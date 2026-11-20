@@ -1,4 +1,4 @@
-import type { MessageReplyReference } from "@rome-os/app-runtime";
+import type { MessageAddressing, MessageReplyReference } from "@rome-os/app-runtime";
 
 /**
  * message_handler — Process an inbound message from a channel.
@@ -68,6 +68,12 @@ export interface MessageHandlerInput {
   messageId: string;
   /** Provider-normalized message explicitly referenced by this reply. */
   replyTo?: MessageReplyReference;
+  /** How the message addressed Rome's account, as the connection reported it. */
+  addressing?: MessageAddressing;
+  /** Another bot sent it, as the connection reported it. */
+  fromBot?: boolean;
+  /** It mentions only others, as the connection reported it. */
+  mentionsOthers?: boolean;
   /** Optional pre-resolved person mapping (skips lookup). */
   personOverride?: MessageHandlerPersonOverride;
   /** Optional project working directory for this dedicated chat session. */

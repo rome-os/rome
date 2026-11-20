@@ -1584,7 +1584,7 @@ async function main() {
   // SDK 0.7 reads.
   const appChatSettings = legacyChatIdSettings(chatSettings);
   const wakeGateFor = wakeGateLoader({
-    chatEnabled: async (chat) => (await appChatSettings.get(chat)).effective.enabled,
+    chatSettings: (chat) => appChatSettings.get(chat),
     bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,
@@ -1910,7 +1910,6 @@ async function main() {
     listAgents: () => agentLoader.list().map((agent) => agent.name),
     hasAgent: (name) => agentLoader.find(name) !== undefined,
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
-    runsOwnTurns: (agent) => runsOwnTurns(agentLoader.find(agent)),
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
       linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {

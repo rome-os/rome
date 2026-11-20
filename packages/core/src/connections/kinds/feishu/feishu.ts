@@ -316,13 +316,8 @@ export class FeishuAdapter {
         });
         return;
       }
-      if ((cfg.requireMention ?? true) && !m.mentionedBot) {
-        log.debug("ignoring Feishu group message not mentioning bot", {
-          from: m.senderId,
-          threadId: m.chatId,
-        });
-        return;
-      }
+      // A group message that mentions no one is recorded too. Whether it
+      // wakes the agent under the reply rule is the wake gate's call.
     }
 
     const name = await chatName;

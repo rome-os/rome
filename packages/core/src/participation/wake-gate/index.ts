@@ -1,6 +1,6 @@
 // The wake gate: does a message wake the agent. Rules:
 // docs/domains/participation.md#wake-gate.
-import type { BondLevel, ChatRef } from "@rome-os/app-runtime";
+import type { BondLevel, ChatRef, MessageAddressing } from "@rome-os/app-runtime";
 
 /** A message as the wake gate reads it. The text is not part of it: a gate
  *  judges where and from whom, never what. */
@@ -15,6 +15,12 @@ export interface WakeMessage {
   place: "direct" | "group";
   /** The chat's or thread's name, which thread policies name. */
   threadName?: string;
+  /** How the message addressed Rome's account, as the connection reports it. */
+  addressing?: MessageAddressing;
+  /** Another bot sent it. A webhook linked to a person speaks for that person. */
+  fromBot?: boolean;
+  /** It mentions someone, and none of them is Rome's account. */
+  mentionsOthers?: boolean;
 }
 
 /** People's answer for the account that said the message. */
@@ -40,4 +46,4 @@ export type WakeGate = (message: WakeMessage, sender: WakeSender) => WakeDecisio
 export type WakeGateFor = (request: { chat: ChatRef }) => Promise<WakeGate>;
 
 export { chatSettingsWake, type ChatWakeSettings } from "./chat-settings-wake.js";
-export { wakeGateLoader, type WakeGateLoaderDeps } from "./load.js";
+export { chatRules, wakeGateLoader, type WakeGateLoaderDeps } from "./load.js";

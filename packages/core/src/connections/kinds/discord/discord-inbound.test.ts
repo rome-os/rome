@@ -58,6 +58,7 @@ describe("DiscordAdapter inbound messages", () => {
       author: { id: "user-1", username: "alice", displayName: "Alice" },
       member: { displayName: "Alice Smith" },
       guild: { members: { me: { displayName: "Rome" } } },
+      mentions: { users: new Map([[BOT.id, { displayName: "Rome" }]]) },
       channel: {
         type: ChannelType.PublicThread,
         name: "launch",
@@ -89,7 +90,7 @@ describe("DiscordAdapter inbound messages", () => {
         senderId: "user-1",
         senderDisplayName: "Alice Smith",
         senderUsername: "alice",
-        text: "see this",
+        text: "@Rome see this",
         attachments: [
           {
             type: "image",
@@ -221,110 +222,107 @@ describe("DiscordAdapter.saveIncomingAttachments", () => {
   });
 });
 
-describe("DiscordAdapter gateway filters", () => {
-  it("passes a link code said in a guild channel to admission without a mention, so it is voided", async () => {
-    const handlers = new Map<string, (message: Message) => Promise<void>>();
-    const adapter = new DiscordAdapter({ botToken: "test-token" });
-    Object.assign(adapter, {
-      client: {
-        user: BOT,
-        on: (event: string, handler: (message: Message) => Promise<void>) =>
-          handlers.set(event, handler),
-        login: async () => "test-token",
+/** A chat's settings, as the adapter reads them for every message. */
+function chatSettingsOf(enabled: boolean) {
+  return {
+    get: async () => ({
+      effective: {
+        enabled,
+        activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
+        replies: { placement: "inline" },
+        routing: { agentName: null },
       },
-    });
-    const captured: ChannelMessage[] = [];
-    adapter.onInbound(async (msg) => {
-      captured.push(msg);
-    });
-    await adapter.start();
-    const guildMessage = (id: string, content: string) =>
-      ({
-        id,
-        channelId: "channel-1",
-        content,
-        createdAt: new Date("2026-05-10T00:00:00Z"),
-        type: MessageType.Default,
-        reference: null,
-        author: { id: "user-1", username: "alice", displayName: "Alice" },
-        member: { displayName: "Alice Smith" },
-        guild: { members: { me: { displayName: "Rome" } } },
-        channel: { type: ChannelType.GuildText, name: "general", isThread: () => false },
-        mentions: { users: new Map() },
-        attachments: new Map(),
-      }) as unknown as Message;
+    }),
+  } as unknown as ConstructorParameters<typeof DiscordAdapter>[0]["chatSettings"];
+}
 
-    await handlers.get("messageCreate")!(guildMessage("msg-1", "ROME-7KQ2M9XA"));
-    await handlers.get("messageCreate")!(guildMessage("msg-2", "hi"));
+/** An adapter started on a stand-in gateway: `say` delivers one message. */
+async function startedAdapter(
+  config: Omit<ConstructorParameters<typeof DiscordAdapter>[0], "botToken">,
+): Promise<{ say: (message: Message) => Promise<void>; captured: ChannelMessage[] }> {
+  const handlers = new Map<string, (message: Message) => Promise<void>>();
+  const adapter = new DiscordAdapter({ botToken: "test-token", ...config });
+  Object.assign(adapter, {
+    client: {
+      user: BOT,
+      on: (event: string, handler: (message: Message) => Promise<void>) =>
+        handlers.set(event, handler),
+      login: async () => "test-token",
+    },
+  });
+  const captured: ChannelMessage[] = [];
+  adapter.onInbound(async (msg) => {
+    captured.push(msg);
+  });
+  await adapter.start();
+  return { say: (message) => handlers.get("messageCreate")!(message), captured };
+}
 
-    expect(captured.map((m) => m.text)).toStrictEqual(["ROME-7KQ2M9XA"]);
+function guildMessage(
+  id: string,
+  content: string,
+  more: { mentions?: string[]; bot?: boolean; webhook?: string } = {},
+): Message {
+  return {
+    id,
+    webhookId: more.webhook ?? null,
+    channelId: "channel-1",
+    content,
+    createdAt: new Date("2026-05-10T00:00:00Z"),
+    type: MessageType.Default,
+    reference: null,
+    author: {
+      id: more.webhook ?? (more.bot ? "ci-bot" : "user-1"),
+      username: "alice",
+      displayName: "Alice",
+      bot: more.bot,
+    },
+    member: { displayName: "Alice Smith" },
+    guild: { members: { me: { displayName: "Rome" } } },
+    channel: { type: ChannelType.GuildText, name: "general", isThread: () => false },
+    mentions: {
+      users: new Map(
+        (more.mentions ?? []).map((user) => [
+          user,
+          { displayName: user === BOT.id ? "Rome" : user },
+        ]),
+      ),
+    },
+    attachments: new Map(),
+  } as unknown as Message;
+}
+
+describe("DiscordAdapter gateway filters", () => {
+  it("hears nothing in a chat switched off but a link code and a stop said to Rome", async () => {
+    const { say, captured } = await startedAdapter({
+      connectionId: "conn-1",
+      chatSettings: chatSettingsOf(false),
+    });
+
+    await say(guildMessage("m1", "ROME-7KQ2M9XA"));
+    await say(guildMessage("m2", "hi"));
+    await say(guildMessage("m3", `<@${BOT.id}> what is left?`, { mentions: [BOT.id] }));
+    await say(guildMessage("m4", `<@${BOT.id}> /stop`, { mentions: [BOT.id] }));
+
+    expect(captured.map((m) => m.messageId)).toStrictEqual(["m1", "m4"]);
     expect(captured[0].thread?.kind).toBe("group");
   });
 
-  it("hears every guild message, whatever the chat's settings, while the account's agent runs its own turns", async () => {
-    const handlers = new Map<string, (message: Message) => Promise<void>>();
-    let bypass = true;
-    const adapter = new DiscordAdapter({
-      botToken: "test-token",
+  it("hears every message in a chat switched on, and tells how each addressed Rome", async () => {
+    const { say, captured } = await startedAdapter({
       connectionId: "conn-1",
-      // The chat is switched off and answers mentions only.
-      chatSettings: {
-        get: async () => ({
-          effective: {
-            enabled: false,
-            activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
-            replies: { placement: "inline" },
-            routing: { agentName: null },
-          },
-        }),
-      } as unknown as ConstructorParameters<typeof DiscordAdapter>[0]["chatSettings"],
-      unsafeTestOnlyHearEveryMessage: () => bypass,
+      // The chat answers mentions only and ignores bots and mentions of others,
+      // which is the wake gate's call now, not the connection's.
+      chatSettings: chatSettingsOf(true),
       resolveDiscordPerson: async (id) =>
         id === "member-webhook" ? { id: "person-1", bondLevel: "acquaintance" } : null,
     });
-    Object.assign(adapter, {
-      client: {
-        user: BOT,
-        on: (event: string, handler: (message: Message) => Promise<void>) =>
-          handlers.set(event, handler),
-        login: async () => "test-token",
-      },
-    });
-    const captured: ChannelMessage[] = [];
-    adapter.onInbound(async (msg) => {
-      captured.push(msg);
-    });
-    await adapter.start();
-    const guildMessage = (
-      id: string,
-      content: string,
-      more: { mentions?: string[]; bot?: boolean; webhook?: string } = {},
-    ) =>
-      ({
-        id,
-        webhookId: more.webhook ?? null,
-        channelId: "channel-1",
-        content,
-        createdAt: new Date("2026-05-10T00:00:00Z"),
-        type: MessageType.Default,
-        reference: null,
-        author: {
-          id: more.webhook ?? (more.bot ? "ci-bot" : "user-1"),
-          username: "alice",
-          displayName: "Alice",
-          bot: more.bot,
-        },
-        member: { displayName: "Alice Smith" },
-        guild: { members: { me: { displayName: "Rome" } } },
-        channel: { type: ChannelType.GuildText, name: "general", isThread: () => false },
-        mentions: { users: new Map((more.mentions ?? []).map((user) => [user, {}])) },
-        attachments: new Map(),
-      }) as unknown as Message;
-    const say = (message: Message) => handlers.get("messageCreate")!(message);
 
     await say(guildMessage("m1", "the demo moved to Thursday"));
     await say(guildMessage("m2", "<@grace> can you take the notes?", { mentions: ["grace"] }));
-    await say(guildMessage("m3", `<@${BOT.id}> what is left?`, { mentions: [BOT.id] }));
+    await say(
+      guildMessage("m3", `<@grace> <@${BOT.id}> what is left?`, { mentions: ["grace", BOT.id] }),
+    );
     await say(guildMessage("m4", `<@${BOT.id}> build passed`, { mentions: [BOT.id], bot: true }));
     await say(
       guildMessage("w1", `<@${BOT.id}> who owns Orkney?`, {
@@ -340,16 +338,25 @@ describe("DiscordAdapter gateway filters", () => {
         webhook: "ci-webhook",
       }),
     );
-    bypass = false;
-    await say(guildMessage("m5", "not heard: the chat is off"));
 
-    expect(captured.map((m) => [m.messageId, m.addressing])).toStrictEqual([
-      ["m1", "ambient"],
-      ["m2", "ambient"],
-      ["m3", "mention"],
-      ["m4", "ambient"],
-      ["w1", "mention"],
-      ["w2", "ambient"],
+    expect(
+      captured.map((m) => [
+        m.messageId,
+        m.addressing,
+        m.fromBot ?? false,
+        m.mentionsOthers ?? false,
+      ]),
+    ).toStrictEqual([
+      ["m1", "ambient", false, false],
+      ["m2", "ambient", false, true],
+      ["m3", "mention", false, false],
+      // Another bot's message, and a webhook linked to nobody.
+      ["m4", "mention", true, false],
+      // A webhook linked to a person speaks for that person.
+      ["w1", "mention", false, false],
+      ["w2", "mention", true, false],
     ]);
+    // The text is what a person sees, Rome's own mention included.
+    expect(captured.find((m) => m.messageId === "m3")?.text).toBe("@grace @Rome what is left?");
   });
 });

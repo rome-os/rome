@@ -23,18 +23,26 @@ describe("Discord stop command", () => {
     expect(normalizeDiscordMessageText("<@!123> /STOP", "123")).toBe("/STOP");
   });
 
-  it("preserves a mention-only message as the visible bot name", () => {
-    const bot = { id: "123", displayName: "Rome" };
-    expect(discordInboundText("<@123>", bot)).toBe("@Rome");
-    expect(discordInboundText(" <@!123> ", bot)).toBe("@Rome");
-    expect(discordInboundText("<@123> please review", bot)).toBe("please review");
+  it("shows every user mention as the name a person sees, Rome's own included", () => {
+    const names: Record<string, string> = { "123": "Rome", "456": "Grace" };
+    const nameOf = (id: string) => names[id];
+    expect(discordInboundText("<@123>", nameOf)).toBe("@Rome");
+    expect(discordInboundText(" <@!123> ", nameOf)).toBe("@Rome");
+    expect(discordInboundText("<@123> please review", nameOf)).toBe("@Rome please review");
+    expect(discordInboundText("<@456> and <@123>, lunch?", nameOf)).toBe(
+      "@Grace and @Rome, lunch?",
+    );
   });
 
-  it("does not invent a mention for empty content without a typed bot mention", () => {
-    // A reply that pings the bot carries no <@id> token in its content.
-    expect(discordInboundText("", { id: "123", displayName: "Rome" })).toBe("");
-    expect(discordInboundText("<@456>", { id: "123", displayName: "Rome" })).toBe("<@456>");
-    expect(discordInboundText("", undefined)).toBe("");
+  it("keeps a mention whose name the message does not carry as typed", () => {
+    expect(discordInboundText("<@789> hi", () => undefined)).toBe("<@789> hi");
+    expect(discordInboundText("", () => undefined)).toBe("");
+  });
+
+  it("reads a /stop after mentions alone as /stop, whoever is mentioned", () => {
+    expect(discordInboundText("<@123> /stop", () => "Rome")).toBe("/stop");
+    expect(discordInboundText("<@123> <@456> /STOP", () => "Rome")).toBe("/stop");
+    expect(discordInboundText("/stop", () => undefined)).toBe("/stop");
   });
 
   it("routes native /stop through chat control before the guardian-only config gate", async () => {

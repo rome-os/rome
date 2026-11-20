@@ -47,6 +47,9 @@ export interface ConformanceChannel {
     readonly at: string;
     /** The person writes in the group, and the platform's id for it. */
     personWrites(text: string): string | Promise<string>;
+    /** How a person sees what `personWrites` sent, where the platform adds
+     *  to the words, as a mention of Rome's account. The words alone by default. */
+    shows?(text: string): string;
   };
   /** A thread in `group`, where the platform has threads and the peer
    *  models one. */
@@ -55,6 +58,8 @@ export interface ConformanceChannel {
     readonly at: string;
     /** The person writes in the thread, and the platform's id for it. */
     personWrites(text: string): string | Promise<string>;
+    /** As `group.shows`. */
+    shows?(text: string): string;
   };
   /** Another of Rome's accounts on the platform, in `group` too, where the
    *  peer models two. */
@@ -374,7 +379,7 @@ export function describeAdapterConformance(
           ["rome", "hello group"],
         ]);
         expect(await transcript(heard.message.place)).toEqual([
-          { text: "hello all", fromRome: false },
+          { text: group.shows?.("hello all") ?? "hello all", fromRome: false },
           { text: "hello group", fromRome: true },
         ]);
         expect(chatsOf("group")).toEqual([heard.message.place.chat.id]);
@@ -421,7 +426,7 @@ export function describeAdapterConformance(
           ["rome", "Tuesday"],
         ]);
         expect(await transcript(heard.message.place)).toEqual([
-          { text: "plans?", fromRome: false },
+          { text: thread.shows?.("plans?") ?? "plans?", fromRome: false },
           { text: "Tuesday", fromRome: true },
         ]);
         // The thread stands in its group's chat, which holds no message of it.

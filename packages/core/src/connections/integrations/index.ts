@@ -51,9 +51,6 @@ export interface BuiltinConnectionDeps {
   listAgents: () => string[];
   /** The agent linked to a Connection's channel (Discord in-chat settings). */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
-  /** Whether an agent's own app runs its turns (`app-host/runs-own-turns.ts`).
-   *  An account linked to it hears every message, whatever its chats' settings say. */
-  runsOwnTurns?: (agent: string) => boolean;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
   /** Guardian auto-map on WhatsApp connect (canonical self JID → channel mapping). */
@@ -88,7 +85,6 @@ export function registerBuiltinConnections(
       peopleRepo: deps.peopleRepo,
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,
-      runsOwnTurns: deps.runsOwnTurns,
       hasAgent: deps.hasAgent,
     }),
   );

@@ -1816,6 +1816,13 @@ export interface ChannelMessage {
    *  Absent in a chat that keeps none. */
   chatThread?: string;
   addressing?: MessageAddressing;
+  /** Another bot sent it, as the connection tells. A webhook linked to a
+   *  person speaks for that person, so it is not a bot. Absent where the
+   *  connection does not tell. */
+  fromBot?: boolean;
+  /** It mentions someone, and none of them is Rome's account. Absent where
+   *  the connection does not tell. */
+  mentionsOthers?: boolean;
   raw?: unknown;
   /** Where this message sits in a channel read, as an opaque token. Set on
    *  what {@link ChannelsService.query} answers: pass it as

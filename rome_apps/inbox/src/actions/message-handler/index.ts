@@ -13,6 +13,7 @@ import type {
   ChatRef,
   ChatRepository,
   EnsureChannelChatInput,
+  MessageAddressing,
   MessageReplyReference,
   PersonMappingRepository,
   PersonRecord,
@@ -49,6 +50,9 @@ export type WakeGate = (
     channel: string;
     place: "direct" | "group";
     threadName?: string;
+    addressing?: MessageAddressing;
+    fromBot?: boolean;
+    mentionsOthers?: boolean;
   },
   sender: { person: { id: string; bondLevel: BondLevel } | null },
 ) => "wake" | "quiet" | "block" | "review";
@@ -780,6 +784,7 @@ export function createMessageHandlerAction(
                   channel,
                   place: threadType === "private" ? "direct" : "group",
                   threadName,
+                  ...addressedBy(args),
                 },
                 { person: person ? { id: person.id, bondLevel: person.bondLevel } : null },
               );
@@ -981,4 +986,17 @@ export async function sendAnswer(
     const { replyToMessageId: _quote, ...unquoted } = input;
     await deps.appContext.runAction("system:send_message", unquoted);
   }
+}
+
+/** How the message addressed Rome's account, as far as the hook passed it. */
+function addressedBy(
+  args: Record<string, unknown>,
+): Pick<Parameters<WakeGate>[0], "addressing" | "fromBot" | "mentionsOthers"> {
+  return {
+    ...(typeof args.addressing === "string"
+      ? { addressing: args.addressing as MessageAddressing }
+      : {}),
+    ...(args.fromBot === true ? { fromBot: true } : {}),
+    ...(args.mentionsOthers === true ? { mentionsOthers: true } : {}),
+  };
 }

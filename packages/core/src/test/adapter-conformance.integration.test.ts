@@ -131,10 +131,13 @@ describeAdapterConformance(
       group: {
         at: DISCORD_CHANNEL,
         personWrites: (text) => peer.emitMessage(text, DISCORD_CHANNEL).id,
+        // Rome's transcript shows the message as a person sees it, mention included.
+        shows: (text) => `@Rome ${text}`,
       },
       thread: {
         at: DISCORD_THREAD,
         personWrites: (text) => peer.emitMessage(text, DISCORD_THREAD).id,
+        shows: (text) => `@Rome ${text}`,
       },
       second: {
         account: { platform: "discord", id: DISCORD_SECOND_BOT_ID },
