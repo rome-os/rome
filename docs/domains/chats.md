@@ -214,7 +214,7 @@ A chat the Concierge starts to hand one piece of work to another agent. It belon
 
 ## Task link
 
-A link to a [task chat](#task-chat) in a Concierge message, a Markdown link `[name](#rome-task=CHAT_ID)`. The Concierge writes it with the `link` that `chat_start` and `chat_list` return, and it is the only way the Concierge refers to a task chat.
+A link to a [task chat](#task-chat) in a Concierge message, a Markdown link `[name](#rome-task=CHAT_ID)`. The Concierge writes it with the `link` that `chat_start` and `chat_list` return, and it is the only way the Concierge refers to a task chat. `chat_start` answers JSON text, and its description says so: a Codex script gets a tool's answer as a string, so the Concierge parses it before it reads `link`, and pastes `link` as it is, since it is already the whole link.
 
 - The dashboard and the iOS app draw it as an inline chip: the task chat's status mark and its current name on a faint fill of the text colour, so it reads on any bubble and never makes its line taller. The link's own text is only a fallback while the name loads. The status word is in the chip's tooltip and its label for a screen reader, never on the chip, and only the mark carries colour: needs you a warning-coloured alert, active the spinning ring in the running blue, done a green check, failed a red cross, and in quiet grey later a clock, stopped a square in a circle, no response an empty circle. The hues are a little softer than the full-strength tokens (80%), and the ring stands still under Reduce Motion. The mark is about 80% of the text's size, on its baseline. The [task list](#task-list)'s rows use the same marks and colours.
 - The chip opens the task chat, and its status changes live, as the task chat runs.

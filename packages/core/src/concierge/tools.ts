@@ -861,7 +861,8 @@ export async function buildConciergeTools(
       description:
         "Start a task chat: a normal chat with another agent (main by default) that does the work while you keep talking. The task chat is the task: its id is the chatId this returns, and its name is its title. " +
         "Pass skill to invoke a catalog skill on its first turn. Its result comes back to you in a <task_events> batch, in the Concierge chat you start it from. " +
-        "Returns the chat's id and `link`, which you paste into the message that tells the guardian about it: it shows as a chip with the task's live status.",
+        'Returns JSON text, such as {"chatId":"…","link":"[name](#rome-task=…)"}: JSON.parse it before you read a field, in a script too. ' +
+        "`link` is already the whole Markdown link: paste it as it is into the message that tells the guardian about it, never inside another [title](…). It shows as a chip with the task's live status.",
       inputSchema: {
         type: "object",
         required: ["title", "brief"],
