@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 .pnpm-store/
 .obs/
 # pnpm concierge:eval results (docs/concierge-eval.md)
