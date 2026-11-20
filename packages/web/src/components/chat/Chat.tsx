@@ -1329,13 +1329,16 @@ export function Chat({
 
   // Subscribe to the main session's events through useLiveEvents.
   const sessionEventIds = useMemo(() => (mainSessionId ? [mainSessionId] : []), [mainSessionId]);
+  // Turns a provider card explains: their end shows no error banner.
+  const cardedTurnsRef = useRef(new Set<string>());
   const handleMessageInsert = useCallback(
     (sid: string, message: ChatMessage) => {
       if (message.sessionId !== sid) return;
       // A provider failure card says why the turn stopped and what to do, so
       // the composer's error banner would only repeat it.
-      if (sid === mainSessionIdRef.current && message.content.includes('"provider_failure"')) {
-        setStreamError(null);
+      if (message.content.includes('"provider_failure"')) {
+        if (message.turnId) cardedTurnsRef.current.add(message.turnId);
+        if (sid === mainSessionIdRef.current) setStreamError(null);
       }
       setMessages((prev) => {
         const next = new Map(prev);
@@ -1453,6 +1456,7 @@ export function Chat({
                 !payload.success &&
                 payload.error &&
                 !isModelResolutionErrorCode(payload.code) &&
+                !cardedTurnsRef.current.has(turnId) &&
                 sessionId === mainSessionIdRef.current
               ) {
                 setStreamError({
@@ -1475,6 +1479,7 @@ export function Chat({
               if (
                 payload.error &&
                 !isModelResolutionErrorCode(payload.code) &&
+                !cardedTurnsRef.current.has(turnId) &&
                 sessionId === mainSessionIdRef.current
               ) {
                 setStreamError({

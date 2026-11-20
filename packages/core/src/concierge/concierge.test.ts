@@ -4013,6 +4013,16 @@ describe("Concierge provider recovery", () => {
       ],
     );
   });
+  it("moves a chat whose turns never ran off the provider's strong model", async () => {
+    const { s } = await prepared({ startEvents: false });
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, null, "auto");
+    expect(
+      await s.service.switchForModelLimit(
+        CONCIERGE_CHAT,
+        failure("Selected model is at capacity. Please try a different model.", "openai"),
+      ),
+    ).toMatchObject({ from: "openai", to: "openai" });
+  });
   it("never moves off a model its owner picked: the chat shows a card", async () => {
     const { s } = await prepared({ startEvents: false });
     await s.deps.webchatRepo.updateSessionLargeModelSelection(

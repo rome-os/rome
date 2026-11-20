@@ -921,7 +921,12 @@ export class ConciergeService {
     // runs, whatever an older read of it says.
     const report = read[from];
     const state = report ? { ...read, [from]: { ...report, state: "available" as const } } : read;
-    const fromModel = selected?.model ?? runtime?.model ?? "";
+    // A chat whose turns never ran records no model: it asked for the
+    // provider's strong one, as every chat that follows the default does.
+    const fromModel =
+      selected?.model ??
+      runtime?.model ??
+      MODEL_SELECTIONS[selectionOfStrength(from, "strong", report?.account)].model;
     // A model each Concierge chat left, so one chat's move never blocks another's.
     const modelKey = (model: string) => `${chatId}\u0000${model.replace(/\[.*\]$/, "")}`;
     const target = sameProviderTarget(state, from, fromModel);
