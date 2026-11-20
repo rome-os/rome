@@ -209,7 +209,15 @@ export function parseSentinelDecision(raw: string): SentinelDecision {
   if (!match) return { action: "escalated" };
 
   const decision = directReply ? "REPLY" : match[1].toUpperCase();
-  if (decision === "ESCALATE") return { action: "escalated", explicit: true };
+  if (decision === "ESCALATE") {
+    // Explicit only when no line names another decision.
+    const named = [
+      ...trimmed.matchAll(/(?:^|\n)\s*(?:Decision\s*:\s*)?(REPLY|ESCALATE|IGNORE)\b/gi),
+    ];
+    return named.every((m) => m[1].toUpperCase() === "ESCALATE")
+      ? { action: "escalated", explicit: true }
+      : { action: "escalated" };
+  }
   if (decision === "IGNORE") return { action: "ignored" };
 
   const explicitResponse = trimmed.match(/(?:^|\n)\s*(?:Response|Reply)\s*:\s*([\s\S]*)$/i);

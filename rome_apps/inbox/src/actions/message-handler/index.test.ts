@@ -467,6 +467,11 @@ describe("parseSentinelDecision", () => {
 
   it("parses explicit escalate and ignore decisions", () => {
     expect(parseSentinelDecision("ESCALATE")).toEqual({ action: "escalated", explicit: true });
+    // A contradiction escalates, but not as the sentinel's own choice.
+    expect(parseSentinelDecision("Decision: ESCALATE\nDecision: IGNORE")).toEqual({
+      action: "escalated",
+    });
+    expect(parseSentinelDecision("ESCALATE\nREPLY: sure")).toEqual({ action: "escalated" });
     expect(parseSentinelDecision("Decision: IGNORE\nReasoning: spam")).toEqual({
       action: "ignored",
     });
@@ -811,6 +816,7 @@ describe("message reply bond-level settings", () => {
   it.each([
     ["empty output", ""],
     ["output with no decision", "I am not sure what to do with this."],
+    ["contradictory decisions", "Decision: ESCALATE\nDecision: IGNORE"],
   ])("answers nothing when the sentinel gives %s for a member let in only by their connection's switch", async (_case, content) => {
     const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
       agentResponses: [[{ type: "result", content }]],
