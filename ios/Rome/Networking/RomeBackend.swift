@@ -72,8 +72,8 @@ protocol RomeBackend: AnyObject, Sendable {
     func sessions() async throws -> [ChatSession]
     func activeTurns(sessionId: String) async throws -> [ActiveTurn]
     func interrupt(turnId: String) async throws
-    /// `GET /chats/:chatId/tasks`: the Concierge chat's task list, by the
-    /// chat's server id.
+    /// `GET /chats/:chatId/tasks?grouping=panel`: the Concierge chat's task
+    /// list in the one panel's groups, by the chat's server id.
     func taskList(chatId: String) async throws -> TaskListResponse
     /// The Ended group's next page alone, from `endedBefore` (its `nextCursor`).
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse
@@ -83,6 +83,16 @@ protocol RomeBackend: AnyObject, Sendable {
     func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse
     /// Stops a task from its chat's task list; a scheduled one loses its schedule.
     func stopListedTask(chatId: String, taskId: String) async throws
+    /// Marks a one-off task of the list done.
+    func markListedTaskDone(chatId: String, taskId: String) async throws
+    /// Cancels a reminder of the list that no task has.
+    func cancelListedCheck(chatId: String, checkId: String) async throws
+    /// Unfollows a target whose alerts come to the chat.
+    func unfollowListed(chatId: String, source: String, target: String) async throws
+    /// Pauses (`enabled` false) or resumes a routine of the list.
+    func setListedRoutineEnabled(chatId: String, routineId: String, enabled: Bool) async throws
+    /// Deletes a routine of the list.
+    func deleteListedRoutine(chatId: String, routineId: String) async throws
     /// `GET /chat/sessions/:id/outputs`: the files chat `chatId`'s agent
     /// wrote or showed, a Concierge chat's task chats' included, newest first.
     func chatOutputs(chatId: String) async throws -> ChatOutputsResponse
@@ -278,12 +288,16 @@ final class LiveBackend: RomeBackend {
     }
 
     func taskList(chatId: String) async throws -> TaskListResponse {
-        try await client.get("/chats/\(escape(chatId))/tasks")
+        try await client.get("/chats/\(escape(chatId))/tasks", query: [Self.panelGrouping])
     }
 
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse {
-        try await client.get("/chats/\(escape(chatId))/tasks", query: [URLQueryItem(name: "endedBefore", value: endedBefore)])
+        try await client.get("/chats/\(escape(chatId))/tasks", query: [Self.panelGrouping, URLQueryItem(name: "endedBefore", value: endedBefore)])
     }
+
+    /// Asks the task list for the one panel's groups (Scheduled), not the
+    /// older Tasks and Routines views.
+    private static let panelGrouping = URLQueryItem(name: "grouping", value: "panel")
 
     func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse {
         try await client.get("/chats/\(escape(chatId))/task-links", query: [URLQueryItem(name: "ids", value: ids.joined(separator: ","))])
@@ -291,6 +305,26 @@ final class LiveBackend: RomeBackend {
 
     func stopListedTask(chatId: String, taskId: String) async throws {
         try await client.post("/chats/\(escape(chatId))/tasks/\(escape(taskId))/stop")
+    }
+
+    func markListedTaskDone(chatId: String, taskId: String) async throws {
+        try await client.post("/chats/\(escape(chatId))/tasks/\(escape(taskId))/done")
+    }
+
+    func cancelListedCheck(chatId: String, checkId: String) async throws {
+        try await client.post("/chats/\(escape(chatId))/tasks/checks/\(escape(checkId))/cancel")
+    }
+
+    func unfollowListed(chatId: String, source: String, target: String) async throws {
+        try await client.post("/chats/\(escape(chatId))/tasks/follows/unfollow", json: .object(["source": .string(source), "target": .string(target)]))
+    }
+
+    func setListedRoutineEnabled(chatId: String, routineId: String, enabled: Bool) async throws {
+        try await client.post("/chats/\(escape(chatId))/tasks/routines/\(escape(routineId))/\(enabled ? "resume" : "pause")")
+    }
+
+    func deleteListedRoutine(chatId: String, routineId: String) async throws {
+        try await client.delete("/chats/\(escape(chatId))/tasks/routines/\(escape(routineId))")
     }
 
     func chatOutputs(chatId: String) async throws -> ChatOutputsResponse {
@@ -501,6 +535,11 @@ extension RomeBackend {
     func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
     func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse { TaskLinksResponse(tasks: []) }
     func stopListedTask(chatId: String, taskId: String) async throws { throw APIError.notFound }
+    func markListedTaskDone(chatId: String, taskId: String) async throws { throw APIError.notFound }
+    func cancelListedCheck(chatId: String, checkId: String) async throws { throw APIError.notFound }
+    func unfollowListed(chatId: String, source: String, target: String) async throws { throw APIError.notFound }
+    func setListedRoutineEnabled(chatId: String, routineId: String, enabled: Bool) async throws { throw APIError.notFound }
+    func deleteListedRoutine(chatId: String, routineId: String) async throws { throw APIError.notFound }
     func chatOutputs(chatId: String) async throws -> ChatOutputsResponse { ChatOutputsResponse(outputs: []) }
     func chatOutputFile(path: String) async throws -> Data { throw APIError.notFound }
     /// Demo data and test doubles hold the file as it is.

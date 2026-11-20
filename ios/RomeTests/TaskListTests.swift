@@ -9,7 +9,7 @@ private let listJSON = #"""
   {"kind":"task","task":{"id":"t2","title":"Daily report","state":"next","status":"later","createdAt":1,"updatedAt":1},"schedule":{"at":"15:47","days":null},"check":{"id":"k1","at":1800061200000,"recurring":true},"cardMessageId":null},
   {"kind":"check","check":{"id":"k2","name":"Look at the flight","at":1800001200000,"waitingFor":null,"taskId":null}}
  ]},
- {"key":"on_its_own","items":[
+ {"key":"scheduled","items":[
   {"kind":"follow","source":"github","label":"GitHub","target":"rome-os/rome","state":"active","digestTimes":["09:00"]},
   {"kind":"routine","id":"r1","name":"Old summary","trigger":{"type":"manual"},"enabled":false,"nextRunAt":null,"lastRun":{"status":"error","firedAt":1}},
   {"kind":"portal","id":"x"}
@@ -29,10 +29,21 @@ private let listJSON = #"""
 
     @Test func theListDecodesEveryKindAndDropsUnknownOnes() throws {
         let list = try decoded()
-        #expect(list.groups.map(\.key) == [.needsYou, .later, .onItsOwn, .ended])
+        #expect(list.groups.map(\.key) == [.needsYou, .later, .scheduled, .ended])
         #expect(list.groups[2].items.map(\.id) == ["follow:github:rome-os/rome", "routine:r1"])
         guard case .task(let waiting) = list.groups[0].items[0] else { Issue.record("no task"); return }
         #expect(waiting.cardMessageId == "m9" && waiting.task.chat?.id == "c1")
+    }
+
+    /// The panel's groups: Scheduled reads, and a group this build does not
+    /// know (the older views' Routines, `on_its_own`) is left out.
+    @Test func thePanelGroupsDecodeAndUnknownOnesAreLeftOut() throws {
+        let json = #"{"chatId":"c","groups":[{"key":"later","items":[]},{"key":"scheduled","items":[{"kind":"routine","id":"r","name":"R","trigger":{"type":"manual"},"enabled":true,"nextRunAt":null,"lastRun":null,"fromTask":{"id":"t","title":"Price watch"}}]},{"key":"on_its_own","items":[]},{"key":"someday","items":[]}]}"#
+        let list = try JSONDecoder().decode(TaskListResponse.self, from: Data(json.utf8))
+        #expect(list.groups.map(\.key) == [.later, .scheduled])
+        guard case .routine(let routine)? = list.groups[1].items.first else { Issue.record("no routine"); return }
+        #expect(routine.fromTask?.title == "Price watch")
+        #expect(TaskListWords.routine(routine, now: now) == "Only when run by hand · From Price watch")
     }
 
     @Test func eachRowSaysItsStateThenItsTime() throws {
@@ -51,15 +62,15 @@ private let listJSON = #"""
         #expect(TaskListWords.follow(follow).hasPrefix("GitHub · Digest daily at "))
         #expect(TaskListWords.routine(routine, now: now) == "Only when run by hand · Paused · Last run failed")
         #expect(TaskListWords.task(ended, now: now) == "Failed · 2 hr ago")
-        #expect(TaskListWords.task(waiting, now: now, stopping: true) == "Stopping…")
+        #expect(TaskListWords.task(waiting, now: now, pending: .stop) == "Stopping…")
     }
 
     /// The groups keep their fixed order, Ended always last, whatever order
     /// they arrive in, with some missing or all there.
     @Test func groupsKeepTheirOrder() async throws {
         func group(_ key: TaskListGroup.Key) -> TaskListGroup { TaskListGroup(key: key, items: []) }
-        let all: [TaskListGroup.Key] = [.needsYou, .active, .later, .onItsOwn, .ended]
-        #expect(TaskListGroup.ordered([.ended, .later, .needsYou, .onItsOwn, .active].map(group)).map(\.key) == all)
+        let all: [TaskListGroup.Key] = [.needsYou, .active, .later, .scheduled, .ended]
+        #expect(TaskListGroup.ordered([.ended, .later, .needsYou, .scheduled, .active].map(group)).map(\.key) == all)
         #expect(TaskListGroup.ordered([.ended, .active].map(group)).map(\.key) == [.active, .ended])
         #expect(TaskListGroup.ordered([.later, .ended, .needsYou].map(group)).map(\.key) == [.needsYou, .later, .ended])
         // The store keeps that order too.
@@ -69,7 +80,7 @@ private let listJSON = #"""
         backend.taskLists["concierge"] = list
         let store = TaskListStore(chatId: "concierge", backend: backend)
         await store.load()
-        #expect(store.groups.map(\.key) == [.needsYou, .later, .onItsOwn, .ended])
+        #expect(store.groups.map(\.key) == [.needsYou, .later, .scheduled, .ended])
     }
 
     /// Each row's menu is titled with when it was made; a row whose kind the
@@ -166,7 +177,7 @@ private let listJSON = #"""
         let store = TaskListStore(chatId: "concierge", backend: backend)
         store.open()
         for _ in 0..<50 where store.connectors == nil { try? await Task.sleep(for: .milliseconds(10)) }
-        guard case .follow(let listed)? = store.groups.first(where: { $0.key == .onItsOwn })?.items.first else { Issue.record("no follow"); return }
+        guard case .follow(let listed)? = store.groups.first(where: { $0.key == .scheduled })?.items.first else { Issue.record("no follow"); return }
         #expect(listed.state == "active" && store.shown(listed).state == "unavailable")
         #expect(backend.connectorReadCount == 1)
         // Another change, with no follow in it, reads the list alone.
@@ -195,7 +206,7 @@ private let listJSON = #"""
         for _ in 0..<100 where backend.connectorReadCount < 2 { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(backend.connectorReadCount == 2)
         for _ in 0..<50 where store.connectors?.first?.watch?.state != "unlocked" { try? await Task.sleep(for: .milliseconds(10)) }
-        guard case .follow(let listed)? = store.groups.first(where: { $0.key == .onItsOwn })?.items.first else { Issue.record("no follow"); return }
+        guard case .follow(let listed)? = store.groups.first(where: { $0.key == .scheduled })?.items.first else { Issue.record("no follow"); return }
         #expect(store.shown(listed).state == "active")
         store.stop()
     }
@@ -214,6 +225,10 @@ private let listJSON = #"""
         store.stop()
     }
 
+    private func item(_ store: TaskListStore, _ id: String) -> TaskListItem? {
+        store.groups.lazy.flatMap(\.items).first { $0.id == id }
+    }
+
     /// Stop shows at once; a failure takes the row back and says so.
     @Test func aFailedStopTakesTheRowBack() async throws {
         let backend = FakeBackend()
@@ -221,10 +236,10 @@ private let listJSON = #"""
         backend.stopListedError = .network
         let store = TaskListStore(chatId: "concierge", backend: backend)
         await store.load()
-        store.stopTask("t1")
-        #expect(store.stopping == ["t1"])
+        store.perform(.stop, on: try #require(item(store, "task:t1")))
+        #expect(store.pending == ["task:t1": .stop])
         for _ in 0..<50 where store.failure == nil { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(store.stopping.isEmpty && store.failure == "Failed to stop the task" && backend.stoppedFromList == ["t1"])
+        #expect(store.pending.isEmpty && store.failure == "Failed to stop the task" && backend.stoppedFromList == ["t1"])
     }
 
     /// A stop that went through keeps the row pending until it reads ended.
@@ -233,9 +248,9 @@ private let listJSON = #"""
         backend.taskLists["concierge"] = try decoded()
         let store = TaskListStore(chatId: "concierge", backend: backend)
         await store.load()
-        store.stopTask("t1")
+        store.perform(.stop, on: try #require(item(store, "task:t1")))
         for _ in 0..<50 where backend.taskListReads < 2 { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(store.stopping == ["t1"])
+        #expect(store.pending == ["task:t1": .stop])
         var list = try decoded()
         if case .task(var item) = list.groups[0].items[0] {
             item.task.status = "ended"
@@ -244,7 +259,110 @@ private let listJSON = #"""
         }
         backend.taskLists["concierge"] = list
         await store.load()
-        #expect(store.stopping.isEmpty)
+        #expect(store.pending.isEmpty)
+    }
+
+    /// Each row offers what the web's row menu does: a one-off task Mark as
+    /// done and Stop, a scheduled one only Stop, an ended one nothing, a
+    /// reminder Cancel, a follow Unfollow, a routine Pause or Resume and
+    /// Delete. Delete and Unfollow ask first.
+    @Test func eachRowKindGetsItsMenu() throws {
+        let list = try decoded()
+        let rows = Dictionary(uniqueKeysWithValues: list.groups.flatMap(\.items).map { ($0.id, $0) })
+        func menu(_ id: String) -> [TaskListAction] { rows[id].map(TaskListAction.menu) ?? [] }
+        #expect(menu("task:t1") == [.markDone, .stop])
+        #expect(menu("task:t2") == [.stop])
+        #expect(menu("task:t3") == [])
+        #expect(menu("check:k2") == [.cancel])
+        #expect(menu("follow:github:rome-os/rome") == [.unfollow])
+        #expect(menu("routine:r1") == [.resume, .delete])
+        guard case .routine(var routine)? = rows["routine:r1"] else { Issue.record("no routine"); return }
+        routine.enabled = true
+        #expect(TaskListAction.menu(for: .routine(routine)) == [.pause, .delete])
+        #expect(TaskListAction.allCases.filter(\.confirms) == [.delete, .unfollow])
+    }
+
+    /// Every action reaches its route with the row's own ids, shows its
+    /// pending line at once, and lets go once the list reads again.
+    @Test func eachActionReachesItsRoute() async throws {
+        let backend = FakeBackend()
+        backend.taskLists["concierge"] = try decoded()
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        await store.load()
+        let presses: [(TaskListAction, String)] = [
+            (.markDone, "task:t1"), (.cancel, "check:k2"), (.unfollow, "follow:github:rome-os/rome"),
+            (.resume, "routine:r1"),
+        ]
+        for (action, id) in presses {
+            store.perform(action, on: try #require(item(store, id)))
+            #expect(store.pending[id] == action)
+        }
+        #expect(TaskListWords.pending(.markDone) == "Marking done…" && TaskListWords.pending(.unfollow) == "Unfollowing…")
+        for _ in 0..<100 where backend.listActions.count < 4 || store.pending.count > 1 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(Set(backend.listActions) == ["done t1", "cancel k2", "unfollow github:rome-os/rome", "resume r1"])
+        // Mark as done holds until the task reads as ended; the rest let go on the read.
+        #expect(store.pending == ["task:t1": .markDone])
+    }
+
+    /// A routine is deleted only by its own id, and Pause sends enabled false.
+    @Test func pauseAndDeleteSendTheRoutine() async throws {
+        let backend = FakeBackend()
+        var list = try decoded()
+        guard case .routine(var routine) = list.groups[2].items[1] else { Issue.record("no routine"); return }
+        routine.enabled = true
+        list.groups[2].items[1] = .routine(routine)
+        backend.taskLists["concierge"] = list
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        await store.load()
+        store.perform(.pause, on: .routine(routine))
+        for _ in 0..<50 where store.pending["routine:r1"] != nil { try? await Task.sleep(for: .milliseconds(10)) }
+        store.perform(.delete, on: .routine(routine))
+        for _ in 0..<50 where store.pending["routine:r1"] != nil { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(backend.listActions == ["pause r1", "delete r1"])
+    }
+
+    /// An action the row does not offer, or a second press while one runs,
+    /// sends nothing.
+    @Test func onlyTheRowsOwnActionsRunOnce() async throws {
+        let backend = FakeBackend()
+        backend.taskLists["concierge"] = try decoded()
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        await store.load()
+        let ended = try #require(item(store, "task:t3"))
+        store.perform(.stop, on: ended)
+        store.perform(.markDone, on: try #require(item(store, "task:t2")))
+        let check = try #require(item(store, "check:k2"))
+        store.perform(.cancel, on: check)
+        store.perform(.cancel, on: check)
+        #expect(store.pending == ["check:k2": .cancel])
+        for _ in 0..<50 where !store.pending.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(backend.stoppedFromList.isEmpty && backend.listActions == ["cancel k2"])
+    }
+
+    /// A failed action takes the row back and says which one failed.
+    @Test func aFailedActionTakesTheRowBack() async throws {
+        let backend = FakeBackend()
+        backend.taskLists["concierge"] = try decoded()
+        backend.listActionError = .network
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        await store.load()
+        store.perform(.unfollow, on: try #require(item(store, "follow:github:rome-os/rome")))
+        for _ in 0..<50 where store.failure == nil { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.pending.isEmpty && store.failure == "Failed to unfollow")
+        // The list was not read again for it.
+        #expect(backend.taskListReads == 1)
+    }
+
+    /// The confirms say what the web's do, with the row's own name.
+    @Test func theConfirmsNameTheRow() throws {
+        let list = try decoded()
+        let follow = list.groups[2].items[0], routine = list.groups[2].items[1]
+        let unfollow = TaskListConfirm(action: .unfollow, item: follow)
+        #expect(unfollow.title == "Unfollow rome-os/rome?")
+        #expect(unfollow.message.hasSuffix("To follow it again, ask Chat."))
+        let delete = TaskListConfirm(action: .delete, item: routine)
+        #expect(delete.title == "Delete “Old summary”?")
+        #expect(delete.message == "It stops running and is removed. This cannot be undone.")
     }
 }
 

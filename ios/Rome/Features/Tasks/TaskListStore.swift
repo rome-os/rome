@@ -6,7 +6,7 @@ import OSLog
 let taskListLog = Logger(subsystem: "cc.romeos.mobile", category: "TaskList")
 
 /// One Concierge chat's task list, the Agent page's Tasks tab: what runs for
-/// the chat, as the server groups it. It reads again whenever the live socket
+/// the chat, in the one panel's groups the server makes, and its rows' actions. It reads again whenever the live socket
 /// says something in it changed, and after a reconnect
 /// (docs/domains/chats.md#task-list).
 @MainActor
@@ -17,8 +17,9 @@ final class TaskListStore {
     private(set) var groups: [TaskListGroup] = []
     private(set) var loaded = false
     private(set) var loadFailed = false
-    /// Tasks whose Stop was pressed and has not shown its effect yet.
-    private(set) var stopping: Set<String> = []
+    /// Rows whose menu action was pressed and has not shown its effect yet,
+    /// by row id (`TaskListItem.id`): the row says so on its line.
+    private(set) var pending: [String: TaskListAction] = [:]
     /// A brief notice after a press or a page read failed; the store clears
     /// it after a few seconds, so it never shows again when the tab reappears.
     private(set) var failure: String?
@@ -218,8 +219,11 @@ final class TaskListStore {
             loadFailed = false
             loaded = true
             readConnectorsIfNeeded()
-            // A stop shows its effect once the task reads as ended.
-            stopping = stopping.filter { id in task(id).map { !TaskListWords.isEnded($0.task) } ?? false }
+            // A stop or a mark done shows its effect once the task reads as ended.
+            pending = pending.filter { id, action in
+                guard action.holdsUntilEnded else { return true }
+                return task(row: id).map { !TaskListWords.isEnded($0.task) } ?? false
+            }
         } catch is CancellationError {
             // A read given up on says nothing about the list.
             taskListLog.notice("read \(mine) cancelled")
@@ -254,18 +258,49 @@ final class TaskListStore {
         return nil
     }
 
-    /// Stops a task at once: its row shows it stopping until the list reads
-    /// it as ended. A failure takes the row back and says so briefly.
-    func stopTask(_ id: String) {
-        guard stopping.insert(id).inserted else { return }
+    /// The task of row `id` (`task:<id>`), when the list holds it.
+    private func task(row id: String) -> TaskListItem.Task? {
+        id.hasPrefix("task:") ? task(String(id.dropFirst("task:".count))) : nil
+    }
+
+    /// Runs `action` from `item`'s menu at once: the row says it is under way
+    /// until the list reads again (a stop or a mark done, until its task
+    /// reads as ended). A failure takes the row back and says so briefly.
+    /// An action the row's menu does not offer, or a second one while one
+    /// is under way, does nothing.
+    func perform(_ action: TaskListAction, on item: TaskListItem) {
+        guard pending[item.id] == nil, TaskListAction.menu(for: item).contains(action) else { return }
+        pending[item.id] = action
         Task {
             do {
-                try await backend.stopListedTask(chatId: chatId, taskId: id)
+                try await send(action, on: item)
                 await load()
+                if !action.holdsUntilEnded { pending[item.id] = nil }
             } catch {
-                stopping.remove(id)
-                fail(String(localized: "Failed to stop the task"))
+                taskListLog.error("\(action.rawValue, privacy: .public) on \(item.id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                pending[item.id] = nil
+                fail(TaskListWords.failure(action))
             }
+        }
+    }
+
+    private func send(_ action: TaskListAction, on item: TaskListItem) async throws {
+        switch (action, item) {
+        case (.stop, .task(let task)):
+            try await backend.stopListedTask(chatId: chatId, taskId: task.task.id)
+        case (.markDone, .task(let task)):
+            try await backend.markListedTaskDone(chatId: chatId, taskId: task.task.id)
+        case (.cancel, .check(let check)):
+            try await backend.cancelListedCheck(chatId: chatId, checkId: check.check.id)
+        case (.unfollow, .follow(let follow)):
+            try await backend.unfollowListed(chatId: chatId, source: follow.source, target: follow.target)
+        case (.pause, .routine(let routine)), (.resume, .routine(let routine)):
+            try await backend.setListedRoutineEnabled(chatId: chatId, routineId: routine.id, enabled: action == .resume)
+        case (.delete, .routine(let routine)):
+            try await backend.deleteListedRoutine(chatId: chatId, routineId: routine.id)
+        default:
+            // `perform` passes only what the row's menu offers.
+            break
         }
     }
 
@@ -302,10 +337,36 @@ enum TaskListWords {
 
     static func isEnded(_ task: ConciergeTask) -> Bool { status(task) == "ended" }
 
+    /// What a row's line says while its menu action is under way.
+    static func pending(_ action: TaskListAction) -> String {
+        switch action {
+        case .stop: return String(localized: "Stopping…")
+        case .markDone: return String(localized: "Marking done…")
+        case .cancel: return String(localized: "Cancelling…")
+        case .unfollow: return String(localized: "Unfollowing…")
+        case .pause: return String(localized: "Pausing…")
+        case .resume: return String(localized: "Resuming…")
+        case .delete: return String(localized: "Deleting…")
+        }
+    }
+
+    /// The notice after a menu action failed.
+    static func failure(_ action: TaskListAction) -> String {
+        switch action {
+        case .stop: return String(localized: "Failed to stop the task")
+        case .markDone: return String(localized: "Failed to mark the task done")
+        case .cancel: return String(localized: "Failed to cancel the reminder")
+        case .unfollow: return String(localized: "Failed to unfollow")
+        case .pause: return String(localized: "Failed to pause the routine")
+        case .resume: return String(localized: "Failed to resume the routine")
+        case .delete: return String(localized: "Failed to delete the routine")
+        }
+    }
+
     /// What a task's line says: what it waits for, that it runs, when it
     /// runs next, or how it ended.
-    static func task(_ item: TaskListItem.Task, now: Date, stopping: Bool = false) -> String {
-        if stopping { return String(localized: "Stopping…") }
+    static func task(_ item: TaskListItem.Task, now: Date, pending: TaskListAction? = nil) -> String {
+        if let pending { return Self.pending(pending) }
         let task = item.task
         let repeats = item.schedule.map(schedule)
         switch status(task) {
@@ -362,7 +423,8 @@ enum TaskListWords {
             trigger(item.trigger),
             item.enabled ? nil : String(localized: "Paused"),
             item.nextRunAt.map { time($0, now: now) },
-            item.lastRun?.status == "error" ? String(localized: "Last run failed") : nil
+            item.lastRun?.status == "error" ? String(localized: "Last run failed") : nil,
+            item.fromTask.map { String(localized: "From \($0.title)") }
         )
     }
 
