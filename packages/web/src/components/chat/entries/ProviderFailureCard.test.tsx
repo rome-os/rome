@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import type { ProviderFailurePart } from "@rome/api-types/chat";
@@ -24,6 +24,17 @@ function mockApi() {
     const url = String(input);
     const method = init?.method ?? "GET";
     calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    if (url.endsWith("/rome-credits")) {
+      return Response.json({
+        credits: {
+          grantedMicros: "2000000",
+          balanceMicros: "2000000",
+          availableMicros: "2000000",
+          enabled: true,
+          models: [],
+        },
+      });
+    }
     return Response.json({ ok: true });
   }) as typeof fetch);
   return calls;
@@ -76,11 +87,26 @@ describe("ProviderFailureCard", () => {
     expect(screen.getByText(`ChatGPT quota used up, continues today at ${time}`)).toBeTruthy();
     // A usage limit ends by itself, so nothing asks to log in.
     expect(screen.queryByRole("button", { name: "Log in" })).toBeNull();
-    const makeDefault = screen.getByRole("checkbox", { name: "Also make default" });
-    expect(makeDefault.getAttribute("aria-checked")).toBe("false");
-
-    await userEvent.click(makeDefault);
+    // The card itself carries no default choice: its switch asks in a dialog.
+    expect(screen.queryByRole("checkbox", { name: "Also make default" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Switch to Claude" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Switch to Claude?")).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        "This chat continues on Claude, and the stopped turn picks up again.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        "Other chats that follow the default switch to Claude on their next reply.",
+      ),
+    ).toBeTruthy();
+    const makeDefault = within(dialog).getByRole("checkbox", { name: "Also make default" });
+    expect(makeDefault.getAttribute("aria-checked")).toBe("false");
+    await userEvent.click(makeDefault);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
 
     await waitFor(() =>
       expect(calls.find((call) => call.method === "POST")).toMatchObject({
@@ -118,6 +144,13 @@ describe("ProviderFailureCard", () => {
     });
     expect(screen.getByText("Claude is not logged in")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Use Rome credits" }));
+    const dialog = await screen.findByRole("dialog");
+    // Credits exist only with no login: no default to make, the balance instead.
+    expect(
+      await within(dialog).findByText("This chat continues on Rome credits ($2.00 left)."),
+    ).toBeTruthy();
+    expect(within(dialog).queryByRole("checkbox")).toBeNull();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
     await waitFor(() =>
       expect(calls.find((call) => call.method === "POST")?.body).toEqual({
         kind: "provider",
@@ -182,6 +215,8 @@ describe("ProviderFailureCard", () => {
     );
     renderCard({});
     await userEvent.click(screen.getByRole("button", { name: "Switch to Claude" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
     expect((await screen.findByRole("alert")).textContent).toBe("Could not switch");
   });
 });

@@ -769,7 +769,17 @@
     "switched": "Switched to {{target}}",
     "switchedContinued": "Switched to {{target}}, continued",
     "recovered": "Recovered",
-    "recoveredContinued": "Recovered, continued"
+    "recoveredContinued": "Recovered, continued",
+    "confirm": {
+      "title": "Switch to {{provider}}?",
+      "body": "This chat continues on {{provider}}, and the stopped turn picks up again.",
+      "bodyCredits": "This chat continues on Rome credits ({{balance}} left).",
+      "bodyTasks_one": "The {{count}} affected task continues on {{provider}}.",
+      "bodyTasks_other": "The {{count}} affected tasks continue on {{provider}}.",
+      "makeDefaultHelp": "Other chats that follow the default switch to {{provider}} on their next reply.",
+      "switch": "Switch",
+      "cancel": "Cancel"
+    }
   },
   "providerOutage": {
     "waiting_one": "{{count}} task waiting",

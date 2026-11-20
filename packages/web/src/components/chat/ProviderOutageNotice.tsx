@@ -91,6 +91,7 @@ export function ProviderOutageNotice({
       )}
       <FailureActions
         facts={facts}
+        affectedTasks={part.chatIds.length}
         pending={switchOutage.isPending}
         failed={switchOutage.isError}
         onSwitch={onSwitch}

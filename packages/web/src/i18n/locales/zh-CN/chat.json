@@ -769,7 +769,17 @@
     "switched": "已切换到 {{target}}",
     "switchedContinued": "已切换到 {{target}}，已继续",
     "recovered": "已恢复",
-    "recoveredContinued": "已恢复，已继续"
+    "recoveredContinued": "已恢复，已继续",
+    "confirm": {
+      "title": "切换到 {{provider}}？",
+      "body": "这个对话改用 {{provider}} 继续，停下的那一轮会接着跑。",
+      "bodyCredits": "这个对话改用 Rome credits 继续（剩余 {{balance}}）。",
+      "bodyTasks_one": "受影响的 {{count}} 个任务改用 {{provider}} 继续。",
+      "bodyTasks_other": "受影响的 {{count}} 个任务改用 {{provider}} 继续。",
+      "makeDefaultHelp": "其他跟随默认的对话会在下一次回复时切到 {{provider}}。",
+      "switch": "切换",
+      "cancel": "取消"
+    }
   },
   "providerOutage": {
     "waiting_one": "{{count}} 个任务在等待",

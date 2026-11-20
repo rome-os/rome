@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import type { ProviderOutagePart } from "@rome/api-types/chat";
@@ -70,8 +70,11 @@ describe("ProviderOutageNotice", () => {
     expect(screen.getByText("2 tasks waiting")).toBeTruthy();
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
 
-    await userEvent.click(screen.getByRole("checkbox", { name: "Also make default" }));
     await userEvent.click(screen.getByRole("button", { name: "Switch to ChatGPT" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("The 2 affected tasks continue on ChatGPT.")).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: "Also make default" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
     await waitFor(() =>
       expect(calls).toEqual([
         {

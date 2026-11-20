@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type {
@@ -16,6 +16,9 @@ import { Button } from "@/components/ui/button";
 import { type ProviderSwitch, switchProviderFailure } from "@/hooks/use-default-provider";
 import { modelDisplayName } from "@/lib/model-display";
 import { cn } from "@/lib/utils";
+import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import { formatCreditDollars, readRomeCredits } from "@/components/rome-credits-row";
+import type { RomeCreditsView } from "@rome/api-types/rome-credits";
 
 /**
  * When a usage limit ends, as a day the guardian reads at a glance: today,
@@ -140,6 +143,7 @@ export function FailureActions({
   failed,
   onSwitch,
   centered = false,
+  affectedTasks,
 }: {
   facts: FailureFacts;
   pending: boolean;
@@ -147,12 +151,15 @@ export function FailureActions({
   onSwitch: (change: ProviderSwitch) => void;
   /** Center the rows, as the main chat's notice is. */
   centered?: boolean;
+  /** For the main chat's notice: how many stopped tasks the switch moves. */
+  affectedTasks?: number;
 }) {
   const { t } = useTranslation("chat");
   const providerName = useProviderName();
-  const [makeDefault, setMakeDefault] = useState(false);
   const [signInOpen, setSignInOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
+  // The provider a switch asks to confirm, in the dialog.
+  const [confirming, setConfirming] = useState<DefaultModelProvider | null>(null);
   const kind = failureCardKind(facts);
   const providers =
     kind === "model"
@@ -184,7 +191,7 @@ export function FailureActions({
               size="sm"
               variant={!canLogIn && index === 0 ? "default" : "outline"}
               disabled={pending}
-              onClick={() => onSwitch({ kind: "provider", provider, makeDefault })}
+              onClick={() => setConfirming(provider)}
             >
               {provider === "rome_credits"
                 ? t("providerFailure.useCredits")
@@ -192,6 +199,7 @@ export function FailureActions({
             </Button>
           ))}
           {replacement && (
+            // Another model of the same provider: no dialog, the move is small.
             <Button
               type="button"
               size="sm"
@@ -203,17 +211,17 @@ export function FailureActions({
           )}
         </div>
       )}
-      {providers.length > 0 && (
-        <div className="mt-2">
-          <LabeledCheckbox
-            checked={makeDefault}
-            disabled={pending}
-            onCheckedChange={setMakeDefault}
-          >
-            {t("providerFailure.alsoMakeDefault")}
-          </LabeledCheckbox>
-        </div>
-      )}
+      <SwitchConfirmDialog
+        provider={confirming}
+        affectedTasks={affectedTasks}
+        pending={pending}
+        onCancel={() => setConfirming(null)}
+        onConfirm={(makeDefault) => {
+          if (!confirming) return;
+          onSwitch({ kind: "provider", provider: confirming, makeDefault });
+          setConfirming(null);
+        }}
+      />
       {failed && (
         <p role="alert" className="mt-2 text-aux text-destructive">
           {t("providerFailure.switchFailed")}
@@ -320,5 +328,76 @@ export function ProviderFailureCard({
         onSwitch={(change) => void onSwitch(change)}
       />
     </div>
+  );
+}
+
+/**
+ * Confirms a card's switch to another provider: this chat (or the notice's
+ * stopped tasks) moves, and with "Also make default" the default too. Rome
+ * credits exist only with no login, so their switch offers no default and
+ * names the balance instead. docs/domains/agents.md#provider-failure
+ */
+export function SwitchConfirmDialog({
+  provider,
+  affectedTasks,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  /** The provider to switch to; null keeps the dialog closed. */
+  provider: DefaultModelProvider | null;
+  affectedTasks?: number;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: (makeDefault: boolean) => void;
+}) {
+  const { t, i18n } = useTranslation("chat");
+  const providerName = useProviderName();
+  const [makeDefault, setMakeDefault] = useState(false);
+  const [credits, setCredits] = useState<RomeCreditsView | null | undefined>(undefined);
+  const open = provider !== null;
+  useEffect(() => {
+    if (!open) return;
+    setMakeDefault(false);
+    if (provider === "rome_credits") void readRomeCredits().then(setCredits);
+  }, [open, provider]);
+  if (!provider) return null;
+  const name = providerName(provider);
+  const balance =
+    provider === "rome_credits" && credits
+      ? formatCreditDollars(credits.availableMicros, i18n.language)
+      : null;
+  const description =
+    affectedTasks !== undefined
+      ? t("providerFailure.confirm.bodyTasks", { count: affectedTasks, provider: name })
+      : provider === "rome_credits" && balance
+        ? t("providerFailure.confirm.bodyCredits", { balance })
+        : t("providerFailure.confirm.body", { provider: name });
+  return (
+    <RomeConfirmDialog
+      open={open}
+      title={t("providerFailure.confirm.title", { provider: name })}
+      description={description}
+      confirmLabel={t("providerFailure.confirm.switch")}
+      cancelLabel={t("providerFailure.confirm.cancel")}
+      confirmDisabled={pending}
+      onCancel={onCancel}
+      onConfirm={() => onConfirm(provider !== "rome_credits" && makeDefault)}
+    >
+      {provider === "rome_credits" ? null : (
+        <div className="space-y-1">
+          <LabeledCheckbox
+            checked={makeDefault}
+            disabled={pending}
+            onCheckedChange={setMakeDefault}
+          >
+            {t("providerFailure.alsoMakeDefault")}
+          </LabeledCheckbox>
+          <p className="pl-6 text-aux text-muted-foreground">
+            {t("providerFailure.confirm.makeDefaultHelp", { provider: name })}
+          </p>
+        </div>
+      )}
+    </RomeConfirmDialog>
   );
 }
