@@ -4,6 +4,7 @@
 // the `expiresAt` envelope).
 
 import type {
+  ChannelMessage,
   ChatDescriptor,
   ChatId,
   ChatSettingsControl,
