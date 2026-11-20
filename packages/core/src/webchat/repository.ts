@@ -1902,7 +1902,9 @@ export class WebChatRepository {
             isNull(romeSessions.largeModelSelection),
             eq(romeSessions.largeModelSelectionBy, "auto"),
           ),
-          sql`exists (select 1 from ${romeAgentMessages} m where m.session_id = ${romeSessions.id})`,
+          // Qualified by hand: inside the subquery an interpolated column
+          // renders unqualified and would name the message's own id.
+          sql`exists (select 1 from ${romeAgentMessages} m where m.session_id = "rome_sessions"."id")`,
         ),
       );
   }

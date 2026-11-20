@@ -161,6 +161,12 @@ function setup(
   options: {
     settingsDelayMs?: number;
     delay?: (ms: number) => Promise<void>;
+    /** Where a failure the Concierge's own recovery could not get past goes. */
+    unrecovered?: Parameters<typeof startConciergeEvents>[2] extends infer O
+      ? O extends { unrecovered?: infer U }
+        ? U
+        : never
+      : never;
     startEvents?: boolean;
     /** False: the turn has said nothing yet, so a new task row has no message to point to. */
     said?: boolean;
@@ -491,7 +497,7 @@ function setup(
           return () => {};
         },
       },
-      { delay: options.delay },
+      { delay: options.delay, unrecovered: options.unrecovered },
     );
   if (options.startEvents !== false) startEvents();
   /** Lets the event handlers run: real time, or fake time moved a little. */
@@ -3975,12 +3981,12 @@ describe("Concierge provider recovery", () => {
     await s.deps.webchatRepo.updateSessionLargeModelSelection(
       CONCIERGE_CHAT,
       "claude-opus-5-5",
-      "owner",
+      "auto",
     );
     return { s, raw };
   }
   it.each([
-    ["anthropic", "claude-sonnet", "You've hit your Sonnet limit", "claude-opus-5-5", "owner"],
+    ["anthropic", "claude-sonnet", "You've hit your Sonnet limit", "claude-opus-5-5", "kept"],
     ["openai", "gpt-6-luna", "Selected model is at capacity.", "gpt-5-6-terra", "auto"],
   ] as const)("moves %s from %s on %s to the same provider's other model, keeping who chose it", async (provider, selection, message, target, by) => {
     const { s } = await prepared({ startEvents: false });
@@ -4007,6 +4013,18 @@ describe("Concierge provider recovery", () => {
       ],
     );
   });
+  it("never moves off a model its owner picked: the chat shows a card", async () => {
+    const { s } = await prepared({ startEvents: false });
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(
+      CONCIERGE_CHAT,
+      "claude-sonnet",
+      "owner",
+    );
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Sonnet limit")),
+    ).toBeNull();
+    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+  });
   it.each(["api source", "other chat"])("refuses %s", async (kind) => {
     const { s, raw } = await prepared({ startEvents: false });
     if (kind === "api source")
@@ -4027,7 +4045,7 @@ describe("Concierge provider recovery", () => {
     await s.deps.webchatRepo.updateSessionLargeModelSelection(
       CONCIERGE_CHAT,
       "claude-sonnet",
-      "owner",
+      "auto",
     );
     const now = rs.spyOn(Date, "now").mockReturnValue(1_000_000);
     expect(
@@ -4175,11 +4193,7 @@ describe("Concierge provider recovery", () => {
     { reason: "model_access_denied" },
   ] as const)("moves a structured model refusal %j to another model on the same provider", async (fields) => {
     const { s } = await prepared();
-    await s.deps.webchatRepo.updateSessionLargeModelSelection(
-      CONCIERGE_CHAT,
-      "gpt-6-luna",
-      "owner",
-    );
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, "gpt-6-luna", "auto");
     s.onBackendTurn(() => {
       void finish(s);
     });
@@ -4193,7 +4207,7 @@ describe("Concierge provider recovery", () => {
     expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenLastCalledWith(
       CONCIERGE_CHAT,
       "gpt-5-6-terra",
-      "owner",
+      "auto",
     );
     expect(s.backendTurns).toHaveLength(1);
     expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenCalledTimes(1);
@@ -4237,7 +4251,7 @@ describe("Concierge provider recovery", () => {
   });
   it("recovers a topic chat as the main chat, and keeps each chat's cooldown its own", async () => {
     const { s } = await prepared({ delay: async () => {} });
-    await s.deps.webchatRepo.updateSessionLargeModelSelection(TOPIC_CHAT, "claude-sonnet", "owner");
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(TOPIC_CHAT, "claude-sonnet", "auto");
     s.onBackendTurn(() => {
       void s.finish({
         turnId: "ok",
@@ -4261,6 +4275,34 @@ describe("Concierge provider recovery", () => {
     expect(
       await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Opus limit")),
     ).toMatchObject({ selectionId: "claude-sonnet" });
+  });
+
+  it("hands a model limit no other model could take to the card handler", async () => {
+    const unrecovered = rs.fn(async () => {});
+    const { s } = await prepared({ unrecovered });
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(
+      CONCIERGE_CHAT,
+      "claude-opus-5-5",
+      "owner",
+    );
+    await finish(s, failure("You've hit your Opus limit"));
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(0);
+    expect(unrecovered).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: CONCIERGE_CHAT, turnId: "failed" }),
+    );
+  });
+
+  it("hands a temporary failure its retry did not get past to the card handler", async () => {
+    const unrecovered = rs.fn(async () => {});
+    const { s } = await prepared({ delay: async () => {}, unrecovered });
+    s.onBackendTurn(() => {
+      void finish(s, failure("Connection error"), "retry");
+    });
+    await finish(s, failure("Connection error"));
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(1);
+    expect(unrecovered).toHaveBeenCalledWith(expect.objectContaining({ turnId: "retry" }));
   });
 
   it("ignores a task chat's temporary failure", async () => {

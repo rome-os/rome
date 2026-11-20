@@ -1,46 +1,62 @@
 // What a dashboard chat shows when the provider its turn needed cannot run.
-// Rome never moves a chat to another provider on its own: a temporary error
-// gets one silent retry, and anything else (a usage limit, a lost sign-in, a
-// removed provider) shows a card in the chat with what the guardian can do.
-// Unattended chats (task chats) do not card each chat: their failures gather
-// into one notice per provider outage in the Concierge main chat, with one
-// push, and they resume on their own when the provider runs again.
-// docs/domains/agents.md#default-provider
+// Rome never moves a chat to another provider on its own. It recovers by
+// itself only when no context is lost, no money is spent and nobody's pick is
+// overridden: a temporary error gets one silent retry, and a single model's
+// limit moves a chat that follows the default to another model of the same
+// provider, with a note. Anything else shows one of three cards, by what the
+// guardian has to do: wait (it recovers by itself), fix the account, or change
+// the model. A card settles in place, to one line, and the stopped turn runs
+// again by itself. Unattended chats (task chats, scheduled runs, routines) get
+// their card too, and the Concierge main chat gets one notice per incident,
+// with one push. docs/domains/agents.md#provider-failure
 
 import type { AgentTurnFailure } from "@rome-os/app-runtime";
 import type {
   DefaultModelProvider,
+  ProviderFailureCardKind,
   ProviderFailurePart,
+  ProviderFailureResolution,
   ProviderOutagePart,
 } from "@rome/api-types/chat";
 import { v7 as uuidv7 } from "uuid";
 import {
-  failoverReason,
+  isModelSelectionId,
+  MODEL_SELECTIONS,
+  providerFailureReason,
+  providerOfDefault,
+  sameProviderTarget,
+  selectionOfStrength,
+  strengthOfSelection,
   type AccountedProviderId,
   type DefaultProvider,
   type DefaultProviders,
   type ModelAccounts,
   type ModelResolutionErrorPayload,
-  type SignedInProviders,
+  type ProviderFailureReason,
 } from "../agent/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger } from "../logger.js";
+import type { ChatProviders } from "./chat-providers.js";
 import { isConciergeChat, TASK_CHAT_TRIGGER_KIND } from "./privacy.js";
 import type { WebChatRepository } from "./repository.js";
 import type { ContinuationRunner } from "./restart-continuation.js";
 
 const log = createLogger("provider-failures");
 
-/** The stored name of the outages that hold unattended chats. */
+/** The stored incidents that stopped unattended chats. */
 export const PROVIDER_OUTAGES_SETTING_KEY = "providerOutages";
+/** The stored cards not settled yet. */
+export const PROVIDER_CARDS_SETTING_KEY = "providerCards";
 
-/** How long a temporary failure waits before its one retry. */
+/** How long a temporary failure waits before its one silent retry. */
 const RETRY_DELAY_MS = 30_000;
+/** When a card that recovers by itself tries the stopped turn again, after it showed. */
+const RECOVERY_DELAYS_MS = [5 * 60_000, 15 * 60_000, 30 * 60_000];
 const RETRY_MARKER = "<provider_retry>";
 
 const PROVIDER_NAMES: Record<DefaultModelProvider, string> = {
   anthropic: "Claude",
-  openai: "Codex (ChatGPT)",
+  openai: "ChatGPT",
   rome_credits: "Rome credits",
 };
 
@@ -48,18 +64,50 @@ export function providerName(provider: DefaultModelProvider): string {
   return PROVIDER_NAMES[provider];
 }
 
-/** One outage that holds unattended chats, as stored. */
+/** The card a reason shows: what the guardian has to do. */
+export function cardKindOf(reason: ProviderFailureReason): ProviderFailureCardKind {
+  switch (reason) {
+    case "quota":
+    case "temporary":
+    case "capacity":
+      return "wait";
+    case "model_unavailable":
+      return "model";
+    default:
+      return "account";
+  }
+}
+
+/** A card not settled yet, as stored. */
+export interface OpenProviderCard {
+  messageId: string;
+  chatId: string;
+  agentName: string;
+  /** The provider that failed, as Rome runs it. */
+  runsOn: AccountedProviderId;
+  part: ProviderFailurePart;
+  /** Parts written beside the card in its message, kept when it is rewritten. */
+  beside: unknown[];
+  since: string;
+  /** How many times Rome ran the stopped turn again for a card that recovers by itself. */
+  attempts: number;
+}
+
+/** One incident that stopped unattended chats, as stored. */
 export interface ProviderOutage {
   id: string;
   provider: DefaultModelProvider;
-  reason: ProviderFailurePart["reason"];
+  runsOn: AccountedProviderId;
+  reason: ProviderFailureReason;
   until?: string;
   /** The Concierge main chat and the notice in it. */
   noticeChatId: string;
   noticeMessageId: string;
-  /** The chats waiting, with the agent and runtime session to resume. */
-  chats: Array<{ chatId: string; agentName: string; sessionId: string }>;
+  /** The chats stopped, with the agent to resume. */
+  chats: Array<{ chatId: string; agentName: string }>;
   since: string;
+  /** The notice as last written. */
+  part?: ProviderOutagePart;
 }
 
 /** A failure as the chat side reads it. */
@@ -76,16 +124,35 @@ export interface ChatTurnFailure {
     | { kind: "resolution"; payload: ModelResolutionErrorPayload };
 }
 
+/** What a card's or a notice's switch does. */
+export type ProviderSwitch =
+  | { kind: "provider"; provider: DefaultProvider; makeDefault?: boolean }
+  | { kind: "model"; selection: string };
+
 export interface ProviderFailuresDeps {
   accounts: Pick<ModelAccounts, "read" | "onChanged">;
-  defaults: Pick<DefaultProviders, "current" | "signedIn">;
-  webchatRepo: Pick<WebChatRepository, "getSession" | "addBackendMessage" | "updateMessageContent">;
+  defaults: Pick<DefaultProviders, "current" | "signedIn" | "choose" | "onChanged">;
+  chats: Pick<ChatProviders, "keep" | "follow">;
+  webchatRepo: Pick<
+    WebChatRepository,
+    "getSession" | "addBackendMessage" | "updateMessageContent" | "updateSessionLargeModelSelection"
+  >;
   settings: Pick<SettingsRepository, "get" | "set">;
   /** The guardian's Concierge main chat, or null when it does not exist. */
   mainChatId: () => Promise<string | null>;
-  /** The runtime session of a chat's agent, for a turn that never opened one. */
+  /** The runtime session of a chat's agent, opening one when the chat has none. */
   runtimeOf: (chatId: string, agentName: string) => Promise<string | null>;
   runner: ContinuationRunner;
+  /**
+   * Moves a chat that follows the default to another model of the same
+   * provider after a single model's limit, with its note. Null when there is
+   * none to move to, or the chat's owner picked its model.
+   */
+  swapModel?: (chatId: string, agentName: string, failure: AgentTurnFailure) => Promise<unknown>;
+  /** Rome credits can be spent now: linked, enabled and with a balance. */
+  creditsUsable?: () => boolean;
+  /** Tells a live session of the chat the model its next turn runs. */
+  selectModel?: (chatId: string, agentName: string, selection: string) => void;
   /** Pushes to the guardian's phone. Absent, nothing is pushed. */
   notify?: {
     send(content: {
@@ -95,31 +162,38 @@ export interface ProviderFailuresDeps {
     }): Promise<unknown>;
   };
   delay?: (ms: number) => Promise<void>;
+  /** Runs `work` after `ms`, for a card that recovers by itself. Returns what cancels it. */
+  later?: (ms: number, work: () => void) => () => void;
   now?: () => Date;
 }
 
-type Classified =
-  | { kind: "temporary" }
-  | {
-      kind: "card";
-      provider: AccountedProviderId;
-      reason: ProviderFailurePart["reason"];
-      until?: string;
-    };
-
 export interface ProviderFailures {
-  /** Decides what a failed turn in a dashboard chat shows, writing the card itself. */
-  failed(turn: ChatTurnFailure): Promise<void>;
   /**
-   * For a turn the resolver refused before it ran, whose error message the
-   * caller writes: the card to write beside the error, or null when the chat
-   * shows none (unattended chats join the outage notice instead).
+   * Decides what a failed turn in a dashboard chat does, writing any card
+   * itself. `final` marks a failure a recovery already tried to get past.
    */
-  cardFor(turn: ChatTurnFailure): Promise<ProviderFailurePart | null>;
-  /** Runs the chat's stopped request again, as the card's actions do after a change. */
-  resend(chatId: string, agentName: string, providerOverride?: AccountedProviderId): Promise<void>;
-  /** The guardian ran an outage's waiting chats on `provider` now, for one turn each. */
-  runOutageOn(outageId: string, provider: AccountedProviderId): Promise<number>;
+  failed(turn: ChatTurnFailure, options?: { final?: boolean }): Promise<void>;
+  /**
+   * For a turn the resolver refused before it ran, whose message the caller
+   * writes with id `messageId`: the card to write in it beside `beside`, or
+   * null when the chat shows none.
+   */
+  cardFor(
+    turn: ChatTurnFailure,
+    messageId: string,
+    beside: unknown[],
+  ): Promise<ProviderFailurePart | null>;
+  /** A turn in the chat ran: its open card, if any, has recovered. */
+  succeeded(chatId: string): Promise<void>;
+  /** A card's switch: this chat moves, its card settles, and the stopped turn runs again. */
+  switchCard(messageId: string, change: ProviderSwitch): Promise<void>;
+  /** A notice's switch: every chat it stopped moves at once. Returns how many. */
+  switchOutage(outageId: string, change: ProviderSwitch): Promise<number>;
+  /** Runs the chat's stopped request again. */
+  resend(chatId: string, agentName: string): Promise<void>;
+  /** Whether the chat has a card not settled yet: its card resumes it, nothing else. */
+  carded(chatId: string): boolean;
+  cards(): Promise<OpenProviderCard[]>;
   outages(): Promise<ProviderOutage[]>;
   stop(): void;
 }
@@ -138,13 +212,56 @@ export function retryPrompt(provider: string): string {
   );
 }
 
+function clock(time: string): string {
+  return new Date(time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** The push for an incident: what stopped and how many tasks wait. */
+export function outagePushText(
+  outage: Pick<ProviderOutage, "provider" | "reason" | "until" | "chats">,
+): string {
+  const name = providerName(outage.provider);
+  const cause = (() => {
+    switch (outage.reason) {
+      case "quota":
+        return `${name} quota used up${outage.until ? `, continues at ${clock(outage.until)}` : ""}`;
+      case "temporary":
+      case "capacity":
+        return `${name} is unavailable for now`;
+      case "model_unavailable":
+        return `The ${name} model is unavailable`;
+      case "login":
+        return `${name} needs you to log in again`;
+      case "removed":
+        return `${name} is not logged in`;
+      case "credits_used_up":
+        return `${name} has no credits left`;
+      case "spend_cap":
+        return `${name} reached its spending limit`;
+    }
+  })();
+  const count = outage.chats.length;
+  return `${cause}. ${count} ${count === 1 ? "task" : "tasks"} waiting`;
+}
+
 export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFailures {
   const now = deps.now ?? (() => new Date());
   const delay = deps.delay ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const later =
+    deps.later ??
+    ((ms: number, work: () => void) => {
+      const timer = setTimeout(work, ms);
+      timer.unref?.();
+      return () => clearTimeout(timer);
+    });
   let stopped = false;
-  // Chats whose one silent retry is running: its failure is never retried.
-  const retrying = new Set<string>();
-  // Outage writes, one at a time.
+  // Chats whose recovery turn is running: its failure is final.
+  const recovering = new Set<string>();
+  // Chats with a card not settled, kept in memory so the usage-limit
+  // continuation can ask synchronously.
+  const cardedChats = new Set<string>();
+  const scheduled = new Map<string, () => void>();
+  // Writes to the stored cards and incidents, one at a time.
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
     const next = queue.then(work, work);
@@ -152,194 +269,269 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     return next;
   };
 
-  const readOutages = async (): Promise<ProviderOutage[]> => {
-    const value = await deps.settings.get<unknown>(PROVIDER_OUTAGES_SETTING_KEY);
-    return Array.isArray(value) ? (value.filter(isRecord) as unknown as ProviderOutage[]) : [];
+  const readList = async <T>(key: string): Promise<T[]> => {
+    const value = await deps.settings.get<unknown>(key);
+    return Array.isArray(value) ? (value.filter(isRecord) as unknown as T[]) : [];
   };
+  const readCards = () => readList<OpenProviderCard>(PROVIDER_CARDS_SETTING_KEY);
+  const writeCards = async (cards: OpenProviderCard[]) => {
+    await deps.settings.set(PROVIDER_CARDS_SETTING_KEY, cards);
+    cardedChats.clear();
+    for (const card of cards) cardedChats.add(card.chatId);
+  };
+  const readOutages = () => readList<ProviderOutage>(PROVIDER_OUTAGES_SETTING_KEY);
   const writeOutages = (outages: ProviderOutage[]) =>
     deps.settings.set(PROVIDER_OUTAGES_SETTING_KEY, outages);
 
   /** The provider as the guardian names it: Codex on Rome credits reads as Rome credits. */
   const named = (provider: AccountedProviderId): DefaultModelProvider => {
-    const current = deps.defaults.current();
-    return provider === "openai" && current === "rome_credits" ? "rome_credits" : provider;
+    if (provider !== "openai") return provider;
+    const signedIn = deps.defaults.signedIn();
+    return !signedIn.openai && !signedIn.anthropic && deps.creditsUsable?.()
+      ? "rome_credits"
+      : "openai";
   };
 
-  /** Signed-in providers other than `failing` that can run now. */
-  const alternatives = (failing: DefaultModelProvider): DefaultModelProvider[] => {
-    const signedIn: SignedInProviders = deps.defaults.signedIn();
+  /** The guardian's other logged-in accounts that can run now. */
+  const alternatives = (failing: AccountedProviderId): DefaultModelProvider[] => {
     const reports = deps.accounts.read();
-    const runs = (provider: DefaultProvider) =>
-      provider === "rome_credits"
-        ? signedIn.rome_credits
-        : reports[provider]?.state === "available";
-    return (["anthropic", "openai", "rome_credits"] as const).filter(
-      (provider) => provider !== failing && signedIn[provider] && runs(provider),
+    return (["anthropic", "openai"] as const).filter(
+      (provider) => provider !== failing && reports[provider]?.state === "available",
     );
   };
 
-  const reasonFromState = (provider: AccountedProviderId): "login" | "removed" =>
-    deps.accounts.read()[provider]?.state === "expired" ? "login" : "removed";
+  /** "Use Rome credits": only while no AI account is logged in and a balance is left. */
+  const creditsOffered = (): boolean => {
+    const signedIn = deps.defaults.signedIn();
+    return !signedIn.anthropic && !signedIn.openai && deps.creditsUsable?.() === true;
+  };
+
+  interface Classified {
+    provider: AccountedProviderId;
+    reason: ProviderFailureReason;
+    until?: string;
+    model?: string;
+    detail?: string;
+    failure?: AgentTurnFailure;
+  }
 
   const classify = (failure: ChatTurnFailure["failure"]): Classified | null => {
+    const reports = deps.accounts.read();
     if (failure.kind === "resolution") {
       const { payload } = failure;
-      if (payload.code === "model_unavailable") return null;
       const provider =
         payload.provider ??
         (() => {
           const current = deps.defaults.current();
-          return current === "anthropic" ? "anthropic" : current ? "openai" : null;
+          return current ? providerOfDefault(current) : null;
         })();
       if (!provider) return null;
-      return payload.reason === "quota_exhausted"
-        ? {
-            kind: "card",
-            provider,
-            reason: "quota",
-            ...(payload.usageLimitUntil ? { until: payload.usageLimitUntil } : {}),
-          }
-        : { kind: "card", provider, reason: reasonFromState(provider) };
+      if (payload.code === "model_unavailable") {
+        return { provider, reason: "model_unavailable", detail: payload.error };
+      }
+      if (payload.reason === "quota_exhausted") {
+        const until = payload.usageLimitUntil ?? reports[provider]?.usageLimitUntil;
+        return { provider, reason: "quota", detail: payload.error, ...(until ? { until } : {}) };
+      }
+      const state = reports[provider]?.state;
+      return {
+        provider,
+        reason: state === "expired" ? "login" : "removed",
+        detail: payload.error,
+      };
     }
-    const reason = failoverReason(failure.failure, deps.accounts.read());
+    const reason = providerFailureReason(failure.failure, reports);
     const provider = failure.failure.provider;
-    if (provider !== "anthropic" && provider !== "openai") return null;
-    if (reason === "temporary") return { kind: "temporary" };
-    if (reason === "quota") {
-      const until = deps.accounts.read()[provider]?.usageLimitUntil;
-      return { kind: "card", provider, reason: "quota", ...(until ? { until } : {}) };
-    }
-    if (reason === "login") return { kind: "card", provider, reason: reasonFromState(provider) };
-    return null;
+    if (!reason || (provider !== "anthropic" && provider !== "openai")) return null;
+    const until = reason === "quota" ? reports[provider]?.usageLimitUntil : undefined;
+    return {
+      provider,
+      reason,
+      detail: failure.failure.message,
+      failure: failure.failure,
+      ...(until ? { until } : {}),
+    };
   };
 
-  const sessionOf = async (turn: Pick<ChatTurnFailure, "chatId" | "agentName" | "sessionId">) =>
-    turn.sessionId ?? (await deps.runtimeOf(turn.chatId, turn.agentName));
+  const ownerPicked = (chat: {
+    largeModelSelection: string | null;
+    largeModelSelectionBy?: string | null;
+  }) =>
+    chat.largeModelSelectionBy === "owner" ||
+    (chat.largeModelSelection !== null && !chat.largeModelSelectionBy);
 
-  const resend: ProviderFailures["resend"] = async (chatId, agentName, providerOverride) => {
+  const run = async (chatId: string, agentName: string, provider: string): Promise<void> => {
     const sessionId = await deps.runtimeOf(chatId, agentName);
-    if (!sessionId) throw new Error("This chat has no session to resend in");
-    const name = providerOverride ? providerName(providerOverride) : "the provider";
-    void deps.runner
-      .runAndReport(
+    if (!sessionId) throw new Error("This chat has no session to run in");
+    recovering.add(chatId);
+    try {
+      await deps.runner.runAndReport(
         {
           agentName,
           sessionId,
           channel: "webchat",
           threadId: chatId,
-          prompt: retryPrompt(name),
-        },
-        {
-          inputLabel: "Provider recovery",
-          ...(providerOverride ? { providerOverride } : {}),
-        },
-      )
-      .catch((error: unknown) =>
-        log.warn("provider recovery turn failed", { chatId, error: String(error) }),
-      );
-  };
-
-  const retryOnce = async (turn: ChatTurnFailure): Promise<void> => {
-    const sessionId = await sessionOf(turn);
-    if (!sessionId) return;
-    retrying.add(turn.chatId);
-    try {
-      await delay(RETRY_DELAY_MS);
-      if (stopped) return;
-      await deps.runner.runAndReport(
-        {
-          agentName: turn.agentName,
-          sessionId,
-          channel: "webchat",
-          threadId: turn.chatId,
-          prompt: retryPrompt("the provider"),
+          prompt: retryPrompt(provider),
         },
         { inputLabel: "Provider recovery" },
       );
     } finally {
-      retrying.delete(turn.chatId);
+      recovering.delete(chatId);
     }
   };
 
+  /** Runs the stopped turn again without waiting for it. */
+  const resume = (chatId: string, agentName: string, provider: string) => {
+    void run(chatId, agentName, provider).catch((error: unknown) =>
+      log.warn("provider recovery turn failed", { chatId, error: String(error) }),
+    );
+  };
+
   const cardPart = async (
-    turn: ChatTurnFailure,
-    failed: Extract<Classified, { kind: "card" }>,
+    chatId: string,
+    agentName: string,
+    failed: Classified,
   ): Promise<ProviderFailurePart | null> => {
-    const chat = await deps.webchatRepo.getSession(turn.chatId);
+    const chat = await deps.webchatRepo.getSession(chatId);
     if (!chat) return null;
-    const provider = named(failed.provider);
-    const part: ProviderFailurePart = {
+    const card = cardKindOf(failed.reason);
+    const replacement =
+      card === "model" && failed.model
+        ? sameProviderTarget(deps.accounts.read(), failed.provider, failed.model)
+        : null;
+    const model =
+      failed.model ??
+      (isModelSelectionId(chat.largeModelSelection)
+        ? MODEL_SELECTIONS[chat.largeModelSelection].model
+        : undefined);
+    const credits = card === "account" && creditsOffered();
+    return {
       type: "provider_failure",
-      provider,
+      provider: named(failed.provider),
       reason: failed.reason,
       ...(failed.until ? { until: failed.until } : {}),
-      followsDefault: !chat.largeModelSelection || chat.largeModelSelectionBy === "auto",
-      alternatives: alternatives(provider),
-      chatId: turn.chatId,
+      followsDefault: !ownerPicked(chat),
+      alternatives: card === "model" ? [] : alternatives(failed.provider),
+      chatId,
+      card,
+      agentName,
+      ...(model ? { model } : {}),
+      ...(replacement
+        ? {
+            replacement: {
+              selection: replacement.selectionId,
+              model: MODEL_SELECTIONS[replacement.selectionId].model,
+            },
+          }
+        : {}),
+      ...(credits ? { credits: true } : {}),
+      ...(failed.detail ? { detail: failed.detail.slice(0, 2_000) } : {}),
+    };
+  };
+
+  const content = (card: Pick<OpenProviderCard, "beside" | "part">) =>
+    JSON.stringify([...card.beside, card.part]);
+
+  /** Writes or rewrites a chat's open card; one per chat. */
+  const writeCard = (
+    turn: ChatTurnFailure,
+    part: ProviderFailurePart,
+    runsOn: AccountedProviderId,
+    written?: { messageId: string; beside: unknown[] },
+  ) =>
+    serial(async () => {
+      const cards = await readCards();
+      const open = cards.find((card) => card.chatId === turn.chatId);
+      if (open && !written) {
+        open.part = part;
+        open.runsOn = runsOn;
+        await deps.webchatRepo.updateMessageContent(open.messageId, content(open));
+        await writeCards(cards);
+        return open;
+      }
+      let messageId = written?.messageId;
+      if (!messageId) {
+        const message = await deps.webchatRepo.addBackendMessage(
+          turn.chatId,
+          turn.turnId ?? uuidv7(),
+          [part],
+        );
+        messageId = message.id;
+      }
+      // A newer card replaces the chat's older one, which settles as superseded.
+      const rest = cards.filter((card) => card.chatId !== turn.chatId);
+      const card: OpenProviderCard = {
+        messageId,
+        chatId: turn.chatId,
+        agentName: turn.agentName,
+        runsOn,
+        part,
+        beside: written?.beside ?? [],
+        since: now().toISOString(),
+        attempts: 0,
+      };
+      await writeCards([...rest, card]);
+      return card;
+    });
+
+  /** A card that recovers by itself tries the stopped turn again, a few times. */
+  const scheduleRecovery = (card: OpenProviderCard) => {
+    if (card.part.card !== "wait" || card.part.reason === "quota") return;
+    const wait = RECOVERY_DELAYS_MS[card.attempts];
+    if (wait === undefined) return;
+    scheduled.get(card.chatId)?.();
+    scheduled.set(
+      card.chatId,
+      later(wait, () => {
+        scheduled.delete(card.chatId);
+        void serial(async () => {
+          const cards = await readCards();
+          const open = cards.find((candidate) => candidate.messageId === card.messageId);
+          if (!open || stopped) return null;
+          open.attempts += 1;
+          await writeCards(cards);
+          return open;
+        }).then((open) => {
+          if (open) resume(open.chatId, open.agentName, providerName(open.part.provider));
+        });
+      }),
+    );
+  };
+
+  const noticePart = (outage: ProviderOutage, resolved?: ProviderFailureResolution) => {
+    const card = cardKindOf(outage.reason);
+    const part: ProviderOutagePart = {
+      type: "provider_outage",
+      outageId: outage.id,
+      provider: outage.provider,
+      reason: outage.reason,
+      ...(outage.until ? { until: outage.until } : {}),
+      chatIds: outage.chats.map((chat) => chat.chatId),
+      alternatives: card === "model" ? [] : alternatives(outage.runsOn),
+      card,
+      ...(card === "account" && creditsOffered() ? { credits: true } : {}),
+      ...(outage.part?.replacement ? { replacement: outage.part.replacement } : {}),
+      ...(outage.part?.detail ? { detail: outage.part.detail } : {}),
+      ...(resolved ? { resolved, resolvedAt: resolved.at } : {}),
     };
     return part;
   };
 
-  const cardIn = async (turn: ChatTurnFailure, failed: Extract<Classified, { kind: "card" }>) => {
-    const part = await cardPart(turn, failed);
-    if (part)
-      await deps.webchatRepo.addBackendMessage(turn.chatId, turn.turnId ?? uuidv7(), [part]);
-  };
-
-  /** Runs each of an outage's chats again; one that cannot run does not stop the rest. */
-  const resendAll = async (
-    outage: ProviderOutage,
-    provider?: AccountedProviderId,
-  ): Promise<number> => {
-    let ran = 0;
-    for (const chat of outage.chats) {
-      try {
-        await resend(chat.chatId, chat.agentName, provider);
-        ran += 1;
-      } catch (error) {
-        log.warn("outage chat resend failed", { chatId: chat.chatId, error: String(error) });
-      }
-    }
-    return ran;
-  };
-
-  const noticePart = (outage: ProviderOutage, resolvedAt?: string): ProviderOutagePart => ({
-    type: "provider_outage",
-    outageId: outage.id,
-    provider: outage.provider,
-    reason: outage.reason,
-    ...(outage.until ? { until: outage.until } : {}),
-    chatIds: outage.chats.map((chat) => chat.chatId),
-    alternatives: alternatives(outage.provider),
-    ...(resolvedAt ? { resolvedAt } : {}),
-  });
-
-  const pushText = (outage: ProviderOutage): string => {
-    const name = providerName(outage.provider);
-    const cause =
-      outage.reason === "quota"
-        ? `${name} usage limit reached${outage.until ? ` (back at ${new Date(outage.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})` : ""}`
-        : outage.reason === "login"
-          ? `${name} needs signing in again`
-          : `${name} is not signed in`;
-    const count = outage.chats.length;
-    return `${cause}, ${count} ${count === 1 ? "chat" : "chats"} waiting`;
-  };
-
-  const groupIn = (turn: ChatTurnFailure, failed: Extract<Classified, { kind: "card" }>) =>
+  /** Adds an unattended chat to its incident's notice, opening one with a push. */
+  const groupIn = (turn: ChatTurnFailure, part: ProviderFailurePart, runsOn: AccountedProviderId) =>
     serial(async () => {
-      const sessionId = await sessionOf(turn);
-      if (!sessionId) return;
-      const provider = named(failed.provider);
       const outages = await readOutages();
-      const open = outages.find((outage) => outage.provider === provider);
+      const open = outages.find(
+        (outage) => outage.provider === part.provider && outage.reason === part.reason,
+      );
       if (open) {
         if (open.chats.some((chat) => chat.chatId === turn.chatId)) return;
-        open.chats.push({ chatId: turn.chatId, agentName: turn.agentName, sessionId });
+        open.chats.push({ chatId: turn.chatId, agentName: turn.agentName });
+        open.part = noticePart(open);
         await writeOutages(outages);
         await deps.webchatRepo.updateMessageContent(
           open.noticeMessageId,
-          JSON.stringify([noticePart(open)]),
+          JSON.stringify([open.part]),
         );
         return;
       }
@@ -347,95 +539,323 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       if (!noticeChatId) return;
       const outage: ProviderOutage = {
         id: uuidv7(),
-        provider,
-        reason: failed.reason,
-        ...(failed.until ? { until: failed.until } : {}),
+        provider: part.provider,
+        runsOn,
+        reason: part.reason,
+        ...(part.until ? { until: part.until } : {}),
         noticeChatId,
         noticeMessageId: "",
-        chats: [{ chatId: turn.chatId, agentName: turn.agentName, sessionId }],
+        chats: [{ chatId: turn.chatId, agentName: turn.agentName }],
         since: now().toISOString(),
       };
+      outage.part = {
+        ...noticePart(outage),
+        ...(part.replacement ? { replacement: part.replacement } : {}),
+        ...(part.detail ? { detail: part.detail } : {}),
+      };
       const message = await deps.webchatRepo.addBackendMessage(noticeChatId, uuidv7(), [
-        noticePart(outage),
+        outage.part,
       ]);
       outage.noticeMessageId = message.id;
       await writeOutages([...outages, outage]);
       await deps.notify
-        ?.send({ body: pushText(outage), level: "active", chatId: noticeChatId })
+        ?.send({ body: outagePushText(outage), level: "active", chatId: noticeChatId })
         .catch((error: unknown) =>
           log.warn("provider outage push failed", { error: String(error) }),
         );
     });
 
-  /** An outage ends: the provider runs again, or the guardian ran its chats elsewhere. */
-  const resolve = (match: (outage: ProviderOutage) => boolean) =>
+  /** Settles the chats' cards in place, and any notice left with no chat waiting. */
+  const settle = (
+    match: (card: OpenProviderCard) => boolean,
+    resolution: (card: OpenProviderCard) => ProviderFailureResolution,
+  ) =>
     serial(async () => {
-      const outages = await readOutages();
-      const ended = outages.filter(match);
+      const cards = await readCards();
+      const ended = cards.filter(match);
       if (ended.length === 0) return [];
-      await writeOutages(outages.filter((outage) => !match(outage)));
-      const at = now().toISOString();
-      for (const outage of ended) {
+      await writeCards(cards.filter((card) => !match(card)));
+      for (const card of ended) {
+        scheduled.get(card.chatId)?.();
+        scheduled.delete(card.chatId);
+        card.part = { ...card.part, resolved: resolution(card) };
         await deps.webchatRepo
-          .updateMessageContent(outage.noticeMessageId, JSON.stringify([noticePart(outage, at)]))
+          .updateMessageContent(card.messageId, content(card))
           .catch(() => undefined);
       }
+      const chatIds = new Set(ended.map((card) => card.chatId));
+      const outages = await readOutages();
+      const left: ProviderOutage[] = [];
+      for (const outage of outages) {
+        const waiting = outage.chats.filter((chat) => !chatIds.has(chat.chatId));
+        if (waiting.length === outage.chats.length) {
+          left.push(outage);
+          continue;
+        }
+        if (waiting.length > 0) {
+          left.push({ ...outage, chats: waiting });
+          continue;
+        }
+        const first = ended.find((card) => outage.chats.some((c) => c.chatId === card.chatId));
+        await deps.webchatRepo
+          .updateMessageContent(
+            outage.noticeMessageId,
+            JSON.stringify([noticePart(outage, first ? resolution(first) : undefined)]),
+          )
+          .catch(() => undefined);
+      }
+      if (left.length !== outages.length || left.some((o, i) => o !== outages[i]))
+        await writeOutages(left);
       return ended;
     });
 
-  const unsubscribe = deps.accounts.onChanged((provider, change, succeeded) => {
-    if (change !== "refreshed" || succeeded === false) return;
+  /** Moves one chat as a switch asks, before its stopped turn runs again. */
+  const moveChat = async (chatId: string, agentName: string, change: ProviderSwitch) => {
+    if (change.kind === "model") {
+      if (!isModelSelectionId(change.selection)) throw new Error("Unknown model");
+      const chat = await deps.webchatRepo.getSession(chatId);
+      if (!chat) throw new Error("Chat not found");
+      const by = chat.largeModelSelectionBy === "kept" || !ownerPicked(chat) ? "kept" : "owner";
+      await deps.webchatRepo.updateSessionLargeModelSelection(chatId, change.selection, by);
+      deps.selectModel?.(chatId, agentName, change.selection);
+      return;
+    }
+    const provider = providerOfDefault(change.provider);
+    const chat = await deps.webchatRepo.getSession(chatId);
+    if (chat && ownerPicked(chat) && isModelSelectionId(chat.largeModelSelection)) {
+      // A model its owner picked moves to the same strength on the new provider, still theirs.
+      if (MODEL_SELECTIONS[chat.largeModelSelection].providerId === provider) return;
+      const selection = selectionOfStrength(
+        provider,
+        strengthOfSelection(chat.largeModelSelection),
+        deps.accounts.read().openai?.account,
+      );
+      await deps.webchatRepo.updateSessionLargeModelSelection(chatId, selection, "owner");
+      deps.selectModel?.(chatId, agentName, selection);
+      return;
+    }
+    if (change.makeDefault) await deps.chats.follow(chatId);
+    else await deps.chats.keep(chatId, provider);
+  };
+
+  const switchResolution = (change: ProviderSwitch): ProviderFailureResolution =>
+    change.kind === "model"
+      ? {
+          at: now().toISOString(),
+          by: "switched",
+          model: MODEL_SELECTIONS[change.selection as keyof typeof MODEL_SELECTIONS]?.model,
+          continued: true,
+        }
+      : { at: now().toISOString(), by: "switched", provider: change.provider, continued: true };
+
+  const switchName = (change: ProviderSwitch) =>
+    change.kind === "model"
+      ? (MODEL_SELECTIONS[change.selection as keyof typeof MODEL_SELECTIONS]?.model ?? "the model")
+      : providerName(change.provider);
+
+  const makeDefault = async (change: ProviderSwitch) => {
+    if (change.kind === "provider" && change.makeDefault) {
+      await deps.defaults.choose(change.provider, { moveExisting: true });
+    }
+  };
+
+  // The provider runs again: its cards settle, and their stopped turns run.
+  const stopAccounts = deps.accounts.onChanged((provider, _change, succeeded) => {
+    if (stopped || succeeded === false) return;
     if (provider !== "anthropic" && provider !== "openai") return;
     if (deps.accounts.read()[provider]?.state !== "available") return;
-    void resolve(
-      (outage) => (outage.provider === "anthropic" ? "anthropic" : "openai") === provider,
-    ).then(async (ended) => {
-      // The usage-limit continuation resumes chats a limit stopped. Chats that
-      // waited for a sign-in run again here.
-      for (const outage of ended) if (outage.reason !== "quota") await resendAll(outage);
+    void settle(
+      (card) =>
+        card.runsOn === provider &&
+        card.part.card !== "model" &&
+        // A fresh temporary card waits for its own retry, not the next read.
+        (card.part.reason === "quota" || card.part.card === "account" || card.attempts > 0),
+      () => ({ at: now().toISOString(), by: "recovered", continued: true }),
+    ).then((ended) => {
+      for (const card of ended)
+        resume(card.chatId, card.agentName, providerName(card.part.provider));
     });
   });
 
-  return {
-    async failed(turn) {
-      if (stopped) return;
-      const classified = classify(turn.failure);
-      if (!classified) return;
-      // Checked before any wait, so a retry that already ended is still known.
-      const retried = retrying.has(turn.chatId);
-      const chat = await deps.webchatRepo.getSession(turn.chatId);
-      if (!chat) return;
-      if (classified.kind === "temporary") {
-        // The Concierge retries its own chats; a retry is never retried.
-        if (isConciergeChat(chat) || retried) return;
-        await retryOnce(turn);
-        return;
+  // A new default moves the chats that follow it, so their cards settle and
+  // their stopped turns run there. Kept chats and owner picks stay.
+  const stopDefaults = deps.defaults.onChanged((change) => {
+    if (stopped || !change.moveExisting) return;
+    const to = providerOfDefault(change.to);
+    void (async () => {
+      const cards = await readCards();
+      const moving: string[] = [];
+      for (const card of cards) {
+        if (card.runsOn === to || card.part.card === "model") continue;
+        const chat = await deps.webchatRepo.getSession(card.chatId);
+        if (chat && !ownerPicked(chat)) moving.push(card.messageId);
       }
-      if (chat.triggerKind === TASK_CHAT_TRIGGER_KIND) await groupIn(turn, classified);
-      else await cardIn(turn, classified);
-    },
-    async cardFor(turn) {
-      if (stopped) return null;
-      const classified = classify(turn.failure);
-      if (classified?.kind !== "card") return null;
-      const chat = await deps.webchatRepo.getSession(turn.chatId);
-      if (!chat) return null;
-      if (chat.triggerKind === TASK_CHAT_TRIGGER_KIND) {
-        await groupIn(turn, classified);
+      const ended = await settle(
+        (card) => moving.includes(card.messageId),
+        () => ({ at: now().toISOString(), by: "switched", provider: change.to, continued: true }),
+      );
+      for (const card of ended) resume(card.chatId, card.agentName, providerName(change.to));
+    })().catch((error: unknown) =>
+      log.warn("cards after a default change failed", { error: String(error) }),
+    );
+  });
+
+  // Cards that recover by themselves try again after a restart, too.
+  void readCards()
+    .then((cards) => {
+      for (const card of cards) {
+        cardedChats.add(card.chatId);
+        scheduleRecovery(card);
+      }
+    })
+    .catch(() => undefined);
+
+  const decide = async (
+    turn: ChatTurnFailure,
+    final: boolean,
+  ): Promise<{
+    part: ProviderFailurePart;
+    runsOn: AccountedProviderId;
+    unattended: boolean;
+  } | null> => {
+    const classified = classify(turn.failure);
+    if (!classified) return null;
+    const chat = await deps.webchatRepo.getSession(turn.chatId);
+    if (!chat) return null;
+    // A recovery turn's failure is final: it is never recovered again.
+    const last = final || recovering.has(turn.chatId);
+    const concierge = isConciergeChat(chat);
+    const failure = classified.failure;
+    if (classified.reason === "temporary" && !last) {
+      // The Concierge retries its own chats, and says when that failed too.
+      if (concierge) return null;
+      const sessionId = turn.sessionId ?? (await deps.runtimeOf(turn.chatId, turn.agentName));
+      if (!sessionId) return null;
+      recovering.add(turn.chatId);
+      void delay(RETRY_DELAY_MS)
+        .then(() => (stopped ? undefined : run(turn.chatId, turn.agentName, "the provider")))
+        .catch((error: unknown) =>
+          log.warn("provider retry failed", { chatId: turn.chatId, error: String(error) }),
+        )
+        .finally(() => recovering.delete(turn.chatId));
+      return null;
+    }
+    if (
+      (classified.reason === "capacity" || classified.reason === "model_unavailable") &&
+      !last &&
+      failure
+    ) {
+      // The Concierge moves its own chats to another model, and says when it could not.
+      if (concierge) return null;
+      if (!ownerPicked(chat) && (await deps.swapModel?.(turn.chatId, turn.agentName, failure))) {
+        resume(turn.chatId, turn.agentName, providerName(named(classified.provider)));
         return null;
       }
-      return cardPart(turn, classified);
+    }
+    if (failure && !classified.model) {
+      const selection = chat.largeModelSelection;
+      if (isModelSelectionId(selection)) classified.model = MODEL_SELECTIONS[selection].model;
+    }
+    const part = await cardPart(turn.chatId, turn.agentName, classified);
+    if (!part) return null;
+    return {
+      part,
+      runsOn: classified.provider,
+      unattended: chat.triggerKind === TASK_CHAT_TRIGGER_KIND,
+    };
+  };
+
+  return {
+    async failed(turn, options) {
+      if (stopped) return;
+      const decided = await decide(turn, options?.final === true);
+      if (!decided) return;
+      const card = await writeCard(turn, decided.part, decided.runsOn);
+      scheduleRecovery(card);
+      if (decided.unattended) await groupIn(turn, decided.part, decided.runsOn);
     },
-    resend,
-    async runOutageOn(outageId, provider) {
-      const [outage] = await resolve((candidate) => candidate.id === outageId);
-      if (!outage) return 0;
-      return await resendAll(outage, provider);
+    async cardFor(turn, messageId, beside) {
+      if (stopped) return null;
+      const decided = await decide(turn, true);
+      if (!decided) return null;
+      // A chat shows one open card: a later failure rewrites it where it is.
+      const reuse = cardedChats.has(turn.chatId);
+      const card = await writeCard(
+        turn,
+        decided.part,
+        decided.runsOn,
+        reuse ? undefined : { messageId, beside },
+      );
+      scheduleRecovery(card);
+      if (decided.unattended) await groupIn(turn, decided.part, decided.runsOn);
+      return reuse ? null : decided.part;
     },
+    async succeeded(chatId) {
+      if (!cardedChats.has(chatId)) return;
+      await settle(
+        (card) => card.chatId === chatId,
+        () => ({ at: now().toISOString(), by: "recovered", continued: true }),
+      );
+    },
+    async switchCard(messageId, change) {
+      const card = (await readCards()).find((candidate) => candidate.messageId === messageId);
+      if (!card) throw new Error("This card is already settled");
+      await makeDefault(change);
+      await moveChat(card.chatId, card.agentName, change);
+      await settle(
+        (candidate) => candidate.messageId === messageId,
+        () => switchResolution(change),
+      );
+      resume(card.chatId, card.agentName, switchName(change));
+    },
+    async switchOutage(outageId, change) {
+      const outage = (await readOutages()).find((candidate) => candidate.id === outageId);
+      if (!outage) throw new Error("This notice is already settled");
+      await makeDefault(change);
+      let moved = 0;
+      for (const chat of outage.chats) {
+        try {
+          await moveChat(chat.chatId, chat.agentName, change);
+          moved += 1;
+        } catch (error) {
+          log.warn("outage chat switch failed", { chatId: chat.chatId, error: String(error) });
+        }
+      }
+      const chatIds = new Set(outage.chats.map((chat) => chat.chatId));
+      await settle(
+        (card) => chatIds.has(card.chatId),
+        () => switchResolution(change),
+      );
+      // A chat whose card was already gone settles with the notice all the same.
+      await serial(async () => {
+        const outages = await readOutages();
+        const still = outages.find((candidate) => candidate.id === outageId);
+        if (!still) return;
+        await writeOutages(outages.filter((candidate) => candidate.id !== outageId));
+        await deps.webchatRepo
+          .updateMessageContent(
+            still.noticeMessageId,
+            JSON.stringify([noticePart(still, switchResolution(change))]),
+          )
+          .catch(() => undefined);
+      });
+      for (const chat of outage.chats) resume(chat.chatId, chat.agentName, switchName(change));
+      return moved;
+    },
+    async resend(chatId, agentName) {
+      const sessionId = await deps.runtimeOf(chatId, agentName);
+      if (!sessionId) throw new Error("This chat has no session to resend in");
+      resume(chatId, agentName, "the provider");
+    },
+    carded: (chatId) => cardedChats.has(chatId),
+    cards: readCards,
     outages: readOutages,
     stop() {
       stopped = true;
-      unsubscribe();
+      stopAccounts();
+      stopDefaults();
+      for (const cancel of scheduled.values()) cancel();
+      scheduled.clear();
     },
   };
 }

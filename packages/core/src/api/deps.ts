@@ -1,4 +1,5 @@
 import type { AgentNameEvents } from "../people/guardian-profile/index.js";
+import type { ChatProviders } from "../webchat/chat-providers.js";
 import type { VoiceInputSource } from "../voice-input/index.js";
 import type { PersonalDataRepository } from "../personal-data/repository.js";
 import type { DeviceConnectionsRepository } from "../connections/device/repository.js";
@@ -246,6 +247,10 @@ export interface ApiDeps {
   defaultProviders?: DefaultProviders;
   /** What a chat shows when its provider cannot run, and the actions on it. */
   providerFailures?: ProviderFailures;
+  /** How many chats follow the default, for the default-change dialog. */
+  chatProviders?: Pick<ChatProviders, "followingCount">;
+  /** Rome credits can be spent now: linked, enabled and with a balance. */
+  romeCreditsUsable?: () => boolean;
   /** Codex's loopback route to Rome credits, built by the composition root. */
   romeCreditsProxy: Hono;
   /**

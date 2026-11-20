@@ -318,5 +318,7 @@ export { fetchRomeCredits } from "./infrastructure/model/codex/rome-credits.js";
 export {
   ambiguousQuota,
   failoverReason,
+  providerFailureReason,
   type FailoverReason,
+  type ProviderFailureReason,
 } from "./domain/failover-reason.js";

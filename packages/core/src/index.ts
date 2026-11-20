@@ -5,6 +5,7 @@ import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { webchatSessionKey } from "./core/agent-session-key.js";
+import { createChatProviders, type ChatProviders } from "./webchat/chat-providers.js";
 import { createProviderFailures } from "./webchat/provider-failures.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
@@ -1078,6 +1079,13 @@ async function main() {
     log: createLogger("codex-login"),
   });
   const stopCodexLoginChoice = () => codexLoginChoice.stop();
+  // Wired once the chats' sessions exist, before Rome serves a request.
+  let chatProviders: ChatProviders = {
+    beforeDefaultChange: async () => {},
+    keep: async () => null,
+    follow: async () => {},
+    followingCount: async () => 0,
+  };
   const defaultProviders = createDefaultProviders({
     setting: createDefaultProviderSetting(settingsRepo),
     accounts: modelAccounts,
@@ -1093,6 +1101,9 @@ async function main() {
       const provider = MODEL_SELECTIONS[stored].providerId;
       return provider === "anthropic" || provider === "openai" ? provider : null;
     },
+    // A change of the default keeps the chats where they are, or lets them
+    // move, before any chat can run on it.
+    beforeChange: (change) => chatProviders.beforeDefaultChange(change),
     log: createLogger("default-provider"),
   });
   codexLoginChoice.onCreditsChanged(() => {
@@ -1449,6 +1460,14 @@ async function main() {
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
+  chatProviders = createChatProviders({
+    webchatRepo,
+    accounts: modelAccounts,
+    selectModel: (chatId, agentName, selection) =>
+      agentSessionManager
+        .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })
+        ?.selectModel(selection),
+  });
   const actionWorkerCoordinator = new ActionWorkerCoordinator(actionEngine);
   actionEngine.setActionWorkerCoordinator(actionWorkerCoordinator);
   const chatResetPolicy: ChatResetPolicy = async (chat) =>
@@ -1535,12 +1554,23 @@ async function main() {
     },
   });
 
-  // A provider that cannot run shows a card in the chat, or, for task chats,
-  // one notice per outage in the Concierge main chat. Nothing moves a chat to
-  // another provider on its own.
+  // A provider that cannot run shows a card in the chat, and for unattended
+  // chats one notice per incident in the Concierge main chat. Nothing moves a
+  // chat to another provider on its own.
+  const selectChatModel = (chatId: string, agentName: string | null, selection: string) => {
+    if (!isModelSelectionId(selection)) return;
+    agentSessionManager
+      .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })
+      ?.selectModel(selection);
+  };
   const providerFailures = createProviderFailures({
     accounts: modelAccounts,
     defaults: defaultProviders,
+    chats: chatProviders,
+    swapModel: (chatId, agentName, failure) =>
+      concierge.switchForModelLimit(chatId, failure, agentName),
+    creditsUsable: () => codexLoginChoice.creditsUsable(),
+    selectModel: selectChatModel,
     webchatRepo,
     settings: settingsRepo,
     mainChatId: () => concierge.findChatId(),
@@ -1555,8 +1585,12 @@ async function main() {
   const stopProviderFailureTurns = turnListeners.listen({
     ended: (event) => {
       const thread = event.turn.threadContext;
-      if (event.status !== "error" || event.turn.parent) return;
-      if (thread?.channel !== "webchat" || !thread.threadId || !event.output.failure) return;
+      if (event.turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
+      if (event.status === "completed") {
+        void providerFailures.succeeded(thread.threadId).catch(() => undefined);
+        return;
+      }
+      if (event.status !== "error" || !event.output.failure) return;
       void providerFailures
         .failed({
           chatId: thread.threadId,
@@ -1605,7 +1639,14 @@ async function main() {
       messages: settledMarks,
     });
   }
-  startConciergeEvents(concierge, turnListeners);
+  startConciergeEvents(concierge, turnListeners, {
+    // What the Concierge's own retry or model move could not get past shows a card.
+    unrecovered: (failed) =>
+      providerFailures.failed(
+        { ...failed, failure: { kind: "turn", failure: failed.failure } },
+        { final: true },
+      ),
+  });
   // The Concierge reaches the connector's watch actions as itself.
   startConciergeFollowing(concierge, {
     timezoneMoved: (owner, timezone) => taskSchedules.rezone(owner, timezone),
@@ -2492,6 +2533,8 @@ async function main() {
       claudeAccount,
       defaultProviders,
       providerFailures,
+      chatProviders,
+      romeCreditsUsable: () => codexLoginChoice.creditsUsable(),
       romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
       permissions,
       dashboardAccessState,
@@ -2719,6 +2762,8 @@ async function main() {
     repo: webchatRepo,
     runner: backendTurnRunner,
     actorOf: continuationActorOf,
+    // A chat with a provider card resumes from its card.
+    skip: (chatId) => providerFailures.carded(chatId),
     // A Concierge turn a limit stopped shows its messages failed; run again,
     // they work again until the continuation ends.
     onContinue: (turn) => concierge.deps.tasks.repo.reopenTurn(turn.sessionId, turn.turnId),

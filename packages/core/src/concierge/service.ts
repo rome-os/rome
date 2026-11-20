@@ -891,13 +891,22 @@ export class ConciergeService {
   }
 
   /**
-   * A Concierge chat whose model hit a limit of its own moves to another model
-   * of the same provider, with a note. It never moves to another provider.
+   * A chat whose model hit a limit of its own moves to another model of the
+   * same provider, with a note. It never moves to another provider, and never
+   * off a model its owner picked: that chat shows a card instead.
    */
-  async switchForModelLimit(chatId: string, failure: AgentTurnFailure) {
+  async switchForModelLimit(chatId: string, failure: AgentTurnFailure, agentName?: string) {
     const chat = await this.deps.webchatRepo.getSession(chatId);
-    if (!chat || !isConciergeChat(chat)) return null;
-    const key = { agentName: CONCIERGE_AGENT_ID, channelThreadKey: webchatSessionKey(chatId) };
+    if (!chat) return null;
+    const ownerPicked =
+      chat.largeModelSelectionBy === "owner" ||
+      (chat.largeModelSelection !== null && chat.largeModelSelectionBy === null);
+    if (ownerPicked) return null;
+    const key = {
+      agentName:
+        agentName ?? (isConciergeChat(chat) ? CONCIERGE_AGENT_ID : (chat.agentName ?? "main")),
+      channelThreadKey: webchatSessionKey(chatId),
+    };
     const selected = resolveWebchatLargeModelSelection(chat.largeModelSelection);
     const runtime = selected
       ? null
@@ -920,7 +929,7 @@ export class ConciergeService {
     await this.deps.webchatRepo.updateSessionLargeModelSelection(
       chatId,
       target.selectionId,
-      chat.largeModelSelectionBy === "owner" ? "owner" : "auto",
+      chat.largeModelSelectionBy === "kept" ? "kept" : "auto",
     );
     this.deps.agentSessionManager.find(key)?.selectModel(target.selectionId);
     this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);

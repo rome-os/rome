@@ -726,6 +726,24 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return message;
   }
 
+  /** As the base, with a chat's messages read from Chats, where its lines are said. */
+  override async followingChats(): Promise<
+    Array<{ id: string; largeModelSelection: string | null }>
+  > {
+    return this.db
+      .all<{ id: string; large_model_selection: string | null }>(sql`
+        SELECT s.id, s.large_model_selection FROM ${romeSessions} s
+        WHERE s.type = 'channel' AND s.chat_platform = 'webchat'
+          AND s.parent_session_id IS NULL
+          AND (s.large_model_selection IS NULL OR s.large_model_selection_by = 'auto')
+          AND (
+            EXISTS (SELECT 1 FROM ${CHAT_MESSAGES} m WHERE m.chat_id = s.chat_id)
+            OR EXISTS (SELECT 1 FROM ${romeAgentMessages} r WHERE r.session_id = s.id)
+          )
+      `)
+      .map((row) => ({ id: row.id, largeModelSelection: row.large_model_selection }));
+  }
+
   override async getMessages(sessionId: string) {
     return this.selectLines([sessionId]);
   }

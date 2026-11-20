@@ -213,40 +213,98 @@ export interface QuotaSwitchPart {
 export type DefaultModelProvider = "anthropic" | "openai" | "rome_credits";
 
 /**
+ * Why a provider could not run a turn. `removed`: no login. `login`: the login
+ * expired or was revoked. `quota`: the subscription's usage limit. The rest are
+ * newer: `temporary` (an error a retry did not get past), `capacity` (one model
+ * at its limit or capacity), `model_unavailable` (not in the plan, or no longer
+ * offered), `spend_cap`, `credits_used_up`. A client that does not know a
+ * reason reads the card's `card` and words it generally.
+ */
+export type ProviderFailureReason =
+  | "quota"
+  | "login"
+  | "removed"
+  | "temporary"
+  | "capacity"
+  | "model_unavailable"
+  | "spend_cap"
+  | "credits_used_up";
+
+/**
+ * What the guardian has to do about a provider failure: `wait` recovers by
+ * itself, `account` needs the guardian's account fixed, `model` needs another
+ * model. docs/domains/agents.md#provider-failure
+ */
+export type ProviderFailureCardKind = "wait" | "account" | "model";
+
+/** How a failure card or notice was settled. */
+export interface ProviderFailureResolution {
+  at: string;
+  /** `switched`: the guardian moved the chat. `recovered`: the provider ran again. */
+  by: "switched" | "recovered";
+  /** Where a switch moved the chat. */
+  provider?: DefaultModelProvider;
+  /** The model a model switch moved the chat to. */
+  model?: string;
+  /** The stopped turn ran again. */
+  continued?: boolean;
+}
+
+/**
  * Host-written card: the provider a turn needed could not run, so the turn did
- * not run. Rome never moves the chat to another provider on its own.
- * docs/domains/agents.md#default-provider
+ * not run. Rome never moves the chat to another provider on its own. The server
+ * decides the card and its actions; a client draws them.
+ * docs/domains/agents.md#provider-failure
  */
 export interface ProviderFailurePart {
   type: "provider_failure";
   provider: DefaultModelProvider;
-  /** `removed`: not signed in. `login`: the sign-in expired. `quota`: its usage limit. */
-  reason: "quota" | "login" | "removed";
+  reason: ProviderFailureReason;
   /** When the usage limit ends, for `quota`. */
   until?: string;
-  /** The chat follows the default provider; false for an exact model selection. */
+  /** The chat follows the default provider; false for a model its owner picked. */
   followsDefault: boolean;
-  /** Other signed-in providers that can run now. */
+  /** Other logged-in accounts that can run now: "Switch to {provider}". */
   alternatives: DefaultModelProvider[];
-  /** The chat the card is in, so its actions resend there. */
+  /** The chat the card is in, so its actions act there. */
   chatId: string;
+  /** What the guardian has to do. Absent on cards written before it existed. */
+  card?: ProviderFailureCardKind;
+  /** The agent whose turn stopped, so the card's actions resume it. */
+  agentName?: string;
+  /** The model the turn needed, for `capacity` and `model_unavailable`. */
+  model?: string;
+  /** For a `model` card: the model selection to switch to, on the same provider. */
+  replacement?: { selection: string; model: string };
+  /** "Use Rome credits": no AI account is logged in and a balance is left. */
+  credits?: boolean;
+  /** The provider's own error, behind "Details". */
+  detail?: string;
+  /** Set once the card is settled; the card then reads as one line. */
+  resolved?: ProviderFailureResolution;
 }
 
 /**
- * Host-written notice in the Concierge main chat: unattended chats (task chats
- * and routines) are waiting for one provider. One notice per outage.
+ * Host-written notice in the Concierge main chat: unattended chats (task chats,
+ * scheduled runs, routines) stopped on one provider failure. One notice per
+ * incident, with one push. Each chat also has its own card.
  */
 export interface ProviderOutagePart {
   type: "provider_outage";
   outageId: string;
   provider: DefaultModelProvider;
-  reason: "quota" | "login" | "removed";
+  reason: ProviderFailureReason;
   until?: string;
-  /** The chats waiting, as of the last write. */
+  /** The chats stopped, as of the last write: the task links. */
   chatIds: string[];
   alternatives: DefaultModelProvider[];
   /** Set once the provider runs again or the chats ran elsewhere. */
   resolvedAt?: string;
+  card?: ProviderFailureCardKind;
+  credits?: boolean;
+  replacement?: { selection: string; model: string };
+  detail?: string;
+  resolved?: ProviderFailureResolution;
 }
 
 /** One part of a stored WebChat message's content. */

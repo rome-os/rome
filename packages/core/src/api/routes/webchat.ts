@@ -4715,22 +4715,28 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
         // The chat shows why, and what the guardian can do, beside the error,
         // which older clients read.
+        const messageId = randomUUID();
+        const errorPart = { type: "error", ...modelError };
         const card = await deps.providerFailures
-          ?.cardFor({
-            chatId: sessionId,
-            agentName,
-            turnId,
-            failure: { kind: "resolution", payload: modelError },
-          })
+          ?.cardFor(
+            {
+              chatId: sessionId,
+              agentName,
+              turnId,
+              failure: { kind: "resolution", payload: modelError },
+            },
+            messageId,
+            [errorPart],
+          )
           .catch((error: unknown) => {
             log.warn("provider failure card failed", { sessionId, error: String(error) });
             return null;
           });
         await deps.webchatRepo.addMessage(
-          randomUUID(),
+          messageId,
           sessionId,
           "assistant",
-          JSON.stringify([{ type: "error", ...modelError }, ...(card ? [card] : [])]),
+          JSON.stringify([errorPart, ...(card ? [card] : [])]),
           turnId,
         );
         // Keep this as a real failed turn on the standard trace wire. The

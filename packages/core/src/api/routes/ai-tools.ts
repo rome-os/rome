@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { ProviderSwitch } from "../../webchat/provider-failures.js";
 import { isDefaultProvider } from "../../agent/index.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
@@ -72,20 +73,27 @@ export function aiToolsRoutes(
     | "claudeAccount"
     | "defaultProviders"
     | "providerFailures"
+    | "chatProviders"
+    | "romeCreditsUsable"
   >,
 ): Hono {
   const app = new Hono();
 
-  // The default provider, the providers it can be, and the note a removal left.
+  // The default provider, the providers it can be, the note a logout left,
+  // how many chats a change moves, and whether Rome credits could run chats
+  // once no AI account is logged in.
   const defaultJson = async () => {
     const defaults = deps.defaultProviders;
     if (!defaults) return null;
     await defaults.ready();
     const note = defaults.note();
+    const followingChats = await deps.chatProviders?.followingCount().catch(() => 0);
     return {
       provider: defaults.current(),
       signedIn: defaults.signedIn(),
       ...(note ? { note } : {}),
+      followingChats: followingChats ?? 0,
+      romeCreditsUsable: deps.romeCreditsUsable?.() ?? false,
     };
   };
 
@@ -124,34 +132,21 @@ export function aiToolsRoutes(
 
   app.get("/ai-tools/default", async (c) => c.json({ defaultProvider: await defaultJson() }));
 
-  // The guardian's choice of default, after the confirm dialog. Following
-  // chats move on their next turn. `resend` also runs a chat's stopped request
-  // again, as a failure card's "Make {other} the default" does.
+  // The guardian's choice of default, after the confirm dialog. With
+  // `moveExisting` false, the chats that follow the default stay on the
+  // provider they run on; otherwise each moves on its next run.
   app.put("/ai-tools/default", async (c) => {
     const defaults = deps.defaultProviders;
     if (!defaults) return c.json({ error: "No default provider here" }, 404);
     const body = (await c.req.json().catch(() => null)) as {
       provider?: unknown;
-      resend?: { chatId?: unknown; agentName?: unknown };
+      moveExisting?: unknown;
     } | null;
     if (!isDefaultProvider(body?.provider)) return c.json({ error: "Unknown provider" }, 400);
     try {
-      await defaults.choose(body.provider);
+      await defaults.choose(body.provider, { moveExisting: body.moveExisting !== false });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 409);
-    }
-    const resend = body.resend;
-    if (
-      resend &&
-      typeof resend.chatId === "string" &&
-      typeof resend.agentName === "string" &&
-      deps.providerFailures
-    ) {
-      await deps.providerFailures
-        .resend(resend.chatId, resend.agentName)
-        .catch((err) =>
-          log.warn("resend after a default change failed", { error: getErrorMessage(err) }),
-        );
     }
     return c.json({ defaultProvider: await defaultJson() });
   });
@@ -161,9 +156,38 @@ export function aiToolsRoutes(
     return c.json({ defaultProvider: await defaultJson() });
   });
 
-  // A failure card's resend: the chat's stopped request runs again, after
-  // the guardian signed in, went back to following the default, or chose
-  // another default.
+  /** A card's or a notice's switch, as the body names it. */
+  const switchOf = (body: unknown): ProviderSwitch | null => {
+    if (typeof body !== "object" || body === null) return null;
+    const value = body as Record<string, unknown>;
+    if (value.kind === "model" && typeof value.selection === "string") {
+      return { kind: "model", selection: value.selection };
+    }
+    if (value.kind === "provider" && isDefaultProvider(value.provider)) {
+      return {
+        kind: "provider",
+        provider: value.provider,
+        makeDefault: value.makeDefault === true,
+      };
+    }
+    return null;
+  };
+
+  // A card's switch: this chat moves (and with `makeDefault`, the default
+  // too), the card settles, and the stopped turn runs again.
+  app.post("/ai-tools/provider-failures/:messageId/switch", async (c) => {
+    if (!deps.providerFailures) return c.json({ error: "Not available" }, 404);
+    const change = switchOf(await c.req.json().catch(() => null));
+    if (!change) return c.json({ error: "A provider or a model is required" }, 400);
+    try {
+      await deps.providerFailures.switchCard(c.req.param("messageId"), change);
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 409);
+    }
+  });
+
+  // Runs a chat's stopped request again.
   app.post("/ai-tools/provider-failures/resend", async (c) => {
     const body = (await c.req.json().catch(() => null)) as {
       chatId?: unknown;
@@ -195,18 +219,17 @@ export function aiToolsRoutes(
     });
   });
 
-  // "Run them on {other} now": each waiting chat runs its stopped request once
-  // on `provider`, and goes back to the default on its next turn.
-  app.post("/ai-tools/provider-outages/:id/run", async (c) => {
-    const body = (await c.req.json().catch(() => null)) as { provider?: unknown } | null;
-    const provider = body?.provider;
-    // Rome credits run only as the default, so a one-off turn cannot use them.
-    if (provider !== "anthropic" && provider !== "openai") {
-      return c.json({ error: "Only Claude or ChatGPT can run a turn now" }, 400);
-    }
+  // A notice's switch: every chat the incident stopped moves, and runs again.
+  app.post("/ai-tools/provider-outages/:id/switch", async (c) => {
     if (!deps.providerFailures) return c.json({ error: "Not available" }, 404);
-    const ran = await deps.providerFailures.runOutageOn(c.req.param("id"), provider);
-    return c.json({ ran });
+    const change = switchOf(await c.req.json().catch(() => null));
+    if (!change) return c.json({ error: "A provider or a model is required" }, 400);
+    try {
+      const moved = await deps.providerFailures.switchOutage(c.req.param("id"), change);
+      return c.json({ moved });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 409);
+    }
   });
 
   // Rome Cloud owns the balance; every instance of the account reads the same one.
