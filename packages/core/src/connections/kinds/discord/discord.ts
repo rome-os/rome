@@ -779,8 +779,7 @@ export class DiscordAdapter {
       const mentionsOthers =
         message.mentions.users.size > 0 && !(botId && message.mentions.users.has(botId));
       const directedStop =
-        addressing !== "ambient" &&
-        isStopCommand(normalizeDiscordMessageText(message.content, botId));
+        addressing !== "ambient" && isStopCommand(withoutMentions(message.content));
 
       // A chat switched off is not heard, as an account with no agent is not:
       // nothing of it is recorded. A stop said to Rome still reaches it.

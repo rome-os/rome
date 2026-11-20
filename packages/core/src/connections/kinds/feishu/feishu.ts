@@ -121,6 +121,31 @@ interface FeishuChannelConfig {
  */
 export type CreateLarkChannel = (config: FeishuConfig) => LarkChannel;
 
+/** What the Lark SDK hears in a group: every message, mentioned or not, and a
+ *  mention of everyone. Rome records them all and the wake gate decides. The
+ *  SDK's own default drops a group message that does not mention the bot. */
+export const HEAR_EVERY_GROUP_MESSAGE = {
+  requireMention: false,
+  respondToMentionAll: true,
+} as const;
+
+/** The Lark SDK channel for app `config`. */
+export function createLarkChannel(config: FeishuConfig): LarkChannel {
+  return larkSdk().createLarkChannel({
+    appId: config.appId,
+    appSecret: config.appSecret,
+    domain: config.domain === "lark" ? larkSdk().Domain.Lark : larkSdk().Domain.Feishu,
+    transport: "websocket",
+    outbound: { markdownConverter: "builtin" },
+    // Populate `raw` on normalized events so the inbound message's `raw`
+    // carries the real wire-level payload (e.g. for media not surfaced in
+    // the normal shape).
+    includeRawEvent: true,
+    loggerLevel: larkSdk().LoggerLevel.warn,
+    policy: HEAR_EVERY_GROUP_MESSAGE,
+  });
+}
+
 /**
  * Feishu / Lark channel adapter.
  *
@@ -166,22 +191,7 @@ export class FeishuAdapter {
    *  Feishu otherwise. */
   private readonly platform: string;
 
-  constructor(
-    config: FeishuConfig,
-    createChannel: CreateLarkChannel = (c) =>
-      larkSdk().createLarkChannel({
-        appId: c.appId,
-        appSecret: c.appSecret,
-        domain: c.domain === "lark" ? larkSdk().Domain.Lark : larkSdk().Domain.Feishu,
-        transport: "websocket",
-        outbound: { markdownConverter: "builtin" },
-        // Populate `raw` on normalized events so the inbound message's `raw`
-        // carries the real wire-level payload (e.g. for media not surfaced in
-        // the normal shape).
-        includeRawEvent: true,
-        loggerLevel: larkSdk().LoggerLevel.warn,
-      }),
-  ) {
+  constructor(config: FeishuConfig, createChannel: CreateLarkChannel = createLarkChannel) {
     this.channel = createChannel(config);
     this.platform = platformOf("feishu", config.domain);
     this.connectionId = config.connectionId;
@@ -316,8 +326,9 @@ export class FeishuAdapter {
         });
         return;
       }
-      // A group message that mentions no one is recorded too. Whether it
-      // wakes the agent under the reply rule is the wake gate's call.
+      // A group message that does not mention the bot is recorded too.
+      // Whether it wakes the agent under the reply rule is the wake gate's
+      // call.
     }
 
     const name = await chatName;
