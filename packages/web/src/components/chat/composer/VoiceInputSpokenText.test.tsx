@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { nextReveal, REVEAL_CHARS_PER_SECOND, VoiceInputSpokenText } from "./VoiceInputSpokenText";
@@ -60,8 +60,7 @@ describe("the spoken text over the field", () => {
         <textarea ref={textareaRef} value={value} readOnly />
         <VoiceInputSpokenText
           textareaRef={textareaRef}
-          value={value}
-          spoken={{ start: 0, end: value.length }}
+          preview={{ value, start: 0, end: value.length }}
         />
       </div>
     );
@@ -83,5 +82,105 @@ describe("the spoken text over the field", () => {
     // The same elements, so their fade-in does not run again.
     expect(after).toHaveLength(before.length);
     expect(after.every((span, i) => span === before[i])).toBe(true);
+  });
+
+  /**
+   * Lays out a copy as jsdom cannot: each spoken character sits 1,000 px down
+   * a copy whose box is 240 px tall, so the newest words show at a scroll of
+   * 780. Scroll positions are kept as set. Returns the copy, a way to report
+   * a resize, and the undo for the stubs.
+   */
+  function renderLaidOut(value: string) {
+    const resizes: ResizeObserverCallback[] = [];
+    rs.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resizes.push(callback);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    rs.stubGlobal("matchMedia", () => ({ matches: true }));
+    const scroll = new WeakMap<Element, number>();
+    const geometry: Record<
+      string,
+      { get: (el: HTMLElement) => unknown; set?: (el: HTMLElement, value: number) => void }
+    > = {
+      offsetTop: { get: (el) => (el.tagName === "SPAN" ? 1000 : 0) },
+      offsetHeight: { get: (el) => (el.tagName === "SPAN" ? 20 : 240) },
+      clientHeight: { get: () => 240 },
+      offsetParent: { get: (el) => el.parentElement },
+      scrollTop: {
+        get: (el) => scroll.get(el) ?? 0,
+        set: (el, top) => scroll.set(el, top),
+      },
+    };
+    const saved = Object.keys(geometry).map(
+      (name) => [name, Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)] as const,
+    );
+    for (const [name, { get, set }] of Object.entries(geometry)) {
+      Object.defineProperty(HTMLElement.prototype, name, {
+        configurable: true,
+        get() {
+          return get(this);
+        },
+        set(top: number) {
+          set?.(this, top);
+        },
+      });
+    }
+    const restore = () => {
+      for (const [name, descriptor] of saved) {
+        if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor);
+        else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+      }
+    };
+    const textareaRef = createRef<HTMLTextAreaElement>();
+    const { container } = render(
+      <div className="relative">
+        <textarea ref={textareaRef} value="" readOnly />
+        <VoiceInputSpokenText
+          textareaRef={textareaRef}
+          preview={{ value, start: 0, end: value.length }}
+        />
+      </div>,
+    );
+    const copy = container.querySelector("[data-voice-input-spoken-text]") as HTMLElement;
+    const resize = () =>
+      act(() => {
+        for (const resized of resizes) resized([], {} as ResizeObserver);
+      });
+    return { copy, resize, restore };
+  }
+
+  it("keeps the newest spoken words in view after the field's box changes", () => {
+    const { copy, resize, restore } = renderLaidOut("buy milk");
+    try {
+      copy.scrollTop = 0;
+      resize();
+      expect(copy.scrollTop).toBe(780);
+    } finally {
+      restore();
+    }
+  });
+
+  it("stays where the guardian scrolled back to, until they scroll to the newest words", () => {
+    const { copy, resize, restore } = renderLaidOut("buy milk");
+    try {
+      copy.scrollTop = 100;
+      fireEvent.scroll(copy);
+      resize();
+      expect(copy.scrollTop).toBe(100);
+
+      copy.scrollTop = 780;
+      fireEvent.scroll(copy);
+      copy.scrollTop = 500;
+      resize();
+      expect(copy.scrollTop).toBe(780);
+    } finally {
+      restore();
+    }
   });
 });
