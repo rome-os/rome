@@ -74,17 +74,20 @@ type Dated = Pick<ChatMessage, "id" | "createdAt">;
  * sent before its time, and of those sent in the same second, the ones up to
  * its own message. Times are whole seconds, so a message that lands in that
  * second after the fold stays shown, and so does one with an unreadable time.
+ * A message still being sent (`sending`) carries the device's clock, which may
+ * run behind the server's, so it always shows.
  */
 export function foldedBy(
   messages: readonly Dated[],
   point: FoldPoint,
+  sending: Pick<ReadonlySet<string>, "has"> = new Set(),
 ): (message: Dated) => boolean {
   const fold = Date.parse(point.at);
   const end = messages.findIndex((message) => message.id === point.id);
   const throughEnd = new Set(messages.slice(0, end + 1).map((message) => message.id));
   return (message) => {
     const at = Date.parse(message.createdAt);
-    if (Number.isNaN(at) || Number.isNaN(fold)) return false;
+    if (Number.isNaN(at) || Number.isNaN(fold) || sending.has(message.id)) return false;
     return at < fold || (at === fold && throughEnd.has(message.id));
   };
 }
@@ -248,7 +251,13 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
  */
 export function buildConciergeItems(
   rows: ChatRow[],
-  opts: { typing: boolean; unreadFrom?: string | null; fold?: FoldPoint | null },
+  opts: {
+    typing: boolean;
+    unreadFrom?: string | null;
+    fold?: FoldPoint | null;
+    /** The messages still being sent, which a fold never hides. */
+    sending?: Pick<ReadonlySet<string>, "has">;
+  },
 ): ConciergeItem[] {
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
@@ -265,6 +274,7 @@ export function buildConciergeItems(
           row.kind === "user" ? [row.message] : row.kind === "agent" ? row.messages : [],
         ),
         opts.fold,
+        opts.sending,
       )
     : null;
   // Whether anything was folded, and whether the transcript is still among

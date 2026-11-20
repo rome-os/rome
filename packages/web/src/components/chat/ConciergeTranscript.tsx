@@ -40,6 +40,8 @@ function TypingBubble() {
 export interface ConciergeFold {
   /** Where the fold ends: the messages up to it are folded away. */
   point: FoldPoint;
+  /** The messages still being sent, which the fold never hides. */
+  sending?: Pick<ReadonlySet<string>, "has">;
   onOpen: () => void;
 }
 
@@ -85,9 +87,10 @@ export function ConciergeTranscript({
   const rows = simulated.rows;
   const typing = showsTyping(rows, live, simulated.holding);
   const foldPoint = fold?.point ?? null;
+  const sending = fold?.sending;
   const items = useMemo(
-    () => buildConciergeItems(rows, { typing, unreadFrom, fold: foldPoint }),
-    [rows, typing, unreadFrom, foldPoint],
+    () => buildConciergeItems(rows, { typing, unreadFrom, fold: foldPoint, sending }),
+    [rows, typing, unreadFrom, foldPoint, sending],
   );
   const messageIds = useMemo(
     () =>

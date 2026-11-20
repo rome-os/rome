@@ -780,8 +780,17 @@ export function Chat({
   // The loaded history reaches into the fold: older pages then hold only
   // folded messages, so none is read while it stays closed.
   const foldReached = useMemo(
-    () => foldClosed && !!foldPoint && foldable.some(foldedBy(foldable, foldPoint)),
-    [foldClosed, foldPoint, foldable],
+    () =>
+      foldClosed &&
+      !!foldPoint &&
+      foldable.some(
+        foldedBy(
+          foldable,
+          foldPoint,
+          localOptimisticMessageIdsRef.current.get(mainSessionId ?? ""),
+        ),
+      ),
+    [foldClosed, foldPoint, foldable, mainSessionId],
   );
   const foldClosedRef = useRef(foldClosed);
   foldClosedRef.current = foldClosed;
@@ -950,8 +959,20 @@ export function Chat({
     if (scroller) scroller.scrollTop = scroller.scrollHeight - fromBottom;
   }, [scrollerEl, openFold]);
   const fold = useMemo(
-    () => (foldClosed && foldPoint ? { point: foldPoint, onOpen: showFolded } : null),
-    [foldClosed, foldPoint, showFolded],
+    () =>
+      foldClosed && foldPoint
+        ? {
+            point: foldPoint,
+            onOpen: showFolded,
+            // Read when the transcript rebuilds: a send marks its message
+            // before the message lands in the list.
+            sending: {
+              has: (id: string) =>
+                localOptimisticMessageIdsRef.current.get(mainSessionId ?? "")?.has(id) ?? false,
+            },
+          }
+        : null,
+    [foldClosed, foldPoint, showFolded, mainSessionId],
   );
   // Folds every message the server has stored, up to the newest.
   const foldEarlier = useCallback(async () => {

@@ -605,6 +605,18 @@ describe("buildConciergeItems with a fold", () => {
     ]);
   });
 
+  it("shows a message still being sent, even stamped before the point by a slow clock", () => {
+    // The device's clock runs behind the server's: the bubble claims a time
+    // before the fold point until the server's copy replaces it.
+    const slow = [...rows(), userRow(guardian("sending", 60 * MIN))];
+    const items = buildConciergeItems(slow, {
+      typing: false,
+      fold: point("a2", 121 * MIN),
+      sending: new Set(["sending"]),
+    });
+    expect(shape(items)).toEqual(["fold", "sep", "G:sending"]);
+  });
+
   it("shows a message that lands in the fold point's second after its message", () => {
     // Stored times are whole seconds: a1 and a1b share one.
     const same = [...rows().slice(0, 2), agentRow(say("a1b", 1_000, "t1b"))];
