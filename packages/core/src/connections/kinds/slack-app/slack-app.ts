@@ -129,6 +129,10 @@ export interface SlackAppAdapterConfig {
   now?: () => Date;
   /** How reads of Slack's history take turns. Defaults to Slack's allowance. */
   readGate?: SlackReadGate;
+  /** How reads of a thread take turns. Slack allows conversations.replies
+   *  its own request a minute, apart from conversations.history. Defaults to
+   *  `readGate` when one is given, else to Slack's allowance. */
+  repliesGate?: SlackReadGate;
 }
 
 /** A `message_changed` or `message_deleted` event, in the fields read here. */
@@ -201,6 +205,7 @@ export class SlackAppAdapter {
   /** A second look at the token after a removal event it outlived. */
   private recheckTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly readGate: SlackReadGate;
+  private readonly repliesGate: SlackReadGate;
   /** The channels the app is a member of, by name. */
   private readonly memberChannels: SlackMemberChannels;
   /** The newest message heard in each direct message since the drain opened. */
@@ -219,6 +224,10 @@ export class SlackAppAdapter {
     this.mailbox = config.mailbox;
     this.memberChannels = new SlackMemberChannels({ api: config.api, botToken: config.botToken });
     this.readGate =
+      config.readGate ??
+      new SlackReadGate({ intervalMs: HISTORY_INTERVAL_MS, maxWaitMs: HISTORY_MAX_WAIT_MS });
+    this.repliesGate =
+      config.repliesGate ??
       config.readGate ??
       new SlackReadGate({ intervalMs: HISTORY_INTERVAL_MS, maxWaitMs: HISTORY_MAX_WAIT_MS });
   }
@@ -824,7 +833,7 @@ export class SlackAppAdapter {
     read: TalkHistoryRead,
   ): Promise<ChannelMessage[]> {
     const oldest = read.newerThan;
-    const page = await this.readGate.run(
+    const page = await this.repliesGate.run(
       `replies:${channelId}:${threadTs}:${oldest ?? ""}`,
       () =>
         this.config.api.conversationReplies(

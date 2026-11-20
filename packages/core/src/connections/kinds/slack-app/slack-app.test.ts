@@ -2090,6 +2090,40 @@ describe("Slack app in the channels it is a member of", () => {
     ).rejects.toThrow("Read on with newerThan=1700000000.000115");
   });
 
+  it("reads a thread in the same minute as a page of history, since Slack paces each method on its own", async () => {
+    const root = "1700000000.000005";
+    const api = channelApi({
+      conversationHistory: rs.fn(async () => ({
+        messages: [{ ts: "1700000000.000004", user: "U_MEMBER", text: "in the channel" }],
+        hasMore: false,
+      })),
+      conversationReplies: rs.fn(async () => ({
+        messages: [{ ts: root, user: "U_MEMBER", text: "root", thread_ts: root }],
+      })),
+    });
+    const pace = () => new SlackReadGate({ intervalMs: 60_000, maxWaitMs: 0 });
+    const a = new SlackAppAdapter({
+      channel: "slack_app",
+      botToken: "xoxb-a",
+      teamId: TEAM,
+      botUserId: BOT,
+      forwardSecret: SECRET,
+      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      api,
+      openMailbox: fakeMailbox().open,
+      copy: testCopy(),
+      readGate: pace(),
+      repliesGate: pace(),
+    });
+    await a.start();
+
+    const history = await a.readHistory("C_NEWS" as never, { limit: 10 });
+    const thread = await a.readHistory(`C_NEWS:${root}` as never, { limit: 10 });
+
+    expect(texts(history)).toEqual(["in the channel"]);
+    expect(texts(thread)).toEqual(["root"]);
+  });
+
   it("reads a thread and a page of history ending at its root as two calls to Slack", async () => {
     const root = "1700000000.000005";
     const api = channelApi({
