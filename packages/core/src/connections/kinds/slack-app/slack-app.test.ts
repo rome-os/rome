@@ -1508,11 +1508,29 @@ describe("Slack app reads Slack refused as too soon", () => {
     expect(asked[2] - asked[1]).toBeGreaterThanOrEqual(300);
   });
 
+  it("answers a read that waited its full turn behind one still in flight", async () => {
+    const asked: number[] = [];
+    const gate = new SlackReadGate({ intervalMs: 300, maxWaitMs: 300 });
+    const slow = () =>
+      new Promise<string>((resolve) => {
+        asked.push(Date.now());
+        setTimeout(() => resolve("page"), 100);
+      });
+
+    const first = gate.run("a", slow);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const second = gate.run("b", slow);
+
+    await expect(Promise.all([first, second])).resolves.toEqual(["page", "page"]);
+    // The second asked a full turn after Slack answered the first.
+    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(400);
+  });
+
   it("refuses a read whose Retry-After would take it past its limit, without asking Slack again", async () => {
     const asked: number[] = [];
     const fetchImpl = (async () => {
       asked.push(Date.now());
-      return new Response(null, { status: 429, headers: { "retry-after": "1" } });
+      return new Response(null, { status: 429, headers: { "retry-after": "20" } });
     }) as unknown as typeof fetch;
     const api = createSlackAppWebApi("http://fake-slack.test", fetchImpl);
     const gate = new SlackReadGate({ intervalMs: 300, maxWaitMs: 500 });
@@ -1521,7 +1539,7 @@ describe("Slack app reads Slack refused as too soon", () => {
       gate.run("replies:C1:1.0", () =>
         api.conversationReplies("t", { channel: "C1", ts: "1.0", limit: 15 }),
       ),
-    ).rejects.toThrow(/Try again in 1 seconds/);
+    ).rejects.toThrow(/Try again in 20 seconds/);
     expect(asked).toHaveLength(1);
   });
 });

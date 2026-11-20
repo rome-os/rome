@@ -8,8 +8,7 @@ import { SlackApiError } from "../slack/slack.js";
 export interface SlackReadGateOptions {
   /** The least time between two requests. */
   intervalMs: number;
-  /** The longest a read waits in all: for its turn, for the request before
-   *  it, and for any wait Slack asks for. */
+  /** The longest a read waits for its turn. */
   maxWaitMs: number;
   now?: () => number;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -37,6 +36,11 @@ export class SlackTooSoonError extends SlackApiError {
   }
 }
 
+/** How much longer than its turn a read may wait: for the request before it
+ *  to be answered, or for a wait Slack asks for. With a minute's turn and one
+ *  request of up to 15 s, a read ends within the 90 s its callers allow. */
+const LATE_MS = 10_000;
+
 function tooSoon(waitMs: number): Error {
   const seconds = Math.ceil(waitMs / 1_000);
   return new Error(
@@ -58,8 +62,9 @@ export class SlackReadGate {
   }
 
   /** Run `call` in its turn. A call with the `key` of one waiting or running
-   *  shares its answer. A read waits at most `maxWaitMs` in all, counting
-   *  any wait Slack asks for, and is refused past it. */
+   *  shares its answer. A read waits at most `maxWaitMs` for its turn, and
+   *  past that only `LATE_MS` more for the request before it to be answered
+   *  or for a wait Slack asks for. It is refused rather than wait longer. */
   run<T>(key: string, call: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     const pending = this.shared.get(key);
     if (pending) return pending as Promise<T>;
@@ -70,11 +75,17 @@ export class SlackReadGate {
     this.nextAt = at + this.options.intervalMs;
     const before = this.last;
     const pause = this.options.sleep ?? sleep;
-    // Refuses a wait that would take the read past its limit.
+    const deadline = now + this.options.maxWaitMs + LATE_MS;
+    // Refuses a wait that would take the read past its deadline.
     const waitOut = async (ms: number) => {
       if (ms <= 0) return;
-      if (this.now() + ms - now > this.options.maxWaitMs) throw tooSoon(ms);
+      if (this.now() + ms > deadline) throw tooSoon(ms);
       await pause(ms, signal);
+    };
+    let asked = false;
+    const ask = () => {
+      asked = true;
+      return call();
     };
     const running = (async () => {
       if (wait > 0) await pause(wait, signal);
@@ -85,16 +96,19 @@ export class SlackReadGate {
       await waitOut(this.answeredAt + this.options.intervalMs - Math.max(at, this.now()));
       try {
         try {
-          return await call();
+          return await ask();
         } catch (error) {
           // A refusal as too soon is the one failure waiting is known to cure.
           if (!(error instanceof SlackTooSoonError)) throw error;
+          this.nextAt = Math.max(this.nextAt, this.now() + error.retryAfterMs);
           await waitOut(error.retryAfterMs);
-          return await call();
+          return await ask();
         }
       } finally {
-        this.answeredAt = this.now();
-        this.nextAt = Math.max(this.nextAt, this.answeredAt + this.options.intervalMs);
+        if (asked) {
+          this.answeredAt = this.now();
+          this.nextAt = Math.max(this.nextAt, this.answeredAt + this.options.intervalMs);
+        }
       }
     })().finally(() => this.shared.delete(key));
     this.last = running.catch(() => {});
