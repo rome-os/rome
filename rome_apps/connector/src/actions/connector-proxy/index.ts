@@ -249,6 +249,21 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         }
       }
 
+      if (toolkit.toLowerCase() === "outlook") {
+        const managed = await deps.appContext.runAction("core:outlook_read", {
+          path,
+          method,
+          host: new URL(endpoint).host,
+          ...(query ? { query } : {}),
+          ...(body !== undefined ? { body } : {}),
+          ...(headers !== undefined ? { headers } : {}),
+        });
+        // Only absence falls back, as for Gmail.
+        if (managed.status !== "error" || !managed.error.startsWith("outlook_not_connected:")) {
+          return managed;
+        }
+      }
+
       const client = await loadConnectorClient(deps.appContext.db);
       if (!client) {
         return {

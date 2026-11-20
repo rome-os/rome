@@ -165,6 +165,7 @@ export const connections: { connections: ApiConnection[] } = {
     // them as placeholders (`id: null`), so the page has something to offer.
     ...[
       { service: "google", grant: "user" },
+      { service: "microsoft", grant: "user" },
       { service: "slack", grant: "workspace" },
       { service: "shopify", grant: "store" },
     ].map(

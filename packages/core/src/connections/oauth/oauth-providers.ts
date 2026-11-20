@@ -1,4 +1,4 @@
-export const OAUTH_PROVIDERS = ["google", "github", "slack", "shopify"] as const;
+export const OAUTH_PROVIDERS = ["google", "github", "slack", "shopify", "microsoft"] as const;
 
 export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
 
@@ -28,6 +28,11 @@ export const OAUTH_PROVIDER_DESCRIPTORS: Record<OAuthProvider, OAuthProviderDesc
     id: "shopify",
     label: "Shopify",
     description: "Products, inventory, and orders in your Shopify store.",
+  },
+  microsoft: {
+    id: "microsoft",
+    label: "Microsoft",
+    description: "Read Outlook mail and send messages you approve.",
   },
 };
 
@@ -79,6 +84,7 @@ export function normalizeShopifyShopDomain(value: string | null | undefined): st
 export const ROME_CLOUD_REFRESHABLE_PROVIDERS: ReadonlySet<OAuthProvider> = new Set([
   "google",
   "shopify",
+  "microsoft",
 ]);
 
 export function isOAuthProvider(value: string): value is OAuthProvider {

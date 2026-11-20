@@ -705,3 +705,40 @@ describe("Rome-managed Gmail routing", () => {
     expect(loadConnectorClient).toHaveBeenCalled();
   });
 });
+
+describe("Rome-managed Outlook routing", () => {
+  const input = { toolkit: "outlook", path: "/v1.0/me/messages", method: "GET" };
+  it("uses Core without Composio sign-in or sharing the Microsoft credential", async () => {
+    const managed = {
+      status: "ok",
+      data: { status: 200, data: { value: [] }, connectionId: "microsoft-1" },
+    };
+    runAction.mockResolvedValueOnce(managed);
+    expect(await run(input)).toEqual(managed);
+    expect(runAction).toHaveBeenCalledWith("core:outlook_read", {
+      path: input.path,
+      method: "GET",
+      host: "graph.microsoft.com",
+    });
+    expect(loadConnectorClient).not.toHaveBeenCalled();
+  });
+  it("does not silently switch mailboxes on a broken Microsoft grant", async () => {
+    runAction.mockResolvedValueOnce({
+      status: "error",
+      error: "Outlook connection is unavailable.",
+    });
+    expect(await run(input)).toMatchObject({ status: "error" });
+    expect(loadConnectorClient).not.toHaveBeenCalled();
+  });
+  it("preserves the Composio path when no Microsoft connection exists", async () => {
+    runAction.mockResolvedValueOnce({
+      status: "error",
+      error: "outlook_not_connected: No Rome-managed Microsoft connection.",
+    });
+    loadConnectorClient.mockResolvedValueOnce(
+      clientWithProxy(async () => ({ status: 200, data: { value: [] }, headers: {} })),
+    );
+    expect(await run(input)).toMatchObject({ status: "ok" });
+    expect(loadConnectorClient).toHaveBeenCalled();
+  });
+});

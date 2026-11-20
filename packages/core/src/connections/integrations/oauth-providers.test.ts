@@ -63,15 +63,16 @@ const CASES: Array<[OAuthProvider, string, Record<string, string>]> = [
   ["google", "user", { accessToken: "ya29.live", refreshToken: "1//refresh" }],
   ["slack", "workspace", { botToken: "xoxb-live", userToken: "xoxp-live" }],
   ["shopify", "store", { accessToken: "shpat_live", refreshToken: "shprt_live" }],
+  ["microsoft", "user", { accessToken: "eyJ.live", refreshToken: "M.refresh" }],
 ];
 
 describe("OAuth connection kinds' display labels", () => {
   it("name each kind as a person reads it, not by its id", () => {
     expect(
-      (["github", "google", "slack", "shopify"] as const).map(
+      (["github", "google", "slack", "shopify", "microsoft"] as const).map(
         (provider) => makeOAuthProviderDescriptor(provider).label,
       ),
-    ).toEqual(["GitHub", "Google", "Slack", "Shopify"]);
+    ).toEqual(["GitHub", "Google", "Slack", "Shopify", "Microsoft"]);
   });
 });
 
@@ -162,6 +163,28 @@ describe("OAuth profile revival", () => {
     expect(() => revive?.({ avatarUrl: "https://example.com/a.png" })).toThrow();
   });
 
+  it("revives Microsoft's stored schema: OIDC identity, no handle or avatar", () => {
+    const revive = makeOAuthProviderDescriptor("microsoft").reviveProfile;
+    const display = revive?.({
+      subject: "pairwise-subject",
+      displayName: "Ada Lovelace",
+      email: "ada@example.com",
+      scopes: ["Mail.Read", "Mail.Send"],
+    });
+    expect(display?.displayName).toBe("Ada Lovelace");
+    expect(display?.email).toBe("ada@example.com");
+    expect(display?.handle).toBeUndefined();
+    expect(() => revive?.({ avatarUrl: "https://example.com/a.png" })).toThrow();
+  });
+
+  it("gives Google and Microsoft a mail Actor and no other provider one", () => {
+    for (const provider of ["github", "google", "slack", "shopify", "microsoft"] as const) {
+      expect(Boolean(makeOAuthProviderDescriptor(provider).capabilities?.actor)).toBe(
+        provider === "google" || provider === "microsoft",
+      );
+    }
+  });
+
   it("rejects reviving a stored record carrying keys outside the connectionKind's schema", () => {
     const github = makeOAuthProviderDescriptor("github").reviveProfile;
     expect(() => github?.({ login: "octocat", teamId: "T123" })).toThrow();
@@ -179,21 +202,21 @@ describe.each(
     while (openDbs.length) openDbs.pop()?.();
   });
 
-  it(`declares one \`${grant}\` grant and a Core-only Gmail Actor for Google`, async () => {
+  it(`declares one \`${grant}\` grant and a Core-only mail Actor for Google and Microsoft`, async () => {
     const registry = new ConnectionRegistry({ repository: makeLedger() });
     registry.register(makeOAuthProviderDescriptor(provider));
     const conn = await registry.connect(provider);
 
     expect(conn.connectionKind).toBe(provider);
     expect(conn.auth.grants()).toEqual({ [grant]: "unauthorized" });
-    // Google builds its Actor only after authorization.
+    // A mail Actor is built only after authorization.
     expect(conn.act).toBeNull();
     expect(conn.isUnlocked("chat")).toBe(false);
     expect(conn.watch).toBeNull();
     expect(conn.status()).toEqual({
       chat: { state: "unsupported" },
       act:
-        provider === "google"
+        provider === "google" || provider === "microsoft"
           ? { state: "needs-auth", missingGrants: [grant] }
           : { state: "unsupported" },
       watch: { state: "unsupported" },
@@ -273,6 +296,7 @@ describe("OAUTH_PROVIDER_GRANTS", () => {
       google: "user",
       slack: "workspace",
       shopify: "store",
+      microsoft: "user",
     });
   });
 });

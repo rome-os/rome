@@ -265,6 +265,15 @@
           "privacyNote": "You approve access on Google; you can disconnect here anytime."
         }
       },
+      "microsoft": {
+        "user": {
+          "title": "Your Microsoft account",
+          "bullets": {
+            "work": "Read your Outlook mail, and send messages only after you approve each one"
+          },
+          "privacyNote": "You approve access on Microsoft; you can disconnect here anytime."
+        }
+      },
       "slack": {
         "user": {
           "title": "Your Slack account",

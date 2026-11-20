@@ -1,4 +1,4 @@
-import { registerGmailActionProxies } from "./gmail-calls.js";
+import { registerMailActionProxies } from "./mail-calls.js";
 import { loadConfig } from "../config.js";
 import { HostExecutionService } from "../apps/host-execution/service.js";
 import { getDb } from "../db/index.js";
@@ -291,7 +291,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     });
   }
 
-  registerGmailActionProxies(actionRegistry);
+  registerMailActionProxies(actionRegistry);
   return actionEngine;
 }
 

@@ -11,9 +11,14 @@ import {
   GMAIL_SEND_ACTION,
   registerGmailActions,
 } from "../connections/gmail/actions.js";
+import {
+  OUTLOOK_READ_ACTION,
+  OUTLOOK_SEND_ACTION,
+  registerOutlookActions,
+} from "../connections/outlook/actions.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { createTestRome, type TestRome } from "../test/kit/index.js";
-import { gmailWorkerCalls, registerGmailActionProxies } from "./gmail-calls.js";
+import { mailWorkerCalls, registerMailActionProxies } from "./mail-calls.js";
 
 let rome: TestRome;
 const cleanup: (() => void)[] = [];
@@ -83,9 +88,21 @@ async function setup() {
         rome.repos.approvals.claimApprovedEffect(id, GMAIL_SEND_ACTION, argsHash),
     },
   );
-  const worker = peers(new WorkerRpcServer({} as WorkerRpcServices, gmailWorkerCalls(mainActions)));
+  registerOutlookActions(
+    mainActions,
+    {
+      find: () =>
+        connected ? [{ id: "microsoft-1", state: () => "working", act: { invoke } }] : [],
+      grantOf: async () => ({ profile: { scopes: ["User.Read", "Mail.Read", "Mail.Send"] } }),
+    } as unknown as ConnectionRegistry,
+    {
+      claimApprovedSend: (id, argsHash) =>
+        rome.repos.approvals.claimApprovedEffect(id, OUTLOOK_SEND_ACTION, argsHash),
+    },
+  );
+  const worker = peers(new WorkerRpcServer({} as WorkerRpcServices, mailWorkerCalls(mainActions)));
   rome = await createTestRome();
-  registerGmailActionProxies(rome.actionRegistry, (method, params) =>
+  registerMailActionProxies(rome.actionRegistry, (method, params) =>
     worker.call<unknown, ActionResult>(method, params),
   );
 
@@ -144,7 +161,7 @@ it("uses worker registrations and the real IPC boundary for Gmail reads and appr
 
   // A bare worker RPC is not a native action body, and cannot send mail.
   expect(
-    await worker.call("gmail.execute", { name: GMAIL_SEND_ACTION, args: message }),
+    await worker.call("mail.execute", { name: GMAIL_SEND_ACTION, args: message }),
   ).toMatchObject({ status: "error" });
   expect(invoke).toHaveBeenCalledTimes(1);
 });
@@ -239,7 +256,7 @@ it("forging the native IPC caller does not replace an exact, resolved, unused ma
         rootExecutionId: "forged",
         initiator: `approval:${approvalId}`,
       },
-      () => worker.call("gmail.execute", { name: GMAIL_SEND_ACTION, args, approvalId }),
+      () => worker.call("mail.execute", { name: GMAIL_SEND_ACTION, args, approvalId }),
     );
   expect(await forged("missing", approvedMessage)).toMatchObject({ status: "error" });
   expect(await forged(id, approvedMessage)).toMatchObject({ status: "error" });
@@ -252,5 +269,36 @@ it("forging the native IPC caller does not replace an exact, resolved, unused ma
   expect(invoke).not.toHaveBeenCalled();
   expect(await forged(id, approvedMessage)).toMatchObject({ status: "ok" });
   expect(await forged(id, approvedMessage)).toMatchObject({ status: "error" });
+  expect(invoke).toHaveBeenCalledTimes(1);
+});
+
+it("carries Outlook reads and approved sends over the same IPC boundary", async () => {
+  const { invoke, worker } = await setup();
+  expect(rome.actionRegistry.get(OUTLOOK_SEND_ACTION)!.config.requiresApproval).toBe(true);
+  expect(await rome.actionEngine.run(OUTLOOK_READ_ACTION, { path: "/v1.0/me" })).toMatchObject({
+    status: "ok",
+    data: { connectionId: "microsoft-1" },
+  });
+  invoke.mockClear();
+  const message = { ...approvedMessage, connectionId: "microsoft-1" };
+  rome.actionRegistry.register({
+    config: workflowConfig,
+    execute: () => callAction(OUTLOOK_SEND_ACTION, message),
+  });
+  const pending = await rome.actionEngine.run(
+    workflowConfig.name,
+    {},
+    { initiator: "routine:test" },
+  );
+  if (pending.status !== "pending_approval") throw new Error("Expected approval");
+  expect(invoke).not.toHaveBeenCalled();
+  await rome.repos.approvals.resolvePending(pending.approval.approvalId, "approve", "guardian");
+  await rome.approvalHandler.onApproved(pending.approval.approvalId);
+  await rome.approvalHandler.onApproved(pending.approval.approvalId);
+  expect(invoke).toHaveBeenCalledTimes(1);
+  expect(invoke).toHaveBeenCalledWith({ operation: "send", input: message });
+  expect(
+    await worker.call("mail.execute", { name: OUTLOOK_SEND_ACTION, args: message }),
+  ).toMatchObject({ status: "error" });
   expect(invoke).toHaveBeenCalledTimes(1);
 });
