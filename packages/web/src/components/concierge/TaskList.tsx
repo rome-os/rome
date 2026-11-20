@@ -47,6 +47,7 @@ import {
   useConciergeConnectors,
 } from "@/hooks/use-concierge-connectors";
 import { useLiveEvents } from "@/hooks/use-live-events";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { fetchJson } from "@/lib/fetch-json";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { cn } from "@/lib/utils";
@@ -335,7 +336,8 @@ const actionIcon = "size-3.5 shrink-0";
 
 /**
  * A one-off task's status mark, which hover turns into its Mark as done
- * check: pressing it ends the task done.
+ * check: pressing it ends the task done. On a screen without hover it is
+ * only the mark.
  */
 function DoneMark({
   title,
@@ -349,6 +351,11 @@ function DoneMark({
   onDone: () => void;
 }) {
   const { t } = useTranslation("chat");
+  // Without hover the check never shows, so a tap would end the task with
+  // nothing to say it will: the mark stays a mark, and the row's ⋯ menu
+  // holds Mark as done.
+  const noHover = useMediaQuery("(hover: none)");
+  if (noHover) return <>{glyph}</>;
   const swap = !pending && "group-hover/row:hidden group-focus-visible/done:hidden";
   return (
     <Tooltip>

@@ -617,6 +617,28 @@ describe("TaskList", () => {
     );
   });
 
+  it("keeps the status mark a plain mark on a screen without hover, with Mark as done in the menu", async () => {
+    rs.stubGlobal(
+      "matchMedia",
+      (query: string) =>
+        ({
+          matches: query === "(hover: none)",
+          media: query,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+        }) as unknown as MediaQueryList,
+    );
+    renderList();
+    await screen.findByRole("region", { name: "Active" });
+    const row = rowOf("Review PRs");
+    // No button on the mark: a tap reaches the row's link and opens the task chat.
+    expect(within(row).queryByRole("button", { name: /as done/ })).toBeNull();
+    expect(row.querySelector(".rome-status-spin")?.closest("button")).toBeNull();
+    fireEvent.click(row.querySelector(".rome-status-spin") as Element);
+    expect(posts()).toEqual([]);
+    expect(await openMenu("Review PRs")).toEqual(["Mark as done", "Stop"]);
+  });
+
   it("says so when the chat has nothing to list", async () => {
     parts = { tasks: [], checks: [], follows: [], routines: [] };
     renderList();
