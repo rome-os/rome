@@ -389,7 +389,7 @@ describe("connector API GitHub webhook outbox", () => {
 
     expect(response.status).toBe(200);
     await rs.waitFor(() => expect(runAction).toHaveBeenCalledOnce());
-    expect(runAction).toHaveBeenCalledWith("publish_event", {
+    expect(runAction).toHaveBeenCalledWith("system:publish_event", {
       name: "provider:event:github.issue_comment",
       source: "connector",
       payload: { action: "created", issue: { number: 7 } },

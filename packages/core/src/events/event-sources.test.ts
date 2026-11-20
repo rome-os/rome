@@ -84,7 +84,7 @@ describe("EventSources", () => {
         run,
       );
       expect(result).toEqual({ ok: true, subscription: "created" });
-      expect(run).toHaveBeenCalledWith("connector_event_ensure", {
+      expect(run).toHaveBeenCalledWith("connector:connector_event_ensure", {
         eventName: "provider:event:github.workflow_run",
         filter: REPO_FILTER,
         dryRun: false,
@@ -127,12 +127,13 @@ describe("EventSources", () => {
 
     it("turns a thrown action into a readable error", async () => {
       const run = rs.fn<RunEnsureAction>(async () => {
-        throw new Error('Action "connector_event_ensure" not found');
+        throw new Error('Action "connector:connector_event_ensure" not found');
       });
       const result = await sources().prepareWait("provider:event:github.push", REPO_FILTER, run);
       expect(result).toEqual({
         ok: false,
-        error: 'connector_event_ensure failed: Action "connector_event_ensure" not found',
+        error:
+          'connector:connector_event_ensure failed: Action "connector:connector_event_ensure" not found',
       });
     });
 
@@ -152,7 +153,7 @@ describe("EventSources", () => {
       });
       const unseen = await sources().prepareWait("provider:event:gmail.new_message", [], run);
       expect(unseen.ok).toBe(true);
-      if (unseen.ok) expect(unseen.warning).toContain("search_event_catalog");
+      if (unseen.ok) expect(unseen.warning).toContain("system:search_event_catalog");
       expect(run).not.toHaveBeenCalled();
     });
 
@@ -206,7 +207,7 @@ describe("EventSources", () => {
       }));
       const result = await sources().probe("provider:event:github.push", REPO_FILTER, run);
       expect(result).toEqual({ ok: true, active: true });
-      expect(run).toHaveBeenCalledWith("connector_event_ensure", {
+      expect(run).toHaveBeenCalledWith("connector:connector_event_ensure", {
         eventName: "provider:event:github.push",
         filter: REPO_FILTER,
         dryRun: true,

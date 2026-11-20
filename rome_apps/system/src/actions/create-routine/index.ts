@@ -123,7 +123,7 @@ export interface ActionExistenceChecker {
 /** Error returned when a routine names an action that isn't registered. Names
  * the remedy so the agent routes correctly instead of guessing again: build the
  * missing automation as a workflow (which registers a `<appId>_run` action),
- * or fall back to the always-available `summon` / `send_message`. */
+ * or fall back to the always-available `system:summon` / `system:send_message`. */
 export function unknownActionError(actionName: string): string {
   return (
     `actionName "${actionName}" is not a registered action. ` +

@@ -309,7 +309,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
             staging,
             before,
             async () => {
-              const res = await appContext.runAction("app_management", {
+              const res = await appContext.runAction("system:app_management", {
                 op: "install",
                 source: { mode: "source", path: carrierDir },
               });

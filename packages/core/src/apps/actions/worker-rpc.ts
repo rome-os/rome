@@ -115,7 +115,7 @@ export interface WorkerRpcServices {
   /** Rome App Store read surface. */
   appStore: AppStoreReader;
   /** Main-process action registry existence check. Worker-local lazy stubs are
-   * presence-only, so validation paths such as `create_routine` ask the eager
+   * presence-only, so validation paths such as `system:create_routine` ask the eager
    * main registry whether an action is actually registered there. */
   hasRegisteredAction: (name: string) => boolean;
   isExplicitAction: (name: string) => boolean;

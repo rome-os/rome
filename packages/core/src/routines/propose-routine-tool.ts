@@ -14,9 +14,9 @@ import { isValidTimeZone } from "../lib/timezone.js";
  * guardian's click. */
 export interface RoutineActivationGate {
   /** Whether this session's agent may call `name` itself — the same allow-list
-   * check `executeAction` enforces. Auto-enable needs both `create_routine` and
+   * check `executeAction` enforces. Auto-enable needs both `system:create_routine` and
    * the target action, so it never schedules anything the agent couldn't
-   * already schedule by calling `create_routine` directly. */
+   * already schedule by calling `system:create_routine` directly. */
   canCallAction(name: string): "permitted" | "denied" | "unknown";
   /** The target action's input-schema check on the routine's args — the same
    * one `POST /api/routines` runs for the card's "Turn it on". Null when the
@@ -31,10 +31,10 @@ export interface RoutineActivationGate {
 const PROPOSE_ROUTINE_DIRECTIVE =
   "The routine draft card has been delivered to the user. They turn it on themselves via the card — it creates the routine directly, so do NOT call any create action yourself. Reply with one short line confirming what you've drafted, then end your turn.";
 
-const CREATE_ROUTINE_ACTION = "create_routine";
+const CREATE_ROUTINE_ACTION = "system:create_routine";
 
 /** Create the drafted routine enabled, on the guardian's explicit instruction.
- * The routine goes through the agent's own `create_routine` call (same
+ * The routine goes through the agent's own `system:create_routine` call (same
  * allow-list, validation and attribution as a direct call); the target must be
  * an action the agent may call too. Without that permission, it falls back to
  * the draft card, so the guardian's click stays the gate.
@@ -236,7 +236,7 @@ function buildEventTriggerFromInput(
   return { ok: true, trigger };
 }
 
-/** Validate the schedule fields the same way the `create_routine` action does,
+/** Validate the schedule fields the same way the `system:create_routine` action does,
  * so a confirm card never creates a silently-dead schedule (bad HH:mm, unknown
  * timezone, or a MONTHLY rule with no day-of-month). */
 function buildScheduleTriggerFromInput(

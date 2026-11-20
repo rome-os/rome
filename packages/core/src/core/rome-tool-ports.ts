@@ -85,7 +85,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   // agent may call: its allow-list, or everything for "*". Both the
   // model-facing catalog and the execution gate derive from it, so they can't
   // disagree. It's consulted per request, so an action installed
-  // mid-conversation by `app_management` is callable in the same session.
+  // mid-conversation by `system:app_management` is callable in the same session.
   const findPermittedAction = (turn: TurnFacts, name: string): Action | undefined => {
     const requestedAction = actionRegistry.get(name);
     if (!requestedAction) throw new Error(`Unknown action: ${name}`);
@@ -138,7 +138,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
     turnId: turn.turnId(),
   });
 
-  // `defer` creates its one-off through `create_routine` directly, not through
+  // `defer` creates its one-off through `system:create_routine` directly, not through
   // the agent's action allow-list: `defer` is a built-in.
   const defer: Pick<DeferTool, "schedule"> = {
     schedule: (turn, wakeUp) =>
@@ -163,7 +163,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             },
             createRoutine: async (createArgs) => {
               const result = await actionEngine.run(
-                "create_routine",
+                "system:create_routine",
                 createArgs,
                 agentRunContext(turn),
               );
@@ -185,7 +185,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   };
 
   // `propose_routine` auto-enables only a routine the agent could already
-  // create with `create_routine` itself (the same check, non-throwing), with
+  // create with `system:create_routine` itself (the same check, non-throwing), with
   // args that fit the target action's schema.
   const routineActivation = (turn: TurnFacts): RoutineActivationGate => ({
     canCallAction: (name) => {

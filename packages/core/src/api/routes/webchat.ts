@@ -1001,7 +1001,7 @@ interface ActiveWebchatStream {
    * accumulation resets at the *block boundary* (a complete `text` block),
    * never on tool_use — what to show during tool calls is client policy
    * (delayed fold: keep the last block until the next one starts). Transient —
-   * the durable reply is still persisted via `send_message` on `result`.
+   * the durable reply is still persisted via `system:send_message` on `result`.
    */
   assistantText: string;
   assistantBlockIx: number;
@@ -2199,7 +2199,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!input.continuable) {
       try {
         const result = await deps.actionEngine.run(
-          "show_app",
+          "system:show_app",
           { appId: SESSIONS_HOST_APP_ID, route: forkSessionId },
           {
             initiator: input.initiator,
@@ -5141,7 +5141,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                     ? lastCompletedText?.blockId
                     : undefined;
               await deps.actionEngine.run(
-                "send_message",
+                "system:send_message",
                 {
                   channel: "webchat",
                   threadId: sessionId,

@@ -352,7 +352,7 @@ export class ChatSettingsControlProxy implements ChatSettingsControl {
 
 /**
  * Worker-side stand-in for the main-process `SystemUpgradeService`. The nightly
- * `system_upgrade` action runs in a worker, but the upgrade countdown hub and
+ * `system:system_upgrade` action runs in a worker, but the upgrade countdown hub and
  * its timers live in the main process — so the probe forwards to main, where
  * the real service checks Rome Cloud and opens the countdown.
  */
@@ -363,7 +363,7 @@ export class SystemUpgradeServiceProxy implements SystemUpgradeChecker {
 }
 
 /** Worker-side stand-in for the main-process backend-turn orchestrator. The
- * `resume_session` action runs in a worker (a routine-fired root action →
+ * `system:resume_session` action runs in a worker (a routine-fired root action →
  * subprocess), but running the turn + delivering its reply needs main-process
  * state (the AgentSession registry, channel adapters, the webchat runtime), so
  * the single `runAndDeliver` forwards there over one RPC. */
@@ -376,7 +376,7 @@ export class BackendTurnRunnerProxy implements BackendTurnRunner {
 }
 
 /** Worker-side stand-in for the main-process `NotifyClient`. The
- * `send_notification` action runs in a worker, but the durable instance token
+ * `system:send_notification` action runs in a worker, but the durable instance token
  * must never leave the main process — so the whole send (token read + the
  * `/api/notify` call) happens in main and only the `SendOutcome` returns here.
  * A worker→main transport failure leaves delivery genuinely uncertain (the
@@ -398,7 +398,7 @@ export class NotifyServiceProxy implements NotifyService {
 
 /** Worker-side stand-in for the live EmailAdapter's inbound entry point. The
  * real adapter (inbound secret, MailProvider, onMessage pipeline) lives in the
- * main process; `email_inbound` runs in a worker, so it forwards the raw deposit
+ * main process; `system:email_inbound` runs in a worker, so it forwards the raw deposit
  * + HMAC to main where the adapter verifies and dispatches it. */
 export class EmailInboundControlProxy implements EmailInboundControl {
   async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {

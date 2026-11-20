@@ -89,7 +89,7 @@ export class EventSources {
         ok: true,
         warning:
           `Nothing has emitted "${eventName}" since Rome started, and no app declares it. ` +
-          "The wait is set; if the name may be wrong, check it with search_event_catalog.",
+          "The wait is set; if the name may be wrong, check it with system:search_event_catalog.",
       };
     }
     // One subscribing call per source at a time: a provider subscription is
@@ -137,26 +137,28 @@ export class EventSources {
     if (missing) return { ok: false, error: `${eventName} needs ${missing}` };
 
     const expected = dryRun ? ["active", "inactive"] : ["existing", "created"];
+    // The manifest names the declaring app's own action.
+    const ensureAction = `${source.appId}:${source.ensureAction}`;
     try {
-      const result = await run(source.ensureAction, { eventName, filter, dryRun });
+      const result = await run(ensureAction, { eventName, filter, dryRun });
       if (result.status === "error") {
-        return { ok: false, error: result.error ?? `${source.ensureAction} failed` };
+        return { ok: false, error: result.error ?? `${ensureAction} failed` };
       }
       const subscription = (result.data as { subscription?: unknown } | undefined)?.subscription;
       if (result.status !== "ok" || typeof subscription !== "string") {
-        return { ok: false, error: `${source.ensureAction} returned no subscription state` };
+        return { ok: false, error: `${ensureAction} returned no subscription state` };
       }
       if (!expected.includes(subscription)) {
         return {
           ok: false,
-          error: `${source.ensureAction} returned subscription "${subscription}", expected ${expected.join(" or ")}`,
+          error: `${ensureAction} returned subscription "${subscription}", expected ${expected.join(" or ")}`,
         };
       }
       return { ok: true, subscription };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.warn("ensure action failed", { eventName, action: source.ensureAction, error: message });
-      return { ok: false, error: `${source.ensureAction} failed: ${message}` };
+      log.warn("ensure action failed", { eventName, action: ensureAction, error: message });
+      return { ok: false, error: `${ensureAction} failed: ${message}` };
     }
   }
 }

@@ -75,7 +75,7 @@ export interface RomeAppRuntimeServices {
    * worker is busy (see ActionRunContext.whenWorkersBusy). Defaults to
    * `"fail"`. Set `"queue"` only for a context built for one caller that no
    * action worker waits on. App code can run on behalf of a waiting worker,
-   * such as turn middleware during a `summon`-driven turn, so a shared app
+   * such as turn middleware during a `system:summon`-driven turn, so a shared app
    * context must stay fail-fast. */
   whenWorkersBusy?: "fail" | "queue";
 }
