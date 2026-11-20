@@ -203,15 +203,15 @@ export default function SettingsPage() {
           fetchConnections(),
           fetch("/api/integrations/composio/status", { cache: "no-store" }),
         ]);
+        // The whole answer is read before it is checked, so a load still
+        // reading its body cannot pass the check and land after a newer one.
+        const payload = composioRes.ok
+          ? ((await composioRes.json()) as { composio?: ComposioCliStatus })
+          : undefined;
         if (load < loadShown.current) return connectionList;
         loadShown.current = load;
         setConnections(connectionList);
-        if (composioRes.ok) {
-          const payload = (await composioRes.json()) as {
-            composio?: ComposioCliStatus;
-          };
-          setComposio(payload.composio ?? null);
-        }
+        if (payload) setComposio(payload.composio ?? null);
         setConnectionsError(null);
         return connectionList;
       } catch (err) {

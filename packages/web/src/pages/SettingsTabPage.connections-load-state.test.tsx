@@ -188,4 +188,92 @@ describe("Settings connections request states", () => {
 
     expect(toggle().getAttribute("aria-checked")).toBe("true");
   });
+  it("keeps the members switch as its change left it when an older poll's body is read after the change's refresh fails", async () => {
+    rs.spyOn(console, "error").mockImplementation(() => {});
+    const feishu = {
+      connections: [
+        {
+          id: "conn-feishu",
+          state: "connected",
+          connectionKind: "feishu",
+          label: "Feishu",
+          channel: "feishu",
+          grants: { app: "authorized" },
+          display: {
+            app: { displayName: "Support Bot", handle: null, email: null, avatarUrl: null },
+          },
+          setups: {},
+          capabilities: {
+            chat: { state: "unlocked" },
+            act: { state: "unsupported" },
+            watch: { state: "unsupported" },
+          },
+          connect: null,
+          agent: null,
+          severalAccounts: true,
+          answerMembers: false,
+        },
+      ],
+    };
+    // The poll's Composio answer arrives at once, but its body only later.
+    let readPollBody: () => void = () => {};
+    let connectionLoads = 0;
+    let composioLoads = 0;
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url === "/api/approvals") return new Response("[]", { status: 200 });
+      if (url === "/api/settings") return ok({});
+      if (url === "/api/integrations/composio/status") {
+        composioLoads += 1;
+        // A fresh status each time, as the server's is, so each one rebuilds the cards.
+        const status = {
+          composio: {
+            installed: false,
+            loggedIn: false,
+            loginPending: false,
+            webUrl: null,
+            orgId: null,
+            testUserId: null,
+            error: null,
+          },
+        };
+        if (composioLoads !== 2) return ok(status);
+        const body = new Promise<unknown>((resolve) => (readPollBody = () => resolve(status)));
+        return { ok: true, json: () => body } as Response;
+      }
+      if (url.endsWith("/answer-members") && init?.method === "PUT") {
+        return ok({ answerMembers: true });
+      }
+      if (url === "/api/connections") {
+        connectionLoads += 1;
+        if (connectionLoads > 2) return failed(503, "Connections service unavailable");
+        return ok(feishu);
+      }
+      return ok({});
+    }) as typeof fetch);
+    const polls: Array<() => void> = [];
+    const setInterval = window.setInterval.bind(window);
+    rs.spyOn(window, "setInterval").mockImplementation(((handler: TimerHandler, ms?: number) => {
+      if (typeof handler === "function") polls.push(handler as () => void);
+      return setInterval(() => {}, ms);
+    }) as typeof window.setInterval);
+
+    renderConnectionsSettings();
+    await userEvent.click(await screen.findByRole("button", { name: /^Open Feishu/ }));
+    const toggle = () =>
+      screen.getByRole("switch", { name: "Answer other members of this workspace" });
+
+    for (const poll of polls) poll();
+    await waitFor(() => expect(composioLoads).toBe(2));
+    await userEvent.click(toggle());
+    await waitFor(() => expect(connectionLoads).toBe(3));
+    await waitFor(() => expect((toggle() as HTMLButtonElement).disabled).toBe(false));
+    readPollBody();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
 });
