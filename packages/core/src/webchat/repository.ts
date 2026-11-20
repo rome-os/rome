@@ -1928,8 +1928,20 @@ export class WebChatRepository {
   }
 
   /**
-   * Lets every kept chat follow the default again, from its next run, those
-   * kept on Rome credits too. Returns the ids it released.
+   * The kept chats: a change of the default that moves existing chats lets
+   * them follow it again.
+   */
+  async keptChatCount(): Promise<number> {
+    const rows = await this.db
+      .select({ count: sql<number>`count(*)`.mapWith(Number) })
+      .from(romeSessions)
+      .where(eq(romeSessions.largeModelSelectionBy, "kept"));
+    return rows[0]?.count ?? 0;
+  }
+
+  /**
+   * Lets every kept chat follow the default again, from its next run. Returns
+   * the chats it released.
    */
   async releaseKeptChats(): Promise<
     Array<{ id: string; agentName: string | null; largeModelSelection: string | null }>
@@ -1937,7 +1949,30 @@ export class WebChatRepository {
     return await this.db
       .update(romeSessions)
       .set({ largeModelSelectionBy: "auto" })
-      .where(inArray(romeSessions.largeModelSelectionBy, ["kept", "credits"]))
+      .where(eq(romeSessions.largeModelSelectionBy, "kept"))
+      .returning({
+        id: romeSessions.id,
+        agentName: romeSessions.agentName,
+        largeModelSelection: romeSessions.largeModelSelection,
+      });
+  }
+
+  /**
+   * Moves one chat onto Rome credits, or off them. Who chose its model, and
+   * the model, stay as they are.
+   */
+  async updateSessionRomeCredits(id: string, romeCredits: boolean) {
+    await this.db.update(romeSessions).set({ romeCredits }).where(eq(romeSessions.id, id));
+  }
+
+  /** Takes every chat off Rome credits. Returns the chats it took off. */
+  async releaseRomeCreditChats(): Promise<
+    Array<{ id: string; agentName: string | null; largeModelSelection: string | null }>
+  > {
+    return await this.db
+      .update(romeSessions)
+      .set({ romeCredits: false })
+      .where(eq(romeSessions.romeCredits, true))
       .returning({
         id: romeSessions.id,
         agentName: romeSessions.agentName,
@@ -2502,14 +2537,16 @@ export class WebChatRepository {
     });
   }
 
-  async updateMessageContent(id: string, content: string) {
+  /** Rewrites a message's content. False when no message has the id: nothing was written. */
+  async updateMessageContent(id: string, content: string): Promise<boolean> {
     assertWidgetAloneInContent(content);
     const rows = await this.db
       .select({ role: romeAgentMessages.role })
       .from(romeAgentMessages)
       .where(eq(romeAgentMessages.id, id))
       .limit(1);
-    const accounting = rows[0] ? traceAccountingColumns(rows[0].role, content) : null;
+    if (!rows[0]) return false;
+    const accounting = traceAccountingColumns(rows[0].role, content);
 
     await this.db
       .update(romeAgentMessages)
@@ -2522,6 +2559,7 @@ export class WebChatRepository {
         outputTokens: accounting?.hasAccounting ? accounting.outputTokens : null,
       })
       .where(eq(romeAgentMessages.id, id));
+    return true;
   }
 
   async getMessages(sessionId: string) {

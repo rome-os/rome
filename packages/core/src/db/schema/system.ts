@@ -23,7 +23,7 @@ import {
 const DEFAULT_WEBCHAT_PROJECT_NAME = "default";
 
 /** Who chose a chat's stored model. docs/domains/agents.md#kept-provider */
-export type ModelSelectionBy = "owner" | "auto" | "kept" | "credits";
+export type ModelSelectionBy = "owner" | "auto" | "kept";
 
 export const sessions = sqliteTable(
   "sessions",
@@ -532,6 +532,10 @@ export const romeSessions = sqliteTable(
     // without moving existing chats. NULL for selections made before this was
     // kept. A change of the default moves only `auto` ones.
     largeModelSelectionBy: text("large_model_selection_by").$type<ModelSelectionBy>(),
+    // The guardian moved this chat alone onto Rome credits: it runs its model's
+    // strength on Codex through them, whoever chose the model. Released once
+    // any AI account is logged in (docs/domains/agents.md#default-provider).
+    romeCredits: integer("rome_credits", { mode: "boolean" }).notNull().default(false),
     // The reasoning effort a message to the chat runs at when it names none,
     // such as the brief and follow-ups the Concierge sends a task chat. NULL
     // takes the dashboard's setting.

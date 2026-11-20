@@ -55,6 +55,8 @@ export const PROVIDER_RESUMES_SETTING_KEY = "providerResumes";
 const RETRY_DELAY_MS = 30_000;
 /** When a card that recovers by itself tries the stopped turn again, after it showed. */
 const RECOVERY_DELAYS_MS = [5 * 60_000, 15 * 60_000, 30 * 60_000];
+/** How long after a quota's reset time its card tries the stopped turn again. */
+const QUOTA_RESET_SLACK_MS = 30_000;
 const RETRY_MARKER = "<provider_retry>";
 
 const PROVIDER_NAMES: Record<DefaultModelProvider, string> = {
@@ -159,7 +161,11 @@ export interface ProviderFailuresDeps {
   chats: Pick<ChatProviders, "keep" | "follow">;
   webchatRepo: Pick<
     WebChatRepository,
-    "getSession" | "addBackendMessage" | "updateMessageContent" | "updateSessionLargeModelSelection"
+    | "getSession"
+    | "addBackendMessage"
+    | "updateMessageContent"
+    | "updateSessionLargeModelSelection"
+    | "updateSessionRomeCredits"
   >;
   settings: Pick<SettingsRepository, "get" | "set">;
   /** The guardian's Concierge main chat, or null when it does not exist. */
@@ -175,8 +181,15 @@ export interface ProviderFailuresDeps {
   swapModel?: (chatId: string, agentName: string, failure: AgentTurnFailure) => Promise<unknown>;
   /** Rome credits can be spent now: linked, enabled and with a balance. */
   creditsUsable?: () => boolean;
+  /** Codex is logged in on Rome credits now, rather than on a ChatGPT account. */
+  codexOnCredits?: () => boolean;
   /** Tells a live session of the chat the model its next turn runs, and whether on Rome credits. */
-  selectModel?: (chatId: string, agentName: string, selection: string, credits?: boolean) => void;
+  selectModel?: (
+    chatId: string,
+    agentName: string,
+    selection: string | null,
+    credits?: boolean,
+  ) => void;
   /** An agent's canonical id ("core:main") for the name a chat uses ("main"). */
   canonicalAgent?: (agentName: string) => string;
   /** Pushes to the guardian's phone. Absent, nothing is pushed. */
@@ -326,9 +339,13 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
 
   type ChatRow = NonNullable<Awaited<ReturnType<WebChatRepository["getSession"]>>>;
 
-  /** The chat runs on Rome credits: moved onto them, or following a default of them. */
+  /**
+   * The chat runs on Rome credits: moved onto them, or following a default of
+   * them, while Codex is logged in on them rather than on a ChatGPT account.
+   */
   const spendsCredits = (chat: ChatRow | null | undefined): boolean =>
-    chat?.largeModelSelectionBy === "credits" || deps.defaults.current() === "rome_credits";
+    (chat?.romeCredits === true || deps.defaults.current() === "rome_credits") &&
+    deps.codexOnCredits?.() !== false;
 
   /** The provider as the guardian names it: Codex for a chat on Rome credits reads as Rome credits. */
   const named = (provider: AccountedProviderId, chat?: ChatRow | null): DefaultModelProvider =>
@@ -434,10 +451,15 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       );
     });
 
-  /** Runs the chat's stopped turn again. The caller marks the chat as recovering. */
+  /**
+   * Runs the chat's stopped turn again. The caller marks the chat as
+   * recovering. A switch's resume marker clears only as the turn starts, so a
+   * turn that never started still runs after a restart.
+   */
   const run = async (chatId: string, agentName: string, provider: string): Promise<void> => {
     const sessionId = await deps.runtimeOf(chatId, agentName);
     if (!sessionId) throw new Error("This chat has no session to run in");
+    await dropResume(chatId).catch(() => undefined);
     await deps.runner.runAndReport(
       {
         agentName,
@@ -455,11 +477,9 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
    * the chat runs already: two ways out of one card run it once.
    */
   const resume = (chatId: string, agentName: string, provider: string): boolean => {
-    const marker = dropResume(chatId).catch(() => undefined);
     if (recovering.has(chatId)) return false;
     recovering.add(chatId);
-    const running = marker
-      .then(() => run(chatId, agentName, provider))
+    const running = run(chatId, agentName, provider)
       .catch((error: unknown) =>
         log.warn("provider recovery turn failed", { chatId, error: String(error) }),
       )
@@ -576,11 +596,20 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       return card;
     });
 
-  /** A card that recovers by itself tries the stopped turn again, a few times. */
+  /**
+   * A card that recovers by itself tries the stopped turn again: a quota card
+   * once its limit resets, any other a few times. A card a switch took is left
+   * to it.
+   */
   const scheduleRecovery = (card: OpenProviderCard) => {
-    if (card.part.card !== "wait" || card.part.reason === "quota" || card.part.retrying) return;
-    const wait = RECOVERY_DELAYS_MS[card.attempts];
-    if (wait === undefined) return;
+    if (card.part.card !== "wait" || card.part.retrying) return;
+    const wait =
+      card.part.reason === "quota"
+        ? card.part.until && card.attempts < RECOVERY_DELAYS_MS.length
+          ? Math.max(0, Date.parse(card.part.until) - now().getTime()) + QUOTA_RESET_SLACK_MS
+          : undefined
+        : RECOVERY_DELAYS_MS[card.attempts];
+    if (wait === undefined || Number.isNaN(wait)) return;
     scheduled.get(card.chatId)?.();
     scheduled.set(
       card.chatId,
@@ -589,7 +618,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         void serial(async () => {
           const cards = await readCards();
           const open = cards.find((candidate) => candidate.messageId === card.messageId);
-          if (!open || stopped) return null;
+          if (!open || stopped || claimed.has(open.messageId)) return null;
           open.attempts += 1;
           await writeCards(cards);
           return open;
@@ -689,10 +718,11 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         scheduled.delete(card.chatId);
         card.part = { ...card.part, resolved: resolution(card) };
         const settled = content(card);
-        await deps.webchatRepo.updateMessageContent(card.messageId, settled).catch(() => {
-          // `cardFor`'s caller has not written the message yet.
-          lateContent.set(card.messageId, settled);
-        });
+        const wrote = await deps.webchatRepo
+          .updateMessageContent(card.messageId, settled)
+          .catch(() => false);
+        // `cardFor`'s caller has not written the message yet: it takes this form when it does.
+        if (!wrote) lateContent.set(card.messageId, settled);
       }
       const chatIds = new Set(ended.map((card) => card.chatId));
       const outages = await readOutages();
@@ -722,22 +752,27 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
 
   /** Moves one chat as a switch asks, before its stopped turn runs again. */
   const moveChat = async (chatId: string, agentName: string, change: ProviderSwitch) => {
+    const chat = await deps.webchatRepo.getSession(chatId);
+    if (!chat) throw new Error("Chat not found");
     if (change.kind === "model") {
       if (!isModelSelectionId(change.selection)) throw new Error("Unknown model");
-      const chat = await deps.webchatRepo.getSession(chatId);
-      if (!chat) throw new Error("Chat not found");
       const by = chat.largeModelSelectionBy === "kept" || !ownerPicked(chat) ? "kept" : "owner";
       await deps.webchatRepo.updateSessionLargeModelSelection(chatId, change.selection, by);
-      deps.selectModel?.(chatId, agentName, change.selection);
+      // Another model is no change of provider: a chat on Rome credits stays on them.
+      deps.selectModel?.(chatId, agentName, change.selection, chat.romeCredits === true);
+      return;
+    }
+    // This chat alone moves onto Rome credits: only it spends them, and its
+    // model and who chose it stay as they are.
+    if (change.provider === "rome_credits" && !change.makeDefault) {
+      await deps.chats.keep(chatId, "rome_credits");
       return;
     }
     const provider = providerOfDefault(change.provider);
-    // This chat alone moves onto Rome credits: only it spends them.
-    const credits = change.provider === "rome_credits" && !change.makeDefault;
-    const chat = await deps.webchatRepo.getSession(chatId);
-    if (chat && ownerPicked(chat) && isModelSelectionId(chat.largeModelSelection)) {
+    if (ownerPicked(chat) && isModelSelectionId(chat.largeModelSelection)) {
+      if (chat.romeCredits) await deps.webchatRepo.updateSessionRomeCredits(chatId, false);
       // A model its owner picked moves to the same strength on the new
-      // provider, still theirs, unless only this chat spends Rome credits.
+      // provider, still theirs.
       const stored = chat.largeModelSelection;
       const selection =
         MODEL_SELECTIONS[stored].providerId === provider
@@ -747,13 +782,12 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
               strengthOfSelection(stored),
               deps.accounts.read().openai?.account,
             );
-      if (!credits && selection === stored) return;
-      await deps.webchatRepo.updateSessionLargeModelSelection(
-        chatId,
-        selection,
-        credits ? "credits" : "owner",
-      );
-      deps.selectModel?.(chatId, agentName, selection, credits);
+      if (selection !== stored) {
+        await deps.webchatRepo.updateSessionLargeModelSelection(chatId, selection, "owner");
+      }
+      if (selection !== stored || chat.romeCredits) {
+        deps.selectModel?.(chatId, agentName, selection, false);
+      }
       return;
     }
     if (change.makeDefault) await deps.chats.follow(chatId);
@@ -804,6 +838,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       void serial(async () => {
         const cards = await readCards();
         let changed = false;
+        const learned: OpenProviderCard[] = [];
         for (const card of cards) {
           if (card.runsOn !== provider || !waits(card)) continue;
           if (card.stateAtFailure !== state) {
@@ -813,12 +848,15 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
           if (until && !card.part.until) {
             card.part = { ...card.part, until };
             changed = true;
+            learned.push(card);
             await deps.webchatRepo
               .updateMessageContent(card.messageId, content(card))
               .catch(() => undefined);
           }
         }
         if (changed) await writeCards(cards);
+        // The reset time a card learns is when it tries again.
+        for (const card of learned) scheduleRecovery(card);
       });
       return;
     }
@@ -895,7 +933,9 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       if (card.part.retrying) {
         const cancel = later(RETRY_DELAY_MS, () => {
           scheduled.delete(card.chatId);
-          if (!stopped) resume(card.chatId, card.agentName, "the provider");
+          if (!stopped && !claimed.has(card.messageId)) {
+            resume(card.chatId, card.agentName, "the provider");
+          }
         });
         scheduled.set(card.chatId, cancel);
         continue;
@@ -1066,13 +1106,34 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       await deps.webchatRepo.updateMessageContent(messageId, late);
     },
     async switchOutage(outageId, change) {
-      const outage = await serial(async () => {
+      // The notice and its chats' cards are taken together: a card's own
+      // switch at the same moment finds its card taken, and a chat whose card
+      // its own switch took already is left to that switch.
+      const taken = await serial(async () => {
         const open = (await readOutages()).find((candidate) => candidate.id === outageId);
         if (!open || claimed.has(outageId)) return null;
         claimed.add(outageId);
-        return open;
+        const cards = await readCards();
+        const own = new Set<string>();
+        const busy = new Set<string>();
+        for (const chat of open.chats) {
+          const card = cards.find((candidate) => candidate.chatId === chat.chatId);
+          if (!card) continue;
+          if (claimed.has(card.messageId)) {
+            busy.add(chat.chatId);
+            continue;
+          }
+          claimed.add(card.messageId);
+          own.add(card.messageId);
+        }
+        return { open, own, busy };
       });
-      if (!outage) throw new Error("This notice is already settled");
+      if (!taken) throw new Error("This notice is already settled");
+      const { own: ownCards } = taken;
+      const outage = {
+        ...taken.open,
+        chats: taken.open.chats.filter((chat) => !taken.busy.has(chat.chatId)),
+      };
       for (const chat of outage.chats) switching.add(chat.chatId);
       try {
         await makeDefault(change);
@@ -1085,9 +1146,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
             log.warn("outage chat switch failed", { chatId: chat.chatId, error: String(error) });
           }
         }
-        const chatIds = new Set(outage.chats.map((chat) => chat.chatId));
         const ended = await settle(
-          (card) => chatIds.has(card.chatId),
+          (card) => ownCards.has(card.messageId),
           () => switchResolution(change),
           switchName(change),
         );
@@ -1115,6 +1175,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         return moved;
       } finally {
         for (const chat of outage.chats) switching.delete(chat.chatId);
+        for (const messageId of ownCards) claimed.delete(messageId);
         claimed.delete(outageId);
       }
     },

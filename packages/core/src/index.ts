@@ -1075,6 +1075,7 @@ async function main() {
     beforeDefaultChange: async () => {},
     keep: async () => null,
     follow: async () => {},
+    releaseCredits: async () => 0,
     followingCount: async () => 0,
   };
   const defaultProviders = createDefaultProviders({
@@ -1369,8 +1370,7 @@ async function main() {
     {
       agentLoader,
       sessionRepository,
-      chatOnCredits: async (chatId) =>
-        (await webchatRepo.getSession(chatId))?.largeModelSelectionBy === "credits",
+      chatOnCredits: async (chatId) => (await webchatRepo.getSession(chatId))?.romeCredits === true,
       systemPrompts,
       modelResolver,
       networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),
@@ -1456,6 +1456,8 @@ async function main() {
   chatProviders = createChatProviders({
     webchatRepo,
     accounts: modelAccounts,
+    // Any login takes every chat off Rome credits.
+    signedIn: () => defaultProviders.signedIn(),
     selectModel: (chatId, agentName, selection, credits) =>
       agentSessionManager
         .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })
@@ -1561,10 +1563,10 @@ async function main() {
   const selectChatModel = (
     chatId: string,
     agentName: string | null,
-    selection: string,
+    selection: string | null,
     credits?: boolean,
   ) => {
-    if (!isModelSelectionId(selection)) return;
+    if (selection !== null && !isModelSelectionId(selection)) return;
     agentSessionManager
       .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })
       ?.selectModel(selection, { credits });
@@ -1576,6 +1578,7 @@ async function main() {
     swapModel: (chatId, agentName, failure) =>
       concierge.switchForModelLimit(chatId, failure, agentName),
     creditsUsable: () => codexLoginChoice.creditsUsable(),
+    codexOnCredits: () => codexAccountService.login().kind === "rome_credits",
     selectModel: selectChatModel,
     canonicalAgent: (agentName) => agentLoader.find(agentName)?.name ?? agentName,
     webchatRepo,

@@ -907,11 +907,17 @@ export class ConciergeService {
         agentName ?? (isConciergeChat(chat) ? CONCIERGE_AGENT_ID : (chat.agentName ?? "main")),
       channelThreadKey: webchatSessionKey(chatId),
     };
-    const selected = resolveWebchatLargeModelSelection(chat.largeModelSelection);
+    // A chat on Rome credits runs its model's strength on Codex, whatever
+    // provider its stored model names.
+    const credits = chat.romeCredits === true;
+    const stored = resolveWebchatLargeModelSelection(chat.largeModelSelection);
+    const selected = credits && stored?.providerId !== "openai" ? null : stored;
     const runtime = selected
       ? null
       : await this.deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-    const from = selected?.providerId ?? runtime?.provider ?? failure.provider;
+    const from = credits
+      ? "openai"
+      : (selected?.providerId ?? runtime?.provider ?? failure.provider);
     if (from !== "openai" && from !== "anthropic") return null;
     if (failure.provider && failure.provider !== from) return null;
     const read = this.deps.accounts.read();
@@ -925,7 +931,7 @@ export class ConciergeService {
     // provider's strong one, as every chat that follows the default does.
     const fromModel =
       selected?.model ??
-      runtime?.model ??
+      (runtime?.provider === from ? runtime.model : undefined) ??
       MODEL_SELECTIONS[selectionOfStrength(from, "strong", report?.account)].model;
     // A model each Concierge chat left, so one chat's move never blocks another's.
     const modelKey = (model: string) => `${chatId}\u0000${model.replace(/\[.*\]$/, "")}`;
@@ -940,7 +946,8 @@ export class ConciergeService {
       target.selectionId,
       chat.largeModelSelectionBy === "kept" ? "kept" : "auto",
     );
-    this.deps.agentSessionManager.find(key)?.selectModel(target.selectionId);
+    // The move keeps the chat where the guardian put it: kept, or on Rome credits.
+    this.deps.agentSessionManager.find(key)?.selectModel(target.selectionId, { credits });
     this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);
     await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [
       {

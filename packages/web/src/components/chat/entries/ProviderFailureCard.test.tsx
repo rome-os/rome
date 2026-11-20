@@ -18,12 +18,22 @@ afterEach(() => {
 
 type Call = { url: string; method: string; body: unknown };
 
-function mockApi() {
+/** `followingChats`: how many chats a change of the default would move. */
+function mockApi(followingChats = 2) {
   const calls: Call[] = [];
   rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
     calls.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    if (url.endsWith("/api/ai-tools/default")) {
+      return Response.json({
+        defaultProvider: {
+          provider: "openai",
+          signedIn: { anthropic: true, openai: true, rome_credits: false },
+          followingChats,
+        },
+      });
+    }
     if (url.endsWith("/rome-credits")) {
       return Response.json({
         credits: {
@@ -149,6 +159,24 @@ describe("ProviderFailureCard", () => {
         provider: "anthropic",
         makeDefault: true,
         moveExisting: false,
+      }),
+    );
+  });
+
+  it("asks no Move existing chats too, as Settings does not, when no other chat would move", async () => {
+    const calls = mockApi(0);
+    renderCard({});
+    await userEvent.click(screen.getByRole("button", { name: "Switch to Claude" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: "Also make default" }));
+    expect(within(dialog).queryByRole("checkbox", { name: "Move existing chats too" })).toBeNull();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === "POST")?.body).toEqual({
+        kind: "provider",
+        provider: "anthropic",
+        makeDefault: true,
+        moveExisting: true,
       }),
     );
   });

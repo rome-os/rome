@@ -66,6 +66,8 @@ function createProvider(id: ProviderId) {
   const opened: ModelSessionParams[] = [];
   /** How many of the next turns fail before reaching the thread. */
   const failing = { next: 0 };
+  /** How many of the next turns answer only after `ms`. */
+  const stalling = { next: 0, ms: 1_000 };
   /** Claude names a new thread only after its first assistant message. */
   const naming = { atOpen: true };
   /** A completed turn can leave no position to branch at. */
@@ -76,6 +78,10 @@ function createProvider(id: ProviderId) {
       id,
       async function* (input): AsyncIterable<AgentEvent | ModelSessionEvent> {
         calls.push(input);
+        if (stalling.next > 0) {
+          stalling.next -= 1;
+          await new Promise((resolve) => setTimeout(resolve, stalling.ms));
+        }
         if (failing.next > 0) {
           failing.next -= 1;
           yield { type: "error", error: "quota exhausted" };
@@ -108,7 +114,7 @@ function createProvider(id: ProviderId) {
     builtinTools: new Set<string>(),
     openSession,
   };
-  return { provider, openSession, calls, opened, failing, naming, positions };
+  return { provider, openSession, calls, opened, failing, stalling, naming, positions };
 }
 
 function healthyState() {
@@ -302,10 +308,10 @@ describe("continuation notice through Sessions", () => {
 
   /** Rome's handoff side over this chat's stored messages. */
   const handoffsOver =
-    (executedActions?: string) =>
+    (executedActions?: string, timeoutMs = 5_000) =>
     (modelResolver: ModelResolver): RenewalHandoffs => {
       const handoffs = createRenewalHandoffs({
-        timeoutMs: 5_000,
+        timeoutMs,
         fallbackTimeoutMs: 5_000,
         modelResolver,
         page: async (chatId, limit, before) => {
@@ -399,6 +405,32 @@ describe("continuation notice through Sessions", () => {
     expect(prompt).toContain("<executed_actions>\n- send_email(to: a@b.c, subject: Rent)");
     expect(prompt).toContain("Email the landlord about rent.");
     expect(prompt).not.toContain("<handoff>");
+  });
+
+  it("moves on without the note when the old model does not write it in time", async () => {
+    const manager = createManager({
+      handoffs: (resolver) => ({
+        ...handoffsOver("- send_email(to: a@b.c, subject: Rent)", 50)(resolver),
+        fallback: async () => null,
+      }),
+    });
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "Email the landlord about rent.");
+    // The old provider runs, but its handoff turn answers long after the deadline.
+    anthropic.stalling.next = 1;
+    anthropic.stalling.ms = 2_000;
+    await acquire(manager, "gpt-6-luna");
+    // Date is faked here: the wall clock tells whether the switch waited.
+    const started = performance.now();
+    await chatTurn(session, "Did that go out?");
+
+    expect(performance.now() - started).toBeLessThan(1_500);
+    expect(anthropic.calls.at(-1)?.prompt).toContain("<handoff_request>");
+    const prompt = openai.calls[0]?.prompt ?? "";
+    // What the turns did, and the chat itself, stand in for the note.
+    expect(prompt).not.toContain("<handoff>");
+    expect(prompt).toContain("<executed_actions>\n- send_email(to: a@b.c, subject: Rent)");
+    expect(prompt).toContain("Email the landlord about rent.");
   });
 
   it("has no position to branch at until a turn runs on the new provider's thread", async () => {

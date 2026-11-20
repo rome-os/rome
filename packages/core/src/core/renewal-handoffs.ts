@@ -156,16 +156,57 @@ function masked(text: string): string {
   return text.replace(SECRET_VALUE, "[redacted]");
 }
 
+/** Argument names that hold what a tool types or fills in. */
+const TYPED_KEY = /^(?:text|value|values|keys|input|typed|fill)$/i;
+/**
+ * A field that takes a secret, as a tool names its target: a password input,
+ * a one-time code, a card number.
+ */
+const SECRET_TARGET =
+  /pass(?:word|code|phrase)?|secret|token|api.?key|\bpin\b|otp|one.?time|2fa|mfa|cvv|cvc|card.?number|credential/i;
+
+/** Whether a call's own words name a secret field as what it types into. */
+function typesSecret(input: Record<string, unknown>, tool?: string): boolean {
+  if (tool && SECRET_TARGET.test(tool)) return true;
+  return Object.entries(input).some(
+    ([key, value]) =>
+      !TYPED_KEY.test(key) && typeof value === "string" && SECRET_TARGET.test(value),
+  );
+}
+
+/**
+ * The value with every credential taken out, however deep: secret-named
+ * entries dropped, and what is typed into a secret field redacted.
+ */
+function withoutSecrets(value: unknown, tool?: string, depth = 0): unknown {
+  if (depth > 8) return "[…]";
+  if (Array.isArray(value)) return value.map((item) => withoutSecrets(item, undefined, depth + 1));
+  if (typeof value !== "object" || value === null) return value;
+  const input = value as Record<string, unknown>;
+  const secretTarget = typesSecret(input, tool);
+  const kept: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(input)) {
+    if (SECRET_KEY.test(key)) continue;
+    kept[key] =
+      secretTarget && TYPED_KEY.test(key)
+        ? "[redacted]"
+        : withoutSecrets(entry, undefined, depth + 1);
+  }
+  return kept;
+}
+
 /**
  * The arguments a tool call is known by: short values whole, long ones cut.
- * A list carried to another provider holds no credentials.
+ * A list carried to another provider holds no credentials, nested ones and
+ * text typed into a password field included.
  */
-export function keyArguments(input: unknown): string {
+export function keyArguments(input: unknown, tool?: string): string {
   if (input === undefined || input === null) return "";
   if (typeof input !== "object") return masked(String(input));
   const parts: string[] = [];
-  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
-    if (value === undefined || value === null || value === "" || SECRET_KEY.test(key)) continue;
+  const clean = withoutSecrets(input, tool) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(clean)) {
+    if (value === undefined || value === null || value === "") continue;
     const text = masked(typeof value === "string" ? value : JSON.stringify(value));
     parts.push(`${key}: ${text.length > 80 ? `${text.slice(0, 80)}…` : text}`);
   }
@@ -198,7 +239,7 @@ export function executedActionsOf(rows: readonly ChatRow[]): string | null {
     );
     for (const block of blocks) {
       if (block?.type !== "tool_use" || typeof block.tool !== "string") continue;
-      const line = `- ${block.tool}(${keyArguments(block.input)})${block.id && failed.has(block.id) ? " (failed)" : ""}`;
+      const line = `- ${block.tool}(${keyArguments(block.input, block.tool)})${block.id && failed.has(block.id) ? " (failed)" : ""}`;
       lines.push(line.length > ACTION_LINE_CHARS ? `${line.slice(0, ACTION_LINE_CHARS)}…` : line);
     }
   }

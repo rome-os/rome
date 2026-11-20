@@ -13,7 +13,11 @@ import { LabeledCheckbox, useProviderName } from "@/components/default-provider"
 import { ChatNotice } from "@/components/chat/ChatNotice";
 import { ProviderSignIn } from "@/components/chat/ProviderSignIn";
 import { Button } from "@/components/ui/button";
-import { type ProviderSwitch, switchProviderFailure } from "@/hooks/use-default-provider";
+import {
+  type ProviderSwitch,
+  switchProviderFailure,
+  useDefaultProvider,
+} from "@/hooks/use-default-provider";
 import { modelDisplayName } from "@/lib/model-display";
 import { cn } from "@/lib/utils";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
@@ -430,6 +434,8 @@ function SwitchConfirmDialog({
   const [makeDefault, setMakeDefault] = useState(false);
   const [moveExisting, setMoveExisting] = useState(true);
   const [credits, setCredits] = useState<RomeCreditsView | null | undefined>(undefined);
+  // Asked exactly when Settings asks it: only while a change would move other chats.
+  const asksToMove = (useDefaultProvider().data?.followingChats ?? 0) > 0;
   const open = provider !== null;
   useEffect(() => {
     if (!open) return;
@@ -458,27 +464,29 @@ function SwitchConfirmDialog({
       cancelLabel={t("providerFailure.confirm.cancel")}
       confirmDisabled={pending}
       onCancel={onCancel}
-      onConfirm={() => onConfirm(makeDefault, moveExisting)}
+      onConfirm={() => onConfirm(makeDefault, asksToMove ? moveExisting : true)}
     >
       <div className="space-y-1">
         <LabeledCheckbox checked={makeDefault} disabled={pending} onCheckedChange={setMakeDefault}>
           {t("providerFailure.alsoMakeDefault")}
         </LabeledCheckbox>
         {makeDefault ? (
-          <div className="space-y-1 pt-1 pl-6">
-            <LabeledCheckbox
-              checked={moveExisting}
-              disabled={pending}
-              onCheckedChange={setMoveExisting}
-            >
-              {t("providerFailure.confirm.moveExisting")}
-            </LabeledCheckbox>
-            {moveExisting && (
-              <p className="pl-6 text-aux text-muted-foreground">
-                {t("providerFailure.confirm.moveExistingHelp", { provider: name })}
-              </p>
-            )}
-          </div>
+          asksToMove && (
+            <div className="space-y-1 pt-1 pl-6">
+              <LabeledCheckbox
+                checked={moveExisting}
+                disabled={pending}
+                onCheckedChange={setMoveExisting}
+              >
+                {t("providerFailure.confirm.moveExisting")}
+              </LabeledCheckbox>
+              {moveExisting && (
+                <p className="pl-6 text-aux text-muted-foreground">
+                  {t("providerFailure.confirm.moveExistingHelp", { provider: name })}
+                </p>
+              )}
+            </div>
+          )
         ) : (
           <p className="pl-6 text-aux text-muted-foreground">
             {t("providerFailure.confirm.makeDefaultHelp", { provider: name })}

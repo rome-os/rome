@@ -2,6 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import type { ModelAccountReport, ModelAccountReports } from "./model-account-report.js";
 import type { CodexLogin } from "./model-login.js";
 import {
+  modelResolutionRequest,
   type ModelResolutionFacts,
   type ModelResolutionRequest,
   resolveModel,
@@ -118,9 +119,9 @@ describe("resolveModel", () => {
       "claude-opus-5-5[1m]",
     ],
     [
-      "Rome credits when no guardian account can serve",
+      "Rome credits when no guardian account is logged in",
       large,
-      facts({ reports: reports(unauthorized, limited), logins: { openai: credits() } }),
+      facts({ reports: reports(unauthorized, unauthorized), logins: { openai: credits() } }),
       "openai",
       "gpt-6.1-sol",
     ],
@@ -128,7 +129,7 @@ describe("resolveModel", () => {
       "Terra on credits when the gateway does not serve Sol",
       large,
       facts({
-        reports: reports(unauthorized, limited),
+        reports: reports(unauthorized, unauthorized),
         logins: { openai: credits(["gpt-5.6-terra"]) },
       }),
       "openai",
@@ -149,7 +150,10 @@ describe("resolveModel", () => {
   it("does not limit a model on Rome credits by the guardian's plan", () => {
     const given = facts({ reports: reports(restricted), logins: { openai: credits() } });
     expect(
-      resolveModel({ kind: "exact", providerId: "openai", model: "gpt-6.1-sol" }, given),
+      resolveModel(
+        { kind: "exact", providerId: "openai", model: "gpt-6.1-sol", credits: true },
+        given,
+      ),
     ).toMatchObject({ ok: true });
   });
 
@@ -229,7 +233,7 @@ describe("resolveModel", () => {
     [
       "Rome credits count as connected and not limited",
       facts({
-        reports: reports(unauthorized, limited),
+        reports: reports(unauthorized, unauthorized),
         logins: { openai: credits(["gpt-6.1-sol"]) },
       }),
       false,
@@ -328,6 +332,36 @@ describe("resolveModel on the default provider", () => {
         given,
       ),
     ).toMatchObject({ ok: true, providerId: "openai" });
+  });
+
+  it("spends Rome credits with no default set only while no AI account is logged in", () => {
+    const exact = { kind: "exact", providerId: "openai", model: "gpt-6.1-sol" } as const;
+    const claudeIn = facts({
+      reports: reports(unauthorized, available),
+      logins: { openai: credits() },
+    });
+    expect(resolveModel(exact, claudeIn)).toMatchObject({
+      ok: false,
+      failure: { kind: "provider_unavailable", provider: "openai" },
+    });
+    const noneIn = facts({
+      reports: reports(unauthorized, unauthorized),
+      logins: { openai: credits() },
+    });
+    expect(resolveModel(exact, noneIn)).toMatchObject({ ok: true, providerId: "openai" });
+  });
+
+  it("runs a chat on Rome credits on Codex, at the strength of the model it keeps", () => {
+    expect(
+      modelResolutionRequest("claude-opus-5-5", undefined, { tier: "large" }, undefined, true),
+    ).toMatchObject({ kind: "exact", providerId: "openai", credits: true });
+    expect(
+      modelResolutionRequest(undefined, undefined, { tier: "large" }, undefined, true),
+    ).toEqual({ kind: "tier", tier: "large", override: "openai", credits: true });
+    expect(modelResolutionRequest("claude-opus-5-5", undefined, { tier: "large" })).toMatchObject({
+      kind: "exact",
+      providerId: "anthropic",
+    });
   });
 
   it("finds none usable with no default and nothing signed in", () => {

@@ -144,8 +144,8 @@ The provider every chat that follows the default runs on: Claude, Codex on the g
 A chat that follows the default but stays on another provider: the guardian switched only this chat from a card, or changed the default without moving the chats already there. Rome made the choice, so a model limit may still move it within its provider, but a change of the default does not move it. A later change that moves existing chats lets it follow again.
 
 - A kept chat stays on the model it last ran, or on its strength on the other provider. One that never ran a model takes its agent's tier.
-- A chat kept on Rome credits spends them, and no other chat does.
-- In code the chat's selection is stored as made by Rome, `kept` (or `credits` for Rome credits), in [`packages/core/src/webchat/chat-providers.ts`](../../packages/core/src/webchat/chat-providers.ts).
+- A chat moved onto Rome credits spends them, and no other chat does. It runs its model's strength on Codex through them, and keeps its model and who chose it, so a model its owner picked comes back. Any login takes every chat off Rome credits.
+- In code the chat's selection is stored as made by Rome, `kept`, and a chat on Rome credits carries a flag beside its model, in [`packages/core/src/webchat/chat-providers.ts`](../../packages/core/src/webchat/chat-providers.ts).
 
 ## Provider failure
 

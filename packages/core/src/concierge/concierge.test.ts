@@ -4013,6 +4013,22 @@ describe("Concierge provider recovery", () => {
       ],
     );
   });
+  it("keeps a chat on Rome credits there when Codex's model hits its limit", async () => {
+    const { s } = await prepared({ startEvents: false });
+    // An owner-free chat on a Claude model, moved onto Rome credits: it runs on Codex.
+    const chat = await s.deps.webchatRepo.getSession(CONCIERGE_CHAT);
+    Object.assign(chat!, { romeCredits: true });
+    const selectModel = rs.fn();
+    (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue({ selectModel });
+    expect(
+      await s.service.switchForModelLimit(
+        CONCIERGE_CHAT,
+        failure("Selected model is at capacity.", "openai"),
+      ),
+    ).toMatchObject({ from: "openai", to: "openai", selectionId: "gpt-6-luna" });
+    expect(selectModel).toHaveBeenCalledWith("gpt-6-luna", { credits: true });
+    expect((await s.deps.webchatRepo.getSession(CONCIERGE_CHAT))?.romeCredits).toBe(true);
+  });
   it("moves a chat whose turns never ran off the provider's strong model", async () => {
     const { s } = await prepared({ startEvents: false });
     await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, null, "auto");

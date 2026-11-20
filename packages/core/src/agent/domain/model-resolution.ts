@@ -24,7 +24,7 @@ import {
 } from "./model-selection.js";
 import type { ModelTier } from "./model-tier.js";
 import { providerAvailability } from "./provider-availability.js";
-import { providerOfDefault, type DefaultProvider } from "./default-provider.js";
+import { providerOfDefault, signedInProviders, type DefaultProvider } from "./default-provider.js";
 import { followingSelection } from "./model-strength.js";
 
 /**
@@ -186,10 +186,11 @@ export function resolveModel(
   // A Rome credits login serves Codex only for an ask that may spend credits:
   // the guardian made them the default or moved this chat onto them. Any
   // other ask reads the guardian's own ChatGPT account, which shows its card.
+  // With no default set, credits run only while no AI account is logged in.
   const spendsCredits =
     request.credits === true ||
     facts.defaultProvider === "rome_credits" ||
-    facts.defaultProvider === undefined;
+    (!facts.defaultProvider && signedInProviders(reports, true).rome_credits);
   const login =
     facts.logins.openai?.kind === "rome_credits" && !spendsCredits
       ? undefined
@@ -299,7 +300,8 @@ export function resolveModel(
  * The ask: the chat's exact selection, else the agent's exact model, else its
  * tier. A tier that names no provider follows the default provider and keeps
  * the session's pin while the pin is on that provider. `override` runs this
- * one ask on another provider, and `credits` lets it spend Rome credits.
+ * one ask on another provider, and `credits` runs it on Codex through Rome
+ * credits.
  * Throws on an agent with neither a tier nor a provider and model, or with a
  * model beside a tier.
  */
@@ -310,8 +312,10 @@ export function modelResolutionRequest(
   override?: AccountedProviderId,
   credits?: boolean,
 ): ModelResolutionRequest {
-  const request = modelAsk(selectionId, pin, agent, override);
-  return credits ? { ...request, credits: true } : request;
+  if (!credits) return modelAsk(selectionId, pin, agent, override);
+  // Rome credits run Codex: the chat's model, whoever chose it, runs at its
+  // strength there.
+  return { ...modelAsk(selectionId, pin, agent, override ?? "openai"), credits: true };
 }
 
 function modelAsk(

@@ -9,7 +9,7 @@
 // make-tls.sh) the same server also listens with TLS on <port>+1, and on 443
 // for the token refresh Codex sends to auth.openai.com, which
 // use-fake-chatgpt.sh points at this host inside the stack's container.
-// POST /control {"provider":"claude"|"chatgpt","mode":"<mode>"} sets a sticky
+// POST /control {"provider":"claude"|"chatgpt","mode":"<mode>","resetIn":<seconds>} sets a sticky
 // mode per provider; GET /control reads them. Modes:
 //   ok | rate | overloaded | model_limit | usage | model_gone | auth | spend
 // Dev only: nothing in Rome refers to it.
@@ -33,7 +33,8 @@ function refused(provider, model) {
 }
 let served = 0;
 const now = () => Math.floor(Date.now() / 1000);
-const resetIn = 2 * 3600;
+// How long until a usage limit resets, in seconds; POST /control {"resetIn": n} sets it.
+let resetIn = 2 * 3600;
 
 const claudeErrors = {
   rate: [429, "rate_limit_error", "Rate limited, please slow down"],
@@ -326,6 +327,7 @@ function handle(req, res) {
         const provider = body.provider === "chatgpt" ? "chatgpt" : "claude";
         modes[provider] = body.mode ?? "ok";
         limited[provider] = null;
+        if (Number.isFinite(body.resetIn)) resetIn = body.resetIn;
       }
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify(modes));

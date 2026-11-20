@@ -748,7 +748,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
    * A dashboard line said in a chat is rewritten there, and the chat's live
    * view told. Any other message is the session's own, as in the base.
    */
-  override async updateMessageContent(id: string, content: string) {
+  override async updateMessageContent(id: string, content: string): Promise<boolean> {
     const chat = this.lines.chatHolding(WEBCHAT_PLATFORM, id);
     if (!chat) return super.updateMessageContent(id, content);
     assertWidgetAloneInContent(content);
@@ -759,7 +759,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
         AND parent_session_id IS NULL
       LIMIT 1
     `);
-    if (!session) return;
+    if (!session) return true;
     const [line] = this.selectLines([session.id], sql`WHERE id = ${id}`);
     if (line) {
       this.emitMessageUpdated({
@@ -771,6 +771,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
         createdAt: line.createdAt,
       });
     }
+    return true;
   }
 
   override async getMessages(sessionId: string) {

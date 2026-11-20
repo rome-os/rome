@@ -20,7 +20,8 @@ import {
 
 type Row = {
   largeModelSelection?: string | null;
-  largeModelSelectionBy?: "owner" | "auto" | "kept" | "credits" | null;
+  largeModelSelectionBy?: "owner" | "auto" | "kept" | null;
+  romeCredits?: boolean;
   triggerKind?: string | null;
   agentName?: string | null;
 };
@@ -49,8 +50,12 @@ function harness(
     onRun?: (params: { threadId: string }, failures: ProviderFailures) => Promise<void> | void;
     /** The silent retry's wait. Default: none. */
     delay?: () => Promise<void>;
-    /** Writing a message that does not exist yet fails, as the repository's does. */
-    strictMessages?: boolean;
+    /** Codex is logged in on Rome credits. Default: whenever they are signed in. */
+    codexOnCredits?: boolean;
+    /** What the chat's session is opened by, as the real lookup would. */
+    runtimeOf?: (chatId: string) => Promise<string | null>;
+    /** What keeping a chat waits on, as the real write would. */
+    keeping?: Promise<void>;
   } = {},
 ) {
   const messages = new Map<string, { chatId: string; parts: unknown[] }>();
@@ -61,6 +66,7 @@ function harness(
   const kept: Array<{ chatId: string; provider: string }> = [];
   const followed: string[] = [];
   const chose: Array<{ provider: string; moveExisting?: boolean }> = [];
+  const selected: Array<{ chatId: string; selection: string | null; credits?: boolean }> = [];
   const timers: Array<{ ms: number; work: () => void }> = [];
   const accountListeners = new Set<
     (provider: ProviderId, change: "authorization" | "refreshed") => void
@@ -98,7 +104,9 @@ function harness(
     },
     chats: {
       keep: async (chatId, provider) => {
+        await options.keeping;
         kept.push({ chatId, provider });
+        if (provider === "rome_credits" && chats[chatId]) chats[chatId].romeCredits = true;
         return "claude-opus-5-5";
       },
       follow: async (chatId) => {
@@ -114,6 +122,7 @@ function harness(
               largeModelSelectionBy: null,
               triggerKind: null,
               agentName: null,
+              romeCredits: false,
               ...chats[id],
             }
           : null,
@@ -122,15 +131,20 @@ function harness(
         messages.set(id, { chatId, parts });
         return { id };
       },
+      // As the repository does: a message not written yet is left alone.
       updateMessageContent: async (id: string, content: string) => {
         const message = messages.get(id);
-        if (!message && options.strictMessages) throw new Error("Message not found");
-        messages.set(id, { chatId: message?.chatId ?? "?", parts: JSON.parse(content) });
+        if (!message) return false;
+        messages.set(id, { chatId: message.chatId, parts: JSON.parse(content) });
+        return true;
+      },
+      updateSessionRomeCredits: async (id: string, romeCredits: boolean) => {
+        if (chats[id]) chats[id].romeCredits = romeCredits;
       },
       updateSessionLargeModelSelection: async (
         id: string,
         selection: string | null,
-        by: "owner" | "auto" | "kept" | "credits",
+        by: "owner" | "auto" | "kept",
       ) => {
         if (chats[id]) {
           chats[id].largeModelSelection = selection;
@@ -145,7 +159,7 @@ function harness(
       },
     },
     mainChatId: async () => "main",
-    runtimeOf: async (chatId) => `session-${chatId}`,
+    runtimeOf: options.runtimeOf ?? (async (chatId) => `session-${chatId}`),
     runner: {
       runAndReport: async (params) => {
         runs.push({ threadId: params.threadId, prompt: params.prompt });
@@ -158,6 +172,10 @@ function harness(
       return options.swap === false ? null : { moved: true };
     },
     creditsUsable: () => options.credits ?? false,
+    codexOnCredits: () => options.codexOnCredits ?? signedIn.rome_credits,
+    selectModel: (chatId, _agentName, selection, credits) => {
+      selected.push({ chatId, selection, ...(credits !== undefined ? { credits } : {}) });
+    },
     notify: {
       send: async (content) => {
         pushes.push(content.body ?? "");
@@ -220,6 +238,7 @@ function harness(
     kept,
     followed,
     chose,
+    selected,
     timers,
     accountChanged,
     cardIn,
@@ -866,7 +885,13 @@ describe("Rome credits, spent only when the guardian chose them", () => {
 
   it("says Rome credits are used up, not that ChatGPT is logged out, for a chat on them", async () => {
     const h = harness(
-      { chat: { largeModelSelection: "gpt-6-1-sol", largeModelSelectionBy: "credits" } },
+      {
+        chat: {
+          largeModelSelection: "claude-opus-5-5",
+          largeModelSelectionBy: "owner",
+          romeCredits: true,
+        },
+      },
       { openai: reportOf("unauthorized"), anthropic: reportOf("unauthorized") },
       {
         defaultProvider: "openai",
@@ -1005,11 +1030,7 @@ describe("the silent retry", () => {
 
 describe("a refused send's card", () => {
   it("takes its settled form when it settled before its message was written", async () => {
-    const h = harness(
-      { chat: {} },
-      { anthropic: reportOf("usage_limit_reached") },
-      { strictMessages: true },
-    );
+    const h = harness({ chat: {} }, { anthropic: reportOf("usage_limit_reached") });
     const part = await h.failures.cardFor(
       { chatId: "chat", agentName: "main", failure: refused("anthropic", "quota_exhausted") },
       "late",
@@ -1019,5 +1040,181 @@ describe("a refused send's card", () => {
     h.messages.set("late", { chatId: "chat", parts: [part] });
     await h.failures.written("late");
     expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "recovered" });
+  });
+});
+
+describe("round 5: what the second review found", () => {
+  it("tries a quota card's turn again once its limit resets, with no account read in between", async () => {
+    const until = new Date(Date.now() + 60 * 60_000).toISOString();
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("usage_limit_reached", {}, until),
+    };
+    const h = harness({ chat: {} }, reports);
+    await h.fail("chat", quota);
+    const timer = h.timers.at(-1);
+    // Due a little after the reset, not on the 5-minute recovery steps.
+    expect(timer?.ms).toBeGreaterThan(59 * 60_000);
+    reports.anthropic = reportOf("available");
+    timer?.work();
+    await flush();
+    expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
+  });
+
+  it("schedules a quota card's retry once the account read names its reset time", async () => {
+    const reports: ModelAccountReports = { anthropic: reportOf("available") };
+    const h = harness({ chat: {} }, reports);
+    await h.fail("chat", quota);
+    expect(h.timers).toEqual([]);
+    reports.anthropic = reportOf(
+      "usage_limit_reached",
+      {},
+      new Date(Date.now() + 10 * 60_000).toISOString(),
+    );
+    await h.accountChanged("anthropic");
+    expect(h.timers).toHaveLength(1);
+  });
+
+  it("leaves a card a switch took to the switch when its recovery timer fires", async () => {
+    let release = () => {};
+    const keeping = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("available"), openai: reportOf("available") },
+      { keeping },
+    );
+    await h.fail("chat", { provider: "anthropic", message: "overloaded", httpStatus: 529 }, true);
+    const [card] = await h.failures.cards();
+    const switched = h.failures.switchCard(card!.messageId, {
+      kind: "provider",
+      provider: "openai",
+    });
+    await flush();
+    // The recovery fires while the switch is still moving the chat.
+    h.timers.at(-1)?.work();
+    await flush();
+    expect(h.runs).toEqual([]);
+    release();
+    await switched;
+    await flush();
+    expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
+    expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "switched", provider: "openai" });
+  });
+
+  it("settles once when the notice's switch races a task's own card", async () => {
+    const h = harness(
+      { a: { triggerKind: "concierge" }, b: { triggerKind: "concierge" }, main: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+    );
+    await h.fail("a", quota);
+    await h.fail("b", quota);
+    const [outage] = await h.failures.outages();
+    const cardOfA = (await h.failures.cards()).find((card) => card.chatId === "a")!;
+    const change = { kind: "provider", provider: "openai" } as const;
+    const results = await Promise.allSettled([
+      h.failures.switchOutage(outage!.id, change),
+      h.failures.switchCard(cardOfA.messageId, change),
+    ]);
+    await flush();
+    expect(results.map((result) => result.status)).toEqual(["fulfilled", "rejected"]);
+    expect(h.runs.map((run) => run.threadId).sort()).toEqual(["a", "b"]);
+    expect(h.kept.map((keep) => keep.chatId).sort()).toEqual(["a", "b"]);
+  });
+
+  it("keeps a switch's resume marker until the turn starts, so a restart runs it", async () => {
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+      { runtimeOf: async () => null },
+    );
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
+    await flush();
+    expect(h.runs).toEqual([]);
+    expect(h.settings.get(PROVIDER_RESUMES_SETTING_KEY)).toEqual([
+      expect.objectContaining({ chatId: "chat" }),
+    ]);
+    const after = harness(
+      { chat: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+      { settings: h.settings },
+    );
+    await flush();
+    expect(after.runs.map((run) => run.threadId)).toEqual(["chat"]);
+    expect(after.settings.get(PROVIDER_RESUMES_SETTING_KEY)).toEqual([]);
+  });
+
+  it("moves a chat whose owner picked its model onto Rome credits, keeping the pick", async () => {
+    const chats: Record<string, Row> = {
+      chat: { largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "owner" },
+    };
+    const h = harness(
+      chats,
+      { openai: reportOf("unauthorized"), anthropic: reportOf("unauthorized") },
+      {
+        defaultProvider: "anthropic",
+        signedIn: { anthropic: false, openai: false, rome_credits: true },
+        credits: true,
+      },
+    );
+    await h.fail("chat", {
+      provider: "anthropic",
+      message: "not logged in",
+      reason: "not_logged_in",
+    });
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "rome_credits" });
+    expect(h.kept).toEqual([{ chatId: "chat", provider: "rome_credits" }]);
+    expect(chats.chat).toMatchObject({
+      largeModelSelection: "claude-opus-5-5",
+      largeModelSelectionBy: "owner",
+      romeCredits: true,
+    });
+  });
+
+  it("names ChatGPT, not Rome credits, once a chat's flag outlives a ChatGPT login", async () => {
+    const h = harness(
+      { chat: { romeCredits: true } },
+      { openai: reportOf("expired"), anthropic: reportOf("unauthorized") },
+      {
+        defaultProvider: "openai",
+        signedIn: { anthropic: false, openai: true, rome_credits: false },
+        codexOnCredits: false,
+      },
+    );
+    await h.fail("chat", revoked);
+    expect(h.cardIn("chat")).toMatchObject({ provider: "openai", reason: "login" });
+  });
+
+  it("keeps a chat on Rome credits when its card switches it to another model", async () => {
+    const h = harness(
+      { chat: { romeCredits: true } },
+      { openai: reportOf("available") },
+      {
+        defaultProvider: "rome_credits",
+        signedIn: { anthropic: false, openai: false, rome_credits: true },
+      },
+    );
+    await h.fail("chat", notInPlan, true);
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "model", selection: "gpt-6-luna" });
+    expect(h.selected).toEqual([{ chatId: "chat", selection: "gpt-6-luna", credits: true }]);
+  });
+
+  it("writes a refused send's card settled when it settled before its message existed", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("usage_limit_reached") });
+    const part = await h.failures.cardFor(
+      { chatId: "chat", agentName: "main", failure: refused("anthropic", "quota_exhausted") },
+      "late",
+      [],
+    );
+    // The repository writes nothing for a message not there yet, and throws nothing.
+    await h.failures.succeeded("chat");
+    expect(h.messages.has("late")).toBe(false);
+    h.messages.set("late", { chatId: "chat", parts: [part] });
+    await h.failures.written("late");
+    expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "recovered", continued: true });
   });
 });

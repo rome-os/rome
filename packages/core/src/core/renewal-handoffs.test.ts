@@ -231,6 +231,48 @@ describe("the executed-actions list", () => {
     expect(list).not.toContain("secret id 42");
   });
 
+  it("carries no credentials nested in arguments, nor what is typed into a password field", () => {
+    const list =
+      executedActionsOf([
+        trace("t1", [
+          {
+            type: "tool_use",
+            tool: "http_request",
+            id: "a",
+            input: {
+              url: "https://example.com/login",
+              body: { user: "ada", login: { password: "hunter2", otpSecret: "JBSWY3DP" } },
+              steps: [{ field: "#email", value: "ada@example.com" }],
+            },
+          },
+          {
+            type: "tool_use",
+            tool: "browser_type",
+            id: "b",
+            input: { element: "Password input", ref: "e12", text: "correct horse battery" },
+          },
+          {
+            type: "tool_use",
+            tool: "browser_fill",
+            id: "c",
+            input: { fields: [{ selector: "input[type=password]", value: "s3cret-pw" }] },
+          },
+          {
+            type: "tool_use",
+            tool: "enter_one_time_code",
+            id: "d",
+            input: { text: "482913" },
+          },
+        ]),
+      ]) ?? "";
+    for (const leaked of ["hunter2", "JBSWY3DP", "correct horse battery", "s3cret-pw", "482913"]) {
+      expect(list).not.toContain(leaked);
+    }
+    // What is not a secret still says what was done.
+    expect(list).toContain("ada@example.com");
+    expect(list).toContain("Password input");
+  });
+
   it("carries no credentials: secret-named arguments are left out, credential-like values masked", () => {
     const list =
       executedActionsOf([

@@ -207,14 +207,16 @@ describe("agent model pins through Sessions", () => {
     expect(openai.openSession).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a pinned Codex session running on credits after ChatGPT disconnects", async () => {
+  it("keeps a pinned Codex session running on credits once no AI account is logged in", async () => {
     await writeConfig({ provider: undefined, modelId: undefined, tier: "small" });
     const firstManager = createManager();
     const first = await firstManager.open(key, { workingDir: directory });
     await collect((await startAfter(first, { prompt: "guardian" })).events());
     await firstManager.shutdown();
 
+    // Credits run only while the guardian is logged in to no AI account.
     state.openai = reportOf("unauthorized");
+    state.anthropic = reportOf("unauthorized");
     const resumed = await createManager(false, true).open(key, { workingDir: directory });
     await collect((await startAfter(resumed, { prompt: "credits" })).events());
 
