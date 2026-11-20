@@ -173,9 +173,19 @@ for (const needle of new Set([conversation, ...escapedToo(words), ...escapedToo(
 /** A condition true when any of `table`'s `columns` holds a needle. */
 const holdsNeedle = (table, columns) =>
   `EXISTS (SELECT 1 FROM temp.wipe_needles n WHERE ${columns.map((c) => `instr("${table}"."${c}", n.v) > 0`).join(" OR ")})`;
+// The words alone, without the conversation id: a place or address naming the
+// conversation is kept, but one holding a word, such as a chat's title, is not.
+db.exec("CREATE TEMP TABLE wipe_words (v TEXT NOT NULL)");
+const addWord = db.prepare("INSERT INTO temp.wipe_words (v) VALUES (?)");
+for (const word of new Set([...escapedToo(words), ...escapedToo(extraTexts)]))
+  if (word !== conversation) addWord.run(word);
+const holdsWord = (table, column) =>
+  `EXISTS (SELECT 1 FROM temp.wipe_words w WHERE instr("${table}"."${column}", w.v) > 0)`;
 
 // ---- Delete
 const deleted = {};
+// Columns of the chat's place and address cleared because they held a word.
+const scrubbed = {};
 function remove(table, column, values) {
   const list = [...values];
   if (!list.length || !has(table, column)) return;
@@ -222,10 +232,28 @@ try {
   remove("session_turn_checkpoints", "session_id", providerSessions.keys());
   remove("sessions", "id", providerSessions.keys());
   sweep();
+  scrubPlaces();
   db.exec(dryRun ? "ROLLBACK" : "COMMIT");
 } catch (error) {
   db.exec("ROLLBACK");
   fail(1, `wipe failed: ${error.message}`);
+}
+
+/**
+ * Clears each nullable text column of the chat's place and address that holds
+ * a word, such as a chat's title, and keeps the row with its key and address.
+ */
+function scrubPlaces() {
+  for (const table of PLACES) {
+    for (const column of schema.get(table) ?? []) {
+      if (!isTextColumn(table, column) || !nullable(table, column)) continue;
+      const where = holdsWord(table, column);
+      const n = all(`SELECT count(*) AS n FROM "${table}" WHERE ${where}`)[0].n;
+      if (!n) continue;
+      (scrubbed[table] ??= {})[column] = n;
+      if (!dryRun) db.exec(`UPDATE "${table}" SET "${column}" = NULL WHERE ${where}`);
+    }
+  }
 }
 
 /**
@@ -359,7 +387,14 @@ for (const [table, columns] of dryRun ? [] : schema) {
     if (!isTextColumn(table, column)) continue;
     const n = all(`SELECT count(*) AS n FROM "${table}" WHERE ${holdsNeedle(table, [column])}`)[0]
       .n;
-    if (n) ((PLACES.has(table) ? kept : remaining)[table] ??= {})[column] = n;
+    if (!n) continue;
+    // A place or address that still holds a word, not only the conversation
+    // id, keeps content: that is a remaining copy, not a kept name.
+    const wordRows = PLACES.has(table)
+      ? all(`SELECT count(*) AS n FROM "${table}" WHERE ${holdsWord(table, column)}`)[0].n
+      : n;
+    if (wordRows) (remaining[table] ??= {})[column] = wordRows;
+    if (n > wordRows) (kept[table] ??= {})[column] = n - wordRows;
   }
 }
 
@@ -384,6 +419,7 @@ const result = {
   sessions: [...sessionIds],
   provider_sessions: [...providerSessions.keys()],
   deleted,
+  scrubbed,
   transcripts,
   remaining,
   kept,
@@ -400,15 +436,18 @@ function readSchema(database) {
     .map((r) => r.name)
     .filter((name) => /^[A-Za-z0-9_]+$/.test(name));
   const map = new Map();
+  const notNull = new Map();
   for (const table of tables) {
     const columns = database.prepare(`PRAGMA table_info("${table}")`).all();
     map.set(table, new Map(columns.map((c) => [c.name, String(c.type).toUpperCase()])));
+    notNull.set(table, new Set(columns.filter((c) => c.notnull || c.pk).map((c) => c.name)));
   }
   // Callers use `.has(column)`; keep the type for the scan.
   return new Map(
     [...map].map(([table, columns]) => {
       const set = new Set(columns.keys());
       set.types = columns;
+      set.notNull = notNull.get(table);
       return [table, set];
     }),
   );
@@ -424,6 +463,10 @@ function escapedToo(list) {
     out.add(JSON.stringify(word).slice(1, -1));
   }
   return [...out];
+}
+
+function nullable(table, column) {
+  return !schema.get(table).notNull.has(column);
 }
 
 function isTextColumn(table, column) {

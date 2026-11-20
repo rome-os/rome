@@ -1029,6 +1029,9 @@ const API_METHODS = {
         return { ok: false, error: "channel_not_found" };
       }
       channel = this.imChannel(info.teamId, channel);
+      // A member id names the same direct message, so the same check holds.
+      const outside = this.notInChannel(info, channel);
+      if (outside) return outside;
     } else if (channel.startsWith("D")) {
       if (!this.imOwner(info.teamId, channel)) return { ok: false, error: "channel_not_found" };
       // A user token posts only into its own member's direct message.

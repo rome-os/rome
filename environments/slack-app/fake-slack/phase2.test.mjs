@@ -718,6 +718,9 @@ test("a user token reads only the private conversations its member is in", async
     const writer = (await install(C, HANK, "chat:write", `${reads},chat:write`)).authed_user
       .access_token;
     assert.equal(await post(dmOf(OWNER), writer), "channel_not_found");
+    // A member id names that member's direct message, so the same check holds.
+    assert.equal(await post(OWNER, writer), "channel_not_found");
+    assert.equal(await post(HANK, writer), "ok");
     assert.equal(await post("GC0000BORD1", writer), "channel_not_found");
     assert.equal(await post(dmOf(HANK), writer), "ok");
     assert.equal(await post("CC0000GENRL", writer), "ok");

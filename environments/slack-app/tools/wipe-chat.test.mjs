@@ -403,6 +403,10 @@ test("--text removes what Rome distilled: rows and memory lines that hold the te
     last_active_at: 1,
     status: "active",
   });
+  // Another chat whose title holds the fact: the title goes, the chat stays.
+  db.prepare(
+    "INSERT INTO chats (platform, key, kind, name, started_at) VALUES ('webchat', 'titled', 'dm', ?, 1)",
+  ).run(`About ${fact}`);
   db.close();
   const memory = join(home, ".rome/default/profile/memory");
   mkdirSync(memory, { recursive: true });
@@ -455,5 +459,7 @@ test("--text removes what Rome distilled: rows and memory lines that hold the te
   assert.equal(count("SELECT count(*) AS n FROM rome_agent_messages WHERE id = 'distilled'"), 0);
   assert.equal(count("SELECT count(*) AS n FROM rome_agent_messages WHERE id = 'unrelated'"), 1);
   assert.equal(count("SELECT count(*) AS n FROM sessions WHERE id = 'p-memory'"), 0);
+  assert.deepEqual(out.scrubbed, { chats: { name: 1 } });
+  assert.equal(after.prepare("SELECT name FROM chats WHERE key = 'titled'").get().name, null);
   after.close();
 });

@@ -76,9 +76,7 @@ fi
 ENV_SHA="$(git -C "$ROME_DIR" rev-parse HEAD)"
 
 resolve() { # <repo> <ref>
-  local repo="$1" ref="$2"
-  case "$ref" in origin/*) git -C "$repo" fetch -q origin "${ref#origin/}" || die "cannot fetch $ref in $repo" ;; esac
-  git -C "$repo" rev-parse --verify -q "$ref^{commit}" || die "$ref is not a commit in $repo"
+  "$ENV_DIR/tools/resolve-ref.sh" "$1" "$2" || die "cannot resolve $2 in $1"
 }
 ROME_SHA="$(resolve "$ROME_DIR" "$ROME_REF")"
 ROME_CLOUD_SHA="$(resolve "$ROME_CLOUD_DIR" "$ROME_CLOUD_REF")"
