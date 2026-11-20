@@ -73,6 +73,15 @@ const SHADOWS_DARK = {
   "rome-shadow-25": "0 25px 60px -12px rgb(0 0 0 / 0.7)",
 } satisfies ThemeTokens;
 
+/** The sidebar's unread count: one red with white numerals in every theme
+ *  and mode, so a count reads the same everywhere (4.7:1). `destructive` can't
+ *  serve it, since dark mode maps it to `red-300`. Like `running`, only the
+ *  host gets the utility; it is not in the app token contract. */
+const UNREAD_COUNT = {
+  unread: "var(--red-400)",
+  "unread-foreground": "var(--neutral-0)",
+} satisfies ThemeTokens;
+
 /** Deprecated status label tokens, kept as host declarations only.
  *
  *  An app is installed as a built artifact: its CSS was compiled against
@@ -89,15 +98,6 @@ const SHADOWS_DARK = {
  *  They leave once no installed artifact references them.
  *
  *  A theme half spreads the set matching its own neutrals. */
-/** The sidebar's unread count: one red with white numerals in every theme
- *  and mode, so a count reads the same everywhere (4.7:1). `destructive` can't
- *  serve it, since dark mode maps it to `red-300`. Like `running`, only the
- *  host gets the utility; it is not in the app token contract. */
-const UNREAD_COUNT = {
-  unread: "var(--red-400)",
-  "unread-foreground": "var(--neutral-0)",
-} satisfies ThemeTokens;
-
 const LEGACY_STATUS_LABELS_WARM_LIGHT = {
   "brand-foreground": "var(--neutral-0)",
   "destructive-foreground": "var(--neutral-0)",
