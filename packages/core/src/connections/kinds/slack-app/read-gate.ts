@@ -3,8 +3,6 @@
 // the same page share one request, and a read waits for its turn up to a
 // limit, past which it is refused with when to try again.
 
-import { SlackApiError } from "../slack/slack.js";
-
 export interface SlackReadGateOptions {
   /** The least time between two requests. */
   intervalMs: number;
@@ -31,6 +29,9 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 export class SlackReadGate {
   private nextAt = 0;
+  /** When Slack last answered a request, which starts its next minute. */
+  private answeredAt = Number.NEGATIVE_INFINITY;
+  private last: Promise<unknown> = Promise.resolve();
   private readonly shared = new Map<string, Promise<unknown>>();
 
   constructor(private readonly options: SlackReadGateOptions) {}
@@ -56,18 +57,24 @@ export class SlackReadGate {
       );
     }
     this.nextAt = at + this.options.intervalMs;
+    const before = this.last;
+    const pause = this.options.sleep ?? sleep;
     const running = (async () => {
-      if (wait > 0) await (this.options.sleep ?? sleep)(wait, signal);
+      if (wait > 0) await pause(wait, signal);
+      // Slack counts its minute from the request it answered, which comes
+      // later than this turn's start when the request before ran long or
+      // waited out a refusal.
+      await before;
+      const late = this.answeredAt + this.options.intervalMs - Math.max(at, this.now());
+      if (late > 0) await pause(late, signal);
       try {
         return await call();
-      } catch (error) {
-        // Slack refused it as too soon: the next request waits a whole turn.
-        if (error instanceof SlackApiError && error.code === "ratelimited") {
-          this.nextAt = Math.max(this.nextAt, this.now() + this.options.intervalMs);
-        }
-        throw error;
+      } finally {
+        this.answeredAt = this.now();
+        this.nextAt = Math.max(this.nextAt, this.answeredAt + this.options.intervalMs);
       }
     })().finally(() => this.shared.delete(key));
+    this.last = running.catch(() => {});
     this.shared.set(key, running);
     return running;
   }

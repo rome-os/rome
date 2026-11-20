@@ -1478,6 +1478,37 @@ describe("Slack app reads take turns with Slack's allowance (R13)", () => {
   });
 });
 
+describe("Slack app reads Slack refused as too soon", () => {
+  it("waits out Slack's Retry-After and asks again, and starts the next turn from Slack's answer", async () => {
+    const asked: number[] = [];
+    let refuse = true;
+    const fetchImpl = (async () => {
+      asked.push(Date.now());
+      if (refuse) {
+        refuse = false;
+        return new Response(null, { status: 429, headers: { "retry-after": "1" } });
+      }
+      return Response.json({ ok: true, messages: [{ ts: "1.0", text: "root", user: "U1" }] });
+    }) as unknown as typeof fetch;
+    const api = createSlackAppWebApi("http://fake-slack.test", fetchImpl);
+    const gate = new SlackReadGate({ intervalMs: 300, maxWaitMs: 60_000 });
+    const replies = (ts: string) =>
+      gate.run(`replies:C1:${ts}`, () =>
+        api.conversationReplies("t", { channel: "C1", ts, limit: 15 }),
+      );
+
+    const [first, second] = await Promise.all([replies("1.0"), replies("2.0")]);
+    expect(first.messages.map((m) => m.text)).toEqual(["root"]);
+    expect(second.messages).toHaveLength(1);
+    expect(asked).toHaveLength(3);
+    // Retry-After held the first read a second before it asked again.
+    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(1_000);
+    // The second thread's turn began when Slack answered, not when the
+    // first read started.
+    expect(asked[2] - asked[1]).toBeGreaterThanOrEqual(300);
+  });
+});
+
 describe("Slack app searches what it keeps (R9)", () => {
   it("finds heard mentions and read direct messages, each once, newest first, and says what it covered", async () => {
     const slack = fakeSlackHistory();
