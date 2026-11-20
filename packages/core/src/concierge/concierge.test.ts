@@ -2364,7 +2364,7 @@ describe("Concierge events", () => {
       turnId,
     });
 
-  it("tells the Concierge nothing of a turn that only carries out the guardian's card answer", async () => {
+  it("tells the Concierge of a turn that only carries out the guardian's card answer, for it to judge", async () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
@@ -2375,11 +2375,12 @@ describe("Concierge events", () => {
       chatId,
       text: concluded(NOTHING_TO_REPORT, "Saved Tea as your afternoon drink."),
     });
-    await rs.advanceTimersByTimeAsync(120_000);
-    expect(s.backendTurns).toEqual([]);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=concierge"');
   });
 
-  it("drops a turn the Concierge's own brief started when it has nothing to report", async () => {
+  it("still reports a turn the Concierge's own brief started, even with nothing to report", async () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
@@ -2393,8 +2394,9 @@ describe("Concierge events", () => {
       chatId,
       text: concluded(NOTHING_TO_REPORT),
     });
-    await rs.advanceTimersByTimeAsync(120_000);
-    expect(s.backendTurns).toEqual([]);
+    await rs.advanceTimersByTimeAsync(2_100);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain(`conclusion: ${NOTHING_TO_REPORT}`);
   });
 
   it("tells the Concierge of a wish for the work to recur, even with nothing else to report", async () => {
@@ -2555,10 +2557,10 @@ describe("Concierge events", () => {
     expect(prompt).not.toContain("Yesterday's summary.");
   });
 
-  it("names no card when the answer has nothing to report, since no forward sends it", async () => {
+  it("names a card even when the answer has nothing to report: the Concierge judges it", async () => {
     const prompt = await cardEventFor(concluded(NOTHING_TO_REPORT), ["Sleep 6.1 h"]);
     expect(prompt).toContain(`conclusion: ${NOTHING_TO_REPORT}`);
-    expect(prompt).not.toContain("card id=");
+    expect(prompt).toContain("card id=card-1: Sleep 6.1 h");
   });
 
   it("cuts a long card line like a long reply", async () => {
@@ -2888,7 +2890,7 @@ describe("Concierge events", () => {
     expect(s.quietFlags).toEqual([true]);
   });
 
-  it("wakes no urgent turn for an approved action that has nothing to report, and tells the decision quietly", async () => {
+  it("tells at once the turn after an approved action, though it has nothing to report, with the decision", async () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
@@ -2908,10 +2910,9 @@ describe("Concierge events", () => {
       startedAt: new Date(Date.now() + 1_000).toISOString(),
     });
     await rs.advanceTimersByTimeAsync(2_000);
-    expect(s.backendTurns).toEqual([]);
-    await rs.advanceTimersByTimeAsync(60_000);
     expect(s.backendTurns).toHaveLength(1);
-    expect(s.backendTurns[0].prompt).toContain('changes="approval_decided"');
+    expect(s.backendTurns[0].prompt).toContain("approval_decided");
+    expect(s.backendTurns[0].prompt).toContain("turn_end:completed by=concierge");
     expect(s.quietFlags).toEqual([true]);
   });
 
@@ -3157,7 +3158,7 @@ describe("Concierge events", () => {
     expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe("");
   });
 
-  it("drops a turn whose conclusion has nothing to report, whoever started it", async () => {
+  it("tells a turn whose conclusion has nothing to report too, and keeps its result waiting for the report", async () => {
     const s = setup();
     const { chatId, taskId } = await startTask(s);
     s.fakeTimers();
@@ -3168,9 +3169,10 @@ describe("Concierge events", () => {
       status: "completed",
       text: concluded(NOTHING_TO_REPORT, "Checked again."),
     });
-    await rs.advanceTimersByTimeAsync(10 * 60_000);
-    expect(s.backendTurns).toEqual([]);
-    expect(await s.taskRepo.get(taskId)).toMatchObject({ outcomeUnsaid: false });
+    expect(await s.taskRepo.get(taskId)).toMatchObject({ outcomeUnsaid: true });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=system"');
   });
 
   it("keeps a digest's no-response notes until a digest that lists them runs to its end", async () => {

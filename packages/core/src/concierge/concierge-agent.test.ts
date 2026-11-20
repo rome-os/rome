@@ -368,8 +368,7 @@ describe("the Concierge agent", () => {
       concierge.systemPromptPrefix
         .split("\n")
         .find((line) => line.startsWith("- A new result of a task")) ?? "";
-    // Rome drops only a turn whose conclusion has nothing to report; a turn
-    // that repeats the guardian's card choice is the Concierge's to judge.
+    // Rome drops no turn by its conclusion: the Concierge judges each one.
     expect(finished).toContain(
       "only carried out what the guardian chose on that task's card or decided on its approval",
     );
@@ -385,7 +384,9 @@ describe("the Concierge agent", () => {
     const silent =
       prompt.split("\n").find((line) => line.startsWith("- Say nothing when a turn only says")) ??
       "";
-    expect(silent).toContain("when its conclusion repeats what you already told");
+    expect(silent).toContain(
+      "its conclusion has nothing new: it says there is nothing to report, or repeats what you already told",
+    );
     expect(silent).toContain("A `by=guardian` turn was read by the guardian in the task chat");
     expect(silent).toContain("`report: when_it_matters` line: tell only news or a problem");
     for (const removed of ['quiet="true"', "ran_on_schedule", "Stay silent unless the result"])

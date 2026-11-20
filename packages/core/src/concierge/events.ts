@@ -22,13 +22,7 @@ import { stopHolds, type TaskStatusView } from "./tasks.js";
 import { WaitExpiry } from "./wait-expiry.js";
 import { isConciergeChat } from "../webchat/privacy.js";
 import { openQuestion } from "./transcript.js";
-import {
-  conclusionOf,
-  hasNothingToReport,
-  recurringOf,
-  withoutConclusion,
-  withoutMarkers,
-} from "./conclusion.js";
+import { conclusionOf, recurringOf, withoutConclusion, withoutMarkers } from "./conclusion.js";
 
 import { failoverReason } from "../agent/index.js";
 
@@ -204,12 +198,9 @@ export async function renderTaskEvents(
       const final = await finalAnswer(messages, taskChatPlace(row.sessionId));
       const latest = final?.answer;
       // Every card the answer's turn showed is what `card_forward` sends by
-      // id, as it is, unless the answer has nothing to report, which holds
-      // them back.
-      if (!(latest && hasNothingToReport(latest.body.text))) {
-        for (const { id, card } of final?.cards ?? []) {
-          lines.push(`card id=${id}: ${replyExcerpt(card.text.replace(/\s+/g, " "))}`);
-        }
+      // id, as it is.
+      for (const { id, card } of final?.cards ?? []) {
+        lines.push(`card id=${id}: ${replyExcerpt(card.text.replace(/\s+/g, " "))}`);
       }
       if (latest) {
         // The task's own conclusion comes whole, so the Concierge can tell
@@ -682,16 +673,6 @@ export function startConciergeEvents(
     const words = userRows.map((row) => userText(row.content)).join(" | ");
     const said = by === "guardian" ? `guardian: ${excerpt(words, DETAIL_EXCERPT_CHARS)}` : null;
     const question = event.status === "completed" ? openQuestion(rows) : null;
-    const finalText =
-      event.status === "completed" && !question
-        ? event.output.text?.trim() ||
-          userText(rows.filter((row) => row.role === "assistant").at(-1)?.content ?? "")
-        : "";
-    // A turn whose conclusion says it has nothing to report owes no report,
-    // whoever started it: no Concierge turn hears of it. Any other turn
-    // reports, and so does a wish for the work to recur, which is news for
-    // the Concierge.
-    const nothingNew = hasNothingToReport(finalText) && recurringOf(finalText) === null;
     // How the task chat's work ended, once it has nothing left to run: a turn
     // a newer input took over hands its work on, and ends nothing.
     const stillRunning = service.dashboard.chats
@@ -699,7 +680,7 @@ export function startConciergeEvents(
       .filter((id) => id !== event.turn.turnId);
     if (stillRunning.length === 0 && (event as EndedAgentTurn).handedOn !== true) {
       await tasks.repo
-        .setLastOutcome(taskId, outcomeOf(event.status), new Date(), { reported: !nothingNew })
+        .setLastOutcome(taskId, outcomeOf(event.status), new Date())
         .catch((error: unknown) =>
           log.warn("failed to write a task's outcome", {
             taskId,
@@ -732,10 +713,10 @@ export function startConciergeEvents(
     }
     // The guardian messages the task worked for read the task's status: its
     // outcome, written above, waits for the Concierge's report, so they
-    // stay working until the turn that reports it ends.
+    // stay working until the turn that reports it ends. Every turn's end is
+    // told, whatever its conclusion says: the Concierge judges it.
     // A failed turn says why, so the Concierge can tell the guardian.
     const { failure, error } = event.output;
-    if (nothingNew) return;
     const cause = event.status === "error" ? (failure?.message ?? error) : undefined;
     const why = cause ? `error: ${excerpt(cause, DETAIL_EXCERPT_CHARS)}` : null;
     const detail = [said, why].filter(Boolean);
