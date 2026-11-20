@@ -649,4 +649,67 @@ describe("ChatRulesSection", () => {
     expect(within(heading).getByText("Follows the defaults")).toBeTruthy();
     expect(within(heading).getByRole("button").getAttribute("aria-expanded")).toBe("true");
   });
+
+  it("keeps a chat's rules shut while its reset runs", async () => {
+    const patchBodies: unknown[] = [];
+    let finishReset: (() => void) | null = null;
+    const row = item({ id: "engineering", name: "engineering", overrides: { enabled: false } });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      const url = String(input);
+      if (url === "/api/connections") return ok({ connections: [] });
+      if (url === "/api/agents") return ok({ agents: [] });
+      if (url.startsWith("/api/chat-settings?")) return ok({ items: [row] });
+      if (url === "/api/chat-settings/reset") {
+        return new Promise<Response>((resolve) => {
+          finishReset = () =>
+            resolve(ok(item({ id: "engineering", name: "engineering" }).snapshot));
+        });
+      }
+      if (init?.method === "PATCH") patchBodies.push(JSON.parse(String(init.body)));
+      return ok(row.snapshot);
+    }) as typeof fetch);
+
+    renderPage();
+    const user = userEvent.setup();
+    const card = await findCard();
+    await user.click(within(card).getByRole("button", { name: "Reset to defaults" }));
+
+    // While the reset is out, no control takes an edit that would land after it.
+    const toggle = within(card).getByRole("switch", { name: "Rome in this chat" });
+    expect(toggle.hasAttribute("disabled") || toggle.closest("fieldset")?.disabled).toBe(true);
+    await user.click(toggle);
+    finishReset?.();
+
+    await waitFor(() => expect(screen.queryByRole("heading", { name: /engineering/ })).toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, PAST_DEBOUNCE_MS));
+    expect(patchBodies).toEqual([]);
+  });
+
+  it("pages through the dialog's chats past those already listed", async () => {
+    const listed = item({ id: "engineering", name: "engineering", overrides: { enabled: false } });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/connections") return ok({ connections: [] });
+      if (url === "/api/agents") return ok({ agents: [] });
+      if (url.includes("changed=true")) return ok({ items: [listed] });
+      if (url.includes("cursor=two"))
+        return ok({ items: [item({ id: "design", name: "design" })] });
+      if (url.startsWith("/api/chat-settings?")) return ok({ items: [listed], nextCursor: "two" });
+      throw new Error(`Unexpected request: GET ${url}`);
+    }) as typeof fetch);
+
+    renderPage();
+    const user = userEvent.setup();
+    await screen.findByRole("heading", { name: /engineering/ });
+    await user.click(screen.getByRole("button", { name: "Add chat" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add a chat" });
+
+    // The first page holds only a listed chat, which says nothing yet about the rest.
+    await user.click(await within(dialog).findByRole("button", { name: "Load more" }));
+    expect(await within(dialog).findByRole("button", { name: /design/ })).toBeTruthy();
+    expect(within(dialog).queryByText("Every chat here already has rules of its own.")).toBeNull();
+  });
 });

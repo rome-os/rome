@@ -392,8 +392,33 @@ function AddChatDialog({
   const { t } = useTranslation("settings");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<ChatSettingsListItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const pagePath = useCallback(
+    (cursor?: string) => {
+      const search = new URLSearchParams({ limit: "50", connectionId });
+      if (query.trim()) search.set("query", query.trim());
+      if (cursor) search.set("cursor", cursor);
+      return `/api/chat-settings?${search}`;
+    },
+    [connectionId, query],
+  );
+
+  async function loadMore() {
+    if (!nextCursor) return;
+    setLoading(true);
+    try {
+      const page = await api<PageResponse>(pagePath(nextCursor));
+      setItems((current) => mergeByKey(current, page.items));
+      setNextCursor(page.nextCursor);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -401,11 +426,11 @@ function AddChatDialog({
     const timer = window.setTimeout(() => {
       setLoading(true);
       setError("");
-      const search = new URLSearchParams({ limit: "50", connectionId });
-      if (query.trim()) search.set("query", query.trim());
-      api<PageResponse>(`/api/chat-settings?${search}`)
+      api<PageResponse>(pagePath())
         .then((page) => {
-          if (!cancelled) setItems(page.items);
+          if (cancelled) return;
+          setItems(page.items);
+          setNextCursor(page.nextCursor);
         })
         .catch((err) => {
           if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -418,7 +443,7 @@ function AddChatDialog({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [connectionId, open, query]);
+  }, [open, pagePath]);
 
   // A reopened dialog starts from a blank search.
   useEffect(() => {
@@ -426,7 +451,8 @@ function AddChatDialog({
   }, [open]);
 
   const choices = items.filter((item) => !exclude.has(keyOf(item)));
-  const allListed = items.length > 0 && choices.length === 0;
+  // Only once every page is in can the dialog say no chat is left to add.
+  const allListed = items.length > 0 && choices.length === 0 && !nextCursor;
 
   return (
     <Dialog open={open} onClose={onClose} size="sm">
@@ -455,7 +481,7 @@ function AddChatDialog({
           <div className="flex justify-center py-6">
             <Spinner label={t("channels.conversationSettings.loading")} />
           </div>
-        ) : choices.length === 0 ? (
+        ) : choices.length === 0 && nextCursor ? null : choices.length === 0 ? (
           <p className="py-6 text-center text-ui text-muted-foreground">
             {allListed
               ? t("channels.conversationSettings.allListed")
@@ -484,6 +510,13 @@ function AddChatDialog({
               );
             })}
           </List>
+        )}
+        {!error && nextCursor && (
+          <div className="flex justify-center">
+            <Button variant="outline" size="sm" disabled={loading} onClick={() => void loadMore()}>
+              {t("channels.conversationSettings.loadMore")}
+            </Button>
+          </div>
         )}
       </DialogBody>
     </Dialog>
