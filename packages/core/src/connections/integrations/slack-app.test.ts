@@ -162,7 +162,7 @@ describe("the Slack app talker", () => {
         return { stop: () => {} };
       },
       copy: {
-        keep: () => true,
+        keep: (kept) => kept.message,
         handedOver: () => {},
         mayNotHold: () => [],
         keepRun: () => [],
@@ -237,7 +237,7 @@ describe("the Slack app's channels in chat settings", () => {
       cloud: cloud(),
       openMailbox: () => ({ stop: () => {} }),
       copy: {
-        keep: () => true,
+        keep: (kept) => kept.message,
         handedOver: () => {},
         mayNotHold: () => [],
         keepRun: () => [],

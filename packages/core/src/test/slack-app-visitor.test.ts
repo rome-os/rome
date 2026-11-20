@@ -105,7 +105,7 @@ describe("Slack app members who did not sign in (R12)", () => {
       // The connection's copy is its own business: this test reads only what
       // it hands over.
       copy: {
-        keep: () => true,
+        keep: (kept) => kept.message,
         handedOver: () => {},
         mayNotHold: () => [],
         keepRun: () => [],

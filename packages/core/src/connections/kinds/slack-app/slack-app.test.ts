@@ -1556,6 +1556,28 @@ describe("Slack app searches what it keeps (R9)", () => {
     expect(found.coverage).toContain("may not read the chat's history");
   });
 
+  it("searches a group it may no longer read in the mentions it heard, not the history it read", async () => {
+    const slack = fakeSlackHistory();
+    slack.say(1);
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    await a.handleFrame(frame(mentionEvent(2)));
+    const member = await a.search({ text: "message", chatId: "C_TEAM" as never, limit: 5 });
+    // The app is removed from the group.
+    slack.conversationHistory.mockImplementation(async () => {
+      throw new SlackApiError("not_in_channel");
+    });
+
+    const removed = await a.search({ text: "message", chatId: "C_TEAM" as never, limit: 5 });
+    const mentions = await a.search({ text: "question", chatId: "C_TEAM" as never, limit: 5 });
+
+    expect(texts(member.messages)).toEqual(["message 1"]);
+    expect(removed.messages).toEqual([]);
+    expect(removed.coverage).toContain("may not read the chat's history");
+    expect(texts(mentions.messages)).toEqual(["question 2"]);
+  });
+
   it("takes a search's wildcards as plain text", async () => {
     const { adapter: a } = adapter(fakeMailbox());
     await a.start();
@@ -1776,6 +1798,18 @@ describe("Slack app takes edits and deletions into its copy", () => {
     const search = async (text: string) => texts((await a.search({ text, limit: 10 })).messages);
     expect(await search("edit")).toEqual(["edit B"]);
     expect(texts(await a.readHistory("D_GUARDIAN" as never, { limit: 1 }))).toEqual(["edit B"]);
+  });
+
+  it("hands the agent a message edited before it arrived as edited", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = historyAdapter(mailbox, slack);
+    await a.start();
+    await mailbox.deposit(changeFrame(9, 1, "edit A", "1700000001.000000"));
+    await mailbox.deposit(frame(dmEvent(1)));
+
+    expect(texts(delivered)).toEqual(["edit A"]);
+    expect(texts((await a.search({ text: "edit", limit: 10 })).messages)).toEqual(["edit A"]);
   });
 
   it("searches a message in the text a page read since shows, not the text it heard", async () => {
