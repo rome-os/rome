@@ -627,13 +627,15 @@ describe("Slack app Web API", () => {
 });
 
 describe("Slack app users.info", () => {
-  it("names the workspace a full member belongs to, and none for a guest or a stranger", async () => {
+  it("names the workspace a full member belongs to, and none for a guest, a stranger or Slackbot", async () => {
     const users: Record<string, object> = {
       U_KIM: { name: "kim", team_id: "T_A" },
       U_CONNECT: { name: "sam", team_id: "T_OTHER" },
       U_GUEST: { name: "guest", team_id: "T_A", is_restricted: true },
       U_STRANGER: { name: "stranger", team_id: "T_OTHER", is_stranger: true },
       U_NO_TEAM: { name: "nobody" },
+      // Slack does not mark Slackbot a bot.
+      USLACKBOT: { name: "slackbot", team_id: "T_A", is_bot: false },
     };
     const fetchImpl = (async (url: string) => {
       const user = new URL(url).searchParams.get("user") as string;
@@ -645,7 +647,7 @@ describe("Slack app users.info", () => {
       Object.keys(users).map(async (id) => (await api.userName("t", id)).fullMemberOf),
     );
 
-    expect(answers).toEqual(["T_A", "T_OTHER", undefined, undefined, undefined]);
+    expect(answers).toEqual(["T_A", "T_OTHER", undefined, undefined, undefined, undefined]);
   });
 });
 

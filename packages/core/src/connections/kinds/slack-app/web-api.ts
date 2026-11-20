@@ -8,6 +8,8 @@ import type { SlackWireMessage } from "./message.js";
 import { SlackTooSoonError } from "./read-gate.js";
 
 const SLACK_API_TIMEOUT_MS = 15_000;
+/** Slackbot's user id, the same in every workspace. */
+const SLACKBOT = "USLACKBOT";
 const SLACK_RATE_LIMIT_MAX_WAIT_MS = 30_000;
 /** Slack's answers for a token it no longer takes. */
 const ALREADY_REFUSED = new Set([
@@ -230,13 +232,15 @@ export function createSlackAppWebApi(
           }
         | undefined;
       // A guest is restricted, a single-channel guest ultra restricted, and
-      // someone from another workspace a stranger. Slack does not mark every
+      // someone from another workspace a stranger. Slackbot is a member Slack
+      // does not mark a bot, so it is named. Slack does not mark every
       // Slack Connect user a stranger, so the user's own workspace is kept
       // for the connection to compare with its own.
       const team = stringField(user?.team_id);
       const fullMember =
         user !== undefined &&
         team !== undefined &&
+        userId !== SLACKBOT &&
         user.is_bot !== true &&
         user.is_restricted !== true &&
         user.is_ultra_restricted !== true &&
