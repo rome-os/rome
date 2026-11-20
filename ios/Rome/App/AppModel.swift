@@ -356,6 +356,16 @@ final class Workspace {
         return true
     }
 
+    /// Pins or unpins a topic chat atop the drawer's list. Returns whether the
+    /// server took it.
+    @discardableResult
+    func pinTopic(_ chatId: String, pinned: Bool) async -> Bool {
+        guard (try? await backend.pinChat(chatId, pinned: pinned)) != nil else { return false }
+        // The row slides to its new place, and the others make room.
+        withAnimation(.snappy) { topics.setPinned(chatId, pinned) }
+        return true
+    }
+
     /// Archives a topic chat and drops it from the drawer. Returns whether the
     /// server took it. `stoppingWork` ends its follows and open tasks instead
     /// of moving them to the main Chat.
@@ -688,7 +698,8 @@ final class AppModel {
         // the widget's copy of the apps is filed under.
         didSet {
             guard workspace !== oldValue else { return }
-            images.reset()
+            // Pictures on disk stay only for the instance now open.
+            images.reset(instance: workspace == nil ? nil : currentInstanceID)
             workspace?.instanceID = currentInstanceID
             // Only this workspace writes the widget's copy from now on.
             WidgetShelf.shared.hand(to: workspace, instanceId: currentInstanceID)
@@ -1389,6 +1400,7 @@ final class AppModel {
         DraftStore.removeAll()
         TranscriptCache.removeAll()
         ImageDiskCache.shared.removeAll()
+        ImageDiskCache.thumbnails.removeAll()
         LanguageSync.removeAll()
         RecentApps.removeAll()
         UpdateBannerStore.removeAll()

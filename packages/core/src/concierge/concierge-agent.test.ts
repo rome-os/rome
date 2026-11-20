@@ -114,7 +114,7 @@ describe("the Concierge agent", () => {
   it("tells a finished task's result with one say from its conclusion, never its whole report", () => {
     const lines = concierge.systemPromptPrefix.split("\n");
     const rule = (start: string) => lines.find((line) => line.startsWith(start)) ?? "";
-    const finished = rule("- A turn that ended `by=concierge`");
+    const finished = rule("- A new result of a task");
     for (const text of [
       "tell the result in ONE `say`",
       "with `replyTo` set to the task's `start_message_id`",
@@ -149,7 +149,7 @@ describe("the Concierge agent", () => {
   it("forwards a task's card with card_forward, alone, and never composes a card from a result", () => {
     const lines = concierge.systemPromptPrefix.split("\n");
     const rule = (start: string) => lines.find((line) => line.startsWith(start)) ?? "";
-    const finished = rule("- A turn that ended `by=concierge`");
+    const finished = rule("- A new result of a task");
     for (const text of [
       "each `card id=` line means the task's final answer showed a card, so send each one with `card_forward` and its id",
       "sends the card as it is (or its text where cards cannot show) and nothing else",
@@ -187,28 +187,31 @@ describe("the Concierge agent", () => {
     expect(rule).toContain("writes its conclusion in the language of its brief");
   });
 
-  it("tells the guardian once, with the task link, that a task waits on them, and copies no card", () => {
-    const rule = concierge.systemPromptPrefix
-      .split("\n")
-      .find((line) => line.startsWith("- `turn_end:completed question` or `approval`"));
+  it("forwards a task's question card itself, and tells an approval in one line with the task link", () => {
+    const lines = concierge.systemPromptPrefix.split("\n");
+    const question = lines.find((line) => line.startsWith("- `turn_end:completed question`")) ?? "";
     for (const text of [
-      "turn_end:completed question",
-      "`approval`",
-      "the task waits for the guardian",
+      "Send its `card id=` with `card_forward`, and nothing else",
+      "it is the same card, answered here or in the task chat",
+      "the answer comes back as the task's next turn",
+      "If they answer in words here instead, pass their words on with `chat_send`",
+    ])
+      expect(question).toContain(text);
+    const approval = lines.find((line) => line.startsWith("- `approval`")) ?? "";
+    for (const text of [
       "Say so once, in one short line, with the task's link",
       "they decide it in the task chat",
-      "pass their words on with `chat_send`",
-      "an approval is decided only in its task chat",
+      "it is decided only in its task chat",
     ])
-      expect(rule).toContain(text);
-    // The Concierge shows no card for a task: its tool is gone, and so are the old words.
+      expect(approval).toContain(text);
+    // The Concierge shows no task card of its own: that tool is gone.
     expect(concierge.systemPromptPrefix).not.toContain("chat_card");
+    expect(concierge.systemPromptPrefix).not.toContain("ask it in plain words");
     // Rome keeps the status; the prompt never asks for one by hand.
     expect(concierge.systemPromptPrefix).not.toContain("needs_user");
     const tasks = concierge.systemPromptPrefix.split("# Tasks\n")[1];
     expect(tasks).toContain("You never set a status");
-    // The Concierge's own question goes in a card; a task asks in its own chat.
-    expect(tasks).toContain("with a question card or an approval");
+    expect(tasks).toContain("with a question card, which you send with `card_forward`");
     expect(tasks).toContain("never in plain text");
   });
 
@@ -367,14 +370,30 @@ describe("the Concierge agent", () => {
     const finished =
       concierge.systemPromptPrefix
         .split("\n")
-        .find((line) => line.startsWith("- A turn that ended `by=concierge`")) ?? "";
-    // Silent only where Rome's own gate is: the guardian's card choice or approval.
+        .find((line) => line.startsWith("- A new result of a task")) ?? "";
+    // Rome drops no turn by its conclusion: the Concierge judges each one.
     expect(finished).toContain(
       "only carried out what the guardian chose on that task's card or decided on its approval",
     );
     expect(finished).toContain("says there is nothing to report, send nothing");
     expect(finished).toContain("as for any other result such as a scheduled run's");
     expect(finished).not.toContain("tells nothing the card or the thread does not already show");
+  });
+
+  it("hears every task turn's end and judges it by what it says, not by who started it", () => {
+    const prompt = concierge.systemPromptPrefix;
+    expect(prompt).toContain("Every turn a task chat ends comes to you, whoever started it");
+    expect(prompt).toContain("`by` says who started the turn, not whether to speak");
+    const silent =
+      prompt.split("\n").find((line) => line.startsWith("- Say nothing when a turn only says")) ??
+      "";
+    expect(silent).toContain(
+      "its conclusion has nothing new: it says there is nothing to report, or repeats what you already told",
+    );
+    expect(silent).toContain("A `by=guardian` turn was read by the guardian in the task chat");
+    expect(silent).toContain("`report: when_it_matters` line: tell only news or a problem");
+    for (const removed of ['quiet="true"', "ran_on_schedule", "Stay silent unless the result"])
+      expect(prompt).not.toContain(removed);
   });
 
   it("schedules recurring work itself, never through a task chat", () => {

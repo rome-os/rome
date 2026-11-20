@@ -77,23 +77,23 @@ jobs:
       - name: Cross-build the arm64 image on amd64
         if: matrix.platform == 'linux/amd64'
         run: docker buildx build --platform linux/arm64 --file infra/rome-node/Dockerfile --output type=cacheonly .
-      - name: Load the Node runtime
-        run: >-
-          docker run --rm --network none --read-only --cap-drop ALL
-          --volume /var/lib/rome-node
-          --security-opt no-new-privileges:true --entrypoint node rome-node:ci
-          --input-type=module -e
-          'import { AuditStore, connectHost } from "/app/dist/host.js";
-          const audit = await AuditStore.open({path: "/var/lib/rome-node/audit.db", entry: "cli", hint: ""});
-          if (audit.state.state !== "ok" || typeof connectHost !== "function" || process.getuid() === 0) process.exit(1);
-          audit.close()'
-      - name: Report invalid Compose configuration
+      - name: Run CLI and audit checks as an unprivileged user
         run: |
-          status=0
-          output=$(docker run --rm --network none rome-node:ci 2>&1) || status=$?
-          printf '%s\n' "$output"
-          test "$status" -eq 1
-          [[ "$output" == *"Invalid Compose configuration."* ]]
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges:true rome-node:ci --help
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --volume /var/lib/rome-node \
+            --security-opt no-new-privileges:true --entrypoint sh rome-node:ci -ec '
+              test "$(id -u)" -ne 0
+              rome-node --help >/dev/null
+              node --input-type=module -e '\''
+                import { AuditStore, connectHost } from "/app/node_modules/@rome-os/node-core/dist/host.js";
+                const audit = await AuditStore.open({ path: "/var/lib/rome-node/audit/audit.db", entry: "cli", hint: "" });
+                if (audit.state.state !== "ok" || typeof connectHost !== "function") process.exit(1);
+                audit.close();
+              '\''
+              rome-node audit status
+            '
 
   publish-image:
     if: >-
@@ -125,4 +125,4 @@ jobs:
             --metadata-file "$RUNNER_TEMP/rome-node-build.json" \
             --tag "$image" --push .
           digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[a-f0-9]{64}$"))' "$RUNNER_TEMP/rome-node-build.json")
-          printf 'After verifying anonymous pulls on amd64 and arm64, set `ROME_NODE_DOCKER_IMAGE=%s@%s`.\n' "${image%:*}" "$digest" >> "$GITHUB_STEP_SUMMARY"
+          printf 'Published `%s@%s`. Verify anonymous pulls on amd64 and arm64 after setting the package public.\n' "${image%:*}" "$digest" >> "$GITHUB_STEP_SUMMARY"

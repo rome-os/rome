@@ -20,7 +20,6 @@ const CONFIG_ENV_KEYS = [
   "WEB_HOST",
   "INTERNAL_API_PORT",
   "INTERNAL_API_WEBHOOK_API_KEY",
-  "ROME_NODE_DOCKER_IMAGE",
   "OTEL_EXPORTER_OTLP_ENDPOINT",
   "RELAY_DRAIN_URL",
   "RELAY_DRAIN_KEY",
@@ -35,18 +34,6 @@ beforeEach(() => {
 });
 
 describe("loadConfig()", () => {
-  it("disables Docker Compose setup by default", () => {
-    expect(loadConfig().internalApi.romeNodeDockerImage).toBeUndefined();
-  });
-
-  it("requires an immutable Rome Node image for Docker Compose setup", () => {
-    const image = `ghcr.io/rome-os/rome-node@sha256:${"a".repeat(64)}`;
-    rs.stubEnv("ROME_NODE_DOCKER_IMAGE", image);
-    expect(loadConfig().internalApi.romeNodeDockerImage).toBe(image);
-    rs.stubEnv("ROME_NODE_DOCKER_IMAGE", "ghcr.io/rome-os/rome-node:latest");
-    expect(() => loadConfig()).toThrow("Invalid configuration");
-  });
-
   it("disables CDP automation by default", () => {
     expect(loadConfig().cdpAutomationEnabled).toBe(false);
   });

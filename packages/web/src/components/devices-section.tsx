@@ -2,18 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { devicesStatusSchema } from "@rome/api-types/devices";
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
 import { NodeDeviceCard, NodeDevices, type NodeNavigation } from "@rome-os/node-ui";
-import {
-  Measure,
-  Section,
-  SectionHeader,
-  SectionHeading,
-  SectionTitle,
-  SectionDescription,
-} from "@rome-os/ui/page";
-import { useMemo, useState } from "react";
+import { Measure, Section, SectionHeader, SectionHeading, SectionTitle } from "@rome-os/ui/page";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { ContainerNodeSetup } from "@/components/container-node-setup";
+import { DeviceConnectionCards, LinkDeviceMenu } from "@/components/device-connection-cards";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useDeviceManage } from "@/hooks/use-device-manage";
@@ -74,42 +67,29 @@ export function DevicesSection() {
   const devices = data?.devices ?? [];
   const thisDevice = useThisDevice(() => void query.refetch());
   const manage = useDeviceManage();
-  const [composeSetup, setComposeSetup] = useState<{
-    trigger: HTMLButtonElement;
-    image: string;
-  } | null>(null);
-  const dockerSetupImage = data?.dockerSetupImage;
-  const composeAction = dockerSetupImage && (
-    <Button
-      id="docker-compose"
-      size="sm"
-      variant="outline"
-      onClick={(event) =>
-        setComposeSetup({ trigger: event.currentTarget, image: dockerSetupImage })
-      }
-    >
-      {t("devices.containerNodes.title")}
-    </Button>
-  );
 
   // While the first read is pending, the devices page holds its place without cards.
-  const linkedDevices = !unavailable && (
-    <NodeDevices
-      url={nodeConsoleUrl()}
-      devices={devices}
-      navigation={navigation}
-      locale={i18n.language}
-      thisDevice={thisDevice ?? undefined}
-      manage={manage}
-      setupAction={composeAction}
-      // The order is set when the cards first draw, so they wait to learn which is this computer.
-      loading={!data || thisDevice === undefined}
-    />
-  );
+  if (!unavailable)
+    return (
+      <NodeDevices
+        url={nodeConsoleUrl()}
+        devices={devices}
+        navigation={navigation}
+        locale={i18n.language}
+        thisDevice={thisDevice ?? undefined}
+        manage={manage}
+        setup={{
+          action: <LinkDeviceMenu />,
+          empty: <DeviceConnectionCards />,
+        }}
+        // The order is set when the cards first draw, so they wait to learn which is this computer.
+        loading={!data || thisDevice === undefined}
+      />
+    );
 
   // Without a working device service there is no activity to show, so the tab explains how to
-  // bring the service back and how to link a computer.
-  const deviceSetupHelp = unavailable && (
+  // bring the service back and how to link a device.
+  return (
     <Measure className="space-y-6">
       {/* The Mac app's computer works without Rome's device service. */}
       {thisDevice && (
@@ -125,18 +105,20 @@ export function DevicesSection() {
           locale={i18n.language}
         />
       )}
-      <Section aria-label={t("devices.title")}>
+      <Section aria-labelledby="device-connection-title">
+        <SectionHeader>
+          <SectionHeading>
+            <SectionTitle id="device-connection-title">{t("devices.connectionLabel")}</SectionTitle>
+          </SectionHeading>
+        </SectionHeader>
         <Card>
           <CardContent>
-            <div className="space-y-2">
-              <p className="text-ui">{t("devices.connectionLabel")}</p>
-              <StatusIndicator
-                status={{
-                  label: t(`devices.connection.${connection}`),
-                  tone: connection === "incompatible" ? "attention" : "muted",
-                }}
-              />
-            </div>
+            <StatusIndicator
+              status={{
+                label: t(`devices.connection.${connection}`),
+                tone: connection === "incompatible" ? "attention" : "muted",
+              }}
+            />
             <p
               role={connection === "unavailable" ? "alert" : undefined}
               className="mt-4 text-ui text-muted-foreground"
@@ -164,44 +146,7 @@ export function DevicesSection() {
           </CardContent>
         </Card>
       </Section>
-      <Section aria-labelledby="connect-computer-title">
-        <SectionHeader>
-          <SectionHeading>
-            <SectionTitle id="connect-computer-title">{t("devices.setup.title")}</SectionTitle>
-            <SectionDescription>{t("devices.setup.description")}</SectionDescription>
-          </SectionHeading>
-        </SectionHeader>
-        <Card>
-          <CardContent className="space-y-4">
-            <p className="text-ui text-muted-foreground">{t("devices.setup.commandHelp")}</p>
-            <pre className="overflow-x-auto rounded-8 bg-muted p-4 font-mono text-ui">
-              <code>rome-node connect</code>
-            </pre>
-            <p className="text-ui text-muted-foreground">{t("devices.setup.access")}</p>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" asChild>
-                <a
-                  href="https://github.com/rome-os/rome/blob/main/packages/rome-node-cli/README.md"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  {t("devices.setup.instructions")}
-                </a>
-              </Button>
-              {composeAction}
-            </div>
-          </CardContent>
-        </Card>
-      </Section>
+      <DeviceConnectionCards />
     </Measure>
-  );
-  return (
-    <>
-      {linkedDevices}
-      {deviceSetupHelp}
-      {composeSetup && (
-        <ContainerNodeSetup {...composeSetup} onClose={() => setComposeSetup(null)} />
-      )}
-    </>
   );
 }

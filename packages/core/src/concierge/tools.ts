@@ -9,6 +9,7 @@ import { pushBody } from "./push.js";
 import { turnPrompts as turnPromptsOf } from "./reply-target.js";
 import { taskCardLine } from "./task-cards.js";
 import type { ForwardedFrom } from "@rome/api-types/chat";
+import type { AgentPlan } from "@rome/api-types/trace-segments";
 import { CONCIERGE_REACTIONS } from "@rome/api-types/concierge";
 import { CONCIERGE_TASK_STATUSES } from "@rome/api-types/concierge-task-status";
 import { taskLink } from "@rome/api-types/task-link";
@@ -42,6 +43,7 @@ import {
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
 import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
+import { openQuestion } from "./transcript.js";
 import { automatedSource } from "../webchat/automated-source.js";
 import { replyQuoteOf } from "../webchat/reply-quote.js";
 import { ownerOf } from "../webchat/owner.js";
@@ -58,6 +60,30 @@ const runTool = romeToolRunner(log);
 const TASK_STATUSES = ["running", "idle", "waiting_input", "failed"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
 const DEFAULT_READ_LIMIT = 6;
+/** How many steps of a running turn's plan chat_read shows, and how long each may be. */
+const PLAN_STEPS = 8;
+const PLAN_STEP_CHARS = 80;
+
+/**
+ * A running turn's plan as chat_read shows it: each step's text on one line,
+ * cut to PLAN_STEP_CHARS, with its status. A plan of more than PLAN_STEPS
+ * steps drops its first ones, but never the step before the first one not yet
+ * completed, so the step in progress always shows.
+ */
+function planForRead({ steps }: AgentPlan) {
+  const next = steps.findIndex((step) => step.status !== "completed");
+  const from = Math.max(
+    0,
+    Math.min((next === -1 ? steps.length : next) - 1, steps.length - PLAN_STEPS),
+  );
+  return steps.slice(from, from + PLAN_STEPS).map((step) => {
+    const text = step.text.replace(/\s+/g, " ").trim();
+    return {
+      step: text.length > PLAN_STEP_CHARS ? `${text.slice(0, PLAN_STEP_CHARS - 1)}…` : text,
+      status: step.status,
+    };
+  });
+}
 
 function requireString(args: Record<string, unknown>, field: string): string {
   const value = args[field];
@@ -161,7 +187,7 @@ const SCHEDULE_PARAMETER = {
       type: "string",
       enum: [...SCHEDULE_REPORTS],
       description:
-        "every_run: each run's result is reported to you. when_it_matters: a run that finishes with nothing to ask goes to the next digest as <ran_on_schedule>; a question, an approval or a failure still comes to you.",
+        "every_run: tell the guardian each run's result. when_it_matters: tell them only news or a problem. Every run's result comes to you either way.",
     },
     brief: {
       type: "string",
@@ -175,6 +201,17 @@ function refusal(result: Exclude<SendResult, { ok: true }>): string {
   if ("error" in result) return result.error;
   if ("invalid" in result) return result.invalid;
   return `The task chat cannot take a message (${result.send})`;
+}
+
+/** The tool use the one card part of a stored message waits on, or undefined. */
+function toolUseOf(content: string): string | undefined {
+  try {
+    const parts: unknown = JSON.parse(content);
+    const part = Array.isArray(parts) ? (parts[0] as { toolUseId?: unknown }) : undefined;
+    return typeof part?.toolUseId === "string" ? part.toolUseId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -655,6 +692,63 @@ export async function buildConciergeTools(
     return only;
   };
 
+  // The question card message `id` of a task chat holds: its chat, the tool
+  // use it waits on, and its questions in one line. Null for any other
+  // message, such as an approval or an app's own card, which its task chat
+  // answers.
+  const questionCardIn = async (id: string) => {
+    const message = await webchatRepo.widgetMessage(id);
+    if (!message) return null;
+    const holder = await webchatRepo.getSession(message.chatId);
+    if (holder?.triggerKind !== TASK_CHAT_TRIGGER_KIND) return null;
+    const asked = openQuestion([{ id, role: "assistant", content: message.content }]);
+    const toolUseId = toolUseOf(message.content);
+    return asked && toolUseId ? { chatId: message.chatId, toolUseId, line: asked.line } : null;
+  };
+
+  // Forwards task chat question card `cardId` as the card itself: a task
+  // card that shows the question it waits on and answers it in its task chat,
+  // so both chats show the same card and its one answer
+  // (docs/domains/chats.md#task). It replies to the task's start message.
+  // Where this chat cannot draw cards, the questions go as a message, which
+  // the guardian answers in words. Forwarding it twice in one turn is one message.
+  const forwardQuestion = async (
+    question: { chatId: string; toolUseId: string; line: string },
+    cardId: string,
+    title: string,
+  ) => {
+    const { chatId, turnId } = currentTurn();
+    const key = sayKey(`card:${cardId}`, undefined);
+    const repeated = service.saidInTurn(turnId, key);
+    if (repeated) return repeated;
+    const task = await tasks.repo.findBySession(question.chatId);
+    const start = await startMessageOf(task?.id);
+    const waitedOn = { kind: "question" as const, id: question.toolUseId, messageId: cardId };
+    // A card replies with no quote, as a forwarded result card does.
+    const id =
+      context.widgets === "card"
+        ? (
+            await webchatRepo.addBackendMessage(
+              chatId,
+              turnId,
+              [{ type: "task_chat", chatId: question.chatId, title, show: "ask", waitedOn }],
+              start ? { replyTo: start.id } : {},
+            )
+          ).id
+        : await addMessage(
+            [
+              {
+                type: "text",
+                content: `${taskLink(title, question.chatId)}: ${question.line}`,
+              },
+            ],
+            start,
+          );
+    said(chatId, turnId, `${title}: ${pushBody(question.line)}`);
+    service.keepSaid(turnId, key, id);
+    return id;
+  };
+
   // Forwards the card message `cardId` of a task chat, as it is: Rome issues
   // it again here, checked as `show_card` checks one, so it never rests on
   // the task chat's stored part. It is a message of its own, as every card
@@ -1030,7 +1124,7 @@ export async function buildConciergeTools(
     {
       name: "chat_read",
       description:
-        "Read a task chat's status (running, idle, waiting_input, or failed) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there. A card in a task chat shows as a message with its plain-text line and a `cardId` that card_forward sends.",
+        "Read a task chat's status (running, idle, waiting_input, or failed) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there. A card in a task chat shows as a message with its plain-text line and a `cardId` that card_forward sends. While it runs, `plan` is its current turn's plan, each step with its status (completed, in_progress or pending): when there is one, report its progress by the plan.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
@@ -1056,6 +1150,8 @@ export async function buildConciergeTools(
           const row =
             chat.triggerKind === TASK_CHAT_TRIGGER_KIND ? await tasks.repo.get(chatId) : null;
           const taskStatus = row ? (await tasks.statusOf([row])).get(chatId) : undefined;
+          const running = service.dashboard.chats.isRunning(chatId);
+          const plan = running ? service.dashboard.chats.turnPlan(chatId) : null;
           return {
             chatId,
             title: chat.name,
@@ -1065,10 +1161,8 @@ export async function buildConciergeTools(
                 : isMainConciergeChat(chat)
                   ? "main chat"
                   : "topic chat",
-            status: statusOf(
-              service.dashboard.chats.isRunning(chatId),
-              await findListEntry(chatId),
-            ),
+            status: statusOf(running, await findListEntry(chatId)),
+            ...(plan ? { plan: planForRead(plan) } : {}),
             ...(taskStatus
               ? {
                   taskStatus: taskStatus.status,
@@ -1299,6 +1393,7 @@ export async function buildConciergeTools(
       name: "card_forward",
       description:
         "Send the guardian one card a task chat showed, as it is, by its id: Rome copies the card, so you pass no content. The id is the `id` of a `card id=…` line in a task event, or the `cardId` of a message chat_read shows. Where this chat cannot show cards, the card's plain-text line goes instead. " +
+        "A task's question card goes as the card itself: the guardian answers it here or in the task chat, and both show the one answer. An approval is decided in its task chat, so it is refused. " +
         "To send several cards, call it once for each: every card is a message of its own. Any card of a task chat started from this Concierge chat can go, from any turn. " +
         "An id that names no such card is refused and nothing is sent: then tell the result yourself with say, replying to the task's start message. " +
         "The message replies to the task's start message and leaves it where it is, so several cards all reply to the same one.",
@@ -1313,6 +1408,16 @@ export async function buildConciergeTools(
           currentTurn();
           const found = await messages.cardIn(cardId);
           const holder = found ? await webchatRepo.getSession(found.chatId) : undefined;
+          // A task's question card goes as itself: the same card, answered
+          // wherever it is.
+          if (!found) {
+            const question = await questionCardIn(cardId);
+            if (question) {
+              const chat = await requireOwnTaskChat(question.chatId);
+              const messageId = await forwardQuestion(question, cardId, chat.name);
+              return { forwarded: context.widgets === "card" ? "card" : "card_text", messageId };
+            }
+          }
           // Everything that can refuse comes before anything is said.
           if (!found || holder?.triggerKind !== TASK_CHAT_TRIGGER_KIND) {
             throw new Error(

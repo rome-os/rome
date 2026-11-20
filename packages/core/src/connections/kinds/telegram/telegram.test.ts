@@ -1,9 +1,10 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { InputFile } from "grammy";
-import { TelegramAdapter } from "./telegram.js";
+import { TelegramAdapter, telegramMentions } from "./telegram.js";
 import { FakeTelegramApi } from "../../../test/kit/fake-telegram.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { OutgoingMessage } from "../../../types.js";
@@ -67,7 +68,7 @@ describe("TelegramAdapter", () => {
   async function startCapturing(): Promise<ChannelMessage[]> {
     const captured: ChannelMessage[] = [];
     adapter.onInbound(async (msg) => {
-      captured.push(msg);
+      captured.push(channelMessageOf(msg, "telegram"));
     });
     await adapter.start();
     await telegram.untilPolling();
@@ -477,5 +478,34 @@ describe("TelegramAdapter", () => {
         /unmodeled Bot API method "banChatMember"/,
       );
     });
+  });
+});
+
+describe("telegramMentions", () => {
+  const me = { id: 42, username: "RomeBot" };
+
+  it("names the bot by its id, a text mention by its user, and another handle by the handle", () => {
+    const text = "@romebot ask @bob and Ann /stop@RomeBot";
+    expect(
+      telegramMentions(
+        [
+          { type: "mention", offset: 0, length: 8 },
+          { type: "mention", offset: 13, length: 4 },
+          {
+            type: "text_mention",
+            offset: 22,
+            length: 3,
+            user: { id: 7, is_bot: false, first_name: "Ann" },
+          },
+          { type: "bot_command", offset: 26, length: 13 },
+        ],
+        text,
+        me,
+      ),
+    ).toEqual(["42", "@bob", "7"]);
+  });
+
+  it("lists nobody when no entity mentions anyone", () => {
+    expect(telegramMentions([{ type: "bold", offset: 0, length: 2 }], "hi", me)).toEqual([]);
   });
 });

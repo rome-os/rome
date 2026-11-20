@@ -130,6 +130,11 @@ struct MainShell: View {
                     onSettings: {
                         settingsPath = []
                         showSettings = true
+                    },
+                    // The open chat archived or deleted from its row: the main
+                    // Chat shows, as from the chat's own header; the drawer stays.
+                    onTopicGone: { id in
+                        if section == .topic(id) { show(.chat) }
                     }
                 )
                 .frame(width: width, height: geometry.size.height)

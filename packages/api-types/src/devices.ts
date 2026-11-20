@@ -1,29 +1,5 @@
 import { z } from "zod";
 
-export const containerNodeNameSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(80)
-  .refine((name) => !/\p{Cc}/u.test(name));
-
-export const containerNodeCredentialSchema = z.object({
-  deviceId: z.uuid(),
-  deviceToken: z.string().regex(/^romedev_[A-Za-z0-9_-]{43}$/),
-  origin: z.url({ protocol: /^https?$/ }),
-});
-export type ContainerNodeCredential = z.infer<typeof containerNodeCredentialSchema>;
-
-export const containerNodeAuthorizationSchema = z.object({
-  verificationUriComplete: z.url({ protocol: /^https?$/ }),
-  userCode: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
-});
-export type ContainerNodeAuthorization = z.infer<typeof containerNodeAuthorizationSchema>;
-
-export const containerNodeImageSchema = z
-  .string()
-  .regex(/^ghcr\.io\/rome-os\/rome-node@sha256:[a-f0-9]{64}$/);
-
 export const devicesStatusSchema = z.object({
   connection: z.enum([
     "not_running",
@@ -38,7 +14,6 @@ export const devicesStatusSchema = z.object({
     "superseded",
   ]),
   checkedAt: z.iso.datetime(),
-  dockerSetupImage: containerNodeImageSchema.optional(),
   devices: z.array(
     z.object({
       id: z.string(),

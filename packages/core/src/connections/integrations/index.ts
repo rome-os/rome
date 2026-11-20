@@ -14,7 +14,6 @@ import {
 } from "../oauth/rome-cloud-oauth.js";
 import { credentialFromBundle, grantProfileFromBundle } from "../providers-import.js";
 import type { ConnectionRegistry } from "../registry.js";
-import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";
@@ -25,6 +24,7 @@ import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { makeSlackBotDescriptor } from "./slack-bot.js";
 import { createWechatDescriptor } from "./wechat.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
+import type { ChatSettingsPort } from "../types.js";
 
 export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
 export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
@@ -43,7 +43,7 @@ export { makeSlackBotDescriptor, SLACK_BOT_KIND } from "./slack-bot.js";
  */
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
-  chatSettings: ChatSettingsService;
+  chatSettings: ChatSettingsPort;
   chatStop: ChatStopHandler;
   peopleRepo: PeopleRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
@@ -51,10 +51,6 @@ export interface BuiltinConnectionDeps {
   listAgents: () => string[];
   /** The agent linked to a Connection's channel (Discord in-chat settings). */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
-  /** A test-only back door: whether an agent keeps the Inbox app off the
-   *  accounts linked to it (`app-host/inbox-bypass.ts`). Such an account hears
-   *  every message, whatever its chats' settings say. */
-  unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
   /** Guardian auto-map on WhatsApp connect (canonical self JID → channel mapping). */
@@ -89,7 +85,6 @@ export function registerBuiltinConnections(
       peopleRepo: deps.peopleRepo,
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,
-      unsafeTestOnlyBypassesInbox: deps.unsafeTestOnlyBypassesInbox,
       hasAgent: deps.hasAgent,
     }),
   );

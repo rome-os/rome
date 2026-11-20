@@ -1,6 +1,5 @@
 import { widgetEventRoutes } from "./routes/widget-events.js";
 import { devicesRoutes } from "./routes/devices.js";
-import { availableContainerNodeImage, containerNodesRoutes } from "./routes/container-nodes.js";
 import { personalDataRoutes } from "../personal-data/routes.js";
 import { deviceConnectionRoutes } from "./routes/device-connections.js";
 import type { Server } from "node:http";
@@ -203,11 +202,7 @@ export function buildApp(
   api.route("/", voiceInputRoutes(deps));
   api.route("/", conciergeRoutes(deps));
   api.route("/", chatTaskListRoutes(deps));
-  api.route(
-    "/",
-    devicesRoutes(deps, (c) => availableContainerNodeImage(c, deps.db, config.romeNodeDockerImage)),
-  );
-  api.route("/devices/container-nodes", containerNodesRoutes(deps, config.romeNodeDockerImage));
+  api.route("/", devicesRoutes(deps));
   api.route("/", personalDataRoutes(deps));
   api.route("/", deviceConnectionRoutes(deps));
   api.route("/", appKeysRoutes(deps));

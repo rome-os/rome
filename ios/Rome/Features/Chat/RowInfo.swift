@@ -17,6 +17,10 @@ struct RowInfo: Hashable {
     var mark: MessageMark?
     /// The row is a send the app still holds, which only it can drop.
     var isPending = false
+    /// The message takes a Reply, from the long-press menu or a swipe: the
+    /// Agent's text, and the guardian's own once it has gone through, in a
+    /// Concierge chat (docs/domains/chats.md#chat-thread).
+    var canReply = false
     /// A task chat's message the Concierge wrote on the guardian's side.
     var saidByAgent = false
     var senderName: String?
@@ -33,6 +37,7 @@ struct RowInfo: Hashable {
         var byID: [String: ChatMessage] = [:]
         for message in messages { byID[message.id] = message }
         let pendingIDs = Set(pending.map(\.id))
+        let pendingReplies = Dictionary(pending.compactMap { send in send.reply.map { (send.id, $0.messageId) } }) { first, _ in first }
         var infos: [String: RowInfo] = [:]
         for (index, row) in rows.enumerated() {
             var info = RowInfo()
@@ -48,6 +53,7 @@ struct RowInfo: Hashable {
                 continue
             }
             if let message = row.ownMessageId.flatMap({ byID[$0] }) {
+                info.canReply = kind == .concierge && Self.takesReply(message, row: row)
                 info.date = message.date
                 info.canShare = message.turnId != nil
                 info.saidByAgent = message.saidByAgent
@@ -55,6 +61,9 @@ struct RowInfo: Hashable {
                 if let quote = Self.quote(of: message, row: row), Self.drawsQuote(message, row: row, previous: Self.messageAbove(index, rows: rows, byID: byID)) {
                     info.quote = quote
                 }
+            } else if let original = pendingReplies[row.id].flatMap({ byID[$0] }) {
+                // A send not stored yet quotes the held message it replies to.
+                info.quote = MessagePart.ReplyQuote(of: original)
             }
             infos[row.id] = info
         }
@@ -69,6 +78,20 @@ struct RowInfo: Hashable {
             if let id = above.ownMessageId, id != own { return byID[id] }
         }
         return nil
+    }
+
+    /// Whether a Reply can pick the row's message: the Agent's text, or the
+    /// guardian's own once stored and settled, as on the web: not a send still
+    /// pending, queued or failed. A card takes none.
+    static func takesReply(_ message: ChatMessage, row: TranscriptRow) -> Bool {
+        switch row {
+        case .agentText:
+            return true
+        case .userText(_, _, _, let state):
+            return state == nil && row.messageId != nil && (message.inputState == nil || message.inputState == "consumed")
+        default:
+            return false
+        }
     }
 
     /// Whether a reply draws its quote (docs/domains/chats.md#chat-thread).

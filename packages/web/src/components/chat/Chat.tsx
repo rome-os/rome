@@ -27,12 +27,13 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
-  CalendarClock,
   Cpu,
   FileOutput,
   FolderOpen,
   PanelRightOpen,
   Pencil,
+  Pin,
+  PinOff,
   Share2,
   Trash2,
 } from "lucide-react";
@@ -200,6 +201,7 @@ import {
   postSessionTurn,
   postSessionTurnJson,
   type PostTurnResult,
+  pinSession,
   renameSession,
   updateSessionModel,
 } from "@/lib/chat-api";
@@ -614,6 +616,7 @@ export function Chat({
     isForkChat,
     pinnedAgentMention: identityAgentMention,
     archivedAt,
+    pinnedAt,
     forkable,
     isTaskChat,
     taskOf,
@@ -1204,16 +1207,27 @@ export function Chat({
     [mainSessionId, setArchived],
   );
 
+  // An archived topic chat is in no active list, so it opens as an ordinary
+  // chat: the session itself says it is a topic chat.
+  const isTopicChat =
+    !isMainChat && mainSessionId !== conciergeMainChatId && (concierge || isConciergeSession);
+  // Pins or unpins the open topic chat; the chat list and this header read it again.
+  const togglePin = useCallback(async () => {
+    if (!mainSessionId) return;
+    try {
+      await pinSession(mainSessionId, !pinnedAt);
+    } catch {
+      toast.error(t("recentChats.pinFailed", { ns: "common" }));
+    }
+    emitSessionsChanged();
+  }, [mainSessionId, pinnedAt, t]);
   // A topic chat asks, as the sidebar does, what becomes of its follows and
   // open tasks when it is archived, and of the follows that moved when it is
   // unarchived.
   const topicArchive = useTopicChatArchive({
     chatId: mainSessionId ?? null,
     name: sessionName?.trim() || t("recentChats.newChat", { ns: "common" }),
-    // An archived topic chat is in no active list, so it opens as an ordinary
-    // chat: the session itself says it is a topic chat.
-    topic:
-      !isMainChat && mainSessionId !== conciergeMainChatId && (concierge || isConciergeSession),
+    topic: isTopicChat,
     onArchive: (stopWork) => void handleArchive(stopWork),
     onUnarchive: (moveBack) => void handleUnarchive(moveBack),
   });
@@ -2406,7 +2420,7 @@ export function Chat({
   const workspaceStore = useContext(WorkspaceStoreContext);
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
-  // The header's Tasks button and ⋯ menu open the chat's lists: what runs for it.
+  // The header's Tasks button opens the chat's task list: what runs for it.
   const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
   // A dot on the header's Tasks button says a task chat needs its owner.
   const { needsYou: tasksNeedYou } = useChatTaskList(concierge ? (mainSessionId ?? null) : null);
@@ -2481,7 +2495,7 @@ export function Chat({
     workspaceStore?.set("followTargetPath", logical);
   };
   // The header's ⋯ menu, in three parts: what opens in the side pane (Outputs,
-  // a Concierge chat's Routines, the chosen project), what is done to the
+  // the chosen project), what is done to the
   // chat (the main chat is only shared), and the model that answered last.
   // Its Tasks have a button of their own beside it.
   const opens: HeaderMenuItem[] = [
@@ -2491,16 +2505,6 @@ export function Chat({
       label: t("concierge.menu.outputs"),
       run: () => outputsPane.open(),
     },
-    ...(concierge
-      ? [
-          {
-            key: "routines",
-            icon: <CalendarClock />,
-            label: t("concierge.menu.routines"),
-            run: () => taskList.open("routines"),
-          },
-        ]
-      : []),
     ...(chosenProject
       ? [
           {
@@ -2525,6 +2529,19 @@ export function Chat({
             run: () => setRenameOpen(true),
           },
         ]),
+    // Only a topic chat is pinned, and an archived one shows no pin.
+    ...(isTopicChat && mainSessionId && !isArchived
+      ? [
+          {
+            key: "pin",
+            icon: pinnedAt ? <PinOff /> : <Pin />,
+            label: pinnedAt
+              ? t("recentChats.unpin", { ns: "common" })
+              : t("recentChats.pin", { ns: "common" }),
+            run: () => void togglePin(),
+          },
+        ]
+      : []),
     {
       key: "share",
       icon: <Share2 />,
@@ -2610,7 +2627,7 @@ export function Chat({
           // its first message, has none.
           tasks={
             concierge && !blankTopicChat
-              ? { needsYou: tasksNeedYou, open: () => taskList.open("tasks") }
+              ? { needsYou: tasksNeedYou, open: () => taskList.open() }
               : undefined
           }
           menu={headerMenu}

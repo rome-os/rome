@@ -91,7 +91,6 @@ export interface ApiConfig {
    * inside the container (`localhost:4141/dashboard`, headless browsers,
    * etc.) and also handles public traffic that arrives via Caddy. */
   webRoot?: string;
-  romeNodeDockerImage?: string;
 }
 
 /**

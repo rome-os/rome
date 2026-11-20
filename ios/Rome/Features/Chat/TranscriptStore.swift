@@ -708,15 +708,20 @@ final class TranscriptStore {
         quote.flatMap { message($0.messageId) }
     }
 
-    /// Reply on a message: the reply bar quotes it.
-    func reply(to messageId: String) {
+    /// Reply on a message, from its menu or a swipe on `row`: the reply bar
+    /// quotes it.
+    func reply(to messageId: String, row: String? = nil) {
         guard kind == .concierge, message(messageId) != nil else { return }
         quote = ReplyTarget(messageId: messageId)
+        replyRow = row ?? rows.first(where: { $0.messageId == messageId })?.id
         replies += 1
     }
 
-    /// Goes up on each Reply: the composer takes the keyboard.
+    /// Goes up on each Reply: the composer takes the keyboard, and the list
+    /// keeps `replyRow` in view instead of going to the bottom.
     private(set) var replies = 0
+    /// The row the last Reply was picked on.
+    private(set) var replyRow: String?
 
     /// The reply bar's ✕: the reply goes.
     func cancelQuote() {

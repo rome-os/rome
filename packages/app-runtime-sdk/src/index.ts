@@ -1816,6 +1816,14 @@ export interface ChannelMessage {
    *  Absent in a chat that keeps none. */
   chatThread?: string;
   addressing?: MessageAddressing;
+  /** Another bot sent it, as the connection tells. A webhook linked to a
+   *  person speaks for that person, so it is not a bot. Absent where the
+   *  connection does not tell. */
+  fromBot?: boolean;
+  /** It mentions someone, none of them is Rome's account, and it does not
+   *  address Rome's account by a reply or in Rome's own thread either.
+   *  Absent where the connection does not tell. */
+  mentionsOthers?: boolean;
   raw?: unknown;
   /** Where this message sits in a channel read, as an opaque token. Set on
    *  what {@link ChannelsService.query} answers: pass it as
@@ -2228,12 +2236,11 @@ export interface ChannelMessageHookDeps {
    */
   accountAgentOf?: (account: Account | string) => string | null | undefined;
   /**
-   * @internal A test-only back door for the Inbox app. True when the Inbox
-   * app must answer no message on an account linked to `agent`, a canonical
-   * agent id, because the app that installed it runs the agent's turns
-   * itself. The host answers true only for an agent that declares
-   * `unsafeTestOnlyBypassInbox: true` in an app on its allow-list, and false
-   * for every other. Not for apps to build on.
+   * @internal For the Inbox app. True when the Inbox app must answer no
+   * message on an account linked to `agent`, a canonical agent id, because
+   * the app that installed it runs the agent's turns itself. The host answers
+   * true only for an agent that declares `runsOwnTurns: true` in an app on its
+   * allow-list, and false for every other. Not for apps to build on.
    */
   unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
   /** @deprecated Use `accountAgentOf`, which answers the same. */
