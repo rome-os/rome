@@ -14,19 +14,10 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // profile's memory/ dir on first boot (MEMORY.md, IDENTITY.md, relationship/,
 // etc.). Keep in sync with getAppTemplateDir() in paths.ts and
 // getMemoryTemplateDir() in profile-memory.ts.
-//
-// The WeChat send driver is read at runtime relative to `import.meta.url`, which
-// is its own folder under tsx and dist/ in the image, so a compiled runtime finds
-// it only if it is copied to the path below.
 export const bundledAssets = [
   ["packages/app-template/template", "dist/app-template", "app template"],
   ["packages/app-template/workflow", "dist/app-template-workflow", "app template"],
   ["packages/core/memory.example", "dist/memory.example", "memory template"],
-  [
-    "packages/core/src/connections/kinds/wechat-user/wechat-user-send-driver.py",
-    "dist/wechat-user-send-driver.py",
-    "WeChat send driver",
-  ],
 ];
 const esbuildModuleCandidates = [
   resolve(projectRoot, "node_modules/esbuild/lib/main.js"),

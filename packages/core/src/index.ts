@@ -162,11 +162,6 @@ import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/acco
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./app-host/accounts-service.js";
 import { createAgentNames } from "./chats/accounts/agent-names.js";
-import {
-  WechatUserReader,
-  WechatUserRuntime,
-  wechatUser,
-} from "./connections/kinds/wechat-user/index.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./apps/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
@@ -500,11 +495,6 @@ async function main() {
     accountProfiles.refresh(platformOf("linkedin"), linkedInAccounts);
   refreshWhatsAppProfiles();
   refreshLinkedInProfiles();
-  // The personal WeChat account contributes a people-timeline source only when
-  // the connection is enabled; its store is the client's own database, read live.
-  // The channel list and the Connection's Talk share this one client runtime.
-  const wechatUserRuntime = config.wechatUserEnabled ? new WechatUserRuntime() : undefined;
-  const wechatUserReader = wechatUserRuntime ? new WechatUserReader(wechatUserRuntime) : undefined;
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
@@ -2119,8 +2109,6 @@ async function main() {
       minIntervalMs: config.linkedinPollMinMinutes * 60_000,
       maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
     }),
-    // Offers the connection only when config `wechatUserEnabled` is on.
-    wechatUser({ ...(wechatUserRuntime ? { runtime: wechatUserRuntime } : {}), guardianOnly }),
   ];
   for (const kind of connectionKinds) {
     if (kind.descriptor) connectionRegistry.register(kind.descriptor);
@@ -2131,7 +2119,6 @@ async function main() {
     db,
     whatsAppAccounts,
     linkedInAccounts,
-    ...(wechatUserReader ? { wechatUserReader } : {}),
     connections: {
       registry: connectionRegistry,
       admit,

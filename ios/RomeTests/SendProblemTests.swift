@@ -237,6 +237,7 @@ import UIKit
         backend.messagesError = .server(status: 404, message: nil)
         let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
         await store.reload()
+        await store.reload()
         #expect(store.loadFailed)
         return store
     }
@@ -319,6 +320,7 @@ import UIKit
         backend.messagesError = .server(status: 503, message: nil)
         let store = TranscriptStore(sessionId: "task-1", kind: .task, backend: backend)
         store.retryHold = .milliseconds(50)
+        await store.reload()
         await store.reload()
         #expect(store.loadBar == .failed)
         store.start()

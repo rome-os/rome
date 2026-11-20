@@ -2473,8 +2473,8 @@ export function Chat({
   // The name the header shows for the Concierge, which a share of this chat
   // labels its turns by too.
   const conciergeDisplayName = resolveMainAgentDisplayName(conciergeName);
-  // A blank topic chat, before its first message, shows nothing in the
-  // header: its empty state speaks for it, and it has no tasks yet.
+  // A topic chat before its first message. It has no tasks yet, and its
+  // header's status capsule welcomes the guardian instead of staying hidden.
   const blankTopicChat = conciergeEmpty && !isMainChat;
   // A chat started in a project the guardian chose names it in the menu. The
   // default project is where a chat goes when none was chosen.
@@ -2579,16 +2579,19 @@ export function Chat({
     ) : undefined,
   };
   const headerBadge = concierge ? (
-    blankTopicChat ? null : (
-      <ConciergeHeaderStatus
-        // Every Concierge chat, main or topic, goes by the Concierge's name
-        // here; a topic chat's own name is in the chat list.
-        name={conciergeDisplayName}
-        activity={conciergeActivity}
-        // A chat with no messages yet draws its own large mascot.
-        badge={!conciergeEmpty}
-      />
-    )
+    // One header for a blank topic chat and the chat its first send makes, so
+    // the badge, the name and the capsule stay put as the first message lands.
+    <ConciergeHeaderStatus
+      // Every Concierge chat, main or topic, goes by the Concierge's name
+      // here; a topic chat's own name is in the chat list.
+      name={conciergeDisplayName}
+      activity={conciergeActivity}
+      // The main chat with no messages yet draws its own large mascot.
+      badge={!conciergeEmpty || blankTopicChat}
+      // Until its first message, a topic chat's capsule asks what's on the
+      // guardian's mind; any activity, and then idle, take over from there.
+      idleText={blankTopicChat ? t("concierge.topicEmpty.welcome") : undefined}
+    />
   ) : (
     <ConciergeHeaderStatus
       // Nothing while the chat's name loads, so "New chat" never flashes first.
@@ -2775,9 +2778,9 @@ export function Chat({
                       onPick={(prompt) => composerRef.current?.insertText(prompt)}
                     />
                   ) : (
-                    // A topic chat: its starters send themselves as its first message.
+                    // A topic chat: a suggestion goes into the composer, unsent.
                     <ConciergeTopicEmptyState
-                      onStart={(prompt) => composerRef.current?.submit(prompt)}
+                      onStart={(prompt) => composerRef.current?.insertText(prompt)}
                     />
                   )
                 ) : mainSessionId ? (
