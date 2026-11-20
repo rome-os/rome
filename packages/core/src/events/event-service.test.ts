@@ -71,7 +71,7 @@ describe("EventService.search", () => {
       "provider:event:github.push": true,
       "provider:event:github.workflow_run": false,
     });
-    expect(run).toHaveBeenCalledWith("connector_event_ensure", {
+    expect(run).toHaveBeenCalledWith("connector:connector_event_ensure", {
       eventName: "provider:event:github.push",
       filter: [{ field: "repository.full_name", equals: "acme/widgets" }],
       dryRun: true,

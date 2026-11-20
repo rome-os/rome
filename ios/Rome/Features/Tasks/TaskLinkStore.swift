@@ -7,8 +7,10 @@ private let taskLinkLog = Logger(subsystem: "cc.romeos.mobile", category: "TaskL
 
 /// What the task links of one Concierge chat show: each task chat's live name
 /// and status (docs/domains/chats.md#task-link). The chat's messages register
-/// the task chats they name; one read answers for all of them, and the chat's
-/// `tasks_changed` events read it again, so a chip moves as its task chat runs.
+/// the task chats they name; one read answers for all of them. A task may come
+/// from any of the owner's Concierge chats. The chat's `tasks_changed` events,
+/// which fire on any of its owner's tasks, read it again, so a chip moves as
+/// its task chat runs.
 @MainActor
 @Observable
 final class TaskLinkStore {

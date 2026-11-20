@@ -1,5 +1,5 @@
 name: image_gen
-description: Forwards an image prompt verbatim to Codex's built-in image generation tool. Backs the generate_image action; requires a connected Codex (ChatGPT) account.
+description: Forwards an image prompt verbatim to Codex's built-in image generation tool. Backs the system:generate_image action; requires a connected Codex (ChatGPT) account.
 tier: small
 provider: openai
 permissionMode: default

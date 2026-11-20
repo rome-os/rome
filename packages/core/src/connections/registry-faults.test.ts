@@ -1,3 +1,4 @@
+import { RenewalUnavailable } from "./errors.js";
 // Fault-handling contract suite. The subtlest semantics:
 // degrade relocking only dependents (scenario 5), renew-once-then-degrade
 // (scenario 6), re-authorize clearing the renewed flag (scenario 7), epoch
@@ -61,6 +62,45 @@ function makeFailingLedger(shouldFail: (grant: GrantValue) => boolean): Connecti
 }
 
 describe("registry faults", () => {
+  it("keeps an unavailable fault renewal retryable, including after an expired-token read", async () => {
+    const ledger = makeLedger();
+    const registry = new ConnectionRegistry({ repository: ledger });
+    const fx = makeRenewableAct();
+    let unavailable = true;
+    let calls = 0;
+    fx.descriptor.auth.renew = async () => {
+      calls++;
+      if (unavailable) throw new RenewalUnavailable("Cloud is offline");
+      return { material: { token: "renewed" }, expiresAt: new Date(Date.now() + 3600_000) };
+    };
+    registry.register(fx.descriptor);
+    const conn = await registry.connect("fake-github");
+    await registry.giveGrant(conn.connectionKind, conn.id, "user", {
+      material: { token: "expired" },
+      expiresAt: new Date(0),
+    });
+    await registry.renewExpiring(60_000);
+    expect(conn.auth.grants().user).toBe("authorized");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      fx.actorFactory.instances.at(-1)!.state.nextInvokeError = new CredentialRejected();
+      await expect(conn.act!.invoke({ operation: "read" })).rejects.toBeInstanceOf(
+        CredentialRejected,
+      );
+      await flush();
+      expect(conn.auth.grants().user).toBe("authorized");
+      expect(conn.act).not.toBeNull();
+    }
+    expect(calls).toBe(3);
+    unavailable = false;
+    await registry.renewExpiring(60_000);
+    expect(conn.auth.grants().user).toBe("authorized");
+    expect(calls).toBe(4);
+    expect((await ledger.grantOf(conn.id))?.credential?.material).toEqual({
+      kind: "inline",
+      record: { token: "renewed" },
+    });
+  });
+
   // Scenario 5 — a degraded grant relocks every capability
   describe("scenario 5: a degraded grant relocks every capability", () => {
     it("a rejection on act degrades the one grant and relocks talk and watch with it", async () => {

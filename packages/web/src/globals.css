@@ -151,6 +151,10 @@
 .voice-input-char-in {
   animation: voice-input-char-in 280ms ease-out both;
 }
+/* The copy drawn over the field shows its text while voice input is on. */
+.voice-input-previewing::placeholder {
+  color: transparent;
+}
 @media (prefers-reduced-motion: reduce) {
   .voice-input-char-in {
     animation: none;
@@ -485,6 +489,11 @@ button.rome-upgrade-row:hover {
 .rome-status-spin {
   animation: rome-status-spin 1s linear infinite;
 }
+@media (prefers-reduced-motion: reduce) {
+  .rome-status-spin {
+    animation: none;
+  }
+}
 
 @keyframes rome-status-spin {
   to {
@@ -505,11 +514,17 @@ button.rome-upgrade-row:hover {
    tint, so it reads as a word in the sentence. It is an inline box with
    horizontal padding only, so it never makes the line taller; only its 14px
    mark carries colour. A status change flashes the tint once. */
+/* The chip: the mark, then the name on a faint fill. Only the name carries
+   the fill, so a chip that starts a line starts flush with the text under
+   it, as the iOS chip does. */
 [data-task-link] {
   display: inline;
   color: inherit;
   text-decoration: none;
   white-space: nowrap;
+}
+
+[data-task-link-name] {
   background-color: color-mix(in oklab, var(--foreground) 7%, transparent);
   @apply px-1;
   box-decoration-break: clone;
@@ -518,7 +533,7 @@ button.rome-upgrade-row:hover {
   transition: background-color 120ms ease;
 }
 
-[data-task-link]:hover {
+[data-task-link]:hover [data-task-link-name] {
   background-color: color-mix(in oklab, var(--foreground) 12%, transparent);
 }
 
@@ -526,7 +541,7 @@ button.rome-upgrade-row:hover {
   display: inline-block;
   width: 14px;
   height: 14px;
-  margin-right: 4px;
+  margin-right: 2px;
   vertical-align: -2px;
 }
 
@@ -536,7 +551,7 @@ button.rome-upgrade-row:hover {
   height: 14px;
 }
 
-[data-task-link][data-flash] {
+[data-task-link][data-flash] [data-task-link-name] {
   animation: rome-task-link-flash 700ms ease-out;
 }
 
@@ -547,7 +562,7 @@ button.rome-upgrade-row:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-task-link][data-flash] {
+  [data-task-link][data-flash] [data-task-link-name] {
     animation: none;
   }
 }
@@ -1055,13 +1070,12 @@ html.is-electron [data-app-titlebar] {
 /* A Concierge chat's mascot hangs from the title bar and drags the window like
    it, below the bar too. The layer it hangs in spans the page's bar and comes
    after its buttons, so it takes no part, or it would cover them; only the
-   badge drags, unless it is the button that opens the chat's tasks, which a
-   drag would swallow. Its messages start under the status capsule, which
+   badge drags. Its messages start under the status capsule, which
    reaches less far below the bar than the floating header does. */
 html.is-electron [data-titlebar-mascot] {
   -webkit-app-region: initial;
 }
-html.is-electron [data-app-titlebar] [data-concierge-header-badge]:not(button) {
+html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
   -webkit-app-region: drag;
 }
 @media (width >= 48rem) {

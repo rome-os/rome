@@ -161,7 +161,7 @@ export interface SessionOpening {
   sharedContext?: Record<string, unknown>;
   /**
    * Set by `AgentSessionBridge` for runs that reach the top-level manager over
-   * the worker→main RPC — i.e. an action spawning an agent (blocking `summon`),
+   * the worker→main RPC — i.e. an action spawning an agent (blocking `system:summon`),
    * which is a nested subagent run by construction. Used only for the
    * `rome.session.acquire` metric's `is_subagent` label; it does NOT change
    * session behavior (login-notice gating, defer, etc. still key off the
@@ -411,6 +411,10 @@ interface ManagerDeps {
    * Absent, every place takes the agent's setup as it is.
    */
   placeSetup?: (agentName: string, thread: ThreadContext | undefined) => PlaceSetup | null;
+  /** The name of Rome's account behind a connection, as a mention of it shows
+   *  in a message, or null when the connection reports none. Absent, the
+   *  thread context names no account. */
+  ownAccountName?: (connectionId: string) => Promise<string | null>;
   /** Where agents work: the default working directory and the projects folder. */
   folders: AgentFolders;
   /** Where the session logs. */
@@ -4185,10 +4189,17 @@ class AgentSessionImpl implements AgentSession {
       if (!this.isSubagent && this.threadFresh && !this.threadContextInjected && tc) {
         this.threadContextInjected = true;
         const workingPath = this.workingDir?.trim();
-        const block = buildThreadContextBlock(tc, {
-          path: workingPath,
-          relativePath: workingPath ? projectPath(this.deps.folders, workingPath) : null,
-        });
+        const accountName = tc.connectionId
+          ? await this.deps.ownAccountName?.(tc.connectionId).catch(() => null)
+          : null;
+        const block = buildThreadContextBlock(
+          tc,
+          {
+            path: workingPath,
+            relativePath: workingPath ? projectPath(this.deps.folders, workingPath) : null,
+          },
+          accountName,
+        );
         if (block) {
           userPrompt = `${block}\n\n${userPrompt}`;
         }

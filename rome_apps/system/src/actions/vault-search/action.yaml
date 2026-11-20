@@ -3,8 +3,8 @@ type: system
 description: >-
   List the secrets in the guardian's vault, by name, description, last-used time and
   whether a grant is live. Never returns values. Use it to find out which secret
-  to ask for before calling vault_apply. To run a command with a secret, ask the
-  guardian with vault_apply, then run `vault load NAME -- <command>` in the shell.
+  to ask for before calling system:vault_apply. To run a command with a secret, ask the
+  guardian with system:vault_apply, then run `vault load NAME -- <command>` in the shell.
 complexity: simple
 speed: fast
 reliability: high

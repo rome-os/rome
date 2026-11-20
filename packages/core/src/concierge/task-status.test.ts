@@ -92,6 +92,15 @@ describe("taskStatus", () => {
     expect(taskStatus(facts({ lastOutcome: "stopped" }), NOW).endReason).toBe("stopped");
     expect(taskStatus(facts(), NOW).endReason).toBe("done");
   });
+
+  it("is ended·done once its owner marked it done, which stops it", () => {
+    expect(
+      taskStatus(
+        facts({ stoppedAt: 1, lastOutcome: "done_by_owner", waitingSince: NOW, running: true }),
+        NOW,
+      ),
+    ).toEqual({ status: "ended", endReason: "done" });
+  });
 });
 
 describe("messageStatus", () => {

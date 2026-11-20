@@ -17,7 +17,9 @@ export const vaultApplyInputSchema = z
       .max(MAX_NAMES)
       .refine((names) => new Set(names).size === names.length, "Name each secret once.")
       .optional()
-      .describe("The names of the secrets, as listed by vault_search. One to 10, each once."),
+      .describe(
+        "The names of the secrets, as listed by system:vault_search. One to 10, each once.",
+      ),
     name: secretName
       .optional()
       .describe("One secret's name. The same as `names` with one entry. Give `names` or `name`."),
@@ -89,14 +91,14 @@ export function createAction(config: ActionConfig): Action {
       if (unknown.length > 0) {
         return {
           status: "error",
-          error: `There is no secret named ${unknown.join(", ")}. Use vault_search for the names, or ask the guardian to add it in Settings, Advanced, Vault.`,
+          error: `There is no secret named ${unknown.join(", ")}. Use system:vault_search for the names, or ask the guardian to add it in Settings, Advanced, Vault.`,
         };
       }
       const ungranted = names.filter((name) => !stored.get(name)?.grantedUntil);
       if (ungranted.length > 0) {
         return {
           status: "error",
-          error: `There is no grant for ${ungranted.join(", ")}. The guardian approves vault_apply with the PIN in the dashboard.`,
+          error: `There is no grant for ${ungranted.join(", ")}. The guardian approves system:vault_apply with the PIN in the dashboard.`,
         };
       }
       const expiresAt = names

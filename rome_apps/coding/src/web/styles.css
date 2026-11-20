@@ -66,9 +66,7 @@
 .eyebrow {
   margin: 0 0 0.5rem;
   font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
+  font-weight: 500;
   color: var(--acc);
 }
 
@@ -257,13 +255,16 @@
   padding: 0.2rem 0.55rem;
   border-radius: var(--rome-radius-full);
   font-size: 0.66rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  font-weight: 500;
   color: #fff;
   background: rgba(8, 9, 11, 0.6);
   border: 1px solid rgba(255, 255, 255, 0.14);
   backdrop-filter: blur(6px);
+}
+
+/* Mock types are lower-case keys, so only the first letter is raised. */
+.mock-badge::first-letter {
+  text-transform: uppercase;
 }
 
 .skeleton {

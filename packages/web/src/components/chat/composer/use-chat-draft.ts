@@ -25,18 +25,23 @@ export function useChatDraft(chatId: string | null | undefined, initialText = ""
   const [saved] = useState(() => (chatId ? loadChatDraft(chatId) : null));
   const [text, setText] = useState(saved ? saved.text : initialText);
   const [notice, setNotice] = useState<DictationStop | null>(saved?.stop ?? null);
-  const latest = useRef({ chatId, text });
-  latest.current = { chatId, text };
+  const latest = useRef({ chatId, notice });
+  latest.current = { chatId, notice };
   useEffect(() => {
     if (chatId) saveChatDraft(chatId, { text, stop: notice }, authEpoch);
   }, [chatId, text, notice, authEpoch]);
-  /** Saves `stop` with the latest text at once, for a field that is going away. */
-  const keepNotice = useCallback(
-    (stop: DictationStop) => {
-      const { chatId, text } = latest.current;
-      if (chatId) saveChatDraft(chatId, { text, stop }, authEpoch);
+  /**
+   * Saves `text`, with `stop` or else the current notice, as the draft at
+   * once, without changing the field's text: for words shown over the field
+   * while voice input is on, and for a field that is going away. A new
+   * `keep` comes with each new `chatId`, so the caller can save again where
+   * the draft now lives.
+   */
+  const keep = useCallback(
+    (text: string, stop?: DictationStop) => {
+      if (chatId) saveChatDraft(chatId, { text, stop: stop ?? latest.current.notice }, authEpoch);
     },
-    [authEpoch],
+    [authEpoch, chatId],
   );
   const sendEnded = useCallback(
     (sent: string, accepted: boolean) => {
@@ -48,5 +53,5 @@ export function useChatDraft(chatId: string | null | undefined, initialText = ""
     },
     [authEpoch],
   );
-  return { text, setText, notice, setNotice, keepNotice, sendEnded };
+  return { text, setText, notice, setNotice, keep, sendEnded };
 }

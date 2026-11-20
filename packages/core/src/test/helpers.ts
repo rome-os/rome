@@ -845,7 +845,7 @@ export async function buildTestDeps(
     sessionOpeningFor: sessionOpeningFor({ channelSurface: testChannelSurface }),
     conversationTitleGenerator: {
       async generate(firstMessage) {
-        return normalizeConversationTitle(firstMessage) ?? "New Chat";
+        return normalizeConversationTitle(firstMessage) ?? "New chat";
       },
     },
     agentRunner,

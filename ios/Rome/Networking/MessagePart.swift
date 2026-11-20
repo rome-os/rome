@@ -453,3 +453,14 @@ func displayActionName(_ name: String?) -> String {
     let local = name.split(separator: ":").last.map(String.init) ?? name
     return local.replacingOccurrences(of: "_", with: " ")
 }
+
+extension MessagePart.ReplyQuote {
+    /// The quote of a held message, as the server snapshots it when a reply to
+    /// it is stored; nil when it has no text.
+    init?(of message: ChatMessage) {
+        let text = message.parts.compactMap(\.textContent).joined(separator: "\n\n")
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let automated = message.isUser && message.sender?.kind == "automated"
+        self.init(messageId: message.id, author: message.isUser ? (automated ? "automated" : "guardian") : "agent", name: automated ? message.sender?.name : nil, text: text)
+    }
+}

@@ -41,7 +41,23 @@ export function generateCaddyfile(): string {
   // the shell + Vite bundle, and the SPA does its own redirect-to-login.
   const webRoot = resolveWebRoot();
 
-  const proxy = `reverse_proxy ${upstream}`;
+  // Caddy replaces an incoming X-Forwarded-Proto with the scheme it was reached
+  // on, which is always http on :8080. Behind a proxy that ends TLS, Hono would
+  // then expect an http origin while the page is https, and the same-origin
+  // check refuses every WebSocket upgrade. The page's scheme passes through as
+  // `https` when the incoming header says so, and as `http` otherwise, absent
+  // included: an empty value would make login cookies Secure on plain http.
+  // X-Forwarded-For keeps Caddy's default, so the login rate limit still keys
+  // on the address that reached Caddy.
+  const forwardedProto = `
+map {http.request.header.X-Forwarded-Proto} {forwarded_proto} {
+\t~^https(,|$) https
+\tdefault http
+}
+`.trim();
+  const proxy = `reverse_proxy ${upstream} {
+\theader_up X-Forwarded-Proto {forwarded_proto}
+}`;
   const forwardAuth = `forward_auth ${upstream} {
 \turi /api/auth/verify
 \tcopy_headers X-Rome-User-Id X-Rome-Visitor-Account-Id X-Rome-Visitor-Email
@@ -122,17 +138,18 @@ handle @nonCanonicalPath {
   // so it reaches both the shell served from disk and the proxied reads.
   const body = `
 root * ${webRoot}
+${forwardedProto}
 ${canonicalPathGuard}
 @sharePages path /share /share/* /api/share /api/share/*
 header @sharePages X-Robots-Tag "${SHARE_ROBOTS}"
 @wsUpgrade path /ws/* /desktop-proxy /desktop-proxy/*
 handle @wsUpgrade {
-\t${proxy}
+${indent(proxy, 1)}
 }
 @dynamic path /api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/* /app-manifest/* /app-icon/*
 handle @dynamic {
 ${indent(forwardAuth, 1)}
-\t${proxy}
+${indent(proxy, 1)}
 }
 ${runtimeConfigHandle}
 @spaAssets {
@@ -152,7 +169,7 @@ handle @missingSpaAssets {
 @appDocs path /apps /apps/* /full/apps /full/apps/* /share/*
 handle @appDocs {
 \tencode zstd gzip
-\t${proxy}
+${indent(proxy, 1)}
 }
 handle {
 \troot * ${webRoot}

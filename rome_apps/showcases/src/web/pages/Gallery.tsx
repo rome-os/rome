@@ -64,9 +64,7 @@ export function Gallery() {
       <div className="space-y-10">
         {categories.map((category) => (
           <section key={category.id}>
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-subtle-foreground">
-              {category.title}
-            </h2>
+            <h2 className="mb-3 text-sm font-semibold text-subtle-foreground">{category.title}</h2>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {category.items.map((item) => (
                 <PresetCard key={item.id} item={item} />

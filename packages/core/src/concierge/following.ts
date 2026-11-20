@@ -1,9 +1,9 @@
 // What the Concierge follows for the guardian. What can be followed belongs to
 // the connections: the connector app answers which services it connects and,
 // for each one it can watch, its status, kinds and options
-// (`connector_watch_sources`), subscribes at the source
-// (`connector_watch_ensure`), and puts each raw event in the common shape
-// (`connector_watch_normalize`). Core never names a source. It keeps the
+// (`connector:connector_watch_sources`), subscribes at the source
+// (`connector:connector_watch_ensure`), and puts each raw event in the common shape
+// (`connector:connector_watch_normalize`). Core never names a source. It keeps the
 // follows and one event-bus routine per raw event a follow listens on. Events
 // are batched, triaged by the `concierge-triage` agent (triage.ts), and what
 // triage kept reaches the Concierge as quiet system turns: important ones after

@@ -10,6 +10,8 @@
 /** Kinds of connection whose platform has another name. */
 const PLATFORM_BY_KIND: Readonly<Record<string, string>> = {
   telegram_user: "telegram",
+  // The personal WeChat connection is gone, but channel records stored while it
+  // existed still name it.
   wechat_user: "wechat",
   slack_bot: "slack",
   slack_app: "slack",

@@ -72,9 +72,16 @@ private struct BubbleMenuItems: View {
 }
 
 private extension View {
-    /// The bubble lifts under the finger with the system's menu.
+    /// The bubble lifts under the finger with the system's menu. Reply is
+    /// also a swipe to the right (`SwipeToReply`), and an action of its own
+    /// for VoiceOver.
     func bubbleMenu(text: String, menu: BubbleMenu) -> some View {
         contextMenu { BubbleMenuItems(text: text, menu: menu) }
+            .accessibilityActions {
+                if menu.problem == nil, let onReply = menu.onReply {
+                    Button("Reply", action: onReply)
+                }
+            }
     }
 }
 
@@ -233,6 +240,14 @@ private struct UserImageTile: View {
     @State private var loaded: CGImage?
     @State private var failed = false
 
+    init(image: UserImage) {
+        self.image = image
+        // Already in memory, it shows in the first frame, with no spinner.
+        if case .stored(let upload) = image {
+            _loaded = State(initialValue: StoredImageCache.shared.image(StoredImageCache.shared.key(upload.assetPath)))
+        }
+    }
+
     var body: some View {
         switch image {
         case .local(let photo):
@@ -262,20 +277,14 @@ private struct UserImageTile: View {
     }
 
     private func load(_ upload: UploadLines.Upload) async {
-        let key = StoredImageCache.shared.key(upload.assetPath)
-        if let cached = StoredImageCache.shared.image(key) {
-            loaded = cached
-            return
-        }
         do {
-            let data = try await ImageFetch.data(upload.source, assetLoader: assetLoader, apiLoader: apiLoader, width: Self.assetWidth)
-            // Decoded small and off the main actor: an upload from the web may be huge.
-            let thumbnail = await Task.detached(priority: .userInitiated) {
-                ImageCompressor.thumbnail(from: data, maxPixel: ComposerImage.thumbnailPixels)
-            }.value
-            guard let thumbnail else { throw APIError.network }
-            StoredImageCache.shared.store(thumbnail, for: key)
-            loaded = thumbnail
+            loaded = try await StoredImageCache.shared.load(
+                upload.assetPath, maxPixel: ComposerImage.thumbnailPixels, onDisk: upload.source.isStoredAsset
+            ) {
+                try await ImageFetch.data(
+                    upload.source, assetLoader: assetLoader, apiLoader: apiLoader, width: Self.assetWidth
+                )
+            }
         } catch is CancellationError {
             // Scrolled away mid-load: the next appear loads it.
         } catch {
@@ -294,47 +303,6 @@ private struct UserImageTile: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(name.map { Text(verbatim: $0) } ?? Text("Attachment"))
-    }
-}
-
-/// Stored photos already loaded, so scrolling back does not fetch them again.
-/// It holds at most 64 MB of decoded pixels. The app uses `shared`; a test
-/// makes its own, so it never sees another test's pictures or resets.
-@MainActor
-final class StoredImageCache {
-    static let shared = StoredImageCache()
-
-    private final class Box {
-        let image: CGImage
-        init(_ image: CGImage) { self.image = image }
-    }
-
-    private let cache: NSCache<NSString, Box> = {
-        let cache = NSCache<NSString, Box>()
-        cache.totalCostLimit = 64 * 1024 * 1024
-        return cache
-    }()
-
-    /// The open workspace's: keys carry it, so a picture loaded for one
-    /// instance or account never shows in another.
-    private var scope = UUID()
-
-    /// The key for a path in the open workspace. Taken before a load starts,
-    /// so a load that ends after a switch lands under the old scope.
-    func key(_ path: String) -> String { "\(scope.uuidString)|\(path)" }
-
-    /// A workspace opened or closed, or a sign-out: nothing cached carries over.
-    func reset() {
-        scope = UUID()
-        cache.removeAllObjects()
-    }
-
-    func image(_ path: String) -> CGImage? {
-        cache.object(forKey: path as NSString)?.image
-    }
-
-    func store(_ image: CGImage, for path: String) {
-        cache.setObject(Box(image), forKey: path as NSString, cost: image.bytesPerRow * image.height)
     }
 }
 

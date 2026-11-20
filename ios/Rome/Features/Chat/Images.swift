@@ -108,6 +108,15 @@ enum ImageSource: Hashable, Sendable {
     }
 }
 
+extension ImageSource {
+    /// A file of the instance's asset store (`/api/assets/<id>.<ext>`): it
+    /// never changes at its name, so it may be kept on disk.
+    var isStoredAsset: Bool {
+        if case .instance(let path, _) = self { return path.hasPrefix("/assets/") }
+        return false
+    }
+}
+
 /// Bytes of an image, from the instance or the open web.
 enum ImageFetch {
     /// The query of an instance asset URL with `w=width` added; any other URL, or
@@ -215,6 +224,15 @@ struct MarkdownImageView: View {
     /// offers (`?w=900`), so keep the two in step.
     nonisolated static let pixels: CGFloat = 900
 
+    init(source: ImageSource, alt: String, src: String = "", onOpen: @escaping () -> Void) {
+        self.source = source
+        self.alt = alt
+        self.src = src
+        self.onOpen = onOpen
+        // Already in memory, it shows in the first frame, with no spinner.
+        _image = State(initialValue: StoredImageCache.shared.image(StoredImageCache.shared.key("md|\(source)")))
+    }
+
     var body: some View {
         Group {
             if source == .rejected {
@@ -255,28 +273,25 @@ struct MarkdownImageView: View {
     }
 
     private func load() async {
-        let key = StoredImageCache.shared.key("md|\(source)")
-        if let cached = StoredImageCache.shared.image(key) {
-            image = cached
-            return
-        }
         do {
             // A thumbnail of the size it shows at, not the original. The viewer fetches the original.
-            let data = try await ImageFetch.data(source, assetLoader: assetLoader, apiLoader: apiLoader, width: Int(Self.pixels))
-            let decoded = await Task.detached(priority: .userInitiated) {
-                ImageCompressor.thumbnail(from: data, maxPixel: Self.pixels)
-            }.value
-            guard let decoded else {
-                // Not an image, such as a page or an error in JSON.
-                imageLog.error("reply image is not an image: \(src, privacy: .public) as \(String(describing: source), privacy: .public), \(data.count) bytes")
-                throw APIError.decoding
+            image = try await StoredImageCache.shared.load(
+                "md|\(source)", maxPixel: Self.pixels, onDisk: source.isStoredAsset
+            ) {
+                try await ImageFetch.data(
+                    source, assetLoader: assetLoader, apiLoader: apiLoader, width: Int(Self.pixels)
+                )
             }
-            StoredImageCache.shared.store(decoded, for: key)
-            image = decoded
         } catch is CancellationError {
         } catch {
             if !Task.isCancelled {
-                if (error as? APIError) != .decoding {
+                if (error as? APIError) == .decoding {
+                    // Not an image, such as a page or an error in JSON.
+                    let described = String(describing: source)
+                    imageLog.error(
+                        "reply image is not an image: \(src, privacy: .public) as \(described, privacy: .public)"
+                    )
+                } else {
                     imageLog.error("reply image failed: \(src, privacy: .public) as \(String(describing: source), privacy: .public): \(String(describing: error), privacy: .public)")
                 }
                 failed = true

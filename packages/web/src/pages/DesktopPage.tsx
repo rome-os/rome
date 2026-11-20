@@ -1,4 +1,3 @@
-import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 /** The page in the iframe is plain HTML outside i18n, so the dashboard writes its copy. */
@@ -15,14 +14,11 @@ function applyDesktopSafeAreaBottom(iframe: HTMLIFrameElement, safeAreaBottom: s
   );
 }
 
-/** The shared desktop, or with `name` the named desktop Rome core serves under
- *  /desktop-proxy/<name>/. */
-export default function DesktopPage({ name }: { name?: string }) {
+/** The shared desktop. */
+export default function DesktopPage() {
   const { t } = useTranslation("common");
-  const path = name
-    ? `desktop-proxy/${encodeURIComponent(name)}/websockify`
-    : "desktop-proxy/websockify";
-  const title = name ? t("desktop.namedIframeTitle", { name }) : t("desktop.iframeTitle");
+  const path = "desktop-proxy/websockify";
+  const title = t("desktop.iframeTitle");
   return (
     <div className="h-[var(--rome-mobile-content-height)] bg-foreground md:h-dvh">
       <iframe
@@ -40,24 +36,4 @@ export default function DesktopPage({ name }: { name?: string }) {
       />
     </div>
   );
-}
-
-/** A name `rome-start-desktop.sh` accepts. `websockify` is the shared desktop's
- *  proxy path, so it would open the shared desktop under this name's title.
- *  DesktopPage encodes the whole path, so other names already reach the proxy
- *  intact and get a 404; this check only spares the guardian a broken view. */
-const DESKTOP_NAME = /^[a-z][a-z0-9-]{0,31}$/;
-
-/** `/desktop/:name`. */
-export function NamedDesktopPage() {
-  const { t } = useTranslation("common");
-  const { name = "" } = useParams<{ name: string }>();
-  if (!DESKTOP_NAME.test(name) || name === "websockify") {
-    return (
-      <div className="flex h-[var(--rome-mobile-content-height)] items-center justify-center p-6 text-muted-foreground md:h-dvh">
-        {t("desktop.notFound", { name })}
-      </div>
-    );
-  }
-  return <DesktopPage name={name} />;
 }

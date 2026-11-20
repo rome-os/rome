@@ -53,7 +53,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 
 - An account that takes an agent keeps its agent across a disconnect, and connecting the same account again finds it. A different account is a different connected account and inherits nothing.
 - Rome listens to an account that takes an agent only while one is linked. An account that takes no agent is always listened to.
-- A newly connected account starts with no agent. Rome never links one on its own, and the guardian links it afterwards.
+- A newly connected account starts with no agent, and the guardian links one afterwards. Only a kind that declares it, today Rome's Slack app, starts a new own account with the Concierge.
 - An agent can be linked to any number of accounts, several on one platform included, and an account has one agent in storage.
 - Feishu and Lark are two platforms.
 - The dashboard and docs say account, agent, connect, disconnect, link, switch and unlink.

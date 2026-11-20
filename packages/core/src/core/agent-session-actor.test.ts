@@ -137,6 +137,7 @@ async function withRunningSession(
         list: () => [],
         permits: () => false,
         appOf: () => undefined,
+        find: () => undefined,
         run: async () => ({ status: "ok" }),
       },
       defer: {

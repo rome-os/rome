@@ -6,9 +6,9 @@ description: |
   slug, human name, and description — never invent trigger slugs. Pass the
   toolkit slug (e.g. 'gmail', 'github', 'slack') and an optional case-insensitive
   regex to filter by slug/name/description (omit to list every trigger the
-  toolkit offers). Requires being signed in to Composio (call connector_login
-  once if not). After finding a slug, call connector_event_schema to learn its
-  config and payload, then connector_event_subscribe to arm it.
+  toolkit offers). Requires being signed in to Composio (call connector:connector_login
+  once if not). After finding a slug, call connector:connector_event_schema to learn its
+  config and payload, then connector:connector_event_subscribe to arm it.
 entry: ./index.ts
 complexity: simple
 speed: fast
