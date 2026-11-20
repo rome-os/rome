@@ -2190,6 +2190,7 @@ async function main() {
       appStore,
       hasRegisteredAction: (name) => actionRegistry.has(name),
       isExplicitAction: (name) => actionRegistry.isExplicit(name),
+      canonicalActionName: (name) => actionRegistry.getCanonicalName(name),
       validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },

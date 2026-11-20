@@ -174,6 +174,13 @@ export class ActionRegistryProxy {
     return result.explicit;
   }
 
+  async getCanonicalName(actionName: string): Promise<string | undefined> {
+    const result = await callMain<{ canonicalName: string | null }>("actions.canonicalName", {
+      actionName,
+    });
+    return result.canonicalName ?? undefined;
+  }
+
   /** Returns an error message when args fail the action's input schema, else null. */
   async validateArgs(actionName: string, args: Record<string, unknown>): Promise<string | null> {
     const result = await callMain<{ error: string | null }>("actions.validateArgs", {
