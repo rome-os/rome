@@ -78,15 +78,22 @@
       }
     },
     "topicEmpty": {
-      "title": "Start an ongoing topic",
-      "description": "Alerts and tasks here show up only in this chat.",
+      "welcome": "What's on your mind?",
+      "label": "Suggestions",
       "starters": {
-        "life": "Be my life helper: schedule, bills, deliveries and other errands live here",
-        "work": "Keep track of work here: project progress, PRs and meetings",
-        "trip": "Help me plan next month's trip, and keep everything about it here"
-      },
-      "justAsk": "Just asking a question?",
-      "backToMain": "Ask in the main chat →"
+        "life": {
+          "label": "Keep my bills and errands here",
+          "text": "Keep my bills, deliveries and other errands here, and remind me before anything is due"
+        },
+        "work": {
+          "label": "Track my work and meetings",
+          "text": "Track my work here: project progress, PRs and meetings"
+        },
+        "trip": {
+          "label": "Plan next month's trip",
+          "text": "Help me plan next month's trip, and keep everything about it here"
+        }
+      }
     },
     "activity": {
       "idle": "Idle",
@@ -120,7 +127,7 @@
         "needs_you": "Needs you",
         "active": "Active",
         "later": "Later",
-        "on_its_own": "Routines",
+        "scheduled": "Scheduled",
         "ended": "Ended"
       },
       "empty": "No tasks yet.",
@@ -132,7 +139,6 @@
         "waitingApproval": "Waiting for your approval",
         "running": "Running",
         "checksIn": "Checks {{when}}",
-        "stopping": "Stopping…",
         "ended": {
           "done": "Done",
           "failed": "Failed",
@@ -155,7 +161,8 @@
       "follow": {
         "digest": "Digest daily at {{times}}",
         "unavailable": "Not available",
-        "off": "Off"
+        "off": "Off",
+        "next": "next {{when}}"
       },
       "routine": {
         "paused": "Paused",
@@ -163,20 +170,47 @@
         "fromTask": "From {{title}}"
       },
       "actions": {
+        "more": "More actions for {{title}}",
         "stop": "Stop",
-        "stopTask": "Stop {{title}}"
+        "markDone": "Mark as done",
+        "markDoneTask": "Mark {{title}} as done",
+        "cancel": "Cancel",
+        "unfollow": "Unfollow",
+        "pause": "Pause",
+        "resume": "Resume",
+        "delete": "Delete"
       },
       "failed": {
-        "stop": "Failed to stop the task"
+        "stop": "Failed to stop the task",
+        "markDone": "Failed to mark the task done",
+        "cancel": "Failed to cancel the reminder",
+        "unfollow": "Failed to unfollow",
+        "pause": "Failed to pause the routine",
+        "resume": "Failed to resume the routine",
+        "delete": "Failed to delete the routine"
       },
       "endedAt": "Ended {{when}}",
-      "routines": "Routines",
       "needsYouDot": "A task needs you",
-      "emptyRoutines": "No routines yet."
+      "pending": {
+        "stopping": "Stopping…",
+        "finishing": "Marking done…",
+        "cancelling": "Cancelling…",
+        "unfollowing": "Unfollowing…",
+        "pausing": "Pausing…",
+        "resuming": "Resuming…",
+        "deleting": "Deleting…"
+      },
+      "deleteRoutine": {
+        "title": "Delete “{{name}}”?",
+        "description": "It stops running and is removed. This cannot be undone."
+      },
+      "unfollowConfirm": {
+        "title": "Unfollow {{target}}?",
+        "description": "Its alerts and digest entries stop coming here. To follow it again, ask the Concierge."
+      }
     },
     "menu": {
       "tasks": "Tasks",
-      "routines": "Routines",
       "outputs": "Outputs",
       "needsYouDot": "A task needs you"
     }

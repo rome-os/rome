@@ -1554,6 +1554,34 @@ describe("Concierge tools", () => {
     expect((await s.taskRepo.get(taskId))?.stoppedAt).toEqual(expect.any(Date));
   });
 
+  it("marks a task done for its owner: it ends done, its work stops, and the Concierge hears of it quietly", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.settle();
+    s.chats.activeTurns = (id: string) => (id === chatId ? ["t1"] : []);
+    const interrupted: string[] = [];
+    s.chats.interruptTurn = async (turnId: string) => {
+      interrupted.push(turnId);
+    };
+    const turnedDown: string[] = [];
+    s.service.attachApprovalExpiry(async (chat) => (turnedDown.push(chat), 1));
+    const pending = () =>
+      (s.service as unknown as { taskEvents: { pending: string[] } }).taskEvents.pending;
+
+    expect(await s.service.markTaskDone(taskId)).toBe(true);
+    expect(interrupted).toEqual(["t1"]);
+    expect(turnedDown).toEqual([chatId]);
+    expect(pending()).toContain(taskId);
+    // The turn it stopped ends after it, as stopped, and leaves it done.
+    await s.taskRepo.setLastOutcome(taskId, "stopped");
+    const row = await s.taskRepo.get(taskId);
+    expect(row).toMatchObject({ stoppedAt: expect.any(Date), lastOutcome: "done_by_owner" });
+    // One already ended is not marked again.
+    expect(await s.service.markTaskDone(taskId)).toBe(false);
+  });
+
   it("tells the Concierge quietly when the owner cancels a task's check from the chat's checks", async () => {
     const s = setup();
     const row = await s.makeTaskRow({ title: "PR 42", chatId: CONCIERGE_CHAT });

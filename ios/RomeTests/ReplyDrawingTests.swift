@@ -326,3 +326,18 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(back.sender == concierge.sender)
     }
 }
+
+/// A reply the app still holds shows its quote at once, before the server stores it.
+@MainActor
+@Suite struct PendingReplyQuoteTests {
+    @Test func aPendingReplyQuotesTheHeldMessage() {
+        let original = message("a", "Kyoto hotel\nsecond line", at: 0)
+        let other = message("b", "later", at: 1)
+        let send = PendingSend(id: "p", text: "go", createdAt: .now, state: .sending, reply: ReplyTarget(messageId: "a"))
+        let rows = TranscriptBuilder.rows(messages: [original, other], pending: [send], answers: [:], options: .init(showNotices: true))
+        let quote = RowInfo.build(rows: rows, messages: [original, other], pending: [send], kind: .concierge)["p"]?.quote
+        #expect(quote?.messageId == "a")
+        #expect(quote?.author == "agent")
+        #expect(quote?.line == "Kyoto hotel")
+    }
+}

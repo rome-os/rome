@@ -2821,7 +2821,7 @@ describe("Chat Concierge empty state", () => {
     expect(within(header).getByRole("button", { name: "navbar.more" })).toBeTruthy();
   });
 
-  it("shows neither the mascot nor the name in a blank topic chat, and both once it has a message", async () => {
+  it("shows the mascot, the name and a welcome in a blank topic chat's capsule, which leaves it for the status once it has a message", async () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "",
       pinnedAgentMention: null,
@@ -2836,8 +2836,17 @@ describe("Chat Concierge empty state", () => {
       return found;
     });
     await waitFor(() => expect(rs.mocked(listSessionMessages)).toHaveBeenCalled());
-    expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
-    expect(header.querySelector("[data-concierge-header-name]")).toBeNull();
+    // The header a chat with messages has: the badge, then the name tag under it.
+    await waitFor(() =>
+      expect(header.querySelector("[data-concierge-header-badge]")).not.toBeNull(),
+    );
+    const name = header.querySelector<HTMLElement>("[data-concierge-header-name]")!;
+    expect(name.className).toContain("row-start-2");
+    expect(within(name).getByText("Rome")).toBeTruthy();
+    // Idle, the capsule is drawn anyway, with the welcome.
+    const capsule = header.querySelector<HTMLElement>("[data-concierge-header-activity]")!;
+    expect(capsule.className).not.toContain("sr-only");
+    expect(capsule.textContent).toBe("concierge.topicEmpty.welcome");
     // No task list yet: no Tasks button.
     expect(screen.queryByRole("button", { name: "concierge.menu.tasks" })).toBeNull();
     view.unmount();
@@ -2854,6 +2863,10 @@ describe("Chat Concierge empty state", () => {
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
     await screen.findByTestId("user-row");
     expect(await screen.findByRole("button", { name: "concierge.menu.tasks" })).toBeTruthy();
+    // Idle with a message, the capsule is read but not drawn, as in any chat.
+    const idle = document.querySelector<HTMLElement>("[data-concierge-header-activity]")!;
+    expect(idle.className).toContain("sr-only");
+    expect(idle.textContent).toBe("concierge.activity.idle");
   });
 
   it("floats the Concierge's header over its messages: the mascot's badge, a name tag, a status capsule and round buttons", async () => {
@@ -3041,20 +3054,17 @@ describe("Chat Concierge empty state", () => {
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
     // The header settles once the chat loads; Tasks has its own button.
     fireEvent.click(await screen.findByRole("button", { name: "concierge.menu.tasks" }));
-    expect(mockOpenTaskList).toHaveBeenLastCalledWith("tasks");
+    expect(mockOpenTaskList).toHaveBeenCalled();
     // The logo opens nothing.
     expect(document.querySelector("[data-concierge-header-badge]")?.tagName).toBe("DIV");
     await user.click(screen.getByRole("button", { name: "navbar.more" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "concierge.menu.outputs",
-      "concierge.menu.routines",
       "recentChats.rename",
       "share.title",
       "navbar.archive",
       "navbar.delete",
     ]);
-    await user.click(screen.getByRole("menuitem", { name: "concierge.menu.routines" }));
-    expect(mockOpenTaskList).toHaveBeenLastCalledWith("routines");
   });
 
   it("offers Share chat but no Archive or Delete for the main chat, and all three for a topic chat", async () => {
@@ -3071,7 +3081,6 @@ describe("Chat Concierge empty state", () => {
     // The main chat is only shared: no Rename, Archive or Delete.
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "concierge.menu.outputs",
-      "concierge.menu.routines",
       "share.title",
     ]);
     await user.keyboard("{Escape}");
