@@ -352,6 +352,10 @@ export interface ConnectionDescriptor {
    *  rather than displaying sparsely. Generic readers consume only the returned
    *  display object; raw records never cross to generic surfaces. */
   reviveProfile?(record: ProfileRecord): ProfileDisplay;
+  /** Which field of the revived profile a mention of the account shows:
+   *  the handle unless the kind says otherwise, as Feishu does, whose handle
+   *  is its application id. */
+  mentionedBy?: "handle" | "displayName";
   /** Grant-state-driven custody of out-of-process artifacts (token files, shell
    *  auth). Omitted by connection kinds with no such artifact — most descriptors. */
   custody?: GrantCustody;

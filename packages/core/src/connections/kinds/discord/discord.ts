@@ -790,8 +790,7 @@ export class DiscordAdapter {
     // nothing of it is recorded. A stop said to Rome still reaches it.
     // Whom a message addresses is otherwise Participation's to work out.
     if (cfg.mode === "ignore") {
-      const botId = this.client.user?.id;
-      const stop = isStopCommand(normalizeDiscordMessageText(message.content, botId));
+      const stop = isStopCommand(withoutMentions(message.content));
       if (!stop || !(await this.saidToBot(message))) {
         log.debug("ignoring message in channel with mode=ignore", {
           channelId: message.channelId,

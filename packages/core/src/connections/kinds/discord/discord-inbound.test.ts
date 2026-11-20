@@ -347,12 +347,15 @@ describe("DiscordAdapter gateway filters", () => {
     await say(guildMessage("m3", `<@${BOT.id}> what is left?`, { mentions: [BOT.id] }));
     await say(guildMessage("m4", `<@${BOT.id}> /stop`, { mentions: [BOT.id] }));
     await say(guildMessage("m5", `<@${BOT.id}> ROME-7KQ2M9XB`, { mentions: [BOT.id] }));
+    await say(guildMessage("m6", `<@${BOT.id}> <@ann> /stop`, { mentions: [BOT.id, "ann"] }));
 
     expect(captured.map((m) => [m.messageId, m.text])).toStrictEqual([
       ["m1", "ROME-7KQ2M9XA"],
       ["m4", "/stop"],
       // A code said to Rome is still the bare code admission voids.
       ["m5", "ROME-7KQ2M9XB"],
+      // A stop said to Rome and someone else is still a stop said to Rome.
+      ["m6", "/stop"],
     ]);
     expect(captured[0].thread?.kind).toBe("group");
   });
