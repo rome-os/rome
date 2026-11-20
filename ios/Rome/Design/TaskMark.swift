@@ -93,3 +93,54 @@ struct TaskMarkStyle: Equatable {
         return glyph.foregroundColor(tone.color)
     }
 }
+
+/// Marks the runs of one task chip, its padding, mark and name, so
+/// `TaskChipRenderer` draws one fill behind them. Two chips side by side keep
+/// their own fills.
+@available(iOS 18.0, *)
+struct TaskChipRun: TextAttribute {
+    let id: String
+}
+
+/// Draws a paragraph's text with a rounded faint fill behind each task chip,
+/// one per line the chip spans, as tall as the line's text, so the mark and
+/// the name sit on the same fill and the line grows no taller.
+@available(iOS 18.0, *)
+struct TaskChipRenderer: TextRenderer {
+    /// The web chip's corner (`rounded-4`).
+    static let cornerRadius: CGFloat = 4
+
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        for line in layout {
+            let bounds = line.typographicBounds.rect
+            // The chip being measured on this line, and how far it reaches.
+            var chip: String?
+            var minX: CGFloat = 0
+            var maxX: CGFloat = 0
+            func fill() {
+                guard chip != nil else { return }
+                let rect = CGRect(x: minX, y: bounds.minY, width: maxX - minX, height: bounds.height)
+                let shape = Path(roundedRect: rect, cornerRadius: Self.cornerRadius, style: .continuous)
+                context.fill(shape, with: .color(Palette.taskChip))
+                chip = nil
+            }
+            for run in line {
+                let id = run[TaskChipRun.self]?.id
+                let rect = run.typographicBounds.rect
+                if id != nil, id == chip {
+                    minX = min(minX, rect.minX)
+                    maxX = max(maxX, rect.maxX)
+                    continue
+                }
+                fill()
+                if let id {
+                    chip = id
+                    minX = rect.minX
+                    maxX = rect.maxX
+                }
+            }
+            fill()
+            context.draw(line)
+        }
+    }
+}
