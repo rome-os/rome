@@ -47,6 +47,8 @@ export interface NodeDevicesProps {
   manage?: NodeDeviceManage;
   /** True while the host reads `devices`. */
   loading?: boolean;
+  /** The host's link action and setup content when there are no devices. */
+  setup?: { action: ReactNode; empty: ReactNode };
 }
 
 /**
@@ -294,6 +296,7 @@ export function NodeDevices({
   thisDevice,
   manage,
   loading = false,
+  setup,
 }: NodeDevicesProps) {
   const m = messagesFor(locale);
   const socket = useNodeSocket(url);
@@ -315,6 +318,7 @@ export function NodeDevices({
     thisDevice && !devices.some((device) => device.id.toLowerCase() === self)
       ? [...devices, { id: thisDevice.id, name: thisDevice.name, platform: thisDevice.platform }]
       : devices;
+  const showSetup = setup && ready && listed.length === 0;
   const statsOf = (device: NodeDevice): DeviceStats | undefined =>
     byPeer.get(device.id.toLowerCase());
   const selfOf = (device: NodeDevice) =>
@@ -348,21 +352,27 @@ export function NodeDevices({
           </SectionTitle>
           <ServiceProblem socket={socket} m={m} />
         </SectionHeading>
-        <SectionActions>
-          <Button size="sm" onClick={() => setLinkOpen(true)}>
-            <Plus data-icon="inline-start" aria-hidden />
-            {m.linkDevice}
-          </Button>
-        </SectionActions>
+        {!showSetup && (
+          <SectionActions>
+            {setup ? (
+              setup.action
+            ) : (
+              <Button size="sm" onClick={() => setLinkOpen(true)}>
+                <Plus data-icon="inline-start" aria-hidden />
+                {m.linkDevice}
+              </Button>
+            )}
+          </SectionActions>
+        )}
       </SectionHeader>
 
       {ready && !supported && (
         <p className="text-aux text-muted-foreground">{m.statsUnavailable}</p>
       )}
 
-      {ready && listed.length === 0 && (
-        <p className="text-ui text-muted-foreground">{m.noDevices}</p>
-      )}
+      {ready &&
+        listed.length === 0 &&
+        (setup?.empty ?? <p className="text-ui text-muted-foreground">{m.noDevices}</p>)}
 
       {current.length > 0 && (
         <ul aria-label={m.title} className="grid gap-2 @xl:grid-cols-2 @6xl:grid-cols-3">
@@ -415,7 +425,7 @@ export function NodeDevices({
         </section>
       )}
 
-      <LinkDeviceDialog open={linkOpen} onClose={() => setLinkOpen(false)} m={m} />
+      {!setup && <LinkDeviceDialog open={linkOpen} onClose={() => setLinkOpen(false)} m={m} />}
     </Section>
   );
 }

@@ -2,17 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { devicesStatusSchema } from "@rome/api-types/devices";
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
 import { NodeDeviceCard, NodeDevices, type NodeNavigation } from "@rome-os/node-ui";
-import {
-  Measure,
-  Section,
-  SectionHeader,
-  SectionHeading,
-  SectionTitle,
-  SectionDescription,
-} from "@rome-os/ui/page";
+import { Measure, Section } from "@rome-os/ui/page";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { DeviceConnectionCards, LinkDeviceMenu } from "@/components/device-connection-cards";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useDeviceManage } from "@/hooks/use-device-manage";
@@ -84,13 +78,17 @@ export function DevicesSection() {
         locale={i18n.language}
         thisDevice={thisDevice ?? undefined}
         manage={manage}
+        setup={{
+          action: <LinkDeviceMenu />,
+          empty: <DeviceConnectionCards />,
+        }}
         // The order is set when the cards first draw, so they wait to learn which is this computer.
         loading={!data || thisDevice === undefined}
       />
     );
 
   // Without a working device service there is no activity to show, so the tab explains how to
-  // bring the service back and how to link a computer.
+  // bring the service back and how to link a device.
   return (
     <Measure className="space-y-6">
       {/* The Mac app's computer works without Rome's device service. */}
@@ -146,32 +144,7 @@ export function DevicesSection() {
           </CardContent>
         </Card>
       </Section>
-      <Section aria-labelledby="connect-computer-title">
-        <SectionHeader>
-          <SectionHeading>
-            <SectionTitle id="connect-computer-title">{t("devices.setup.title")}</SectionTitle>
-            <SectionDescription>{t("devices.setup.description")}</SectionDescription>
-          </SectionHeading>
-        </SectionHeader>
-        <Card>
-          <CardContent className="space-y-4">
-            <p className="text-ui text-muted-foreground">{t("devices.setup.commandHelp")}</p>
-            <pre className="overflow-x-auto rounded-8 bg-muted p-4 font-mono text-ui">
-              <code>rome-node connect</code>
-            </pre>
-            <p className="text-ui text-muted-foreground">{t("devices.setup.access")}</p>
-            <Button variant="outline" size="sm" asChild>
-              <a
-                href="https://github.com/rome-os/rome/blob/main/packages/rome-node-cli/README.md"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {t("devices.setup.instructions")}
-              </a>
-            </Button>
-          </CardContent>
-        </Card>
-      </Section>
+      <DeviceConnectionCards />
     </Measure>
   );
 }
