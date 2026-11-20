@@ -32,19 +32,8 @@ import type {
 } from "@rome/api-types/chat-settings";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogBody,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  EmptyState,
-  EmptyStateDescription,
-  EmptyStateIcon,
-  EmptyStateTitle,
-} from "@/components/ui/empty-state";
+import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
 import { FieldGroupLabel, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -316,11 +305,6 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
               ? t("channels.conversationSettings.noMatches")
               : t("channels.conversationSettings.emptyTitle")}
           </EmptyStateTitle>
-          {!query && (
-            <EmptyStateDescription>
-              {t("channels.conversationSettings.emptyDescription")}
-            </EmptyStateDescription>
-          )}
         </EmptyState>
       ) : (
         <>
@@ -460,9 +444,6 @@ function AddChatDialog({
     <Dialog open={open} onClose={onClose} size="sm">
       <DialogHeader onClose={onClose} closeLabel={t("channels.conversationSettings.close")}>
         <DialogTitle>{t("channels.conversationSettings.addDialog.title")}</DialogTitle>
-        <DialogDescription>
-          {t("channels.conversationSettings.addDialog.description")}
-        </DialogDescription>
       </DialogHeader>
       <DialogBody className="space-y-3 pb-6">
         <label className="relative block">

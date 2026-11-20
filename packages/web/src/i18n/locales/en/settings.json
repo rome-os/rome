@@ -434,7 +434,6 @@
       },
       "loading": "Loading chats…",
       "emptyTitle": "Every chat follows the defaults",
-      "emptyDescription": "To give a chat rules of its own, add it.",
       "loadMore": "Load more",
       "sections": {
         "activation": "Activation",
@@ -452,7 +451,7 @@
         "sessionReset": "Provider session reset"
       },
       "descriptions": {
-        "sessionReset": "Clears the agent's memory kept by the model provider"
+        "sessionReset": "Clears the agent's memory kept by the model provider."
       },
       "options": {
         "mentions": "Only mentions",
@@ -468,7 +467,7 @@
       },
       "mainAgent": "main (default)",
       "accountAgent": "{{agent}} (this account's agent)",
-      "silentAccount": "Messages here do not reach Rome until this account has an agent.",
+      "silentAccount": "Messages here do not reach Rome until this connected account has an agent.",
       "silentAccountLink": "<account>Link one in Envoys</account>.",
       "silentAccountOverride": "This chat's choice, {{agent}}, applies once one is linked.",
       "sessionReset": {
@@ -488,17 +487,15 @@
       "saving": "Saving…",
       "retry": "Retry",
       "chatRules": {
-        "title": "Chat rules",
-        "description": "How Rome takes part in each chat on this account."
+        "title": "Chat rules"
       },
-      "otherChats": "Other group chats:",
+      "otherChats": "Group chats by default:",
       "addChat": "Add chat",
       "noMatches": "No chats match",
-      "findChats": "Send a message in a chat on this account, and Rome will find it.",
+      "findChats": "A chat shows up here once Rome sees a message in it.",
       "close": "Close",
       "addDialog": {
-        "title": "Add a chat",
-        "description": "It follows the defaults until you change a rule."
+        "title": "Add a chat"
       },
       "resetToDefaults": "Reset to defaults",
       "changed": "Changed from the default",

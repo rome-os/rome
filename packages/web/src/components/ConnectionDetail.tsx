@@ -9,7 +9,7 @@ import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import { CHANNEL_CONFIGS, ChannelConnectCard } from "@/components/channels/channel-connect-card";
 import { ChatRulesSection } from "@/components/connections/chat-rules-section";
-import { Section, SectionDescription, SectionHeader, SectionHeading } from "@rome-os/ui/page";
+import { Section, SectionHeader, SectionHeading } from "@rome-os/ui/page";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -118,9 +118,6 @@ function ConnectionChatRules({
               ? `${t("channels.conversationSettings.chatRules.title")} · ${title}`
               : t("channels.conversationSettings.chatRules.title")}
           </h3>
-          <SectionDescription>
-            {t("channels.conversationSettings.chatRules.description")}
-          </SectionDescription>
         </SectionHeading>
       </SectionHeader>
       <ChatRulesSection connectionId={connectionId} />

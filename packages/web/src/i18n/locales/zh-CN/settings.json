@@ -434,7 +434,6 @@
       },
       "loading": "正在加载聊天…",
       "emptyTitle": "所有聊天都使用默认规则",
-      "emptyDescription": "要为某个聊天单独设置规则，请添加它。",
       "loadMore": "加载更多",
       "sections": {
         "activation": "触发",
@@ -452,7 +451,7 @@
         "sessionReset": "提供商会话重置"
       },
       "descriptions": {
-        "sessionReset": "清除模型提供商侧保存的智能体记忆"
+        "sessionReset": "清除模型提供商侧保存的智能体记忆。"
       },
       "options": {
         "mentions": "仅提及消息",
@@ -468,7 +467,7 @@
       },
       "mainAgent": "main（默认）",
       "accountAgent": "{{agent}}（此账号的智能体）",
-      "silentAccount": "此账号有智能体之前，这里的消息不会到达 Rome。",
+      "silentAccount": "此关联账号有智能体之前，这里的消息不会到达 Rome。",
       "silentAccountLink": "<account>在外派智能体中关联一个</account>。",
       "silentAccountOverride": "关联后，此聊天选择的 {{agent}} 将生效。",
       "sessionReset": {
@@ -488,17 +487,15 @@
       "saving": "保存中…",
       "retry": "重试",
       "chatRules": {
-        "title": "聊天规则",
-        "description": "Rome 在这个账号的每个聊天中如何参与。"
+        "title": "聊天规则"
       },
-      "otherChats": "其他群聊：",
+      "otherChats": "群聊默认：",
       "addChat": "添加聊天",
       "noMatches": "没有匹配的聊天",
-      "findChats": "在这个账号的聊天里发一条消息，Rome 就能找到它。",
+      "findChats": "Rome 在某个聊天中收到消息后，该聊天会出现在这里。",
       "close": "关闭",
       "addDialog": {
-        "title": "添加聊天",
-        "description": "在你修改规则之前，它沿用默认规则。"
+        "title": "添加聊天"
       },
       "resetToDefaults": "恢复默认",
       "changed": "已改动默认值",
