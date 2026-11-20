@@ -15,6 +15,7 @@ import { preserveMentionOnlyText } from "../../../participation/mention-only.js"
 import { isLinkCodeMessage } from "../../../people/link-code/index.js";
 import type { OutgoingMessage } from "../../../types.js";
 import { createLogger } from "../../../logger.js";
+import { KeyedMutex } from "../../../lib/keyed-mutex.js";
 import type * as connections from "../../message.js";
 import { refuseAttachments, replyToShaped, textToSend } from "../../outbound/send-refusals.js";
 import type { PeopleRepository } from "../../../people/model/people-repository.js";
@@ -145,6 +146,8 @@ export type CreateLarkChannel = (config: FeishuConfig) => LarkChannel;
 export class FeishuAdapter {
   private channel: LarkChannel;
   private handler?: (msg: connections.Message) => Promise<void>;
+  /** Holds each chat's messages in arrival order until they are delivered. */
+  private readonly hearing = new KeyedMutex();
   private readonly connectionId?: string;
   private readonly chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
@@ -197,9 +200,12 @@ export class FeishuAdapter {
 
   async start(): Promise<void> {
     this.unsubscribes.push(
-      this.channel.on("message", async (msg) => {
-        await this.handleMessage(msg);
-      }),
+      // Handling a message waits on its chat's settings and name, so each
+      // chat's messages are handled one after another and delivered in the
+      // order they arrived (the Talker order contract, connections/types.ts).
+      this.channel.on("message", (msg) =>
+        this.hearing.runExclusive(msg.chatId, () => this.handleMessage(msg)),
+      ),
       this.channel.on("cardAction", async (evt) => {
         await this.handleCardAction(evt);
       }),

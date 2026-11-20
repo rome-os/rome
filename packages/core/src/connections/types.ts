@@ -268,6 +268,17 @@ export interface RuntimeKit {
 
 /** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
 export interface Talker extends TalkFeatures {
+  /**
+   * Starts the transport, which calls `deliver` for each message heard.
+   *
+   * Order, per chat: `deliver` is called for a chat's messages in the order
+   * the platform gave them, even when one needs a lookup first, such as a
+   * reply's author. Core keeps the order `deliver` is called in, so a
+   * Talker that calls it late for a slow message reorders the chat for good.
+   * Different chats may deliver in any order. A `KeyedMutex` keyed by chat,
+   * held from the platform's event to `deliver`, keeps the rule; the adapter
+   * conformance suite checks it.
+   */
   start(deliver: (msg: Message) => void, fault: (err: StreamFault) => void): void;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
