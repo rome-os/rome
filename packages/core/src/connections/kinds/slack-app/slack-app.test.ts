@@ -1818,6 +1818,27 @@ describe("Slack app takes edits and deletions into its copy", () => {
     expect(texts((await a.search({ text: "edit", limit: 10 })).messages)).toEqual(["edit A"]);
   });
 
+  it("searches a group mention across chats in the edit a page read since shows", async () => {
+    const slack = fakeSlackHistory();
+    const mailbox = fakeMailbox();
+    const { adapter: a } = historyAdapter(mailbox, slack);
+    await a.start();
+    await mailbox.deposit(frame(mentionEvent(1)));
+    // Edited in Slack, with no edit event the app hears in a group, then
+    // read from the group's history.
+    Object.assign(slack.say(1, "member", "1700000100.000001"), {
+      user: "U_MEMBER",
+      text: `<@${BOT}> question 1, launch Monday`,
+      edited: { ts: "1700000200.000000" },
+    });
+    await a.readHistory("C_TEAM" as never, { limit: 5 });
+
+    const search = async (text: string) => texts((await a.search({ text, limit: 10 })).messages);
+    expect(await search("Monday")).toHaveLength(1);
+    expect(await search("question 1")).toHaveLength(1);
+    expect((await a.search({ text: "Monday", limit: 10 })).messages[0]?.chatId).toBe("C_TEAM");
+  });
+
   it("searches a message in the text a page read since shows, not the text it heard", async () => {
     const slack = fakeSlackHistory();
     const mailbox = fakeMailbox();

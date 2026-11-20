@@ -230,6 +230,22 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
               set: change,
             })
             .run();
+          // The message as heard reads as edited too: a search across chats
+          // matches a group's mentions there, not in its timeline.
+          const text = m.message.text ?? "";
+          tx.update(slackAppMessages)
+            .set({
+              text,
+              message: sql`json_set(${slackAppMessages.message}, '$.text', ${text})`,
+            })
+            .where(
+              and(
+                eq(slackAppMessages.teamId, teamId),
+                eq(slackAppMessages.channelId, channelId),
+                eq(slackAppMessages.ts, m.ts),
+              ),
+            )
+            .run();
         }
         return [m];
       });
