@@ -84,7 +84,13 @@ if (new URL(consent.url).origin === new URL(instance).origin) {
     fail("consent form", {
       status: consent.response.status,
       url: consent.url,
-      html: html.slice(0, 600),
+      // What the page says, without its markup.
+      text: html
+        .replace(/<(script|style)[\s\S]*?<\/\1>/g, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 400),
     });
   const fields = new URLSearchParams();
   for (const input of form[1].matchAll(/<input[^>]*>/g)) {

@@ -62,6 +62,13 @@ test("a second up keeps the certificate and restarts what reads it; down leaves 
     const calls = readFileSync(log, "utf8");
     assert.match(calls, /up -d --force-recreate edge /);
     assert.match(calls, /up -d --force-recreate rome\n/);
+    // Rome Cloud must not take the instance's public name for one it hosts
+    // (https://<slug>.<PANTHEON_DOMAIN>), or it shows no consent form.
+    const pantheonEnv = readFileSync(join(state, "pantheon.env"), "utf8");
+    const domain = pantheonEnv.match(/^PANTHEON_DOMAIN=(.*)$/m)[1];
+    const romeHost = readFileSync(join(state, "compose.env"), "utf8").match(/^ROME_HOST=(.*)$/m)[1];
+    assert.equal(romeHost, "slack.romeos.dev");
+    assert.ok(!romeHost.endsWith(`.${domain}`), domain);
     // The Slack app's secrets reach no file this environment writes.
     for (const f of ["compose.env", "pantheon.env", "secrets.env"]) {
       const text = readFileSync(join(state, f), "utf8");
@@ -74,4 +81,16 @@ test("a second up keeps the certificate and restarts what reads it; down leaves 
     run("down");
   }
   assert.ok(!existsSync(state));
+  // Without a rome-cloud checkout, it names the variable to set.
+  const missing = (() => {
+    try {
+      execFileSync(live, ["up", "--rome", "HEAD"], {
+        env: { ...env, ROME_CLOUD_DIR: join(dir, "nowhere") },
+        stdio: "pipe",
+      });
+    } catch (e) {
+      return String(e.stderr);
+    }
+  })();
+  assert.match(missing, /set ROME_CLOUD_DIR/);
 });

@@ -23,9 +23,15 @@ set -euo pipefail
 
 ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROME_DIR="$(git -C "$ENV_DIR" rev-parse --show-toplevel)"
-ROME_CLOUD_DIR="${ROME_CLOUD_DIR:-$(dirname "$ROME_DIR")/rome-cloud}"
+# Next to the main rome checkout, also when this runs from one of its worktrees.
+ROME_MAIN_DIR="$(dirname "$(git -C "$ROME_DIR" rev-parse --path-format=absolute --git-common-dir)")"
+ROME_CLOUD_DIR="${ROME_CLOUD_DIR:-$(dirname "$ROME_MAIN_DIR")/rome-cloud}"
 STATE_DIR="${SLACKENV_LIVE_STATE:-$ENV_DIR/.state-live}"
 PUBLIC_DOMAIN="${ROME_REMOTE_DOMAIN:-romeos.dev}"
+# Rome Cloud's PANTHEON_DOMAIN, the zone of the instances it hosts. Not the
+# public zone: under it Rome Cloud would take https://<slug>.romeos.dev for an
+# instance it hosts, find none by that name, and show no consent form.
+CLOUD_DOMAIN=slackenv-live.invalid
 
 log() { printf '[slackenv-live] %s\n' "$*" >&2; }
 die() {
@@ -106,6 +112,8 @@ cmd_up() {
   done
   case "$slug" in obs | clickhouse | otlp | deploy | *-pantheon | *[!a-z0-9-]*) die "--slug $slug does not fit the devbox's routing" ;; esac
   slack_app_env
+  [ -d "$ROME_CLOUD_DIR/.git" ] || [ -f "$ROME_CLOUD_DIR/.git" ] ||
+    die "no rome-cloud checkout at $ROME_CLOUD_DIR; set ROME_CLOUD_DIR to it"
 
   [ -n "$(git -C "$ROME_DIR" status --porcelain -- "$ENV_DIR" ':!environments/slack-app/.state' ':!environments/slack-app/.state-live')" ] &&
     die "environments/slack-app has uncommitted changes; commit them first"
@@ -164,7 +172,7 @@ cmd_up() {
   . "$STATE_DIR/secrets.env"
   set +a
 
-  export SLUG="$slug" PUBLIC_DOMAIN GUARDIAN_EMAIL="$guardian"
+  export SLUG="$slug" PUBLIC_DOMAIN CLOUD_DOMAIN GUARDIAN_EMAIL="$guardian"
   export CLOUD_HOST="$slug-pantheon.$PUBLIC_DOMAIN" ROME_HOST="$slug.$PUBLIC_DOMAIN"
   # Kept across starts while the names stay: the edge and every container that
   # trusts it read it once, when they start.
@@ -187,7 +195,7 @@ cmd_up() {
   # the model credential are left out.
   local v
   for v in SLACKENV_PROJECT SLACKENV_NODE_IMAGE SLACKENV_POSTGRES_IMAGE ROME_IMAGE AGENT_MODEL ENV_DIR STATE_DIR \
-    HOST_UID HOST_GID SLUG PUBLIC_DOMAIN CLOUD_HOST ROME_HOST GUARDIAN_EMAIL ROME_JWT_SECRET; do
+    HOST_UID HOST_GID SLUG PUBLIC_DOMAIN CLOUD_DOMAIN CLOUD_HOST ROME_HOST GUARDIAN_EMAIL ROME_JWT_SECRET; do
     printf '%s=%s\n' "$v" "${!v}"
   done >"$STATE_DIR/compose.env"
   chmod 600 "$STATE_DIR/compose.env"
@@ -196,9 +204,9 @@ cmd_up() {
 NODE_ENV=development
 APP_PORT=3100
 DATABASE_URL=postgresql://pantheon:pantheon@postgres:5432/pantheon
-PANTHEON_DOMAIN=$PUBLIC_DOMAIN
+PANTHEON_DOMAIN=$CLOUD_DOMAIN
 PANTHEON_BASE_ORIGIN=https://$CLOUD_HOST
-NEXT_PUBLIC_PANTHEON_DOMAIN=$PUBLIC_DOMAIN
+NEXT_PUBLIC_PANTHEON_DOMAIN=$CLOUD_DOMAIN
 PANTHEON_COOKIE_SECURE=true
 PANTHEON_DEV_IDP=1
 PANTHEON_JWT_SECRET=$PANTHEON_JWT_SECRET
