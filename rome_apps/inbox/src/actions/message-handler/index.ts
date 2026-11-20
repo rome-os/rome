@@ -8,13 +8,14 @@ import type {
   ApprovalsRepository,
   Attachment,
   BondLevel,
+  ChatId,
   ChatRecord,
+  ChatRef,
   ChatRepository,
   EnsureChannelChatInput,
   MessageReplyReference,
   PersonMappingRepository,
   PersonRecord,
-  PolicyEngine,
   SentinelLogRepository,
   StreamAgentMessage,
 } from "@rome-os/app-runtime";
@@ -40,13 +41,28 @@ export type SendGate = (request: {
   author: { agentName: string };
 }) => "send" | "check" | "ask_guardian" | "refuse";
 
+/** Core's wake gate, which the SDK does not describe yet. */
+export type WakeGate = (
+  message: {
+    connectionId: string;
+    chatId: string;
+    channel: string;
+    place: "direct" | "group";
+    threadName?: string;
+  },
+  sender: { person: { id: string; bondLevel: BondLevel } | null },
+) => "wake" | "quiet" | "block" | "review";
+
+/** The wake gate for a chat, built from its current settings. */
+export type WakeGateFor = (request: { chat: ChatRef }) => Promise<WakeGate>;
+
 export interface MessageHandlerDeps {
   agentRunner: AgentRunnerInterface;
   sendGate: SendGate;
   personMappingRepo: PersonMappingRepository;
   sentinelLogRepo: SentinelLogRepository;
   approvalsRepo: ApprovalsRepository;
-  policyEngine: PolicyEngine;
+  wakeGateFor: WakeGateFor;
   emitAgentMessage?: (message: StreamAgentMessage) => void;
   resolveProfilePath(filePath: string): string;
   strangerPersonId: string;
@@ -83,17 +99,6 @@ type CollectedAgentResult =
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
-
-const DEFAULT_TRUSTED_BOND_LEVELS = ["guardian"];
-const DEFAULT_REPLY_TO_BOND_LEVELS = ["guardian"];
-
-function isTrustedBondLevel(bondLevel: string, trustedLevels: string[]): boolean {
-  return trustedLevels.includes(bondLevel);
-}
-
-function canReplyToBondLevel(bondLevel: string, replyToLevels: string[]): boolean {
-  return replyToLevels.includes(bondLevel);
-}
 
 function readMarkdownContext(filePath: string): string | null {
   const fullPath = isAbsolute(filePath) ? filePath : filePath;
@@ -763,20 +768,27 @@ export function createMessageHandlerAction(
 
         const bondLevel = (person?.bondLevel as string) ?? "other";
 
-        const policy = await deps.policyEngine.evaluate({
-          channel,
-          sender: person ? { id: person.id, bondLevel: person.bondLevel } : null,
-          bondLevel,
-          threadName,
-          threadType,
-        });
+        // The hook asked the wake gate already when the host recorded the
+        // message with People's answer; otherwise ask it here.
+        const wake =
+          args.wake === "wake" || args.wake === "review"
+            ? args.wake
+            : (await deps.wakeGateFor({ chat: { connectionId, chatId: threadId as ChatId } }))(
+                {
+                  connectionId,
+                  chatId: threadId,
+                  channel,
+                  place: threadType === "private" ? "direct" : "group",
+                  threadName,
+                },
+                { person: person ? { id: person.id, bondLevel: person.bondLevel } : null },
+              );
 
-        if (policy.action === "block") {
+        if (wake === "block") {
           log.info("message blocked by policy", { channel, channelUserId });
           return { status: "ok", data: { action: "blocked" } };
         }
 
-        const settings = deps.appContext.repositories.settings;
         const conversations = requireChatRepository(deps);
         const requestedAgent =
           typeof args.routedAgentName === "string" && args.routedAgentName.trim()
@@ -841,9 +853,7 @@ export function createMessageHandlerAction(
         // the agent was away. Waking the agent makes it the turn's prompt.
         const recorded =
           typeof args.recordedMessageId === "string" && args.recordedMessageId.length > 0;
-        const replyToLevels =
-          (await settings.get<string[]>("replyToBondLevels")) ?? DEFAULT_REPLY_TO_BOND_LEVELS;
-        if (!canReplyToBondLevel(bondLevel, replyToLevels)) {
+        if (wake === "quiet") {
           const stored = recorded
             ? { inserted: true }
             : await conversations.addMessage({
@@ -859,7 +869,7 @@ export function createMessageHandlerAction(
           if (!stored.inserted) {
             return { status: "ok", data: { action: "duplicate", messageId: platformMessageId } };
           }
-          log.info("message ignored by reply-to bond-level setting", {
+          log.info("message wakes nobody", {
             channel,
             channelUserId,
             bondLevel,
@@ -887,11 +897,7 @@ export function createMessageHandlerAction(
           person && person.id !== deps.strangerPersonId ? person.displayName : null;
         const enrichedArgs = { ...args, text: promptText, bondLevel, replyTo, senderPerson };
 
-        const trustedLevels =
-          (await settings.get<string[]>("trustedBondLevels")) ?? DEFAULT_TRUSTED_BOND_LEVELS;
-
-        const trusted = isTrustedBondLevel(bondLevel, trustedLevels);
-        const triggersTargetAgent = trusted || policy.action === "allow";
+        const triggersTargetAgent = wake === "wake";
         if (recorded && triggersTargetAgent) {
           await conversations.promoteMessageToUser(conversation.id, platformMessageId);
         }
@@ -914,9 +920,8 @@ export function createMessageHandlerAction(
         log.info("routing message", {
           channel,
           channelUserId,
-          trusted,
           bondLevel,
-          policyAction: policy.action,
+          wake,
         });
 
         if (triggersTargetAgent) {

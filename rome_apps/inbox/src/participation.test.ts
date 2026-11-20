@@ -5,9 +5,10 @@
  * suite. One row is one case: change a row only when the behavior is meant
  * to change.
  *
- * The policy column is whatever the policy engine answered, taken as given.
- * With no policy configured the engine answers from the trusted levels, which
- * its own tests pin (packages/core/src/core/policy-engine.test.ts).
+ * The gates' own tables live with them in packages/core/src/participation:
+ * which sender, policy and settings wake the agent (chat-settings-wake.test.ts),
+ * and which reply is checked (guarded-send.test.ts). The rows here take the
+ * gates' answers as given and pin what Inbox does with each.
  */
 import { describe, expect, it, rs } from "@rstest/core";
 import type {
@@ -21,11 +22,10 @@ import type {
   InboundEvent,
   MessagesSaid,
   PersonRecord,
-  PolicyRule,
   RunParams,
   SaidInboundEvent,
 } from "@rome-os/app-runtime";
-import type { SendGate } from "./actions/message-handler/index.js";
+import type { SendGate, WakeGate } from "./actions/message-handler/index.js";
 import { createAction } from "./actions/message-handler/index.js";
 import { ChannelMessageHook } from "./hooks/channel-message/index.js";
 
@@ -46,12 +46,10 @@ type BondLevel = "guardian" | "inner-circle" | "acquaintance" | "other";
 interface Setup {
   /** The sender's bond level, or `stranger` for an account linked to no person. */
   sender: BondLevel | "stranger";
-  /** What the policy engine answers for the message. */
-  policy: PolicyRule["action"];
-  /** The `trustedBondLevels` setting, or the default (`guardian`) when absent. */
-  trusted?: string[];
-  /** The `replyToBondLevels` setting, or the default (`guardian`) when absent. */
-  replyTo?: string[];
+  /** What Core's wake gate answers, `wake` when absent. */
+  wake?: ReturnType<WakeGate>;
+  /** The hook's decision passed on with the message, so Inbox asks no gate. */
+  decidedByHook?: "wake" | "review";
   /** What each agent answers, in the order they run. */
   answers?: AgentMessage[][];
   /** What Core's send gate answers. Its own table is guarded-send.test.ts in
@@ -95,15 +93,11 @@ async function handle(setup: Setup) {
     hasAgent: () => true,
     hasAction: () => false,
   };
-  const settings: Record<string, unknown> = {
-    ...(setup.trusted ? { trustedBondLevels: setup.trusted } : {}),
-    ...(setup.replyTo ? { replyToBondLevels: setup.replyTo } : {}),
-  };
   const stored: { role: string }[] = [];
   const promoted: string[] = [];
   const sent: Record<string, unknown>[] = [];
   const approvals: Record<string, unknown>[] = [];
-  const policyContexts: unknown[] = [];
+  const wakeRequests: Parameters<WakeGate>[] = [];
   const gateRequests: Parameters<SendGate>[0][] = [];
 
   const action = createAction(actionConfig, {
@@ -122,15 +116,14 @@ async function handle(setup: Setup) {
         return "approval-1";
       },
     },
-    policyEngine: {
-      evaluate: async (context: unknown) => {
-        policyContexts.push(context);
-        return { action: setup.policy };
+    wakeGateFor:
+      async () =>
+      (...request: Parameters<WakeGate>) => {
+        wakeRequests.push(request);
+        return setup.wake ?? "wake";
       },
-    },
     appContext: {
       repositories: {
-        settings: { get: async (key: string) => settings[key] ?? null },
         chats: {
           ensureChannelChat: async () => ({ id: "chat-1", agentName: null }),
           addMessage: async (message: { role: string }) => {
@@ -162,9 +155,10 @@ async function handle(setup: Setup) {
     text: "Can you help?",
     messageId: "message-1",
     ...(setup.recorded ? { recordedMessageId: "recorded-1" } : {}),
+    ...(setup.decidedByHook ? { wake: setup.decidedByHook } : {}),
   });
 
-  return { outcome, runs, stored, promoted, sent, approvals, policyContexts, gateRequests };
+  return { outcome, runs, stored, promoted, sent, approvals, wakeRequests, gateRequests };
 }
 
 type Wake = "woke" | "quiet" | "blocked" | "reviewed";
@@ -180,90 +174,27 @@ function wakeOf(handled: Awaited<ReturnType<typeof handle>>): Wake {
   throw new Error(`unexpected handler outcome: ${JSON.stringify(handled.outcome)}`);
 }
 
-describe("wake: sender × policy × settings", () => {
-  const rows: (Setup & { wake: Wake })[] = [
-    // The guardian is trusted by default, so only a block keeps the agent asleep.
-    { sender: "guardian", policy: "allow", wake: "woke" },
-    { sender: "guardian", policy: "sentinel_review", wake: "woke" },
-    { sender: "guardian", policy: "require_approval", wake: "woke" },
-    { sender: "guardian", policy: "block", wake: "blocked" },
-
-    // By default the agent replies to the guardian alone, so anyone else stays quiet.
-    { sender: "stranger", policy: "sentinel_review", wake: "quiet" },
-    { sender: "stranger", policy: "allow", wake: "quiet" },
-    { sender: "inner-circle", policy: "allow", wake: "quiet" },
-    { sender: "acquaintance", policy: "sentinel_review", wake: "quiet" },
-
-    // A block wins over every setting.
-    { sender: "stranger", policy: "block", wake: "blocked" },
-    {
-      sender: "inner-circle",
-      policy: "block",
-      trusted: ["guardian", "inner-circle"],
-      replyTo: ["guardian", "inner-circle"],
-      wake: "blocked",
-    },
-
-    // A sender the agent may reply to: trusted wakes, untrusted goes to review
-    // unless the policy allows it.
-    {
-      sender: "inner-circle",
-      policy: "sentinel_review",
-      replyTo: ["guardian", "inner-circle"],
-      wake: "reviewed",
-    },
-    {
-      sender: "inner-circle",
-      policy: "require_approval",
-      replyTo: ["guardian", "inner-circle"],
-      wake: "reviewed",
-    },
-    {
-      sender: "inner-circle",
-      policy: "allow",
-      replyTo: ["guardian", "inner-circle"],
-      wake: "woke",
-    },
-    {
-      sender: "inner-circle",
-      policy: "sentinel_review",
-      trusted: ["guardian", "inner-circle"],
-      replyTo: ["guardian", "inner-circle"],
-      wake: "woke",
-    },
-    { sender: "stranger", policy: "sentinel_review", replyTo: ["other"], wake: "reviewed" },
-    { sender: "other", policy: "allow", replyTo: ["other"], wake: "woke" },
-
-    // The reply rule wins over trust: a trusted sender the agent may not reply to stays quiet.
-    {
-      sender: "inner-circle",
-      policy: "allow",
-      trusted: ["guardian", "inner-circle"],
-      wake: "quiet",
-    },
-    // A guardian left out of the reply rule stays quiet too.
-    { sender: "guardian", policy: "allow", replyTo: ["inner-circle"], wake: "quiet" },
-  ];
-
-  it.each(rows)("$sender, policy $policy, trusted $trusted, reply to $replyTo → $wake", async ({
-    wake,
-    ...setup
-  }) => {
-    const answers = wake === "reviewed" ? [[result("IGNORE")]] : [];
-    const handled = await handle({ ...setup, answers });
-    expect(wakeOf(handled)).toBe(wake);
+describe("wake: what Inbox does with the wake gate's answer", () => {
+  it.each([
+    { wake: "wake", outcome: "woke" },
+    { wake: "quiet", outcome: "quiet" },
+    { wake: "block", outcome: "blocked" },
+    { wake: "review", outcome: "reviewed" },
+  ] as const)("the gate says $wake → $outcome", async ({ wake, outcome }) => {
+    const answers = wake === "review" ? [[result("IGNORE")]] : [];
+    const handled = await handle({ sender: "inner-circle", wake, answers });
+    expect(wakeOf(handled)).toBe(outcome);
   });
 
   it("records a message that wakes the agent as said to it, and any other as said around it", async () => {
-    const woke = await handle({ sender: "guardian", policy: "allow" });
-    const quiet = await handle({ sender: "stranger", policy: "allow" });
+    const woke = await handle({ sender: "guardian", wake: "wake" });
+    const quiet = await handle({ sender: "stranger", wake: "quiet" });
     const reviewed = await handle({
       sender: "stranger",
-      policy: "sentinel_review",
-      replyTo: ["other"],
+      wake: "review",
       answers: [[result("IGNORE")]],
     });
-    const blocked = await handle({ sender: "guardian", policy: "block" });
+    const blocked = await handle({ sender: "guardian", wake: "block" });
 
     expect(woke.stored.map((m) => m.role)).toEqual(["user"]);
     expect(quiet.stored.map((m) => m.role)).toEqual(["notification"]);
@@ -272,23 +203,21 @@ describe("wake: sender × policy × settings", () => {
   });
 
   it("on a message the host recorded, makes it the turn's prompt only when it wakes the agent", async () => {
-    const woke = await handle({ sender: "guardian", policy: "allow", recorded: true });
-    const quiet = await handle({ sender: "stranger", policy: "allow", recorded: true });
+    const woke = await handle({ sender: "guardian", wake: "wake", recorded: true });
+    const quiet = await handle({ sender: "stranger", wake: "quiet", recorded: true });
     const reviewed = await handle({
       sender: "stranger",
-      policy: "sentinel_review",
-      replyTo: ["other"],
+      wake: "review",
       answers: [[result("IGNORE")]],
       recorded: true,
     });
     const escalated = await handle({
       sender: "stranger",
-      policy: "sentinel_review",
-      replyTo: ["other"],
+      wake: "review",
       answers: [[result("ESCALATE")]],
       recorded: true,
     });
-    const blocked = await handle({ sender: "guardian", policy: "block", recorded: true });
+    const blocked = await handle({ sender: "guardian", wake: "block", recorded: true });
 
     for (const handled of [woke, quiet, reviewed, escalated, blocked]) {
       expect(handled.stored).toEqual([]);
@@ -300,27 +229,42 @@ describe("wake: sender × policy × settings", () => {
     expect(blocked.promoted).toEqual([]);
   });
 
-  it("asks the policy engine about the linked person, or no one for a stranger", async () => {
-    const linked = await handle({ sender: "inner-circle", policy: "allow" });
-    const stranger = await handle({ sender: "stranger", policy: "allow" });
+  it("asks the gate about the chat and the linked person, or no one for a stranger", async () => {
+    const linked = await handle({ sender: "inner-circle" });
+    const stranger = await handle({ sender: "stranger" });
 
-    expect(linked.policyContexts).toEqual([
-      expect.objectContaining({
-        channel: "telegram",
-        sender: { id: "person-inner-circle", bondLevel: "inner-circle" },
-        bondLevel: "inner-circle",
-        threadName: "Dev Chat",
-        threadType: "group",
-      }),
+    expect(linked.wakeRequests).toEqual([
+      [
+        {
+          connectionId: "connection:telegram",
+          chatId: "chat-1",
+          channel: "telegram",
+          place: "group",
+          threadName: "Dev Chat",
+        },
+        { person: { id: "person-inner-circle", bondLevel: "inner-circle" } },
+      ],
     ]);
-    expect(stranger.policyContexts).toEqual([
-      expect.objectContaining({ sender: null, bondLevel: "other" }),
-    ]);
+    expect(stranger.wakeRequests).toEqual([[expect.anything(), { person: null }]]);
+  });
+
+  it("takes the hook's decision without asking the gate again", async () => {
+    const woke = await handle({ sender: "guardian", wake: "block", decidedByHook: "wake" });
+    const reviewed = await handle({
+      sender: "stranger",
+      wake: "block",
+      decidedByHook: "review",
+      answers: [[result("IGNORE")]],
+    });
+
+    expect(wakeOf(woke)).toBe("woke");
+    expect(wakeOf(reviewed)).toBe("reviewed");
+    expect([...woke.wakeRequests, ...reviewed.wakeRequests]).toEqual([]);
   });
 });
 
 describe("wake: what review decides", () => {
-  const reviewable: Setup = { sender: "stranger", policy: "sentinel_review", replyTo: ["other"] };
+  const reviewable: Setup = { sender: "stranger", wake: "review" };
 
   it.each([
     { sentinel: "IGNORE", action: "sentinel_ignored", agents: ["sentinel"] },
@@ -363,12 +307,7 @@ function sendOf(handled: Awaited<ReturnType<typeof handle>>): Send {
 }
 
 describe("send: send gate × Envoy", () => {
-  const woken: Setup = {
-    sender: "inner-circle",
-    policy: "allow",
-    trusted: ["guardian", "inner-circle"],
-    replyTo: ["guardian", "inner-circle"],
-  };
+  const woken: Setup = { sender: "inner-circle", wake: "wake" };
 
   const rows: {
     name: string;
@@ -452,19 +391,16 @@ describe("send: send gate × Envoy", () => {
   it("asks the gate about the chat the message came from, the person who sent it, and the agent", async () => {
     const guardian = await handle({
       sender: "guardian",
-      policy: "allow",
       answers: [[result("Hi")]],
     });
     const stranger = await handle({
       sender: "stranger",
-      policy: "sentinel_review",
-      replyTo: ["other"],
+      wake: "review",
       answers: [[result("ESCALATE")], [result("Hi")], [envoy("approve", "Fine")]],
     });
 
     const guardianDirect = await handle({
       sender: "guardian",
-      policy: "allow",
       threadType: "private",
       answers: [[result("Hi")]],
     });
@@ -498,8 +434,7 @@ describe("send: send gate × Envoy", () => {
   it("sends Sentinel's own reply without asking the gate or Envoy", async () => {
     const handled = await handle({
       sender: "stranger",
-      policy: "sentinel_review",
-      replyTo: ["other"],
+      wake: "review",
       answers: [[result("REPLY: I'll pass that on")]],
     });
 
@@ -520,13 +455,17 @@ describe("send: send gate × Envoy", () => {
   });
 });
 
-describe("wake: chat on/off and the account's agent", () => {
+describe("wake: in the hook", () => {
   async function hear(options: {
     enabled: boolean;
     accountAgent: string | null | undefined;
     recorded: boolean;
+    /** The wake gate's answer, for a recorded message that names its sender. */
+    gate?: ReturnType<WakeGate>;
   }) {
     const run = rs.fn(async () => ({ status: "ok" as const }));
+    const typing = rs.fn(async () => null);
+    const download = rs.fn(async () => []);
     let handler: ((event: InboundEvent) => Promise<void>) | undefined;
     let recordedHandler: ((event: SaidInboundEvent) => Promise<void>) | undefined;
     const messagesSaid: MessagesSaid = {
@@ -538,12 +477,13 @@ describe("wake: chat on/off and the account's agent", () => {
     };
     const channel: Channel = {
       name: "telegram",
+      send: { send: async () => ({}), activity: { begin: typing } },
       inbound: {
         subscribe: (h) => {
           handler = h;
           return () => {};
         },
-        media: null,
+        media: { materialize: download },
       },
     } as unknown as Channel;
     const chatSettings = {
@@ -560,6 +500,7 @@ describe("wake: chat on/off and the account's agent", () => {
       {
         accountAgentOf: () => options.accountAgent,
         ...(options.recorded ? { messagesSaid } : {}),
+        wakeGateFor: async () => () => options.gate ?? "wake",
       },
     );
     await hook.register();
@@ -574,7 +515,7 @@ describe("wake: chat on/off and the account's agent", () => {
         senderId: "user-1",
         senderDisplayName: "Alice",
         text: "Can you help?",
-        attachments: [],
+        attachments: [{ type: "image", url: "file-1" }],
         timestamp: new Date("2026-01-20T12:00:00Z"),
         thread: { kind: "group", name: "Dev Chat" },
       },
@@ -583,11 +524,18 @@ describe("wake: chat on/off and the account's agent", () => {
       await recordedHandler?.({
         ...event,
         recorded: { chatRecordId: "chat-1", messageId: "recorded-1" },
+        ...(options.gate ? { sender: { person: null, delegate: false, label: "not linked" } } : {}),
       });
     } else {
       await handler?.(event);
     }
-    return run.mock.calls.length > 0 ? "handled" : "quiet";
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const args = run.mock.calls[0]?.[1] as { wake?: string } | undefined;
+    return {
+      heard: run.mock.calls.length > 0 ? "handled" : "quiet",
+      wake: args?.wake,
+      typing: typing.mock.calls.length > 0,
+    };
   }
 
   it.each(
@@ -602,11 +550,29 @@ describe("wake: chat on/off and the account's agent", () => {
       { ...row, recorded: true },
       { ...row, recorded: false },
     ]),
-  )("recorded $recorded, chat enabled $enabled, account's agent $agent → $heard", async ({
+  )("with no sender named: recorded $recorded, chat enabled $enabled, account's agent $agent → $heard", async ({
     heard,
     agent: _label,
     ...options
   }) => {
-    expect(await hear(options)).toBe(heard);
+    expect((await hear(options)).heard).toBe(heard);
+  });
+
+  // The hook asks the gate once People's answer comes with the message, so a
+  // message that wakes nobody shows no typing. Before
+  // the wake gate, the hook showed typing for it and Inbox dropped it after.
+  it.each([
+    { gate: "wake", heard: "handled", wake: "wake", typing: true },
+    { gate: "review", heard: "handled", wake: "review", typing: true },
+    { gate: "quiet", heard: "quiet", wake: undefined, typing: false },
+    { gate: "block", heard: "quiet", wake: undefined, typing: false },
+  ] as const)("with the sender named, the gate says $gate → $heard", async ({
+    gate,
+    heard,
+    wake,
+    typing,
+  }) => {
+    const result = await hear({ enabled: true, accountAgent: "main", recorded: true, gate });
+    expect(result).toEqual({ heard, wake, typing });
   });
 });
