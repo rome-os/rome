@@ -5,15 +5,18 @@
 // cannot hold a check past its own deadline by more than this much.
 const REQUEST_MS = 15_000;
 
-/** Calls `url` and parses a JSON answer. Never throws on a non-2xx status. */
-export async function json(url, { method = "GET", body, headers = {} } = {}) {
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(REQUEST_MS),
+/**
+ * Calls `url` and parses a JSON answer. Never throws on a non-2xx status; an
+ * endpoint that cannot be reached throws `Unreachable` (see `request`).
+ */
+export async function json(url, { method = "GET", body, headers = {}, retry = true } = {}) {
+  const res = await request(url, {
     method,
     headers: { "content-type": "application/json", ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
+    retry,
   });
-  const text = await res.text();
+  const text = await readBody(res, url, method);
   let data = null;
   try {
     data = text ? JSON.parse(text) : null;
@@ -21,6 +24,133 @@ export async function json(url, { method = "GET", body, headers = {} } = {}) {
     data = { raw: text };
   }
   return { status: res.status, ok: res.ok, data };
+}
+
+// How long a request keeps trying an endpoint it cannot connect to, so a
+// check rides out an instance restart (a wipe restarts it for about 15 s).
+let reachMs = 90_000;
+
+/** Sets how long `request` retries an endpoint it cannot connect to. */
+export function setReachSeconds(seconds) {
+  reachMs = seconds * 1000;
+}
+
+// The step a rule is on, and its last requests, for a report that names
+// what was being done when a request failed.
+let currentPhase = null;
+const trail = [];
+const TRAIL_MAX = 12;
+
+/** Names the step the running rule is on; the label goes into failure reports. */
+export function phase(label) {
+  currentPhase = label;
+}
+
+/** Clears the step and the request trail, at the start of each rule. */
+export function resetTrail() {
+  currentPhase = null;
+  trail.length = 0;
+}
+
+/** The step and the last requests made, oldest first. */
+export function lastRequests() {
+  return { phase: currentPhase, requests: [...trail] };
+}
+
+/**
+ * A request that never got an answer: the endpoint refused the connection,
+ * reset it, or timed out, across every retry. `sent` says whether the request
+ * may have reached the endpoint before it failed.
+ */
+export class Unreachable extends Error {
+  constructor(info) {
+    super(
+      `could not reach ${info.host}: ${info.method} ${info.url} failed after ${info.attempts} attempt(s) over ${info.seconds} s (${info.cause})${info.phase ? `, during "${info.phase}"` : ""}`,
+    );
+    this.name = "Unreachable";
+    this.info = info;
+  }
+}
+
+// Failures where the request never reached the endpoint, so any method may
+// be sent again.
+const NEVER_SENT = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+// Failures where it may have; only a GET or HEAD is sent again.
+const MAYBE_SENT = new Set(["ECONNRESET", "EPIPE", "UND_ERR_SOCKET", "UND_ERR_CLOSED", "TimeoutError", "AbortError"]);
+
+/** The code and message under a fetch failure, which says only "fetch failed" itself. */
+function causeOf(err) {
+  let e = err;
+  const chain = [];
+  while (e && chain.length < 4) {
+    chain.push(e);
+    e = e.cause;
+  }
+  const deepest = chain.at(-1);
+  const code = chain.map((x) => x.code ?? (x.name !== "Error" && x.name !== "TypeError" ? x.name : undefined)).find(Boolean) ?? null;
+  return { code, text: `${code ? `${code}: ` : ""}${deepest?.message ?? String(err)}` };
+}
+
+/**
+ * fetch with a deadline per attempt, a record in the trail, and retries while
+ * the endpoint cannot be reached, for up to the reach window. `retry: false`
+ * tries once, for probes that expect a stopped endpoint.
+ */
+export async function request(url, { retry = true, ...init } = {}) {
+  const method = (init.method ?? "GET").toUpperCase();
+  const idempotent = method === "GET" || method === "HEAD";
+  const started = Date.now();
+  let attempts = 0;
+  for (;;) {
+    attempts++;
+    const at = new Date().toISOString();
+    try {
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_MS) });
+      remember({ at, method, url: String(url), status: res.status });
+      return res;
+    } catch (err) {
+      const cause = causeOf(err);
+      remember({ at, method, url: String(url), error: cause.text });
+      const again = NEVER_SENT.has(cause.code) || (idempotent && MAYBE_SENT.has(cause.code));
+      if (!retry || !again || Date.now() - started >= reachMs) {
+        throw new Unreachable({
+          url: String(url),
+          host: new URL(url).host,
+          method,
+          phase: currentPhase,
+          cause: cause.text,
+          attempts,
+          seconds: Math.round((Date.now() - started) / 1000),
+          sent: NEVER_SENT.has(cause.code) ? false : "maybe",
+        });
+      }
+      await sleep(Math.min(3000, 500 * attempts));
+    }
+  }
+}
+
+/** Reads a body; a connection lost mid-body is reported like any other. */
+async function readBody(res, url, method) {
+  try {
+    return await res.text();
+  } catch (err) {
+    const cause = causeOf(err);
+    throw new Unreachable({
+      url: String(url),
+      host: new URL(url).host,
+      method,
+      phase: currentPhase,
+      cause: `answered ${res.status}, then the body failed: ${cause.text}`,
+      attempts: 1,
+      seconds: 0,
+      sent: true,
+    });
+  }
+}
+
+function remember(entry) {
+  trail.push(currentPhase ? { phase: currentPhase, ...entry } : entry);
+  if (trail.length > TRAIL_MAX) trail.shift();
 }
 
 /**
@@ -44,8 +174,7 @@ export async function follow(url, { method = "GET", form, stopAt = () => false, 
   for (let i = 0; i < max; i++) {
     visited.push(next);
     if (stopAt(new URL(next))) return { stoppedAt: new URL(next), visited };
-    const res = await fetch(next, {
-      signal: AbortSignal.timeout(REQUEST_MS),
+    const res = await request(next, {
       method: nextMethod,
       redirect: "manual",
       headers: nextBody ? { "content-type": "application/x-www-form-urlencoded" } : {},
@@ -58,7 +187,7 @@ export async function follow(url, { method = "GET", form, stopAt = () => false, 
       nextBody = undefined;
       continue;
     }
-    return { status: res.status, url: new URL(next), html: await res.text(), visited };
+    return { status: res.status, url: new URL(next), html: await readBody(res, next, nextMethod), visited };
   }
   throw new Error(`more than ${max} redirects from ${url}`);
 }

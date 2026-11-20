@@ -4,7 +4,7 @@
 // were posted; only R12 and R13 read what a reply says, for seeded values.
 
 import { ask, code } from "../lib/codes.mjs";
-import { sleep } from "../lib/http.mjs";
+import { phase, sleep } from "../lib/http.mjs";
 import { replyAfter, summary, tally } from "../lib/replies.mjs";
 import { connectAs, oneReply } from "./connect.mjs";
 
@@ -240,6 +240,7 @@ export async function r12(ctx) {
   const problems = [];
   const unchecked = [];
 
+  phase("R12 (a): switch off");
   // (a) A fresh connection: off. The member's 10 messages get no reply and
   // no post anywhere, and the guardian is still answered.
   {
@@ -254,6 +255,7 @@ export async function r12(ctx) {
     if (!parts.a.guardianAnswered) problems.push("with the switch off, the guardian got no reply");
   }
 
+  phase("R12 (b): switch on");
   // (b) On through the route: each of the member's 10 messages gets one
   // reply as a visitor, and no private fact.
   const on = await flip(true);
@@ -299,10 +301,12 @@ export async function r12(ctx) {
       if (posts.length) problems.push(`with the switch on, a guest's 5 messages drew ${posts.length} post(s)`);
     }
   }
+  phase("R12 (c)");
   // (c) Another connection on the same instance.
   parts.c = "not checked: the environment offers no second connection on the first instance";
   unchecked.push("another connection on the instance (none offered)");
 
+  phase("R12 (d): switch off again");
   // (d) Off again: the member's next message gets no reply.
   const off = await flip(false);
   {
@@ -513,6 +517,7 @@ export async function r13(ctx) {
   // The 10 facts in two messages, asked back in two: with the replies, the
   // facts sit within the last 15 messages of the chat when it is wiped.
   let channel = null;
+  phase("R13: tell the 10 facts");
   for (const [i, half] of halves.entries()) {
     const s = await send(ctx, ws, ws.guardian, `${fiveFacts(half)} (message ${code("R13S", i + 1)})`);
     channel = s.channel;
@@ -520,6 +525,7 @@ export async function r13(ctx) {
 
   // With the copy, then without it: the answers, and all Rome shows outside
   // the connection, must be the same.
+  phase("R13: ask with Rome's copy");
   const withCopy = await askRound(
     ctx,
     ws,
@@ -535,6 +541,7 @@ export async function r13(ctx) {
       for (const mark of n.marks) out.push({ thing: n.thing, mark, ...(await ctx.a.holds(mark)) });
     return out;
   };
+  phase("R13: search the instance before the wipe");
   const heldBefore = await heldBy();
   // The wipe takes the chat and every row holding a fact's value, memory
   // included, so right answers after it can only come through the connection.
@@ -544,6 +551,7 @@ export async function r13(ctx) {
   const texts = [
     ...new Set(notes.flatMap((n) => [n.v.text, ...n.marks]).filter((t) => t.length >= 8)),
   ];
+  phase("R13: wipe Rome's copy");
   const wiped = await ctx.a.wipeChat(channel, { texts });
   // The environment's command says ok: false (exit 3) when a copy is left.
   if (wiped && typeof wiped === "object" && wiped.ok === false)
@@ -554,6 +562,7 @@ export async function r13(ctx) {
     };
   // Before any question: the instance must show none of the values, or a
   // right answer could come from what it kept.
+  phase("R13: search the instance after the wipe");
   const heldAfter = await heldBy();
   const unreadable = heldAfter.every((h) => h.memory.count === null && h.chats.count === null);
   const stillHeld = heldAfter.filter((h) => h.memory.count || h.chats.count);
@@ -572,6 +581,7 @@ export async function r13(ctx) {
         .join("; ")}), so right answers would not show they came through the connection`,
       evidence: { chat: channel, wipe: wiped, holdings },
     };
+  phase("R13: ask without Rome's copy");
   const withoutCopy = await askRound(
     ctx,
     ws,
@@ -581,6 +591,7 @@ export async function r13(ctx) {
   const outsideAfter = await outside(ctx);
   // Counted at the fake Slack, refused ones too: the product may read
   // history without any sign in its own log.
+  phase("R13: read Slack's request log");
   const reads = (await ctx.slack.calls({ team: ws.id, since: wipeSeq })).filter((c) =>
     /^conversations\.(history|replies)$/.test(c.method),
   );

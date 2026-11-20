@@ -10,7 +10,7 @@ The verifier reads one `env.json` and talks to three things: the fake Slack, eac
   "model": "claude-haiku-5-5",
   "differences": { },                  // copied into the report as is
   "stopSeconds": 120,                  // R6's stop; production's is 3600
-  "timeouts": { "replySeconds": 90, "settleSeconds": 10, "restartSeconds": 300 },
+  "timeouts": { "replySeconds": 90, "settleSeconds": 10, "restartSeconds": 300, "reachSeconds": 90, "threadReadSeconds": 90 },
   "repos": {                           // checkouts R11 reads
     "rome": "/abs/path/rome",
     "romeCloud": "/abs/path/rome-cloud",

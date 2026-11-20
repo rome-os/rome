@@ -189,6 +189,28 @@ const CASES = [
     what: "the connection's view shows that it had to read Slack",
   },
   {
+    name: "R13-slow-start",
+    breaks: "R13-slow-start",
+    rule: "R13",
+    result: "pass",
+    what: "the instance comes back 15 s after the wipe returns; requests ride it out",
+  },
+  { name: "R14-no-wait", breaks: "R14-no-wait", rule: "R14", what: "a thread read refused by Slack's pace is not waited out; the reply says the thread could not be read" },
+  {
+    name: "R13-short-memory",
+    breaks: "R13-short-memory",
+    rule: "R13",
+    result: "not checked",
+    what: "the instance logs it is short on memory during R13, which then loses the answers",
+  },
+  {
+    name: "R13-gone",
+    breaks: "R13-gone",
+    rule: "R13",
+    result: "not checked",
+    what: "the instance never comes back after the wipe; R13 names what it could not reach",
+  },
+  {
     name: "R8-never",
     breaks: "R8-never",
     rule: "R8",

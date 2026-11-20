@@ -343,7 +343,9 @@ async function api(token, method, params = {}) {
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
     body: JSON.stringify(params),
   });
-  return res.json();
+  const out = await res.json();
+  if (res.status === 429) out.retryAfter = Number(res.headers.get("retry-after")) || 60;
+  return out;
 }
 
 /** The groups the bot can see, by name, with whether it is in each. */
@@ -487,7 +489,7 @@ async function recall(conn, channel, thing) {
     db.messages.filter((m) => m.channel === channel).map((m) => m.text),
     thing,
   );
-  if (fromCopy || breaks.has("R13-forget")) return fromCopy;
+  if (fromCopy || breaks.has("R13-forget") || breaks.has("R13-short-memory")) return fromCopy;
   // Pages through Slack's history under its limit, waiting out a 429, and
   // keeps what it read as its copy again.
   const read = [];
@@ -639,7 +641,14 @@ async function threadContext(conn, ev) {
   const key = `${conn.team}/${ev.channel}/${ev.thread_ts}`;
   db.threads ??= {};
   if (!db.threads[key] || breaks.has("R14-replies-each")) {
-    const r = await api(conn.botToken, "conversations.replies", { channel: ev.channel, ts: ev.thread_ts, limit: 15 });
+    // Slack paces this method (one a minute per workspace): wait out a 429
+    // once, as the product does, for up to 90 s.
+    let r = await api(conn.botToken, "conversations.replies", { channel: ev.channel, ts: ev.thread_ts, limit: 15 });
+    if (r.error === "ratelimited" && !breaks.has("R14-no-wait")) {
+      await new Promise((ok) => setTimeout(ok, Math.min(90, (r.retryAfter ?? 60) + 1) * 1000));
+      r = await api(conn.botToken, "conversations.replies", { channel: ev.channel, ts: ev.thread_ts, limit: 15 });
+    }
+    if (!r.ok && r.error === "ratelimited") return "I could not read this thread just now, Slack asked me to slow down.";
     if (!r.ok) return breaks.has("R14-old-error") ? `I could not read this thread: ${r.error}.` : null;
     db.threads[key] = r.messages.slice(0, 15).map((m) => ({ ts: m.ts, text: m.text, bot: Boolean(m.bot_id) }));
     save();

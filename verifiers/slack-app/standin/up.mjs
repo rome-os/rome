@@ -120,6 +120,16 @@ const control = await serve(async (req, res, url) => {
     db.messages = db.messages.filter((m) => m.channel !== conversation && !holds(m.text));
     if (!breaks.has("R13-memory-kept")) db.memory = (db.memory ?? []).filter((t) => !holds(t));
     writeFileSync(file, JSON.stringify(db));
+    // Broken R13-gone never starts again; R13-slow-start answers the wipe
+    // first and starts 15 s later, past the instance's restart wait.
+    // Broken R13-short-memory logs Rome's warning, then answers as R13-forget.
+    if (breaks.has("R13-short-memory"))
+      writeFileSync(join(workDir, `instance-${w[1]}-warnings.log`), `${new Date().toISOString()} WARN instance short on memory; holding queued roots\n`, { flag: "a" });
+    if (breaks.has("R13-gone")) return send(res, 200, { messages: before - db.messages.length });
+    if (breaks.has("R13-slow-start")) {
+      setTimeout(() => startInstance(w[1]), 15_000);
+      return send(res, 200, { messages: before - db.messages.length });
+    }
     startInstance(w[1]);
     await listening(`http://127.0.0.1:${ports[w[1]]}/`);
     return send(res, 200, { messages: before - db.messages.length });
@@ -352,7 +362,7 @@ const env = {
   model: "stand-in (no model)",
   differences: { product: "stand-in", stopSeconds: 2, breaks: [...breaks] },
   stopSeconds: 2,
-  timeouts: { replySeconds: 5, settleSeconds: 1, restartSeconds: 10, answerSeconds: 15 },
+  timeouts: { replySeconds: 5, settleSeconds: 1, restartSeconds: 10, answerSeconds: 15, reachSeconds: 30, threadReadSeconds: 75 },
   repos: { rome, romeCloud, romeCloudBase: "main", romeBase: "main" },
   // R9's existing tests: the stand-in's rome has the four files but no test
   // runner, so a stand-in command plays it. Broken R9-tests-fail fails.
@@ -372,6 +382,8 @@ const env = {
       wipeChat: `${control.url}/instances/${name}/wipe`,
       tokenFile: `${control.url}/instances/${name}/token-file`,
       oldConnections: `${control.url}/instances/${name}/old-connections`,
+      // Warnings the stand-in logs; only R13-short-memory writes any.
+      logs: `cat ${JSON.stringify(join(workDir, `instance-${name}-warnings.log`))} 2>/dev/null || true`,
     },
     connect: { kind: "slack_app", grant: "bot" },
   })),

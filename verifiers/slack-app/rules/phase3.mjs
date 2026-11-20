@@ -3,7 +3,7 @@
 // since it is R1's check from another workspace.
 
 import { execFileSync, spawn } from "node:child_process";
-import { sleep } from "../lib/http.mjs";
+import { request, sleep, Unreachable } from "../lib/http.mjs";
 import { replyAfter } from "../lib/replies.mjs";
 
 // The connector app's existing tests for its Slack actions on main: what R9
@@ -699,7 +699,7 @@ async function newConnectRefused(inst, kind) {
   }
   // The old OAuth kind's start: refused unless it answers 2xx or sends the
   // browser on to a sign-in.
-  const res = await fetch(`${inst.origin}/api/oauth/slack/start`, {
+  const res = await request(`${inst.origin}/api/oauth/slack/start`, {
     redirect: "manual",
     headers: { origin: inst.origin, "sec-fetch-site": "same-origin", ...(inst.headers ?? {}) },
   });
@@ -829,6 +829,7 @@ export async function r10(ctx) {
     try {
       await inst.disconnect(e.id);
     } catch (err) {
+      if (err instanceof Unreachable) throw err;
       alone = false;
       evidence.officialDisconnect = err.message;
     }
@@ -861,6 +862,7 @@ export async function r10(ctx) {
     try {
       await inst.disconnect(c.connection_id);
     } catch (err) {
+      if (err instanceof Unreachable) throw err;
       problems.push(`disconnecting ${kind} failed: ${err.message}`);
       continue;
     }

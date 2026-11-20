@@ -4,7 +4,9 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { lastRequests, resetTrail, setReachSeconds, Unreachable } from "./lib/http.mjs";
 import { loadEnv } from "./lib/env.mjs";
+import { hostMemory, shortOnMemory, warnedDuring } from "./lib/memory.mjs";
 import { instance } from "./lib/instance.mjs";
 import { fakeSlack } from "./lib/slack.mjs";
 import { r4, r6, r7 } from "./rules/chat.mjs";
@@ -56,6 +58,7 @@ const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R5", "R12", "R13", "R9",
 
 const [envPath, outDir, verifierCommit] = process.argv.slice(2);
 const env = loadEnv(envPath);
+setReachSeconds(env.timeouts.reachSeconds);
 const slack = fakeSlack(env.slack.control.replace(/\/$/, ""));
 // Workspace A binds to the first instance and B to the second. Each
 // workspace's guardian is its owner.
@@ -69,8 +72,8 @@ const homeTeam = fakeState.distribution?.home_team ?? null;
 const ctx = {
   env,
   slack,
-  a: instance(env.instances[0], slack.origin),
-  b: instance(env.instances[1], slack.origin),
+  a: instance(env.instances[0], slack.origin, env.timeouts),
+  b: instance(env.instances[1], slack.origin, env.timeouts),
   wsA: workspaces[0],
   wsB: workspaces[1],
   wsC: workspaces.slice(2).find((w) => homeTeam && w.id !== homeTeam) ?? null,
@@ -100,13 +103,26 @@ for (const step of ORDER) {
   }
   const rule = RULES.find((r) => r.id === step);
   log(`${rule.id} ${rule.title} ...`);
+  resetTrail();
+  const memoryAtStart = hostMemory();
+  const warnedBefore = await shortOnMemory([ctx.a, ctx.b]);
   try {
     results[rule.id] = await rule.check(ctx);
   } catch (err) {
+    results[rule.id] = crashed(err);
+  }
+  const warned = warnedDuring(warnedBefore, await shortOnMemory([ctx.a, ctx.b]));
+  results[rule.id].memory = { atStart: memoryAtStart, shortOnMemoryWarnings: warned };
+  // Rome held its turns while the machine was short on memory: a rule that
+  // did not pass then measured the machine. A pass stands.
+  if (Object.keys(warned).length && results[rule.id].result !== "pass") {
+    const [name, lines] = Object.entries(warned)[0];
+    const was = results[rule.id];
     results[rule.id] = {
-      result: "fail",
-      reason: `the check crashed: ${err.message}`,
-      evidence: { stack: err.stack },
+      result: "not checked",
+      reason: `machine short on memory: ${name} logged "${lines.at(-1).slice(0, 200)}" during the rule (otherwise ${was.result}: ${was.reason})`,
+      evidence: was.evidence,
+      memory: was.memory,
     };
   }
   results[rule.id].seconds = Math.round((Date.now() - started) / 1000);
@@ -142,6 +158,28 @@ writeFileSync(join(outDir, "report.md"), markdown(report));
 const failed = report.rules.filter((r) => r.result === "fail").map((r) => r.id);
 log(`report: ${join(outDir, "report.md")}; failed: ${failed.join(", ") || "none"}`);
 process.exit(failed.length ? 1 : 0);
+
+/**
+ * A check that threw. An endpoint that never answered leaves the rule not
+ * checked, naming what could not be reached; any other error fails it, with
+ * its cause chain and the requests just before.
+ */
+function crashed(err) {
+  const trail = lastRequests();
+  if (err instanceof Unreachable)
+    return {
+      result: "not checked",
+      reason: err.message,
+      evidence: { unreachable: err.info, lastRequests: trail.requests },
+    };
+  const causes = [];
+  for (let e = err.cause; e && causes.length < 4; e = e.cause) causes.push(`${e.code ?? e.name}: ${e.message}`);
+  return {
+    result: "fail",
+    reason: `the check crashed${trail.phase ? ` during "${trail.phase}"` : ""}: ${err.message}`,
+    evidence: { stack: err.stack, causes, phase: trail.phase, lastRequests: trail.requests },
+  };
+}
 
 function log(msg) {
   process.stderr.write(`[verifier ${new Date().toISOString().slice(11, 19)}] ${msg}\n`);

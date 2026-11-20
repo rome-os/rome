@@ -45,6 +45,10 @@ export function loadEnv(path) {
   // How long a dashboard ask waits for a task to deliver its answer.
   env.timeouts.answerSeconds ??= 180;
   env.timeouts.restartSeconds ??= 300;
+  // How long a request retries an endpoint it cannot connect to.
+  env.timeouts.reachSeconds ??= 90;
+  // How long a thread read may wait for Slack's pace on conversations.replies.
+  env.timeouts.threadReadSeconds ??= 90;
   // The environment does not name its checkouts yet, so R11 can take them
   // from the shell.
   env.repos ??= {};
@@ -99,6 +103,12 @@ function fromEnvironment(raw) {
         wipeChat: i.control?.wipe_chat ?? i.wipe_chat,
         tokenFile: i.control?.token_file,
         oldConnections: i.control?.old_connections,
+        // The instance's recent log lines. env.json names no logs command, so
+        // it is ctl.sh's own (`ctl.sh logs <service>`, last 500 lines), found
+        // beside its stop command.
+        logs:
+          i.control?.logs ??
+          (Array.isArray(i.stop) && i.stop[1] === "stop" ? [i.stop[0], "logs", i.stop[2]] : undefined),
       },
       connect: i.connect,
     })),

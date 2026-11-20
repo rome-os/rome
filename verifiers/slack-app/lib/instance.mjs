@@ -3,7 +3,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { follow, forms, json, sleep } from "./http.mjs";
+import { follow, forms, json, sleep, waitFor } from "./http.mjs";
 
 const run = promisify(execFile);
 
@@ -11,7 +11,7 @@ const run = promisify(execFile);
 const SLACK_KIND = "slack_app";
 
 /** Wraps instance `inst` from env.json. */
-export function instance(inst, slackOrigin) {
+export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
   // The dashboard's Concierge chat; replaced by a made one if it is missing.
   let conciergeChat = "concierge";
   const api = inst.api.replace(/\/$/, "");
@@ -28,6 +28,34 @@ export function instance(inst, slackOrigin) {
         ...(opts.headers ?? {}),
       },
     });
+
+  /** Runs the environment's wipe of `conversation`; see `wipeChat`. */
+  async function wipe(conversation, texts) {
+    const target = inst.control.wipeChat;
+    const extra = texts.flatMap((t) => ["--text", t]);
+    if (typeof target === "string" && /^https?:\/\//.test(target)) {
+      const q = new URLSearchParams([["conversation", conversation], ...texts.map((t) => ["text", t])]);
+      const res = await json(`${target}?${q}`, { method: "POST" });
+      if (!res.ok) throw new Error(`wipe_chat ${inst.name}: ${res.status}`);
+      return res.data;
+    }
+    // Exit 3: the command ran, and a copy is left. Its JSON says what.
+    const { stdout } = await (
+      Array.isArray(target)
+        ? run(target[0], [...target.slice(1), conversation, ...extra], { timeout: 600_000 })
+        : run("sh", ["-c", `${target} "$@"`, "wipe", conversation, ...extra], {
+            timeout: 600_000,
+          })
+    ).catch((err) => {
+      if (err.code === 3 && err.stdout) return { stdout: err.stdout, left: true };
+      throw new Error(`wipe_chat on ${inst.name}: ${err.message}`);
+    });
+    try {
+      return JSON.parse(stdout);
+    } catch {
+      return stdout.trim();
+    }
+  }
 
   async function control(what) {
     const target = inst.control[what];
@@ -201,6 +229,16 @@ export function instance(inst, slackOrigin) {
     },
 
     /** Whether the environment can wipe Rome's copy of one chat. */
+    /** The instance's recent log lines, or null when the environment gives no logs command. */
+    async logs() {
+      const target = inst.control.logs;
+      if (!target) return null;
+      const { stdout } = Array.isArray(target)
+        ? await run(target[0], target.slice(1), { timeout: 60_000, maxBuffer: 32 << 20 })
+        : await run("sh", ["-c", target], { timeout: 60_000, maxBuffer: 32 << 20 });
+      return stdout.split("\n");
+    },
+
     canWipe: () => Array.isArray(inst.control.wipeChat) || typeof inst.control.wipeChat === "string",
 
     /**
@@ -211,30 +249,11 @@ export function instance(inst, slackOrigin) {
      * It returns once the instance is healthy again, with what it printed.
      */
     async wipeChat(conversation, { texts = [] } = {}) {
-      const target = inst.control.wipeChat;
-      const extra = texts.flatMap((t) => ["--text", t]);
-      if (typeof target === "string" && /^https?:\/\//.test(target)) {
-        const q = new URLSearchParams([["conversation", conversation], ...texts.map((t) => ["text", t])]);
-        const res = await json(`${target}?${q}`, { method: "POST" });
-        if (!res.ok) throw new Error(`wipe_chat ${inst.name}: ${res.status}`);
-        return res.data;
-      }
-      // Exit 3: the command ran, and a copy is left. Its JSON says what.
-      const { stdout } = await (
-        Array.isArray(target)
-          ? run(target[0], [...target.slice(1), conversation, ...extra], { timeout: 600_000 })
-          : run("sh", ["-c", `${target} "$@"`, "wipe", conversation, ...extra], {
-              timeout: 600_000,
-            })
-      ).catch((err) => {
-        if (err.code === 3 && err.stdout) return { stdout: err.stdout, left: true };
-        throw new Error(`wipe_chat on ${inst.name}: ${err.message}`);
-      });
-      try {
-        return JSON.parse(stdout);
-      } catch {
-        return stdout.trim();
-      }
+      const out = await wipe(conversation, texts);
+      // The wipe restarts the instance; its API may come back a little after
+      // the command returns, so nothing asks it anything before then.
+      await waitFor(() => this.up(), { timeoutMs: restartSeconds * 1000, everyMs: 2000 });
+      return out;
     },
 
     /**
@@ -423,7 +442,7 @@ export function instance(inst, slackOrigin) {
     /** True once the instance's API answers. */
     async up() {
       try {
-        return (await call("/connected-accounts")).ok;
+        return (await call("/connected-accounts", { retry: false })).ok;
       } catch {
         return false;
       }

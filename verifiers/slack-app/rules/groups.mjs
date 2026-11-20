@@ -9,7 +9,7 @@
 //
 // Scored through the agent and the fake Slack, never through the prompt.
 
-import { sleep } from "../lib/http.mjs";
+import { phase, sleep } from "../lib/http.mjs";
 import { replyAfter } from "../lib/replies.mjs";
 import { connectAs } from "./connect.mjs";
 import { askConcierge, holds, operate, SEARCH_ASKS } from "./phase3.mjs";
@@ -59,14 +59,16 @@ const NAMED_SEARCH_ASKS = [
   (w) => `Look up "${w}" in #news on Slack and tell me what you find.`,
 ];
 
-// Thread facts: each code word appears once, in an earlier reply of a thread;
+// Thread facts: harmless ones (a name, a place), never anything called a
+// code, password, key or PIN, which the Concierge rightly declines to repeat
+// in a group. Each made-up word appears once, in an earlier reply of a thread;
 // the guardian then mentions the app later in that thread with a question
 // that needs it. The first two share the environment's seeded thread, so two
 // mentions there test that the thread is read once.
 const THREAD_FACTS = [
-  { fact: "The gate code for the harbour fair is Quillfeather.", ask: "what is the gate code for the harbour fair?", mark: "Quillfeather" },
+  { fact: "The harbour fair opens with a song called Quillfeather Morning.", ask: "which song opens the harbour fair?", mark: "Quillfeather" },
   { fact: "The lantern boat this year is called the Marrowdine.", ask: "what is the lantern boat called this year?", mark: "Marrowdine" },
-  { fact: "The lost-and-found tent password is Brackenspur.", ask: "what is the password for the lost-and-found tent?", mark: "Brackenspur" },
+  { fact: "The lost-and-found tent stands beside the Brackenspur oak.", ask: "where is the lost-and-found tent?", mark: "Brackenspur" },
   { fact: "The fireworks crew meets at the Tollywick jetty.", ask: "where does the fireworks crew meet?", mark: "Tollywick" },
   { fact: "The raffle prize is hidden in the Scarrowmoor crate.", ask: "which crate holds the raffle prize?", mark: "Scarrowmoor" },
 ];
@@ -76,6 +78,9 @@ const THREAD_TOPICS = [
   "Raffle for the harbour fair, details here.",
 ];
 
+// A reply saying the thread could not be read (the product's words for a
+// thread read that failed even after waiting for Slack's pace).
+const UNREAD = /(could ?n[o']t|can ?n[o']t|unable to|was ?n[o']t able to|failed to)\b[^.]*\b(read|load|open|see|fetch|get)\b[^.]*\bthread|thread\b[^.]*\b(could ?n[o']t|can ?n[o']t) be read/i;
 const ERRORISH = /missing_scope|not_in_channel|error|could not|couldn't|failed/i;
 const REAPPROVE = /approv\w*\b[^.]*\bagain|re-?approv/i;
 
@@ -94,13 +99,25 @@ async function mentionInThread(ctx, ws, { user, channel, text, threadTs }) {
   const since = await ctx.slack.seq();
   const at = now();
   const sent = await ctx.slack.mention(ws.id, user, text, channel, { thread_ts: threadTs });
-  await replyAfter(ctx.slack, { team: ws.id, channel, since, timeoutMs: ctx.env.timeouts.replySeconds * 1000 });
+  // A thread read waits for Slack's pace on conversations.replies (one a
+  // minute per workspace), so the reply may take that long on top of the
+  // model's time.
+  const budget = ctx.env.timeouts.replySeconds + ctx.env.timeouts.threadReadSeconds;
+  await replyAfter(ctx.slack, { team: ws.id, channel, since, timeoutMs: budget * 1000 });
   await sleep(ctx.env.timeouts.settleSeconds * 1000);
   const replies = await threadReplies(ctx, ws.id, channel, threadTs, since);
   const repliesCalls = (await ctx.slack.calls({ team: ws.id, method: "conversations.replies", since })).filter(
     (c) => c.args?.channel === channel && c.args?.ts === threadTs,
   );
-  return { at, control: sent, replies: replies.map((p) => ({ seq: p.seq, text: p.text?.slice(0, 300) })), repliesCalls: repliesCalls.length, since };
+  return {
+    at,
+    control: sent,
+    waitedUpToSeconds: budget,
+    replies: replies.map((p) => ({ seq: p.seq, text: p.text?.slice(0, 300) })),
+    repliesCalls: repliesCalls.length,
+    repliesCallResults: repliesCalls.map((c) => (c.ok ? "ok" : c.error ?? "refused")),
+    since,
+  };
 }
 
 /** Workspace A, on the first instance: the group checks proper. */
@@ -119,6 +136,7 @@ async function inGroups(ctx, timeline) {
   const ops = [];
   const observations = {};
 
+  phase("R14: send to #news by name");
   // Sends by name alone.
   ops.push({
     op: "send to #news by name",
@@ -131,6 +149,7 @@ async function inGroups(ctx, timeline) {
     })),
   });
 
+  phase("R14: list groups");
   // The groups it is in: #news and #general, never #quiet.
   const listed = await operate(ctx, ws, {
     asks: LIST_ASKS,
@@ -145,6 +164,7 @@ async function inGroups(ctx, timeline) {
       : { op: "list groups", ...listed },
   );
 
+  phase("R14: read #news");
   // A plain message in #news, read back by name.
   timeline.push({ at: now(), step: "seed message in #news", text: READ.text, control: await ctx.slack.groupMessage(ws.id, member, READ.text, g.news) });
   ops.push({
@@ -157,6 +177,7 @@ async function inGroups(ctx, timeline) {
     })),
   });
 
+  phase("R14: read #quiet");
   // A read of #quiet is refused: no read succeeds at Slack, nothing shown.
   {
     const before = await ctx.slack.seq();
@@ -173,6 +194,7 @@ async function inGroups(ctx, timeline) {
     });
   }
 
+  phase("R14: search #news after a wipe");
   // A search naming #news, after Rome's copy of #news is wiped.
   if (!ctx.a.canWipe()) ops.push({ op: "search #news after wipe", result: "not checked", why: "the environment cannot wipe a chat", tries: [] });
   else {
@@ -203,6 +225,7 @@ async function inGroups(ctx, timeline) {
     }
   }
 
+  phase("R14: mentions in threads");
   // A mention inside a thread carries the thread's earlier messages. The
   // first two facts go in the environment's seeded thread, each later one in
   // a thread of its own; every fact is in place before its mention, and
@@ -219,6 +242,9 @@ async function inGroups(ctx, timeline) {
   }
   const answers = [];
   const twoMentions = { root: seededRoot ?? null, repliesCalls: 0 };
+  // Slack's pace on thread reads is on for the mentions, as in production
+  // for an app outside the Marketplace; the rest of R14 runs without it.
+  await ctx.slack.config({ history_limit: true });
   for (const t of threads) {
     for (const f of t.facts) {
       const c = await ctx.slack.groupMessage(ws.id, member, f.fact, g.news, { thread_ts: t.root });
@@ -228,20 +254,36 @@ async function inGroups(ctx, timeline) {
       const m = await mentionInThread(ctx, ws, { user: ws.guardian, channel: g.news, text: f.ask, threadTs: t.root });
       timeline.push({ at: m.at, step: "mention in a thread", thread: t.root, text: f.ask, control: m.control, replies: m.replies, repliesCalls: m.repliesCalls });
       const right = m.replies.some((r) => holds(r.text, f.mark));
-      answers.push({ mark: f.mark, thread: t.root, replied: m.replies.length > 0, right });
+      const unread = m.replies.find((r) => UNREAD.test(r.text ?? ""));
+      answers.push({
+        mark: f.mark,
+        thread: t.root,
+        replied: m.replies.length > 0,
+        right,
+        ...(unread && !right ? { saidThreadUnread: unread.text } : {}),
+        repliesCalls: m.repliesCallResults,
+      });
       if (t.seeded) twoMentions.repliesCalls += m.repliesCalls;
     }
   }
+  await ctx.slack.config({ history_limit: false });
+  // A reply that says the thread could not be read, or no reply within the
+  // budget, fails like a wrong one: the product was asked and did not answer.
   const wrong = answers.filter((a) => a.replied && !a.right);
   const silent = answers.filter((a) => !a.replied);
+  const right = answers.length - wrong.length - silent.length;
   ops.push({
-    op: `mention in a thread (${answers.length} code words)`,
-    result: wrong.length ? "fail" : silent.length ? "not checked" : "pass",
-    why: wrong.length
-      ? `the reply lacked the thread's earlier value for ${wrong.map((a) => a.mark).join(", ")}`
-      : silent.length
-        ? `no reply in the thread for ${silent.map((a) => a.mark).join(", ")}`
-        : `${answers.length} of ${answers.length} replies stated the thread's earlier value`,
+    op: `mention in a thread (${answers.length} facts)`,
+    result: wrong.length || silent.length ? "fail" : "pass",
+    why: [
+      `${right} of ${answers.length} replies stated the thread's earlier value`,
+      wrong.length ? `lacking it: ${wrong.map((a) => `${a.mark}${a.saidThreadUnread ? " (said the thread could not be read)" : ""}`).join(", ")}` : "",
+      silent.length
+        ? `no reply within ${ctx.env.timeouts.replySeconds + ctx.env.timeouts.threadReadSeconds} s: ${silent.map((a) => a.mark).join(", ")}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("; "),
     answers,
   });
   if (seededRoot)
@@ -253,13 +295,17 @@ async function inGroups(ctx, timeline) {
     });
   else ops.push({ op: "thread read once for two mentions", result: "not checked", why: "the environment seeds no thread in #news", tries: [] });
 
+  phase("R14: plain message in #news");
   // Only direct messages and mentions are heard: a plain message in #news,
   // with Slack's message event sent as if the app had subscribed, gets no
   // reply and causes no Slack call (the turn itself is not visible here).
   {
     const since = await ctx.slack.seq();
     const text = "Plain note for the group: the tide tables are pinned by the Wexcombe door.";
-    const c = await ctx.slack.groupMessage(ws.id, member, text, g.news, { send_event: true });
+    // Sent by the guardian, whom Rome answers whatever the members switch
+    // says, so silence shows the message was not heard, not that the sender
+    // was ignored.
+    const c = await ctx.slack.groupMessage(ws.id, ws.guardian, text, g.news, { send_event: true });
     timeline.push({ at: now(), step: "plain message in #news with its event", text, control: c });
     await sleep((ctx.env.timeouts.replySeconds + ctx.env.timeouts.settleSeconds) * 1000);
     const posts = (await ctx.slack.posts({ team: ws.id, since })).filter((p) => p.tokenKind === "bot");
@@ -314,6 +360,7 @@ async function oldPermissions(ctx, timeline) {
     const general = w.groups.find((g) => g.name === "general")?.id;
     const member = w.members.find((m) => m.id !== ws.guardian && !m.is_restricted && !m.is_ultra_restricted && !m.is_bot)?.id;
 
+    phase("R14 old permissions: direct message");
     // A direct message from the guardian.
     {
       const since = await ctx.slack.seq();
@@ -322,10 +369,12 @@ async function oldPermissions(ctx, timeline) {
       timeline.push({ at: now(), step: "direct message (old scopes)", control: sent, replied: ok });
       ops.push({ op: "old permissions: direct message answered", result: ok ? "pass" : "fail", why: ok ? "replied" : "no reply", tries: [] });
     }
+    phase("R14 old permissions: mentions");
     // A mention, at the top of the group and inside a thread.
     {
       const since = await ctx.slack.seq();
-      const sent = await ctx.slack.mention(ws.id, member, "hello from the group, are you there?", general);
+      // The guardian: a fresh connection answers no one else (R12).
+      const sent = await ctx.slack.mention(ws.id, ws.guardian, "hello from the group, are you there?", general);
       const ok = await replyAfter(ctx.slack, { team: ws.id, channel: general, since, timeoutMs: ctx.env.timeouts.replySeconds * 1000 });
       timeline.push({ at: now(), step: "mention (old scopes)", control: sent, replied: ok });
       ops.push({ op: "old permissions: mention answered", result: ok ? "pass" : "fail", why: ok ? "replied" : "no reply", tries: [] });
@@ -343,6 +392,7 @@ async function oldPermissions(ctx, timeline) {
         tries: [],
       });
     }
+    phase("R14 old permissions: group read");
     // A group read asked on the second instance's dashboard: answered with a
     // message to approve the app again.
     ops.push({
