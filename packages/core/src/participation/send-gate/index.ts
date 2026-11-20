@@ -5,8 +5,13 @@ import type { BondLevel } from "@rome-os/app-runtime";
 /** A message an agent wants to send, as the send gate reads it. The text is
  *  not part of it: a gate judges where and to whom, never what. */
 export interface SendRequest {
-  /** Where the message goes. */
+  /** Where the message goes. A gate reads what it needs, and whether any of
+   *  it reaches an agent's context is the caller's choice. */
   destination: {
+    /** The connection that carries the message. */
+    connectionId: string;
+    /** The chat the message goes to, as that connection names it. */
+    chatId: string;
     /** A direct message, or a group, channel or other chat with more than one reader. */
     place: "direct" | "group";
     /** The message goes to the chat the agent was woken in. */

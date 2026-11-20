@@ -472,14 +472,24 @@ describe("send: send gate × Envoy", () => {
     // The guardian's message answered in a group: others read the reply.
     expect(guardian.gateRequests).toEqual([
       {
-        destination: { place: "group", sameChatAsWake: true, onlyGuardianReads: false },
+        destination: {
+          connectionId: "connection:telegram",
+          chatId: "chat-1",
+          place: "group",
+          sameChatAsWake: true,
+          onlyGuardianReads: false,
+        },
         recipient: { bondLevel: "guardian" },
         author: { agentName: "main" },
       },
     ]);
     expect(guardianDirect.gateRequests).toEqual([
       expect.objectContaining({
-        destination: { place: "direct", sameChatAsWake: true, onlyGuardianReads: true },
+        destination: expect.objectContaining({
+          place: "direct",
+          sameChatAsWake: true,
+          onlyGuardianReads: true,
+        }),
       }),
     ]);
     expect(stranger.gateRequests).toEqual([expect.objectContaining({ recipient: null })]);

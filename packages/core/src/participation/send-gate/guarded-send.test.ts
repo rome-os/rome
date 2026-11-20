@@ -5,6 +5,8 @@ import { guardedSend } from "./index.js";
 function request(
   recipient: SendRequest["recipient"],
   destination: SendRequest["destination"] = {
+    connectionId: "connection:telegram",
+    chatId: "chat-1",
     place: "direct",
     sameChatAsWake: true,
     onlyGuardianReads: recipient?.bondLevel === "guardian",
@@ -31,7 +33,13 @@ describe("guardedSend", () => {
   // Today's rule and a known gap: others in the group read the reply, and
   // nobody checks it. Whether it should be checked is the guardian's call.
   it("sends a reply to the guardian's message in a group unchecked", () => {
-    const destination = { place: "group" as const, sameChatAsWake: true, onlyGuardianReads: false };
+    const destination = {
+      connectionId: "connection:telegram",
+      chatId: "group-1",
+      place: "group" as const,
+      sameChatAsWake: true,
+      onlyGuardianReads: false,
+    };
     expect(guardedSend(request({ bondLevel: "guardian" }, destination))).toBe("send");
   });
 });
