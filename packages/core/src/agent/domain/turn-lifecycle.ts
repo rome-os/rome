@@ -14,6 +14,13 @@ import { turnStatus, turnStop, type TurnEnding } from "./turn-end.js";
 export interface AgentTurnFailedBeforeStart {
   turn: AgentTurnRef;
   error: string;
+  /** Why, as the error event said it: a model resolution's code, provider and reason. */
+  failure?: {
+    code?: string;
+    provider?: string;
+    reason?: string;
+    usageLimitUntil?: string;
+  };
 }
 
 /**

@@ -321,6 +321,8 @@ describe("agent model pins through Sessions", () => {
       {
         turn: expect.objectContaining({ turnId: blocked.id }),
         error: expect.stringContaining("Selected model provider is unavailable"),
+        // What the refusal said, so a dashboard chat can show its card.
+        failure: expect.objectContaining({ code: "model_provider_unavailable" }),
       },
     ]);
   });

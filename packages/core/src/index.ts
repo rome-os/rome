@@ -218,6 +218,7 @@ import {
   isModelSelectionId,
   MODEL_SELECTIONS,
   type DefaultProvider,
+  type ModelResolutionErrorPayload,
   DrizzleSessionRepository,
   codexLoginKind,
   SharedCodexAccountService,
@@ -1591,6 +1592,46 @@ async function main() {
     notify: notifyClient,
   });
   const stopProviderFailureTurns = turnListeners.listen({
+    // A live session refused on its model before the turn began: the same
+    // card as a send refused before any session opened.
+    couldNotStart: (event) => {
+      const thread = event.turn.threadContext;
+      const code = event.failure?.code;
+      if (event.turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
+      if (
+        code !== "model_provider_unavailable" &&
+        code !== "no_model_provider_available" &&
+        code !== "model_unavailable"
+      )
+        return;
+      void providerFailures
+        .failed(
+          {
+            chatId: thread.threadId,
+            agentName: event.turn.agentName,
+            sessionId: event.turn.sessionId,
+            turnId: event.turn.turnId,
+            failure: {
+              kind: "resolution",
+              payload: {
+                error: event.error,
+                code,
+                ...(event.failure?.provider
+                  ? { provider: event.failure.provider as "anthropic" | "openai" }
+                  : {}),
+                ...(event.failure?.reason ? { reason: event.failure.reason } : {}),
+                ...(event.failure?.usageLimitUntil
+                  ? { usageLimitUntil: event.failure.usageLimitUntil }
+                  : {}),
+              } as ModelResolutionErrorPayload,
+            },
+          },
+          { final: true },
+        )
+        .catch((error: unknown) =>
+          log.warn("provider failure handling failed", { error: String(error) }),
+        );
+    },
     ended: (event) => {
       const thread = event.turn.threadContext;
       if (event.turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;

@@ -19,7 +19,11 @@ import {
 import { storeForkParent } from "../domain/session-parent.js";
 import { turnStatus, type TurnEnding } from "../domain/turn-end.js";
 import { createTurn, type Turn, type TurnWriter } from "../domain/turn.js";
-import { endedTurn, type TurnLifecycle } from "../domain/turn-lifecycle.js";
+import {
+  endedTurn,
+  type AgentTurnFailedBeforeStart,
+  type TurnLifecycle,
+} from "../domain/turn-lifecycle.js";
 import type { TurnMiddleware } from "../domain/turn-middleware.js";
 import { shapedResult, type AnswerShape, type ReadAnswerShape } from "../domain/answer-shape.js";
 import { type TurnAttribution, type TurnUsageReporting } from "../domain/turn-usage-reporting.js";
@@ -3552,6 +3556,7 @@ class AgentSessionImpl implements AgentSession {
             parent: sink.lifecycleParent,
           }),
           error: terminal.error,
+          failure: failureFieldsOf(terminal),
         });
       }
       return;
@@ -4613,4 +4618,18 @@ function subagentsOf(agents: AgentCatalog, config: AgentDefinition): Subagent[] 
     name,
     description: requireAgent(agents, name).definition.description,
   }));
+}
+
+/** The classification an error event carries, such as a refused model resolution's. */
+function failureFieldsOf(terminal: StreamAgentEvent): AgentTurnFailedBeforeStart["failure"] {
+  const fields = terminal as unknown as Record<string, unknown>;
+  const text = (key: string) =>
+    typeof fields[key] === "string" ? (fields[key] as string) : undefined;
+  const failure = {
+    ...(text("code") ? { code: text("code") } : {}),
+    ...(text("provider") ? { provider: text("provider") } : {}),
+    ...(text("reason") ? { reason: text("reason") } : {}),
+    ...(text("usageLimitUntil") ? { usageLimitUntil: text("usageLimitUntil") } : {}),
+  };
+  return Object.keys(failure).length > 0 ? failure : undefined;
 }
