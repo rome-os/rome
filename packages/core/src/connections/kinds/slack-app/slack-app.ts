@@ -855,7 +855,10 @@ export class SlackAppAdapter {
       );
     }
     messages.sort((a, b) => compareTs(tsOfId(b.messageId), tsOfId(a.messageId)));
-    const below = read.olderThan !== undefined || read.until !== undefined;
+    // A read on from a message answers the messages just after it, whatever
+    // bounds it above.
+    const below =
+      read.newerThan === undefined && (read.olderThan !== undefined || read.until !== undefined);
     return below
       ? messages.slice(0, read.limit)
       : messages.slice(Math.max(0, messages.length - read.limit));

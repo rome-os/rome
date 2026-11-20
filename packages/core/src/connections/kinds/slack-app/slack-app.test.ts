@@ -2084,6 +2084,13 @@ describe("Slack app in the channels it is a member of", () => {
       limit: 100,
     });
     const fromStart = await a.readHistory(`C_NEWS:${root}` as never, { limit: 3 });
+    // A read on from a message, bounded above too, still answers the messages
+    // just after it, so reading on from its newest skips none.
+    const onUntil = await a.readHistory(`C_NEWS:${root}` as never, {
+      newerThan: root,
+      until: new Date(1_800_000_000_000),
+      limit: 3,
+    });
 
     expect(texts(first)).toHaveLength(15);
     expect(texts(first).at(-1)).toBe("message 0");
@@ -2106,6 +2113,7 @@ describe("Slack app in the channels it is a member of", () => {
     );
     // With no bound, a thread is read from its start, as Slack reads it.
     expect(texts(fromStart)).toEqual(["message 2", "message 1", "message 0"]);
+    expect(texts(onUntil)).toEqual(["message 3", "message 2", "message 1"]);
   });
 
   it("says where to read on when a page of a thread held nothing Rome reads, rather than end the thread", async () => {
