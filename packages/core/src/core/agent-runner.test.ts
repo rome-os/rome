@@ -115,7 +115,9 @@ import { AppTurnMiddleware } from "../app-host/app-turn-middleware.js";
 import type {
   AgentTurnFinishedEvent,
   AgentTurnStartedEvent,
+  ChatId,
   ProviderSessionResetPolicy,
+  ThreadContext,
 } from "@rome-os/app-runtime";
 import type { TurnUsageFacts } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
@@ -6905,6 +6907,82 @@ describe("AgentRunner", () => {
       expect(providerPrompts[0]).not.toContain("<conversation_context>");
       expect(providerPrompts[0]).not.toContain("ambient update");
       expect(seen).toEqual([]);
+    });
+
+    it("reads a platform thread's earlier messages once per thread, the first time a turn is in it", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "slack_app",
+        threadId: "C_NEWS",
+        agentName: "main",
+      });
+      const said = (minute: number, text: string) => ({
+        channel: "slack_app",
+        chatId: "C_NEWS",
+        messageId: `root:m${minute}`,
+        direction: "inbound",
+        senderId: "T_A/U_SAM",
+        senderDisplayName: "Sam",
+        text,
+        attachments: [],
+        timestamp: new Date(Date.UTC(2026, 7, 3, 8, minute)),
+      });
+      const latest = rs.fn(
+        async (place: ThreadContext) =>
+          (place.threadId === "C_NEWS:root"
+            ? [said(2, "the venue moved to Hollyfold"), said(1, "picnic on Saturday?")]
+            : [said(4, "the other thread")]) as never,
+      );
+      const promptFacts = chatPromptFacts({
+        facts: { unseen: () => [], seen: () => undefined },
+        messages: { byIds: () => [] },
+        labels: new SenderLabels({ byAccount: async () => null }),
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+        latest,
+      });
+      const providerPrompts: string[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (input) {
+          providerPrompts.push(input.prompt);
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks: promptFacts,
+        keepAliveAcrossTurns: true,
+      });
+      for (const [prompt, inThread] of [
+        ["where is the picnic?", "C_NEWS:root"],
+        ["and when?", "C_NEWS:root"],
+        ["what about this one?", "C_NEWS:other"],
+      ] as const) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt,
+            channelThreadKey: "slack_app:C_NEWS",
+            romeSessionId: conversation.id,
+            threadContext: { channel: "slack_app", threadId: "C_NEWS", threadType: "group" },
+            inThread: inThread as ChatId,
+          }),
+        );
+      }
+
+      expect(latest.mock.calls.map(([place]) => place.threadId)).toEqual([
+        "C_NEWS:root",
+        "C_NEWS:other",
+      ]);
+      const [first, second, third] = providerPrompts;
+      expect(first).toContain("<thread_messages>");
+      expect(first.indexOf("picnic on Saturday?")).toBeLessThan(
+        first.indexOf("the venue moved to Hollyfold"),
+      );
+      expect(second).not.toContain("<thread_messages>");
+      expect(third).toContain("the other thread");
+      expect(third).not.toContain("Hollyfold");
     });
 
     it("reads the chat's latest messages from the platform on a new session's first turn only", async () => {

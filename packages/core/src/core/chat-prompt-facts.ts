@@ -53,6 +53,42 @@ export interface ChatPromptFactsDeps {
 export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
   const handsEveryMessage = (channel: string) =>
     !surfaceOf(deps.channelSurface, channel).promptContext;
+  /** The latest messages of the chat `place` names said before `before`, and
+   *  below message `first` when Rome holds its platform id, as the agent reads
+   *  them. Null where the channel hands every message or none can be read. */
+  const readBefore = async (
+    place: ThreadContext,
+    before: Date,
+    first: number | undefined,
+  ): Promise<UnseenMessage[] | null> => {
+    if (!deps.latest || handsEveryMessage(place.channel)) return null;
+    // Rome's record keeps whole seconds, so what was said just before the
+    // session's first message may share its second. Knowing that message's
+    // platform id, the read takes in the whole second and is bounded below
+    // that message, so messages said after it in the same second take no
+    // room on the platform's page.
+    const key = first === undefined ? undefined : deps.messages.byIds([first])[0]?.key;
+    const until = key === undefined ? before : new Date(before.getTime() + 999);
+    // One more than kept: the bound takes in a message said at `until`.
+    const read = deps.latest(place, {
+      limit: EARLIER_MESSAGES + 1,
+      until,
+      ...(key === undefined ? {} : { olderThan: key }),
+    });
+    read.catch(() => {});
+    const page = await within(read, deps.latestWaitMs ?? EARLIER_WAIT_MS);
+    if (!page) return null;
+    const said = earlierMessages(...olderThan(page, before, key));
+    const labelled = await deps.labels.read(said.map((message, i) => lineOf(message, -(i + 1))));
+    return labelled.map(
+      (message, i): UnseenMessage => ({
+        ...message,
+        fromRome: said[i].direction === "outbound",
+        quoted: null,
+        quotesOutside: false,
+      }),
+    );
+  };
   return {
     async unseen(chatId) {
       const channel = deps.channelOfChat(chatId);
@@ -64,40 +100,14 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     async earlier(place, before, first) {
       // Only a direct message: in a group, the platform also holds what was
       // said before Rome joined, which no turn's catch-up shows.
-      if (
-        !deps.latest ||
-        !place.threadId ||
-        place.threadType !== "private" ||
-        handsEveryMessage(place.channel)
-      )
-        return null;
-      // Rome's record keeps whole seconds, so what was said just before the
-      // session's first message may share its second. Knowing that message's
-      // platform id, the read takes in the whole second and is bounded below
-      // that message, so messages said after it in the same second take no
-      // room on the platform's page.
-      const key = first === undefined ? undefined : deps.messages.byIds([first])[0]?.key;
-      const until = key === undefined ? before : new Date(before.getTime() + 999);
-      // One more than kept: the bound takes in a message said at `until`.
-      const read = deps.latest(place, {
-        limit: EARLIER_MESSAGES + 1,
-        until,
-        ...(key === undefined ? {} : { olderThan: key }),
-      });
-      read.catch(() => {});
-      const page = await within(read, deps.latestWaitMs ?? EARLIER_WAIT_MS);
-      if (!page) return null;
-      const said = earlierMessages(...olderThan(page, before, key));
-      const labelled = await deps.labels.read(said.map((message, i) => lineOf(message, -(i + 1))));
-      return labelled.map(
-        (message, i): UnseenMessage => ({
-          ...message,
-          fromRome: said[i].direction === "outbound",
-          quoted: null,
-          quotesOutside: false,
-        }),
-      );
+      if (!place.threadId || place.threadType !== "private") return null;
+      return readBefore(place, before, first);
     },
+    // A thread inside a group's conversation is read whole: the session
+    // holds the conversation, and none of its turns saw the thread's replies
+    // that did not mention Rome.
+    thread: (place, thread, before, first) =>
+      readBefore({ ...place, threadId: thread }, before, first),
   };
 }
 

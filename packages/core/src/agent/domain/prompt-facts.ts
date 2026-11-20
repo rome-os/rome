@@ -53,4 +53,16 @@ export interface PromptFacts {
    * platform's own order, since Rome's record keeps whole seconds.
    */
   earlier?(place: ThreadContext, before: Date, first?: number): Promise<UnseenMessage[] | null>;
+  /**
+   * The earlier messages of platform thread `thread`, said in `place`'s
+   * conversation, read as {@link earlier} reads a chat: before `before` and
+   * below message `first`, oldest first. Null where none can be read.
+   * Absent, a thread's earlier messages are not read.
+   */
+  thread?(
+    place: ThreadContext,
+    thread: string,
+    before: Date,
+    first?: number,
+  ): Promise<UnseenMessage[] | null>;
 }

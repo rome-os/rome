@@ -471,6 +471,11 @@ export class SlackAppAdapter {
       // A thread lives inside its conversation's chat. The reply finds the
       // thread from the id of the message it answers.
       ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
+      // A reply in a thread is read with the thread's earlier messages, which
+      // the conversation's chat does not hold.
+      ...(event.thread_ts && event.thread_ts !== event.ts
+        ? { inThread: `${event.channel}:${event.thread_ts}` as ChatId }
+        : {}),
       addressing: direct ? "direct" : "mention",
     };
     // The mailbox is told the message was received only once the copy holds

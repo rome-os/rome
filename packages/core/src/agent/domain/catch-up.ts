@@ -58,7 +58,8 @@ function contextLine(message: ContextMessage): string {
  * said where its session stands that it has not seen, the last 20 shown and
  * the rest counted, after the message that started the thread when a message
  * of Rome's quotes one from outside it, then the message the turn replies to,
- * then the turn's own message with who said it. The message replied to is not
+ * then the earlier messages of the platform thread the turn's message is in
+ * when they are read, then the turn's own message with who said it. The message replied to is not
  * repeated among the unseen ones. With nothing to catch up on and no sender
  * named, the prompt is unchanged.
  */
@@ -72,6 +73,9 @@ export function catchUpPrompt(
     replyTo?: MessageReplyReference;
     /** The message the turn answers, as Rome holds it, or null when Rome holds none. */
     current?: PromptMessage | null;
+    /** The earlier messages of the platform thread the turn's message was
+     *  said in, oldest first, when the session reads them this turn. */
+    inThread?: readonly PromptMessage[];
   },
 ): string {
   const { unseen } = facts;
@@ -108,6 +112,13 @@ export function catchUpPrompt(
       ...(omitted > 0 ? [`[${omitted} earlier messages omitted]`] : []),
       ...notifications.map(contextLine),
       "</conversation_context>",
+    );
+  }
+  if (facts.inThread?.length) {
+    sections.push(
+      "<thread_messages>",
+      ...facts.inThread.map((message) => contextLine(contextMessage(message))),
+      "</thread_messages>",
     );
   }
   if (repliedTo) sections.push(...replyContextSection(contextLine(repliedTo)));

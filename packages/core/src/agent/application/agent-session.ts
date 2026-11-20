@@ -267,6 +267,10 @@ export interface SendTurnOptions {
   romeSessionId?: string;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
+  /** The platform thread the turn's message was said in, by the chat id a
+   *  read of it takes, where the session's chat is the thread's conversation.
+   *  The session reads the thread's earlier messages once. */
+  inThread?: string;
   /** The id of the message `replyTo` names, as Rome holds it where the turn's
    *  session stands, or null when Rome holds none. Read with `promptFacts`
    *  when the turn runs. */
@@ -2244,6 +2248,7 @@ interface TurnSink {
   sharedContext?: Record<string, unknown>;
   romeSessionId: string;
   replyTo?: MessageReplyReference;
+  inThread?: string;
   quotedId?: number | null;
   currentId?: number | null;
   initiatedBy?: "user" | "system";
@@ -2447,6 +2452,9 @@ class AgentSessionImpl implements AgentSession {
   // turn of a fresh session only. Flipped the first time runOneTurn considers it
   // so it never reappears on later turns of the same session.
   private threadContextInjected = false;
+  /** The platform threads whose earlier messages the model thread has read,
+   *  by the chat id a read of each takes. */
+  private threadsRead = new Set<string>();
   /**
    * The current model thread started in this session rather than resuming
    * one, so its first turn carries the `<thread_context>` block.
@@ -2803,6 +2811,7 @@ class AgentSessionImpl implements AgentSession {
         // Another provider: the new thread has seen nothing of this chat.
         this.threadFresh = true;
         this.threadContextInjected = false;
+        this.threadsRead = new Set();
         this.sentHeaders = new Map();
         this.lastContextTokens = undefined;
         this.lastPosition = undefined;
@@ -3248,6 +3257,7 @@ class AgentSessionImpl implements AgentSession {
       this.modelSession.modelThreadId === undefined
     ) {
       this.threadContextInjected = false;
+      this.threadsRead = new Set();
     }
     this.publishTurnEnd(sink, terminal);
     this.dispatchTurnFinished(sink, terminal);
@@ -3924,6 +3934,7 @@ class AgentSessionImpl implements AgentSession {
       sharedContext: options?.sharedContext,
       romeSessionId: options?.romeSessionId ?? this.sessionId,
       replyTo: options?.replyTo,
+      ...(options?.inThread ? { inThread: options.inThread } : {}),
       quotedId: options?.quotedId ?? null,
       currentId: options?.currentId ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
@@ -4154,11 +4165,33 @@ class AgentSessionImpl implements AgentSession {
                 // A read that fails opens the session as if there were none.
                 .catch(() => null)
             : null;
+        // A message in a platform thread inside the session's conversation,
+        // such as a Slack mention in a thread, comes with the thread's
+        // earlier messages, read once per thread in the session.
+        const current = byId(sink.currentId);
+        const thread =
+          !this.isSubagent && sink.inThread && !this.threadsRead.has(sink.inThread)
+            ? sink.inThread
+            : undefined;
+        const inThread =
+          thread && promptFacts.thread
+            ? await promptFacts
+                .thread(
+                  sink.threadContext as ThreadContext,
+                  thread,
+                  current?.at ?? new Date(),
+                  current?.id,
+                )
+                .catch(() => null)
+            : null;
+        // A read that failed is tried again on the thread's next message.
+        if (thread && inThread) this.threadsRead.add(thread);
         userPrompt = catchUpPrompt(userPrompt, {
           unseen: opening ? [...opening, ...unseen] : unseen,
           quoted: byId(sink.quotedId),
           replyTo: sink.replyTo,
-          current: byId(sink.currentId),
+          current,
+          ...(inThread ? { inThread } : {}),
         });
       }
       // Every turn, subagents included: the folder is where the work happens.

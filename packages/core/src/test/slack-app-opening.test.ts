@@ -6,7 +6,7 @@
 // connection restarted, and the session reads the same both times.
 
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { ThreadContext } from "@rome-os/app-runtime";
+import type { ChannelMessage, ThreadContext } from "@rome-os/app-runtime";
 import { SenderLabels } from "../chats/sender-labels.js";
 import { SlackMessageCopyRepository } from "../connections/kinds/slack-app/message-copy.js";
 import type { SlackWireMessage } from "../connections/kinds/slack-app/message.js";
@@ -243,3 +243,155 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
     expect(earlier?.map((m) => m.text)).toEqual(["it is 42", "or 43"]);
   });
 });
+
+describe("a mention inside a Slack thread (R14)", () => {
+  let testDb: TestDb;
+  beforeEach(() => {
+    testDb = createTestDb();
+  });
+  afterEach(() => testDb.close());
+
+  it("reaches the agent with the thread's earlier messages, read from Slack's replies", async () => {
+    const root = tsOf(1);
+    const thread: SlackWireMessage[] = [
+      { ts: root, user: "U_SAM", text: "Picnic on Saturday?", thread_ts: root },
+      { ts: tsOf(2), user: "U_KIM", text: "It moved to Hollyfold Meadow", thread_ts: root },
+      { ts: tsOf(3), user: MEMBER, text: `<@${BOT}> where is it?`, thread_ts: root },
+      { ts: tsOf(4), user: "U_SAM", text: "said after the mention", thread_ts: root },
+    ];
+    const conversationReplies = rs.fn(async () => ({ messages: thread }));
+    const delivered: ChannelMessage[] = [];
+    let onFrame: ((frame: MailboxFrame) => Promise<{ status: number }>) | null = null;
+    const adapter = new SlackAppAdapter({
+      channel: "slack_app",
+      botToken: "xoxb-a",
+      teamId: TEAM,
+      botUserId: BOT,
+      forwardSecret: SECRET,
+      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      api: {
+        authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
+        postMessage: async () => ({ ts: "9.0" }),
+        openDirectMessage: async () => "D_NEW",
+        userName: async () => ({}),
+        conversationHistory: async () => ({ messages: [], hasMore: false }),
+        conversationReplies,
+        memberChannels: async () => ({ channels: [] }),
+        revoke: async () => {},
+      },
+      openMailbox: (_mailbox, handler) => {
+        onFrame = handler;
+        return { stop: () => {} };
+      },
+      copy: new SlackMessageCopyRepository(testDb.db),
+      readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
+    });
+    adapter.onInbound((message) => delivered.push(message));
+    await adapter.start();
+
+    await onFrame!(
+      signed({
+        type: "event_callback",
+        team_id: TEAM,
+        api_app_id: "A_ROME",
+        event_id: "EvT3",
+        event: { type: "app_mention", channel: "C_NEWS", ...thread[2] },
+      }),
+    );
+    const mention = delivered[0];
+    const facts = chatPromptFacts({
+      facts: { unseen: () => [], seen: () => {} },
+      messages: { byIds: () => [{ key: mention.messageId }] as never },
+      labels: new SenderLabels({ byAccount: async () => null }),
+      channelOfChat: () => "slack_app",
+      channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+      latest: (place, read) => adapter.readHistory(place.threadId as never, read),
+    });
+    const place: ThreadContext = { channel: "slack_app", threadId: "C_NEWS", threadType: "group" };
+    const earlier = await facts.thread!(place, mention.inThread!, mention.timestamp, 1);
+    await adapter.stop();
+
+    expect(mention.inThread).toBe(`C_NEWS:${root}`);
+    expect(earlier?.map((m) => m.text)).toEqual([
+      "Picnic on Saturday?",
+      "It moved to Hollyfold Meadow",
+    ]);
+    expect(conversationReplies).toHaveBeenCalledTimes(1);
+  });
+
+  it("names no thread on a mention that is not in one", async () => {
+    const delivered: ChannelMessage[] = [];
+    let onFrame: ((frame: MailboxFrame) => Promise<{ status: number }>) | null = null;
+    const adapter = new SlackAppAdapter({
+      channel: "slack_app",
+      botToken: "xoxb-a",
+      teamId: TEAM,
+      botUserId: BOT,
+      forwardSecret: SECRET,
+      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      api: {
+        authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
+        postMessage: async () => ({ ts: "9.0" }),
+        openDirectMessage: async () => "D_NEW",
+        userName: async () => ({}),
+        conversationHistory: async () => ({ messages: [], hasMore: false }),
+        conversationReplies: async () => ({ messages: [] }),
+        memberChannels: async () => ({ channels: [] }),
+        revoke: async () => {},
+      },
+      openMailbox: (_mailbox, handler) => {
+        onFrame = handler;
+        return { stop: () => {} };
+      },
+      copy: new SlackMessageCopyRepository(testDb.db),
+      readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
+    });
+    adapter.onInbound((message) => delivered.push(message));
+    await adapter.start();
+
+    // A thread's root is said in the conversation, not in its thread.
+    for (const [i, extra] of [
+      [5, {}],
+      [6, { thread_ts: tsOf(6) }],
+    ] as const) {
+      await onFrame!(
+        signed({
+          type: "event_callback",
+          team_id: TEAM,
+          api_app_id: "A_ROME",
+          event_id: `EvR${i}`,
+          event: {
+            type: "app_mention",
+            channel: "C_NEWS",
+            user: MEMBER,
+            text: `<@${BOT}> hello ${i}`,
+            ts: tsOf(i),
+            ...extra,
+          },
+        }),
+      );
+    }
+    await adapter.stop();
+
+    expect(delivered.map((m) => m.inThread)).toEqual([undefined, undefined]);
+  });
+});
+
+/** `payload` as Rome Cloud deposits it, signed. */
+function signed(payload: unknown): MailboxFrame {
+  const body = new TextEncoder().encode(JSON.stringify(payload));
+  const timestamp = "1700000000";
+  return {
+    headers: {
+      [FORWARD_TEAM_HEADER]: TEAM,
+      [FORWARD_TIMESTAMP_HEADER]: timestamp,
+      [FORWARD_SIGNATURE_HEADER]: forwardSignature({
+        forwardSecret: SECRET,
+        timestamp,
+        teamId: TEAM,
+        body,
+      }),
+    },
+    body,
+  };
+}

@@ -68,6 +68,9 @@ export interface MessageHandlerInput {
   messageId: string;
   /** Provider-normalized message explicitly referenced by this reply. */
   replyTo?: MessageReplyReference;
+  /** The platform thread the message was said in, where `threadId` names its
+   *  conversation (ChannelMessage.inThread). */
+  inThread?: string;
   /** Optional pre-resolved person mapping (skips lookup). */
   personOverride?: MessageHandlerPersonOverride;
   /** Optional project working directory for this dedicated chat session. */

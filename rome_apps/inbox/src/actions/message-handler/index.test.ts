@@ -639,6 +639,7 @@ describe("message reply bond-level settings", () => {
         content: "Jack Ma profile",
         senderName: "Rome",
       },
+      inThread: "ray-wechat:thread-7",
     });
 
     expect(conversations.addMessage).toHaveBeenCalledWith(
@@ -650,6 +651,7 @@ describe("message reply bond-level settings", () => {
         content: "Jack Ma profile",
         senderName: "Rome",
       },
+      inThread: "ray-wechat:thread-7",
     });
   });
 

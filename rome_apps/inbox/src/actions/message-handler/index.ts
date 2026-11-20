@@ -7,6 +7,7 @@ import type {
   AppActionRuntimeDeps,
   ApprovalsRepository,
   Attachment,
+  ChatId,
   ChatRecord,
   ChatRepository,
   EnsureChannelChatInput,
@@ -442,6 +443,9 @@ async function handleTrustedMessage(
       romeSessionId: chatId,
       platformMessageId: messageId,
       replyTo: parseMessageReplyReference(args.replyTo),
+      ...(typeof args.inThread === "string" && args.inThread
+        ? { inThread: args.inThread as ChatId }
+        : {}),
       threadContext: {
         connectionId,
         channel,
