@@ -245,7 +245,7 @@ export function createAction(
             }
           }
           const mapped = mapProxyResponse(toolkit, method, endpoint, res);
-          return both && mapped.status === "ok"
+          return mapped.status === "ok"
             ? { ...mapped, data: { ...mapped.data, via: "sign_in" } }
             : mapped;
         } catch (err) {

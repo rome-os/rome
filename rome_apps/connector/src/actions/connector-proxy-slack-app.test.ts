@@ -209,6 +209,22 @@ describe("connector_proxy for Slack with both the sign-in and the Slack app conn
     expect(locked.send).not.toHaveBeenCalled();
   });
 
+  it("names the sign-in on a call it makes when only the sign-in is connected", async () => {
+    const none = {
+      list: async () => [],
+      send: rs.fn(),
+      query: rs.fn(),
+    } as unknown as ChannelsService;
+
+    for (const args of [post, { ...post, via: "sign_in" }]) {
+      expect(await run(none, args)).toMatchObject({
+        status: "ok",
+        data: { via: "sign_in", data: { ok: true } },
+      });
+    }
+    expect(slackProxyCall).toHaveBeenCalledTimes(2);
+  });
+
   it("refuses a connection the call names that is not connected", async () => {
     readSlackOAuthTokens.mockResolvedValue(null);
     const { service } = app();
