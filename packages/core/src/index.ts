@@ -81,6 +81,7 @@ import {
   legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
+import { shareAcceptance } from "./participation/inbound-acceptance.js";
 import type { Channel, ChannelsService, ChatStopHandler } from "@rome-os/app-runtime";
 import { conciergeChatGuard } from "./concierge/automated-input.js";
 import { resolveAutomatedSender } from "./api/routes/chat-senders.js";
@@ -1993,6 +1994,7 @@ async function main() {
   // recorded in Chats.
   const hookChannels = legacyChatIdChannels(
     chatsWired.recordedSends(withInboundSpans(channels, "channel-message")),
+    shareAcceptance,
   );
   // Every message the channels deliver is put on record in its chat before the
   // hook hears it (docs/domains/participation.md#wake). It records through the
@@ -2094,6 +2096,7 @@ async function main() {
     recordedChannels.push(...chatsWired.recordedSends([channel]));
     const added = legacyChatIdChannels(
       chatsWired.recordedSends(withInboundSpans([channel], "channel-message")),
+      shareAcceptance,
     );
     hookChannels.push(...added);
     inboundRecorder.addChannels(added);

@@ -19,6 +19,7 @@ import type {
   ChatSettingsControl,
   ChatSettingsSnapshot,
   ChatStopHandler,
+  InboundEvent,
   MessageReceipt,
 } from "@rome-os/app-runtime";
 
@@ -147,8 +148,13 @@ function sendOut(send: ChannelSend): ChannelSend {
   return wrapped;
 }
 
-/** Channels as a hook gets them. */
-export function legacyChatIdChannels<C extends Channel>(channels: readonly C[]): C[] {
+/** Channels as a hook gets them. Each inbound event reaches the hook as a
+ *  copy, and `copied` hears both, so whatever was attached to the event can
+ *  follow it to the copy. */
+export function legacyChatIdChannels<C extends Channel>(
+  channels: readonly C[],
+  copied: (event: InboundEvent, copy: InboundEvent) => void,
+): C[] {
   return channels.map((channel) => {
     const { inbound, send } = channel;
     return {
@@ -156,9 +162,11 @@ export function legacyChatIdChannels<C extends Channel>(channels: readonly C[]):
       send: send && sendOut(send),
       inbound: inbound && {
         subscribe: (handler) =>
-          inbound.subscribe((event) =>
-            handler({ ...event, message: messageOut(event.message), ref: refOut(event.ref) }),
-          ),
+          inbound.subscribe((event) => {
+            const legacy = { ...event, message: messageOut(event.message), ref: refOut(event.ref) };
+            copied(event, legacy);
+            return handler(legacy);
+          }),
         get media() {
           const media = inbound.media;
           return (

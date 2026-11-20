@@ -114,7 +114,7 @@ describe("agents channel", () => {
     const talker = createAgentsTalker(client);
     const delivered: ChannelMessage[] = [];
     talker.start(
-      (message) => delivered.push(message),
+      (message) => void delivered.push(message),
       () => {},
     );
     await until(() => client.acknowledged.length > 0);
@@ -132,7 +132,7 @@ describe("agents channel", () => {
     const delivered: ChannelMessage[] = [];
     const faults: unknown[] = [];
     talker.start(
-      (message) => delivered.push(message),
+      (message) => void delivered.push(message),
       (fault) => faults.push(fault),
     );
     await until(() => faults.length > 0);
@@ -162,7 +162,7 @@ describe("agents channel", () => {
     const talker = createAgentsTalker(client);
     const delivered: ChannelMessage[] = [];
     talker.start(
-      (message) => delivered.push(message),
+      (message) => void delivered.push(message),
       () => {},
     );
     await until(() => client.acknowledged.length > 0);
@@ -183,7 +183,7 @@ describe("agents channel", () => {
     const talker = createAgentsTalker(client);
     const delivered: ChannelMessage[] = [];
     talker.start(
-      (message) => delivered.push(message),
+      (message) => void delivered.push(message),
       () => {},
     );
     await until(() => calls === 1, true);

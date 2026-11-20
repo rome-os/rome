@@ -26,6 +26,7 @@ import { createLogger } from "../../logger.js";
 import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
 import { AccountNotConnected, type AccountChats, type ChannelSend } from "./connected-account.js";
 import { ChatBuffers } from "../../participation/conversation-buffer.js";
+import { openAcceptance } from "../../participation/inbound-acceptance.js";
 
 const log = createLogger("channel-ports");
 
@@ -261,10 +262,12 @@ function connectionInbound(backing: Backing): ChannelInbound {
   // in the order they are pushed here, which admission keeps as arrival
   // order (R4). A conversation is keyed by the Connection it arrived on as
   // well, so two Connections' conversations sharing an id never share a queue.
-  // Nothing upstream waits on delivery, so dispatch returns once every event
-  // is buffered. A subscription's waiting events are dropped when it ends
-  // (R3); a handler already running keeps running, and its subscriber owns
-  // stopping it.
+  // Dispatch resolves once every subscription has taken the event in, and
+  // rejects when one let it go, so a talker that waits confirms receipt
+  // upstream only for what is kept (participation/inbound-acceptance.ts). A
+  // talker that does not wait loses nothing by not waiting. A subscription's
+  // waiting events are dropped when it ends (R3); a handler already running
+  // keeps running, and its subscriber owns stopping it.
   const dispatchFrom =
     (connectionId: string) =>
     async (message: ChannelMessage): Promise<void> => {
@@ -283,7 +286,14 @@ function connectionInbound(backing: Backing): ChannelInbound {
       };
       // A Connection id is a UUID, so the first colon ends it.
       const conversation = `${connectionId}:${message.chatId}`;
-      for (const buffers of subscriptions) buffers.push(conversation, event);
+      const accepted: Promise<void>[] = [];
+      for (const buffers of subscriptions) {
+        // Each subscription is handed its own copy, which it accepts alone.
+        const handed: InboundEvent = { ...event };
+        accepted.push(openAcceptance(handed));
+        buffers.push(conversation, handed);
+      }
+      await Promise.all(accepted);
     };
 
   const listens = (connection: Connection): boolean =>

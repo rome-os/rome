@@ -301,7 +301,7 @@ describe("email Talker fault mapping", () => {
     });
     const received: ChannelMessage[] = [];
     talker.start(
-      (msg) => received.push(msg),
+      (msg) => void received.push(msg),
       () => {},
     );
 
@@ -354,7 +354,7 @@ function buildDeliveringTalker(provider: MailProvider): {
   });
   const delivered: ChannelMessage[] = [];
   talker.start(
-    (msg) => delivered.push(msg),
+    (msg) => void delivered.push(msg),
     () => {},
   );
   return {

@@ -390,7 +390,7 @@ describe("discord inbound delivery", () => {
     });
     const delivered: ChannelMessage[] = [];
     talker.start(
-      (msg) => delivered.push(msg),
+      (msg) => void delivered.push(msg),
       () => {},
     );
 

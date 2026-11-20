@@ -1116,16 +1116,27 @@ class ConnectionImpl implements Connection {
   private startInstance(slot: CapabilitySlot, epoch: Epoch): void {
     const fault = (err: StreamFault) => this.handleFault(slot, err, epoch);
     if (slot.kind === "talker") {
-      (epoch.instance as Talker).start((msg) => {
+      const talker = epoch.instance as Talker;
+      talker.start((msg) => {
         epoch.disconnectStreak = 0; // a successful delivery ends any backoff run
-        for (const handler of slot.messageHandlers) {
-          void handler(msg).catch((err) => {
+        const handled = slot.messageHandlers.map(async (handler) => {
+          try {
+            await handler(msg);
+          } catch (err) {
             this.log.error("Talk onMessage handler threw", {
               connectionId: this.id,
               error: errMsg(err),
             });
-          });
-        }
+            throw err;
+          }
+        });
+        // Settles once every handler has taken the message in. Only a talker
+        // that confirms receipt upstream is handed it: the others await what
+        // deliver returns, and a slow chat would hold up the next one
+        // (Talker.start).
+        const accepted = Promise.all(handled).then(() => undefined);
+        accepted.catch(() => {});
+        return talker.confirmsReceipt ? accepted : undefined;
       }, fault);
     } else if (slot.kind === "watcher") {
       (epoch.instance as Watcher).start((event) => {

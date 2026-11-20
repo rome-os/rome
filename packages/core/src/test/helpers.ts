@@ -250,11 +250,20 @@ export class FakeTransport {
 
   /**
    * Deliver one inbound message on this channel, built by `buildMessage`
-   * with this channel's name. Resolves once every listener has taken it,
-   * which on a channel's inbound port is after admission and before any
-   * subscriber's handler finishes (R4 buffers it). Answers the message.
+   * with this channel's name. Resolves once every listener has settled it,
+   * which on a channel's inbound port is once every subscriber has taken it
+   * in or let it go. A message let go is not an error here, as a transport
+   * that cannot redeliver goes on. Answers the message.
    */
   async receive(overrides: Partial<ChannelMessage> = {}): Promise<ChannelMessage> {
+    const message = buildMessage({ channel: this.channel, ...overrides });
+    await Promise.all([...this.listeners].map((listener) => listener(message).catch(() => {})));
+    return message;
+  }
+
+  /** As {@link receive}, but rejects when a listener let the message go, as a
+   *  transport that confirms receipt upstream sees it. */
+  async receiveAccepted(overrides: Partial<ChannelMessage> = {}): Promise<ChannelMessage> {
     const message = buildMessage({ channel: this.channel, ...overrides });
     await Promise.all([...this.listeners].map((listener) => listener(message)));
     return message;

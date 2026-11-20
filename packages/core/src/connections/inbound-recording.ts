@@ -13,6 +13,7 @@ import { messageToRome, type RecordedMessage } from "../chats/storage/message.js
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn } from "../chats/storage/place.js";
 import { createLogger } from "../logger.js";
+import { InboundNotAccepted } from "../participation/inbound-acceptance.js";
 import type { ChannelChatAdapter, ChatAdapters, Inbound } from "./chat-adapter.js";
 
 const log = createLogger("inbound-recording");
@@ -118,9 +119,12 @@ export function inboundRecording(
     const { via } = message;
     // A message still queued when the last listener left is dropped, as it
     // is for any hook swap: nobody is there to hear it, even once a new
-    // hook listens again.
-    if (recording.get(via.channel) !== subscription) return null;
-    // What reaches an account Rome does not listen to never forms a chat.
+    // hook listens again. It was not taken in, so upstream keeps it.
+    if (recording.get(via.channel) !== subscription) {
+      throw new InboundNotAccepted("inbound message not recorded: recording stopped");
+    }
+    // What reaches an account Rome does not listen to never forms a chat,
+    // and is taken in as heard.
     if (deps.listens?.(via.connectionId) === false) return null;
     const chat = deps.chats.start(message.chat, message.chatKind, message.chatName);
     // Recorded and raised in one step, with nothing run in between, so

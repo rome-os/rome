@@ -22,6 +22,11 @@ import { createLogger } from "../logger.js";
 import type { MessagePart } from "../types.js";
 import type { ChatKind } from "../chats/storage/chat.js";
 import { CONVERSATION_BUFFER_DEFAULTS } from "../participation/conversation-buffer.js";
+import {
+  type AcceptanceTicket,
+  InboundNotAccepted,
+  takeAcceptance,
+} from "../participation/inbound-acceptance.js";
 import type { ChatAddresses } from "./chat-addresses.js";
 import {
   chatKey,
@@ -331,6 +336,13 @@ export function channelAdapter(
   /** Each chat's messages waiting for the one being handed over, by the
    *  chat's key. A chat is here while its queue drains. */
   const queues = new Map<string, InboundEvent[]>();
+  // An event is taken in once it is handed over, which records it; until
+  // then the port's ticket waits here (participation/inbound-acceptance.ts).
+  const tickets = new WeakMap<InboundEvent, AcceptanceTicket>();
+  const letGo = (event: InboundEvent | undefined, why: string) => {
+    if (!event) return;
+    tickets.get(event)?.refuse(new InboundNotAccepted(`Inbound message dropped: ${why}.`));
+  };
 
   /** Where the platform takes a message for the chat keyed `key`: the
    *  thread's id, else where the account reaches the chat when that is not
@@ -431,7 +443,11 @@ export function channelAdapter(
         for (let event = queue.shift(); event !== undefined; event = queue.shift()) {
           try {
             await handOver(event);
+            tickets.get(event)?.accept();
           } catch (error) {
+            tickets.get(event)?.refuse(error);
+            // A message the receiver chose not to take in is no fault.
+            if (error instanceof InboundNotAccepted) continue;
             fault(error instanceof Error ? error : new Error(String(error)));
           }
         }
@@ -455,13 +471,19 @@ export function channelAdapter(
             channel: channel.name,
             messageId: event.message.messageId,
           });
+          takeAcceptance(event)?.refuse(
+            new InboundNotAccepted("inbound message not taken in: its channel knows no account"),
+          );
           return;
         }
         const chat = keyed(heardBy, event.message).key.externalId;
+        const ticket = takeAcceptance(event);
+        if (ticket) tickets.set(event, ticket);
         const waiting = queues.get(chat);
         if (waiting) {
           if (waiting.length >= QUEUE_CAPACITY) {
             const dropped = waiting.shift();
+            letGo(dropped, "its chat queue was full");
             log.warn("inbound message dropped: chat queue full", {
               channel: channel.name,
               chat,
@@ -493,7 +515,10 @@ export function channelAdapter(
       // What is still waiting was heard for the receiver that stopped, so it
       // is dropped rather than handed to the next one. The message being
       // handed over finishes.
-      for (const queue of queues.values()) queue.length = 0;
+      for (const queue of queues.values()) {
+        for (const event of queue) letGo(event, "its receiver stopped");
+        queue.length = 0;
+      }
       queues.clear();
       await Promise.allSettled([...inFlight]);
     },

@@ -6,6 +6,7 @@
  */
 
 import type { Logger } from "../logger.js";
+import { acceptUntaken, InboundNotAccepted, refuseAcceptance } from "./inbound-acceptance.js";
 
 export interface ChatBufferLimits {
   /** Most events a conversation may hold waiting. Pushing past it drops the
@@ -53,7 +54,10 @@ export class ChatBuffers<T> {
   /** Add an event to its conversation and start that conversation's loop if it
    *  is not running. */
   push(conversation: string, item: T): void {
-    if (this.closed) return;
+    if (this.closed) {
+      refuse(item, "the subscription ended");
+      return;
+    }
     const limits = this.limits();
     let entry = this.conversations.get(conversation);
     const idle = !entry;
@@ -63,6 +67,7 @@ export class ChatBuffers<T> {
     }
     if (entry.waiting.length >= limits.capacity) {
       const dropped = entry.waiting.shift()!;
+      refuse(dropped, "its conversation buffer was full");
       this.options.log.warn("inbound event dropped: conversation buffer full", {
         conversation,
         capacity: limits.capacity,
@@ -96,7 +101,10 @@ export class ChatBuffers<T> {
    *  finishes; nothing starts after it. */
   close(): void {
     this.closed = true;
-    for (const entry of this.conversations.values()) entry.waiting.length = 0;
+    for (const entry of this.conversations.values()) {
+      for (const item of entry.waiting) refuse(item, "the subscription ended");
+      entry.waiting.length = 0;
+    }
   }
 
   private async drain(conversation: string, entry: ChatQueue<T>): Promise<void> {
@@ -123,7 +131,9 @@ export class ChatBuffers<T> {
     slow.unref?.();
     try {
       await this.handle(item);
+      if (isObject(item)) acceptUntaken(item);
     } catch (err) {
+      if (isObject(item)) refuseAcceptance(item, err);
       this.options.log.error("inbound handler threw", {
         conversation,
         ...this.options.describe(item),
@@ -137,4 +147,14 @@ export class ChatBuffers<T> {
   private limits(): ChatBufferLimits {
     return { ...CONVERSATION_BUFFER_DEFAULTS, ...this.options.limits };
   }
+}
+
+function isObject(item: unknown): item is object {
+  return typeof item === "object" && item !== null;
+}
+
+/** An event this buffer let go of unhandled is not taken in. */
+function refuse(item: unknown, why: string): void {
+  if (isObject(item))
+    refuseAcceptance(item, new InboundNotAccepted(`Inbound event dropped: ${why}.`));
 }

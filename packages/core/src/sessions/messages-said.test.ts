@@ -15,6 +15,7 @@ import { ChatEvents } from "../chats/storage/events.js";
 import { messageToRome } from "../chats/storage/message.js";
 import { chatKey, placeIn } from "../chats/storage/place.js";
 import { inboundRecording } from "../connections/inbound-recording.js";
+import { InboundNotAccepted, openAcceptance } from "../participation/inbound-acceptance.js";
 import { WebChatRepository } from "../webchat/repository.js";
 import { chatMessages, romeSessions } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/db.js";
@@ -348,6 +349,55 @@ describe("messagesSaid", () => {
 
     expect(heard).toEqual(["tg-1"]);
     expect(lines()).toHaveLength(1);
+  });
+
+  it("refuses a message whose attachments were still being saved when the last hook left", async () => {
+    const saving = gate();
+    let savingStarted = () => {};
+    const started = new Promise<void>((resolve) => {
+      savingStarted = resolve;
+    });
+    const handlers: ((event: InboundEvent) => Promise<void>)[] = [];
+    const slow: Channel = {
+      name: "telegram",
+      send: null,
+      inbound: {
+        subscribe: (handler) => {
+          handlers.push(handler);
+          return () => handlers.splice(handlers.indexOf(handler), 1);
+        },
+        media: {
+          materialize: async (incoming) => {
+            savingStarted();
+            await saving.opened;
+            return incoming.attachments;
+          },
+        },
+      },
+    };
+    events = new ChatEvents();
+    const recording = inboundRecording(
+      { chats: wiring.chats, messages: wiring.messages, events, adapters: wiring.adapters },
+      [slow],
+    );
+    const leave = recording.listen();
+    const event: InboundEvent = {
+      kind: "message",
+      message: message({
+        messageId: "tg-photo",
+        attachments: [{ type: "image", url: "https://example.test/a.png" }],
+      }),
+      ref: { connectionId: "connection:telegram", chatId: GROUP },
+    };
+    const accepted = openAcceptance(event);
+    await handlers[0](event);
+    await started;
+    leave();
+    saving.open();
+    await wiring.adapters.of(slow).settled();
+
+    await expect(accepted).rejects.toThrow(InboundNotAccepted);
+    expect(lines()).toHaveLength(0);
   });
 
   it("stops recording once the last hook leaves", async () => {
