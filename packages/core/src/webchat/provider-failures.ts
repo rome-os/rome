@@ -261,6 +261,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
   // continuation can ask synchronously.
   const cardedChats = new Set<string>();
   const scheduled = new Map<string, () => void>();
+  // Chats a switch is moving: a default change it makes leaves them to it.
+  const switching = new Set<string>();
   // Writes to the stored cards and incidents, one at a time.
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
@@ -667,9 +669,14 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     void settle(
       (card) =>
         card.runsOn === provider &&
-        card.part.card !== "model" &&
-        // A fresh temporary card waits for its own retry, not the next read.
-        (card.part.reason === "quota" || card.part.card === "account" || card.attempts > 0),
+        // A spending limit or used-up credits show nothing on the account's
+        // state, so only the guardian or a later turn settles them.
+        (card.part.reason === "quota" ||
+          card.part.reason === "login" ||
+          card.part.reason === "removed" ||
+          // A fresh temporary card waits for its own retry, not the next read.
+          ((card.part.reason === "temporary" || card.part.reason === "capacity") &&
+            card.attempts > 0)),
       () => ({ at: now().toISOString(), by: "recovered", continued: true }),
     ).then((ended) => {
       for (const card of ended)
@@ -686,7 +693,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       const cards = await readCards();
       const moving: string[] = [];
       for (const card of cards) {
-        if (card.runsOn === to || card.part.card === "model") continue;
+        if (card.runsOn === to || card.part.card === "model" || switching.has(card.chatId))
+          continue;
         const chat = await deps.webchatRepo.getSession(card.chatId);
         if (chat && !ownerPicked(chat)) moving.push(card.messageId);
       }
@@ -800,18 +808,29 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     async switchCard(messageId, change) {
       const card = (await readCards()).find((candidate) => candidate.messageId === messageId);
       if (!card) throw new Error("This card is already settled");
-      await makeDefault(change);
-      await moveChat(card.chatId, card.agentName, change);
-      await settle(
-        (candidate) => candidate.messageId === messageId,
-        () => switchResolution(change),
-      );
+      switching.add(card.chatId);
+      try {
+        await makeDefault(change);
+        await moveChat(card.chatId, card.agentName, change);
+        await settle(
+          (candidate) => candidate.messageId === messageId,
+          () => switchResolution(change),
+        );
+      } finally {
+        switching.delete(card.chatId);
+      }
       resume(card.chatId, card.agentName, switchName(change));
     },
     async switchOutage(outageId, change) {
       const outage = (await readOutages()).find((candidate) => candidate.id === outageId);
       if (!outage) throw new Error("This notice is already settled");
-      await makeDefault(change);
+      for (const chat of outage.chats) switching.add(chat.chatId);
+      try {
+        await makeDefault(change);
+      } catch (error) {
+        for (const chat of outage.chats) switching.delete(chat.chatId);
+        throw error;
+      }
       let moved = 0;
       for (const chat of outage.chats) {
         try {
@@ -839,7 +858,10 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
           )
           .catch(() => undefined);
       });
-      for (const chat of outage.chats) resume(chat.chatId, chat.agentName, switchName(change));
+      for (const chat of outage.chats) {
+        switching.delete(chat.chatId);
+        resume(chat.chatId, chat.agentName, switchName(change));
+      }
       return moved;
     },
     async resend(chatId, agentName) {

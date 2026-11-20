@@ -425,6 +425,31 @@ describe("the three cards", () => {
     expect(await h.failures.cards()).toEqual([]);
   });
 
+  it("runs the stopped turn once when Also make default moves the other chats", async () => {
+    const h = harness(
+      { chat: {}, other: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+    );
+    await h.fail("chat", quota);
+    await h.fail("other", quota);
+    const card = (await h.failures.cards()).find((open) => open.chatId === "chat");
+    await h.failures.switchCard(card!.messageId, {
+      kind: "provider",
+      provider: "openai",
+      makeDefault: true,
+    });
+    await flush();
+    expect(h.runs.map((run) => run.threadId).sort()).toEqual(["chat", "other"]);
+  });
+
+  it("leaves a spending limit to the guardian when the account reads fine", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("available") });
+    await h.fail("chat", spendCap);
+    await h.accountChanged("anthropic");
+    expect(h.cardIn("chat")?.resolved).toBeUndefined();
+    expect(h.runs).toEqual([]);
+  });
+
   it("with Also make default, changes the default and moves every chat", async () => {
     const h = harness(
       { chat: {} },
