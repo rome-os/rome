@@ -30,10 +30,10 @@ export function useChatDraft(chatId: string | null | undefined, initialText = ""
   useEffect(() => {
     if (chatId) saveChatDraft(chatId, { text, stop: notice }, authEpoch);
   }, [chatId, text, notice, authEpoch]);
-  /** Saves `stop` with the latest text at once, for a field that is going away. */
+  /** Saves `stop` with `text` at once, for a field that is going away. */
   const keepNotice = useCallback(
-    (stop: DictationStop) => {
-      const { chatId, text } = latest.current;
+    (stop: DictationStop, text: string) => {
+      const { chatId } = latest.current;
       if (chatId) saveChatDraft(chatId, { text, stop }, authEpoch);
     },
     [authEpoch],

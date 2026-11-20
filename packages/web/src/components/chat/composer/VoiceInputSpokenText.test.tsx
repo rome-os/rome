@@ -60,8 +60,7 @@ describe("the spoken text over the field", () => {
         <textarea ref={textareaRef} value={value} readOnly />
         <VoiceInputSpokenText
           textareaRef={textareaRef}
-          value={value}
-          spoken={{ start: 0, end: value.length }}
+          preview={{ value, start: 0, end: value.length }}
         />
       </div>
     );

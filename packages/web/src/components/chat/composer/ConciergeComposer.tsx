@@ -629,11 +629,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                   />
                 }
               />
-              <VoiceInputSpokenText
-                textareaRef={textareaRef}
-                value={inputText}
-                spoken={voice.spoken}
-              />
+              <VoiceInputSpokenText textareaRef={textareaRef} preview={voice.preview} />
             </div>
             {voice.state === "listening" ? (
               <VoiceInputWaveform level={voice.level} className="flex-1 self-center" />

@@ -1068,11 +1068,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                       />
                     }
                   />
-                  <VoiceInputSpokenText
-                    textareaRef={textareaRef}
-                    value={inputText}
-                    spoken={voice.spoken}
-                  />
+                  <VoiceInputSpokenText textareaRef={textareaRef} preview={voice.preview} />
                 </div>
               }
             />

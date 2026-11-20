@@ -293,7 +293,9 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(stop.closest("form")).toBe(box.closest("form"));
 
     socket.say({ type: "text", settled: "buy", pending: " mil" });
-    expect(field().value).toBe("Note: buy mil");
+    // The heard words show over the field, whose value stays as it was so the
+    // browser keeps its undo history.
+    expect(field().value).toBe("Note:");
     expect(field().readOnly).toBe(true);
     socket.say({ type: "text", settled: " milk", pending: "" });
 
@@ -328,12 +330,14 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     socket.say({ type: "text", settled: "buy", pending: " milk" });
     expect(copy()?.textContent?.startsWith("Note:")).toBe(true);
     expect(field().style.color).toBe("transparent");
+    expect(field().classList.contains("voice-input-previewing")).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
     await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
     socket.say({ type: "ended" });
     expect(copy()).toBeNull();
     expect(field().style.color).toBe("");
+    expect(field().classList.contains("voice-input-previewing")).toBe(false);
     expect(field().value).toBe("Note: buy milk");
   });
 
@@ -435,7 +439,7 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     socket.say({ type: "text", settled: "hello", pending: "" });
 
     act(() => handle.current?.insertText("an example prompt"));
-    expect(field().value).toBe("hello");
+    expect(field().value).toBe("");
 
     fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
     socket.say({ type: "ended" });
@@ -453,7 +457,7 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
 
     const socket = await startListening();
     socket.say({ type: "text", settled: "new", pending: "" });
-    expect(field().value).toBe("Hello new world");
+    expect(field().value).toBe("Hello old world");
     fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
     socket.say({ type: "ended" });
 
