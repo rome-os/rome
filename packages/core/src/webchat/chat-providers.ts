@@ -112,7 +112,7 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
         );
     if (ran) {
       if (MODEL_SELECTIONS[ran].providerId === provider) return ran;
-      return selectionOfStrength(provider, strengthOfSelection(ran), codexAccount);
+      return selectionOfStrength(provider, strengthOfSelection(ran, codexAccount), codexAccount);
     }
     const tier = deps.agentTier?.(agentName);
     return selectionOfStrength(provider, tier === "large" ? "strong" : "fast", codexAccount);

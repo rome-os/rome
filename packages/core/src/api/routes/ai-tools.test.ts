@@ -10,6 +10,9 @@ import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../agent/index.js";
 import { settings } from "../../db/schema.js";
 import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 import { reportOf } from "../../test/kit/model-accounts.js";
+import { runWithSessionActor } from "../../access/session-actor.js";
+import { TASK_CHAT_TRIGGER_KIND } from "../../webchat/privacy.js";
+import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 
 const {
   isAnthropicAuthRevokedMock,
@@ -738,5 +741,70 @@ describe("Rome credits API", () => {
     );
     const { status } = await get("/ai-tools/rome-credits");
     expect(status).toBe(503);
+  });
+});
+
+describe("a card's or a notice's switch, and a resend", () => {
+  it("is refused to a visitor on a chat that is not theirs, as the chat itself is", async () => {
+    const testDb = createTestDb();
+    try {
+      const deps = await buildTestDeps(testDb.db);
+      // The guardian's task chat and main chat: private to the guardian.
+      const rows: Record<string, { id: string; agentName: string; triggerKind: string | null }> = {
+        task: { id: "task", agentName: "main", triggerKind: TASK_CHAT_TRIGGER_KIND },
+        [CONCIERGE_CHAT_ID]: { id: CONCIERGE_CHAT_ID, agentName: "concierge", triggerKind: null },
+      };
+      const switchCard = rs.fn(async () => {});
+      const switchOutage = rs.fn(async () => 1);
+      const resend = rs.fn(async () => {});
+      const app = new Hono().route(
+        "/",
+        aiToolsRoutes({
+          ...deps,
+          webchatRepo: { getSession: async (id: string) => rows[id] ?? null } as never,
+          providerFailures: {
+            cards: async () => [{ messageId: "m1", chatId: "task" }],
+            outages: async () => [
+              { id: "o1", noticeChatId: CONCIERGE_CHAT_ID, chats: [{ chatId: "task" }] },
+            ],
+            switchCard,
+            switchOutage,
+            resend,
+          } as never,
+        }),
+      );
+      const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+      const post = (path: string, body: unknown) =>
+        runWithSessionActor(visitor, () =>
+          app.request(path, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+        );
+      const change = { kind: "provider", provider: "openai" };
+      expect((await post("/ai-tools/provider-failures/m1/switch", change)).status).toBe(404);
+      expect((await post("/ai-tools/provider-outages/o1/switch", change)).status).toBe(404);
+      expect(
+        (await post("/ai-tools/provider-failures/resend", { chatId: "task", agentName: "main" }))
+          .status,
+      ).toBe(404);
+      const listed = await runWithSessionActor(visitor, () =>
+        app.request("/ai-tools/provider-outages"),
+      );
+      expect((await listed.json()).outages).toEqual([]);
+      expect(switchCard).not.toHaveBeenCalled();
+      expect(switchOutage).not.toHaveBeenCalled();
+      expect(resend).not.toHaveBeenCalled();
+      // The guardian may.
+      const own = await app.request("/ai-tools/provider-failures/m1/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(change),
+      });
+      expect(own.status).toBe(200);
+    } finally {
+      testDb.close();
+    }
   });
 });

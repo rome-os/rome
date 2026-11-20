@@ -3,7 +3,10 @@ import { STICKY_HEADERS } from "./core/sticky-headers.js";
 import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
 import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
-import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
+import {
+  startUsageLimitContinuation,
+  stoppedTurnContinues,
+} from "./webchat/usage-limit-continuation.js";
 import { webchatSessionKey } from "./core/agent-session-key.js";
 import { createChatProviders, type ChatProviders } from "./webchat/chat-providers.js";
 import { createProviderFailures } from "./webchat/provider-failures.js";
@@ -254,7 +257,8 @@ import { openChannelChat } from "./connections/open-chat.js";
 import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
 import { privateChildren, privateOwnerOf } from "./webchat/privacy.js";
-import { ownerOfChat } from "./webchat/owner.js";
+import { ownerOf, ownerOfChat } from "./webchat/owner.js";
+import { actorOfOwner } from "./access/owner-actor.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
 import { TaskChecks } from "./concierge/task-checks.js";
@@ -1370,7 +1374,12 @@ async function main() {
     {
       agentLoader,
       sessionRepository,
-      chatOnCredits: async (chatId) => (await webchatRepo.getSession(chatId))?.romeCredits === true,
+      // On Rome credits; kept on another provider, never on them; else as the default says.
+      chatOnCredits: async (chatId) => {
+        const chat = await webchatRepo.getSession(chatId);
+        if (chat?.romeCredits) return true;
+        return chat?.largeModelSelectionBy === "kept" ? false : undefined;
+      },
       systemPrompts,
       modelResolver,
       networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),
@@ -1578,12 +1587,18 @@ async function main() {
     swapModel: (chatId, agentName, failure) =>
       concierge.switchForModelLimit(chatId, failure, agentName),
     creditsUsable: () => codexLoginChoice.creditsUsable(),
-    codexOnCredits: () => codexAccountService.login().kind === "rome_credits",
+    // A recovery turn acts for the chat's owner, as a continuation does for its turn's.
+    actorOf: async (chatId) => {
+      const chat = await webchatRepo.getSession(chatId);
+      return chat ? actorOfOwner(db, ownerOf(chat)) : undefined;
+    },
+    // A turn resumed by itself passes the usage-limit continuation's checks.
+    continues: (chatId) => stoppedTurnContinues(webchatRepo, chatId),
     selectModel: selectChatModel,
     canonicalAgent: (agentName) => agentLoader.find(agentName)?.name ?? agentName,
     webchatRepo,
     settings: settingsRepo,
-    mainChatId: () => concierge.findChatId(),
+    mainChatId: (owner) => concierge.findChatId(owner),
     // A refused send names the agent as the chat does ("main"), its session
     // by the canonical id ("core:main").
     runtimeOf: async (chatId, agentName) =>

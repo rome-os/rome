@@ -37,6 +37,8 @@ export interface ModelResolutionErrorPayload {
   followsDefault?: boolean;
   /** When the provider's usage limit ends, for a quota failure. */
   usageLimitUntil?: string;
+  /** The model that may not run, for a model the login does not allow. */
+  model?: string;
 }
 
 /** A recoverable model-selection failure safe to expose over HTTP/SSE. */
@@ -46,6 +48,7 @@ export class ModelResolutionError extends Error {
   readonly reason: ModelResolutionErrorReason;
   readonly followsDefault?: boolean;
   readonly usageLimitUntil?: string;
+  readonly model?: string;
 
   constructor(
     message: string,
@@ -55,6 +58,7 @@ export class ModelResolutionError extends Error {
       reason: ModelResolutionErrorReason;
       followsDefault?: boolean;
       usageLimitUntil?: string;
+      model?: string;
     },
   ) {
     super(message);
@@ -64,6 +68,7 @@ export class ModelResolutionError extends Error {
     this.reason = details.reason;
     this.followsDefault = details.followsDefault;
     this.usageLimitUntil = details.usageLimitUntil;
+    this.model = details.model;
   }
 }
 
@@ -76,6 +81,7 @@ export function toModelResolutionErrorPayload(error: unknown): ModelResolutionEr
     reason: error.reason,
     ...(error.followsDefault ? { followsDefault: true } : {}),
     ...(error.usageLimitUntil ? { usageLimitUntil: error.usageLimitUntil } : {}),
+    ...(error.model ? { model: error.model } : {}),
   };
 }
 
@@ -136,6 +142,7 @@ function resolutionError(failure: ModelResolutionFailure): ModelResolutionError 
         code: "model_unavailable",
         provider: failure.provider,
         reason: "model_access_denied",
+        model: failure.model,
       });
     case "none_usable":
       return new ModelResolutionError(

@@ -171,11 +171,6 @@ export interface SessionOpening {
   /** Appended to the system prompt at open time. */
   contextSuffix?: string;
   /**
-   * The provider the open resolves on, for a turn run alone on another
-   * provider than the default (`AgentTurnInput.providerOverride`).
-   */
-  providerOverride?: AccountedProviderId;
-  /**
    * Optional exact model selection, used by the WebChat model selector. On a
    * session that is already open, a value replaces its selection from the next
    * turn and null clears it; undefined leaves it as it is.
@@ -230,12 +225,6 @@ export interface AgentTurnInput {
   /** Absolute local paths of images attached to the turn (providers without image-input support ignore them). */
   images?: string[];
   reasoningEffort?: ModelReasoningEffort;
-  /**
-   * Runs this turn alone on another provider than the default, as the
-   * guardian's "run them on {other} now" does. The next turn follows the
-   * default again. An exact selection ignores it.
-   */
-  providerOverride?: AccountedProviderId;
 }
 
 /** A forked turn: what it says, and what the fork asks of its source (see `openFork`). */
@@ -443,11 +432,12 @@ interface ManagerDeps {
    */
   handoffs?: RenewalHandoffs;
   /**
-   * Whether the chat runs on Rome credits, the guardian having moved it onto
-   * them. Read at open and before each turn, so every opener and resume
-   * agrees. Absent, only `init.credits` says so.
+   * Whether the chat may spend Rome credits: true once the guardian moved it
+   * onto them, false while it is kept on another provider, undefined when it
+   * follows the default. Read at open and before each turn, so every opener
+   * and resume agrees. Absent, only `init.credits` says so.
    */
-  chatOnCredits?: (chatId: string) => Promise<boolean>;
+  chatOnCredits?: (chatId: string) => Promise<boolean | undefined>;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
   /** Stamps the session id on the spans a session starts and binds it for logs. */
@@ -1571,7 +1561,8 @@ async function openSession(
       ? await deps.sessionSettings?.savedModelSelection(sessionId)
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
-  const credits = init.credits ?? (await chatOnCredits(deps, init.threadContext?.romeSessionId));
+  const credits =
+    init.credits ?? (await chatOnCredits(deps, init.threadContext?.romeSessionId))?.credits;
   // A cold resume runs at the effort its web chat saved when the open names
   // none, as a message to that chat does; a turn that names one still wins.
   const savedEffort =
@@ -2013,7 +2004,7 @@ async function openSession(
     });
   } else {
     initialResolution = await deps.modelResolver.resolve(
-      modelResolutionRequest(selectionId, sessionPin, config, init.providerOverride, credits),
+      modelResolutionRequest(selectionId, sessionPin, config, credits),
     );
     modelSession = await openModelSession(initialResolution, resumed?.provider, modelThreadId);
     threadResumed =
@@ -2180,7 +2171,7 @@ interface ImplArgs {
    * handoff if any: what the session it replaced held (`held`), or the
    * latest ones (`recent`).
    */
-  carriesMessages?: "held" | "recent" | "own";
+  carriesMessages?: "held" | "recent";
   /** The model the row's thread ran on. */
   previousModel?: string;
   openModelSession: (
@@ -2470,7 +2461,7 @@ class AgentSessionImpl implements AgentSession {
   /** The renewal's handoff, carried by the continuation notice until a turn succeeds. */
   private handoff?: string;
   /** The continuation notice carries the chat's open tasks and messages until a turn succeeds. */
-  private carriesMessages?: "held" | "recent" | "own";
+  private carriesMessages?: "held" | "recent";
   /**
    * The thread moved off a provider that cannot run any more: its first turn
    * also carries what the latest turns did, so the new model does not redo it.
@@ -2785,19 +2776,13 @@ class AgentSessionImpl implements AgentSession {
     if (options?.credits !== undefined) this.credits = options.credits;
   }
 
-  private async ensureModelSessionForTurn(override?: AccountedProviderId): Promise<void> {
+  private async ensureModelSessionForTurn(): Promise<void> {
     if (this.config.codeBacked) return;
     // Whether the chat runs on Rome credits now: a switch since the open moved it.
     const onCredits = await chatOnCredits(this.deps, this.threadContext?.romeSessionId);
-    if (onCredits !== undefined) this.credits = onCredits;
+    if (onCredits) this.credits = onCredits.credits;
     const resolution = await this.deps.modelResolver.resolve(
-      modelResolutionRequest(
-        this.selectionId,
-        this.sessionPin,
-        this.config,
-        override,
-        this.credits,
-      ),
+      modelResolutionRequest(this.selectionId, this.sessionPin, this.config, this.credits),
     );
     if (
       this.modelSessionAvailable &&
@@ -3109,15 +3094,6 @@ class AgentSessionImpl implements AgentSession {
       });
       return { openTasks: null, recent: [] };
     };
-    if (this.carriesMessages === "own") {
-      const held = await heldBy(this.deps.sessionRepository, this.session).catch(() => null);
-      if (held) {
-        const context = await handoffs
-          .context(sink.romeSessionId, sink.turnId, held.since)
-          .catch(failed);
-        return handoffSections(held.handoff, context, { all: true });
-      }
-    }
     if (this.carriesMessages === "held") {
       const held = await this.heldByPredecessor().catch(() => null);
       if (held) {
@@ -4133,7 +4109,7 @@ class AgentSessionImpl implements AgentSession {
     // boundary, before the sink is attached, so a backend replacement cannot
     // leak close events into the new turn.
     if (!sink.lifecycleInterrupted) {
-      await this.ensureModelSessionForTurn(input.providerOverride);
+      await this.ensureModelSessionForTurn();
     }
     if (sink.lifecycleInterrupted) {
       await this.modelSession.interrupt("user-stop");
@@ -4660,11 +4636,15 @@ function failureFieldsOf(terminal: StreamAgentEvent): AgentTurnFailedBeforeStart
   return Object.keys(failure).length > 0 ? failure : undefined;
 }
 
-/** Whether the chat runs on Rome credits, as the deps read it; undefined when they cannot. */
+/** Whether the chat may spend Rome credits, as the deps read it; null when they cannot. */
 async function chatOnCredits(
   deps: Pick<ManagerDeps, "chatOnCredits">,
   chatId: string | undefined,
-): Promise<boolean | undefined> {
-  if (!chatId || !deps.chatOnCredits) return undefined;
-  return await deps.chatOnCredits(chatId).catch(() => undefined);
+): Promise<{ credits: boolean | undefined } | null> {
+  if (!chatId || !deps.chatOnCredits) return null;
+  const read = deps.chatOnCredits;
+  return await read(chatId).then(
+    (credits) => ({ credits }),
+    () => null,
+  );
 }

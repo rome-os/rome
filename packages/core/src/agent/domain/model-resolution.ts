@@ -45,8 +45,9 @@ export type ModelResolutionRequest = (
   | { kind: "exact"; providerId: ProviderId; model: string }
 ) & {
   /**
-   * The ask may spend Rome credits: its chat was moved onto them. Without it,
-   * only a default of Rome credits spends them.
+   * Whether the ask may spend Rome credits: true when its chat was moved onto
+   * them, false when its chat is kept on another provider. Without it, only a
+   * default of Rome credits spends them.
    */
   credits?: boolean;
 };
@@ -187,10 +188,11 @@ export function resolveModel(
   // the guardian made them the default or moved this chat onto them. Any
   // other ask reads the guardian's own ChatGPT account, which shows its card.
   // With no default set, credits run only while no AI account is logged in.
+  // A chat kept on another provider never spends them, whatever the default.
   const spendsCredits =
-    request.credits === true ||
-    facts.defaultProvider === "rome_credits" ||
-    (!facts.defaultProvider && signedInProviders(reports, true).rome_credits);
+    request.credits ??
+    (facts.defaultProvider === "rome_credits" ||
+      (!facts.defaultProvider && signedInProviders(reports, true).rome_credits));
   const login =
     facts.logins.openai?.kind === "rome_credits" && !spendsCredits
       ? undefined
@@ -203,6 +205,19 @@ export function resolveModel(
 
   if (request.kind === "exact") {
     const { providerId, model } = request;
+    // A chat on Rome credits runs what the gateway serves: a model it does not
+    // serve gives way to the served model of the same strength.
+    if (
+      request.credits === true &&
+      providerId === "openai" &&
+      credits &&
+      served &&
+      !codexAllows(codex, model)
+    ) {
+      const tier: ModelTier = /luna|terra|mini/i.test(model) ? "small" : "large";
+      const fallback = codexTierModel(tier, codex);
+      return answer("openai", fallback, notAllowed("openai", fallback, codex));
+    }
     return answer(
       providerId,
       model,
@@ -299,23 +314,22 @@ export function resolveModel(
 /**
  * The ask: the chat's exact selection, else the agent's exact model, else its
  * tier. A tier that names no provider follows the default provider and keeps
- * the session's pin while the pin is on that provider. `override` runs this
- * one ask on another provider, and `credits` runs it on Codex through Rome
- * credits.
- * Throws on an agent with neither a tier nor a provider and model, or with a
- * model beside a tier.
+ * the session's pin while the pin is on that provider. `credits` true runs it
+ * on Codex through Rome credits; false keeps it off them whatever the
+ * default. Throws on an agent with neither a tier nor a provider and model, or
+ * with a model beside a tier.
  */
 export function modelResolutionRequest(
   selectionId: ModelSelectionId | undefined,
   pin: { providerId: ProviderId; model: string } | undefined,
   agent: { tier?: ModelTier; providerId?: ProviderId; modelId?: string },
-  override?: AccountedProviderId,
   credits?: boolean,
 ): ModelResolutionRequest {
-  if (!credits) return modelAsk(selectionId, pin, agent, override);
+  if (credits === false) return { ...modelAsk(selectionId, pin, agent), credits: false };
+  if (!credits) return modelAsk(selectionId, pin, agent);
   // Rome credits run Codex: the chat's model, whoever chose it, runs at its
   // strength there.
-  return { ...modelAsk(selectionId, pin, agent, override ?? "openai"), credits: true };
+  return { ...modelAsk(selectionId, pin, agent, "openai"), credits: true };
 }
 
 function modelAsk(

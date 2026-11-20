@@ -36,8 +36,18 @@ export function selectionOfStrength(
     : codexStrongSelection(codexAccount);
 }
 
-/** How strong a selection is: each provider's quick models are fast, the rest strong. */
-export function strengthOfSelection(id: ModelSelectionId): ModelStrength {
+/**
+ * How strong a selection is: each provider's quick models are fast, the rest
+ * strong. Terra is Codex's strong model for an account whose plan withholds
+ * Sol, so it counts as strong there.
+ */
+export function strengthOfSelection(
+  id: ModelSelectionId,
+  codexAccount?: ModelAccountReport["account"],
+): ModelStrength {
+  if (id === "gpt-5-6-terra" && codexAccount && codexStrongSelection(codexAccount) === id) {
+    return "strong";
+  }
   return /sonnet|haiku|luna|terra/.test(id) ? "fast" : "strong";
 }
 
@@ -54,5 +64,5 @@ export function followingSelection(
   if (!defaultProvider) return stored;
   const provider = providerOfDefault(defaultProvider);
   if (MODEL_SELECTIONS[stored].providerId === provider) return stored;
-  return selectionOfStrength(provider, strengthOfSelection(stored), codexAccount);
+  return selectionOfStrength(provider, strengthOfSelection(stored, codexAccount), codexAccount);
 }

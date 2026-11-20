@@ -353,15 +353,47 @@ describe("resolveModel on the default provider", () => {
 
   it("runs a chat on Rome credits on Codex, at the strength of the model it keeps", () => {
     expect(
-      modelResolutionRequest("claude-opus-5-5", undefined, { tier: "large" }, undefined, true),
+      modelResolutionRequest("claude-opus-5-5", undefined, { tier: "large" }, true),
     ).toMatchObject({ kind: "exact", providerId: "openai", credits: true });
-    expect(
-      modelResolutionRequest(undefined, undefined, { tier: "large" }, undefined, true),
-    ).toEqual({ kind: "tier", tier: "large", override: "openai", credits: true });
+    expect(modelResolutionRequest(undefined, undefined, { tier: "large" }, true)).toEqual({
+      kind: "tier",
+      tier: "large",
+      override: "openai",
+      credits: true,
+    });
     expect(modelResolutionRequest("claude-opus-5-5", undefined, { tier: "large" })).toMatchObject({
       kind: "exact",
       providerId: "anthropic",
     });
+  });
+
+  it("spends no Rome credits for a chat kept on another provider when credits become the default", () => {
+    const given = facts({
+      reports: reports(unauthorized, unauthorized),
+      logins: { openai: credits() },
+      defaultProvider: "rome_credits",
+    });
+    const kept = { kind: "exact", providerId: "openai", model: "gpt-6.1-sol" } as const;
+    // "Move existing chats too" was off: the chat stays where it ran, and shows its card.
+    expect(resolveModel({ ...kept, credits: false }, given)).toMatchObject({
+      ok: false,
+      failure: { kind: "provider_unavailable", provider: "openai" },
+    });
+    // A chat that follows the default runs on them.
+    expect(resolveModel(kept, given)).toMatchObject({ ok: true, providerId: "openai" });
+  });
+
+  it("runs a chat on Rome credits on the served model of its strength", () => {
+    const given = facts({
+      reports: reports(unauthorized, unauthorized),
+      logins: { openai: credits(["gpt-6-luna", "gpt-5.6-terra"]) },
+    });
+    expect(
+      resolveModel(
+        { kind: "exact", providerId: "openai", model: "gpt-6-astra", credits: true },
+        given,
+      ),
+    ).toEqual({ ok: true, providerId: "openai", model: "gpt-5.6-terra" });
   });
 
   it("finds none usable with no default and nothing signed in", () => {

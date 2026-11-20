@@ -24,6 +24,7 @@ type Row = {
   romeCredits?: boolean;
   triggerKind?: string | null;
   agentName?: string | null;
+  ownerKey?: string | null;
 };
 
 const flush = async () => {
@@ -50,17 +51,17 @@ function harness(
     onRun?: (params: { threadId: string }, failures: ProviderFailures) => Promise<void> | void;
     /** The silent retry's wait. Default: none. */
     delay?: () => Promise<void>;
-    /** Codex is logged in on Rome credits. Default: whenever they are signed in. */
-    codexOnCredits?: boolean;
     /** What the chat's session is opened by, as the real lookup would. */
     runtimeOf?: (chatId: string) => Promise<string | null>;
     /** What keeping a chat waits on, as the real write would. */
     keeping?: Promise<void>;
+    /** Whether a stopped turn may still run again by itself. Default: always. */
+    continues?: (chatId: string) => boolean;
   } = {},
 ) {
   const messages = new Map<string, { chatId: string; parts: unknown[] }>();
   const settings = options.settings ?? new Map<string, unknown>();
-  const runs: Array<{ threadId: string; prompt: string }> = [];
+  const runs: Array<{ threadId: string; prompt: string; actor?: unknown }> = [];
   const pushes: string[] = [];
   const swaps: string[] = [];
   const kept: Array<{ chatId: string; provider: string }> = [];
@@ -158,11 +159,15 @@ function harness(
         settings.set(key, structuredClone(value));
       },
     },
-    mainChatId: async () => "main",
+    mainChatId: async (owner) => (owner === "guardian" ? "main" : `main-${owner}`),
     runtimeOf: options.runtimeOf ?? (async (chatId) => `session-${chatId}`),
     runner: {
-      runAndReport: async (params) => {
-        runs.push({ threadId: params.threadId, prompt: params.prompt });
+      runAndReport: async (params, runOptions) => {
+        runs.push({
+          threadId: params.threadId,
+          prompt: params.prompt,
+          ...(runOptions?.actor ? { actor: runOptions.actor } : {}),
+        });
         await options.onRun?.(params, failures);
         return options.outcome ?? "completed";
       },
@@ -172,7 +177,9 @@ function harness(
       return options.swap === false ? null : { moved: true };
     },
     creditsUsable: () => options.credits ?? false,
-    codexOnCredits: () => options.codexOnCredits ?? signedIn.rome_credits,
+    actorOf: async (chatId) =>
+      chatId === "visitors" ? ({ kind: "visitor", accountId: "acct-v" } as never) : undefined,
+    ...(options.continues ? { continues: options.continues } : {}),
     selectModel: (chatId, _agentName, selection, credits) => {
       selected.push({ chatId, selection, ...(credits !== undefined ? { credits } : {}) });
     },
@@ -1181,7 +1188,6 @@ describe("round 5: what the second review found", () => {
       {
         defaultProvider: "openai",
         signedIn: { anthropic: false, openai: true, rome_credits: false },
-        codexOnCredits: false,
       },
     );
     await h.fail("chat", revoked);
@@ -1216,5 +1222,166 @@ describe("round 5: what the second review found", () => {
     h.messages.set("late", { chatId: "chat", parts: [part] });
     await h.failures.written("late");
     expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "recovered", continued: true });
+  });
+});
+
+describe("the silent retry, bound to its card", () => {
+  const held = () => {
+    let release = () => {};
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { wait, release };
+  };
+
+  it("leaves the turn to a switch that settles its card while it waits", async () => {
+    const pause = held();
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("available"), openai: reportOf("available") },
+      { delay: () => pause.wait },
+    );
+    await h.fail("chat", temporary);
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
+    await flush();
+    pause.release();
+    await flush();
+    // The switch ran the turn, once; the retry that waited ran nothing.
+    expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
+    // The resumed turn names the provider that could not run it.
+    expect(h.runs[0]?.prompt).toContain("because Claude could not run it");
+  });
+
+  it("is dropped by a turn that ran, or a newer failure, before it starts", async () => {
+    const pause = held();
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("available") },
+      {
+        delay: () => pause.wait,
+      },
+    );
+    await h.fail("chat", temporary);
+    await h.failures.succeeded("chat");
+    pause.release();
+    await flush();
+    expect(h.runs).toEqual([]);
+  });
+});
+
+describe("whose main chat a notice is in", () => {
+  it("groups a visitor's stopped task in that visitor's main chat, with no push to the guardian", async () => {
+    const h = harness(
+      {
+        mine: { triggerKind: "concierge" },
+        theirs: { triggerKind: "concierge", ownerKey: "visitor:acct-v" },
+        main: {},
+        "main-visitor:acct-v": { ownerKey: "visitor:acct-v" },
+      },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+    );
+    await h.fail("mine", quota);
+    await h.fail("theirs", quota);
+    const outages = await h.failures.outages();
+    expect(
+      outages.map((outage) => [outage.noticeChatId, outage.chats.map((c) => c.chatId)]),
+    ).toEqual([
+      ["main", ["mine"]],
+      ["main-visitor:acct-v", ["theirs"]],
+    ]);
+    expect(h.pushes).toHaveLength(1);
+  });
+});
+
+describe("a turn resumed by itself", () => {
+  it("runs only when the usage-limit continuation would, else its card settles quietly", async () => {
+    const reports: ModelAccountReports = { anthropic: reportOf("usage_limit_reached") };
+    const h = harness({ chat: {}, other: {} }, reports, {
+      // The guardian wrote in "other" since its turn stopped.
+      continues: (chatId) => chatId !== "other",
+    });
+    await h.fail("chat", quota);
+    await h.fail("other", quota);
+    reports.anthropic = reportOf("available");
+    await h.accountChanged("anthropic");
+    expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
+    expect(h.cardIn("other")?.resolved).toMatchObject({ by: "recovered" });
+    expect(h.cardIn("other")?.resolved?.continued).toBeUndefined();
+  });
+
+  it("names the provider that failed when a default change resumes it", async () => {
+    const h = harness(
+      { chat: {}, other: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+    );
+    await h.fail("chat", quota);
+    await h.fail("other", quota);
+    const card = (await h.failures.cards()).find((open) => open.chatId === "chat");
+    await h.failures.switchCard(card!.messageId, {
+      kind: "provider",
+      provider: "openai",
+      makeDefault: true,
+    });
+    await flush();
+    expect(h.runs.map((run) => run.threadId).sort()).toEqual(["chat", "other"]);
+    for (const run of h.runs) expect(run.prompt).toContain("because Claude could not run it");
+  });
+});
+
+describe("a model the resolver refused", () => {
+  it("offers the provider's other model on its card", async () => {
+    const h = harness(
+      { chat: { largeModelSelection: "gpt-6-1-sol", largeModelSelectionBy: "owner" } },
+      { openai: reportOf("available") },
+      { defaultProvider: "openai" },
+    );
+    const part = await h.failures.cardFor(
+      {
+        chatId: "chat",
+        agentName: "main",
+        failure: {
+          kind: "resolution",
+          payload: {
+            error: "Selected model is unavailable: gpt-6.1-sol",
+            code: "model_unavailable",
+            provider: "openai",
+            reason: "model_access_denied",
+            model: "gpt-6.1-sol",
+          },
+        },
+      },
+      "m-card",
+      [],
+    );
+    expect(part).toMatchObject({ card: "model", replacement: { selection: expect.any(String) } });
+    expect(part?.replacement?.selection).not.toBe("gpt-6-1-sol");
+  });
+});
+
+describe("a recovery turn", () => {
+  it("acts for the chat's owner, as a continuation does", async () => {
+    const h = harness(
+      { visitors: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+    );
+    await h.fail("visitors", quota);
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
+    await flush();
+    expect(h.runs[0]?.actor).toMatchObject({ kind: "visitor", accountId: "acct-v" });
+  });
+
+  it("names Rome credits used up while no ChatGPT account is logged in, though the balance is gone", async () => {
+    const h = harness(
+      { chat: { romeCredits: true } },
+      { openai: reportOf("unauthorized"), anthropic: reportOf("unauthorized") },
+      {
+        defaultProvider: "openai",
+        signedIn: { anthropic: false, openai: false, rome_credits: false },
+      },
+    );
+    await h.fail("chat", revoked);
+    expect(h.cardIn("chat")).toMatchObject({ provider: "rome_credits", reason: "credits_used_up" });
   });
 });

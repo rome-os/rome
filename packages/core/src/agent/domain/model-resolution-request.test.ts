@@ -44,21 +44,26 @@ describe("modelResolutionRequest", () => {
     });
   });
 
-  it("runs a selection's strength on the provider a one-off override names", () => {
-    expect(modelResolutionRequest("claude-sonnet", undefined, { tier: "large" }, "openai")).toEqual(
-      {
-        kind: "exact",
-        providerId: "openai",
-        model: "gpt-6-luna",
-      },
-    );
+  it("runs a selection's strength on Codex for a chat on Rome credits", () => {
+    expect(modelResolutionRequest("claude-sonnet", undefined, { tier: "large" }, true)).toEqual({
+      kind: "exact",
+      providerId: "openai",
+      model: "gpt-6-luna",
+      credits: true,
+    });
   });
 
-  it("carries a one-off provider override on a tier ask", () => {
-    expect(modelResolutionRequest(undefined, undefined, { tier: "large" }, "openai")).toEqual({
+  it("runs a tier on Codex for a chat on Rome credits, and keeps a kept chat off them", () => {
+    expect(modelResolutionRequest(undefined, undefined, { tier: "large" }, true)).toEqual({
       kind: "tier",
       tier: "large",
       override: "openai",
+      credits: true,
+    });
+    expect(modelResolutionRequest(undefined, undefined, { tier: "large" }, false)).toEqual({
+      kind: "tier",
+      tier: "large",
+      credits: false,
     });
   });
 
