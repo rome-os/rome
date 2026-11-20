@@ -750,7 +750,9 @@
   },
   "providerFailure": {
     "quota": "{{provider}} 额度用完了，重置后自动继续",
-    "quotaUntil": "{{provider}} 额度用完了，{{time}} 后自动继续",
+    "quotaUntil": "{{provider}} 额度用完了，{{date}} {{time}} 后自动继续",
+    "quotaUntilToday": "{{provider}} 额度用完了，今天 {{time}} 后自动继续",
+    "quotaUntilTomorrow": "{{provider}} 额度用完了，明天 {{time}} 后自动继续",
     "temporary": "{{provider}} 暂时用不了，Rome 会自己重试。",
     "login": "{{provider}} 需要重新登录",
     "removed": "{{provider}} 未登录",

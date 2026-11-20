@@ -914,9 +914,13 @@ export class ConciergeService {
     const from = selected?.providerId ?? runtime?.provider ?? failure.provider;
     if (from !== "openai" && from !== "anthropic") return null;
     if (failure.provider && failure.provider !== from) return null;
-    const state = this.deps.accounts.read();
+    const read = this.deps.accounts.read();
     // An account billed per use has no subscription to switch from.
-    if (state[from]?.account.usageLimited === false) return null;
+    if (read[from]?.account.usageLimited === false) return null;
+    // The turn reached the provider, which refused one model only: the account
+    // runs, whatever an older read of it says.
+    const report = read[from];
+    const state = report ? { ...read, [from]: { ...report, state: "available" as const } } : read;
     const fromModel = selected?.model ?? runtime?.model ?? "";
     // A model each Concierge chat left, so one chat's move never blocks another's.
     const modelKey = (model: string) => `${chatId}\u0000${model.replace(/\[.*\]$/, "")}`;

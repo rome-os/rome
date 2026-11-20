@@ -249,7 +249,7 @@ function sameIdentity(a: AgentIdentity, b: AgentIdentity): boolean {
 
 function sameRow(a: ChatRow, b: ChatRow): boolean {
   if (a.kind !== b.kind || a.key !== b.key) return false;
-  if (a.kind === "user") return true;
+  if (a.kind === "user") return b.kind === "user" && a.message.inputState === b.message.inputState;
   if (a.kind === "model_switch") {
     return (
       b.kind === "model_switch" &&
@@ -297,7 +297,11 @@ export function buildRows(
 
   const tracesByTurn = new Map<string, ChatMessage>();
   const turnsWithAssistant = new Set<string>();
+  // Turns a provider card explains: their send did not fail, it waits on the card.
+  const cardedTurns = new Set<string>();
   for (const m of messages) {
+    if (m.role === "assistant" && m.turnId && m.content.includes('"provider_failure"'))
+      cardedTurns.add(m.turnId);
     if (m.role === "trace" && m.turnId && (m.traceSummary || m.traceArchived))
       tracesByTurn.set(m.turnId, m);
     if (m.role === "assistant" && m.turnId) turnsWithAssistant.add(m.turnId);
@@ -329,7 +333,11 @@ export function buildRows(
       }
     }
     if (msg.role === "user") {
-      rows.push(reuseRow(msg, { kind: "user", key: msg.id, message: msg }));
+      const calm =
+        msg.inputState === "failed" && msg.turnId && cardedTurns.has(msg.turnId)
+          ? { ...msg, inputState: "consumed" as const }
+          : msg;
+      rows.push(reuseRow(msg, { kind: "user", key: msg.id, message: calm }));
       continue;
     }
     if (msg.role === "trace") {

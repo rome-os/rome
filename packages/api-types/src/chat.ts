@@ -240,8 +240,12 @@ export type ProviderFailureCardKind = "wait" | "account" | "model";
 /** How a failure card or notice was settled. */
 export interface ProviderFailureResolution {
   at: string;
-  /** `switched`: the guardian moved the chat. `recovered`: the provider ran again. */
-  by: "switched" | "recovered";
+  /**
+   * `switched`: the guardian moved the chat. `recovered`: the provider ran
+   * again. `moved`: a later turn of the chat carries the card now, or a silent
+   * retry got past the failure; a client shows nothing for it.
+   */
+  by: "switched" | "recovered" | "moved";
   /** Where a switch moved the chat. */
   provider?: DefaultModelProvider;
   /** The model a model switch moved the chat to. */
@@ -280,6 +284,11 @@ export interface ProviderFailurePart {
   credits?: boolean;
   /** The provider's own error, behind "Details". */
   detail?: string;
+  /**
+   * Rome retries this temporary failure once, silently: a client shows
+   * nothing yet, and nothing of the turn reads as failed.
+   */
+  retrying?: boolean;
   /** Set once the card is settled; the card then reads as one line. */
   resolved?: ProviderFailureResolution;
 }

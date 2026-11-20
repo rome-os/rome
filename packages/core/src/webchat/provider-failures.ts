@@ -266,6 +266,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
   let stopped = false;
   // Chats whose recovery turn is running: its failure is final.
   const recovering = new Set<string>();
+  // Chats Rome just moved to another model: one more model limit shows a card.
+  const swapped = new Set<string>();
   // Chats with a card not settled, kept in memory so the usage-limit
   // continuation can ask synchronously.
   const cardedChats = new Set<string>();
@@ -463,8 +465,13 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       const cards = await readCards();
       const open = cards.find((card) => card.chatId === turn.chatId);
       if (open) {
+        // The older turn keeps its card, hidden, so it still reads as explained.
+        const moved = {
+          ...open,
+          part: { ...open.part, resolved: { at: now().toISOString(), by: "moved" as const } },
+        };
         await deps.webchatRepo
-          .updateMessageContent(open.messageId, JSON.stringify(open.beside))
+          .updateMessageContent(open.messageId, content(moved))
           .catch(() => undefined);
       }
       let messageId = written?.messageId;
@@ -486,7 +493,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         part,
         beside: written?.beside ?? [],
         since: open?.since ?? now().toISOString(),
-        attempts: open?.attempts ?? 0,
+        attempts: open?.part.retrying ? 0 : (open?.attempts ?? 0),
         ...(state ? { stateAtFailure: state } : {}),
       };
       await writeCards([...rest, card]);
@@ -495,7 +502,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
 
   /** A card that recovers by itself tries the stopped turn again, a few times. */
   const scheduleRecovery = (card: OpenProviderCard) => {
-    if (card.part.card !== "wait" || card.part.reason === "quota") return;
+    if (card.part.card !== "wait" || card.part.reason === "quota" || card.part.retrying) return;
     const wait = RECOVERY_DELAYS_MS[card.attempts];
     if (wait === undefined) return;
     scheduled.get(card.chatId)?.();
@@ -775,12 +782,17 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     if (!classified) return null;
     const chat = await deps.webchatRepo.getSession(turn.chatId);
     if (!chat) return null;
-    // A recovery turn's failure is final: it is never recovered again.
+    // A retry's failure is final: a temporary error is retried once.
     const last = final || recovering.has(turn.chatId);
     const concierge = isConciergeChat(chat);
     const failure = classified.failure;
     if (classified.reason === "temporary" && !last) {
-      // The Concierge retries its own chats, and says when that failed too.
+      // Nothing of the turn reads as failed while its one retry waits: a
+      // quiet card stands in for the error. The Concierge retries its own chats.
+      const quiet = await cardPart(turn.chatId, turn.agentName, classified);
+      if (quiet) {
+        await writeCard(turn, { ...quiet, retrying: true }, classified.provider);
+      }
       if (concierge) return null;
       const sessionId = turn.sessionId ?? (await deps.runtimeOf(turn.chatId, turn.agentName));
       if (!sessionId) return null;
@@ -793,14 +805,18 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         .finally(() => recovering.delete(turn.chatId));
       return null;
     }
+    // A single model's limit moves a chat that follows the default to another
+    // model of the provider, a resumed turn included, once in a row.
     if (
       (classified.reason === "capacity" || classified.reason === "model_unavailable") &&
-      !last &&
+      !final &&
+      !swapped.has(turn.chatId) &&
       failure
     ) {
       // The Concierge moves its own chats to another model, and says when it could not.
       if (concierge) return null;
       if (!ownerPicked(chat) && (await deps.swapModel?.(turn.chatId, turn.agentName, failure))) {
+        swapped.add(turn.chatId);
         resume(turn.chatId, turn.agentName, providerName(named(classified.provider)));
         return null;
       }
@@ -849,10 +865,15 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       return decided.part;
     },
     async succeeded(chatId) {
+      swapped.delete(chatId);
       if (!cardedChats.has(chatId)) return;
       await settle(
         (card) => card.chatId === chatId,
-        () => ({ at: now().toISOString(), by: "recovered", continued: true }),
+        (card) =>
+          // A silent retry that got past the failure stays silent.
+          card.part.retrying
+            ? { at: now().toISOString(), by: "moved" }
+            : { at: now().toISOString(), by: "recovered", continued: true },
       );
     },
     async switchCard(messageId, change) {

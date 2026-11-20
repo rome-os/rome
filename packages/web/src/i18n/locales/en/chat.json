@@ -750,7 +750,9 @@
   },
   "providerFailure": {
     "quota": "{{provider}} quota used up, continues when it resets",
-    "quotaUntil": "{{provider}} quota used up, continues at {{time}}",
+    "quotaUntil": "{{provider}} quota used up, continues on {{date}} at {{time}}",
+    "quotaUntilToday": "{{provider}} quota used up, continues today at {{time}}",
+    "quotaUntilTomorrow": "{{provider}} quota used up, continues tomorrow at {{time}}",
     "temporary": "{{provider}} is unavailable for now. Rome tries again by itself.",
     "login": "{{provider}} needs you to log in again",
     "removed": "{{provider}} is not logged in",

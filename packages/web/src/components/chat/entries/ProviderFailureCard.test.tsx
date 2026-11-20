@@ -51,6 +51,20 @@ function renderCard(part: Partial<ProviderFailurePart>, onSettled?: () => void) 
   );
 }
 
+describe("formatUntil", () => {
+  it("names today, tomorrow, or the date", () => {
+    const now = new Date(2026, 10, 20, 9, 0);
+    expect(formatUntil(new Date(2026, 10, 20, 15, 54).toISOString(), "en", now).day).toBe("today");
+    expect(formatUntil(new Date(2026, 10, 21, 3, 54).toISOString(), "en", now).day).toBe(
+      "tomorrow",
+    );
+    expect(formatUntil(new Date(2026, 10, 24, 3, 54).toISOString(), "en", now)).toMatchObject({
+      day: "date",
+      date: "Nov 24",
+    });
+  });
+});
+
 describe("ProviderFailureCard", () => {
   it("waits out a usage limit and switches this chat only, unless also made default", async () => {
     const calls = mockApi();
@@ -58,8 +72,8 @@ describe("ProviderFailureCard", () => {
     const until = new Date();
     until.setHours(14, 20, 0, 0);
     renderCard({ until: until.toISOString() }, settled);
-    const time = formatUntil(until.toISOString(), "en");
-    expect(screen.getByText(`ChatGPT quota used up, continues at ${time}`)).toBeTruthy();
+    const { time } = formatUntil(until.toISOString(), "en");
+    expect(screen.getByText(`ChatGPT quota used up, continues today at ${time}`)).toBeTruthy();
     // A usage limit ends by itself, so nothing asks to log in.
     expect(screen.queryByRole("button", { name: "Log in" })).toBeNull();
     const makeDefault = screen.getByRole("checkbox", { name: "Also make default" });

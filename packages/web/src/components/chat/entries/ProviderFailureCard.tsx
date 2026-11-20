@@ -17,16 +17,25 @@ import { type ProviderSwitch, switchProviderFailure } from "@/hooks/use-default-
 import { modelDisplayName } from "@/lib/model-display";
 import { cn } from "@/lib/utils";
 
-/** `until` as a time of day, with the date when it is not today. */
-export function formatUntil(until: string, locale: string, now = new Date()): string {
+/**
+ * When a usage limit ends, as a day the guardian reads at a glance: today,
+ * tomorrow, or a date, and the time of day.
+ */
+export function formatUntil(
+  until: string,
+  locale: string,
+  now = new Date(),
+): { day: "today" | "tomorrow" | "date"; date: string; time: string } {
   const at = new Date(until);
-  if (Number.isNaN(at.getTime())) return until;
-  const sameDay = at.toDateString() === now.toDateString();
-  return new Intl.DateTimeFormat(locale, {
-    ...(sameDay ? {} : { month: "short", day: "numeric" }),
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(at);
+  const time = Number.isNaN(at.getTime())
+    ? until
+    : new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }).format(at);
+  const startOf = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const days = Math.round((startOf(at).getTime() - startOf(now).getTime()) / 86_400_000);
+  const date = Number.isNaN(at.getTime())
+    ? until
+    : new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }).format(at);
+  return { day: days <= 0 ? "today" : days === 1 ? "tomorrow" : "date", date, time };
 }
 
 /** What a failure asks of the guardian. A part written before `card` existed
@@ -67,7 +76,14 @@ export function failureText(
   switch (facts.reason) {
     case "quota":
       return facts.until
-        ? t("providerFailure.quotaUntil", { provider, time: formatUntil(facts.until, locale) })
+        ? (() => {
+            const { day, date, time } = formatUntil(facts.until, locale);
+            return day === "today"
+              ? t("providerFailure.quotaUntilToday", { provider, time })
+              : day === "tomorrow"
+                ? t("providerFailure.quotaUntilTomorrow", { provider, time })
+                : t("providerFailure.quotaUntil", { provider, date, time });
+          })()
         : t("providerFailure.quota", { provider });
     case "temporary":
       return t("providerFailure.temporary", { provider });
@@ -257,6 +273,9 @@ export function ProviderFailureCard({
   // What a switch this view sent settled the card as, until the chat is read again.
   const [switched, setSwitched] = useState<ProviderFailureResolution | null>(null);
   const resolved = part.resolved ?? switched;
+
+  // A quiet retry, or a card a later turn carries now: nothing to show here.
+  if (part.retrying || resolved?.by === "moved") return null;
 
   if (resolved) {
     return (

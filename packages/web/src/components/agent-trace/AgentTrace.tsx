@@ -88,16 +88,14 @@ function CollapsedTraceContent({
 }) {
   const { t } = useTranslation("activity");
 
-  if (summary?.terminalError) {
+  // A card beside the turn says why it stopped: the line stays calm, as for a
+  // turn that ran.
+  if (summary?.terminalError && !errorExplained) {
     // A guided error shows its guidance beside the trace (`TraceTrigger`), so
     // the line names the failure without the raw provider text.
     return (
       <TraceErrorSummary
-        error={
-          errorExplained || hasGuidedErrorCopy(summary.terminalErrorCode)
-            ? null
-            : summary.terminalError
-        }
+        error={hasGuidedErrorCopy(summary.terminalErrorCode) ? null : summary.terminalError}
       />
     );
   }

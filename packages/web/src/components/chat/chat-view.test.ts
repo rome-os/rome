@@ -268,6 +268,28 @@ describe("buildRows model switch notice", () => {
     expect(rows.filter((r) => r.kind === "model_switch")).toHaveLength(1);
   });
 
+  it("shows a send a provider card explains as delivered, not failed", () => {
+    const user = {
+      ...mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+      inputState: "failed" as const,
+    };
+    const card = mk(MAIN, "assistant", "t1", [
+      {
+        type: "provider_failure",
+        provider: "openai",
+        reason: "quota",
+        card: "wait",
+        followsDefault: true,
+        alternatives: [],
+        chatId: MAIN,
+      },
+    ]);
+    const [row] = rowsOf([user, card]);
+    expect(row).toMatchObject({ kind: "user", message: { inputState: "consumed" } });
+    const [plain] = rowsOf([user]);
+    expect(plain).toMatchObject({ kind: "user", message: { inputState: "failed" } });
+  });
+
   it("skips turns with no known model and compares within one session", () => {
     const rows = rowsOf([
       ...turn(MAIN, "t1", "gpt-6-luna"),

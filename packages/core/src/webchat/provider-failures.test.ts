@@ -166,17 +166,27 @@ function harness(
     for (const listener of accountListeners) listener(provider, "refreshed");
     await flush();
   };
-  /** The parts of the message the chat's card is in. */
+  /** The chat's newest card: the one it shows, unless that settled as moved. */
   const cardIn = (chatId: string): ProviderFailurePart | undefined => {
+    let found: ProviderFailurePart | undefined;
     for (const message of messages.values()) {
       if (message.chatId !== chatId) continue;
       const card = message.parts.find(
         (part) => (part as { type?: string }).type === "provider_failure",
       );
-      if (card) return card as ProviderFailurePart;
+      if (card) found = card as ProviderFailurePart;
     }
-    return undefined;
+    return found;
   };
+  /** The cards the chat draws: not a quiet retry, not one that moved on. */
+  const shownCards = (chatId: string) =>
+    [...messages.values()]
+      .filter((message) => message.chatId === chatId)
+      .flatMap((message) => message.parts as ProviderFailurePart[])
+      .filter(
+        (part) =>
+          part.type === "provider_failure" && !part.retrying && part.resolved?.by !== "moved",
+      );
   const notice = (): ProviderOutagePart | undefined =>
     [...messages.values()]
       .flatMap((message) => message.parts)
@@ -201,6 +211,7 @@ function harness(
     timers,
     accountChanged,
     cardIn,
+    shownCards,
     notice,
     fail,
   };
@@ -247,9 +258,13 @@ describe("automatic recovery, the same in every chat", () => {
     await flush();
     expect(h.runs).toHaveLength(1);
     expect(h.runs[0]?.prompt).toContain("<provider_retry>");
-    expect(h.cardIn("chat")).toBeUndefined();
+    // Only a quiet card while the retry waits: the turn reads as explained, not failed.
+    expect(h.cardIn("chat")).toMatchObject({ retrying: true });
+    expect(h.shownCards("chat")).toEqual([]);
     await h.fail("chat", temporary, true);
     expect(h.cardIn("chat")).toMatchObject({ card: "wait", reason: "temporary" });
+    expect(h.cardIn("chat")?.retrying).toBeUndefined();
+    expect(h.shownCards("chat")).toHaveLength(1);
     expect(h.runs).toHaveLength(1);
   });
 
@@ -258,7 +273,7 @@ describe("automatic recovery, the same in every chat", () => {
     await h.fail("main", temporary);
     await flush();
     expect(h.runs).toEqual([]);
-    expect(h.cardIn("main")).toBeUndefined();
+    expect(h.shownCards("main")).toEqual([]);
     await h.fail("main", temporary, true);
     expect(h.cardIn("main")).toMatchObject({ card: "wait", reason: "temporary" });
   });
@@ -301,6 +316,40 @@ describe("automatic recovery, the same in every chat", () => {
       replacement: { selection: expect.any(String) },
       alternatives: [],
     });
+  });
+
+  it("moves a resumed turn to another model too, once in a row", async () => {
+    const reports: ModelAccountReports = {
+      openai: reportOf("usage_limit_reached"),
+      anthropic: reportOf("available"),
+    };
+    const h = harness({ chat: {} }, reports, { defaultProvider: "openai" });
+    const atCapacity: AgentTurnFailure = {
+      provider: "openai",
+      message: "Selected model is at capacity. Please try a different model.",
+    };
+    // A send refused on the quota, then resumed once the account reads available.
+    await h.fail("chat", { provider: "openai", message: "usage limit", code: "usage_limit" }, true);
+    reports.openai = reportOf("available");
+    await h.accountChanged("openai");
+    expect(h.runs).toHaveLength(1);
+    // The resumed turn hits one model's limit: Rome moves the model, no card.
+    await h.fail("chat", atCapacity);
+    await flush();
+    expect(h.swaps).toEqual(["chat"]);
+    expect(h.runs).toHaveLength(2);
+    // The moved model is limited too: now the card.
+    await h.fail("chat", atCapacity);
+    expect(h.swaps).toEqual(["chat"]);
+    expect(h.cardIn("chat")).toMatchObject({ card: "wait", reason: "capacity" });
+  });
+
+  it("leaves the older turn's card hidden when the card moves on", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("usage_limit_reached") });
+    await h.fail("chat", quota);
+    await h.fail("chat", spendCap);
+    const parts = [...h.messages.values()].flatMap((m) => m.parts as ProviderFailurePart[]);
+    expect(parts.map((part) => part.resolved?.by)).toEqual(["moved", undefined]);
   });
 
   it("cards a model limit no other model could take", async () => {
@@ -415,10 +464,7 @@ describe("the three cards", () => {
     );
     await h.fail("chat", quota);
     await h.fail("chat", spendCap);
-    const withCards = [...h.messages.values()].filter((message) =>
-      message.parts.some((part) => (part as { type?: string }).type === "provider_failure"),
-    );
-    expect(withCards).toHaveLength(1);
+    expect(h.shownCards("chat")).toHaveLength(1);
     expect(h.cardIn("chat")).toMatchObject({ reason: "spend_cap" });
     expect(await h.failures.cards()).toHaveLength(1);
   });
@@ -468,10 +514,7 @@ describe("the three cards", () => {
     await h.accountChanged("anthropic");
     await h.fail("chat", quota, true);
     await h.accountChanged("anthropic");
-    const withCards = [...h.messages.values()].filter((message) =>
-      message.parts.some((part) => (part as { type?: string }).type === "provider_failure"),
-    );
-    expect(withCards).toHaveLength(1);
+    expect(h.shownCards("chat")).toHaveLength(1);
     expect(h.runs).toHaveLength(1);
   });
 
