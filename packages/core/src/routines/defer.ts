@@ -2,11 +2,11 @@
 //
 // The agent calls `defer` mid-turn with a delay, an absolute time, or an event
 // to wait for, plus a note-to-self. We create a one-off routine that, when it
-// fires, resumes the *same* session through `resume_session` — so the agent
+// fires, resumes the *same* session through `system:resume_session` — so the agent
 // wakes in its own conversation with full context. A time wakeup is a dated
 // schedule routine; an event wakeup is a `once` event-bus routine.
 //
-// This module shapes the `create_routine` args from the parsed wake-up. The side
+// This module shapes the `system:create_routine` args from the parsed wake-up. The side
 // effects (reading the live thread context, subscribing to the event's source,
 // calling create_routine through the action engine) are injected by the
 // caller (`agent-session.ts`) so this stays testable without a running engine.
@@ -14,11 +14,11 @@
 import type { WakeUp } from "../agent/index.js";
 import type { ThreadContext } from "../core/types.js";
 
-/** The action the one-off routine fires: `resume_session` continues this
+/** The action the one-off routine fires: `system:resume_session` continues this
  * thread's conversation on any channel. It's a thin shim over the
  * main-process backend-turn orchestrator — defer needs only name the session to
  * resume; the orchestrator owns running the turn and delivering the reply. */
-export const RESUME_SESSION_ACTION = "resume_session";
+export const RESUME_SESSION_ACTION = "system:resume_session";
 
 /** The thread the `defer` call is running in, captured from the live session. */
 export interface DeferContext {
@@ -79,7 +79,7 @@ export type DeferResult =
       routineId?: string;
     };
 
-/** Build the args `resume_session` fires with: which runtime session to continue,
+/** Build the args `system:resume_session` fires with: which runtime session to continue,
  * where its reply is delivered, and the prompt the woken turn receives.
  * No trust fields — a continuation skips the inbound trust pipeline. */
 function buildResumeArgs(
@@ -153,7 +153,7 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
         once: true,
       },
       actionName: RESUME_SESSION_ACTION,
-      // `resume_session` appends a summary of the event payload to `text`.
+      // `system:resume_session` appends a summary of the event payload to `text`.
       args: buildResumeArgs(
         deps.context,
         {

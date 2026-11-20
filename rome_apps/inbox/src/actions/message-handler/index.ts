@@ -7,14 +7,16 @@ import type {
   AppActionRuntimeDeps,
   ApprovalsRepository,
   Attachment,
+  BondLevel,
   ChatId,
   ChatRecord,
+  ChatRef,
   ChatRepository,
   EnsureChannelChatInput,
+  MessageAddressing,
   MessageReplyReference,
   PersonMappingRepository,
   PersonRecord,
-  PolicyEngine,
   SentinelLogRepository,
   StreamAgentMessage,
 } from "@rome-os/app-runtime";
@@ -27,12 +29,44 @@ const log = createAppLogger("message-handler");
 // Dependencies injected via factory
 // ---------------------------------------------------------------------------
 
+/** Core's send gate, which the SDK does not describe yet. */
+export type SendGate = (request: {
+  destination: {
+    connectionId: string;
+    chatId: string;
+    place: "direct" | "group";
+    sameChatAsWake: boolean;
+    onlyGuardianReads: boolean;
+  };
+  recipient: { bondLevel: BondLevel } | null;
+  author: { agentName: string };
+}) => "send" | "check" | "ask_guardian" | "refuse";
+
+/** Core's wake gate, which the SDK does not describe yet. */
+export type WakeGate = (
+  message: {
+    connectionId: string;
+    chatId: string;
+    channel: string;
+    place: "direct" | "group";
+    threadName?: string;
+    addressing?: MessageAddressing;
+    fromBot?: boolean;
+    mentionsOthers?: boolean;
+  },
+  sender: { person: { id: string; bondLevel: BondLevel } | null },
+) => "wake" | "quiet" | "block" | "review";
+
+/** The wake gate for a chat, built from its current settings. */
+export type WakeGateFor = (request: { chat: ChatRef }) => Promise<WakeGate>;
+
 export interface MessageHandlerDeps {
   agentRunner: AgentRunnerInterface;
+  sendGate: SendGate;
   personMappingRepo: PersonMappingRepository;
   sentinelLogRepo: SentinelLogRepository;
   approvalsRepo: ApprovalsRepository;
-  policyEngine: PolicyEngine;
+  wakeGateFor: WakeGateFor;
   emitAgentMessage?: (message: StreamAgentMessage) => void;
   resolveProfilePath(filePath: string): string;
   strangerPersonId: string;
@@ -69,17 +103,6 @@ type CollectedAgentResult =
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
-
-const DEFAULT_TRUSTED_BOND_LEVELS = ["guardian"];
-const DEFAULT_REPLY_TO_BOND_LEVELS = ["guardian"];
-
-function isTrustedBondLevel(bondLevel: string, trustedLevels: string[]): boolean {
-  return trustedLevels.includes(bondLevel);
-}
-
-function canReplyToBondLevel(bondLevel: string, replyToLevels: string[]): boolean {
-  return replyToLevels.includes(bondLevel);
-}
 
 function readMarkdownContext(filePath: string): string | null {
   const fullPath = isAbsolute(filePath) ? filePath : filePath;
@@ -484,10 +507,10 @@ async function handleTrustedMessage(
     return { status: "ok", data: { action: "no_response" } };
   }
 
-  // Skip envoy for guardian — send directly
-  if (bondLevel === "guardian") {
-    log.info("skipping envoy (guardian)", { channel, channelUserId });
-    await sendAnswer(deps, {
+  const approval = { type: "outgoing_message" as const, requestedBy: targetAgent };
+  const payload = { response, channel, threadId, messageId, channelUserId };
+  const send = () =>
+    sendAnswer(deps, {
       channel,
       threadId,
       text: response,
@@ -497,17 +520,52 @@ async function handleTrustedMessage(
       ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
       knownToProvider: true,
     });
+  const senderPerson = typeof args.senderPerson === "string" ? args.senderPerson : null;
+  const recipient =
+    typeof args.senderPerson === "string" ? { bondLevel: bondLevel as BondLevel } : null;
+  const place = args.threadType === "private" ? "direct" : "group";
+  const decision = deps.sendGate({
+    destination: {
+      connectionId,
+      chatId: threadId,
+      place,
+      // The reply goes to the chat the message came from.
+      sameChatAsWake: true,
+      onlyGuardianReads: place === "direct" && recipient?.bondLevel === "guardian",
+    },
+    recipient,
+    author: { agentName: targetAgent },
+  });
+  log.info("send gate decision", { decision, channel, channelUserId });
+
+  if (decision === "send") {
+    await send();
     await deps.approvalsRepo.create({
-      type: "outgoing_message",
-      requestedBy: targetAgent,
+      ...approval,
       description: "Skipped envoy (guardian)",
-      payload: { response, channel, threadId, messageId, channelUserId },
+      payload,
       status: "auto_approved",
     });
     return { status: "ok", data: { action: "sent", response } };
   }
+  if (decision === "ask_guardian") {
+    await deps.approvalsRepo.create({
+      ...approval,
+      description: "Held by the send gate",
+      payload,
+    });
+    return { status: "ok", data: { action: "pending_approval", response } };
+  }
+  if (decision === "refuse") {
+    await deps.approvalsRepo.create({
+      ...approval,
+      description: "Refused by the send gate",
+      payload,
+      status: "rejected",
+    });
+    return { status: "ok", data: { action: "rejected_by_send_gate" } };
+  }
 
-  // Envoy check before sending (non-guardian trusted senders)
   log.info("running envoy check", { channel, channelUserId });
   const envoyResult = await envoyCheck(
     deps.agentRunner,
@@ -515,7 +573,7 @@ async function handleTrustedMessage(
     text,
     {
       shownName: typeof args.displayName === "string" ? args.displayName : channelUserId,
-      person: typeof args.senderPerson === "string" ? args.senderPerson : null,
+      person: senderPerson,
       bondLevel,
       threadType: typeof args.threadType === "string" ? args.threadType : undefined,
     },
@@ -525,21 +583,11 @@ async function handleTrustedMessage(
   log.info("envoy decision", { action: envoyResult.action, channel, channelUserId });
 
   if (envoyResult.action === "approve") {
-    await sendAnswer(deps, {
-      channel,
-      threadId,
-      text: response,
-      channelUserId,
-      replyToMessageId: messageId,
-      romeSessionId: chatId,
-      ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
-      knownToProvider: true,
-    });
+    await send();
     await deps.approvalsRepo.create({
-      type: "outgoing_message",
-      requestedBy: targetAgent,
+      ...approval,
       description: envoyResult.reason ?? "Envoy approved",
-      payload: { response, channel, threadId, messageId, channelUserId },
+      payload,
       status: "auto_approved",
     });
     return { status: "ok", data: { action: "sent", response } };
@@ -547,20 +595,17 @@ async function handleTrustedMessage(
 
   if (envoyResult.action === "require_approval") {
     await deps.approvalsRepo.create({
-      type: "outgoing_message",
-      requestedBy: targetAgent,
+      ...approval,
       description: envoyResult.reason ?? "Envoy flagged for approval",
-      payload: { response, channel, threadId, messageId, channelUserId },
+      payload,
     });
     return { status: "ok", data: { action: "pending_approval", response } };
   }
 
-  // Rejected
   await deps.approvalsRepo.create({
-    type: "outgoing_message",
-    requestedBy: targetAgent,
+    ...approval,
     description: envoyResult.reason ?? "Envoy rejected",
-    payload: { response, channel, threadId, messageId, channelUserId },
+    payload,
     status: "rejected",
   });
   return {
@@ -730,20 +775,28 @@ export function createMessageHandlerAction(
 
         const bondLevel = (person?.bondLevel as string) ?? "other";
 
-        const policy = await deps.policyEngine.evaluate({
-          channel,
-          sender: person ? { id: person.id, bondLevel: person.bondLevel } : null,
-          bondLevel,
-          threadName,
-          threadType,
-        });
+        // The hook asked the wake gate already when the host recorded the
+        // message with People's answer; otherwise ask it here.
+        const wake =
+          args.wake === "wake" || args.wake === "review"
+            ? args.wake
+            : (await deps.wakeGateFor({ chat: { connectionId, chatId: threadId as ChatId } }))(
+                {
+                  connectionId,
+                  chatId: threadId,
+                  channel,
+                  place: threadType === "private" ? "direct" : "group",
+                  threadName,
+                  ...addressedBy(args),
+                },
+                { person: person ? { id: person.id, bondLevel: person.bondLevel } : null },
+              );
 
-        if (policy.action === "block") {
+        if (wake === "block") {
           log.info("message blocked by policy", { channel, channelUserId });
           return { status: "ok", data: { action: "blocked" } };
         }
 
-        const settings = deps.appContext.repositories.settings;
         const conversations = requireChatRepository(deps);
         const requestedAgent =
           typeof args.routedAgentName === "string" && args.routedAgentName.trim()
@@ -808,9 +861,7 @@ export function createMessageHandlerAction(
         // the agent was away. Waking the agent makes it the turn's prompt.
         const recorded =
           typeof args.recordedMessageId === "string" && args.recordedMessageId.length > 0;
-        const replyToLevels =
-          (await settings.get<string[]>("replyToBondLevels")) ?? DEFAULT_REPLY_TO_BOND_LEVELS;
-        if (!canReplyToBondLevel(bondLevel, replyToLevels)) {
+        if (wake === "quiet") {
           const stored = recorded
             ? { inserted: true }
             : await conversations.addMessage({
@@ -826,7 +877,7 @@ export function createMessageHandlerAction(
           if (!stored.inserted) {
             return { status: "ok", data: { action: "duplicate", messageId: platformMessageId } };
           }
-          log.info("message ignored by reply-to bond-level setting", {
+          log.info("message wakes nobody", {
             channel,
             channelUserId,
             bondLevel,
@@ -854,11 +905,7 @@ export function createMessageHandlerAction(
           person && person.id !== deps.strangerPersonId ? person.displayName : null;
         const enrichedArgs = { ...args, text: promptText, bondLevel, replyTo, senderPerson };
 
-        const trustedLevels =
-          (await settings.get<string[]>("trustedBondLevels")) ?? DEFAULT_TRUSTED_BOND_LEVELS;
-
-        const trusted = isTrustedBondLevel(bondLevel, trustedLevels);
-        const triggersTargetAgent = trusted || policy.action === "allow";
+        const triggersTargetAgent = wake === "wake";
         if (recorded && triggersTargetAgent) {
           await conversations.promoteMessageToUser(conversation.id, platformMessageId);
         }
@@ -881,9 +928,8 @@ export function createMessageHandlerAction(
         log.info("routing message", {
           channel,
           channelUserId,
-          trusted,
           bondLevel,
-          policyAction: policy.action,
+          wake,
         });
 
         if (triggersTargetAgent) {
@@ -931,7 +977,7 @@ export async function sendAnswer(
   input: Record<string, unknown> & { replyToMessageId?: string },
 ): Promise<void> {
   try {
-    await deps.appContext.runAction("send_message", input);
+    await deps.appContext.runAction("system:send_message", input);
   } catch (err) {
     // Matched by its fields, not its class, as `isSendRefused` matches, so a
     // copy of the SDK other than the host's still recognizes it.
@@ -941,6 +987,19 @@ export async function sendAnswer(
       (err as { refusal?: unknown }).refusal === "reply_unaddressable";
     if (!unquotable || input.replyToMessageId === undefined) throw err;
     const { replyToMessageId: _quote, ...unquoted } = input;
-    await deps.appContext.runAction("send_message", unquoted);
+    await deps.appContext.runAction("system:send_message", unquoted);
   }
+}
+
+/** How the message addressed Rome's account, as far as the hook passed it. */
+function addressedBy(
+  args: Record<string, unknown>,
+): Pick<Parameters<WakeGate>[0], "addressing" | "fromBot" | "mentionsOthers"> {
+  return {
+    ...(typeof args.addressing === "string"
+      ? { addressing: args.addressing as MessageAddressing }
+      : {}),
+    ...(args.fromBot === true ? { fromBot: true } : {}),
+    ...(args.mentionsOthers === true ? { mentionsOthers: true } : {}),
+  };
 }

@@ -38,6 +38,7 @@ What the guardian picks when they connect: the kind of access they hand Rome. A 
 - Each kind of connection belongs to one platform, and a platform may offer more than one kind. A Telegram bot and a signed-in Telegram user are two kinds on one platform. A Feishu app and a Lark app are two kinds on two platforms, whatever code they share.
 - A kind of connection says how Rome got in. Where an account lives and who is who is the account's [platform](chats.md#platform), never its kind of connection.
 - Some kinds have no platform, such as GitHub, since no chats live there.
+- The Rome-managed Google kind reads Gmail without modifying, deleting or labeling mail. Every send needs the guardian's approval of that exact message, including its sender, recipients, subject and body. A schedule or another agent cannot approve a send on the guardian's behalf.
 - The kinds ship with Rome. The guardian picks one, and never makes one.
 - A kind another one replaces is no longer offered: the guardian can't connect a new account of it, and its existing connections keep working, and can be fixed, until the guardian disconnects them. Rome's own Slack app replaces the Slack bot and the Slack sign-in, so Connect shows one Slack.
 
@@ -83,6 +84,8 @@ What one of the guardian's devices lets Agents reach on it live, over rome-node:
 - **A device id is one sign-in of one app install.** Its report names the install's personal-data origin, which stays the same across sign-ins, so Rome knows which install's data a device reads. Signing out reports no connections. Removing a device from the account through this Rome deletes its rows and turns its origin off when no other device id of that install still reports it, and its data stays. Rows leave no other way. A device whose last report is more than 7 days old is stale: it shows as stale and is never chosen, and its rows stay.
 
 ## Decided against
+
+- **Giving tools direct access to the Google grant.** It would let a tool send mail without the guardian approving the exact message. Gmail access stays behind the read-only and approved-send operations.
 
 - **The next connection of the same kind takes over the disconnected account's name, chats and history.** For an account that takes an agent, a new account is a new participant, and inheriting another account's history misattributes what was said.
 - **Deleting a disconnected account's record, with the chats it alone was in.** The rule until 2026-11-04. The agent link is the guardian's decision about the account and outlives Rome's access to it, and a chat's history belongs to the chat whatever reaches it, so a disconnect removes Rome's reach and nothing else.

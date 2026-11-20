@@ -4,8 +4,8 @@ description: |
   Execute one Composio tool against its connected service and return the result.
   Composio holds the connection's credential and proxies the upstream API call
   (e.g. send a Gmail message, create a GitHub issue). Requires being signed in
-  (connector_login) and the toolkit connected (connector_connect) first. Look up
-  the tool's argument schema with connector_tool_schema before calling. Pass the
+  (connector:connector_login) and the toolkit connected (connector:connector_connect) first. Look up
+  the tool's argument schema with connector:connector_tool_schema before calling. Pass the
   owning toolkit slug, the tool slug, and `args` matching the tool's input
   schema. On success, returns the tool's raw payload as `data`. Fails closed:
   not signed in, toolkit not connected, or a tool-level refusal (the upstream

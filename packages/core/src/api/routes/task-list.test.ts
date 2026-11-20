@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
 import {
   TASK_LIST_ENDED_PAGE,
+  type TaskListTaskItem,
+  groupTaskPanel,
   type TaskLinksResponse,
   type TaskListFollowItem,
   type TaskListResponse,
@@ -25,6 +27,9 @@ import { makeTask } from "../../test/task-chats.js";
 import { buildTestDeps } from "../../test/helpers.js";
 import type { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import { routinesRoutes } from "./routines.js";
+import { approvalWaits } from "../../test/open-waits.js";
+import { CONCIERGE_DIGEST_ACTION, CONCIERGE_FOLLOW_ACTION } from "../../concierge/following.js";
+import { CONCIERGE_TASK_RUN_ACTION } from "../../concierge/task-schedule.js";
 import { chatTaskListRoutes } from "./task-list.js";
 
 const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
@@ -52,7 +57,10 @@ describe("/chats/:chatId/tasks", () => {
   let routines: RoutinesRepository;
   let calls: string[];
   let follows: Record<string, TaskListFollowItem[]>;
-  let checks: Record<string, Array<{ id: string; at: number | null; taskId: string | null }>>;
+  let checks: Record<
+    string,
+    Array<{ id: string; at: number | null; taskId: string | null; recurring?: boolean }>
+  >;
   let taskSource: ConciergeTasks | null;
   let chats: ChatsWebChatRepository;
   /** Makes a task chat, which is a task, for the guardian unless `ownerKey` says otherwise. */
@@ -75,6 +83,14 @@ describe("/chats/:chatId/tasks", () => {
       },
       following: {
         followsIn: async (chatId: string) => follows[chatId] ?? [],
+        unfollow: async (source: string, target: string, owner: string) => {
+          calls.push(`unfollow ${source} ${target} ${owner}`);
+          return { removed: true };
+        },
+      },
+      cancelCheckByOwner: async (chatId: string, checkId: string) => {
+        calls.push(`cancel ${chatId} ${checkId}`);
+        return true;
       },
       conciergeChat: async (chatId: string) =>
         OWNERS[chatId] ? { id: chatId, name: chatId, main: true } : null,
@@ -83,11 +99,21 @@ describe("/chats/:chatId/tasks", () => {
         calls.push(`stop ${taskId} ${by}`);
         return 0;
       },
+      markTaskDone: async (taskId: string) => {
+        calls.push(`done ${taskId}`);
+        return true;
+      },
     } as unknown as ConciergeService;
     const routineEngine = {
       onChange: (listener: (routineId: string) => void) => {
         routineChanges.add(listener);
         return () => routineChanges.delete(listener);
+      },
+      activate: async (routine: { id: string }) => {
+        calls.push(`activate ${routine.id}`);
+      },
+      deactivate: async (id: string) => {
+        calls.push(`deactivate ${id}`);
       },
     } as unknown as ApiDeps["routineEngine"];
     return new Hono().use("*", sessionActorMiddleware(testDb.db)).route(
@@ -103,6 +129,11 @@ describe("/chats/:chatId/tasks", () => {
   };
   const read = async (chatId: string, as = guardian) =>
     (await (await app().request(`/chats/${chatId}/tasks`, as)).json()) as TaskListResponse;
+  /** The chat's list in the one panel's groups. */
+  const readPanel = async (chatId: string, as = guardian) =>
+    (await (
+      await app().request(`/chats/${chatId}/tasks?grouping=panel`, as)
+    ).json()) as TaskListResponse;
   const kindsIn = (work: TaskListResponse) =>
     Object.fromEntries(
       work.groups.map((group) => [
@@ -348,8 +379,20 @@ describe("/chats/:chatId/tasks", () => {
     expect(calls).toEqual([`stop ${flights.id} guardian`]);
   });
 
-  it("answers a task link only for a task chat of the caller's own Concierge chat", async () => {
+  it("answers a task link for a task chat of any of the caller's own Concierge chats", async () => {
     const flights = await task({ title: "Flights" });
+    await chats.createSession(
+      "calendar",
+      "Calendar",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+    );
+    const agenda = await task({ title: "Agenda", chatId: "calendar" });
     const annsTask = await task({
       title: "Ann's",
       chatId: "ann-main",
@@ -363,11 +406,22 @@ describe("/chats/:chatId/tasks", () => {
     // Its live name and status, as the link draws it.
     await chats.updateSessionName(flights.id, "Book direct flights");
     expect(await links("concierge", [flights.id, "no-such-chat", annsTask.id])).toEqual({
-      tasks: [{ id: flights.id, name: "Book direct flights", status: "ended", endReason: "done" }],
+      tasks: [
+        {
+          id: flights.id,
+          name: "Book direct flights",
+          status: "ended",
+          endReason: "done",
+        },
+      ],
     });
-    // Another owner's task chat reads as none, and so does another Concierge chat's.
+    // A task of another of the owner's Concierge chats draws too.
+    expect((await links("concierge", [agenda.id])).tasks).toMatchObject([
+      { id: agenda.id, name: "Agenda" },
+    ]);
+    // Another owner's task chat reads as none.
     expect(
-      (await links("ann-main", [annsTask.id, flights.id], ann)).tasks.map((t) => t.id),
+      (await links("ann-main", [annsTask.id, flights.id, agenda.id], ann)).tasks.map((t) => t.id),
     ).toEqual([annsTask.id]);
     // Another person's chat does not exist to the caller.
     expect((await app().request("/chats/ann-main/task-links?ids=x", guardian)).status).toBe(404);
@@ -445,5 +499,322 @@ describe("/chats/:chatId/tasks", () => {
     expect(stream.status).toBe(200);
     expect(stream.headers.get("content-type")).toContain("text/event-stream");
     await stream.body?.cancel();
+  });
+
+  describe("in the one panel's groups", () => {
+    const github = (target: string): TaskListFollowItem => ({
+      kind: "follow",
+      source: "github",
+      label: "GitHub",
+      target,
+      state: "active",
+      digestTimes: ["09:00", "18:00"],
+      nextAt: IN_AN_HOUR + 3_000,
+    });
+    /** A one-off routine of chat `chatId`, due on a date far ahead. */
+    const oneOff = (chatId: string, name: string) =>
+      routines.create({
+        name,
+        trigger: {
+          type: "schedule",
+          localTime: "09:00",
+          tzid: "UTC",
+          tzMode: "fixed",
+          date: "2099-01-01",
+        },
+        actionName: "send_user_message",
+        args: { sessionId: chatId, text: name },
+        nextRunAt: new Date(IN_AN_HOUR + 1_000),
+      });
+
+    it("puts each kind in its group: one-offs Later, recurring ones Scheduled", async () => {
+      const visa = await task({ title: "Visa" });
+      await task({ title: "Hotel" });
+      const sources = new ConciergeTasks(tasks);
+      sources.attachFacts({
+        now: () => Date.now(),
+        running: () => false,
+        openWaits: async () => new Map(),
+        reportPending: () => [],
+        laterOf: async (ids) =>
+          new Map(ids.filter((id) => id === visa.id).map((id) => [id, IN_AN_HOUR])),
+      });
+      taskSource = sources;
+      checks.concierge = [
+        { id: "on-visa", at: IN_AN_HOUR, taskId: visa.id },
+        { id: "lone", at: IN_AN_HOUR + 2_000, taskId: null },
+      ];
+      follows.concierge = [github("rome-os/rome"), github("rome-os/gizmos")];
+      await oneOff("concierge", "Water the plants");
+      await summary("concierge", "Daily summary");
+      await routines.create({
+        name: "On new mail",
+        trigger: { type: "event-bus", eventName: "mail.received" },
+        actionName: "send_user_message",
+        args: { sessionId: "concierge", text: "Tell me." },
+      });
+
+      expect(kindsIn(await readPanel("concierge"))).toEqual({
+        later: ["task Visa", "routine Water the plants", "check Check lone"],
+        // One row per follow; a row with no next time last.
+        scheduled: [
+          "follow rome-os/gizmos",
+          "follow rome-os/rome",
+          "routine Daily summary",
+          "routine On new mail",
+        ],
+        ended: ["task Hotel"],
+      });
+      // The two-view grouping, which older iOS builds read, is as it was.
+      expect(kindsIn(await read("concierge"))).toEqual({
+        later: ["task Visa"],
+        on_its_own: [
+          "routine Water the plants",
+          "check Check lone",
+          "follow rome-os/gizmos",
+          "follow rome-os/rome",
+          "routine Daily summary",
+          "routine On new mail",
+        ],
+        ended: ["task Hotel"],
+      });
+    });
+
+    it("moves a scheduled task from Active to Needs you to Scheduled across a run", async () => {
+      const brief = await task({ title: "Morning brief" });
+      const run = await routines.create({
+        name: "Morning brief",
+        trigger: {
+          type: "schedule",
+          localTime: "08:00",
+          tzid: "UTC",
+          tzMode: "fixed",
+          rrule: "FREQ=DAILY",
+        },
+        actionName: CONCIERGE_TASK_RUN_ACTION,
+        args: { chatId: brief.id, brief: "Brief me." },
+      });
+      let phase: "running" | "waiting" | "between" = "running";
+      const sources = new ConciergeTasks(tasks);
+      sources.attachFacts({
+        now: () => Date.now(),
+        running: () => phase === "running",
+        openWaits: async (ids) =>
+          approvalWaits(
+            new Map(phase === "waiting" && ids.includes(brief.id) ? [[brief.id, Date.now()]] : []),
+          ),
+        reportPending: () => [],
+        laterOf: async (ids) =>
+          new Map(ids.filter((id) => id === brief.id).map((id) => [id, IN_AN_HOUR])),
+        recurringOf: async (ids) => new Set(ids.filter((id) => id === brief.id)),
+      });
+      taskSource = sources;
+      checks.concierge = [{ id: run, at: IN_AN_HOUR, taskId: brief.id, recurring: true }];
+
+      expect(kindsIn(await readPanel("concierge"))).toEqual({ active: ["task Morning brief"] });
+      phase = "waiting";
+      expect(kindsIn(await readPanel("concierge"))).toEqual({
+        needs_you: ["task Morning brief"],
+      });
+      phase = "between";
+      const between = await readPanel("concierge");
+      expect(kindsIn(between)).toEqual({ scheduled: ["task Morning brief"] });
+      expect(between.groups[0]!.items[0]).toMatchObject({
+        schedule: { at: "08:00", days: null },
+        check: { id: run, at: IN_AN_HOUR, recurring: true },
+      });
+    });
+
+    it("leaves out a follow's watcher and digest, a routine of no chat, a spent one-off and an archived task", async () => {
+      const shown = await summary("concierge", "Daily summary");
+      await routines.create({
+        name: "Watch rome-os/rome",
+        trigger: { type: "event-bus", eventName: "github.push" },
+        actionName: CONCIERGE_FOLLOW_ACTION,
+        args: { source: "github" },
+        chatId: "concierge",
+      });
+      await routines.create({
+        name: "Digest",
+        trigger: {
+          type: "schedule",
+          localTime: "18:00",
+          tzid: "UTC",
+          tzMode: "fixed",
+          rrule: "FREQ=DAILY",
+        },
+        actionName: CONCIERGE_DIGEST_ACTION,
+        args: {},
+        chatId: "concierge",
+      });
+      await routines.create({
+        name: "Nobody's",
+        trigger: {
+          type: "schedule",
+          localTime: "07:00",
+          tzid: "UTC",
+          tzMode: "fixed",
+          rrule: "FREQ=DAILY",
+        },
+        actionName: "send_user_message",
+        args: { text: "Hello" },
+        chatId: null,
+      });
+      const spent = await oneOff("concierge", "Spent");
+      await routines.update(spent, { nextRunAt: null });
+      await routines.updateLastFired(spent, new Date());
+
+      const work = await readPanel("concierge");
+      expect(kindsIn(work)).toEqual({ scheduled: ["routine Daily summary"] });
+      expect(work.groups[0]!.items[0]).toMatchObject({ id: shown });
+
+      // An archived task chat is in no group.
+      const archived = {
+        kind: "task",
+        task: { ...(await sampleTask()), archivedAt: Date.now() },
+        schedule: null,
+        check: null,
+      } as TaskListTaskItem;
+      expect(groupTaskPanel({ tasks: [archived], checks: [], follows: [], routines: [] })).toEqual(
+        [],
+      );
+    });
+
+    /** A task row as the list reads it. */
+    const sampleTask = async () => {
+      await task({ title: "Archived" });
+      const row = (await read("concierge")).groups
+        .flatMap((group) => group.items)
+        .find((item) => item.kind === "task");
+      if (row?.kind !== "task") throw new Error("expected a task row");
+      return row.task;
+    };
+  });
+
+  describe("row actions", () => {
+    it("marks a one-off task of the chat done for its owner only, and no scheduled or ended one", async () => {
+      const flights = await task({ title: "Flights" });
+      const brief = await task({ title: "Morning brief" });
+      const ended = await task({ title: "Hotel" });
+      await routines.create({
+        name: "Morning brief",
+        trigger: {
+          type: "schedule",
+          localTime: "08:00",
+          tzid: "UTC",
+          tzMode: "fixed",
+          rrule: "FREQ=DAILY",
+        },
+        actionName: CONCIERGE_TASK_RUN_ACTION,
+        args: { chatId: brief.id, brief: "Brief me." },
+      });
+      const sources = new ConciergeTasks(tasks);
+      sources.attachFacts({
+        now: () => Date.now(),
+        running: (chatId) => chatId !== ended.id,
+        openWaits: async () => new Map(),
+        reportPending: () => [],
+      });
+      taskSource = sources;
+      const done = (chatId: string, id: string, as = guardian) =>
+        app().request(`/chats/${chatId}/tasks/${id}/done`, { ...as, method: "POST" });
+
+      expect((await done("concierge", flights.id, ann)).status).toBe(404);
+      expect((await done("ann-main", flights.id, ann)).status).toBe(404);
+      expect((await done("concierge", brief.id)).status).toBe(409);
+      expect((await done("concierge", ended.id)).status).toBe(409);
+      expect(calls).toEqual([]);
+      expect((await done("concierge", flights.id)).status).toBe(200);
+      expect(calls).toEqual([`done ${flights.id}`]);
+    });
+
+    it("cancels a reminder no task has, for the chat's owner only", async () => {
+      const visa = await task({ title: "Visa" });
+      checks.concierge = [
+        { id: "lone", at: IN_AN_HOUR, taskId: null },
+        { id: "on-visa", at: IN_AN_HOUR, taskId: visa.id },
+      ];
+      const cancel = (chatId: string, id: string, as = guardian) =>
+        app().request(`/chats/${chatId}/tasks/checks/${id}/cancel`, { ...as, method: "POST" });
+
+      expect((await cancel("concierge", "lone", ann)).status).toBe(404);
+      expect((await cancel("ann-main", "lone", ann)).status).toBe(404);
+      // A task's check is on the task's row, which has no Cancel.
+      expect((await cancel("concierge", "on-visa")).status).toBe(404);
+      expect(calls).toEqual([]);
+      expect((await cancel("concierge", "lone")).status).toBe(200);
+      expect(calls).toEqual(["cancel concierge lone"]);
+    });
+
+    it("unfollows a follow of the chat, for the chat's owner only", async () => {
+      follows.concierge = [
+        {
+          kind: "follow",
+          source: "github",
+          label: "GitHub",
+          target: "rome-os/rome",
+          state: "active",
+          digestTimes: ["09:00"],
+        },
+      ];
+      const unfollow = (chatId: string, body: unknown, as = guardian) =>
+        app().request(`/chats/${chatId}/tasks/follows/unfollow`, {
+          method: "POST",
+          headers: { ...as.headers, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+      const rome = { source: "github", target: "rome-os/rome" };
+      expect((await unfollow("concierge", rome, ann)).status).toBe(404);
+      expect((await unfollow("ann-main", rome, ann)).status).toBe(404);
+      expect((await unfollow("concierge", { source: "github", target: "other" })).status).toBe(404);
+      expect((await unfollow("concierge", { source: "github" })).status).toBe(400);
+      expect(calls).toEqual([]);
+      expect((await unfollow("concierge", rome)).status).toBe(200);
+      expect(calls).toEqual(["unfollow github rome-os/rome guardian"]);
+    });
+
+    it("pauses, resumes and deletes a routine of the chat, for the chat's owner only", async () => {
+      const mine = await summary("concierge", "Daily summary");
+      const hers = await summary("ann-main", "Ann summary");
+      const act = (chatId: string, id: string, what: string, as = guardian) =>
+        app().request(
+          what === "delete"
+            ? `/chats/${chatId}/tasks/routines/${id}`
+            : `/chats/${chatId}/tasks/routines/${id}/${what}`,
+          { ...as, method: what === "delete" ? "DELETE" : "POST" },
+        );
+
+      expect((await act("concierge", mine, "pause", ann)).status).toBe(404);
+      expect((await act("concierge", hers, "pause")).status).toBe(404);
+      expect((await act("ann-main", mine, "delete", ann)).status).toBe(404);
+      expect(calls).toEqual([]);
+
+      expect((await act("concierge", mine, "pause")).status).toBe(200);
+      expect((await routines.findById(mine))?.enabled).toBe(false);
+      expect((await act("concierge", mine, "resume")).status).toBe(200);
+      expect((await routines.findById(mine))?.enabled).toBe(true);
+      expect(calls).toEqual([`deactivate ${mine}`, `deactivate ${mine}`, `activate ${mine}`]);
+
+      expect((await act("concierge", mine, "delete")).status).toBe(200);
+      expect(await routines.findById(mine)).toBeNull();
+      expect(await routines.findById(hers)).not.toBeNull();
+    });
+
+    it("acts on no routine the list leaves out, such as a follow's watcher", async () => {
+      const watcher = await routines.create({
+        name: "Watch",
+        trigger: { type: "event-bus", eventName: "github.push" },
+        actionName: CONCIERGE_FOLLOW_ACTION,
+        args: {},
+        chatId: "concierge",
+      });
+      const res = await app().request(`/chats/concierge/tasks/routines/${watcher}`, {
+        ...guardian,
+        method: "DELETE",
+      });
+      expect(res.status).toBe(404);
+      expect(await routines.findById(watcher)).not.toBeNull();
+    });
   });
 });

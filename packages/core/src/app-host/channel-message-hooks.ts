@@ -5,6 +5,7 @@ import type { ChannelMessageHook } from "../apps/hooks/types.js";
 import type { ArtifactRef } from "../apps/state.js";
 import { createLogger, type Logger } from "../logger.js";
 import { createChannelMessageHook } from "./app-actions-wiring.js";
+import type { WakeGateFor } from "../participation/wake-gate/index.js";
 
 const log = createLogger("channel-message-hooks");
 
@@ -13,7 +14,8 @@ const HOOK_NAME = "channel-message";
 export interface ChannelMessageHooksOptions {
   catalog: Pick<AppCatalog, "listArtifacts">;
   /** What every app's hook is created with. */
-  deps: ChannelMessageHookDeps;
+  /** The SDK's hook deps, and the wake gate the SDK does not describe yet. */
+  deps: ChannelMessageHookDeps & { wakeGateFor: WakeGateFor };
   /** Whether an app's hook may load now. Absent, every app's may. */
   mayLoad?: (appId: string) => boolean;
   /** An app's hook failed to load or to register, and is not live. */

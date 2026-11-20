@@ -416,7 +416,7 @@
     "grantedUntil": "Granted until {{time}}"
   },
   "trust": {
-    "title": "Bond Level Rules",
+    "title": "Bond level rules",
     "trustedLevels": {
       "title": "Trusted messages",
       "description": "Messages from persons with these bond levels bypass sentinel triage."
@@ -520,8 +520,8 @@
       "connected": "Connected",
       "disconnected": "Disconnected",
       "configured": "Configured",
-      "awaitingVerification": "Awaiting Verification",
-      "codePending": "Code Pending"
+      "awaitingVerification": "Awaiting verification",
+      "codePending": "Code pending"
     },
     "connectedAs": "Connected as",
     "telegram": {
@@ -533,7 +533,7 @@
       "yourBot": "your agent's account",
       "waitingVerification": "Waiting for verification...",
       "codeShownEarlier": "Verification code was shown when you first connected. Disconnect and reconnect to generate a new code.",
-      "botTokenLabel": "Bot Token",
+      "botTokenLabel": "Bot token",
       "botTokenPlaceholder": "Bot token from @BotFather"
     },
     "telegramUser": {
@@ -547,7 +547,7 @@
     "discord": {
       "title": "Discord",
       "guardianLinked": "Your Discord account is linked as guardian.",
-      "botTokenLabel": "Bot Token",
+      "botTokenLabel": "Bot token",
       "botTokenPlaceholder": "Paste your bot token here",
       "routing": {
         "title": "Channel routing",
@@ -584,10 +584,6 @@
     "feishu": {
       "title": "Feishu",
       "guardianLinked": "Your Feishu account is linked as guardian."
-    },
-    "wechatUser": {
-      "fallbackName": "WeChat account",
-      "disconnectFailedFallback": "Failed to disconnect the WeChat account."
     }
   },
   "favors": {
@@ -680,8 +676,8 @@
       "sevenDay": "7D USED",
       "resetsIn": "Resets in <1>{{time}}</1>"
     },
-    "logIn": "Log In",
-    "logOut": "Log Out",
+    "logIn": "Log in",
+    "logOut": "Log out",
     "loggingOut": "Logging out…",
     "codexLogout": {
       "title": "Log out of ChatGPT?",
@@ -701,7 +697,7 @@
     "otherProviders": {
       "title": "Other API providers",
       "experimental": "Experimental",
-      "apiKey": "API Key",
+      "apiKey": "API key",
       "apiProvidersTooltip": "MiniMax, DeepSeek, Kimi, Z.ai, and more",
       "changeProvider": "Change",
       "dialogDescription": "Takes priority over your Claude account until removed.",
@@ -710,8 +706,8 @@
       "apiKeyLabel": "API key",
       "apiKeyPlaceholderReplace": "Enter a new key to replace the saved key",
       "apiKeyPlaceholderNew": "Paste API key",
-      "saveKey": "Save Key",
-      "saveConfiguration": "Save Configuration",
+      "saveKey": "Save key",
+      "saveConfiguration": "Save configuration",
       "envHint": "{{envVar}} is sent to {{baseUrl}} for Anthropic-compatible Claude sessions.",
       "needsApiKeyUpdate": "The saved {{providerName}} API key was rejected. Save a new key to reconnect this provider.",
       "saveFailedFallback": "Failed to save provider key.",
@@ -725,7 +721,7 @@
         "title": "Custom environment",
         "inputModeLabel": "Environment input mode",
         "jsonMode": "Paste JSON",
-        "fieldsMode": "Key / Value",
+        "fieldsMode": "Key / value",
         "jsonLabel": "Custom environment JSON",
         "jsonPlaceholder": "{\n  \"env\": {\n    \"ANTHROPIC_AUTH_TOKEN\": \"...\",\n    \"ANTHROPIC_BASE_URL\": \"https://...\"\n  }\n}",
         "emptyFields": "No environment variables yet.",
@@ -749,10 +745,10 @@
     }
   },
   "sentinelLog": {
-    "title": "Sentinel Log",
+    "title": "Sentinel log",
     "empty": "No sentinel log entries.",
     "responsePrefix": "Response: {{response}}",
-    "markReviewed": "Mark Reviewed",
+    "markReviewed": "Mark reviewed",
     "reviewed": "Reviewed"
   },
   "advanced": {

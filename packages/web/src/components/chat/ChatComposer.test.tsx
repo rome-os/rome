@@ -1219,7 +1219,7 @@ describe("New chat draft", () => {
     expect(loadNewChatDraft()?.text).toBe("newer");
   });
 
-  it("restores an existing-session send over newer text as on main", async () => {
+  it("keeps newer text when an existing-session send fails", async () => {
     let rejectSend!: (error: Error) => void;
     renderComposer({
       persistNewChatDraft: false,
@@ -1231,6 +1231,21 @@ describe("New chat draft", () => {
     fireEvent.input(input(), { target: { value: "failed message" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     fireEvent.input(input(), { target: { value: "newer text" } });
+    await act(async () => rejectSend(new Error("post failed")));
+    expect(input().value).toBe("newer text");
+  });
+
+  it("restores a failed existing-session send when no newer text replaced it", async () => {
+    let rejectSend!: (error: Error) => void;
+    renderComposer({
+      persistNewChatDraft: false,
+      onSend: () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    });
+    fireEvent.input(input(), { target: { value: "failed message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await act(async () => rejectSend(new Error("post failed")));
     expect(input().value).toBe("failed message");
   });

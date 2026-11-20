@@ -370,6 +370,10 @@ export interface ConnectionDescriptor {
    *  rather than displaying sparsely. Generic readers consume only the returned
    *  display object; raw records never cross to generic surfaces. */
   reviveProfile?(record: ProfileRecord): ProfileDisplay;
+  /** Which field of the revived profile a mention of the account shows:
+   *  the handle unless the kind says otherwise, as Feishu does, whose handle
+   *  is its application id. */
+  mentionedBy?: "handle" | "displayName";
   /** Grant-state-driven custody of out-of-process artifacts (token files, shell
    *  auth). Omitted by connection kinds with no such artifact — most descriptors. */
   custody?: GrantCustody;
@@ -417,6 +421,10 @@ export interface ConnectionDescriptor {
    *  that says which kinds take an agent. Vocabulary:
    *  docs/domains/chats.md#connected-account. */
   link?: AccountLink;
+  /** True when a newly connected own account of this kind starts with the
+   *  Concierge as its agent, so it answers from its first message. Absent, it
+   *  starts with none until the guardian links one. */
+  startsWithConcierge?: boolean;
   capabilities: Partial<{
     talker: {
       build(cred: Credential, kit: RuntimeKit): Talker;

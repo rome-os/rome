@@ -95,11 +95,14 @@ function statusOf(
   return chat?.lastTurnFailed ? "failed" : "idle";
 }
 
+/** How far back `chat_list`'s `recentlyEnded` reaches. */
+const RECENTLY_ENDED_HOURS = 24;
+
 /**
  * A task chat as `chat_list` answers it: compact, with no empty fields. Its
- * id, name, link, status, the Concierge chat it came from, start message and
- * schedule, and with `details` also what the Concierge wrote on it and its
- * schedule's brief. Rome derives its status.
+ * id, name, link, status, when it ended, the Concierge chat it came from,
+ * start message and schedule, and with `details` also what the Concierge
+ * wrote on it and its schedule's brief. Rome derives its status.
  */
 function compactTask(
   { row, chat, conciergeChat, sourceMessageId }: ConciergeTaskWithChat,
@@ -115,6 +118,7 @@ function compactTask(
     from: conciergeChat.id,
     ...(status ? { status: status.status } : {}),
     ...(status?.endReason ? { endReason: status.endReason } : {}),
+    ...(status?.status === "ended" && row.endedAt ? { endedAt: row.endedAt.toISOString() } : {}),
     ...(finiteOrNull(status?.laterAt ?? null) !== null
       ? { laterAt: new Date(status?.laterAt as number).toISOString() }
       : {}),
@@ -158,7 +162,7 @@ const SCHEDULE_PARAMETER = {
       type: "string",
       enum: [...SCHEDULE_REPORTS],
       description:
-        "every_run: each run's result is reported to you. when_it_matters: a run that finishes with nothing to ask goes to the next digest as <ran_on_schedule>; a question, an approval or a failure still comes to you.",
+        "every_run: tell the guardian each run's result. when_it_matters: tell them only news or a problem. Every run's result comes to you either way.",
     },
     brief: {
       type: "string",
@@ -1206,7 +1210,7 @@ export async function buildConciergeTools(
     {
       name: "chat_list",
       description:
-        "List your other chats, each with its kind: the main chat and your topic chats (kind main chat or topic chat), then the task chats you started (kind task chat), each with its chatId, title, link, the id of the Concierge chat it came from (from), and its status, which Rome keeps: needs_you, active, later, or ended (with endReason done, failed, stopped or no_response). Only the task chats that have not ended, unless you pass includeEnded or a status. Check it before you start a task, so you do not start one twice. chat_read reads any of them.",
+        "List your other chats, each with its kind: the main chat and your topic chats (kind main chat or topic chat), then the task chats you started (kind task chat), each with its chatId, title, link, the id of the Concierge chat it came from (from), and its status, which Rome keeps: needs_you, active, later, or ended (with endReason done, failed, stopped or no_response). Only the task chats that have not ended, unless you pass includeEnded, recentlyEnded or a status; an ended one says when (endedAt). Pass here for only the task chats started from the chat you are in. Check it before you start a task, so you do not start one twice. chat_read reads any of them.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1221,33 +1225,58 @@ export async function buildConciergeTools(
             description:
               "Also answer each task chat's note, the one you wrote for your later self, its schedule's brief, and when it last changed.",
           },
+          recentlyEnded: {
+            type: "boolean",
+            description: `Also list the task chats that ended in the last ${RECENTLY_ENDED_HOURS} hours, as a progress overview does.`,
+          },
+          here: {
+            type: "boolean",
+            description:
+              "List only the task chats started from the chat you are in (their from is this chat), and no other chats.",
+          },
         },
       },
       handler: (input) =>
         runTool("chat_list", input, async (args) => {
+          const onlyHere = args.here === true;
           const wanted = CONCIERGE_TASK_STATUSES.find((status) => status === args.status);
           const { chatId: here } = currentTurn();
           const owner = await ownerHere();
-          const rows = await ownRows(wanted !== undefined || args.includeEnded === true);
+          const allEnded = wanted !== undefined || args.includeEnded === true;
+          const endedSince =
+            !allEnded && args.recentlyEnded === true
+              ? Date.now() - RECENTLY_ENDED_HOURS * 60 * 60 * 1000
+              : null;
+          const rows = await ownRows(allEnded || endedSince !== null);
+          // Filter first, so a schedule is read only for a task that is listed.
+          const listed = rows
+            .filter((task) => !wanted || task.status?.status === wanted)
+            .filter((task) => !onlyHere || task.conciergeChat.id === here)
+            // An ended task counts as recent by when it ended, else when it last changed.
+            .filter(
+              (task) =>
+                endedSince === null ||
+                task.status?.status !== "ended" ||
+                (task.row.endedAt ?? task.row.updatedAt).getTime() >= endedSince,
+            );
           const schedules = await Promise.all(
-            rows.map((task) => service.deps.schedules?.of(task.row.id) ?? null),
+            listed.map((task) => service.deps.schedules?.of(task.row.id) ?? null),
           );
-          const taskChats = rows
-            .map((task, index) => ({ task, schedule: schedules[index] }))
-            .filter(({ task }) => !wanted || task.status?.status === wanted)
-            .map(({ task, schedule }) =>
-              compactTask(task, task.status, args.details === true, schedule),
+          const taskChats = listed
+            .map((task, index) =>
+              compactTask(task, task.status, args.details === true, schedules[index]),
             )
             .sort((a, b) => a.chatId.localeCompare(b.chatId));
-          const conciergeChats = wanted
-            ? []
-            : (await service.listChats(owner))
-                .filter((chat) => chat.id !== here)
-                .map((chat) => ({
-                  chatId: chat.id,
-                  title: chat.name,
-                  kind: chat.main ? "main chat" : "topic chat",
-                }));
+          const conciergeChats =
+            wanted || onlyHere
+              ? []
+              : (await service.listChats(owner))
+                  .filter((chat) => chat.id !== here)
+                  .map((chat) => ({
+                    chatId: chat.id,
+                    title: chat.name,
+                    kind: chat.main ? "main chat" : "topic chat",
+                  }));
           return [...conciergeChats, ...taskChats];
         }),
     },

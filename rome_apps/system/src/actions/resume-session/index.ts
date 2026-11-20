@@ -100,20 +100,23 @@ export function createResumeSessionAction(config: ActionConfig, deps: RuntimeDep
       const threadId = typeof args.threadId === "string" ? args.threadId : "";
       const prompt = buildResumePrompt(args);
       if (!channel || !threadId) {
-        return { status: "error" as const, error: "resume_session requires channel and threadId" };
+        return {
+          status: "error" as const,
+          error: "system:resume_session requires channel and threadId",
+        };
       }
       // `agentName` is always set by `buildResumeArgs`; a missing value means a
       // serialization bug upstream. Fail fast rather than silently resume the
       // wrong agent (wrong thread context, wrong tool catalog).
       if (typeof args.agentName !== "string" || !args.agentName.trim()) {
-        return { status: "error" as const, error: "resume_session requires agentName" };
+        return { status: "error" as const, error: "system:resume_session requires agentName" };
       }
       const agentName = args.agentName.trim();
       const sessionId = typeof args.sessionId === "string" ? args.sessionId.trim() : "";
       if (!sessionId) {
         return {
           status: "error" as const,
-          error: "resume_session requires sessionId",
+          error: "system:resume_session requires sessionId",
         };
       }
 
@@ -130,7 +133,7 @@ export function createResumeSessionAction(config: ActionConfig, deps: RuntimeDep
         return { status: "ok" as const, data: { action: "resumed", channel, threadId } };
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
-        log.error("resume_session failed", { channel, threadId, error });
+        log.error("system:resume_session failed", { channel, threadId, error });
         return { status: "error" as const, error };
       }
     },
@@ -140,7 +143,7 @@ export function createResumeSessionAction(config: ActionConfig, deps: RuntimeDep
 export function createAction(config: ActionConfig, deps: RuntimeDeps): Action {
   // Fail the load at boot (not on first fire) if the orchestrator is unwired.
   if (typeof deps.backendTurnRunner?.runAndDeliver !== "function") {
-    throw new Error("resume_session requires a backendTurnRunner dep with runAndDeliver()");
+    throw new Error("system:resume_session requires a backendTurnRunner dep with runAndDeliver()");
   }
   return createResumeSessionAction(config, deps);
 }

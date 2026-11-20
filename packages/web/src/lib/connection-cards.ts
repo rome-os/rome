@@ -266,11 +266,9 @@ function composioCard(status: ComposioCliStatus): ConnectionCard {
 
 /** Personal-account services that present as a `session` slot on their brand's
  *  card rather than a card of their own. One brand, two credentials: Telegram's
- *  bot and the guardian's own account; WeChat's official bot and the guardian's
- *  own account read off the hosting VM. */
+ *  bot and the guardian's own account. */
 const FOLDED_ACCOUNT_SERVICES: Record<string, string> = {
   telegram_user: "telegram",
-  wechat_user: "wechat",
 };
 
 export function buildConnectionCards(

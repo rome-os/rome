@@ -52,6 +52,10 @@ A core or app agent may declare how a chat treats its turns in an optional `poli
 | `handoffOnRenewal` | Whether a renewed session starts from a [handoff](sessions.md#handoff). | `false` |
 | `delegatesWork` | Whether the agent hands its work to other chats rather than doing it. Its system prompt then leaves out the command line tools and the runtime context beyond where memory and the docs are, and its sessions carry no `propose_routine`. | `false` |
 
+## Own turns
+
+An app agent may declare `runsOwnTurns: true` when its own app runs its turns. On an account linked to it, the Inbox app answers no message, so no [wake gate](../domains/participation.md#wake-gate), sentinel or [send gate](../domains/participation.md#send-gate) judges what the agent hears or sends. On Discord the account hears every message, whatever its chats' settings say. Rome honours the field only for the first-party apps in `RUNS_OWN_TURNS_APPS` (`packages/core/src/app-host/runs-own-turns.ts`) and ignores it on any other agent. The old name `unsafeTestOnlyBypassInbox` still loads as `runsOwnTurns`.
+
 ## Builtin tools
 
 A builtin tool is a tool the model provider runs itself, such as a file read or a shell command. An agent's `tools` list names the builtin tools it gets. Its actions, skills, and subagents are Rome tools, which `tools` does not control.

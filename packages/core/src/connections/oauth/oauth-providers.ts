@@ -12,7 +12,7 @@ export const OAUTH_PROVIDER_DESCRIPTORS: Record<OAuthProvider, OAuthProviderDesc
   google: {
     id: "google",
     label: "Google",
-    description: "Workspace APIs, Drive, Gmail, Calendar, and Google identity.",
+    description: "Read Gmail and send messages you approve.",
   },
   github: {
     id: "github",
@@ -76,7 +76,10 @@ export function normalizeShopifyShopDomain(value: string | null | undefined): st
 /** Providers whose expiring grants Rome Cloud can refresh. Any other provider's
  *  expiring grant answers "needs-fix" without a round trip, and degrades at
  *  expiry until the guardian reconnects. */
-export const ROME_CLOUD_REFRESHABLE_PROVIDERS: ReadonlySet<OAuthProvider> = new Set(["shopify"]);
+export const ROME_CLOUD_REFRESHABLE_PROVIDERS: ReadonlySet<OAuthProvider> = new Set([
+  "google",
+  "shopify",
+]);
 
 export function isOAuthProvider(value: string): value is OAuthProvider {
   return OAUTH_PROVIDERS.includes(value as OAuthProvider);

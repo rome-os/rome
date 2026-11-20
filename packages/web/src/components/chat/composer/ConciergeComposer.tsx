@@ -176,7 +176,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       setValue: setInputText,
       notice: draft.notice,
       setNotice: draft.setNotice,
-      keepNotice: draft.keepNotice,
+      keepDraft: draft.keep,
       onSend: () => void runSendRef.current(),
     });
     const runSendRef = useRef<() => Promise<void>>(async () => {});
@@ -261,7 +261,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       } catch {
         failedSendRef.current = { inputId, text, uploads, folder: pickedFolder, skill };
         if (clearsOptimistically) {
-          setInputText(text);
+          // Text typed or dictated while the send was pending is newer than
+          // what failed. Dictated words are not in the field until listening ends.
+          setInputText((current) => (current === "" && !voiceActiveRef.current ? text : current));
           sendEnded(text, false);
           setPendingUploads(uploads);
           setFolder(pickedFolder);
@@ -628,11 +630,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                   />
                 }
               />
-              <VoiceInputSpokenText
-                textareaRef={textareaRef}
-                value={inputText}
-                spoken={voice.spoken}
-              />
+              <VoiceInputSpokenText textareaRef={textareaRef} preview={voice.preview} />
             </div>
             {voice.state === "listening" ? (
               <VoiceInputWaveform level={voice.level} className="flex-1 self-center" />

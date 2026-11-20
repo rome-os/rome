@@ -16,11 +16,14 @@ function deps(routineNames: string[]) {
     appId: "dream",
     logger: { info, warn: rs.fn(), error: rs.fn(), debug: rs.fn() },
     appContext: {
-      listRoutines: rs
-        .fn()
-        .mockResolvedValue(
-          routineNames.map((name) => ({ id: name, name, actionName: "dream", enabled: true })),
-        ),
+      listRoutines: rs.fn().mockResolvedValue(
+        routineNames.map((name) => ({
+          id: name,
+          name,
+          actionName: "dream:dream",
+          enabled: true,
+        })),
+      ),
       runAction,
     },
   } as unknown as AppStartedHookDeps;
@@ -34,8 +37,8 @@ describe("dream app-started hook", () => {
     await createHook(hookDeps).onAppStarted(event);
 
     expect(runAction).toHaveBeenCalledWith(
-      "create_routine",
-      expect.objectContaining({ name: "dream", actionName: "dream" }),
+      "system:create_routine",
+      expect.objectContaining({ name: "dream", actionName: "dream:dream" }),
     );
     expect(info).toHaveBeenCalledWith("registered the dream routine");
   });
@@ -54,7 +57,7 @@ describe("dream app-started hook", () => {
 
     await createHook(hookDeps).onAppStarted(event);
 
-    expect(runAction).toHaveBeenCalledWith("delete_routine", { routineId: "daily-dream" });
+    expect(runAction).toHaveBeenCalledWith("system:delete_routine", { routineId: "daily-dream" });
     expect(info).toHaveBeenCalledWith("replaced the daily dream routine");
   });
 });
