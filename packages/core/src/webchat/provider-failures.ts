@@ -441,7 +441,11 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
   const content = (card: Pick<OpenProviderCard, "beside" | "part">) =>
     JSON.stringify([...card.beside, card.part]);
 
-  /** Writes or rewrites a chat's open card; one per chat. */
+  /**
+   * Writes a chat's open card with the turn that failed. A chat shows one open
+   * card: an older one leaves its message, which keeps what else it held, and
+   * the new card carries on its recovery attempts.
+   */
   const writeCard = (
     turn: ChatTurnFailure,
     part: ProviderFailurePart,
@@ -451,14 +455,10 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     serial(async () => {
       const cards = await readCards();
       const open = cards.find((card) => card.chatId === turn.chatId);
-      if (open && !written) {
-        open.part = part;
-        open.runsOn = runsOn;
-        const state = deps.accounts.read()[runsOn]?.state;
-        if (state) open.stateAtFailure = state;
-        await deps.webchatRepo.updateMessageContent(open.messageId, content(open));
-        await writeCards(cards);
-        return open;
+      if (open) {
+        await deps.webchatRepo
+          .updateMessageContent(open.messageId, JSON.stringify(open.beside))
+          .catch(() => undefined);
       }
       let messageId = written?.messageId;
       if (!messageId) {
@@ -469,7 +469,6 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         );
         messageId = message.id;
       }
-      // A newer card replaces the chat's older one, which settles as superseded.
       const rest = cards.filter((card) => card.chatId !== turn.chatId);
       const state = deps.accounts.read()[runsOn]?.state;
       const card: OpenProviderCard = {
@@ -479,8 +478,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         runsOn,
         part,
         beside: written?.beside ?? [],
-        since: now().toISOString(),
-        attempts: 0,
+        since: open?.since ?? now().toISOString(),
+        attempts: open?.attempts ?? 0,
         ...(state ? { stateAtFailure: state } : {}),
       };
       await writeCards([...rest, card]);
@@ -829,17 +828,10 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       if (stopped) return null;
       const decided = await decide(turn, true);
       if (!decided) return null;
-      // A chat shows one open card: a later failure rewrites it where it is.
-      const reuse = cardedChats.has(turn.chatId);
-      const card = await writeCard(
-        turn,
-        decided.part,
-        decided.runsOn,
-        reuse ? undefined : { messageId, beside },
-      );
+      const card = await writeCard(turn, decided.part, decided.runsOn, { messageId, beside });
       scheduleRecovery(card);
       if (decided.unattended) await groupIn(turn, decided.part, decided.runsOn);
-      return reuse ? null : decided.part;
+      return decided.part;
     },
     async succeeded(chatId) {
       if (!cardedChats.has(chatId)) return;

@@ -407,16 +407,19 @@ describe("the three cards", () => {
     expect(h.cardIn("chat")?.detail).toBe("Claude usage limit reached");
   });
 
-  it("rewrites a chat's open card in place rather than adding another", async () => {
+  it("moves a chat's open card to the newest failed turn, one card per chat", async () => {
     const h = harness(
       { chat: {} },
       { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
     );
     await h.fail("chat", quota);
     await h.fail("chat", spendCap);
-    const cards = [...h.messages.values()].filter((message) => message.chatId === "chat");
-    expect(cards).toHaveLength(1);
+    const withCards = [...h.messages.values()].filter((message) =>
+      message.parts.some((part) => (part as { type?: string }).type === "provider_failure"),
+    );
+    expect(withCards).toHaveLength(1);
     expect(h.cardIn("chat")).toMatchObject({ reason: "spend_cap" });
+    expect(await h.failures.cards()).toHaveLength(1);
   });
 
   it("switches this chat only, settles the card to one line, and runs the stopped turn", async () => {
@@ -456,7 +459,7 @@ describe("the three cards", () => {
     expect(h.runs.map((run) => run.threadId).sort()).toEqual(["chat", "other"]);
   });
 
-  it("rewrites the card in place when the resumed turn fails again", async () => {
+  it("keeps one card when the resumed turn fails again", async () => {
     const reports: ModelAccountReports = { anthropic: reportOf("usage_limit_reached") };
     const h = harness({ chat: {} }, reports);
     await h.fail("chat", quota);
@@ -464,7 +467,10 @@ describe("the three cards", () => {
     await h.accountChanged("anthropic");
     await h.fail("chat", quota, true);
     await h.accountChanged("anthropic");
-    expect([...h.messages.values()].filter((m) => m.chatId === "chat")).toHaveLength(1);
+    const withCards = [...h.messages.values()].filter((message) =>
+      message.parts.some((part) => (part as { type?: string }).type === "provider_failure"),
+    );
+    expect(withCards).toHaveLength(1);
     expect(h.runs).toHaveLength(1);
   });
 
