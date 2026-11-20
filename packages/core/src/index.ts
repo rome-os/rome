@@ -466,10 +466,14 @@ async function main() {
     linkOf: (kind: string) => accountLinkOf(connectionRegistry)(kind),
     accounts: connectedAccounts,
   };
-  // A newly connected own account starts with the Concierge, the guardian's,
-  // so it answers from its first message. One Rome already has keeps its
-  // agent (docs/architecture/channels.md#an-accounts-agent).
-  const agentOnConnectOf = (kind: string) => agentOnConnect(accountAgents.linkOf(kind));
+  // A newly connected own account of a kind that asks for it starts with the
+  // Concierge, the guardian's, so it answers from its first message. One Rome
+  // already has keeps its agent (docs/architecture/channels.md#an-accounts-agent).
+  const agentOnConnectOf = (kind: string) =>
+    agentOnConnect(
+      accountAgents.linkOf(kind),
+      connectionRegistry.getDescriptor(kind)?.startsWithConcierge === true,
+    );
   // Rome listens to an account of a linkable connection kind only while it has an
   // agent: each inbound port reads this by connection, and a link tells it.
   const accountListening = new AccountListening(accountAgents);

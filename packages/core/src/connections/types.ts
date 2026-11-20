@@ -362,6 +362,10 @@ export interface ConnectionDescriptor {
    *  that says which kinds take an agent. Vocabulary:
    *  docs/domains/chats.md#connected-account. */
   link?: AccountLink;
+  /** True when a newly connected own account of this kind starts with the
+   *  Concierge as its agent, so it answers from its first message. Absent, it
+   *  starts with none until the guardian links one. */
+  startsWithConcierge?: boolean;
   capabilities: Partial<{
     talker: {
       build(cred: Credential, kit: RuntimeKit): Talker;

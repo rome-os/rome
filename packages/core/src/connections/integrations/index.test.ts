@@ -116,6 +116,19 @@ describe("registerBuiltinConnections", () => {
     ).toEqual([...GUARDIAN_OWN_KINDS].sort());
   });
 
+  it("starts a new account with the Concierge only for Rome's Slack app", () => {
+    const registered: ConnectionDescriptor[] = [];
+    registerEveryKind({
+      register: (descriptor: ConnectionDescriptor) => registered.push(descriptor),
+    } as unknown as ConnectionRegistry);
+
+    expect(
+      registered
+        .filter((descriptor) => descriptor.startsWithConcierge === true)
+        .map((descriptor) => descriptor.connectionKind),
+    ).toEqual(["slack_app"]);
+  });
+
   // A grant names the account it reaches, and every kind with a platform has
   // accounts (docs/domains/connections.md#grant).
   it("names the account for every kind", () => {
