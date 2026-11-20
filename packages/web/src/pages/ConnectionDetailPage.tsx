@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -91,6 +92,14 @@ export default function ConnectionDetailPage() {
     if (route !== serviceId) navigate(`${BACK_TO_LIST}/${encodeURIComponent(route)}`);
   };
 
+  const composio = composioQuery.data ?? null;
+  // Built again only when a load brings new lists, so a card stands for one
+  // load: the members switch takes a new one as the server's state.
+  const cards = useMemo(
+    () => buildConnectionCards(connectionsQuery.data ?? [], composio),
+    [connectionsQuery.data, composio],
+  );
+
   if (loading) {
     return <DetailSkeleton />;
   }
@@ -122,8 +131,6 @@ export default function ConnectionDetailPage() {
     );
   }
 
-  const composio = composioQuery.data ?? null;
-  const cards = buildConnectionCards(connectionsQuery.data ?? [], composio);
   // The Telegram personal account folded onto a Telegram card as a slot; its
   // old standalone route redirects to whichever card holds it.
   if (serviceId === "telegram-user") {

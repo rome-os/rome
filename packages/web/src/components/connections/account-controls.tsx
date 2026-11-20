@@ -99,7 +99,8 @@ function AnswerMembersRow({
 }: {
   connectionId: string;
   on: boolean;
-  /** The card as last loaded: each load brings a new one. */
+  /** The card as last loaded: each load brings a new one, and nothing else
+   *  does. */
   snapshot: unknown;
   onRefresh: () => void | Promise<unknown>;
 }) {

@@ -1,7 +1,7 @@
 import { AppDocumentAccess } from "@/components/connections/app-document-access";
 import { Measure, Section } from "@rome-os/ui/page";
 import { ListCollection } from "@rome-os/ui/layout-list";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleAlert, Plus, RefreshCw, Search, Unplug, X } from "lucide-react";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
@@ -68,7 +68,9 @@ export function ConnectionsSection({
   onFlash: (message: string) => void;
 }) {
   const { t } = useTranslation("settings");
-  const cards = buildConnectionCards(connections, composio);
+  // Built again only when a load brings new lists, so a card stands for one
+  // load: the members switch takes a new one as the server's state.
+  const cards = useMemo(() => buildConnectionCards(connections, composio), [connections, composio]);
 
   // Which card's detail pane is open (null = closed). Track the route, not
   // the card object, so a refresh with the pane open re-derives the LIVE card.
