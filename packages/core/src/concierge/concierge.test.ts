@@ -2234,6 +2234,17 @@ describe("Concierge task chats", () => {
     expect((await s.tasks.repo.get("task-1"))?.title).toBe("Flights [Lisbon]");
   });
 
+  it("chat_start says its answer is JSON text and its link a whole Markdown link to paste as it is", async () => {
+    // In Codex code mode a script gets a tool's answer as a string, so reading
+    // `.link` without JSON.parse yields String.prototype.link (#2510).
+    const s = setup({ said: false });
+    const tools = await buildConciergeTools(s.service, s.context());
+    const { description } = tools.find((tool) => tool.name === "chat_start")!;
+    expect(description).toContain("Returns JSON text");
+    expect(description).toContain("JSON.parse it before you read a field");
+    expect(description).toContain("`link` is already the whole Markdown link: paste it as it is");
+  });
+
   it("chat_start refuses a task chat's own card and taskId parameters, as it takes neither", async () => {
     const s = setup({ said: false });
     const tools = await buildConciergeTools(s.service, s.context());
