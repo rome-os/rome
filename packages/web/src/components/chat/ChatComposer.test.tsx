@@ -651,6 +651,27 @@ describe("composer attachment uploads", () => {
       false,
     );
   });
+
+  it("keeps a file attached while a text-only send is pending", async () => {
+    let rejectSend!: (error: Error) => void;
+    const composerRef = createRef<ChatComposerHandle>();
+    renderComposer(
+      {
+        onSend: () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectSend = reject;
+          }),
+      },
+      { composerRef },
+    );
+    fireEvent.input(screen.getByRole("textbox"), { target: { value: "failed message" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    act(() => composerRef.current?.addFiles([new File(["fixture"], "plan.pdf")]));
+    await act(async () => rejectSend(new Error("post failed")));
+
+    expect(screen.getByText("plan.pdf")).toBeTruthy();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("failed message");
+  });
 });
 
 describe("composer scoped slash skill", () => {
@@ -1386,6 +1407,28 @@ describe("composer reply", () => {
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("Fly to Lisbon.")).toBeTruthy();
+  });
+
+  it("does not put the reply back when newer text replaced the failed message", async () => {
+    stubCoarsePointer(false);
+    let rejectSend!: (error: Error) => void;
+    const onSend = rs.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    );
+    renderWithReply(onSend);
+    await screen.findByText("Fly to Lisbon.");
+
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.input(textarea, { target: { value: "and then?" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.input(textarea, { target: { value: "newer text" } });
+    await act(async () => rejectSend(new Error("offline")));
+
+    expect(textarea.value).toBe("newer text");
+    expect(screen.queryByText("Fly to Lisbon.")).toBeNull();
   });
 
   it("drops the reply on Escape from the textarea", async () => {

@@ -786,14 +786,15 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           authEpoch,
         );
       }
-      if (clearsOptimistically) {
+      if (clearsOptimistically && !textareaRef.current?.value) {
         // Text typed while the send was pending survives a failure; only an
-        // empty field takes the failed text back.
+        // empty field takes the failed text and its context back.
         setInputText((current) =>
           current === "" ? (persistNewChatDraft ? rawText : text) : current,
         );
-        setPendingUploads(uploads);
-        setDraftSkill(skill);
+        // Keep anything the guardian added since the send.
+        setPendingUploads((current) => (current.length === 0 ? uploads : current));
+        setDraftSkill((current) => (current === null ? skill : current));
         if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);
       }
       // Nothing to restore otherwise — a cancelled or failed upload never
