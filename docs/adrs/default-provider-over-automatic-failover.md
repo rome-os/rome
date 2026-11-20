@@ -1,7 +1,7 @@
 # Chats follow a default provider the guardian picks, and nothing moves them on its own
 
 - **Status**: Accepted
-- **Date**: 2026-11-16
+- **Date**: 2026-11-16, amended 2026-11-19
 - **Concept**: [agents — default provider](../domains/agents.md#default-provider)
 - **Supersedes**: [Concierge provider failover](concierge-provider-failover.md), and amends [pinned session model](pinned-session-model-fails-closed.md)
 
@@ -13,7 +13,9 @@ The cause was that "the guardian removed this provider" and "this login is broke
 
 ## Decision
 
-The guardian picks a default provider among the signed-in ones, Rome credits included. Every chat follows it, unless a developer picked an exact model. A chat moves to another provider only on the guardian's decision: changing the default after a confirm dialog, or removing the provider. The pin keeps a model within one provider and never holds a chat on another. When a provider cannot run, the chat shows a card, and unattended chats gather into one notice per outage. A move to another provider carries the chat's text into the new thread.
+The guardian picks a default provider among the logged-in accounts. Rome credits can be it only while no AI account is logged in, and the first login replaces them. Every chat follows the default, unless its owner picked a model. A chat moves to another provider only on the guardian's decision: changing the default (optionally leaving existing chats where they are), logging out of the default, or switching one chat from a card. The pin keeps a model within one provider and never holds a chat on another.
+
+Rome recovers by itself only when no context is lost, no money is spent and nobody's pick is overridden: one silent retry for a temporary error, and another model of the same provider for one model's limit. Anything else shows one of three cards by what the guardian has to do (wait, fix the account, change the model). The card settles in place and the stopped turn resumes. Unattended chats get their card and one grouped notice per incident. A move to another provider carries a handoff from the old model when it can still run, else the chat's text and the tools the latest turns called.
 
 ## Alternatives
 
@@ -21,13 +23,14 @@ The guardian picks a default provider among the signed-in ones, Rome credits inc
 - **Fail over every chat automatically.** Rejected because a task chat's stored messages omit its tool calls, and a guardian who removed a provider expects their choice to hold.
 - **Keep the fixed order and re-resolve per turn.** Rejected because the order is Rome's guess, not the guardian's, and it gave no way to prefer one subscription.
 - **Ask on every failure which provider to use.** Rejected for unattended chats, which have nobody to ask. They wait for the limit to end, or for one tap on the grouped notice.
-- **Use Rome credits whenever ChatGPT is out.** Rejected because it spent the guardian's credits without a decision. They run only as the default, or when nothing else is signed in.
+- **Use Rome credits whenever ChatGPT is out, or as a default beside a login.** Rejected because it spent the guardian's credits without a decision, and two ways to run Codex at once confused which one paid. They run only while no AI account is logged in.
+- **Move every existing chat in one batch when the default changes.** Rejected because it interrupts running turns and writes a handoff for chats nobody opens again. Each chat moves at its next run.
 
 ## Consequences
 
-A provider that cannot run stops the Concierge until the guardian acts on the card. Unattended work waits for the window reset, or for "run them on {other} now", which moves one turn and leaves the default alone.
+A provider that cannot run stops the Concierge until the guardian acts on the card or the provider recovers. Unattended work waits for the window reset, or for one tap on the grouped notice, which moves those tasks and leaves the default alone unless "Also make default" is ticked.
 
-Changing the default moves every chat that follows it. The new thread reads the chat's text and open tasks, or a handoff note when that is too long. Tool traces are not carried, so a task in the middle of its work may read files again, and the voice changes with the model.
+Changing the default moves every chat that follows it, unless the guardian unticks "Move existing chats too". A move while the old provider still runs waits a few seconds for the old model's handoff. Tool results are not carried, so a task in the middle of its work may read files again, and the voice changes with the model.
 
 Guardians who relied on Rome credits covering an expired ChatGPT login now see a card instead.
 

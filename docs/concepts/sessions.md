@@ -122,7 +122,7 @@ A session remembers the concrete model that produced its history — the **sessi
 
 - Resolution for a turn is **exact selection → agent `modelId` → the default provider**. An exact selection runs that model. An agent's exact `modelId` runs that model, or the pin while it is on the same provider. Every other turn runs on the default provider at its tier or strength, on the pinned model while the pin is on that provider.
 - A successful turn establishes or updates the pin. Changing the default moves every chat that follows it on its next turn. An exact selection stays where it is.
-- No chat moves to another provider on its own. When the provider a turn needs cannot run, the turn fails with a structured resolution error, and a dashboard chat shows a [failure card](../domains/agents.md#default-provider). A temporary error (429, 5xx, a network error) gets one silent retry after about 30 seconds. A single-model limit in a Concierge chat tries another model of the same provider.
+- No chat moves to another provider on its own. When the provider a turn needs cannot run, the turn fails with a structured resolution error, and a dashboard chat shows a [card](../domains/agents.md#provider-failure). A temporary error (429, 5xx, a network error) gets one silent retry after about 30 seconds. A single-model limit in a chat that follows the default tries another model of the same provider, in every chat.
 - A Concierge or task chat stores the model Rome chose for it, with who chose it. A model Rome chose follows the default at the same strength: the strongest model, or the fast one a task asked for. A model the owner picked in the model selector is an exact selection.
 - The webchat model selector stays available after a chat's first message and lists only the signed-in providers' models. A pick is stored on the chat as its exact selection, and the next turn runs on it, also when the chat's session is already open. Auto clears the pick, so the chat follows the default again. A fork chat promoted to a chat, and a chat with a handoff open, show no selector.
 - A cold resume restores the chat's saved selection over the pin, on every agent.
@@ -140,7 +140,11 @@ A session remembers the concrete model that produced its history — the **sessi
 
 ## Continuation
 
-Rome's transcript is the conversation, and a model thread is a cache of it. When a chat moves to another provider, the new provider starts a thread that has seen none of the chat. Its first turn carries a `<continuation>` notice with the chat's text messages since the session opened and its open tasks, for every agent. When that is past half the context limit, Rome writes a handoff note from the chat's messages instead, and the notice carries the note and the recent messages. Tool traces are not carried, so a task in the middle of its work may read files again.
+Rome's transcript is the conversation, and a model thread is a cache of it. When a chat moves to another provider, the new provider starts a thread that has seen none of the chat. Its first turn carries a `<continuation>` notice with the chat's recent text messages (about 16,000 tokens: the guardian's whole, long agent replies cut) and its open tasks, for every agent.
+
+- When the old provider can still run, as after the guardian changes the default with both accounts healthy, the old model first writes a [handoff](#handoff) note on its own thread, while the chat says it is tidying up, and the notice carries it.
+- When it cannot, as after a quota or a lost login and a card's switch, the notice carries an **executed-actions list** instead: the tools the latest turns called, with their key arguments, and none of their results, so the new model does not redo what was done.
+- Tool results are not carried, so a task in the middle of its work may read files again.
 
 **Contracts:**
 
