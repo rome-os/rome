@@ -407,6 +407,9 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
         // The connection reads a chat from its own copy where that holds the
         // whole chat, and from Slack where it does not (slack-app/timeline.ts).
         reads: true,
+        // The account list marks the account searchable by this flag, even
+        // while the connection is locked. That is how the connector finds the
+        // app's connection to search through.
         searches: true,
         // A task chat sends, reads and searches Slack through the connector's
         // proxy, which makes its calls through this talker.
