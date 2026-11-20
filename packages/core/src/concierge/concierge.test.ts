@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import type { AgentPlan } from "@rome/api-types/trace-segments";
 import { and, eq } from "drizzle-orm";
 import { threadIdOf } from "../apps/repositories/approvals.js";
 import { approvalWaits } from "../test/open-waits.js";
@@ -263,6 +264,7 @@ function setup(
     isRunning: rs.fn(() => false),
     isBusy: rs.fn(() => false),
     openTool: rs.fn(() => null),
+    turnPlan: rs.fn((): AgentPlan | null => null),
     onTurnChange: rs.fn(() => () => {}),
     // A task chat runs from the message that starts its turn until that
     // turn finishes, as the dashboard's runtime reports it.
@@ -1345,6 +1347,37 @@ describe("Concierge tools", () => {
         { role: "assistant", text: "3 options" },
       ],
     });
+  });
+
+  it("chat_read shows a running task chat's plan, the step in progress in view and each step on one short line", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    const steps: AgentPlan["steps"] = Array.from({ length: 12 }, (_, index) => ({
+      text: `Step ${index + 1}`,
+      status: index < 9 ? "completed" : index === 9 ? "in_progress" : "pending",
+    }));
+    steps[9] = { ...steps[9], text: `Compare\nthe fares ${"x".repeat(100)}` };
+    s.chats.turnPlan = () => ({ steps });
+    const read = async () =>
+      JSON.parse((await s.tool("chat_read", { chatId: "task-1" })).content[0].text);
+
+    // Idle, it has no plan to show, whatever the runtime holds.
+    expect((await read()).plan).toBeUndefined();
+
+    s.chats.isRunning = () => true;
+    const { plan } = await read();
+    expect(plan).toHaveLength(8);
+    expect(plan[0]).toEqual({ step: "Step 5", status: "completed" });
+    expect(plan[5]).toEqual({
+      step: `Compare the fares ${"x".repeat(61)}…`,
+      status: "in_progress",
+    });
+    expect(plan[5].step).toHaveLength(80);
+    expect(plan[7]).toEqual({ step: "Step 12", status: "pending" });
+
+    // A turn with no plan shows none.
+    s.chats.turnPlan = () => null;
+    expect((await read()).plan).toBeUndefined();
   });
 
   it("chat_read and chat_list call a task chat whose latest turn failed failed, unless it runs or waits", async () => {

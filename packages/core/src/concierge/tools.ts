@@ -9,6 +9,7 @@ import { pushBody } from "./push.js";
 import { turnPrompts as turnPromptsOf } from "./reply-target.js";
 import { taskCardLine } from "./task-cards.js";
 import type { ForwardedFrom } from "@rome/api-types/chat";
+import type { AgentPlan } from "@rome/api-types/trace-segments";
 import { CONCIERGE_REACTIONS } from "@rome/api-types/concierge";
 import { CONCIERGE_TASK_STATUSES } from "@rome/api-types/concierge-task-status";
 import { taskLink } from "@rome/api-types/task-link";
@@ -59,6 +60,30 @@ const runTool = romeToolRunner(log);
 const TASK_STATUSES = ["running", "idle", "waiting_input", "failed"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
 const DEFAULT_READ_LIMIT = 6;
+/** How many steps of a running turn's plan chat_read shows, and how long each may be. */
+const PLAN_STEPS = 8;
+const PLAN_STEP_CHARS = 80;
+
+/**
+ * A running turn's plan as chat_read shows it: each step's text on one line,
+ * cut to PLAN_STEP_CHARS, with its status. A plan of more than PLAN_STEPS
+ * steps drops its first ones, but never the step before the first one not yet
+ * completed, so the step in progress always shows.
+ */
+function planForRead({ steps }: AgentPlan) {
+  const next = steps.findIndex((step) => step.status !== "completed");
+  const from = Math.max(
+    0,
+    Math.min((next === -1 ? steps.length : next) - 1, steps.length - PLAN_STEPS),
+  );
+  return steps.slice(from, from + PLAN_STEPS).map((step) => {
+    const text = step.text.replace(/\s+/g, " ").trim();
+    return {
+      step: text.length > PLAN_STEP_CHARS ? `${text.slice(0, PLAN_STEP_CHARS - 1)}…` : text,
+      status: step.status,
+    };
+  });
+}
 
 function requireString(args: Record<string, unknown>, field: string): string {
   const value = args[field];
@@ -1099,7 +1124,7 @@ export async function buildConciergeTools(
     {
       name: "chat_read",
       description:
-        "Read a task chat's status (running, idle, waiting_input, or failed) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there. A card in a task chat shows as a message with its plain-text line and a `cardId` that card_forward sends.",
+        "Read a task chat's status (running, idle, waiting_input, or failed) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there. A card in a task chat shows as a message with its plain-text line and a `cardId` that card_forward sends. While it runs, `plan` is its current turn's plan, each step with its status (completed, in_progress or pending): when there is one, report its progress by the plan.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
@@ -1125,6 +1150,8 @@ export async function buildConciergeTools(
           const row =
             chat.triggerKind === TASK_CHAT_TRIGGER_KIND ? await tasks.repo.get(chatId) : null;
           const taskStatus = row ? (await tasks.statusOf([row])).get(chatId) : undefined;
+          const running = service.dashboard.chats.isRunning(chatId);
+          const plan = running ? service.dashboard.chats.turnPlan(chatId) : null;
           return {
             chatId,
             title: chat.name,
@@ -1134,10 +1161,8 @@ export async function buildConciergeTools(
                 : isMainConciergeChat(chat)
                   ? "main chat"
                   : "topic chat",
-            status: statusOf(
-              service.dashboard.chats.isRunning(chatId),
-              await findListEntry(chatId),
-            ),
+            status: statusOf(running, await findListEntry(chatId)),
+            ...(plan ? { plan: planForRead(plan) } : {}),
             ...(taskStatus
               ? {
                   taskStatus: taskStatus.status,
