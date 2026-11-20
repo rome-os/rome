@@ -411,11 +411,13 @@ enum MarkdownParser {
     }
 
     /// A paragraph's text where each link to a task chat, `[name](#rome-task=ID)`,
-    /// is a chip: the task chat's status mark and its current name on a faint
-    /// fill (`Palette.taskChip`), the link's text only while the name is unknown. A task
-    /// chat the chat does not know reads as plain text
-    /// (docs/domains/chats.md#task-link). SwiftUI's text cannot tint an image,
-    /// so the mark sits just before the tinted name, drawn in `marks`.
+    /// is a chip: the task chat's status mark and its current name on one
+    /// rounded faint fill (`Palette.taskChip`), the link's text only while the
+    /// name is unknown. A task chat the chat does not know reads as plain text
+    /// (docs/domains/chats.md#task-link). The text's own background can neither
+    /// round nor hold an image, so `TaskChipRenderer` draws the fill behind the
+    /// chip's runs; on iOS 17, which has no text renderer, the mark sits just
+    /// before the tinted name.
     @MainActor
     static func text(_ source: String, linksAsText: Bool, tasks: TaskLinkStore?, marks: TaskMarkStyle) -> Text {
         let styled = inline(source, linksAsText: linksAsText)
@@ -453,9 +455,15 @@ enum MarkdownParser {
         }
         var name = AttributedString("\u{00A0}\(info.name.isEmpty ? written : info.name)\u{00A0}")
         name.foregroundColor = Palette.fg
-        name.backgroundColor = Palette.taskChip
         name.link = TaskLink.url(chatId: id)
-        let chip = marks.mark(info) + Text(name)
+        let chip: Text
+        if #available(iOS 18.0, *) {
+            // A no-break space before the mark pads the fill as the one after the name does.
+            chip = (Text(verbatim: "\u{00A0}") + marks.mark(info) + Text(name)).customAttribute(TaskChipRun(id: id))
+        } else {
+            name.backgroundColor = Palette.taskChip
+            chip = marks.mark(info) + Text(name)
+        }
         return spaced ? Text(verbatim: " ") + chip : chip
     }
 
@@ -820,11 +828,23 @@ struct MarkdownParagraph: View {
         }
     }
 
+    @ViewBuilder
     private func paragraph(frame: Int) -> some View {
-        MarkdownParser.text(source, linksAsText: linksAsText, tasks: tasks, marks: .forText(fontSize, dynamicTypeSize, frame: frame))
+        let marks = TaskMarkStyle.forText(fontSize, dynamicTypeSize, frame: frame)
+        let text = MarkdownParser.text(source, linksAsText: linksAsText, tasks: tasks, marks: marks)
             .romeFont(fontSize)
             .lineSpacing(lineSpacing)
             .fixedSize(horizontal: false, vertical: true)
+        if #available(iOS 18.0, *), hasChips {
+            text.textRenderer(TaskChipRenderer())
+        } else {
+            text
+        }
+    }
+
+    /// Whether this paragraph may draw a chip; the rest keep the plain text drawing.
+    private var hasChips: Bool {
+        !linksAsText && tasks != nil && source.contains(TaskLink.prefix)
     }
 
     /// Whether a chip in this paragraph is active and its ring may turn.
