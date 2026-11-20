@@ -110,6 +110,10 @@ export interface SlackAppAdapterConfig {
   onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
   /** The connection's own copy of the direct messages it hears. */
   copy: SlackMessageCopy;
+  /** Whether Rome listens to the account now. A message heard while it does
+   *  not is neither kept nor handed over, so linking an agent later brings
+   *  none of it back (docs/domains/chats.md). Absent, Rome always listens. */
+  listened?: () => boolean;
   /** Now, for the copy's times. */
   now?: () => Date;
   /** How reads of Slack's history take turns. Defaults to Slack's allowance. */
@@ -407,6 +411,12 @@ export class SlackAppAdapter {
     }
     const said = slackMessage(this.context(event.channel), wire);
     if (!said) return { status: 200 };
+    // Rome does not listen to the account, so the message is neither kept nor
+    // handed over. The drain's timeline breaks there, so a read once an agent
+    // is linked asks Slack for it rather than link across it.
+    if (this.config.listened && !this.config.listened()) {
+      return direct ? this.breakAt(event.channel, wire) : { status: 200 };
+    }
 
     const name = event.user ? await this.lookUpName(event.user) : {};
     const message: ChannelMessage = {

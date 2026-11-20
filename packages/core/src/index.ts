@@ -1928,6 +1928,7 @@ async function main() {
       api: createSlackAppWebApi(config.slackApiBaseUrl),
       cloud: romeCloudSlackApp(),
       copy: new SlackMessageCopyRepository(db),
+      listens: (connectionId) => accountListening.listens(connectionId),
       openMailbox: (mailbox, onFrame) => {
         const drainer = new RelayDrainer(
           [

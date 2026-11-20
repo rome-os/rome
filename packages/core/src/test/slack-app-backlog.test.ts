@@ -125,6 +125,7 @@ describe("a Slack app backlog, end to end", () => {
         cloud: {} as never,
         openMailbox: mailbox.open,
         copy: new SlackMessageCopyRepository(testDb.db),
+        listens: () => true,
       }),
     );
     const ports = connectionPorts(
