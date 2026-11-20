@@ -476,7 +476,9 @@ export class SlackAppAdapter {
       ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
       // A reply in a thread is read with the thread's earlier messages, which
       // the conversation's chat does not hold.
-      ...(event.thread_ts && event.thread_ts !== event.ts
+      // In a direct message the app hears every reply, so only a thread in a
+      // group is read.
+      ...(!direct && event.thread_ts && event.thread_ts !== event.ts
         ? { inThread: `${event.channel}:${event.thread_ts}` as ChatId }
         : {}),
       addressing: direct ? "direct" : "mention",
@@ -798,20 +800,29 @@ export class SlackAppAdapter {
   /**
    * A thread's messages within `read`'s bounds, newest first, its root
    * included. Slack answers a thread oldest first, one page of 15 a minute,
-   * so a read answers the thread's first page: a longer thread's later
-   * replies are not in it.
+   * so one read is one page: a read below a bound (`olderThan`, `until`)
+   * answers the newest of the thread's first page, and any other read answers
+   * the oldest `limit` from the thread's start or just after `newerThan`. A
+   * longer thread is read on with `newerThan`, each page asking Slack from
+   * there, until a read comes back empty.
    */
   private async readThread(
     channelId: string,
     threadTs: string,
     read: TalkHistoryRead,
   ): Promise<ChannelMessage[]> {
+    const oldest = read.newerThan;
     const page = await this.readGate.run(
-      `replies:${channelId}:${threadTs}`,
+      `replies:${channelId}:${threadTs}:${oldest ?? ""}`,
       () =>
         this.config.api.conversationReplies(
           this.config.botToken,
-          { channel: channelId, ts: threadTs, limit: HISTORY_PAGE },
+          {
+            channel: channelId,
+            ts: threadTs,
+            limit: HISTORY_PAGE,
+            ...(oldest ? { oldest } : {}),
+          },
           this.abort.signal,
         ),
       this.abort.signal,
@@ -829,9 +840,11 @@ export class SlackAppAdapter {
       const message = slackMessage(this.context(channelId), wire, name);
       if (message) messages.push(message);
     }
-    return messages
-      .sort((a, b) => compareTs(tsOfId(b.messageId), tsOfId(a.messageId)))
-      .slice(0, read.limit);
+    messages.sort((a, b) => compareTs(tsOfId(b.messageId), tsOfId(a.messageId)));
+    const below = read.olderThan !== undefined || read.until !== undefined;
+    return below
+      ? messages.slice(0, read.limit)
+      : messages.slice(Math.max(0, messages.length - read.limit));
   }
 
   /** The channels the app is a member of, by name. */

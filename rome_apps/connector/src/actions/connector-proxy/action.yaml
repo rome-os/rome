@@ -30,13 +30,15 @@ description: |
   Slack through Rome's own Slack app takes five methods: `/api/chat.postMessage`
   ({ channel, text, thread_ts? }) sends, `/api/conversations.history`
   ({ channel, limit?, latest?, oldest? }) and `/api/conversations.replies`
-  ({ channel, ts }) read, `/api/conversations.list` ({ query?, limit? }) lists
+  ({ channel, ts, limit?, cursor? }) read, `/api/conversations.list` ({ query?, limit? }) lists
   the channels the app is a member of, and `/api/search.messages`
   ({ query, count?, channel? }) searches. A channel is named by its id or as
   `#name`. History answers newest first, and a page can hold fewer messages
   than `limit` with more before it: page back by passing the oldest `ts` as
   `latest` until a page comes back empty, which is the only one with
-  `has_more: false`. Search covers what Rome has kept of the app's direct
+  `has_more: false`. A thread answers oldest first, from its start: read on
+  by passing `response_metadata.next_cursor` as `cursor` until a page comes
+  back empty. Search covers what Rome has kept of the app's direct
   messages and mentions, reading a named `channel`'s newest messages first,
   and its `coverage` field says what it covered.
   Any other Slack method is refused. With both the Slack app and the older Slack

@@ -106,6 +106,7 @@ export function isIpcMessage(message: unknown): message is IpcMessage {
 const CALLER_GATED_CALLS = new Set([
   "channels.query",
   "channels.search",
+  "channels.chats",
   "channels.send",
   "notify.send",
   "session.continue",

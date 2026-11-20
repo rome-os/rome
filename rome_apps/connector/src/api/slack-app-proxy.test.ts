@@ -261,55 +261,98 @@ describe("Slack's Web API through Rome's Slack app", () => {
     expect((await call(service, "/api/search.messages", {})).status).toBe("error");
   });
 
-  it("reads a thread with conversations.replies, oldest first as Slack answers it", async () => {
-    const service = channels();
+  it("reads a thread with conversations.replies, oldest first, and goes on from its cursor until a page is empty", async () => {
+    // A thread longer than Slack's page of 15: the connection answers it a
+    // page at a time.
+    const first = Array.from({ length: 15 }, (_, i) =>
+      said(`1700000000.${String(100 + i).padStart(6, "0")}`),
+    ).reverse();
+    const second = [said("1700000000.000200")];
+    const query = rs
+      .fn<ChannelsService["query"]>()
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second)
+      .mockResolvedValueOnce([]);
+    const service = channels({ query });
+    const read = async (extra: Record<string, string> = {}) => {
+      const result = await call(service, "/api/conversations.replies", undefined, {
+        channel: "C1",
+        ts: "1700000000.000100",
+        ...extra,
+      });
+      if (result.status !== "ok") throw new Error(result.error);
+      return result.data.data as {
+        messages: Array<{ ts: string }>;
+        has_more: boolean;
+        response_metadata: { next_cursor: string };
+      };
+    };
 
-    const result = await call(service, "/api/conversations.replies", undefined, {
-      channel: "C1",
-      ts: "1700000000.000100",
+    const one = await read();
+    const two = await read({ cursor: one.response_metadata.next_cursor });
+    const three = await read({ cursor: two.response_metadata.next_cursor });
+
+    expect(query).toHaveBeenNthCalledWith(1, APP, { chatId: "C1:1700000000.000100", limit: 100 });
+    expect(query).toHaveBeenNthCalledWith(2, APP, {
+      chatId: "C1:1700000000.000100",
+      limit: 100,
+      newerThan: "1700000000.000114",
     });
-
-    expect(service.query).toHaveBeenCalledWith(APP, { chatId: "C1:1700000000.000100", limit: 100 });
-    if (result.status !== "ok") throw new Error(result.error);
-    expect(result.data.data).toMatchObject({
-      messages: [{ ts: "1700000000.000100" }, { ts: "1700000000.000300" }],
+    expect(one.messages[0]?.ts).toBe("1700000000.000100");
+    expect(one.messages).toHaveLength(15);
+    expect(one).toMatchObject({ has_more: true });
+    expect(two).toMatchObject({
+      messages: [{ ts: "1700000000.000200" }],
+      has_more: true,
+      response_metadata: { next_cursor: "1700000000.000200" },
+    });
+    expect(three).toMatchObject({
+      messages: [],
+      has_more: false,
+      response_metadata: { next_cursor: "" },
     });
   });
 
-  it("lists the channels the app is a member of, from the chats Rome knows", async () => {
-    const descriptor = (
-      connectionKind: string,
-      kind: string,
-      chatId: string,
-      displayName: string,
-    ) => ({
-      snapshot: {
-        conversation: { ref: { connectionId: "c1", chatId }, connectionKind, kind, displayName },
-      },
+  it("refuses a thread cursor that is not a Slack time, reading nothing", async () => {
+    const service = channels();
+    const result = await call(service, "/api/conversations.replies", undefined, {
+      channel: "C1",
+      ts: "1700000000.000100",
+      cursor: "dXNlcjpVMDYxTkZUVDI=",
     });
-    const list = rs.fn(async () => ({
-      items: [
-        descriptor("slack_app", "channel", "C_NEWS", "#news"),
-        descriptor("slack_app", "dm", "D1", "Ouou"),
-        descriptor("discord", "channel", "123", "general"),
-      ],
+    expect(result.status).toBe("error");
+    expect(service.query).not.toHaveBeenCalled();
+  });
+
+  it("lists the channels the app is a member of through its own connection", async () => {
+    const chats = rs.fn(async () => ({
+      chats: [{ chatId: "C_NEWS" as ChatId, name: "#news", kind: "channel" as const }],
       nextCursor: "next",
     }));
 
-    const result = await slackAppProxyCall({
-      channels: channels(),
-      chatSettings: { list } as never,
-      account: APP,
-      path: "/api/conversations.list",
-      query: { limit: "20", query: "ne" },
+    const result = await call(channels({ chats }), "/api/conversations.list", undefined, {
+      limit: "20",
+      query: "ne",
     });
 
-    expect(list).toHaveBeenCalledWith({ limit: 20, query: "ne" });
+    expect(chats).toHaveBeenCalledWith(APP, { limit: 20, query: "ne" });
     if (result.status !== "ok") throw new Error(result.error);
     expect(result.data.data).toEqual({
       ok: true,
       channels: [{ id: "C_NEWS", name: "news", is_member: true }],
       response_metadata: { next_cursor: "next" },
     });
+  });
+
+  it("fails a listing Slack refuses, with its reason, rather than answer no channels", async () => {
+    const chats = rs.fn(async () => {
+      throw new Error("Rome's Slack app may not see channels in this workspace yet");
+    });
+
+    const result = await call(channels({ chats }), "/api/conversations.list");
+
+    expect(result).toMatchObject({ status: "error" });
+    if (result.status !== "error") throw new Error("expected a refusal");
+    expect(result.error).toContain("may not see channels in this workspace yet");
   });
 });

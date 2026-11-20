@@ -309,8 +309,11 @@ describe("a mention inside a Slack thread (R14)", () => {
     });
     const place: ThreadContext = { channel: "slack_app", threadId: "C_NEWS", threadType: "group" };
     const earlier = await facts.thread!(place, mention.inThread!, mention.timestamp, 1);
+    // A thread of another chat is never read into this conversation's prompt.
+    const elsewhere = await facts.thread!(place, `D_OTHER:${root}` as never, mention.timestamp, 1);
     await adapter.stop();
 
+    expect(elsewhere).toBeNull();
     expect(mention.inThread).toBe(`C_NEWS:${root}`);
     expect(earlier?.map((m) => m.text)).toEqual([
       "Picnic on Saturday?",
@@ -319,7 +322,7 @@ describe("a mention inside a Slack thread (R14)", () => {
     expect(conversationReplies).toHaveBeenCalledTimes(1);
   });
 
-  it("names no thread on a mention that is not in one", async () => {
+  it("names no thread on a mention that is not in one, nor on a reply in a direct message", async () => {
     const delivered: ChannelMessage[] = [];
     let onFrame: ((frame: MailboxFrame) => Promise<{ status: number }>) | null = null;
     const adapter = new SlackAppAdapter({
@@ -371,9 +374,28 @@ describe("a mention inside a Slack thread (R14)", () => {
         }),
       );
     }
+    // In a direct message the app hears every reply in a thread, so none is
+    // read again.
+    await onFrame!(
+      signed({
+        type: "event_callback",
+        team_id: TEAM,
+        api_app_id: "A_ROME",
+        event_id: "EvR7",
+        event: {
+          type: "message",
+          channel: "D_MEMBER",
+          channel_type: "im",
+          user: MEMBER,
+          text: "a reply in a thread of a direct message",
+          ts: tsOf(7),
+          thread_ts: tsOf(6),
+        },
+      }),
+    );
     await adapter.stop();
 
-    expect(delivered.map((m) => m.inThread)).toEqual([undefined, undefined]);
+    expect(delivered.map((m) => m.inThread)).toEqual([undefined, undefined, undefined]);
   });
 });
 

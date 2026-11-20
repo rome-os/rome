@@ -145,7 +145,7 @@ describe("IpcRpc caller context", () => {
   it("carries the calling action's turn on every chat call main gates by it", async () => {
     const { main, worker } = linkedPeers(ROOT_CONTEXT);
     const seen = new Map<string, unknown>();
-    for (const method of ["channels.query", "channels.search", "channels.send"]) {
+    for (const method of ["channels.query", "channels.search", "channels.chats", "channels.send"]) {
       main.handle(method, async (_params, ctx) => {
         seen.set(method, ctx.callerActionContext);
         return null;
@@ -164,10 +164,11 @@ describe("IpcRpc caller context", () => {
     await actionExecutionContext.run(turn, async () => {
       await worker.call("channels.query", {});
       await worker.call("channels.search", {});
+      await worker.call("channels.chats", {});
       await worker.call("channels.send", {});
     });
 
-    for (const method of ["channels.query", "channels.search", "channels.send"]) {
+    for (const method of ["channels.query", "channels.search", "channels.chats", "channels.send"]) {
       expect(seen.get(method)).toMatchObject({ audience: "shared", turnId: "t1" });
     }
   });

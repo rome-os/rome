@@ -50,6 +50,15 @@ const QueryParams = z
   })
   .strict();
 
+const ChatsParams = z
+  .object({
+    channel: AccountOrChannel,
+    query: z.string().optional(),
+    limit: z.number().int().positive().optional(),
+    cursor: z.string().optional(),
+  })
+  .strict();
+
 const SearchParams = z
   .object({
     channel: AccountOrChannel,
@@ -216,6 +225,24 @@ export function chatWorkerCalls(
           ...(limit ? { limit } : {}),
         }),
       );
+    },
+    "channels.chats": async (params, caller) => {
+      const { channel, query, limit, cursor } = parseWorkerCallParams(
+        "channels.chats",
+        ChatsParams,
+        params,
+      );
+      if (!channelsService.chats) throw new Error("This Rome lists no chats");
+      // A listing names no one chat, so it reads as a query of no chat would:
+      // a turn others read lists nothing.
+      if (!readsAnyChat(caller?.callerActionContext)) {
+        throw new Error("A turn others read lists no chats");
+      }
+      return await channelsService.chats(channel, {
+        ...(query ? { query } : {}),
+        ...(limit ? { limit } : {}),
+        ...(cursor ? { cursor } : {}),
+      });
     },
     "agentNames.resolve": async (params) => {
       const { name } = parseWorkerCallParams("agentNames.resolve", AgentNamesResolveParams, params);

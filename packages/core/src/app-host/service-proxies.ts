@@ -64,6 +64,8 @@ import type {
   ChannelMessageQuery,
   ChannelMessageSearch,
   ChannelSearchResult,
+  ChannelChatsPage,
+  ChannelChatsQuery,
   ChannelSummary,
   ChannelsService,
   MessageReceipt,
@@ -353,6 +355,14 @@ export class ChannelsServiceProxy implements ChannelsService {
       { timeoutMs: CHANNEL_QUERY_RPC_TIMEOUT_MS },
     );
     return { messages: fromWire(found.messages), coverage: found.coverage };
+  }
+
+  chats(channel: Account | string, query: ChannelChatsQuery = {}): Promise<ChannelChatsPage> {
+    return callMain<ChannelChatsPage>(
+      "channels.chats",
+      { channel, ...query },
+      { timeoutMs: CHANNEL_QUERY_RPC_TIMEOUT_MS },
+    );
   }
 }
 

@@ -105,9 +105,12 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     },
     // A thread inside a group's conversation is read whole: the session
     // holds the conversation, and none of its turns saw the thread's replies
-    // that did not mention Rome.
+    // that did not mention Rome. Only a thread of the session's own
+    // conversation is read, so its messages reach no other audience.
     thread: (place, thread, before, first) =>
-      readBefore({ ...place, threadId: thread }, before, first),
+      place.threadId && thread.startsWith(`${place.threadId}:`)
+        ? readBefore({ ...place, threadId: thread }, before, first)
+        : Promise.resolve(null),
   };
 }
 
