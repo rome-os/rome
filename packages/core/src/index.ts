@@ -1571,11 +1571,19 @@ async function main() {
       concierge.switchForModelLimit(chatId, failure, agentName),
     creditsUsable: () => codexLoginChoice.creditsUsable(),
     selectModel: selectChatModel,
+    canonicalAgent: (agentName) => agentLoader.find(agentName)?.name ?? agentName,
     webchatRepo,
     settings: settingsRepo,
     mainChatId: () => concierge.findChatId(),
+    // A refused send names the agent as the chat does ("main"), its session
+    // by the canonical id ("core:main").
     runtimeOf: async (chatId, agentName) =>
-      (await sessionRepository.current(webchatSessionKey(chatId), agentName))?.id ??
+      (
+        await sessionRepository.current(
+          webchatSessionKey(chatId),
+          agentLoader.find(agentName)?.name ?? agentName,
+        )
+      )?.id ??
       // A chat whose first turn never ran has no session yet: open it as
       // its first message would have.
       (await concierge.dashboard.chats.openSession(chatId).catch(() => null)),

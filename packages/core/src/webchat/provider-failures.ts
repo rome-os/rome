@@ -160,6 +160,8 @@ export interface ProviderFailuresDeps {
   creditsUsable?: () => boolean;
   /** Tells a live session of the chat the model its next turn runs. */
   selectModel?: (chatId: string, agentName: string, selection: string) => void;
+  /** An agent's canonical id ("core:main") for the name a chat uses ("main"). */
+  canonicalAgent?: (agentName: string) => string;
   /** Pushes to the guardian's phone. Absent, nothing is pushed. */
   notify?: {
     send(content: {
@@ -811,9 +813,16 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     };
   };
 
+  /** The failure with its agent named as its sessions are, so a resume finds them. */
+  const canonical = (turn: ChatTurnFailure): ChatTurnFailure => ({
+    ...turn,
+    agentName: deps.canonicalAgent?.(turn.agentName) ?? turn.agentName,
+  });
+
   return {
-    async failed(turn, options) {
+    async failed(raw, options) {
       if (stopped) return;
+      const turn = canonical(raw);
       const decided = await decide(turn, options?.final === true);
       if (!decided) return;
       const card = await writeCard(turn, decided.part, decided.runsOn);
@@ -824,8 +833,9 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         void deps.accounts.refresh?.(decided.runsOn).catch(() => undefined);
       }
     },
-    async cardFor(turn, messageId, beside) {
+    async cardFor(raw, messageId, beside) {
       if (stopped) return null;
+      const turn = canonical(raw);
       const decided = await decide(turn, true);
       if (!decided) return null;
       const card = await writeCard(turn, decided.part, decided.runsOn, { messageId, beside });
