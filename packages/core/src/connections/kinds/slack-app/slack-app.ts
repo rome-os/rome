@@ -851,6 +851,14 @@ export class SlackAppAdapter {
       const message = slackMessage(this.context(channelId), wire, name);
       if (message) messages.push(message);
     }
+    // A page Slack goes on from that held nothing Rome reads, such as only
+    // file shares with no text, must not read as the thread's end.
+    const lastRaw = page.messages.at(-1)?.ts;
+    if (messages.length === 0 && page.nextCursor && lastRaw) {
+      throw new Error(
+        `Slack's page of thread ${channelId}:${threadTs} held only messages Rome does not read, such as files with no text, and the thread goes on. Read on with newerThan=${lastRaw}, which conversations.replies takes as its cursor.`,
+      );
+    }
     messages.sort((a, b) => compareTs(tsOfId(b.messageId), tsOfId(a.messageId)));
     const below = read.olderThan !== undefined || read.until !== undefined;
     return below

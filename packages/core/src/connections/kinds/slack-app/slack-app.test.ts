@@ -2047,6 +2047,26 @@ describe("Slack app in the channels it is a member of", () => {
     expect(texts(fromStart)).toEqual(["message 2", "message 1", "message 0"]);
   });
 
+  it("says where to read on when a page of a thread held nothing Rome reads, rather than end the thread", async () => {
+    const root = "1700000000.000100";
+    const files = Array.from({ length: 15 }, (_, i) => ({
+      ts: `1700000000.${String(101 + i).padStart(6, "0")}`,
+      user: "U_MEMBER",
+      text: "",
+      subtype: "file_share",
+      thread_ts: root,
+    }));
+    const api = channelApi({
+      conversationReplies: rs.fn(async () => ({ messages: files, nextCursor: "more" })),
+    });
+    const { adapter: a } = adapter(fakeMailbox(), api, testCopy(), undefined, openGate());
+    await a.start();
+
+    await expect(
+      a.readHistory(`C_NEWS:${root}` as never, { newerThan: root, limit: 100 }),
+    ).rejects.toThrow("Read on with newerThan=1700000000.000115");
+  });
+
   it("reads a thread and a page of history ending at its root as two calls to Slack", async () => {
     const root = "1700000000.000005";
     const api = channelApi({
