@@ -240,6 +240,8 @@ export interface SlackAppDescriptorDeps {
   copy: SlackMessageCopy;
   /** Which connections the guardian opened to their workspace's other members. */
   openToMembers: SlackAppOpenToMembers;
+  /** Whether Rome listens to the account behind a connection. */
+  listens: (connectionId: string) => boolean;
   instanceOrigin?: () => string;
 }
 
@@ -442,6 +444,7 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
             copy: deps.copy,
             // Read for each message, so a switch turned off holds from the next.
             openToMembers: () => deps.openToMembers.isOpen(kit.connectionId),
+            listened: () => deps.listens(kit.connectionId),
           });
           return {
             start(deliver, fault): void {

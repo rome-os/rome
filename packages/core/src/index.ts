@@ -1933,6 +1933,7 @@ async function main() {
       cloud: romeCloudSlackApp(),
       copy: new SlackMessageCopyRepository(db),
       openToMembers: new SlackAppOpenToMembersRepository(db),
+      listens: (connectionId) => accountListening.listens(connectionId),
       openMailbox: (mailbox, onFrame) => {
         const drainer = new RelayDrainer(
           [
