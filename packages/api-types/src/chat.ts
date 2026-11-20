@@ -250,7 +250,10 @@ export interface ProviderFailureResolution {
   provider?: DefaultModelProvider;
   /** The model a model switch moved the chat to. */
   model?: string;
-  /** The stopped turn ran again. */
+  /**
+   * Whether the stopped turn ran again. The server always sends it on a
+   * switched or recovered card; one written before it did reads as `true`.
+   */
   continued?: boolean;
 }
 

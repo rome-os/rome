@@ -1327,7 +1327,7 @@ describe("a turn resumed by itself", () => {
     await h.accountChanged("anthropic");
     expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
     expect(h.cardIn("other")?.resolved).toMatchObject({ by: "recovered" });
-    expect(h.cardIn("other")?.resolved?.continued).toBeUndefined();
+    expect(h.cardIn("other")?.resolved?.continued).toBe(false);
   });
 
   it("names the provider that failed when a default change resumes it", async () => {
@@ -1506,7 +1506,7 @@ describe("round 6: recovery bound to the card's request", () => {
     await h.accountChanged("anthropic");
     expect(h.runs).toEqual([]);
     expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "recovered" });
-    expect(h.cardIn("chat")?.resolved?.continued).toBeUndefined();
+    expect(h.cardIn("chat")?.resolved?.continued).toBe(false);
   });
 
   it("names ChatGPT for a chat kept on it, though Rome credits are the default", async () => {
@@ -1567,7 +1567,7 @@ describe("round 7: a switch the guardian clicked", () => {
     await flush();
     expect(h.runs).toEqual([]);
     expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "switched" });
-    expect(h.cardIn("chat")?.resolved?.continued).toBeUndefined();
+    expect(h.cardIn("chat")?.resolved?.continued).toBe(false);
   });
 
   it("binds the silent retry to its quiet card: a newer card stops it", async () => {
@@ -1616,7 +1616,7 @@ describe("round 7: a switch the guardian clicked", () => {
     await flush();
     expect(h.runs).toEqual([]);
     expect(h.settings.get(PROVIDER_RESUMES_SETTING_KEY)).toEqual([]);
-    expect(h.cardIn("chat")?.resolved?.continued).toBeUndefined();
+    expect(h.cardIn("chat")?.resolved?.continued).toBe(false);
   });
 
   it("keeps an owner's pick on Rome credits made the default", async () => {
@@ -1666,5 +1666,101 @@ describe("round 7: a switch the guardian clicked", () => {
     queue.release();
     await flush();
     expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
+  });
+});
+
+describe("round 8: what a card says, and what settles it", () => {
+  const held = () => {
+    let release = () => {};
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { wait, release };
+  };
+
+  it("says outright that a turn a default change moved did not continue", async () => {
+    const h = harness(
+      { chat: {}, other: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+      // The guardian wrote in "other" since its turn stopped.
+      { continues: (chatId) => chatId !== "other" },
+    );
+    await h.fail("chat", quota);
+    await h.fail("other", quota);
+    const card = (await h.failures.cards()).find((open) => open.chatId === "chat");
+    await h.failures.switchCard(card!.messageId, {
+      kind: "provider",
+      provider: "openai",
+      makeDefault: true,
+    });
+    await flush();
+    expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
+    expect(h.cardIn("other")?.resolved).toHaveProperty("continued", false);
+    expect(h.cardIn("other")?.resolved).toMatchObject({ by: "switched", provider: "openai" });
+  });
+
+  it("leaves the guardian's card and its retry to the request when a system turn runs", async () => {
+    const pause = held();
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("available") },
+      { delay: () => pause.wait },
+    );
+    await h.fail("chat", temporary);
+    // A Concierge report ran in the chat meanwhile.
+    await h.failures.succeeded("chat", false);
+    expect(h.cardIn("chat")).toMatchObject({ retrying: true });
+    expect(h.cardIn("chat")?.resolved).toBeUndefined();
+    pause.release();
+    await flush();
+    expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
+  });
+
+  it("moves a ChatGPT chat's card when Rome credits become the default, though both run on Codex", async () => {
+    const h = harness(
+      { a: {}, b: {} },
+      { openai: reportOf("unauthorized"), anthropic: reportOf("unauthorized") },
+      {
+        defaultProvider: "openai",
+        signedIn: { anthropic: false, openai: false, rome_credits: true },
+        credits: true,
+      },
+    );
+    await h.fail("a", revoked);
+    await h.fail("b", revoked);
+    const card = (await h.failures.cards()).find((open) => open.chatId === "a");
+    await h.failures.switchCard(card!.messageId, {
+      kind: "provider",
+      provider: "rome_credits",
+      makeDefault: true,
+    });
+    await flush();
+    expect(h.runs.map((run) => run.threadId).sort()).toEqual(["a", "b"]);
+    expect(h.cardIn("b")?.resolved).toMatchObject({
+      by: "switched",
+      provider: "rome_credits",
+      continued: true,
+    });
+  });
+
+  it("keeps a switch's promise to run and its card when Rome shuts down first", async () => {
+    const queue = held();
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+      { queue: queue.wait },
+    );
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
+    await flush();
+    h.failures.stop();
+    queue.release();
+    await flush();
+    expect(h.runs).toEqual([]);
+    expect(h.settings.get(PROVIDER_RESUMES_SETTING_KEY)).toEqual([
+      expect.objectContaining({ chatId: "chat", cardId: card!.messageId }),
+    ]);
+    expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "switched", continued: true });
   });
 });

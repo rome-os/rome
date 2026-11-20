@@ -304,7 +304,7 @@ function retryPrompt(provider: string): string {
   );
 }
 
-/** A settled card's content with its "continued" taken back. */
+/** A settled card's content with its "continued" taken back, said outright. */
 function withoutContinued(content: string): string {
   try {
     const parts = JSON.parse(content) as unknown[];
@@ -313,8 +313,7 @@ function withoutContinued(content: string): string {
         if (!isRecord(part) || part.type !== "provider_failure" || !isRecord(part.resolved)) {
           return part;
         }
-        const { continued: _continued, ...resolved } = part.resolved;
-        return { ...part, resolved };
+        return { ...part, resolved: { ...part.resolved, continued: false } };
       }),
     );
   } catch {
@@ -574,7 +573,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     const cardId = origin.cardId;
     const ended = await settle(
       (card) => card.messageId === cardId,
-      () => ({ at: now().toISOString(), by: "recovered" }),
+      () => ({ at: now().toISOString(), by: "recovered", continued: false }),
     );
     if (ended.length > 0) return;
     const settled = settledContent.get(cardId);
@@ -599,6 +598,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     const asked = now().getTime();
     const sessionId = await deps.runtimeOf(chatId, agentName).catch(() => null);
     if (!sessionId) {
+      // Shutting down: the next start tries again.
+      if (stopped) return;
       // Nothing can run it, now or after a restart: the promise goes, and the card says so.
       log.warn("provider recovery has no session to run in", { chatId });
       await dropResume(chatId).catch(() => undefined);
@@ -618,6 +619,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         inputLabel: "Provider recovery",
         ...(actor ? { actor } : {}),
         shouldRun: () => {
+          // Rome is shutting down: the marker and the card stay, and the next start runs it.
+          if (stopped) return false;
           void dropResume(chatId).catch(() => undefined);
           const wanted = stillWanted(chatId, asked, origin);
           if (wanted) {
@@ -668,7 +671,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     }
     void settle(
       (open) => open.messageId === card.messageId,
-      () => ({ at: now().toISOString(), by: "recovered" }),
+      () => ({ at: now().toISOString(), by: "recovered", continued: false }),
     ).catch(() => undefined);
   };
 
@@ -1107,14 +1110,15 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
   // their stopped turns run there. Kept chats and owner picks stay.
   const stopDefaults = deps.defaults.onChanged((change) => {
     if (stopped || !change.moveExisting) return;
-    const to = providerOfDefault(change.to);
     void (async () => {
       const cards = await readCards();
       const moving: string[] = [];
       for (const card of cards) {
         // A quiet card waits on its own retry, which runs where the chat now runs.
+        // Rome credits and ChatGPT both run on Codex: the provider the card
+        // names tells them apart.
         if (
-          card.runsOn === to ||
+          card.part.provider === change.to ||
           card.part.card === "model" ||
           card.part.retrying ||
           switching.has(card.chatId) ||
@@ -1136,7 +1140,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       );
       await settle(
         (card) => moving.includes(card.messageId) && !continuing.includes(card.messageId),
-        () => ({ at: now().toISOString(), by: "switched", provider: change.to }),
+        () => ({ at: now().toISOString(), by: "switched", provider: change.to, continued: false }),
       );
       for (const card of ended) {
         resume(card.chatId, card.agentName, failedName(card), originOf(card));
@@ -1359,7 +1363,10 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       return decided.part;
     },
     async succeeded(chatId, answers = true) {
-      if (answers) ranAt.set(chatId, now().getTime());
+      // A system turn of the chat answers no one: the guardian's card and its
+      // retry still wait for the request.
+      if (!answers) return;
+      ranAt.set(chatId, now().getTime());
       swapped.delete(chatId);
       // A turn ran: the retry that waited for the provider is not needed.
       dropRetry(chatId);
