@@ -400,6 +400,10 @@ interface ManagerDeps {
    * nothing is added.
    */
   chatInstructions?: (thread: ThreadContext | undefined) => Promise<string | null>;
+  /** The name of Rome's account behind a connection, as a mention of it shows
+   *  in a message, or null when the connection reports none. Absent, the
+   *  thread context names no account. */
+  ownAccountName?: (connectionId: string) => Promise<string | null>;
   /** Where agents work: the default working directory and the projects folder. */
   folders: AgentFolders;
   /** Where the session logs. */
@@ -4139,10 +4143,17 @@ class AgentSessionImpl implements AgentSession {
       if (!this.isSubagent && this.threadFresh && !this.threadContextInjected && tc) {
         this.threadContextInjected = true;
         const workingPath = this.workingDir?.trim();
-        const block = buildThreadContextBlock(tc, {
-          path: workingPath,
-          relativePath: workingPath ? projectPath(this.deps.folders, workingPath) : null,
-        });
+        const accountName = tc.connectionId
+          ? await this.deps.ownAccountName?.(tc.connectionId).catch(() => null)
+          : null;
+        const block = buildThreadContextBlock(
+          tc,
+          {
+            path: workingPath,
+            relativePath: workingPath ? projectPath(this.deps.folders, workingPath) : null,
+          },
+          accountName,
+        );
         if (block) {
           userPrompt = `${block}\n\n${userPrompt}`;
         }

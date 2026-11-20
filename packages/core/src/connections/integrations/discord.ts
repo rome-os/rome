@@ -112,10 +112,9 @@ export interface DiscordDeps {
   /** The agent linked to a Connection's channel, as `accountAgentResolver`
    *  answers it for that channel. */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
-  /** Whether an agent's own app runs its turns (`app-host/runs-own-turns.ts`).
-   *  An account linked to it hears every message, whatever its chats' settings say. */
-  runsOwnTurns?: (agent: string) => boolean;
   /** Whether an agent is loaded, aliases included. */
+  /** The platform ids of all of Rome's Discord accounts. */
+  romeAccountIds?: () => ReadonlySet<string>;
   hasAgent?: (name: string) => boolean;
   /** Injectable token validator so the connect route / tests can drive the
    *  users/@me probe without hitting the network. Production pings the Discord
@@ -262,11 +261,8 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             chatStop: deps.chatStop,
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
-            unsafeTestOnlyHearEveryMessage: () => {
-              const agent = deps.accountAgentOf?.(kit.connectionId);
-              return typeof agent === "string" && deps.runsOwnTurns?.(agent) === true;
-            },
             hasAgent: deps.hasAgent,
+            romeAccountIds: deps.romeAccountIds,
             resolveDiscordPerson: (channelUserId) =>
               deps.peopleRepo.byAccount({ platform: "discord", id: channelUserId }),
             // Live gateway faults (post-login) route through here; the descriptor

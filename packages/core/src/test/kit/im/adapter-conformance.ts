@@ -47,6 +47,9 @@ export interface ConformanceChannel {
     readonly at: string;
     /** The person writes in the group, and the platform's id for it. */
     personWrites(text: string): string | Promise<string>;
+    /** How a person sees what `personWrites` sent, where the platform adds
+     *  to the words, as a mention of Rome's account. The words alone by default. */
+    shows?(text: string): string;
   };
   /** A thread in `group`, where the platform has threads and the peer
    *  models one. */
@@ -55,6 +58,8 @@ export interface ConformanceChannel {
     readonly at: string;
     /** The person writes in the thread, and the platform's id for it. */
     personWrites(text: string): string | Promise<string>;
+    /** As `group.shows`. */
+    shows?(text: string): string;
   };
   /** Another of Rome's accounts on the platform, in `group` too, where the
    *  peer models two. */
@@ -64,6 +69,13 @@ export interface ConformanceChannel {
     /** The person writes in the group so both accounts hear it, and the
      *  platform's id for the message. */
     bothHear(text: string): string | Promise<string>;
+    /** The person addresses this account alone in the group, where the peer
+     *  models it: by a mention, or by replying to the account's message
+     *  `messageId`. Both accounts hear it. Each answers the platform's id. */
+    alone?: {
+      mentions(text: string): string | Promise<string>;
+      repliesTo(messageId: string, text: string): string | Promise<string>;
+    };
   };
   /** What a person in conversation `at` sees there. */
   visible(at: string): VisibleMessage[];
@@ -116,6 +128,7 @@ export type ConformanceCase =
   | "refusal"
   | "group"
   | "twoAccounts"
+  | "oneOfTwoAccounts"
   | "thread";
 
 /**
@@ -141,6 +154,8 @@ export function describeAdapterConformance(
     groups: boolean;
     /** A second account of Rome's in the group, as `second` names it. */
     twoAccounts: boolean;
+    /** The person can address the second account alone, as `second.alone` names it. */
+    oneOfTwoAccounts?: boolean;
     /** A thread in the group, as `thread` names it. */
     threads: boolean;
   },
@@ -374,7 +389,7 @@ export function describeAdapterConformance(
           ["rome", "hello group"],
         ]);
         expect(await transcript(heard.message.place)).toEqual([
-          { text: "hello all", fromRome: false },
+          { text: group.shows?.("hello all") ?? "hello all", fromRome: false },
           { text: "hello group", fromRome: true },
         ]);
         expect(chatsOf("group")).toEqual([heard.message.place.chat.id]);
@@ -407,6 +422,48 @@ export function describeAdapterConformance(
       },
     );
 
+    /** What Rome raised for a message `writes` sends, once both accounts
+     *  have had the time to hear it. */
+    async function raisedFor(writes: () => unknown): Promise<MessageSaid[]> {
+      const before = said.length;
+      await writes();
+      const deadline = Date.now() + 3_000;
+      while (said.length === before) {
+        if (Date.now() > deadline) throw new Error("Rome recorded nothing");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return said.slice(before);
+    }
+
+    const oneOfTwo = runs("oneOfTwoAccounts", models.groups && (models.oneOfTwoAccounts ?? false));
+
+    oneOfTwo(
+      "leaves a message that mentions one of two of Rome's accounts to that account",
+      async () => {
+        const second = peer.second!;
+        const raised = await raisedFor(() => second.alone!.mentions("hi"));
+        expect(raised.map((event) => event.via.account)).toEqual([second.account]);
+      },
+    );
+
+    oneOfTwo("leaves a stop said to one of two of Rome's accounts to that account", async () => {
+      const second = peer.second!;
+      const raised = await raisedFor(() => second.alone!.mentions("/stop"));
+      expect(raised.map((event) => [event.via.account, event.message.body.text])).toEqual([
+        [second.account, "/stop"],
+      ]);
+    });
+
+    oneOfTwo("leaves a reply to one of two of Rome's accounts to that account", async () => {
+      const second = peer.second!;
+      const group = peer.group!;
+      await secondSend!(group.at, { text: "noted" });
+      const own = [...peer.visible(group.at)].reverse().find((message) => message.from === "rome")!;
+      const raised = await raisedFor(() => second.alone!.repliesTo(own.id, "thanks"));
+      expect(raised.map((event) => event.via.account)).toEqual([second.account]);
+    });
+
     runs("thread", models.threads)(
       "records a thread's messages in the thread of its group's chat, and answers there",
       async () => {
@@ -421,7 +478,7 @@ export function describeAdapterConformance(
           ["rome", "Tuesday"],
         ]);
         expect(await transcript(heard.message.place)).toEqual([
-          { text: "plans?", fromRome: false },
+          { text: thread.shows?.("plans?") ?? "plans?", fromRome: false },
           { text: "Tuesday", fromRome: true },
         ]);
         // The thread stands in its group's chat, which holds no message of it.

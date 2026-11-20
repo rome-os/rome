@@ -312,6 +312,7 @@ import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
 import { guardedSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
+import { ownAccountNames } from "./connections/own-account-name.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
 import type { EmailAdapter, EmailSettings } from "./connections/kinds/email/email.js";
@@ -1345,6 +1346,7 @@ async function main() {
       turnMiddleware,
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
       chatInstructions: taskChatInstructions({ webchatRepo }),
+      ownAccountName: ownAccountNames(connectionRegistry),
       sessionTracing: romeSessionTracing,
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
@@ -1574,7 +1576,7 @@ async function main() {
   // SDK 0.7 reads.
   const appChatSettings = legacyChatIdSettings(chatSettings);
   const wakeGateFor = wakeGateLoader({
-    chatEnabled: async (chat) => (await appChatSettings.get(chat)).effective.enabled,
+    chatSettings: (chat) => appChatSettings.get(chat),
     bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,
@@ -1900,7 +1902,16 @@ async function main() {
     listAgents: () => agentLoader.list().map((agent) => agent.name),
     hasAgent: (name) => agentLoader.find(name) !== undefined,
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
-    runsOwnTurns: (agent) => runsOwnTurns(agentLoader.find(agent)),
+    // Only accounts Rome listens to: a message left to one that does not
+    // listen would be recorded by nobody.
+    romeAccountIds: () =>
+      new Set(
+        connectionRegistry
+          .find("discord")
+          .filter((connection) => accountListening.listens(connection.id))
+          .map((connection) => accounts.accountOf(connection.id)?.id)
+          .filter((id): id is string => !!id),
+      ),
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
       linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {
