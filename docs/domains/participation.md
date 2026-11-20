@@ -41,6 +41,7 @@ The agent's working memory of a chat: a view built from the chat's messages, not
 - An app that hears every message said to Rome gets the same answer with each message, so an app running its own agent names a sender as Rome's own turns do.
 - Participation asks People when the turn runs and never keeps the answer on the message, so a link the guardian makes or removes shows from the next turn. It never takes a person from the name a message showed, and no name a sender picks can pass for People's answer.
 - A message's text is what a person sees on the platform, whichever of Rome's accounts heard it. On Discord every mention shows as `@name`, the agent's own account included. Whether the message addressed the agent's account is a fact the connection reports beside the text, not something read from it.
+- A woken agent is told the name of the account it speaks as in the chat, so it can tell its own mention from another of Rome's accounts.
 - The messages the agent reads further back on its own, and those a renewed session carries over, show only the name each message showed.
 - Beyond the default view, the agent can read more of the chat on its own judgement: further back, the chat around a thread, other threads in the chat.
 
