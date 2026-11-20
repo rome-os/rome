@@ -1266,6 +1266,10 @@ export interface RunParams {
   platformMessageId?: string;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
+  /** The platform thread the triggering message was said in, as
+   *  {@link ChannelMessage.inThread} names it. A conversation's session reads
+   *  the thread's earlier messages the first time one of its turns is in it. */
+  inThread?: ChatId;
   /**
    * Ask the host to deliver the reply into `threadContext`'s conversation as
    * it is written, answering `platformMessageId`. The host does so only when
@@ -1822,6 +1826,12 @@ export interface ChannelMessage {
    *  account read live from its platform, such as Discord, where the message
    *  opened a thread or says that one was opened. */
   openedThread?: ChatId;
+  /** The platform thread this message was said in, by the id a read takes as
+   *  `chatId` to read the thread's earlier messages. Set by a channel whose
+   *  chat holds its threads, such as Slack's, where `chatId` names the
+   *  conversation and a thread is read apart from it. Absent where the
+   *  message is in no thread, or `chatId` already names the thread. */
+  inThread?: ChatId;
   /** Where this message sits in a channel read, as an opaque token. Set on
    *  what {@link ChannelsService.query} answers: pass it as
    *  {@link ChannelMessageQuery.after} to read the messages older than it. */
