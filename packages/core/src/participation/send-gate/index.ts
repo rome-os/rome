@@ -5,8 +5,15 @@ import type { BondLevel } from "@rome-os/app-runtime";
 /** A message an agent wants to send, as the send gate reads it. The text is
  *  not part of it: a gate judges where and to whom, never what. */
 export interface SendRequest {
-  /** The chat the message goes to. */
-  destination: { connectionId: string; chatId: string };
+  /** Where the message goes. */
+  destination: {
+    /** A direct message, or a group, channel or other chat with more than one reader. */
+    place: "direct" | "group";
+    /** The message goes to the chat the agent was woken in. */
+    sameChatAsWake: boolean;
+    /** Nobody but the guardian can read the message there. */
+    onlyGuardianReads: boolean;
+  };
   /** People's answer for the sender of the message this one answers, or null
    *  when it is nobody. Others in the chat may read it too: the gate is not told. */
   recipient: { bondLevel: BondLevel } | null;

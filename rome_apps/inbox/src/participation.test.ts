@@ -60,6 +60,8 @@ interface Setup {
   /** The host recorded the message before Inbox heard it, as it does when it
    *  hands the hook `messagesSaid`. */
   recorded?: boolean;
+  /** Where the message was said: a direct message, or a group (the default). */
+  threadType?: "private" | "group";
 }
 
 function result(content: string, structuredOutput?: unknown): AgentMessage {
@@ -155,7 +157,7 @@ async function handle(setup: Setup) {
     channelUserId: "user-1",
     threadId: "chat-1",
     threadName: "Dev Chat",
-    threadType: "group",
+    threadType: setup.threadType ?? "group",
     displayName: "Alice",
     text: "Can you help?",
     messageId: "message-1",
@@ -460,12 +462,25 @@ describe("send: send gate × Envoy", () => {
       answers: [[result("ESCALATE")], [result("Hi")], [envoy("approve", "Fine")]],
     });
 
+    const guardianDirect = await handle({
+      sender: "guardian",
+      policy: "allow",
+      threadType: "private",
+      answers: [[result("Hi")]],
+    });
+
+    // The guardian's message answered in a group: others read the reply.
     expect(guardian.gateRequests).toEqual([
       {
-        destination: { connectionId: "connection:telegram", chatId: "chat-1" },
+        destination: { place: "group", sameChatAsWake: true, onlyGuardianReads: false },
         recipient: { bondLevel: "guardian" },
         author: { agentName: "main" },
       },
+    ]);
+    expect(guardianDirect.gateRequests).toEqual([
+      expect.objectContaining({
+        destination: { place: "direct", sameChatAsWake: true, onlyGuardianReads: true },
+      }),
     ]);
     expect(stranger.gateRequests).toEqual([expect.objectContaining({ recipient: null })]);
   });

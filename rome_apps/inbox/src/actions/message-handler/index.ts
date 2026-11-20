@@ -29,7 +29,7 @@ const log = createAppLogger("message-handler");
 
 /** Core's send gate, which the SDK does not describe yet. */
 export type SendGate = (request: {
-  destination: { connectionId: string; chatId: string };
+  destination: { place: "direct" | "group"; sameChatAsWake: boolean; onlyGuardianReads: boolean };
   recipient: { bondLevel: BondLevel } | null;
   author: { agentName: string };
 }) => "send" | "check" | "ask_guardian" | "refuse";
@@ -503,9 +503,17 @@ async function handleTrustedMessage(
       knownToProvider: true,
     });
   const senderPerson = typeof args.senderPerson === "string" ? args.senderPerson : null;
+  const recipient =
+    typeof args.senderPerson === "string" ? { bondLevel: bondLevel as BondLevel } : null;
+  const place = args.threadType === "private" ? "direct" : "group";
   const decision = deps.sendGate({
-    destination: { connectionId, chatId: threadId },
-    recipient: typeof args.senderPerson === "string" ? { bondLevel: bondLevel as BondLevel } : null,
+    destination: {
+      place,
+      // The reply goes to the chat the message came from.
+      sameChatAsWake: true,
+      onlyGuardianReads: place === "direct" && recipient?.bondLevel === "guardian",
+    },
+    recipient,
     author: { agentName: targetAgent },
   });
   log.info("send gate decision", { decision, channel, channelUserId });
