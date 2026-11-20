@@ -235,6 +235,7 @@ export interface ConciergeDeps {
     | "awaitingGuardianSince"
     | "openWaitsOf"
     | "taskCardsOf"
+    | "widgetMessage"
     | "ownerSpokeAt"
     | "archiveSessionIn"
     | "unarchiveSession"
