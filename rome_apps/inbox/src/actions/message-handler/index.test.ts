@@ -120,6 +120,9 @@ function createMessageHandlerDeps(
 
   const deps = {
     agentRunner,
+    // Answers as Core's guardedSend does, which an app test cannot import.
+    sendGate: ({ recipient }: { recipient: { bondLevel: string } | null }) =>
+      recipient?.bondLevel === "guardian" ? "send" : "check",
     personMappingRepo: {
       findByChannelUser: rs.fn(async () => null),
       findByName: rs.fn(async () => []),

@@ -28,6 +28,7 @@ import { PoliciesRepository } from "../db/repositories/policies.js";
 import { RpcAgentRunner } from "../core/rpc-agent-runner.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { PolicyEngine } from "../core/policy-engine.js";
+import { guardedSend } from "../participation/send-gate/index.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "../profile-memory.js";
 import {
   ActionRegistryProxy,
@@ -223,6 +224,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       sentinelLogRepo,
       approvalsRepo,
       policyEngine,
+      sendGate: guardedSend,
       routinesRepo,
       resolveOneOffDate: (trigger: Trigger) =>
         resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),

@@ -19,6 +19,7 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
     "connections",
     "favors",
     "instance",
+    "participation",
     "people",
     "relay",
     "routines",
