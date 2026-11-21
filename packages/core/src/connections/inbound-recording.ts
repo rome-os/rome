@@ -243,10 +243,9 @@ export function inboundRecording(
   ): number | null => {
     const { via } = message;
     // A message handed over after the last listener left is not recorded.
-    if (recording.get(via.channel) !== subscription) {
-      settleInbound(message, new RecordingStopped());
-      return null;
-    }
+    // Its delivery was refused when recording stopped; a waiter now can only
+    // be a redelivery under the new subscription, which records it.
+    if (recording.get(via.channel) !== subscription) return null;
     // What reaches an account Rome does not listen to never forms a chat.
     if (deps.listens?.(via.connectionId) === false) {
       settleInbound(message);
