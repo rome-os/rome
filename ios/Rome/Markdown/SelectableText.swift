@@ -265,6 +265,44 @@ enum SelectableText {
         return out
     }
 
+    /// The paragraph around the character at `index` (UTF-16), without its
+    /// break: a Markdown block's text, one list item, or a run of the
+    /// guardian's own text between blank lines. Blocks are separate lines
+    /// (`\n`); a line break inside a block is a line separator, and two in
+    /// a row are a blank line.
+    nonisolated static func paragraph(in text: String, at index: Int) -> NSRange {
+        let string = text as NSString
+        guard string.length > 0 else { return NSRange(location: 0, length: 0) }
+        let at = min(max(index, 0), string.length - 1)
+        let newline: unichar = 0x0A, separator: unichar = 0x2028
+        func breaks(_ i: Int) -> Bool {
+            let c = string.character(at: i)
+            if c == newline { return true }
+            guard c == separator else { return false }
+            // A blank line: this separator next to another.
+            return (i > 0 && string.character(at: i - 1) == separator)
+                || (i + 1 < string.length && string.character(at: i + 1) == separator)
+        }
+        // A press on a break counts toward the text before it, else after.
+        var probe = at
+        if breaks(probe) {
+            var back = probe
+            while back > 0, breaks(back) { back -= 1 }
+            if !breaks(back) { probe = back } else {
+                while probe < string.length - 1, breaks(probe) { probe += 1 }
+            }
+        }
+        var start = probe
+        while start > 0, !breaks(start - 1) { start -= 1 }
+        var end = probe
+        while end < string.length, !breaks(end) { end += 1 }
+        // Without its edges' spaces.
+        let whitespace = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{2028}"))
+        while start < end, let scalar = Unicode.Scalar(string.character(at: start)), whitespace.contains(scalar) { start += 1 }
+        while end > start, let scalar = Unicode.Scalar(string.character(at: end - 1)), whitespace.contains(scalar) { end -= 1 }
+        return NSRange(location: start, length: end - start)
+    }
+
     /// What Copy writes for `text` taken from these strings: its line
     /// breaks as newlines.
     nonisolated static func copied(_ text: String) -> String {
@@ -344,8 +382,9 @@ struct SelectableTextView: UIViewRepresentable {
     var markers: [ListMarker] = []
     /// Off for code, which keeps its lines and scrolls sideways instead.
     var wraps = true
-    /// Opens with all of its text selected and the edit menu up.
-    var selectsAll = false
+    /// Where select mode opens a selection in this text, with the edit menu
+    /// up; nil opens none.
+    var start: SelectionStart? = nil
     /// The selection's colour and its handles'.
     var tint: UIColor = UIColor(Palette.primary)
 
@@ -354,7 +393,7 @@ struct SelectableTextView: UIViewRepresentable {
     func makeUIView(context: Context) -> SelectingTextView {
         let view = SelectingTextView(wraps: wraps)
         view.delegate = context.coordinator
-        view.selectsAllOnAppear = selectsAll
+        view.start = start
         return view
     }
 
@@ -385,7 +424,21 @@ struct SelectableTextView: UIViewRepresentable {
                 environment.openURL(url)
             }
         }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            (textView as? SelectingTextView)?.selectionDidChange()
+        }
     }
+}
+
+/// Where select mode opens its selection: the paragraph the long press that
+/// opened the menu was on.
+struct SelectionStart: Equatable {
+    /// The long press, in the window; nil with none (VoiceOver, a keyboard).
+    var point: CGPoint?
+    /// This text is the message's first: with no point, it opens on its
+    /// first paragraph.
+    var first: Bool
 }
 
 /// Line spacing as SwiftUI's `Text` lays it: between the lines of a
@@ -410,7 +463,7 @@ final class SelectableLayout: NSObject, NSLayoutManagerDelegate, Sendable {
 /// reports the used height directly.
 final class SelectingTextView: UITextView {
     private let wraps: Bool
-    var selectsAllOnAppear = false
+    var start: SelectionStart?
     private var selectedOnce = false
     var quotes: [NSRange] = [] {
         didSet { if quotes != oldValue { setNeedsLayout() } }
@@ -541,22 +594,39 @@ final class SelectingTextView: UITextView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window != nil, selectsAllOnAppear, !selectedOnce else { return }
+        guard window != nil, start != nil, !selectedOnce else { return }
         selectedOnce = true
-        selectAllWithMenu(tries: 4)
+        selectStart(tries: 4)
     }
 
-    /// Selects all of the text and shows the edit menu. The bubble's context
-    /// menu may still be closing, and the text view cannot take focus until
-    /// it has, so it tries again a moment later.
-    private func selectAllWithMenu(tries: Int) {
+    /// The paragraph select mode opens on, in this text: the one under the
+    /// long press, else the first when the message's first text has no
+    /// press to go by. Nil where the press was on other text.
+    private var startRange: NSRange? {
+        guard let start else { return nil }
+        guard let point = start.point else {
+            return start.first ? SelectableText.paragraph(in: textStorage.string, at: 0) : nil
+        }
+        // Half the space between blocks on either side: a press there
+        // takes the nearer text.
+        let local = convert(point, from: nil)
+        guard bounds.insetBy(dx: -SelectableText.blockSpacing, dy: -SelectableText.blockSpacing / 2).contains(local),
+              let position = closestPosition(to: local) else { return nil }
+        return SelectableText.paragraph(in: textStorage.string, at: offset(from: beginningOfDocument, to: position))
+    }
+
+    /// Selects the paragraph select mode opens on and shows the edit menu.
+    /// The bubble's context menu may still be closing, and the text view
+    /// cannot take focus until it has, so it tries again a moment later.
+    private func selectStart(tries: Int) {
         DispatchQueue.main.asyncAfter(deadline: .now() + (tries == 4 ? 0 : 0.15)) { [weak self] in
-            guard let self, self.window != nil else { return }
+            guard let self, self.window != nil, let range = self.startRange, range.length > 0 else { return }
             guard self.isFirstResponder || self.becomeFirstResponder() else {
-                if tries > 1 { self.selectAllWithMenu(tries: tries - 1) }
+                if tries > 1 { self.selectStart(tries: tries - 1) }
                 return
             }
-            self.selectedRange = NSRange(location: 0, length: self.textStorage.length)
+            self.selectedRange = range
+            self.startAutoscroll()
             // After the bubble's menu has closed: one shown while it closes
             // is closed with it.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.presentEditMenu() }
@@ -578,5 +648,110 @@ final class SelectingTextView: UITextView {
         let rect = selectedTextRange.map { firstRect(for: $0) } ?? bounds
         let point = CGPoint(x: rect.isNull ? bounds.midX : rect.midX, y: rect.isNull ? bounds.minY : rect.minY)
         openingMenu.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: point))
+    }
+
+    // MARK: Edge auto-scroll
+
+    private var lastRange = NSRange(location: 0, length: 0)
+    /// Whether the finger holds the selection's start, else its end.
+    private var movingStart = false
+    private var autoscroll: CADisplayLink?
+
+    func selectionDidChange() {
+        let range = selectedRange
+        if range != lastRange {
+            // The end that moved is the one the finger holds.
+            movingStart = range.location != lastRange.location && NSMaxRange(range) == NSMaxRange(lastRange)
+            lastRange = range
+        }
+        if selectedRange.length > 0 { startAutoscroll() }
+    }
+
+    /// The gesture under way on the view or its handles, if any: one that
+    /// is moving before one that has only begun, whose place may be stale
+    /// (the loupe's stays where a long press began while a handle moves).
+    private static func tracking(_ view: UIView) -> UIGestureRecognizer? {
+        let active = recognizers(in: view).filter { $0.state == .began || $0.state == .changed }
+        return active.first { $0.state == .changed } ?? active.first
+    }
+
+    private static func recognizers(in view: UIView) -> [UIGestureRecognizer] {
+        (view.gestureRecognizers ?? []) + view.subviews.flatMap { recognizers(in: $0) }
+    }
+
+    /// While a finger drags a selection past the top or bottom of what the
+    /// transcript shows, it scrolls, and the held end follows the finger
+    /// into the text that comes into view. UIKit scrolls a text view that
+    /// scrolls itself, not the scroll view around one that does not. It
+    /// watches for a drag for as long as the text holds a selection: a
+    /// handle's drag reports no change of selection until it ends.
+    private func startAutoscroll() {
+        guard autoscroll == nil, Self.enclosingScrollView(of: self) != nil else { return }
+        let link = CADisplayLink(target: AutoscrollTarget(view: self), selector: #selector(AutoscrollTarget.tick(_:)))
+        link.add(to: .main, forMode: .common)
+        autoscroll = link
+    }
+
+    /// A selection's handle or loupe is being dragged in some text view.
+    @MainActor static var dragging = false
+
+    fileprivate func autoscrollTick() {
+        guard let window, isFirstResponder, selectedRange.length > 0 else {
+            Self.dragging = false
+            autoscroll?.invalidate()
+            autoscroll = nil
+            return
+        }
+        let finger = Self.tracking(self)
+        Self.dragging = finger != nil
+        guard let finger, let scroll = Self.enclosingScrollView(of: self) else { return }
+        let y = finger.location(in: window).y
+        let visible = scroll.convert(scroll.bounds, to: window)
+        let top = max(visible.minY, window.safeAreaInsets.top) + Self.edge
+        let bottom = min(visible.maxY, window.bounds.height - window.safeAreaInsets.bottom) - Self.edge
+        let step: CGFloat
+        if y < top { step = -min(1, (top - y) / Self.edge) * Self.speed }
+        else if y > bottom { step = min(1, (y - bottom) / Self.edge) * Self.speed }
+        else { return }
+        let minOffset = -scroll.adjustedContentInset.top
+        let maxOffset = max(minOffset, scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height)
+        let offset = min(max(scroll.contentOffset.y + step, minOffset), maxOffset)
+        guard offset != scroll.contentOffset.y else { return }
+        scroll.contentOffset.y = offset
+        // The held end goes where the finger now is in the text.
+        guard let range = selectedTextRange, let point = closestPosition(to: finger.location(in: self)) else { return }
+        let fixed = movingStart ? range.end : range.start
+        let ordered = compare(point, to: fixed) == .orderedAscending ? (point, fixed) : (fixed, point)
+        if let moved = textRange(from: ordered.0, to: ordered.1), moved != range { selectedTextRange = moved }
+    }
+
+    /// How near an edge the finger starts scrolling, and the most it scrolls a frame.
+    private static let edge: CGFloat = 56
+    private static let speed: CGFloat = 14
+
+    /// The nearest scroll view around `view` that has more to show.
+    private static func enclosingScrollView(of view: UIView) -> UIScrollView? {
+        var next = view.superview
+        while let current = next {
+            if let scroll = current as? UIScrollView, scroll.isScrollEnabled,
+               scroll.contentSize.height > scroll.bounds.height + 1 { return scroll }
+            next = current.superview
+        }
+        return nil
+    }
+}
+
+/// Drives `SelectingTextView`'s edge auto-scroll from a display link, which
+/// holds its target strongly; this holds the view weakly.
+private final class AutoscrollTarget: NSObject {
+    weak var view: SelectingTextView?
+
+    init(view: SelectingTextView) {
+        self.view = view
+    }
+
+    @objc func tick(_ link: CADisplayLink) {
+        guard let view else { return link.invalidate() }
+        view.autoscrollTick()
     }
 }

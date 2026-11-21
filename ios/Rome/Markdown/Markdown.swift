@@ -691,6 +691,9 @@ struct MarkdownText: View {
     /// Select mode (`TextSelection`): the text blocks are drawn as text views
     /// that select in part, the rest as they are.
     var selectable = false
+    /// In select mode, where the long press that opened it was, in the
+    /// window: the paragraph under it opens selected.
+    var selectFrom: CGPoint? = nil
 
     private var blocks: [MarkdownBlock] {
         let parsed = MarkdownParser.parse(source)
@@ -772,11 +775,11 @@ struct MarkdownText: View {
         ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
             switch segment {
             case .text(let run):
-                SelectableTextView(text: run.text, quotes: run.quotes, markers: run.markers, selectsAll: index == first)
+                SelectableTextView(text: run.text, quotes: run.quotes, markers: run.markers, start: SelectionStart(point: selectFrom, first: index == first))
                     .padding(.top, SelectableText.topSpace(run.text))
             case .code(let text):
                 ScrollView(.horizontal, showsIndicators: false) {
-                    SelectableTextView(text: text, wraps: false, selectsAll: index == first)
+                    SelectableTextView(text: text, wraps: false, start: SelectionStart(point: selectFrom, first: index == first))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 14)
                 }

@@ -235,6 +235,78 @@ import UIKit
     }
 }
 
+/// The paragraph select mode opens on.
+@MainActor
+@Suite struct SelectionStartTests {
+    let style = SelectableTextStyle(color: .black)
+
+    private func paragraph(_ text: String, at index: Int) -> String {
+        (text as NSString).substring(with: SelectableText.paragraph(in: text, at: index))
+    }
+
+    private func run(_ source: String) -> String {
+        SelectableText.attributed(MarkdownParser.parse(source), style: style).text.string
+    }
+
+    @Test func aPressInAParagraphTakesThatParagraph() {
+        let text = run("第一段：出版社回信了。书稿下周一前可以看。\n\nSecond paragraph. It has two sentences.\n\n第三段。")
+        #expect(paragraph(text, at: 3) == "第一段：出版社回信了。书稿下周一前可以看。")
+        let second = (text as NSString).range(of: "two").location
+        #expect(paragraph(text, at: second) == "Second paragraph. It has two sentences.")
+        #expect(paragraph(text, at: text.utf16.count - 1) == "第三段。")
+    }
+
+    @Test func aListItemIsAParagraph() {
+        let text = run("Steps:\n\n1. Open the app\n2. 选一个聊天\n   - nested item\n3. Send")
+        let second = (text as NSString).range(of: "聊天").location
+        #expect(paragraph(text, at: second) == "选一个聊天")
+        let nested = (text as NSString).range(of: "nested").location
+        #expect(paragraph(text, at: nested) == "nested item")
+        #expect(paragraph(text, at: 0) == "Steps:")
+    }
+
+    @Test func aLineBreakInsideAParagraphStaysInIt() {
+        let text = run("First line\nsecond line\n\nNext")
+        #expect(paragraph(text, at: 15) == "First line\u{2028}second line")
+    }
+
+    @Test func aPressOnABreakTakesTheNearestParagraph() {
+        let text = run("Before.\n\nAfter.")
+        let gap = (text as NSString).range(of: "\n").location
+        #expect(paragraph(text, at: gap) == "Before.")
+        // The guardian's own text: a blank line between two runs.
+        let own = SelectableText.plain("One\n\nTwo", style: style).string
+        let blank = (own as NSString).range(of: "\u{2028}").location
+        #expect(paragraph(own, at: blank) == "One")
+        #expect(paragraph(own, at: own.utf16.count - 1) == "Two")
+    }
+
+    @Test func aOneParagraphMessageIsAllOfIt() {
+        let text = run("出版社回信了，说书稿下周一前可以看。")
+        #expect(SelectableText.paragraph(in: text, at: 5) == NSRange(location: 0, length: text.utf16.count))
+    }
+
+    @Test func selectTextTakesTheLastPressAndForgetsAStaleOne() {
+        let selection = TextSelection()
+        let now = Date()
+        selection.touchedDown(at: CGPoint(x: 10, y: 20), now: now)
+        selection.begin(row: "m1", text: "Hello", now: now.addingTimeInterval(2))
+        #expect(selection.target?.point == CGPoint(x: 10, y: 20))
+        // Picked long after (VoiceOver, say): no press to go by.
+        selection.begin(row: "m1", text: "Hello", now: now.addingTimeInterval(TextSelection.touchLifetime + 1))
+        #expect(selection.target?.point == nil)
+    }
+
+    @Test func selectModeUnfoldsAFoldedReply() {
+        let long: CGFloat = 2000
+        #expect(AgentBubble.capped(measured: long, expanded: false, size: .large))
+        #expect(!AgentBubble.capped(measured: long, expanded: false, selecting: true, size: .large))
+        #expect(!AgentBubble.capped(measured: 0, expanded: false, selecting: true, size: .large))
+        // Leaving select mode folds it again.
+        #expect(AgentBubble.capped(measured: long, expanded: false, selecting: false, size: .large))
+    }
+}
+
 /// Which message is in select mode, and what ends it.
 @MainActor
 @Suite struct TextSelectionTests {

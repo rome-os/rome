@@ -1,6 +1,7 @@
 import ChatLayout
 import os
 import SwiftUI
+import UIKit.UIGestureRecognizerSubclass
 import UIKit
 
 /// A transcript in a `UICollectionView` laid out by ChatLayout, with each row
@@ -432,6 +433,10 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         tap.cancelsTouchesInView = false
         tap.delegate = self
         view.addGestureRecognizer(tap)
+        // Where each touch lands: Select text opens on the paragraph the
+        // long press that opened the menu was on.
+        let touches = TouchDownRecorder { [weak self] point in self?.selection?.touchedDown(at: point) }
+        view.addGestureRecognizer(touches)
         #if DEBUG
         // A fling `ROME_PERF=paging` drives in code is a drag away from the bottom.
         NotificationCenter.default.addObserver(forName: PerfProbe.flingStarted, object: nil, queue: .main) { [weak self] _ in
@@ -747,7 +752,9 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        selection?.end()
+        // A scroll ends select mode, but not one a selection's own drag
+        // makes as it reaches the edge.
+        if !SelectingTextView.dragging { selection?.end() }
         revealing = nil
         keeping = nil
         // A drag stops a status-bar scroll short of the top, and UIKit then
@@ -1023,5 +1030,26 @@ private final class TranscriptCell: UICollectionViewCell {
 private extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+/// Reports each touch down on its view, in the window, and recognizes
+/// nothing: it fails at once, so it takes no touch from any other gesture.
+private final class TouchDownRecorder: UIGestureRecognizer {
+    private let onTouchDown: (CGPoint) -> Void
+
+    init(onTouchDown: @escaping (CGPoint) -> Void) {
+        self.onTouchDown = onTouchDown
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let touch = touches.first, let window = view?.window {
+            onTouchDown(touch.location(in: window))
+        }
+        state = .failed
     }
 }

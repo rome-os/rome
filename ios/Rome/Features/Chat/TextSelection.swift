@@ -13,13 +13,28 @@ import UIKit
 @MainActor
 @Observable
 final class TextSelection {
-    /// The message in select mode: its row, and the text it had when picked.
+    /// The message in select mode: its row, the text it had when picked,
+    /// and where the long press that opened its menu was, in the window.
     struct Target: Equatable {
         let row: String
         let text: String
+        var point: CGPoint? = nil
     }
 
     private(set) var target: Target?
+
+    /// The last touch down on the transcript, in the window, and when: the
+    /// long press that opened a bubble's menu, read when Select text is
+    /// picked. Not observed: a touch redraws nothing.
+    @ObservationIgnored private var lastTouch: (point: CGPoint, at: Date)?
+    /// Older than this, a touch is not the press that opened the menu (Select
+    /// text picked with VoiceOver, say), and select mode opens on the first
+    /// paragraph.
+    static let touchLifetime: TimeInterval = 30
+
+    func touchedDown(at point: CGPoint, now: Date = .now) {
+        lastTouch = (point, now)
+    }
 
     @ObservationIgnored nonisolated(unsafe) private var editing: NSObjectProtocol?
 
@@ -40,8 +55,9 @@ final class TextSelection {
     var isActive: Bool { target != nil }
 
     /// Puts the message of `row` in select mode; any other leaves it.
-    func begin(row: String, text: String) {
-        target = Target(row: row, text: text)
+    func begin(row: String, text: String, now: Date = .now) {
+        let press = lastTouch.flatMap { now.timeIntervalSince($0.at) <= Self.touchLifetime ? $0.point : nil }
+        target = Target(row: row, text: text, point: press)
     }
 
     func end() {
