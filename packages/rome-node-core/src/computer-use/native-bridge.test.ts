@@ -30,28 +30,37 @@ async function server(
   const canonicalStateDir = await realpath(stateDir);
   const sockets = new Set<Socket>();
   const calls: Array<Record<string, unknown>> = [];
+  const connections: Array<string[]> = [];
   const service = createServer((socket) => {
     sockets.add(socket);
+    const methods: string[] = [];
+    connections.push(methods);
     socket.on("close", () => sockets.delete(socket));
     socket.on("error", () => {});
     let buffer = Buffer.alloc(0);
     socket.on("data", (chunk: Buffer) => {
       buffer = Buffer.concat([buffer, chunk]);
-      if (buffer.length < 4 || buffer.length < 4 + buffer.readUInt32LE()) return;
-      const request = JSON.parse(buffer.subarray(4).toString("utf8")) as Record<string, unknown>;
-      calls.push(request);
-      const respond = (value: unknown) => {
-        const response = Buffer.from(JSON.stringify(value));
-        const header = Buffer.alloc(4);
-        header.writeUInt32LE(response.length);
-        socket.write(header.subarray(0, 2));
-        socket.write(Buffer.concat([header.subarray(2), response]));
-      };
-      reply(
-        request,
-        (result) => respond({ id: request.id, ok: true, result }),
-        (error) => respond({ id: request.id, ok: false, error }),
-      );
+      while (buffer.length >= 4) {
+        const size = buffer.readUInt32LE();
+        if (buffer.length < 4 + size) return;
+        const payload = buffer.subarray(4, 4 + size);
+        buffer = buffer.subarray(4 + size);
+        const request = JSON.parse(payload.toString("utf8")) as Record<string, unknown>;
+        calls.push(request);
+        if (typeof request.method === "string") methods.push(request.method);
+        const respond = (value: unknown) => {
+          const response = Buffer.from(JSON.stringify(value));
+          const header = Buffer.alloc(4);
+          header.writeUInt32LE(response.length);
+          socket.write(header.subarray(0, 2));
+          socket.write(Buffer.concat([header.subarray(2), response]));
+        };
+        reply(
+          request,
+          (result) => respond({ id: request.id, ok: true, result }),
+          (error) => respond({ id: request.id, ok: false, error }),
+        );
+      }
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -67,6 +76,7 @@ async function server(
     stateDir,
     canonicalStateDir,
     calls,
+    connections,
     bridge: createNativeRpcTransport({ stateDir, requestTimeoutMs: 100 }),
   };
 }
@@ -256,7 +266,7 @@ describe("native computer-use transport", () => {
     }
   });
 
-  it("revalidates helper identity before non-hello calls when a service is replaced between calls", async () => {
+  it("verifies helper identity on the same socket before non-hello calls and blocks replaced services", async () => {
     const source = {
       path: "/bundled/app",
       requirement: "stable",
@@ -283,7 +293,7 @@ describe("native computer-use transport", () => {
       bundledAppPath: source.path,
     });
     expect(await bridge.call("act", { sessionId: "s1" })).toEqual({ ok: true });
-    expect(f.calls.filter((call) => call.method === "act")).toHaveLength(1);
+    expect(f.connections).toEqual([["hello"], ["hello", "act"]]);
 
     // Simulate another Node/Desktop version replacing the helper behind the same socket path.
     currentHello = { ...baseHello, implementationSha256: "f".repeat(64) };
@@ -292,7 +302,39 @@ describe("native computer-use transport", () => {
       details: { effectStatus: "not_dispatched" },
     });
     // The incompatible replacement must never receive the action.
-    expect(f.calls.filter((call) => call.method === "act")).toHaveLength(1);
+    expect(f.connections).toEqual([["hello"], ["hello", "act"], ["hello"]]);
+  });
+
+  it("verifies identity and capability on the same socket for readStopStatus", async () => {
+    const source = {
+      path: "/bundled/app",
+      requirement: "stable",
+      implementationSha256: "a".repeat(64),
+      executableSha256: "b".repeat(64),
+      architecture: "arm64" as const,
+    };
+    let sessionRecovery = false;
+    const f = await server((request, send) => {
+      if (request.method === "hello") {
+        send({
+          protocolVersion: 1,
+          bundleId: "com.rome.computer-use",
+          permissions: { accessibility: true, screenCapture: true },
+          capabilities: { actions: [], background: { sessionRecovery } },
+          architecture: "arm64",
+          implementationSha256: source.implementationSha256,
+        });
+      } else send({ status: "stopped" });
+    });
+    assets.inspect.mockResolvedValue(source);
+    const bridge = createComputerUseNativeBridge({
+      stateDir: f.stateDir,
+      bundledAppPath: source.path,
+    });
+    expect(await bridge.readStopStatus?.("s1")).toBeUndefined();
+    sessionRecovery = true;
+    expect(await bridge.readStopStatus?.("s1")).toEqual({ status: "stopped" });
+    expect(f.connections).toEqual([["hello"], ["hello", "stop_status"]]);
   });
 
   it.each([

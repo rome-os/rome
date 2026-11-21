@@ -107,37 +107,49 @@ async function privateToken(stateDir: string): Promise<string> {
   }
 }
 
+function encodeFrame(
+  id: string,
+  token: string,
+  method: string,
+  params: Record<string, unknown>,
+): Buffer {
+  const json = Buffer.from(JSON.stringify({ id, token, method, params }));
+  if (json.length > MAX_RPC_BYTES)
+    throw new ComputerUseError("request_too_large", "The computer-use request is too large.");
+  const header = Buffer.alloc(4);
+  header.writeUInt32LE(json.length);
+  return Buffer.concat([header, json]);
+}
+
 function request(
   socketPath: string,
   token: string,
   method: string,
   params: Record<string, unknown>,
   timeoutMs: number,
+  verifyHello?: (hello: unknown) => boolean | void,
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const id = randomUUID();
-    const json = Buffer.from(JSON.stringify({ id, token, method, params }));
-    if (json.length > MAX_RPC_BYTES)
-      return reject(
-        new ComputerUseError("request_too_large", "The computer-use request is too large."),
-      );
-    const header = Buffer.alloc(4);
-    header.writeUInt32LE(json.length);
-    let sent = false;
+    let requestFrame: Buffer;
+    let helloId: string | undefined;
+    let helloFrame: Buffer | undefined;
+    try {
+      requestFrame = encodeFrame(id, token, method, params);
+      if (verifyHello) {
+        helloId = randomUUID();
+        helloFrame = encodeFrame(helloId, token, "hello", {});
+      }
+    } catch (error) {
+      return reject(error);
+    }
+    let stage: "hello" | "method" = verifyHello ? "hello" : "method";
+    let expectedId = helloId ?? id;
+    let connected = false;
+    let dispatched = false;
     let settled = false;
     let bytes = Buffer.alloc(0);
     const socket = connect(socketPath);
-    const timer = setTimeout(
-      () =>
-        finish(
-          new ComputerUseError(
-            "helper_timeout",
-            "The computer-use helper did not return before the deadline.",
-            { effectStatus: sent ? "unknown" : "not_dispatched" },
-          ),
-        ),
-      timeoutMs,
-    );
     const finish = (error?: Error, result?: unknown) => {
       if (settled) return;
       settled = true;
@@ -146,56 +158,120 @@ function request(
       if (error) reject(error);
       else resolve(result);
     };
+    const timer = setTimeout(
+      () =>
+        finish(
+          new ComputerUseError(
+            "helper_timeout",
+            "The computer-use helper did not return before the deadline.",
+            { effectStatus: dispatched ? "unknown" : "not_dispatched" },
+          ),
+        ),
+      timeoutMs,
+    );
     socket.on("connect", () => {
-      sent = true;
-      socket.write(Buffer.concat([header, json]));
+      connected = true;
+      if (stage === "hello") {
+        socket.write(helloFrame!);
+      } else {
+        dispatched = true;
+        socket.write(requestFrame);
+      }
     });
     socket.on("data", (chunk: Buffer) => {
       bytes = Buffer.concat([bytes, chunk]);
-      if (bytes.length > MAX_RPC_BYTES + 4)
-        return finish(
-          new ComputerUseError(
-            "invalid_helper_response",
-            "The computer-use helper response is too large.",
-            { effectStatus: "unknown" },
-          ),
-        );
-      if (bytes.length < 4) return;
-      const size = bytes.readUInt32LE();
-      if (!size || size > MAX_RPC_BYTES)
-        return finish(
-          new ComputerUseError(
-            "invalid_helper_response",
-            "The computer-use helper frame is invalid.",
-            { effectStatus: "unknown" },
-          ),
-        );
-      if (bytes.length < size + 4) return;
-      try {
-        const response: unknown = JSON.parse(bytes.subarray(4, size + 4).toString("utf8"));
-        if (!isRecord(response) || response.id !== id) throw new Error("Unexpected response id");
-        if (response.ok === true && Object.hasOwn(response, "result"))
-          return finish(undefined, response.result);
+      while (!settled) {
+        if (bytes.length > MAX_RPC_BYTES + 4)
+          return finish(
+            new ComputerUseError(
+              "invalid_helper_response",
+              "The computer-use helper response is too large.",
+              { effectStatus: dispatched ? "unknown" : "not_dispatched" },
+            ),
+          );
+        if (bytes.length < 4) return;
+        const size = bytes.readUInt32LE();
+        if (!size || size > MAX_RPC_BYTES)
+          return finish(
+            new ComputerUseError(
+              "invalid_helper_response",
+              "The computer-use helper frame is invalid.",
+              { effectStatus: dispatched ? "unknown" : "not_dispatched" },
+            ),
+          );
+        if (bytes.length < size + 4) return;
+        const payload = bytes.subarray(4, size + 4);
+        bytes = bytes.subarray(size + 4);
+        let response: unknown;
+        try {
+          response = JSON.parse(payload.toString("utf8"));
+        } catch {
+          return finish(
+            new ComputerUseError(
+              "invalid_helper_response",
+              "The computer-use helper returned an invalid response.",
+              { effectStatus: dispatched ? "unknown" : "not_dispatched" },
+            ),
+          );
+        }
+        if (!isRecord(response) || response.id !== expectedId)
+          return finish(
+            new ComputerUseError(
+              "invalid_helper_response",
+              "The computer-use helper returned an invalid response.",
+              { effectStatus: dispatched ? "unknown" : "not_dispatched" },
+            ),
+          );
         if (
           response.ok === false &&
           isRecord(response.error) &&
           typeof response.error.code === "string" &&
           typeof response.error.message === "string"
-        )
+        ) {
+          const details = isRecord(response.error.details) ? response.error.details : {};
           return finish(
             new ComputerUseError(
               response.error.code,
               response.error.message,
-              isRecord(response.error.details) ? response.error.details : {},
+              dispatched ? details : { ...details, effectStatus: "not_dispatched" },
             ),
           );
-        throw new Error("Unexpected response shape");
-      } catch {
-        finish(
+        }
+        if (response.ok === true && Object.hasOwn(response, "result")) {
+          if (stage === "hello") {
+            try {
+              if (verifyHello!(response.result) === false) return finish(undefined, undefined);
+            } catch (error) {
+              if (error instanceof ComputerUseError)
+                return finish(
+                  new ComputerUseError(error.code, error.message, {
+                    ...error.details,
+                    effectStatus: "not_dispatched",
+                  }),
+                );
+              return finish(error instanceof Error ? error : new Error(String(error)));
+            }
+            if (bytes.length > 0)
+              return finish(
+                new ComputerUseError(
+                  "invalid_helper_response",
+                  "The computer-use helper returned unexpected trailing data.",
+                  { effectStatus: "not_dispatched" },
+                ),
+              );
+            stage = "method";
+            expectedId = id;
+            dispatched = true;
+            socket.write(requestFrame);
+            return;
+          }
+          return finish(undefined, response.result);
+        }
+        return finish(
           new ComputerUseError(
             "invalid_helper_response",
             "The computer-use helper returned an invalid response.",
-            { effectStatus: "unknown" },
+            { effectStatus: dispatched ? "unknown" : "not_dispatched" },
           ),
         );
       }
@@ -203,9 +279,9 @@ function request(
     socket.on("error", (error: NodeJS.ErrnoException) =>
       finish(
         new ComputerUseError(
-          sent ? "helper_connection_lost" : "helper_unavailable",
+          connected ? "helper_connection_lost" : "helper_unavailable",
           "The computer-use helper connection is unavailable.",
-          { effectStatus: sent ? "unknown" : "not_dispatched", socketCode: error.code },
+          { effectStatus: dispatched ? "unknown" : "not_dispatched", socketCode: error.code },
         ),
       ),
     );
@@ -214,34 +290,41 @@ function request(
         new ComputerUseError(
           "helper_connection_lost",
           "The computer-use helper connection closed without a reply.",
-          { effectStatus: sent ? "unknown" : "not_dispatched" },
+          { effectStatus: dispatched ? "unknown" : "not_dispatched" },
         ),
       ),
     );
   });
 }
 
+function createSocketPreparer(
+  stateDir: string,
+): () => Promise<{ socketPath: string; token: string }> {
+  let prepared: Promise<{ socketPath: string; token: string }> | undefined;
+  return () =>
+    (prepared ??= (async () => {
+      const canonicalDir = await privateComputerUseDirectory(stateDir);
+      const socketPath = join(canonicalDir, "helper.sock");
+      if (Buffer.byteLength(socketPath) > 103)
+        throw new ComputerUseError(
+          "helper_path_too_long",
+          "The computer-use state directory is too long for a macOS Unix socket.",
+        );
+      return { socketPath, token: await privateToken(canonicalDir) };
+    })().catch((error: unknown) => {
+      prepared = undefined;
+      throw error;
+    }));
+}
+
 /** Every request has its own socket, so cancel does not wait behind an in-flight action. */
 export function createNativeRpcTransport(options: NativeBridgeOptions = {}): ComputerUseNative {
-  const stateDir = options.stateDir ?? defaultComputerUseStateDir();
-  let prepared: Promise<{ socketPath: string; token: string }> | undefined;
+  const prepare = createSocketPreparer(options.stateDir ?? defaultComputerUseStateDir());
+  const requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
   return {
     async call(method, params) {
-      prepared ??= (async () => {
-        const canonicalDir = await privateComputerUseDirectory(stateDir);
-        const socketPath = join(canonicalDir, "helper.sock");
-        if (Buffer.byteLength(socketPath) > 103)
-          throw new ComputerUseError(
-            "helper_path_too_long",
-            "The computer-use state directory is too long for a macOS Unix socket.",
-          );
-        return { socketPath, token: await privateToken(canonicalDir) };
-      })().catch((error: unknown) => {
-        prepared = undefined;
-        throw error;
-      });
-      const { socketPath, token } = await prepared;
-      return request(socketPath, token, method, params, options.requestTimeoutMs ?? 15_000);
+      const { socketPath, token } = await prepare();
+      return request(socketPath, token, method, params, requestTimeoutMs);
     },
   };
 }
@@ -274,13 +357,22 @@ export function createComputerUseNativeBridge(
   options: NativeBridgeOptions = {},
 ): ComputerUseNative {
   const stateDir = options.stateDir ?? defaultComputerUseStateDir();
-  const transport = createNativeRpcTransport(options);
+  const prepare = createSocketPreparer(stateDir);
+  const requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
+  const callSocket = async (
+    method: string,
+    params: Record<string, unknown>,
+    verifyHello?: (hello: unknown) => boolean | void,
+  ) => {
+    const { socketPath, token } = await prepare();
+    return request(socketPath, token, method, params, requestTimeoutMs, verifyHello);
+  };
   let ready: Promise<ComputerUseApp> | undefined;
   async function initialize(): Promise<ComputerUseApp> {
     const source = await inspectComputerUseApp(computerUseAppPath(options));
     const canonicalStateDir = await privateComputerUseDirectory(stateDir);
     try {
-      assertComputerUseImplementation(await transport.call("hello", {}), source);
+      assertComputerUseImplementation(await callSocket("hello", {}), source);
       return source;
     } catch (error) {
       if (!unavailable(error)) throw error;
@@ -303,7 +395,7 @@ export function createComputerUseNativeBridge(
     }
     for (;;) {
       try {
-        assertComputerUseImplementation(await transport.call("hello", {}), source);
+        assertComputerUseImplementation(await callSocket("hello", {}), source);
         return source;
       } catch (error) {
         if (!unavailable(error) || Date.now() >= until) throw error;
@@ -328,42 +420,36 @@ export function createComputerUseNativeBridge(
   return {
     async readStopStatus(sessionId) {
       const source = await inspectComputerUseApp(computerUseAppPath(options));
-      const hello = parseComputerUseHello(await transport.call("hello", {}));
-      assertComputerUseImplementation(hello, source);
-      const background = hello.capabilities.background;
-      if (!isRecord(background) || background.sessionRecovery !== true) return undefined;
-      return transport.call("stop_status", { sessionId });
+      return callSocket("stop_status", { sessionId }, (helloValue) => {
+        const hello = parseComputerUseHello(helloValue);
+        assertComputerUseImplementation(hello, source);
+        const background = hello.capabilities.background;
+        return isRecord(background) && background.sessionRecovery === true;
+      });
     },
     async call(method, params) {
-      const hadReady = ready !== undefined;
       let source = await ensure();
-      // Revalidate the live helper before every non-hello dispatch so a helper replaced
-      // between calls cannot receive actions without matching the verified implementation.
-      if (hadReady && method !== "hello") {
-        try {
-          assertComputerUseImplementation(await transport.call("hello", {}), source);
-        } catch (error) {
-          ready = undefined;
-          if (!unavailable(error)) {
-            if (error instanceof ComputerUseError)
-              throw new ComputerUseError(error.code, error.message, {
-                ...error.details,
-                effectStatus: "not_dispatched",
-              });
-            throw error;
-          }
-          source = await ensure();
-        }
-      }
+      // Verify the connected helper's identity on the same socket before writing any non-hello
+      // request so a replacement helper cannot take over helper.sock between check and dispatch.
+      const verify =
+        method === "hello"
+          ? undefined
+          : (helloValue: unknown) => {
+              assertComputerUseImplementation(helloValue, source);
+            };
       let value: unknown;
       try {
-        value = await transport.call(method, params);
+        value = await callSocket(method, params, verify);
       } catch (error) {
         // A socket that never connected dispatched nothing. Written requests are never retried.
-        if (!unavailable(error)) throw error;
+        if (!unavailable(error)) {
+          if (error instanceof ComputerUseError && error.details.effectStatus === "not_dispatched")
+            ready = undefined;
+          throw error;
+        }
         ready = undefined;
         source = await ensure();
-        value = await transport.call(method, params);
+        value = await callSocket(method, params, verify);
       }
       if (method === "hello") {
         try {
