@@ -3,7 +3,8 @@
 //
 // A message said to Rome wakes an agent or does not, and until that is
 // decided no catch-up reads it. Recording holds it out from its record until
-// MessageSaid has been heard; Agents holds it from the raise, and lets it go
+// Agents, MessageSaid's first listener, has taken its own hold, synchronously
+// in the raise; Agents then holds it, and lets it go
 // once the hook that heard it says the wake is decided. Nothing hears through it until the Chats switch.
 
 import type {
