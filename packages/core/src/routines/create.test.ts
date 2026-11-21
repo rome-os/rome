@@ -1645,7 +1645,12 @@ describe("create_routine — naming the action", () => {
   it("names the full ID of a bare target only to an agent that holds it", async () => {
     const attempt = (holds: boolean) =>
       actionExecutionContext.run(
-        { executionId: "exec", rootExecutionId: "root", agentName: "main" },
+        {
+          executionId: "exec",
+          rootExecutionId: "root",
+          initiator: "agent:main",
+          agentName: "main",
+        },
         () =>
           createRoutine(nightly("coding_task"), {
             routinesRepo: repo,
