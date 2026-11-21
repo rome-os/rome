@@ -701,6 +701,17 @@ struct MarkdownText: View {
         let parsed = MarkdownParser.parse(source)
         return textOnly ? MarkdownParser.withoutImages(parsed) : parsed
     }
+    /// The blocks select mode lays a text view over; the rest keep their
+    /// place in it by their drawn height.
+    static func isText(_ block: MarkdownBlock) -> Bool {
+        switch block {
+        case .paragraph, .heading, .list, .quote, .code: true
+        case .rule, .image, .table, .pictures: false
+        }
+    }
+
+    /// The drawn height of each block select mode does not select, by place.
+    @State private var blockHeights: [Int: CGFloat] = [:]
     @State private var showViewer = false
     @State private var viewerStart = 0
     @Environment(\.instanceOrigin) private var origin
@@ -737,7 +748,14 @@ struct MarkdownText: View {
     var body: some View {
         VStack(alignment: .leading, spacing: SelectableText.blockSpacing) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { position, block in
-                view(for: block, at: position)
+                if Self.isText(block) {
+                    view(for: block, at: position)
+                } else {
+                    // A block select mode does not select: its height, as
+                    // drawn, holds its place in the overlay.
+                    view(for: block, at: position)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { blockHeights[position] = $0 }
+                }
             }
         }
         // Select mode lays text views over the text, which select it but
@@ -785,7 +803,7 @@ struct MarkdownText: View {
         ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
             switch segment {
             case .text(let run):
-                // Its quote bars and list markers are the text's own, below.
+                // Its quote bars and list markers are SwiftUI's, below.
                 SelectableTextView(text: SelectableText.invisible(run.text), start: SelectionStart(point: selectFrom, first: index == first, last: index == last, foldBottom: foldBottom))
                     .padding(.top, SelectableText.topSpace(run.text))
             case .code(let text):
@@ -797,9 +815,11 @@ struct MarkdownText: View {
                         .padding(.vertical, 14)
                 }
                 .background(Palette.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            case .block(let position, let block):
-                // Its place only: the block itself is drawn, and tapped, below.
-                view(for: block, at: position).hidden()
+            case .block(let position, _):
+                // Its place only, as tall as the block drawn below, which
+                // keeps its own state (a picture loading or failed): a new
+                // copy of it here could take another height.
+                Color.clear.frame(height: blockHeights[position] ?? 0)
             }
         }
     }

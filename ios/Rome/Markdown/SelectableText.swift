@@ -19,24 +19,10 @@ enum SelectableSegment {
     case block(position: Int, MarkdownBlock)
 }
 
-/// A run of text blocks as one string, and what is drawn beside the text.
+/// A run of text blocks as one string. Its quote bars and list markers are
+/// SwiftUI's, drawn under it.
 struct SelectableRun {
     var text: NSAttributedString
-    /// The quote blocks' ranges, which draw their bar beside them.
-    var quotes: [NSRange] = []
-    /// The list items' markers, drawn in the indent before each item's
-    /// first line. Kept out of the text, so an item breaks its lines as
-    /// `Text` does and Copy takes the item's words alone.
-    var markers: [ListMarker] = []
-}
-
-/// A list item's number or bullet.
-struct ListMarker: Equatable {
-    /// Where its item's text starts.
-    let location: Int
-    let text: NSAttributedString
-    /// Its right edge, from the text view's leading edge.
-    let trailing: CGFloat
 }
 
 /// The type a message's text is set in, as `MarkdownText` takes it.
@@ -107,7 +93,6 @@ enum SelectableText {
     /// A run of text blocks as one string, with its quotes and list markers.
     static func attributed(_ blocks: [MarkdownBlock], style: SelectableTextStyle, tasks: TaskLinkStore? = nil) -> SelectableRun {
         var pieces: [Piece] = []
-        var quoteIndices: [Int] = []
         for block in blocks {
             switch block {
             case .paragraph(let text):
@@ -124,7 +109,6 @@ enum SelectableText {
                 let paragraph = paragraphStyle(lineSpacing: style.lineSpacing)
                 paragraph.firstLineHeadIndent = quoteIndent
                 paragraph.headIndent = quoteIndent
-                quoteIndices.append(pieces.count)
                 pieces.append(Piece(text: inline(text, size: style.scaled(style.fontSize), weight: .regular, color: UIColor(Palette.sub), tasks: tasks),
                                     style: paragraph))
             case .code, .rule, .image, .table, .pictures:
@@ -137,15 +121,9 @@ enum SelectableText {
         if !pieces.isEmpty { pieces[pieces.count - 1].style.paragraphSpacing = 0 }
 
         let out = NSMutableAttributedString()
-        var quotes: [NSRange] = []
-        var markers: [ListMarker] = []
         for (index, piece) in pieces.enumerated() {
             let start = out.length
             out.append(piece.text)
-            if quoteIndices.contains(index) { quotes.append(NSRange(location: start, length: piece.text.length)) }
-            if let marker = piece.marker {
-                markers.append(ListMarker(location: start, text: marker.text, trailing: marker.trailing))
-            }
             // A paragraph's style covers its closing newline too.
             if index < pieces.count - 1 {
                 // In the font of the line it ends, so it adds no height.
@@ -154,7 +132,7 @@ enum SelectableText {
             }
             out.addAttribute(.paragraphStyle, value: piece.style, range: NSRange(location: start, length: out.length - start))
         }
-        return SelectableRun(text: FallbackAdvances.matched(out), quotes: quotes, markers: markers)
+        return SelectableRun(text: FallbackAdvances.matched(out))
     }
 
     /// The space above the first paragraph a text view leaves out, which a
@@ -182,7 +160,6 @@ enum SelectableText {
         var text: NSAttributedString
         var style: NSMutableParagraphStyle
         /// A list item's marker, and its right edge.
-        var marker: (text: NSAttributedString, trailing: CGFloat)?
     }
 
     private static func paragraphStyle(lineSpacing: CGFloat) -> NSMutableParagraphStyle {
@@ -214,9 +191,8 @@ enum SelectableText {
             paragraph.firstLineHeadIndent = textStart
             paragraph.headIndent = textStart
             paragraph.paragraphSpacing = itemSpacing
-            let drawn = NSAttributedString(string: marker, attributes: [.font: markerFont, .foregroundColor: UIColor(Palette.sub)])
             pieces.append(Piece(text: inline(item.text, size: size, weight: .regular, color: style.color, tasks: tasks),
-                                style: paragraph, marker: (drawn, indent + width)))
+                                style: paragraph))
             for child in item.children {
                 if case .list(let ordered, let start, let items) = child {
                     list(ordered: ordered, start: start, items: items, indent: textStart, style: style, tasks: tasks, into: &pieces)
@@ -424,8 +400,6 @@ enum FallbackAdvances {
 /// way SwiftUI's `Text` does, so a bubble keeps its height in select mode.
 struct SelectableTextView: UIViewRepresentable {
     let text: NSAttributedString
-    var quotes: [NSRange] = []
-    var markers: [ListMarker] = []
     /// Off for code, which keeps its lines and scrolls sideways instead.
     var wraps = true
     /// Where select mode opens a selection in this text, with the edit menu
@@ -450,8 +424,6 @@ struct SelectableTextView: UIViewRepresentable {
             view.attributedText = text
             view.invalidateIntrinsicContentSize()
         }
-        view.quotes = quotes
-        view.markers = markers
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: SelectingTextView, context: Context) -> CGSize? {
@@ -534,14 +506,6 @@ final class SelectingTextView: UITextView {
     #else
     static let opensSelection = true
     #endif
-    var quotes: [NSRange] = [] {
-        didSet { if quotes != oldValue { setNeedsLayout() } }
-    }
-    private var bars: [UIView] = []
-    var markers: [ListMarker] = [] {
-        didSet { if markers != oldValue { setNeedsLayout() } }
-    }
-    private var markerLabels: [UILabel] = []
 
     init(wraps: Bool) {
         self.wraps = wraps
@@ -610,64 +574,6 @@ final class SelectingTextView: UITextView {
     override func copy(_ sender: Any?) {
         guard let range = Range(selectedRange, in: text ?? ""), let text else { return }
         UIPasteboard.general.string = SelectableText.copied(String(text[range]))
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        drawQuoteBars()
-        drawMarkers()
-    }
-
-    /// Each list marker on its item's first baseline, right-aligned at its edge.
-    private func drawMarkers() {
-        while markerLabels.count < markers.count {
-            let label = UILabel()
-            label.isUserInteractionEnabled = false
-            addSubview(label)
-            markerLabels.append(label)
-        }
-        for (index, label) in markerLabels.enumerated() {
-            guard index < markers.count, markers[index].location < textStorage.length else {
-                label.isHidden = true
-                continue
-            }
-            let marker = markers[index]
-            let glyph = layoutManager.glyphIndexForCharacter(at: marker.location)
-            let line = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-            let baseline = line.minY + layoutManager.location(forGlyphAt: glyph).y
-            label.attributedText = marker.text
-            label.isHidden = false
-            let size = label.intrinsicContentSize
-            let font = marker.text.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
-            label.frame = CGRect(x: marker.trailing - size.width, y: baseline - (font?.ascender ?? size.height), width: size.width, height: size.height)
-        }
-    }
-
-    /// Each quote's bar, as tall as its text, at the leading edge.
-    private func drawQuoteBars() {
-        while bars.count < quotes.count {
-            let bar = UIView()
-            bar.layer.cornerRadius = 1.5
-            bar.isUserInteractionEnabled = false
-            addSubview(bar)
-            bars.append(bar)
-        }
-        for (index, bar) in bars.enumerated() {
-            guard index < quotes.count else {
-                bar.isHidden = true
-                continue
-            }
-            let glyphs = layoutManager.glyphRange(forCharacterRange: quotes[index], actualCharacterRange: nil)
-            var top = CGFloat.greatestFiniteMagnitude
-            var bottom: CGFloat = 0
-            layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { _, used, _, _, _ in
-                top = min(top, used.minY)
-                bottom = max(bottom, used.maxY)
-            }
-            bar.isHidden = bottom <= top
-            bar.backgroundColor = UIColor(Palette.sub).withAlphaComponent(0.5)
-            bar.frame = CGRect(x: 0, y: top, width: 3, height: max(0, bottom - top))
-        }
     }
 
     override func didMoveToWindow() {

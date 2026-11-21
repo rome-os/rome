@@ -13,8 +13,16 @@ import UIKit
     }
 
     private func string(_ source: String) -> (NSAttributedString, [NSRange]) {
-        let run = run(source)
-        return (run.text, run.quotes)
+        let text = run(source).text
+        // The quotes' ranges: the paragraphs indented as a quote is.
+        var quotes: [NSRange] = []
+        text.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+            if let style = value as? NSParagraphStyle, style.headIndent == SelectableText.quoteIndent, style.firstLineHeadIndent == SelectableText.quoteIndent {
+                let string = (text.string as NSString).substring(with: range)
+                quotes.append(NSRange(location: range.location, length: string.hasSuffix("\n") ? range.length - 1 : range.length))
+            }
+        }
+        return (text, quotes)
     }
 
     private func paragraph(_ text: NSAttributedString, at location: Int) -> NSParagraphStyle? {
@@ -58,25 +66,20 @@ import UIKit
 
     @Test func aListItemHasItsMarkerAndHangingIndent() throws {
         let run = run("- apples\n- pears\n  - green")
-        // The markers are drawn beside the text, not in it.
+        // The markers are SwiftUI's, beside the text, not in it.
         #expect(run.text.string == "apples\npears\ngreen")
-        #expect(run.markers.map { $0.text.string } == ["•", "•", "•"])
-        #expect(run.markers.map(\.location) == [0, 7, 13])
         let first = try #require(paragraph(run.text, at: 0))
         #expect(first.firstLineHeadIndent == first.headIndent)
         #expect(first.headIndent >= SelectableText.markerColumn + SelectableText.markerGap)
         #expect(first.paragraphSpacing == SelectableText.itemSpacing)
-        #expect(run.markers[0].trailing == first.headIndent - SelectableText.markerGap)
         // The nested item starts past its parent's text start, its marker in between.
         let nested = try #require(paragraph(run.text, at: 13))
         #expect(nested.headIndent > first.headIndent)
-        #expect(run.markers[2].trailing > first.headIndent)
     }
 
     @Test func aNumberedListCountsFromItsStart() {
         let run = run("3. three\n4. four")
         #expect(run.text.string == "three\nfour")
-        #expect(run.markers.map { $0.text.string } == ["3.", "4."])
     }
 
     @Test func aQuoteIsIndentedGreyAndReportsItsRange() throws {
@@ -449,6 +452,118 @@ import UIKit
         }
         window.isHidden = true
         return image
+    }
+
+    /// The overlay's own lines, as TextKit lays them, in the window.
+    private static func overlayLines(in view: UIView) -> [CGRect] {
+        var lines: [CGRect] = []
+        func visit(_ view: UIView) {
+            if let text = view as? SelectingTextView {
+                let manager = text.layoutManager
+                manager.ensureLayout(for: text.textContainer)
+                manager.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: manager.numberOfGlyphs)) { _, used, _, _, _ in
+                    lines.append(text.convert(used, to: nil))
+                }
+            }
+            view.subviews.forEach(visit)
+        }
+        visit(view)
+        return lines.sorted { $0.minY < $1.minY }
+    }
+
+    /// The overlay a selection is made in sits on the text drawn under it:
+    /// each of its lines on a drawn line, ending where it does, at every
+    /// width; text after a picture too, with select mode starting after the
+    /// message is drawn, as it does in a chat.
+    @Test(arguments: [200, 260, 320] as [CGFloat])
+    func theOverlaysLinesSitOnTheDrawnLines(width: CGFloat) async throws {
+        SelectingTextView.opensSelection = false
+        defer { SelectingTextView.opensSelection = true }
+        let sources = [
+            "First paragraph of the reply, long enough to wrap here.\n\n- 第一项，看看中文怎么换行\n- second item\n\n> A quoted line that wraps.",
+            "Before.\n\n![broken](https://127.0.0.1:9/missing.png)\n\nAfter the picture, a line that wraps at narrow widths.",
+        ]
+        for source in sources {
+            let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let mode = SelectModeSwitch()
+            let host = UIHostingController(rootView: SelectModeHost(source: source, mode: mode)
+                .frame(width: width, height: 700, alignment: .topLeading).background(Color.white))
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: width, height: 700)
+            window.rootViewController = host
+            window.isHidden = false
+            // Drawn first, then select mode starts: the overlay holds the
+            // place each picture has as drawn.
+            try await Task.sleep(for: .milliseconds(1500))
+            mode.on = true
+            try await Task.sleep(for: .milliseconds(50))
+            let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            let overlay = Self.overlayLines(in: window)
+            window.isHidden = true
+            #expect(!overlay.isEmpty)
+            let ink = Ink(image)
+            for line in overlay {
+                // Text is drawn on the line, centred in it, and ends where
+                // the line does: a line out of place, or broken elsewhere,
+                // finds none or ends off its edge.
+                let middle = CGRect(x: 0, y: line.minY + line.height * 0.25, width: width, height: line.height * 0.5)
+                let found = ink.box(in: middle)
+                #expect(found.weight > 0, "no text under the overlay line \(line) at \(width)")
+                guard found.weight > 0 else { continue }
+                #expect(abs(found.centerY - line.midY) < line.height * 0.25, "text centred at \(found.centerY) in \(line) at \(width)")
+                #expect(found.maxX <= line.maxX + 1 && found.maxX >= line.maxX - 17, "text ends at \(found.maxX), the line at \(line.maxX), at \(width)")
+            }
+        }
+    }
+
+    @MainActor @Observable final class SelectModeSwitch {
+        var on = false
+    }
+
+    struct SelectModeHost: View {
+        let source: String
+        let mode: SelectModeSwitch
+        var body: some View {
+            MarkdownText(source: source, color: .black, selectable: mode.on).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Dark pixels of a rendering, read in points.
+    private struct Ink {
+        let data: [UInt8]
+        let width: Int, height: Int
+        let scale: CGFloat
+
+        init(_ image: UIImage) {
+            let cg = image.cgImage!
+            width = cg.width; height = cg.height; scale = image.scale
+            var data = [UInt8](repeating: 0, count: width * height * 4)
+            let context = CGContext(data: &data, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            self.data = data
+        }
+
+        /// The ink in `rect`: its weight, its centre's y and its right edge.
+        func box(in rect: CGRect) -> (weight: Double, centerY: CGFloat, maxX: CGFloat) {
+            var weight = 0.0, sy = 0.0, right = 0
+            let y0 = max(0, Int(rect.minY * scale)), y1 = min(height, Int(rect.maxY * scale))
+            let x0 = max(0, Int(rect.minX * scale)), x1 = min(width, Int(rect.maxX * scale))
+            guard y0 < y1, x0 < x1 else { return (0, 0, 0) }
+            for y in y0..<y1 {
+                for x in x0..<x1 {
+                    let i = (y * width + x) * 4
+                    let sum = Int(data[i]) + Int(data[i + 1]) + Int(data[i + 2])
+                    // Grey text (a quote's) counts; a picture's light fill does not.
+                    guard sum < 600 else { continue }
+                    let value = Double(600 - sum)
+                    weight += value; sy += Double(y) * value; right = max(right, x + 1)
+                }
+            }
+            return (weight, weight > 0 ? CGFloat(sy / weight) / scale : 0, CGFloat(right) / scale)
+        }
     }
 
     @Test(arguments: [
