@@ -24,6 +24,7 @@ import {
   SlackAppRefused,
   type SlackAppWorkspace,
 } from "../kinds/slack-app/rome-cloud.js";
+import { legacyBotToken, revokeLegacyBotToken } from "../kinds/slack-app/legacy-token.js";
 import { type MailboxFrame, SlackAppAdapter } from "../kinds/slack-app/slack-app.js";
 import type { SlackAppWebApi } from "../kinds/slack-app/web-api.js";
 import type { SetupFn } from "../setup/types.js";
@@ -264,6 +265,8 @@ export interface SlackAppDescriptorDeps {
   /** Whether Rome listens to the account behind a connection. */
   listens: (connectionId: string) => boolean;
   approval?: { pollMs: number; limitMs: number };
+  /** Revokes a token a grant from before the Worker holds (tests). */
+  revokeLegacyToken?: (token: string, signal: AbortSignal) => Promise<string | null>;
 }
 
 export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): ConnectionDescriptor {
@@ -291,8 +294,15 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
     // The Worker revokes each of this instance's tokens at Slack and lets go
     // of its workspaces, so another Rome may connect them. Removing the app in
     // Slack does neither on the instance's side, so a fix through the same
-    // sign-in returns the same connection.
-    async onDisconnect(_grant, { signal }) {
+    // sign-in returns the same connection. A grant from before the Worker
+    // also holds a token of its own, revoked here at Slack; the token goes
+    // with the grant whatever Slack answers.
+    async onDisconnect(grant, { signal }) {
+      const legacy = legacyBotToken(grant.material);
+      if (legacy) {
+        const failed = await (deps.revokeLegacyToken ?? revokeLegacyBotToken)(legacy, signal);
+        if (failed) log.warn("Slack did not revoke a token Rome held before", { reason: failed });
+      }
       try {
         await deps.cloud.disconnect(signal);
       } catch (error) {

@@ -425,6 +425,36 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
     expect(c.disconnect).toHaveBeenCalledWith(signal);
   });
 
+  it("revokes at Slack a token a grant from before the Worker holds, and still disconnects when Slack refuses", async () => {
+    for (const answer of [null, "ratelimited"]) {
+      const c = cloud();
+      const revoked: string[] = [];
+      await descriptor({
+        cloud: c,
+        revokeLegacyToken: async (token) => {
+          revoked.push(token);
+          return answer;
+        },
+      }).onDisconnect?.(
+        { material: { botToken: "xoxb-old", teamId: "T_A" }, expiresAt: "never" } as never,
+        { signal } as never,
+      );
+      expect(revoked).toEqual(["xoxb-old"]);
+      expect(c.disconnect).toHaveBeenCalledWith(signal);
+    }
+  });
+
+  it("makes no call to Slack for a grant with no token", async () => {
+    const revoked: string[] = [];
+    await descriptor({
+      revokeLegacyToken: async (token) => {
+        revoked.push(token);
+        return null;
+      },
+    }).onDisconnect?.({ material: MATERIAL, expiresAt: "never" } as never, { signal } as never);
+    expect(revoked).toEqual([]);
+  });
+
   it("says the Worker kept the workspace when it could not let go", async () => {
     const c = cloud({
       disconnect: rs.fn(async () => {
