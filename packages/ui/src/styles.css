@@ -350,8 +350,11 @@
   --switch-width-sm: var(--rome-size-24);
   --switch-hit-inset-x: var(--rome-space-3);
   --field-min-font-size: 0px;
-  --control-action-offset: var(--rome-space-2);
-  --control-action-offset-sm: var(--rome-space-1);
+  /* An action row pulls out by its icon's inset, so the icon itself, not the
+     button around it, sits on the content edge above. 16px and 14px are the
+     glyph sizes IconButton gives `md` and `sm`. */
+  --control-action-offset: calc((var(--control-h-md) - var(--rome-size-16)) / 2);
+  --control-action-offset-sm: calc((var(--control-h-sm) - var(--rome-size-14)) / 2);
   --markdown-action-py: var(--rome-space-1);
   --markdown-zoom-direction: column;
   --markdown-band-height: var(--rome-space-8);
@@ -400,8 +403,11 @@
   --switch-width-sm: var(--switch-width-md);
   --switch-hit-inset-x: 0px;
   --field-min-font-size: var(--rome-font-size-16);
-  --control-action-offset: var(--rome-space-4);
-  --control-action-offset-sm: var(--rome-space-3);
+  /* An action row pulls out by its icon's inset, so the icon itself, not the
+     button around it, sits on the content edge above. 16px and 14px are the
+     glyph sizes IconButton gives `md` and `sm`. */
+  --control-action-offset: calc((var(--control-h-md) - var(--rome-size-16)) / 2);
+  --control-action-offset-sm: calc((var(--control-h-sm) - var(--rome-size-14)) / 2);
   --markdown-action-py: 0px;
   --markdown-zoom-direction: row;
   --markdown-band-height: auto;
