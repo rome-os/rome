@@ -32,6 +32,7 @@ import { isForwardedBy } from "./forward.js";
 import type { SlackAppMailbox } from "./rome-cloud.js";
 import type { SlackAppWebApi } from "./web-api.js";
 import type { Message } from "../../message.js";
+import { RecordingStopped } from "../../types.js";
 
 const log = createLogger("slack-app");
 
@@ -349,13 +350,19 @@ export class SlackAppAdapter {
     // again; Chats records a message it already holds only once. The drain
     // gives up on a frame after a few retries and waits to be resumed, so the
     // refusal also reports the connection down: the runtime starts it again
-    // after a backoff, with a fresh drain that retries the frame.
+    // after a backoff, with a fresh drain that retries the frame. Recording
+    // stopping is no fault: an app swapping its hook stops it for a moment,
+    // and the drain's own retries outlast that.
     if (!this.handler) return { status: 500 };
     try {
       await this.handler(
         messageOf(message, slackSenderId(this.config.teamId, this.config.botUserId)),
       );
     } catch (error) {
+      if (error instanceof RecordingStopped) {
+        log.info("slack app message not recorded yet: recording stopped");
+        return { status: 500 };
+      }
       log.error("slack app message not accepted", { error: describe(error) });
       this.config.onFault?.({ kind: "transport", cause: error });
       return { status: 500 };

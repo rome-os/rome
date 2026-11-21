@@ -11,6 +11,7 @@ import { createSlackAppWebApi, type SlackAppWebApi } from "./web-api.js";
 import { SlackApiError } from "../slack/slack.js";
 import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import type { Message } from "../../message.js";
+import { RecordingStopped } from "../../types.js";
 
 /**
  * Rome's side of a delivery, as Chats takes it: a message is on record once
@@ -274,6 +275,27 @@ describe("Slack app acknowledging its mailbox", () => {
 
     // The mailbox kept the frame and delivers it again.
     chats.refusing = false;
+    await mailbox.deposit();
+    expect(mailbox.statuses).toEqual([500, 200]);
+    expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
+  });
+
+  it("lets the mailbox deliver again a message refused while recording stopped, without reporting the connection down", async () => {
+    const mailbox = fakeMailbox();
+    const chats = fakeChats();
+    const { adapter: a, delivered, faults } = adapter(mailbox, fakeApi(), { chats });
+    let swapping = true;
+    a.onInbound(async (message) => {
+      if (swapping) throw new RecordingStopped();
+      await chats.accept(message);
+    });
+    await a.start();
+
+    await mailbox.deposit(frame(dmEvent(1)));
+    expect(mailbox.statuses).toEqual([500]);
+    expect(faults).toEqual([]);
+
+    swapping = false;
     await mailbox.deposit();
     expect(mailbox.statuses).toEqual([500, 200]);
     expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
