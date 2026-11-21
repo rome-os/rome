@@ -398,23 +398,21 @@ A participant's identity on a platform. A colleague's Feishu identity is an acco
 - The platform's own id is the one the platform uses for that account everywhere, so the same person is seen with the same id by every one of Rome's accounts on that platform. On Feishu that is the tenant-wide user id, not the per-app one.
 - A person's identity and an agent's identity on a platform are the same kind of thing.
 - Most accounts in a chat are other people's. Rome has no connection to them and no agent speaks through them.
-- An account Rome holds a connection to has at most one agent speaking through it, held by its [connected account](#connected-account), in every chat and DM that account is in: an own-account link if the account is the agent's own, a delegate if it is the guardian's. There is no per-chat choice of agent.
-- A connected account may have no agent: the guardian has not linked one, or unlinked it. Rome then does not listen to that account's messages at all. No chat forms through it and nothing is recorded, until an agent is linked.
-- Those link rules cover accounts that take an agent. An account that takes none, such as email or WhatsApp, is always listened to.
-- The guardian **links** an agent to the account, **switches** it in one step, or **unlinks** it. The noun is the account's agent.
-- Connecting an account and linking an agent are two separate operations. Connecting a new own account of a kind that declares it, which today is only Rome's Slack app, links the Concierge to it in the same step, so it answers from its first message. Every other account starts with no agent until the guardian links one. An account Rome already has a connected account for keeps its agent when it connects again.
+- An account Rome holds a connection to has one agent speaking through it, in every chat and DM that account is in: as its [own account](#own-account) if the account is a bot, as a [delegate](#delegate) if it is the guardian's. There is no per-chat choice of agent.
+- The kind of connection decides the agent, and nobody picks it: the Concierge on Rome's Slack app, main on every other account. So an account answers from its first message (Ouou, 2026-11-21).
+- Rome listens to every account it holds a connection to. An account that takes no agent, such as email or WhatsApp, is listened to and never answered.
 - An account named "Sales agent" is the sales agent, wherever it appears. That is the intuition the rules protect.
 
 ## Connected account
 
-One of Rome's accounts as Chats sees it: an [account](#account) Rome holds, or held, a [connection](connections.md#connection) to that lets Rome chat as it, with the agent that speaks through it. Its two ends are the account and the agent (Ouou, 2026-11-04).
+One of Rome's accounts as Chats sees it: an [account](#account) Rome holds, or held, a [connection](connections.md#connection) to that lets Rome chat as it. The agent that speaks through it is its kind of connection's ([Account](#account)).
 
-- A connected account has the identity of its account, platform and the platform's own id, and no other. Its one attribute is its agent.
-- It starts when a connection to the account is first connected, with no agent. Disconnecting takes away Rome's reach, not the connected account: the agent link stays, Rome does not hear or speak through the account until it is connected again, and connecting the same account again finds the same connected account with its agent. Unlinking the agent is the guardian's own step.
+- A connected account has the identity of its account, platform and the platform's own id, and no other.
+- It starts when a connection to the account is first connected. Disconnecting takes away Rome's reach, not the connected account: Rome does not hear or speak through the account until it is connected again, and connecting the same account again finds the same connected account.
 - A connection reaches one account for its whole life, and at most one connection reaches an account at a time, so a connected account is reached by at most one connection, or by none while disconnected.
-- The guardian links, switches and unlinks its agent on the connected account, naming it by its account. The dashboard shows it by its account's platform, id and name, and whether a connection reaches it.
+- The dashboard shows its agent on its connection's page, read-only.
 - A message or a participant names an account by platform and the platform's own id, never by a connection. A message remembers who said it, not the connection that carried it. Rome finds the connection when it sends, as the one whose grant reaches the account.
-- Its kind of link, [own account](#own-account) or [delegate](#delegate), follows from the kind of connection that reaches it: a bot is always the agent's own account, and the guardian's signed-in account always takes a delegate.
+- Whether its agent speaks as its [own account](#own-account) or as a [delegate](#delegate) follows from the kind of connection that reaches it: a bot is always the agent's own account, and the guardian's signed-in account always takes a delegate.
 
 ## Account profile
 
@@ -428,20 +426,15 @@ What a platform says about an [account](#account): its display name, handle and 
 - A profile may be missing for an account a link, a dismissal or a message names. A reader then shows the account by its id.
 - A channel's own mirror of an address book stays the source for what it mirrors. A name is read from the mirror first, then from the profile.
 
-## Envoy
-
-The feature's name: linking agents to accounts so they can take part in chats on platforms. Not a thing in the model. The things are the two kinds of link below. The dashboard's use of the name as a page title is branding.
-
 ## Own account
 
-One kind of link: an agent linked to an account that is the agent's own, so the agent speaks as that account.
+One way an agent speaks through a connected account: the account is a bot, so the agent speaks as that account.
 
 ## Delegate
 
-The other kind of link: an agent linked to the guardian's own account, so it answers on their behalf. The guardian picks the delegate. Main is suggested.
+The other way: the account is the guardian's own, so the agent answers on their behalf.
 
-- Own account and delegate are different kinds of link, and the product shows which one an account has. The kind of connection decides which, and the guardian never picks it.
-- When the guardian switches the agent on an account, the new agent picks up where the old one left off: the chat's history is there for it to read. What it remembers is its own business.
+- Own account and delegate are told apart by the kind of connection, and the product shows which one an account has. The guardian never picks it.
 
 ## Decided against
 
@@ -453,6 +446,7 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **Every action on every row of the task list,** such as rename, skip the next run, archive, move and a routine's detail page. Every row grew its own buttons, so the list read as a control panel rather than an answer to what runs. Each row keeps the few actions that end or hold what it shows, in a ⋯ menu. The rest stay with the Concierge, the Routines page and settings.
 - **Task chats in the chat list's Tasks panel, and task chats out of the chat list.** The panel and the task list showed the same running work in two places. Task chats left the chat list first, and the task list and cards were the only way back to them. The task list in each Concierge chat is now the one list, and a task link in the Concierge's message is the way to one.
 - **Channel as a thing the guardian meets, with its own identity and lifetime.** A channel is one to one with a connected account, so the two words name one thing and the guardian only ever sees the account. Its jobs went to account, connection, connected account and chat. The code's channel layer ([Channels](../architecture/channels.md)) is retired as those words replace it.
+- **The guardian picking each account's agent (Envoy).** A connected account with no agent heard nothing, so a newly connected bot stayed silent until the guardian found a separate page to link one, and nothing said why. The kind of connection picks the agent instead (Ouou, 2026-11-21).
 - **The agent as part of the connection.** Which agent speaks through an account is the guardian's decision about a chat identity, so it belongs to Chats. Kept on the connection, Connections would hold a fact only Chats uses.
 - **The connected account as the connection, with the agent dying on disconnect.** This was the rule until 2026-11-04. Its forces were that a reconnect would inherit an agent the guardian never set, and that a connection with no account reported yet had no record to hold one. Neither holds: the guardian set the agent on that account, and a connection is active only once the platform has reported its account. The account is what the guardian means by "the sales agent", so the link hangs on it.
 - **Storing the kind of link.** It follows from the kind of connection, and a stored copy could disagree with it. It becomes the guardian's choice only if a kind of connection ever allows both.
@@ -460,7 +454,7 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **At most one account per agent per platform.** A guardian with two Feishu accounts for one agent is an ordinary case, and the rule forced a "move the link" behaviour nobody asked for.
 - **Linking the first account of a kind of connection to main automatically.** Connecting and linking are two operations and cannot be made one, so a state with no agent exists anyway, and an agent the guardian did not pick is confusing.
 - **A thread as a chat of its own.** People do not think of a thread as a chat. It is a side conversation inside one, seen by everyone in it. Letting the thread model decide the agent's memory boundary went with it. Memory is the agent's own decision.
-- **"Bot" and "linked agent" as names.** A person's identity and an agent's identity on a platform are the same kind of thing, and one name per thing is the writing rule. Unlink stays: it is the verb for taking an agent off an account.
+- **"Bot" and "linked agent" as names.** A person's identity and an agent's identity on a platform are the same kind of thing, and one name per thing is the writing rule.
 - **"Conversation" as the canonical word.** The guardian says chat. Conversation is kept as an alias until the rename lands.
 - **"Agent" for a Dot or Muse.** Agent means one of Rome's own agents, which the guardian defines and runs. A Dot or Muse runs elsewhere and answers to someone else's rules, so one word for both would need context to tell them apart.
 - **Assistants' chats mixed into the dashboard's own chats.** The guardian talks to Rome in one and watches Rome talk to another agent in the other. Mixed together, a chat with Muse reads as a chat with Rome.

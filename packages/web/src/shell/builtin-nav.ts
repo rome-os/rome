@@ -7,7 +7,7 @@ import {
   PersonIcon,
   Pencil2Icon,
 } from "@radix-ui/react-icons";
-import { Bot, Chrome as ChromeIcon, FolderKanban, Megaphone } from "lucide-react";
+import { Bot, Chrome as ChromeIcon, FolderKanban } from "lucide-react";
 import type { ComponentType } from "react";
 
 /** Rome's own dashboard destinations. The sidebar, the Apps launcher, page
@@ -43,7 +43,6 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
   // Off the sidebar until the guardian pins it: main answers assistants, so
   // their chats are read now and then rather than watched.
   { id: "assistants", href: "/assistants", labelKey: "nav.assistants", Icon: Bot },
-  { id: "envoys", href: "/envoys", labelKey: "nav.envoys", Icon: Megaphone },
   { id: "routines", href: "/routines", labelKey: "nav.routines", Icon: CalendarIcon },
   {
     // One page for sessions and the event log. It keeps the Sessions address,

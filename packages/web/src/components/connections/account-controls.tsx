@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { agentLabel, canonicalAgent } from "@rome/api-types/account-agents";
 import { useTranslation } from "react-i18next";
-import { Bot, ChevronRight, Plus } from "lucide-react";
+import { Bot, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +17,7 @@ import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 /**
  * Account controls on a channel card: "Add another account" for services that
  * offer several, and the agent of a linkable service's account whose Talk is
- * connected, with a way to Envoys to change it. Both act on the account, not on
+ * connected. Both act on the account, not on
  * a slot, so they sit below the slot cards. Adding opens the service's connect
  * flow for a new account, which exists only once that flow connects it.
  */
@@ -153,38 +152,31 @@ function AddAccount({
   );
 }
 
-/** The account's agent, read-only. Envoys is where it changes, since that is
- *  where the confirmation and the one-account-per-platform warning live. */
+/** The account's agent, read-only. */
 function AccountAgentRow({ card }: { card: ConnectionCard }) {
   const { t } = useTranslation("settings");
   const agent = card.agent === null ? null : canonicalAgent(card.agent);
   return (
-    <ListRow asChild interactive>
-      <Link to={agent ? `/envoys/${encodeURIComponent(agent)}/settings` : "/envoys"}>
-        <Bot className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        <ListRowContent>
-          <ListRowTitle className="truncate">
-            {agent ? (
-              <span className="font-mono">{agentLabel(agent)}</span>
-            ) : (
-              t("connections.accounts.noAgentTitle")
-            )}
-          </ListRowTitle>
-          <ListRowDescription>
-            {agent
-              ? t(
-                  card.link === "delegate"
-                    ? "connections.accounts.agentAnswersForYou"
-                    : "connections.accounts.agentSpeaksAs",
-                )
-              : t("connections.accounts.agentNone")}
-          </ListRowDescription>
-        </ListRowContent>
-        <span className="sr-only shrink-0 text-aux text-muted-foreground sm:not-sr-only">
-          {t("connections.accounts.changeInEnvoys")}
-        </span>
-        <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-      </Link>
+    <ListRow>
+      <Bot className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <ListRowContent>
+        <ListRowTitle className="truncate">
+          {agent ? (
+            <span className="font-mono">{agentLabel(agent)}</span>
+          ) : (
+            t("connections.accounts.noAgentTitle")
+          )}
+        </ListRowTitle>
+        <ListRowDescription>
+          {agent
+            ? t(
+                card.link === "delegate"
+                  ? "connections.accounts.agentAnswersForYou"
+                  : "connections.accounts.agentSpeaksAs",
+              )
+            : t("connections.accounts.agentNone")}
+        </ListRowDescription>
+      </ListRowContent>
     </ListRow>
   );
 }
