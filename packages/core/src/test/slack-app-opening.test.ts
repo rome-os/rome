@@ -1,10 +1,10 @@
 // What a new session in a Slack app chat reads from before it: the chat's
-// latest messages, read from Slack through the connection, which keeps no
-// record of its own. Built in test/ because it crosses the connection and the
-// prompt facts. Rome keeps no record of the chat here at all, and the
-// connection is restarted between two reads, which read the same.
+// latest messages, read through the connection from Slack. Built in test/
+// because it crosses the connection and the prompt facts. Rome keeps no record
+// of the chat here at all, and the connection keeps none of its own, so a
+// session reads the same before and after the connection restarts.
 
-import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ThreadContext } from "@rome-os/app-runtime";
 import { SenderLabels } from "../chats/sender-labels.js";
 import type { SlackWireMessage } from "../connections/kinds/slack-app/message.js";
@@ -17,7 +17,6 @@ import {
   forwardSignature,
 } from "../connections/kinds/slack-app/forward.js";
 import { chatPromptFacts } from "../core/chat-prompt-facts.js";
-import { createTestDb, type TestDb } from "./db.js";
 import { channelMessageOf } from "../chats/connected-accounts/channel-message.js";
 
 const TEAM = "T_A";
@@ -80,13 +79,7 @@ function heard(i: number, ts = tsOf(i)): MailboxFrame {
 }
 
 describe("a new session in a Slack app chat (R13, option b)", () => {
-  let testDb: TestDb;
-  beforeEach(() => {
-    testDb = createTestDb();
-  });
-  afterEach(() => testDb.close());
-
-  it("reads the chat's latest messages from Slack, the same after a restart", async () => {
+  it("reads the chat's latest messages from Slack, the same after the connection restarts", async () => {
     const slack = slackSide();
     for (let i = 1; i <= 6; i++) {
       slack.said.push({
@@ -124,7 +117,7 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
         },
         openMailbox: (_mailbox, handler) => {
           onFrame = handler;
-          return { stop: () => {} };
+          return { stop: () => {}, attempts: 4 };
         },
         readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
       });
@@ -150,19 +143,19 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
     await first.start();
     for (let i = 1; i <= 6; i++) await onFrame!(heard(i));
     for (let i = 7; i <= 23; i++) await onFrame!(heard(i, backlogTs(i)));
-    const readsBeforeFirst = slack.conversationHistory.mock.calls.length;
-    const firstRead = await factsOver(first).earlier!(place, before);
-    const readsAfterFirst = slack.conversationHistory.mock.calls.length;
+    const readsBeforeFull = slack.conversationHistory.mock.calls.length;
+    const full = await factsOver(first).earlier!(place, before);
+    const readsAfterFull = slack.conversationHistory.mock.calls.length;
     await first.stop();
 
-    // The connection restarted, having heard nothing since.
+    // The connection restarted.
     const second = connect();
     await second.start();
     const readsBeforeRestart = slack.conversationHistory.mock.calls.length;
     const restarted = await factsOver(second).earlier!(place, before);
     await second.stop();
 
-    expect(firstRead?.map((m) => [m.text, m.fromRome])).toEqual([
+    expect(full?.map((m) => [m.text, m.fromRome])).toEqual([
       ["message 1", false],
       ["message 2", true],
       ["message 3", false],
@@ -170,12 +163,12 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
       ["message 5", false],
       ["message 6", true],
     ]);
-    expect(restarted).toEqual(firstRead);
+    expect(restarted).toEqual(full);
     // Each asked Slack once, from the turn's time.
     const latestOf = (calls: typeof slack.conversationHistory.mock.calls) =>
       calls.map(([, input]) => input.latest);
     const calls = slack.conversationHistory.mock.calls;
-    expect(latestOf(calls.slice(readsBeforeFirst, readsAfterFirst))).toEqual(["1700000040.000001"]);
+    expect(latestOf(calls.slice(readsBeforeFull, readsAfterFull))).toEqual(["1700000040.000001"]);
     expect(latestOf(calls.slice(readsBeforeRestart))).toEqual(["1700000040.000001"]);
   });
 
@@ -211,7 +204,7 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
         memberChannels: async () => ({ channels: [] }),
         revoke: async () => {},
       },
-      openMailbox: () => ({ stop: () => {} }),
+      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
     adapter.onInbound(() => {});
@@ -236,12 +229,6 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
 });
 
 describe("a mention inside a Slack thread (R14)", () => {
-  let testDb: TestDb;
-  beforeEach(() => {
-    testDb = createTestDb();
-  });
-  afterEach(() => testDb.close());
-
   it("reaches the agent with the thread's earlier messages, read from Slack's replies", async () => {
     const root = tsOf(1);
     const thread: SlackWireMessage[] = [
@@ -272,7 +259,7 @@ describe("a mention inside a Slack thread (R14)", () => {
       },
       openMailbox: (_mailbox, handler) => {
         onFrame = handler;
-        return { stop: () => {} };
+        return { stop: () => {}, attempts: 4 };
       },
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
@@ -348,7 +335,7 @@ describe("a mention inside a Slack thread (R14)", () => {
         memberChannels: async () => ({ channels: [] }),
         revoke: async () => {},
       },
-      openMailbox: () => ({ stop: () => {} }),
+      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
     await adapter.start();
@@ -419,7 +406,7 @@ describe("a mention inside a Slack thread (R14)", () => {
         memberChannels: async () => ({ channels: [] }),
         revoke: async () => {},
       },
-      openMailbox: () => ({ stop: () => {} }),
+      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
       // Slack's pacing, scaled down: one thread read per 300 ms.
       repliesGate: new SlackReadGate({ intervalMs: 300, maxWaitMs: 300 }),
     });
@@ -476,7 +463,7 @@ describe("a mention inside a Slack thread (R14)", () => {
       },
       openMailbox: (_mailbox, handler) => {
         onFrame = handler;
-        return { stop: () => {} };
+        return { stop: () => {}, attempts: 4 };
       },
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });

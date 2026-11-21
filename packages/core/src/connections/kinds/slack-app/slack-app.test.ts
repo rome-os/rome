@@ -118,6 +118,7 @@ function fakeMailbox() {
       stop: () => {
         onFrame = null;
       },
+      attempts: 4,
     };
   };
   return {
@@ -142,9 +143,8 @@ function adapter(
   api = fakeApi(),
   options: {
     chats?: ReturnType<typeof fakeChats>;
-    now?: () => Date;
-    readGate?: SlackReadGate;
     listened?: () => boolean;
+    readGate?: SlackReadGate;
   } = {},
 ) {
   const chats = options.chats ?? fakeChats();
@@ -159,7 +159,6 @@ function adapter(
     api,
     openMailbox: mailbox.open,
     onFault: ({ kind }) => faults.push(kind),
-    ...(options.now ? { now: options.now } : {}),
     ...(options.readGate ? { readGate: options.readGate } : {}),
     ...(options.listened ? { listened: options.listened } : {}),
   });
@@ -386,7 +385,7 @@ describe("Slack app mentions in a group (R5)", () => {
     expect(delivered.map((m) => m.text)).toEqual(["@Rome", "@Rome"]);
   });
 
-  it("does not hand over a group message that does not mention it", async () => {
+  it("does not answer or hand over a group message that does not mention it", async () => {
     const mailbox = fakeMailbox();
     const { adapter: a, delivered } = adapter(mailbox);
     await a.start();
@@ -498,6 +497,35 @@ describe("Slack app acknowledging its mailbox", () => {
     expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
   });
 
+  it("reports the connection down when recording stays stopped past the drain's retries", async () => {
+    const mailbox = fakeMailbox();
+    const chats = fakeChats();
+    const { adapter: a, delivered, faults } = adapter(mailbox, fakeApi(), { chats });
+    let swapping = true;
+    a.onInbound(async (message) => {
+      if (swapping) throw new RecordingStopped();
+      await chats.accept(message);
+    });
+    await a.start();
+
+    await mailbox.deposit(frame(dmEvent(1)));
+    await mailbox.deposit();
+    await mailbox.deposit();
+    expect(faults).toEqual([]);
+    // The drain's fourth and last delivery before it would hold the frame.
+    await mailbox.deposit();
+    expect(mailbox.statuses).toEqual([500, 500, 500, 500]);
+    expect(faults).toEqual(["transport"]);
+
+    // The runtime starts the connection again, with a fresh drain.
+    await a.stop();
+    swapping = false;
+    await a.start();
+    await mailbox.settle();
+    expect(mailbox.statuses).toEqual([500, 500, 500, 500, 200]);
+    expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
+  });
+
   it("answers the mailbox only after the delivery settles", async () => {
     const mailbox = fakeMailbox();
     let settle = () => {};
@@ -523,17 +551,18 @@ describe("Slack app acknowledging its mailbox", () => {
   it("hands over nothing heard while Rome does not listen to the account", async () => {
     const mailbox = fakeMailbox();
     let listening = false;
-    const first = adapter(mailbox, fakeApi(), { listened: () => listening });
-    await first.adapter.start();
+    const { adapter: a, delivered } = adapter(mailbox, fakeApi(), {
+      listened: () => listening,
+    });
+    await a.start();
 
     await mailbox.deposit(frame(dmEvent(1)));
     expect(mailbox.statuses).toEqual([200]);
-    expect(first.delivered).toHaveLength(0);
+    expect(delivered).toHaveLength(0);
 
     listening = true;
     await mailbox.deposit(frame(dmEvent(2)));
-    expect(first.delivered.map((m) => m.text)).toEqual(["message 2"]);
-    await first.adapter.stop();
+    expect(delivered.map((m) => m.text)).toEqual(["message 2"]);
   });
 
   it("hands a message Slack delivers again to Chats, which has it once", async () => {
@@ -623,7 +652,7 @@ describe("Slack app mailbox key", () => {
     const refreshed: string[] = [];
     const open: OpenMailbox = (mailbox) => {
       opened.push(mailbox.drainKey);
-      return { stop: () => void stopped.push(mailbox.drainKey) };
+      return { stop: () => void stopped.push(mailbox.drainKey), attempts: 4 };
     };
     const a = new SlackAppAdapter({
       channel: "slack_app",
@@ -714,6 +743,7 @@ describe("Slack app mailbox key", () => {
             await inFlight;
             order.push(`stopped ${mailbox.drainKey.split(".")[1]}`);
           },
+          attempts: 4,
         };
       };
       let answer = first;

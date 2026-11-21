@@ -1062,8 +1062,15 @@
     {
       "idx": 152,
       "version": "6",
-      "when": 1795232570094,
-      "tag": "0152_remove_old_slack_connections",
+      "when": 1795232470758,
+      "tag": "0152_remove_slack_bot_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "6",
+      "when": 1795234533909,
+      "tag": "0153_remove_slack_sign_in_connections",
       "breakpoints": true
     }
   ]

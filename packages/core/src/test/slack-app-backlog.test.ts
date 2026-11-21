@@ -96,6 +96,7 @@ function heldMailbox(frames: MailboxFrame[]) {
       stop: () => {
         open = false;
       },
+      attempts: 4,
     };
   };
   return { open, empty, left: () => queue.length };

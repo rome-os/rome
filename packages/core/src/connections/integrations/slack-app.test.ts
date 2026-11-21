@@ -106,7 +106,7 @@ describe("connecting Rome's Slack app (R1)", () => {
     const descriptor = makeSlackAppDescriptor({
       api: {} as never,
       cloud: cloud(),
-      openMailbox: () => ({ stop: () => {} }),
+      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
       listens: () => true,
     });
     expect(descriptor.link).toBe("own_account");
@@ -159,7 +159,7 @@ describe("the Slack app talker", () => {
       }),
       openMailbox: (mailbox) => {
         opened.push(mailbox.drainKey);
-        return { stop: () => {} };
+        return { stop: () => {}, attempts: 4 };
       },
       listens: () => true,
     });
@@ -224,7 +224,7 @@ describe("the Slack app's channels in chat settings", () => {
         revoke: async () => {},
       },
       cloud: cloud(),
-      openMailbox: () => ({ stop: () => {} }),
+      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
     });
     const talker = descriptor.capabilities.talker?.build(
       {
@@ -310,7 +310,7 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
           await c.release(teamId, signal, generation);
         },
       },
-      openMailbox: () => ({ stop: () => {} }),
+      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
     });
     return { descriptor, steps };
   }

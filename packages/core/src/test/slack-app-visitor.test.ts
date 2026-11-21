@@ -101,7 +101,7 @@ describe("Slack app members who did not sign in (R12)", () => {
       },
       openMailbox: (_mailbox, handler) => {
         onFrame = handler;
-        return { stop: () => {} };
+        return { stop: () => {}, attempts: 4 };
       },
     });
     const heard: ChannelMessage[] = [];

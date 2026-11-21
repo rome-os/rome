@@ -81,12 +81,13 @@ export interface MailboxFrame {
  * HTTP-style status says what happened to it: 2xx handled, a 4xx other than a
  * transient one dropped for good, anything else retried and then held. The
  * mailbox keeps frames while nothing drains it, so events sent while the
- * instance is stopped arrive once it starts again.
+ * instance is stopped arrive once it starts again. `attempts` is how many
+ * times the drain delivers one frame before it holds it until resumed.
  */
 export type OpenMailbox = (
   mailbox: SlackAppMailbox,
   onFrame: (frame: MailboxFrame) => Promise<{ status: number }>,
-) => { stop(): Promise<void> | void };
+) => { stop(): Promise<void> | void; attempts: number };
 
 export interface SlackAppAdapterConfig {
   /** The connection kind the channel records carry. */
@@ -201,7 +202,15 @@ function describe(error: unknown): string {
 
 export class SlackAppAdapter {
   private handler?: (message: Message) => void | Promise<void>;
-  private drain: { stop(): Promise<void> | void } | null = null;
+  private drain: ReturnType<OpenMailbox> | null = null;
+  /** How many times in a row each frame not yet acknowledged was refused
+   *  because recording stopped, by its event id. Kept so a refusal that
+   *  outlasts the drain's retries reports the connection down instead of
+   *  leaving the frame held. An entry goes when its frame is answered
+   *  otherwise; the whole map goes when a drain opens. */
+  private readonly refusedWhileStopped = new Map<string, number>();
+  /** The last opened drain's `attempts`, kept while a renewal swaps drains. */
+  private drainAttempts = 1;
   private readonly dedup = new InboundDedup(5_000);
   private readonly userNames = new Map<string, SlackUserName>();
   private abort = new AbortController();
@@ -257,9 +266,17 @@ export class SlackAppAdapter {
     if (this.keyExpired()) {
       throw new Error("The Slack mailbox key expired and Rome Cloud could not renew it.");
     }
-    this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
+    this.openDrain();
     this.scheduleRenewal();
     log.info("slack app started", { teamId: this.config.teamId });
+  }
+
+  /** A new drain delivers each frame afresh, so the refusals counted
+   *  against the last one start over. */
+  private openDrain(): void {
+    this.refusedWhileStopped.clear();
+    this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
+    this.drainAttempts = this.drain.attempts;
   }
 
   /** Ask Rome Cloud for drain credentials; true when they changed. An answer
@@ -323,7 +340,7 @@ export class SlackAppAdapter {
         this.drain = null;
         await old?.stop();
         if (signal.aborted) return;
-        this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
+        this.openDrain();
         log.info("slack app mailbox key renewed", { teamId: this.config.teamId });
       }
       // A key Rome Cloud answered that is already due again, the same one or
@@ -424,8 +441,7 @@ export class SlackAppAdapter {
     if (!author || typeof event.text !== "string") return { status: 200 };
     const said = slackMessage(this.context(event.channel), wire);
     if (!said) return { status: 200 };
-    // Rome does not listen to the account, so the message is neither kept nor
-    // handed over. A read once an agent is linked asks Slack for it.
+    // Rome does not listen to the account, so the message is not handed over. A read once an agent is linked asks Slack for it.
     if (this.config.listened && !this.config.listened()) return { status: 200 };
 
     const name = event.user ? await this.lookUpName(event.user) : {};
@@ -452,8 +468,8 @@ export class SlackAppAdapter {
     // gives up on a frame after a few retries and waits to be resumed, so the
     // refusal also reports the connection down: the runtime starts it again
     // after a backoff, with a fresh drain that retries the frame. Recording
-    // stopping is no fault: an app swapping its hook stops it for a moment,
-    // and the drain's own retries outlast that.
+    // stopping is no fault while the drain's own retries remain: an app
+    // swapping its hook stops it for a moment. A stop that outlasts them is.
     if (!this.handler) return { status: 500 };
     try {
       await this.handler(
@@ -461,13 +477,23 @@ export class SlackAppAdapter {
       );
     } catch (error) {
       if (error instanceof RecordingStopped) {
-        log.info("slack app message not recorded yet: recording stopped");
+        const refused = (this.refusedWhileStopped.get(eventId) ?? 0) + 1;
+        if (refused < this.drainAttempts) {
+          this.refusedWhileStopped.set(eventId, refused);
+          log.info("slack app message not recorded yet: recording stopped");
+          return { status: 500 };
+        }
+        this.refusedWhileStopped.delete(eventId);
+        log.warn("slack app message refused past the drain's retries: recording stopped");
+        this.config.onFault?.({ kind: "transport", cause: error });
         return { status: 500 };
       }
+      this.refusedWhileStopped.delete(eventId);
       log.error("slack app message not accepted", { error: describe(error) });
       this.config.onFault?.({ kind: "transport", cause: error });
       return { status: 500 };
     }
+    this.refusedWhileStopped.delete(eventId);
     log.info("message received", { chatId: message.chatId });
     return { status: 200 };
   }

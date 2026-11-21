@@ -5,5 +5,7 @@ import type { AccountLink } from "@rome/api-types/account-agents";
  *  kind's descriptor. */
 export function linkOf(connectionKind: string): AccountLink | null {
   if (connectionKind === "telegram_user") return "delegate";
-  return ["feishu", "telegram", "discord"].includes(connectionKind) ? "own_account" : null;
+  return ["feishu", "telegram", "discord", "slack_app"].includes(connectionKind)
+    ? "own_account"
+    : null;
 }
