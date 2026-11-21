@@ -82,6 +82,9 @@ function mockBackend(opts: {
       if (next === "timeout") throw new DOMException("signal timed out", "TimeoutError");
       return json(next);
     }
+    if (url.startsWith("/api/system/release-notes?")) {
+      return json({ status: 404, body: { error: "not_found" } });
+    }
     if (url === "/api/build-info") {
       if (opts.buildDelayMs) await new Promise((r) => setTimeout(r, opts.buildDelayMs));
       return json({ status: 200, body: { version: state.build } });

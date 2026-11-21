@@ -7,7 +7,7 @@ import { settings } from "../db/schema.js";
 // webhook subscription Rome registers upstream is app-owned state.
 //
 // `githubWebhookSecret` is the HMAC secret for Rome's OWN GitHub webhook (no
-// Composio): `connector_github_subscribe` mints it and registers it on the
+// Composio): `connector:connector_github_subscribe` mints it and registers it on the
 // repo/org hook, and the `/webhook` handler's GitHub branch verifies inbound
 // `X-Hub-Signature-256` against it. One secret per instance, shared by every
 // GitHub hook Rome registers.

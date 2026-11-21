@@ -9,10 +9,13 @@ import {
 } from "./baseline-checks.js";
 import {
   chineseStyle,
+  conclusionIn,
   emojiCount,
+  exactSpecifics,
   noTaskChatPointer,
   noTrailingOffer,
   oneEmoji,
+  specificsOf,
   thanksWithoutEyes,
 } from "./baseline-rules.js";
 import { CARD_SCENARIOS } from "./baseline-scenarios-cards.js";
@@ -76,6 +79,79 @@ const input = (saidAfter: string[][]): CheckInput => ({
   said: saidAfter.flat(),
   shown: saidAfter.flat(),
   tasks: [],
+  conclusions: [],
+});
+
+describe("exactSpecifics", () => {
+  const conclusion =
+    "PR #2392 ships in 1.1.209 (commit 5b1f1da52): see https://github.com/rome-os/rome/pull/2392. Cheapest ¥4,380, 6.1 h of sleep, 12 km, 3 options.";
+
+  it("finds each URL, PR number, version, hex id and measured number once, and no small integer", () => {
+    expect(specificsOf(conclusion)).toEqual([
+      "https://github.com/rome-os/rome/pull/2392",
+      "5b1f1da52",
+      "#2392",
+      "1.1.209",
+      "4,380",
+      "6.1",
+      "12",
+    ]);
+  });
+
+  it("finds a UUID, a v-prefixed version with a suffix, and no part of a URL twice", () => {
+    expect(
+      specificsOf(
+        "Card 2a6c1fea-a43d-4057-ae8d-bc5f82d9fed2, release v2.0.1-rc.1, https://x.example/v1.2.3/a.",
+      ),
+    ).toEqual([
+      "https://x.example/v1.2.3/a",
+      "2a6c1fea-a43d-4057-ae8d-bc5f82d9fed2",
+      "v2.0.1-rc.1",
+    ]);
+  });
+
+  it("passes when the Concierge's words keep every specific verbatim", () => {
+    expect(
+      exactSpecifics(
+        [conclusion],
+        [
+          "PR #2392 is in 1.1.209 (5b1f1da52), https://github.com/rome-os/rome/pull/2392. Flights from ¥4,380; sleep 6.1 小时; 12 km.",
+        ],
+        false,
+      ),
+    ).toEqual([]);
+  });
+
+  it("names each specific the Concierge changed or dropped", () => {
+    expect(
+      exactSpecifics(
+        [conclusion],
+        ["PR 2392 is in 1.1.210 (5b1f1da52), see the PR. Flights from ¥4380; sleep 6.1 h; 12 km."],
+        false,
+      ),
+    ).toEqual([
+      'rule: result drops "https://github.com/rome-os/rome/pull/2392" from the conclusion',
+      'rule: result drops "#2392" from the conclusion',
+      'rule: result drops "1.1.209" from the conclusion',
+      'rule: result drops "4,380" from the conclusion',
+    ]);
+  });
+
+  it("skips a result sent as a forwarded card, a conclusion with no news, and no conclusion", () => {
+    expect(exactSpecifics([conclusion], ["Done."], true)).toEqual([]);
+    expect(exactSpecifics(["Nothing to report."], ["Done."], false)).toEqual([]);
+    expect(exactSpecifics([], ["Done."], false)).toEqual([]);
+  });
+
+  it("reads the last conclusion section of an answer, closed or not", () => {
+    expect(
+      conclusionIn(
+        "Details.\n<!-- rome:conclusion -->\nold\n<!-- /rome:conclusion -->\n<!-- rome:conclusion -->\nFound 1.2.3.\n<!-- /rome:conclusion -->",
+      ),
+    ).toBe("Found 1.2.3.");
+    expect(conclusionIn("<!-- rome:conclusion -->\nNo close")).toBe("No close");
+    expect(conclusionIn("No section.")).toBeNull();
+  });
 });
 
 describe("the multi-turn scenario", () => {

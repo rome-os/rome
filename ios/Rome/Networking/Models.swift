@@ -21,6 +21,8 @@ struct ChatSession: Codable, Identifiable, Hashable, Sendable {
     var lastTurnFailed: Bool?
     var awaitingGuardian: Bool?
     var largeModelSelection: String?
+    /// When its owner pinned it; a topic chat only. Nil when not pinned.
+    var pinnedAt: String?
 }
 
 /// One stored message. `content` is a JSON array of parts, or plain text on old rows.
@@ -32,17 +34,6 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     var content: String
     var createdAt: String
     var traceSummary: TraceSummary?
-    /// The root of the chat thread this one is in: the first message of its
-    /// reply chain, which is the message itself when it replies to nothing.
-    /// Nil on an instance without chat threads.
-    var chatThreadId: String? = nil
-    /// The instance sent `chatThreadId`, null included: it has chat threads.
-    /// An older instance leaves the field out.
-    var knowsThreads = false
-    /// The thread's name when a task's start message is in it: the newest
-    /// such task's title. A thread no task started in has none here: the app
-    /// names it from its root's text.
-    var chatThreadTitle: String? = nil
     /// Who said a guardian-side message, when it was not simply the guardian.
     var sender: MessageSender? = nil
     /// Where a guardian message stands with the agent: `failed` and `unknown`
@@ -69,7 +60,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, reaction, status
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, sender, inputState, reaction, status
     }
 }
 
@@ -99,9 +90,6 @@ extension ChatMessage {
         content = try container.decode(String.self, forKey: .content)
         createdAt = try container.decode(String.self, forKey: .createdAt)
         traceSummary = try container.decodeIfPresent(TraceSummary.self, forKey: .traceSummary)
-        chatThreadId = try container.decodeIfPresent(String.self, forKey: .chatThreadId)
-        knowsThreads = container.contains(.chatThreadId)
-        chatThreadTitle = try container.decodeIfPresent(String.self, forKey: .chatThreadTitle)
         // An unknown shape never costs the message itself.
         sender = try? container.decodeIfPresent(MessageSender.self, forKey: .sender)
         inputState = (try? container.decodeIfPresent(String.self, forKey: .inputState)) ?? nil
@@ -109,8 +97,6 @@ extension ChatMessage {
         status = (try? container.decodeIfPresent(String.self, forKey: .status)) ?? nil
     }
 
-    /// Writes `chatThreadId` as null when the instance sent it as null, so a
-    /// kept copy reads back the same.
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
@@ -120,49 +106,21 @@ extension ChatMessage {
         try container.encode(content, forKey: .content)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(traceSummary, forKey: .traceSummary)
-        if knowsThreads { try container.encode(chatThreadId, forKey: .chatThreadId) }
-        try container.encodeIfPresent(chatThreadTitle, forKey: .chatThreadTitle)
         try container.encodeIfPresent(sender, forKey: .sender)
         try container.encodeIfPresent(inputState, forKey: .inputState)
         try container.encodeIfPresent(reaction, forKey: .reaction)
         try container.encodeIfPresent(status, forKey: .status)
     }
-
-    /// The root of the thread it is in: its own id when it is the root.
-    var threadRoot: String { chatThreadId ?? id }
 }
 
-/// What a message the guardian sends replies to: the quoted message, and
-/// the root of the thread view it was sent from, if one was open. The
-/// instance replies to the message named, so the message is in that thread
-/// (docs/domains/chats.md#chat-thread). A send from a thread view names the
-/// thread's last message with text (`TranscriptStore.wireTarget`); only a
-/// thread with none loaded sends the root alone, which the instance resolves.
-struct ThreadTarget: Codable, Hashable, Sendable {
+/// What a message the guardian sends replies to: the message the Reply button
+/// quoted (docs/domains/chats.md#chat-thread). The instance stores the quote
+/// with the message and draws it.
+struct ReplyTarget: Codable, Hashable, Sendable {
     /// The message replied to, quoted in the reply bar.
     let messageId: String
-    let instanceKnowsThreads: Bool
-    /// Written by a build where Reply quoted; absent from drafts written
-    /// when Reply opened the thread view.
-    var quote: Bool? = nil
-    /// The root of the thread view the reply was sent from.
-    var thread: String? = nil
-    /// Aimed at the thread only: opened from its label, with no message
-    /// replied to, so there is no reply bar and the send names no message.
-    var bare: Bool? = nil
 
-    var isQuote: Bool { quote == true }
-
-    /// The message whose thread view the reply was written in: the thread's
-    /// root. A draft from before quotes was always written in one, at `messageId`.
-    var threadMessage: String? { isQuote ? thread : messageId }
-
-    var body: [String: JSONValue] {
-        var body: [String: JSONValue] = [:]
-        if bare != true { body["replyToMessageId"] = .string(messageId) }
-        if let thread { body["chatThread"] = .string(thread) }
-        return body
-    }
+    var body: [String: JSONValue] { ["replyToMessageId": .string(messageId)] }
 }
 
 struct TraceSummary: Codable, Hashable, Sendable {

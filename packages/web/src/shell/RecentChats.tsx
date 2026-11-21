@@ -2,9 +2,7 @@ import {
   Archive,
   ArchiveRestore,
   Check,
-  ChevronUp,
   Ellipsis,
-  ListChecks,
   Folder,
   Cloud,
   FolderOpen,
@@ -23,12 +21,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { RomeLogo } from "@/components/logo";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -38,11 +35,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
+import { Kbd } from "@/components/ui/kbd";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { deleteSession, renameSession, type SessionScope } from "@/lib/chat-api";
+import { deleteSession, getSession, renameSession, type SessionScope } from "@/lib/chat-api";
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import type { ChatSession } from "@/lib/chat-types";
 import { deviceFolderName, pathSegments } from "@/lib/device-folder";
@@ -240,17 +238,7 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
-function ChatRowLink({
-  id,
-  name,
-  nested,
-  onCard,
-}: {
-  id: string;
-  name: string;
-  nested: boolean;
-  onCard: boolean;
-}) {
+function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -276,8 +264,8 @@ function ChatRowLink({
           to={`/chat/${id}`}
           onPointerEnter={syncNameClipped}
           onFocus={syncNameClipped}
-          className={`flex h-full min-w-0 flex-1 items-center ${onCard ? "rounded-8" : "rounded-12"} border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-            nested ? (onCard ? "pl-[var(--row-card-text-pl)]" : "pl-[var(--row-child-pl)]") : "pl-2"
+          className={`flex h-full min-w-0 flex-1 items-center rounded-12 border border-transparent pr-1 outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
+            nested ? "pl-[var(--row-child-pl)]" : "pl-2"
           }`}
         >
           <span ref={nameRef} className="truncate">
@@ -291,16 +279,6 @@ function ChatRowLink({
     </Tooltip>
   );
 }
-
-/** The folded Tasks card: its heading row, the card's padding and border. */
-const TASKS_FOLDED_HEIGHT = "h-[calc(max(var(--row-h),var(--control-min-h))_+_0.5rem_+_2px)]";
-
-// Rows fade out over the bottom padding, so a list that runs on under its
-// edge shows it, and the last row clears the fade once scrolled to the end.
-const FADE_BOTTOM_7 =
-  "[mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.75rem),transparent)] [-webkit-mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.75rem),transparent)]";
-const FADE_BOTTOM_6 =
-  "[mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.5rem),transparent)] [-webkit-mask-image:linear-gradient(to_bottom,#000_calc(100%_-_1.5rem),transparent)]";
 
 /** A dot on a segment's corner that says the other mode needs a look. */
 function ModeDot({ label, className }: { label: string; className: string }) {
@@ -398,16 +376,7 @@ function NewChatRow({
         <Plus className="size-4 shrink-0" />
       </span>
       <span className="flex-1 truncate">{label}</span>
-      {shortcut ? (
-        <Badge
-          asChild
-          variant="muted"
-          shape="square"
-          className="shrink-0 border-border font-sans font-normal"
-        >
-          <kbd>{shortcut}</kbd>
-        </Badge>
-      ) : null}
+      {shortcut ? <Kbd>{shortcut}</Kbd> : null}
     </Link>
   );
 }
@@ -647,8 +616,9 @@ export function RecentChats({
     [sessions],
   );
 
-  // Task chats list under Tasks in Concierge mode and nowhere in Chat mode.
-  // With no Concierge they stay under their project, as before.
+  // Task chats are no chat of the list: they open from the Tasks view and from
+  // the links in a Concierge chat. With no Concierge they stay under their
+  // project, as before.
   const projectSessions = useMemo(
     () =>
       hasConcierge
@@ -656,32 +626,19 @@ export function RecentChats({
         : sortedSessions,
     [hasConcierge, sortedSessions, conciergeChatId],
   );
-  const taskSessions = useMemo(
-    () =>
-      hasConcierge ? sortedSessions.filter((s) => chatKind(s, conciergeChatId) === "task") : [],
-    [hasConcierge, sortedSessions, conciergeChatId],
-  );
-  // The Tasks panel starts folded, and opens when the open chat is a task
-  // chat, so its row is in view. Folding it again holds until another one opens.
-  const [tasksExpanded, setTasksExpanded] = useState(false);
-  // Whether the open card's rows have scrolled under its heading.
-  const [tasksScrolled, setTasksScrolled] = useState(false);
-  const tasksListRef = useRef<HTMLDivElement | null>(null);
-  const activeTaskId = taskSessions.some((s) => s.id === activeSessionId) ? activeSessionId : null;
-  const showTasks = mode === "concierge" && conciergeChatId !== null && taskSessions.length > 0;
-  useEffect(() => {
-    if (activeTaskId) setTasksExpanded(true);
-  }, [activeTaskId]);
-  // The card scrolls on its own, so an open task chat far down its list is
-  // brought into view once the card is open and on screen (the list can be in
-  // Chat mode when the task chat opens).
-  useEffect(() => {
-    if (!showTasks || !tasksExpanded || !activeTaskId) return;
-    const link = Array.from(tasksListRef.current?.querySelectorAll("a[href]") ?? []).find(
-      (a) => a.getAttribute("href") === `/chat/${activeTaskId}`,
-    );
-    link?.closest("[data-chat-row]")?.scrollIntoView?.({ block: "nearest" });
-  }, [tasksExpanded, activeTaskId, showTasks]);
+  // An open task chat marks the Concierge chat it reports to, which holds it.
+  const openTaskChatId = sessions.some(
+    (s) => s.id === activeSessionId && chatKind(s, conciergeChatId) === "task",
+  )
+    ? activeSessionId
+    : null;
+  const { data: openTaskChat } = useQuery({
+    queryKey: ["task-chat-reports-to", openTaskChatId],
+    enabled: openTaskChatId !== null && hasConcierge,
+    queryFn: () => getSession(openTaskChatId ?? ""),
+    staleTime: 60_000,
+  });
+  const markedConciergeChatId = openTaskChat?.taskOf?.conciergeChatId ?? activeSessionId;
 
   const projectGroups = useMemo<SessionGroup[]>(() => {
     const buckets = new Map<
@@ -827,12 +784,10 @@ export function RecentChats({
     },
   });
 
-  // A row on the Tasks card, which is already `surface`, marks the open chat
-  // with the hover tone instead of the raised one.
-  const renderChatRow = (session: ChatSession, nested = false, onCard = false) => {
+  const renderChatRow = (session: ChatSession, nested = false) => {
     const isActive = activeSessionId === session.id;
-    // A chat under a project folder; the Tasks card's rows are nested but not in a group.
-    const inGroup = nested && !onCard;
+    // A chat under a project folder.
+    const inGroup = nested;
     const status = chatRowStatus(session, isActive);
     const statusLabel = status ? t(`recentChats.rowStatus.${status}`) : null;
     const isEditing = rename.editingId === session.id;
@@ -850,14 +805,8 @@ export function RecentChats({
         data-chat-row
         className={`group relative flex h-[var(--row-h)] ${
           inGroup ? "ml-[var(--row-child-ml)]" : ""
-        } items-center gap-1 ${onCard ? "rounded-8" : "rounded-12"} text-ui font-normal transition min-h-[var(--control-min-h)] ${session.archivedAt ? "text-subtle-foreground" : "text-foreground"} ${
-          isActive
-            ? onCard
-              ? "bg-surface-hover ring-1 ring-border/70"
-              : ACTIVE_CLASS
-            : onCard
-              ? "hover:bg-surface-hover"
-              : "hover:bg-surface-hover dark:hover:bg-surface"
+        } items-center gap-1 rounded-12 text-ui font-normal transition min-h-[var(--control-min-h)] ${session.archivedAt ? "text-subtle-foreground" : "text-foreground"} ${
+          isActive ? ACTIVE_CLASS : "hover:bg-surface-hover dark:hover:bg-surface"
         }`}
       >
         {/* The selected child's mark on the folder's guide line. */}
@@ -875,15 +824,11 @@ export function RecentChats({
             maxLength={SESSION_NAME_MAX_LENGTH}
             aria-label={t("recentChats.renameLabel")}
             className={`my-1 h-[var(--control-h-sm)] min-w-0 flex-1 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 ${
-              nested
-                ? onCard
-                  ? "ml-[var(--row-card-rename-ml)]"
-                  : "ml-[var(--row-child-rename-ml)]"
-                : "ml-2"
+              nested ? "ml-[var(--row-child-rename-ml)]" : "ml-2"
             }`}
           />
         ) : (
-          <ChatRowLink id={session.id} name={session.name} nested={nested} onCard={onCard} />
+          <ChatRowLink id={session.id} name={session.name} nested={nested} />
         )}
         <span
           className={`relative ${inGroup ? "mr-[var(--row-px)]" : "mr-2"} flex h-4 w-4 shrink-0 items-center justify-center ${
@@ -1108,81 +1053,6 @@ export function RecentChats({
     );
   };
 
-  // A card pinned under the scrolling list. Folded it is just its heading,
-  // with the running count; open it grows to half the list's height and
-  // scrolls on its own. Its rows stay mounted, inert while folded, so the
-  // height can animate both ways.
-  const renderTasks = () => {
-    if (!showTasks) return null;
-    const running = taskSessions.filter((s) => s.running).length;
-    return (
-      <section
-        aria-labelledby="recent-chats-tasks-heading"
-        data-tasks-section
-        data-expanded={tasksExpanded}
-        className={`mx-2 mb-2 flex shrink-0 flex-col overflow-hidden rounded-12 border border-border-strong bg-surface p-1 shadow-1 transition-[height] duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:shadow-none ${
-          tasksExpanded ? "h-1/2" : TASKS_FOLDED_HEIGHT
-        }`}
-      >
-        <h2
-          id="recent-chats-tasks-heading"
-          className={`relative shrink-0 after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:h-px after:bg-border-strong after:transition-opacity ${
-            tasksExpanded && tasksScrolled ? "after:opacity-100" : "after:opacity-0"
-          }`}
-        >
-          <button
-            type="button"
-            aria-expanded={tasksExpanded}
-            aria-controls="recent-chats-tasks-list"
-            aria-label={
-              running > 0
-                ? t("recentChats.tasksRunning", { count: running })
-                : t("recentChats.sectionTasks")
-            }
-            onClick={() => setTasksExpanded((open) => !open)}
-            className="flex h-[var(--row-h)] w-full min-h-[var(--control-min-h)] items-center gap-[var(--row-icon-gap)] rounded-8 border border-transparent px-[var(--row-card-px)] text-left text-ui font-normal text-foreground transition outline-none outline-1 outline-offset-0 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50"
-          >
-            <span
-              className="flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
-              aria-hidden
-            >
-              <ListChecks className="size-4 shrink-0" />
-            </span>
-            <span className="flex-1 truncate">{t("recentChats.sectionTasks")}</span>
-            {running > 0 ? (
-              <span
-                data-tasks-running
-                className="flex shrink-0 items-center gap-1 text-aux tabular-nums text-muted-foreground"
-              >
-                <ChatStatusGlyph status="running" />
-                {running}
-              </span>
-            ) : null}
-            <ChevronUp
-              className={`h-3.5 w-3.5 shrink-0 text-subtle-foreground transition-transform duration-280 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none ${
-                tasksExpanded ? "rotate-180" : ""
-              }`}
-              aria-hidden
-            />
-          </button>
-        </h2>
-        <div
-          id="recent-chats-tasks-list"
-          ref={tasksListRef}
-          inert={!tasksExpanded}
-          aria-hidden={tasksExpanded ? undefined : true}
-          onScroll={(event) => setTasksScrolled(event.currentTarget.scrollTop > 0)}
-          onClickCapture={markOpening}
-          className={`min-h-0 flex-1 scroll-pb-6 overflow-y-auto overscroll-contain pb-6 scrollbar-idle-hidden ${FADE_BOTTOM_6} transition-opacity duration-180 motion-reduce:transition-none ${
-            tasksExpanded ? "opacity-100 delay-60" : "opacity-0"
-          }`}
-        >
-          {taskSessions.map((session) => renderChatRow(session, true, true))}
-        </div>
-      </section>
-    );
-  };
-
   return (
     // skipDelayDuration 0 makes every row wait out the delay on its own:
     // Radix's default grace window would otherwise pop each name instantly
@@ -1266,12 +1136,9 @@ export function RecentChats({
             {headerControls}
           </div>
         </div>
-        {/* The list and the Tasks card share what is left under the header. */}
         <div className="flex min-h-0 flex-1 flex-col">
           <div
-            className={`min-h-0 flex-1 overflow-y-auto px-2 pt-2 scrollbar-idle-hidden ${
-              showTasks ? `pb-7 ${FADE_BOTTOM_7}` : "pb-3"
-            }`}
+            className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 pt-2 scrollbar-idle-hidden"
             onClickCapture={markOpening}
           >
             <NewChatRow
@@ -1284,7 +1151,7 @@ export function RecentChats({
               conciergeChatId ? (
                 <ConciergeChats
                   mainChatId={conciergeChatId}
-                  activeSessionId={activeSessionId}
+                  activeSessionId={markedConciergeChatId}
                   statusFilter={statusFilter}
                   topicSessions={conciergeTopicSessions}
                 />
@@ -1329,7 +1196,6 @@ export function RecentChats({
               </section>
             )}
           </div>
-          {renderTasks()}
         </div>
         <RomeConfirmDialog
           open={pendingDeleteId !== null}

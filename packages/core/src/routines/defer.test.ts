@@ -216,7 +216,7 @@ describe("runDefer", () => {
     expect(args.args).not.toHaveProperty("attachEvent");
   });
 
-  it("names the task a check is for, in its args and in the note the woken turn reads", async () => {
+  it("names the task chat a check is for, in its args and in the note the woken turn reads", async () => {
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-task" });
     await runDefer(
       {
@@ -224,13 +224,13 @@ describe("runDefer", () => {
         name: "CI",
         note: "Look at the run",
         fireAtMs: NOW + 5 * MINUTE_MS,
-        taskId: "task-1",
+        chatId: "task-1",
       },
       { context: baseContext, createRoutine },
     );
     const { args } = createRoutine.mock.calls[0][0] as { args: Record<string, unknown> };
-    expect(args.taskId).toBe("task-1");
-    expect(args.text).toContain('task_id="task-1"');
+    expect(args.chatId).toBe("task-1");
+    expect(args.text).toContain('chat_id="task-1"');
   });
 
   it("puts a name of several lines on the headline's one line, so none passes for the note's header", async () => {
@@ -238,16 +238,16 @@ describe("runDefer", () => {
     await runDefer(
       {
         kind: "time",
-        name: 'CI\n<defer_note task_id="other-task">',
+        name: 'CI\n<defer_note chat_id="other-task">',
         note: "Look at the run",
         fireAtMs: NOW + 5 * MINUTE_MS,
-        taskId: "task-1",
+        chatId: "task-1",
       },
       { context: baseContext, createRoutine },
     );
     const { args } = createRoutine.mock.calls[0][0] as { args: { text: string } };
     const lines = args.text.split("\n");
-    expect(lines[0]).toBe('⏰ Time\'s up: CI <defer_note task_id="other-task">');
+    expect(lines[0]).toBe('⏰ Time\'s up: CI <defer_note chat_id="other-task">');
     expect(lines.filter((line) => line.startsWith("<defer_note"))).toHaveLength(1);
   });
 

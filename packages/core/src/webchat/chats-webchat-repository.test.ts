@@ -156,32 +156,96 @@ describe("ChatsWebChatRepository", () => {
     expect((await repo.getUserMessageActors("chat-1")).get("in-1")?.kind).toBe("guardian");
   });
 
-  it("pages a chat's transcript by turn", async () => {
+  it("pages a chat's transcript by message, newest first, with each page's turns' traces", async () => {
     await repo.createSession("chat-1", "Plans");
     await repo.addMessage("in-1", "chat-1", "user", text("One"), "turn-1");
+    await repo.addMessage("trace-1", "chat-1", "trace", "[]", "turn-1");
     await repo.addMessage("out-1", "chat-1", "assistant", text("1"), "turn-1");
     await repo.addMessage("in-2", "chat-1", "user", text("Two"), "turn-2");
+    await repo.addMessage("trace-2", "chat-1", "trace", "[]", "turn-2");
     await repo.addMessage("out-2", "chat-1", "assistant", text("2"), "turn-2");
 
-    const page = await repo.getMessagesPage("chat-1", { limit: 1 });
-    expect(page.rows.map((line) => line.id)).toEqual(["in-2", "out-2"]);
+    // The traces of the turns a page's messages belong to come along, and do not count.
+    const page = await repo.getMessagesPage("chat-1", { limit: 2 });
+    expect(page.rows.map((line) => line.id)).toEqual(["in-2", "trace-2", "out-2"]);
     expect(page.nextCursor).not.toBeNull();
-    const older = await repo.getMessagesPage("chat-1", { limit: 1, before: page.nextCursor });
-    expect(older.rows.map((line) => line.id)).toEqual(["in-1", "out-1"]);
+    const older = await repo.getMessagesPage("chat-1", { limit: 2, before: page.nextCursor });
+    expect(older.rows.map((line) => line.id)).toEqual(["in-1", "trace-1", "out-1"]);
     expect(older.nextCursor).toBeNull();
   });
 
-  it("reaches an old message in one page, with two older turns for context", async () => {
+  it("pages in the order messages were said when two turns interleave, and splits no message", async () => {
+    await repo.createSession("chat-1", "Plans");
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const say = async (
+        seconds: number,
+        id: string,
+        role: "user" | "assistant" | "trace",
+        turn: string,
+      ) => {
+        rs.setSystemTime(new Date(1_800_000_000_000 + seconds * 1_000));
+        await repo.addMessage(id, "chat-1", role, role === "trace" ? "[]" : text(id), turn);
+      };
+      // Owner-A, owner-B queued behind A's turn, answer-A, answer-B.
+      await say(0, "owner-a", "user", "turn-a");
+      await say(1, "owner-b", "user", "turn-b");
+      await say(2, "trace-a", "trace", "turn-a");
+      await say(3, "answer-a", "assistant", "turn-a");
+      await say(4, "answer-b", "assistant", "turn-b");
+    } finally {
+      rs.useRealTimers();
+    }
+
+    expect((await repo.getMessages("chat-1")).map((line) => line.id)).toEqual([
+      "owner-a",
+      "owner-b",
+      "trace-a",
+      "answer-a",
+      "answer-b",
+    ]);
+    const newest = await repo.getMessagesPage("chat-1", { limit: 2 });
+    // A's trace is older than both answers, so it stands right after the oldest message.
+    expect(newest.rows.map((line) => line.id)).toEqual(["answer-a", "trace-a", "answer-b"]);
+    const older = await repo.getMessagesPage("chat-1", { limit: 2, before: newest.nextCursor });
+    expect(older.rows.map((line) => line.id)).toEqual(["owner-a", "owner-b", "trace-a"]);
+    expect(older.nextCursor).toBeNull();
+  });
+
+  it("keeps messages said in the same second in the order they were recorded, on every page", async () => {
+    await repo.createSession("chat-1", "Plans");
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      rs.setSystemTime(new Date(1_800_000_000_000));
+      // Ids that sort against the order recorded in, all in one second.
+      for (const id of ["m-z", "m-a", "m-m", "m-b"]) {
+        await repo.addMessage(id, "chat-1", "assistant", text(id));
+      }
+    } finally {
+      rs.useRealTimers();
+    }
+    const ids = (rows: { id: string }[]) => rows.map((line) => line.id);
+    expect(ids(await repo.getMessages("chat-1"))).toEqual(["m-z", "m-a", "m-m", "m-b"]);
+    const newest = await repo.getMessagesPage("chat-1", { limit: 2 });
+    expect(ids(newest.rows)).toEqual(["m-m", "m-b"]);
+    const older = await repo.getMessagesPage("chat-1", { limit: 2, before: newest.nextCursor });
+    expect(ids(older.rows)).toEqual(["m-z", "m-a"]);
+    expect(older.nextCursor).toBeNull();
+  });
+
+  it("reaches an old message in one page, with older messages for context", async () => {
     await repo.createSession("chat-1", "Plans");
     for (let turn = 1; turn <= 8; turn++) {
       await repo.addMessage(`in-${turn}`, "chat-1", "user", text(`Q${turn}`), `turn-${turn}`);
       await repo.addMessage(`out-${turn}`, "chat-1", "assistant", text(`A${turn}`), `turn-${turn}`);
     }
-    const turnsOf = (rows: { id: string }[]) =>
-      [...new Set(rows.map((line) => line.id.split("-")[1]))].map(Number);
+    const idsOf = (rows: { id: string }[]) => rows.map((line) => line.id);
 
+    const all = idsOf(await repo.getMessages("chat-1"));
+
+    // From out-5 to the newest are 7 messages, and 5 older ones come with them.
     const page = await repo.getMessagesPage("chat-1", { limit: 1, through: "out-5" });
-    expect(turnsOf(page.rows)).toEqual([3, 4, 5, 6, 7, 8]);
+    expect(idsOf(page.rows)).toEqual(all.slice(4));
     expect(page.nextCursor).not.toBeNull();
 
     // From the oldest page held, it brings only what lies between.
@@ -191,60 +255,11 @@ describe("ChatsWebChatRepository", () => {
       before: newest.nextCursor,
       through: "in-4",
     });
-    expect(turnsOf(between.rows)).toEqual([2, 3, 4, 5, 6]);
+    expect(idsOf(between.rows)).toEqual(all.slice(1, 14));
 
     // A message the chat does not hold pages as usual.
     const plain = await repo.getMessagesPage("chat-1", { limit: 1, through: "elsewhere" });
-    expect(turnsOf(plain.rows)).toEqual([8]);
-  });
-
-  it("reads a chat's task chat parts from a time on", async () => {
-    const part = JSON.stringify([{ type: "task_chat", chatId: "task-1", title: "Flights" }]);
-    rs.useFakeTimers({ toFake: ["Date"] });
-    try {
-      rs.setSystemTime(new Date("2026-11-13T08:00:00Z"));
-      await repo.createSession("chat-1", "Plans");
-      rs.setSystemTime(new Date("2026-11-13T09:00:00Z"));
-      await repo.addMessage("card-old", "chat-1", "assistant", part, "turn-1");
-      rs.setSystemTime(new Date("2026-11-13T09:05:00Z"));
-      await repo.addMessage("card-new", "chat-1", "assistant", part, "turn-2");
-      await repo.addMessage("plain", "chat-1", "assistant", text("No card"), "turn-2");
-    } finally {
-      rs.useRealTimers();
-    }
-    const ids = async (since?: Date) =>
-      (await repo.taskChatPartMessages("chat-1", since)).map((line) => line.id);
-    expect(await ids()).toEqual(["card-old", "card-new"]);
-    expect(await ids(new Date("2026-11-13T09:04:59Z"))).toEqual(["card-new"]);
-  });
-
-  it("reads task chat parts in the transcript's order when two turns' cards share a second", async () => {
-    const part = JSON.stringify([{ type: "task_chat", chatId: "task-1", title: "Flights" }]);
-    rs.useFakeTimers({ toFake: ["Date"] });
-    try {
-      rs.setSystemTime(new Date("2026-11-13T08:00:00Z"));
-      await repo.createSession("chat-1", "Plans");
-      // "turn-z" starts first, "turn-a" later; both cards land in one second.
-      rs.setSystemTime(new Date("2026-11-13T09:00:00Z"));
-      await repo.addMessage("in-z", "chat-1", "user", text("Book it"), "turn-z");
-      rs.setSystemTime(new Date("2026-11-13T09:00:05Z"));
-      await repo.addMessage("in-a", "chat-1", "user", text("Something else"), "turn-a");
-      rs.setSystemTime(new Date("2026-11-13T09:00:10Z"));
-      await repo.addMessage("new-task", "chat-1", "assistant", part, "turn-a");
-      await repo.addMessage("ask", "chat-1", "assistant", part, "turn-z");
-    } finally {
-      rs.useRealTimers();
-    }
-    expect((await repo.getMessages("chat-1")).map((line) => line.id)).toEqual([
-      "in-z",
-      "ask",
-      "in-a",
-      "new-task",
-    ]);
-    const ids = async (since?: Date) =>
-      (await repo.taskChatPartMessages("chat-1", since)).map((line) => line.id);
-    expect(await ids()).toEqual(["ask", "new-task"]);
-    expect(await ids(new Date("2026-11-13T09:00:09Z"))).toEqual(["ask", "new-task"]);
+    expect(idsOf(plain.rows)).toEqual(["out-8"]);
   });
 
   // A subagent, fork or action run stands in no chat, so its prompts and
@@ -274,8 +289,6 @@ describe("ChatsWebChatRepository", () => {
       ["in-1", "user", "turn-1"],
       ["out-1", "assistant", "turn-1"],
     ]);
-    // What the fork said before is history, not news.
-    expect((await repo.getMessages("fork-1")).map((line) => line.read)).toEqual([true, true]);
   });
   it("says the prompt and answer of a fork promoted while its turn runs in its chat", async () => {
     await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
@@ -906,148 +919,6 @@ describe("ChatsWebChatRepository", () => {
       await said("Sunny", "m1");
       await said("Good morning");
       expect(inserted).toEqual(["m1", expect.any(String)]);
-    });
-
-    it("reads one thread in the order its messages were said, and finds its last", async () => {
-      await repo.recordUserInput("m1", "chat-1", text("Weather?"));
-      await said("Unrelated");
-      const answer = await said("Sunny", "m1");
-      await repo.recordUserInput("m2", "chat-1", text("And Friday?"), undefined, undefined, answer);
-      expect((await repo.getChatThreadMessages("chat-1", "m1")).map((line) => line.id)).toEqual([
-        "m1",
-        answer,
-        "m2",
-      ]);
-      expect(await repo.lastInChatThread("chat-1", "m1")).toBe("m2");
-      expect(await repo.lastInChatThread("chat-1", "missing")).toBeNull();
-      // Any message of a thread names it, as a client that sends the message it tapped does.
-      for (const key of [answer, "m2"]) {
-        expect((await repo.getChatThreadMessages("chat-1", key)).map((line) => line.id)).toEqual([
-          "m1",
-          answer,
-          "m2",
-        ]);
-        expect(await repo.lastInChatThread("chat-1", key)).toBe("m2");
-      }
-    });
-
-    describe("Concierge page", () => {
-      type Statement = { all(...values: unknown[]): unknown[] };
-      type Client = { prepare(sql: string): Statement };
-
-      /** The query plan of each statement `read` runs whose SQL holds `marker`. */
-      async function plansOf(marker: string, read: () => Promise<unknown>): Promise<string[]> {
-        const client = (testDb.db as unknown as { $client: Client }).$client;
-        const prepare = client.prepare.bind(client);
-        const ran: { sql: string; values: unknown[] }[] = [];
-        client.prepare = (query: string) => {
-          const statement = prepare(query);
-          const all = statement.all.bind(statement);
-          statement.all = (...values: unknown[]) => {
-            if (query.includes(marker)) ran.push({ sql: query, values });
-            return all(...values);
-          };
-          return statement;
-        };
-        try {
-          await read();
-        } finally {
-          client.prepare = prepare;
-        }
-        return ran.map(({ sql: query, values }) =>
-          (prepare(`EXPLAIN QUERY PLAN ${query}`).all(...values) as { detail: string }[])
-            .map((row) => row.detail)
-            .join("\n"),
-        );
-      }
-
-      it("finds the main line by the page index and the replies by the root index", async () => {
-        await repo.recordUserInput("m1", "chat-1", text("Weather?"));
-        await said("Sunny", "m1");
-        await repo.recordUserInput("m2", "chat-1", text("Hello"));
-
-        const page = () => repo.getConciergePage("chat-1", { limit: 1 });
-        const [mainLine] = await plansOf("m.said_at DESC, m.id DESC", page);
-        const [replies] = await plansOf("m.root_message_id = j.value", page);
-
-        const [waiting] = await plansOf("m.read_at IS NULL", page);
-
-        expect(mainLine).toContain("idx_chat_messages_page");
-        expect(replies).toContain("idx_chat_messages_root");
-        expect(waiting).toContain("idx_chat_messages_root");
-      });
-
-      it("finds the traces of the page's turns by turn", async () => {
-        await repo.addMessage("u1", "chat-1", "user", text("Hello"), "turn-1");
-
-        const [traces] = await plansOf("r.turn_id = j.value", () =>
-          repo.getConciergePage("chat-1", { limit: 5 }),
-        );
-
-        expect(traces).toContain("idx_rome_agent_messages_turn_id");
-        expect(traces).not.toMatch(/SCAN r/);
-      });
-
-      it("reads no thread for a message the chat does not hold", async () => {
-        expect(await repo.getConciergeThread("chat-1", "missing")).toEqual({
-          mainLine: [],
-          outside: [],
-          traces: [],
-          nextCursor: null,
-        });
-      });
-    });
-
-    describe("read marks", () => {
-      const readOf = async () =>
-        new Map((await repo.getMessages("chat-1")).map((message) => [message.id, message.read]));
-
-      it("reads what the owner said as read, and what an agent said as unread", async () => {
-        await repo.recordUserInput("m1", "chat-1", text("Weather?"));
-        const answer = await said("Sunny", "m1");
-        const inserted: (boolean | undefined)[] = [];
-        repo.onMessageInserted((message) => inserted.push(message.read));
-        const later = await said("Later");
-        expect(await readOf()).toEqual(
-          new Map([
-            ["m1", true],
-            [answer, false],
-            [later, false],
-          ]),
-        );
-        expect(inserted).toEqual([false]);
-      });
-
-      it("marks the named messages read, and only in that chat", async () => {
-        await repo.createSession("chat-2", "Other");
-        await repo.recordUserInput("m1", "chat-1", text("Weather?"));
-        const a = await said("Sunny", "m1");
-        const b = await said("Warm", "m1");
-        expect(await repo.markMessagesRead("chat-2", [a, b])).toBe(0);
-        expect(await repo.markMessagesRead("chat-1", [a, "missing"])).toBe(1);
-        expect(await readOf()).toEqual(
-          new Map([
-            ["m1", true],
-            [a, true],
-            [b, false],
-          ]),
-        );
-        expect(await repo.markMessagesRead("no-chat", [b])).toBe(0);
-      });
-
-      it("reads the main line when the chat is opened, and leaves a thread's replies", async () => {
-        await repo.recordUserInput("m1", "chat-1", text("Weather?"));
-        const reply = await said("Sunny", "m1");
-        const alone = await said("Good morning");
-        await repo.markSessionRead("chat-1");
-        expect(await readOf()).toEqual(
-          new Map([
-            ["m1", true],
-            [reply, false],
-            [alone, true],
-          ]),
-        );
-      });
     });
   });
 });

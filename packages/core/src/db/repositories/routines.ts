@@ -84,7 +84,7 @@ const CHAT_ARG_OF_ACTION: Record<string, string> = {
 
 /**
  * The chat a routine works for: the chat its args send into (`threadId` of
- * `resume_session` and `send_message`, `sessionId` of `send_user_message`),
+ * `system:resume_session` and `system:send_message`, `sessionId` of `system:send_user_message`),
  * else the chat it was made in: `madeIn`, or the webchat chat whose turn
  * creates it. Null when neither names one. Migration 0134 fills older rows by
  * their args alone, as nothing on them says where they were made.
@@ -110,12 +110,6 @@ export const PERSONAL_DATA_ROUTINE_REFUSED =
   "personal_data_private_only: A routine that reads personal data (Apple Health and other synced " +
   "data) must work for a private chat, such as one of the guardian's own dashboard chats.";
 
-/** Whether a routine bound to `actionName` reads personal data, by its
- *  canonical name or the local name an agent may write. */
-function readsPersonalData(actionName: string): boolean {
-  return isPersonalDataAction(actionName) || isPersonalDataAction(`core:${actionName}`);
-}
-
 export class RoutinesRepository {
   /**
    * @param placeAudience Who can read a routine's chat. Absent, every chat is
@@ -125,6 +119,25 @@ export class RoutinesRepository {
     private db: DrizzleDb,
     private placeAudience?: RoutinePlaceAudience,
   ) {}
+
+  /**
+   * @deprecated Renames the action of every routine saved under an action's
+   * old bare name, such as `send_message`, to its full ID, such as
+   * `system:send_message`. Goes once no instance has a routine saved under an
+   * old name.
+   */
+  async deprecatedQualifyActionNames(fullIdOf: Readonly<Record<string, string>>): Promise<number> {
+    let renamed = 0;
+    for (const [oldName, fullId] of Object.entries(fullIdOf)) {
+      const updated = await this.db
+        .update(routines)
+        .set({ actionName: fullId })
+        .where(eq(routines.actionName, oldName))
+        .returning({ id: routines.id });
+      renamed += updated.length;
+    }
+    return renamed;
+  }
 
   /**
    * Who can read what a routine's fires say: its chat's audience, and shared
@@ -211,6 +224,38 @@ export class RoutinesRepository {
     return rows.map(toRoutine);
   }
 
+  /** The apps that manage at least one routine. */
+  async managingAppIds(): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ managedBy: routines.managedBy })
+      .from(routines)
+      .where(isNotNull(routines.managedBy));
+    return rows.flatMap((row) => (row.managedBy ? [row.managedBy] : []));
+  }
+
+  /**
+   * Deletes the routines these apps manage, with their run history. Nobody can
+   * maintain a routine once its app is gone. A routine with an active run is
+   * kept, and a later call deletes it once the run ends. Returns the ids of the
+   * deleted routines.
+   */
+  async deleteManagedRoutines(
+    appIds: readonly string[],
+  ): Promise<{ deleted: string[]; kept: number }> {
+    const result = { deleted: [] as string[], kept: 0 };
+    if (appIds.length === 0) return result;
+    const rows = await this.db
+      .select({ id: routines.id, managedBy: routines.managedBy })
+      .from(routines)
+      .where(inArray(routines.managedBy, [...appIds]));
+    for (const row of rows) {
+      const outcome = await this.deleteIfNoActiveRuns(row.id, row.managedBy ?? undefined);
+      if (outcome.status === "deleted") result.deleted.push(row.id);
+      else if (outcome.status === "active-runs") result.kept += 1;
+    }
+    return result;
+  }
+
   /** Delete a routine only if it has no in-flight runs. The active-run count
    * and the delete run in one transaction so a run can't start (or finish)
    * between check and delete — without it, a concurrent fire could be counted
@@ -283,7 +328,7 @@ export class RoutinesRepository {
         ? routineChatOf(data.actionName, data.args, data.madeIn)
         : data.chatId;
     // Refused when it is made, not on every fire.
-    if (readsPersonalData(data.actionName) && (await this.chatAudience(chatId)) !== "private") {
+    if (isPersonalDataAction(data.actionName) && (await this.chatAudience(chatId)) !== "private") {
       throw new Error(PERSONAL_DATA_ROUTINE_REFUSED);
     }
     const createdBy = await routineCreator(this.db, data);
@@ -320,7 +365,7 @@ export class RoutinesRepository {
   ) {
     if (
       data.actionName !== undefined &&
-      readsPersonalData(data.actionName) &&
+      isPersonalDataAction(data.actionName) &&
       (await this.audienceOf(id)) !== "private"
     ) {
       throw new Error(PERSONAL_DATA_ROUTINE_REFUSED);

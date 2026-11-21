@@ -1,5 +1,5 @@
 /**
- * `show_app` — place an available app's widget on the guardian's workspace.
+ * `system:show_app` — place an available app's widget on the guardian's workspace.
  *
  * The generic, app-agnostic form of a widget placement: the caller names which
  * `appId` to mount (an installed app or a host-owned app such as Sessions), and

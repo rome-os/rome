@@ -1,7 +1,9 @@
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { channelMessageOf } from "../chats/connected-accounts/channel-message.js";
 import { toAgentInboundMessage } from "../connections/integrations/agents.js";
-import { PeopleRepository } from "../db/repositories/people.js";
+import { DrizzlePeopleRepository } from "./infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "./model/people-repository.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { persons } from "../db/schema.js";
 import type { AgentMessageEnvelope } from "../connections/integrations/rome-cloud-agents.js";
@@ -24,7 +26,7 @@ function message(
     hop: 1,
   });
   if (!inbound) throw new Error("the envelope names no sender agent");
-  return inbound;
+  return channelMessageOf(inbound, "agents");
 }
 
 const external = { account: "friend", sameAccount: false };
@@ -37,7 +39,7 @@ describe("linking same-account agents to the guardian", () => {
 
   beforeEach(async () => {
     testDb = createTestDb();
-    people = new PeopleRepository(testDb.db);
+    people = new DrizzlePeopleRepository(testDb.db);
     settings = new SettingsRepository(testDb.db);
     testDb.db
       .insert(persons)

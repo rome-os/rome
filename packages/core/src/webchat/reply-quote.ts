@@ -71,21 +71,6 @@ export async function quoteSpans(content: string, cardLine?: CardLine): Promise<
   return spans;
 }
 
-/**
- * The first line with text of the quote a stored message carries, or null when
- * it quotes nothing. A thread whose root is not at hand is named by it.
- */
-export function storedQuoteLine(content: string): string | null {
-  const quote = partsOf(content).find((part) => part.type === "reply_to");
-  const text = typeof quote?.text === "string" ? quote.text : "";
-  return (
-    text
-      .split("\n")
-      .map((line) => line.trim())
-      .find((line) => line !== "") ?? null
-  );
-}
-
 /** `text` cut to {@link REPLY_TO_TEXT_MAX_LENGTH} characters, ending in an ellipsis when cut. */
 export function truncateQuote(text: string): string {
   if (text.length <= REPLY_TO_TEXT_MAX_LENGTH) return text;

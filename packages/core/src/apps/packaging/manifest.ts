@@ -101,7 +101,7 @@ const RemixDeclarationSchema = z
 // An event type family the app can deliver on the bus, and the action core
 // calls to make sure it does. `events` is the event-name glob (one `*`), and
 // `types` fill that `*` so the catalog can list them before the first
-// emission. Read by `defer` and `search_event_catalog`.
+// emission. Read by `defer` and `system:search_event_catalog`.
 const EventSourceDeclarationSchema = z
   .object({
     events: z.string().min(1),

@@ -3,6 +3,7 @@
 // so a task chat's open question is read off its rows.
 
 interface StoredRow {
+  id?: string;
   role: string;
   content: string;
 }
@@ -22,23 +23,29 @@ function parts(content: string): StoredPart[] {
 }
 
 export interface OpenQuestion {
-  question: string;
-  options?: string[];
+  /** The message that holds the card: the id `card_forward` takes. */
+  messageId: string;
+  /** Its questions in one line, each with its options. */
+  line: string;
 }
 
-/** The first question of a question card in these rows, or null when there is none. */
+/** A question card in these rows, as one line with the message that holds it, or null when there is none. */
 export function openQuestion(rows: StoredRow[]): OpenQuestion | null {
   for (const row of rows) {
-    if (row.role !== "assistant") continue;
+    if (row.role !== "assistant" || !row.id) continue;
     for (const part of parts(row.content)) {
       if (part.type !== "pending_interaction" || part.render?.builtin !== true) continue;
+      if (part.render.componentId !== "question-card") continue;
       const questions = (part.render.props as { questions?: unknown } | undefined)?.questions;
-      const first = Array.isArray(questions) ? (questions[0] as Record<string, unknown>) : null;
-      if (!first || typeof first.question !== "string") continue;
-      const options = Array.isArray(first.options)
-        ? first.options.filter((option): option is string => typeof option === "string")
-        : [];
-      return { question: first.question, ...(options.length ? { options } : {}) };
+      const asked = (Array.isArray(questions) ? questions : []).flatMap((q) => {
+        const { question, options } = (q ?? {}) as { question?: unknown; options?: unknown };
+        if (typeof question !== "string") return [];
+        const choices = Array.isArray(options)
+          ? options.filter((option): option is string => typeof option === "string")
+          : [];
+        return [choices.length ? `${question} (options: ${choices.join(" | ")})` : question];
+      });
+      if (asked.length) return { messageId: row.id, line: asked.join(" · ") };
     }
   }
   return null;

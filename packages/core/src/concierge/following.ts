@@ -1,9 +1,9 @@
 // What the Concierge follows for the guardian. What can be followed belongs to
 // the connections: the connector app answers which services it connects and,
 // for each one it can watch, its status, kinds and options
-// (`connector_watch_sources`), subscribes at the source
-// (`connector_watch_ensure`), and puts each raw event in the common shape
-// (`connector_watch_normalize`). Core never names a source. It keeps the
+// (`connector:connector_watch_sources`), subscribes at the source
+// (`connector:connector_watch_ensure`), and puts each raw event in the common shape
+// (`connector:connector_watch_normalize`). Core never names a source. It keeps the
 // follows and one event-bus routine per raw event a follow listens on. Events
 // are batched, triaged by the `concierge-triage` agent (triage.ts), and what
 // triage kept reaches the Concierge as quiet system turns: important ones after
@@ -1483,6 +1483,20 @@ export function startConciergeFollowing(
       const known = sourcesCache?.watch ?? [];
       const fresh = sourcesCache !== null && now() - sourcesCache.at < SOURCES_TTL_MS;
       const { digestTimes } = rulesOf(stored, owner);
+      // When the owner's next digest comes: the soonest of their digest routines.
+      const digestKeys = new Set(
+        digestTimes.map((localTime) =>
+          owner === GUARDIAN_OWNER
+            ? `${DIGEST_KEY_PREFIX}${localTime}`
+            : `${DIGEST_KEY_PREFIX}${mainChatIdOf(owner)}:${localTime}`,
+        ),
+      );
+      let nextAt: number | null = null;
+      for (const routine of await deps.routines.listRoutines()) {
+        if (!routine.enabled || !routine.key || !digestKeys.has(routine.key)) continue;
+        const at = routine.nextRunAt?.getTime();
+        if (at !== undefined && (nextAt === null || at < nextAt)) nextAt = at;
+      }
       const items: TaskListFollowItem[] = [];
       for (const follow of followsOf(stored, owner)) {
         if ((await chatRefOf(follow.chat, owner)).id !== chatId) continue;
@@ -1499,6 +1513,7 @@ export function startConciergeFollowing(
               ? toDto(source, follow, { id: chatId, name: "", main: false }).state
               : "unavailable",
           digestTimes,
+          nextAt,
           ...(follow.createdAt !== undefined ? { createdAt: follow.createdAt } : {}),
         });
       }

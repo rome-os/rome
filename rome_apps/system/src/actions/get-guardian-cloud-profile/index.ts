@@ -18,7 +18,7 @@ export function createAction(
 ): Action {
   const service = deps.cloudProfile;
   if (typeof service?.get !== "function") {
-    throw new Error("get_guardian_cloud_profile requires a cloudProfile capability");
+    throw new Error("system:get_guardian_cloud_profile requires a cloudProfile capability");
   }
   return {
     config,

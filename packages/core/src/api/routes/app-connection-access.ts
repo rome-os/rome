@@ -3,7 +3,7 @@ import type { DocumentAccessOptions } from "@rome/api-types/app-connection-acces
 import {
   FEISHU_DOCUMENT_READ,
   feishuDocumentGuidance,
-} from "../../connections/integrations/feishu-documents.js";
+} from "../../connections/kinds/feishu/index.js";
 import { z } from "zod";
 import { isResolvedApp } from "../../apps/state.js";
 import { appAccessibleOperations } from "../../connections/app-connections.js";

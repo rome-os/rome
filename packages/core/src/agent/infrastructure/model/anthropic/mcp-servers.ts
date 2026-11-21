@@ -79,7 +79,7 @@ export function buildAnthropicMcpServers({
 
   // The actions + skills MCP servers always register so the agent can list
   // them mid-session even when the live catalogs are currently empty — that's
-  // how `app_management` installs become discoverable in-session.
+  // how `system:app_management` installs become discoverable in-session.
   const mcpServers: AnthropicMcpServers = {
     actions: server("actions"),
     skills: server("skills"),

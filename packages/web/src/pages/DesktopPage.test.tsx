@@ -2,8 +2,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import i18n from "@/i18n";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import DesktopPage, { NamedDesktopPage } from "./DesktopPage";
+import DesktopPage from "./DesktopPage";
 
 /** The websocket path `desktop-vnc.html` reads from an iframe's src. */
 function socketPath(iframe: HTMLElement): string | null {
@@ -25,63 +24,5 @@ describe("DesktopPage", () => {
     expect(iframe.getAttribute("src")).toMatch(/^\/desktop-vnc\.html\?resize=scale&path=/);
     expect(socketPath(iframe)).toBe("desktop-proxy/websockify");
     expect(iframe.getAttribute("allow")).toBe("clipboard-read; clipboard-write");
-  });
-
-  it("shows a named desktop through its own proxy path", async () => {
-    await i18n.changeLanguage("en");
-
-    render(<DesktopPage name="wechat" />);
-
-    expect(socketPath(screen.getByTitle("Rome desktop “wechat”"))).toBe(
-      "desktop-proxy/wechat/websockify",
-    );
-  });
-
-  it("keeps a name whole on its way to the proxy", async () => {
-    await i18n.changeLanguage("en");
-
-    render(<DesktopPage name="a?b#c" />);
-
-    // desktop-vnc.html decodes the query once. The name must still be encoded
-    // then, so `?` and `#` cannot cut the socket path short.
-    expect(socketPath(screen.getByTitle("Rome desktop “a?b#c”"))).toBe(
-      "desktop-proxy/a%3Fb%23c/websockify",
-    );
-  });
-
-  it("serves /desktop/:name for any name", async () => {
-    await i18n.changeLanguage("en");
-
-    render(
-      <MemoryRouter initialEntries={["/desktop/notes"]}>
-        <Routes>
-          <Route path="/desktop/:name" element={<NamedDesktopPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    expect(socketPath(screen.getByTitle("Rome desktop “notes”"))).toBe(
-      "desktop-proxy/notes/websockify",
-    );
-  });
-
-  it.each([
-    "/desktop/websockify",
-    "/desktop/%3F",
-    "/desktop/%23",
-    "/desktop/Wechat",
-  ])("shows no desktop at %s, a path that cannot name one", async (path) => {
-    await i18n.changeLanguage("en");
-
-    const { container } = render(
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/desktop/:name" element={<NamedDesktopPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    expect(container.querySelector("iframe")).toBeNull();
-    expect(screen.getByText(/There is no desktop called/)).toBeTruthy();
   });
 });

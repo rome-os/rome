@@ -15,7 +15,7 @@
  * // User: "stop reminding me to drink water in the morning"
  * // Search on content terms only; the time ("morning") is the agent's to
  * // resolve against each result's schedule.
- * await callAction("search_routine", { query: "drink water" });
+ * await callAction("system:search_routine", { query: "drink water" });
  * // → { totalRoutines: 4, matches: [{ id, name, schedule: "recurring (FREQ=DAILY) at 08:00 ...", ... }] }
  */
 

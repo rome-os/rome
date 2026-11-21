@@ -2,7 +2,6 @@ import { Reply } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ReplyToPart } from "@rome/api-types/chat";
 import { cn } from "@/lib/utils";
-import { useChatThreads } from "./chat-threads";
 import { useReplyDraft } from "./reply-draft";
 import { quoteLine } from "./reply-source";
 
@@ -10,39 +9,19 @@ const FOCUS_RING =
   "outline-1 outline-offset-2 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
 
 /**
- * What a click on a reply's quote does, and its accessible name:
- * focus the chat on the reply's thread, held on the reply, while no thread is
- * in focus. While one is, go to the original when the transcript shows it.
- * Without either, the quote is plain.
- */
-function useQuoteTarget(part: ReplyToPart, hostId: string | undefined) {
-  const { t } = useTranslation("chat");
-  const draft = useReplyDraft();
-  const threads = useChatThreads();
-  const threadOf = threads && hostId !== undefined ? threads.roots.get(hostId) : undefined;
-  const opensThread = draft?.threads === true && draft.thread === null && threadOf !== undefined;
-  const threadTitle = threadOf ? threads?.titles.get(threadOf) : undefined;
-  if (!draft || !(opensThread || draft.has(part.messageId))) return null;
-  return {
-    label: t(opensThread ? "reply.openThread" : "reply.jump"),
-    onClick: () =>
-      opensThread
-        ? draft.openThread({ thread: hostId ?? part.messageId, title: threadTitle ?? "" })
-        : draft.jump(part.messageId),
-  };
-}
-
-/**
  * The quote a reply carries when it does not sit under what it answers
  * (docs/domains/chats.md#chat-thread): a small reply arrow and one muted line
  * of the quoted message, at the top of the reply's bubble. A message from an
- * automation names it first.
+ * automation names it first. The quote fills the width of the bubble's
+ * content and adds nothing to it (`contain: inline-size`): a long original is
+ * cut, and never widens the bubble, whose minimum width a quote sets
+ * (ChatBubble). Pressing it goes to the original, where the chat can.
  */
-export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: string }) {
+export function QuotedReply({ part }: { part: ReplyToPart }) {
   const { t } = useTranslation("chat");
-  const target = useQuoteTarget(part, hostId);
+  const draft = useReplyDraft();
   const className =
-    "mb-1 flex w-full max-w-72 items-center gap-1 text-left text-aux text-muted-foreground transition-colors";
+    "mb-1 flex w-full items-center gap-1 text-left text-aux text-muted-foreground transition-colors [contain:inline-size] [.rome-bubble-on-primary_&]:text-primary-foreground/[0.82]";
   const quoted = (
     <>
       <Reply aria-hidden className="size-3.5 shrink-0 opacity-80" strokeWidth={1.75} />
@@ -57,7 +36,7 @@ export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: stri
       </span>
     </>
   );
-  if (!target) {
+  if (!draft) {
     return (
       <div data-reply-quote={part.messageId} className={className}>
         {quoted}
@@ -68,10 +47,10 @@ export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: stri
     <button
       type="button"
       data-reply-quote={part.messageId}
-      aria-label={target.label}
+      aria-label={t("reply.jump")}
       title={part.text}
       className={cn(className, "cursor-pointer hover:text-foreground", FOCUS_RING)}
-      onClick={target.onClick}
+      onClick={() => draft.jump(part.messageId)}
     >
       {quoted}
     </button>

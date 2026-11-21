@@ -10,6 +10,8 @@ import i18n from "@/i18n";
 import { ChatComposer, type ChatComposerHandle } from "../ChatComposer";
 import { ConciergeComposer } from "./ConciergeComposer";
 import { ReplyDraftHarness } from "../reply/reply-draft-harness";
+import { loadChatDraft } from "@/lib/chat-draft-storage";
+import { loadNewChatDraft } from "@/lib/new-chat-draft-storage";
 
 // The browser's microphone, which jsdom does not have.
 const microphone = rs.hoisted(() => ({
@@ -109,6 +111,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   microphone.refuse = false;
   microphone.pending = false;
   microphone.answer = null;
@@ -293,7 +296,9 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     expect(stop.closest("form")).toBe(box.closest("form"));
 
     socket.say({ type: "text", settled: "buy", pending: " mil" });
-    expect(field().value).toBe("Note: buy mil");
+    // The heard words show over the field, whose value stays as it was so the
+    // browser keeps its undo history.
+    expect(field().value).toBe("Note:");
     expect(field().readOnly).toBe(true);
     socket.say({ type: "text", settled: " milk", pending: "" });
 
@@ -328,13 +333,29 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     socket.say({ type: "text", settled: "buy", pending: " milk" });
     expect(copy()?.textContent?.startsWith("Note:")).toBe(true);
     expect(field().style.color).toBe("transparent");
+    expect(field().classList.contains("voice-input-previewing")).toBe(true);
+    expect(field().style.overflowY).toBe("hidden");
 
     fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
     await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
     socket.say({ type: "ended" });
     expect(copy()).toBeNull();
     expect(field().style.color).toBe("");
+    expect(field().classList.contains("voice-input-previewing")).toBe(false);
     expect(field().value).toBe("Note: buy milk");
+  });
+
+  it("keeps focus in the field when the guardian presses on the spoken text", async () => {
+    const { field } = renderComposer(kind);
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "buy", pending: " milk" });
+    const copy = document.querySelector("[data-voice-input-spoken-text]") as HTMLElement;
+    screen.getByRole("button", { name: "Stop voice input" }).focus();
+
+    expect(fireEvent.mouseDown(copy)).toBe(false);
+    expect(document.activeElement).toBe(field());
+    fireEvent.keyDown(field(), { key: "Enter" });
+    await waitFor(() => expect(socket.textSent.at(-1)).toEqual({ type: "stop" }));
   });
 
   it("ends listening on Enter and sends once the last words are in", async () => {
@@ -435,7 +456,7 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
     socket.say({ type: "text", settled: "hello", pending: "" });
 
     act(() => handle.current?.insertText("an example prompt"));
-    expect(field().value).toBe("hello");
+    expect(field().value).toBe("");
 
     fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
     socket.say({ type: "ended" });
@@ -453,7 +474,7 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
 
     const socket = await startListening();
     socket.say({ type: "text", settled: "new", pending: "" });
-    expect(field().value).toBe("Hello new world");
+    expect(field().value).toBe("Hello old world");
     fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
     socket.say({ type: "ended" });
 
@@ -816,6 +837,114 @@ describe.each(["chat", "concierge"] as const)("voice input in the %s message fie
 
     await waitFor(() => expect(onSend).toHaveBeenCalled());
     expect(onSend.mock.calls[0][0]).toMatchObject({ text: "Abc" });
+  });
+});
+
+describe.each(["chat", "concierge"] as const)("the %s draft while voice input listens", (kind) => {
+  it("holds the words heard as they arrive, though the field's value does not", async () => {
+    const { field } = renderComposer(kind, SONIOX, "chat-a");
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: " the" });
+
+    expect(field().value).toBe("");
+    expect(loadChatDraft("chat-a")?.text).toBe("hello the");
+  });
+
+  it("keeps the words dictated while an earlier send was pending when that send fails", async () => {
+    const { onSend, field } = renderComposer(kind, SONIOX, "chat-a");
+    let fail: (error: Error) => void = () => {};
+    onSend.mockImplementation(
+      () =>
+        new Promise<void>((_, reject) => {
+          fail = reject;
+        }),
+    );
+    const box = await waitFor(() => {
+      expect(field()).toBeTruthy();
+      return field();
+    });
+    fireEvent.change(box, { target: { value: "first" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(field().value).toBe(""));
+
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "second", pending: "" });
+    await act(async () => fail(new Error("send failed")));
+
+    expect(field().value).toBe("");
+    expect(loadChatDraft("chat-a")?.text).toBe("second");
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    socket.say({ type: "ended" });
+    expect(field().value).toBe("second");
+  });
+
+  it("saves the words heard to the chat a first send makes while voice input listens", async () => {
+    mockFetch(SONIOX);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (chatId?: string) => (
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          {composers[kind](rs.fn(), chatId)}
+        </QueryClientProvider>
+      </MemoryRouter>
+    );
+    const { rerender } = render(view());
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+
+    rerender(view("chat-new"));
+    expect(loadChatDraft("chat-new")?.text).toBe("hello");
+  });
+
+  it("goes back to the field's text when the words heard are withdrawn", async () => {
+    const { field } = renderComposer(kind, SONIOX, "chat-a");
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "", pending: "hm" });
+    expect(loadChatDraft("chat-a")?.text).toBe("hm");
+    socket.say({ type: "text", settled: "", pending: "" });
+    fireEvent.click(screen.getByRole("button", { name: "Stop voice input" }));
+    socket.say({ type: "ended" });
+
+    expect(field().value).toBe("");
+    expect(loadChatDraft("chat-a")?.text ?? "").toBe("");
+  });
+});
+
+describe("voice input in the new chat message field", () => {
+  function renderNewChat() {
+    mockFetch(SONIOX);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const handle = createRef<ChatComposerHandle>();
+    const view = render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}>
+          <ChatComposer ref={handle} persistNewChatDraft onSend={rs.fn()} />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+    const field = () => document.querySelector("form textarea") as HTMLTextAreaElement;
+    return { field, handle, leave: view.unmount };
+  }
+
+  it("keeps the words heard in the draft when the rest of the draft changes", async () => {
+    const { handle } = renderNewChat();
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: "" });
+    act(() => handle.current?.setSkillSelection({ name: "summarize" }));
+
+    expect(loadNewChatDraft()?.skill?.name).toBe("summarize");
+    expect(loadNewChatDraft()?.text).toBe("hello");
+  });
+
+  it("keeps the words heard after leaving mid-message", async () => {
+    const first = renderNewChat();
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "hello", pending: " the" });
+    expect(loadNewChatDraft()?.text).toBe("hello the");
+    first.leave();
+
+    const back = renderNewChat();
+    expect(back.field().value).toBe("hello the");
   });
 });
 

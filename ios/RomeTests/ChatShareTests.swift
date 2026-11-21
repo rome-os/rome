@@ -92,14 +92,6 @@ private let twoTurns = [
         #expect(!share.isSelecting)
     }
 
-    @Test func shareModeClosesAnOpenThread() async {
-        let backend = FakeBackend()
-        let store = await chat(backend, twoTurns)
-        store.openThread(at: "a1")
-        store.share.begin(fromRow: "a1:0")
-        #expect(store.thread == nil)
-    }
-
     @Test func createSendsThePickedTurnsInOrderAndOffersTheLink() async {
         let backend = FakeBackend()
         let store = await chat(backend, twoTurns)
@@ -158,17 +150,16 @@ private let twoTurns = [
         #expect(share.outgoing == nil && share.selection == ["t1", "t2"])
     }
 
-    /// Share mode leaves a quoted reply, and where its draft goes, as it was.
+    /// Share mode leaves a quoted reply, and what its draft is for, as it was.
     @Test func shareModeKeepsAQuotedReply() async throws {
-        let messages = twoTurns.map { m -> ChatMessage in var m = m; m.knowsThreads = true; return m }
-        let store = await chat(FakeBackend(), messages)
+        let store = await chat(FakeBackend(), twoTurns)
         store.reply(to: "a3")
         let quote = try #require(store.quote)
-        #expect(store.composerThread == quote)
+        #expect(store.composerReply == quote)
         store.share.begin(fromRow: "a1:0")
         #expect(store.quote == quote)
         store.share.cancel()
-        #expect(store.quote == quote && store.composerThread == quote)
+        #expect(store.quote == quote && store.composerReply == quote)
     }
 
     /// Only an instance known to be at or above the app's minimum gets a

@@ -3,6 +3,7 @@
 // documented in email.ts:
 //   1. descriptor shape — one `inbox` grant, a talker needing it.
 //   2. registry-level: import unlocks talk; send()/ingestInbound() round-trip
+import { channelMessageOf } from "../../chats/connected-accounts/channel-message.js";
 //      through the wrapped EmailAdapter.
 //   3. fault mapping: ingestInbound's bad_signature verdict → CredentialRejected
 //      { grant: "inbox" }; adapter.start() rejecting (Rome Cloud outage) →
@@ -23,7 +24,7 @@ import type {
   SendMailInput,
   SendMailResult,
 } from "../kinds/email/rome-cloud-mail.js";
-import type { PeopleRepository } from "../../db/repositories/people.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { EmailInboundResult } from "../kinds/email/email-control.js";
 import { createTestDb } from "../../test/db.js";
@@ -301,7 +302,7 @@ describe("email Talker fault mapping", () => {
     });
     const received: ChannelMessage[] = [];
     talker.start(
-      (msg) => received.push(msg),
+      (msg) => received.push(channelMessageOf(msg, "email")),
       () => {},
     );
 
@@ -354,7 +355,7 @@ function buildDeliveringTalker(provider: MailProvider): {
   });
   const delivered: ChannelMessage[] = [];
   talker.start(
-    (msg) => delivered.push(msg),
+    (msg) => delivered.push(channelMessageOf(msg, "email")),
     () => {},
   );
   return {
@@ -389,7 +390,7 @@ describe("email inbound delivery", () => {
     attachments: [{ blobId: "att_1", name: "doc.pdf", size: 3, type: "application/pdf" }],
   });
 
-  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+  it("delivers the transport's message as apps receive it, field for field", async () => {
     const h = buildDeliveringTalker(makeProvider());
 
     await h.ingest(event);
@@ -472,7 +473,7 @@ describe("email descriptor over a real ConnectionRegistry", () => {
     expect(conn.status().chat).toEqual({ state: "unlocked" });
     const received: ChannelMessage[] = [];
     conn.hearTalker(async (msg) => {
-      received.push(msg);
+      received.push(channelMessageOf(msg, "email"));
       return;
     });
 

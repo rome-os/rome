@@ -63,6 +63,7 @@ const BULLET_KEYS: Record<string, string[]> = {
   "linkedin.bot": ["read", "recap"],
   "discord.bot": ["reply", "start"],
   "feishu.bot": ["reply", "start"],
+  "slack_app.bot": ["reply"],
   "slack_bot.bot": ["reply", "start"],
   "email.bot": ["reply", "start"],
   "agents.bot": ["reply", "start"],

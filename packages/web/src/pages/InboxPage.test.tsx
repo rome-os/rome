@@ -83,7 +83,7 @@ describe("InboxPage message sources", () => {
     expect((await badgeOf("WhatsApp")).getByText("Broken")).toBeTruthy();
     expect((await badgeOf("WeChat")).getByText("Connected")).toBeTruthy();
     expect((await badgeOf("Discord")).getByText("Configured")).toBeTruthy();
-    expect((await badgeOf("Telegram User")).getByText("Not connected")).toBeTruthy();
+    expect((await badgeOf("Telegram user")).getByText("Not connected")).toBeTruthy();
     expect((await badgeOf("Webchat")).getByText("Always on")).toBeTruthy();
   });
 
@@ -186,7 +186,7 @@ describe("InboxPage triage policy", () => {
     // Mark-reviewed reruns loadAll; the refreshed settings must win over the
     // stale local toggle state. Re-query the switch — the page shows its
     // loading state during the refetch, remounting the section.
-    fireEvent.click(await screen.findByRole("button", { name: "Mark Reviewed" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Mark reviewed" }));
     await waitFor(() => {
       const sw = screen.getAllByRole("switch")[0];
       expect(sw.getAttribute("aria-checked")).toBe("false");

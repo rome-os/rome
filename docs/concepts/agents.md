@@ -45,12 +45,18 @@ A core or app agent may declare how a chat treats its turns in an optional `poli
 
 | Field | Values | Default |
 |---|---|---|
-| `finalText` | `deliver` sends the model's text to the chat. `private` keeps it, narration and final reply alike, in the trace, so the agent reaches the guardian only through its tools. A `private` agent gets no Claude Code reminder to update the guardian, and `defer` does not ask it for a confirmation line. | `deliver` |
+| `finalText` | `deliver` sends the model's text to the chat. `private` keeps it, narration and final reply alike, in the trace, so the agent reaches the guardian only through its tools. A place can override it: on a connection the Concierge's text is the reply ([Concierge](../architecture/concierge.md#on-a-connection)). A `private` agent gets no Claude Code reminder to update the guardian, and `defer` does not ask it for a confirmation line. | `deliver` |
 | `autoTitle` | Whether the chat's first message names the chat. | `true` |
 | `loadMemory` | Whether a core agent's system prompt carries the memory index, project summaries, and runtime paths. | `true` for `main` only |
 | `freshSessionOnSetupChange` | Whether a session opened by continuity key is replaced by a fresh one when the agent's [setup](sessions.md#setup) changed since it opened. | `false` |
 | `handoffOnRenewal` | Whether a renewed session starts from a [handoff](sessions.md#handoff). | `false` |
 | `delegatesWork` | Whether the agent hands its work to other chats rather than doing it. Its system prompt then leaves out the command line tools and the runtime context beyond where memory and the docs are, and its sessions carry no `propose_routine`. | `false` |
+
+## Own turns
+
+Deprecated, and to be removed: Rome is not keeping a way for an app to run its agent's turns past the Inbox app.
+
+An app agent may declare `runsOwnTurns: true` when its own app runs its turns. On an account linked to it, the Inbox app answers no message, so no [wake gate](../domains/participation.md#wake-gate), sentinel or [send gate](../domains/participation.md#send-gate) judges what the agent hears or sends. Rome honours the field only for the first-party apps in `DEPRECATED_RUNS_OWN_TURNS_APPS` (`packages/core/src/app-host/deprecated-runs-own-turns.ts`) and ignores it on any other agent. Rome reads it as `deprecatedRunsOwnTurns`. The key keeps its name, so an app that sets it still loads on older Rome hosts. Its earlier name `unsafeTestOnlyBypassInbox` still loads too.
 
 ## Builtin tools
 
@@ -107,4 +113,4 @@ provider's native structured-output API.
 
 ## Agent hierarchy
 
-Agents form a hierarchy with one orchestrator: the **main agent** handles trusted messages directly or delegates to role-restricted subagents (quick tasks, read-only exploration, coding). The coding agent is a subagent, so the chat shows its progress while it runs, and a follow-up in the same chat continues its session. Routines, workflows, and agents that do not list the coding subagent start the same agent through the `coding:coding_task` [action](actions.md). The coding agent plans its own work before it edits code. Two agents sit outside the delegation tree as gates: the [sentinel](messaging.md#sentinel) triages untrusted inbound messages, and the **envoy** validates outgoing messages before they are sent.
+Agents form a hierarchy with one orchestrator: the **main agent** handles trusted messages directly or delegates to role-restricted subagents (quick tasks, read-only exploration, building Rome apps). The coding agent builds and installs apps only, so the main agent does other coding work itself. The coding agent is a subagent, so the chat shows its progress while it runs, and a follow-up in the same chat continues its session. Routines, workflows, and agents that do not list the coding subagent start the same agent through the `coding:coding_task` [action](actions.md). The coding agent plans its own work before it edits code. Two agents sit outside the delegation tree as gates: the [sentinel](messaging.md#sentinel) triages untrusted inbound messages, and the **envoy** validates outgoing messages before they are sent.

@@ -18,11 +18,15 @@ function nonEmptyString(value: unknown): string | null {
 const ASK_QUESTION_APP_ID = "core";
 const ASK_QUESTION_COMPONENT_ID = "question-card";
 
-/** The parameter that names the one earlier message a Concierge message replies to: `say`'s, and `ask_question`'s card. */
+/**
+ * The parameter that names the one earlier message a Concierge message replies
+ * to: `say`'s, and `ask_question`'s card. Optional: left out or null, a message
+ * answers nothing (docs/domains/chats.md#chat-thread).
+ */
 export const REPLY_TO_PARAMETER = {
-  type: "string",
+  type: ["string", "null"],
   description:
-    "The id of the one earlier message this replies to: the message_id of a guardian message from its <chat_thread> line, a messageId say returned, or a task's start_message_id for its result. The guardian sees the quote, and the message joins that message's thread. Leave it out for a message that replies to nothing, except when the guardian wrote inside a thread: then it replies there.",
+    "The id of the one earlier message this answers: the message_id of the guardian message you are answering, from its <chat_thread> line, or a task's start_message_id for its result. Leave it out, or null, for a message that answers nothing, such as one you start yourself. The guardian sees what you answer as a quote, unless your message sits right under it.",
 };
 
 const ASK_QUESTION_PARK_DIRECTIVE =

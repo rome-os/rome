@@ -132,7 +132,7 @@ Debug builds read these environment variables (set them in the scheme's Run opti
 docker exec -i rome-rome-1 python3 - <chat id> < ios/Tools/card-states-chat.py
 ```
 
-Lines that come from a turn's trace (a renewal, a failed turn) and thread labels are not copied: for those, read the demo data (`ROME_DEMO=1`) or the main Chat.
+Lines that come from a turn's trace (a renewal, a failed turn) are not copied: for those, read the demo data (`ROME_DEMO=1`) or the main Chat.
 
 The stacking game ("Build Rome") opens from the update page while a Rome upgrades, or with ten quick taps on the big mascot of the Agent page (a tap on a chat header's mascot opens it). To reach the update entry without a real upgrade, launch with `ROME_DEMO=update` and tap "Update now": the demo upgrade runs for about 8 seconds, and "Play a game" shows under its status line. The best score stays on the device, across sign-out.
 

@@ -21,18 +21,19 @@ cases:
       - aiAssert: >-
           A Telegram connection detail dialog is open and shows its connected status and account
           information rather than an error.
-  - name: SET-03 Inspect channel activation settings
+  - name: SET-03 Inspect a chat's rules on its connection page
     tags:
       - settings
     steps:
       - app.open:
-          path: /settings/channels
+          path: /settings/connections/discord
       - aiAct: >-
-          Click the visible "Rome / can you see active chats?" chat card once, then stop.
+          Scroll down until the "Chat rules" heading and the "can you see active chats?" row
+          below it are visible, then click that row to open it.
       - aiAssert: >-
-          The card's configuration sections are shown, including an "Activation" section ("Rome in
-          this chat"), a "Respond" policy set to "Only when mentioned", and "Reply
-          placement" options ("Native thread", "Inline").
+          The row's rules are shown, including "Rome in this chat", an "Activation" section with a
+          "Respond" rule set to "Only when addressed", and "Reply placement" options ("Native
+          thread", "Inline").
   - name: SET-04 Open advanced developer settings
     tags:
       - settings

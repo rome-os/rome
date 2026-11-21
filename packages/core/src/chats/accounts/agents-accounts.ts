@@ -49,7 +49,7 @@ function agentAccount(agentId: string, agent?: ExternalAgent): Account {
 }
 
 /** The agents this Rome can message, read from Cloud. The People page and
- *  `send_message` by name share one read, so both see the same listing. */
+ *  `system:send_message` by name share one read, so both see the same listing. */
 export interface ExternalAgents {
   /** Whether the guardian has connected Agents. Until then the channel
    *  reaches no one, and Cloud is not asked. */
