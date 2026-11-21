@@ -39,6 +39,7 @@ What the guardian picks when they connect: the kind of access they hand Rome. A 
 - A kind of connection says how Rome got in. Where an account lives and who is who is the account's [platform](chats.md#platform), never its kind of connection.
 - Some kinds have no platform, such as GitHub, since no chats live there.
 - The Rome-managed Google kind reads Gmail without modifying, deleting or labeling mail. Every send needs the guardian's approval of that exact message, including its sender, recipients, subject and body. A schedule or another agent cannot approve a send on the guardian's behalf.
+- The Rome-managed Microsoft kind reads Outlook mail the same way, without modifying, moving, deleting or flagging it, under the same approval rule for every send. Each send is a new message, never a threaded reply.
 - The kinds ship with Rome. The guardian picks one, and never makes one.
 
 ## Watch
@@ -94,7 +95,8 @@ What a platform delivered through a connection: where it was said, who said it, 
 
 ## Decided against
 
-- **Giving tools direct access to the Google grant.** It would let a tool send mail without the guardian approving the exact message. Gmail access stays behind the read-only and approved-send operations.
+- **Giving tools direct access to the Google or Microsoft grant.** It would let a tool send mail without the guardian approving the exact message. Gmail and Outlook access stay behind the read-only and approved-send operations.
+- **Outlook replies through Graph's reply endpoints.** They pick recipients from the original message, and `createReply` needs permission to change the mailbox, so the guardian could not approve exactly who receives the mail (2026-11-20).
 
 - **The next connection of the same kind takes over the disconnected account's name, chats and history.** For an account that takes an agent, a new account is a new participant, and inheriting another account's history misattributes what was said.
 - **Deleting a disconnected account's record, with the chats it alone was in.** The rule until 2026-11-04. The agent link is the guardian's decision about the account and outlives Rome's access to it, and a chat's history belongs to the chat whatever reaches it, so a disconnect removes Rome's reach and nothing else.

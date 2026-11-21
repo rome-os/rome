@@ -1,32 +1,12 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-import { actionExecutionContext } from "../../apps/actions/context.js";
 import { hashArgs } from "../../apps/actions/replay.js";
 import { z } from "zod";
 import type { ActionRegistry, ActionResult } from "../../apps/actions/types.js";
+import { approvedSendId as approvalId, type ApprovedSendOptions } from "../approved-send.js";
 import type { ConnectionRegistry } from "../registry.js";
 import { gmailReadSchema, gmailSendSchema, type GmailResponse } from "./api.js";
 
 export const GMAIL_READ_ACTION = "core:gmail_read";
 export const GMAIL_SEND_ACTION = "core:gmail_send";
-
-const forwardedApproval = new AsyncLocalStorage<{ id?: string }>();
-export function withGmailApprovalId<T>(id: string | undefined, call: () => T): T {
-  return forwardedApproval.run({ id }, call);
-}
-function approvalId(): string | undefined {
-  const forwarded = forwardedApproval.getStore();
-  if (forwarded) return forwarded.id;
-  const initiator = actionExecutionContext.getStore()?.initiator;
-  return initiator?.startsWith("approval:") ? initiator.slice("approval:".length) : undefined;
-}
-interface GmailActionOptions {
-  forward?: (
-    name: string,
-    args: Record<string, unknown>,
-    approvalId?: string,
-  ) => Promise<ActionResult>;
-  claimApprovedSend?: (approvalId: string, argsHash: string) => Promise<boolean>;
-}
 
 function response(result: unknown, connectionId: string): ActionResult {
   const reply = result as GmailResponse;
@@ -39,7 +19,7 @@ function response(result: unknown, connectionId: string): ActionResult {
 export function registerGmailActions(
   actions: Pick<ActionRegistry, "register">,
   connections: Pick<ConnectionRegistry, "find" | "grantOf"> | undefined,
-  options: GmailActionOptions = {},
+  options: ApprovedSendOptions = {},
 ): void {
   actions.register({
     config: {

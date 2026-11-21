@@ -37,6 +37,17 @@ description: |
   means the existing Composio Gmail path remains available; a broken grant never
   silently switches to Composio. Other Google services stay on Composio.
 
+  With a Rome-managed Microsoft connection, Outlook is restricted to GETs for
+  /v1.0/me, /v1.0/me/messages, /v1.0/me/messages/{id}, /v1.0/me/mailFolders,
+  /v1.0/me/mailFolders/{id} and /v1.0/me/mailFolders/{id}/messages, without custom
+  headers/body. It never modifies, moves, deletes or flags mail, and attachments
+  are not supported. Read replies include connectionId. Send via
+  core:outlook_send with that connectionId and /v1.0/me's address as From:
+  every exact message requires the guardian's approval card. No managed
+  Microsoft connection means the existing Composio Outlook path remains
+  available; a broken grant never silently switches to Composio. Calendar,
+  contacts and other Graph paths stay on Composio.
+
   Fails closed: not signed in, toolkit not connected, or a non-2xx
   provider response all come back as an action error, so a rejected call never
   reads as success.

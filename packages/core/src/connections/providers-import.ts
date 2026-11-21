@@ -10,6 +10,7 @@ import {
   OAUTH_PROVIDER_GRANTS,
   githubGrantProfileSchema,
   googleGrantProfileSchema,
+  microsoftGrantProfileSchema,
   shopifyGrantProfileSchema,
   slackGrantProfileSchema,
   type OAuthProviderGrantProfile,
@@ -23,7 +24,7 @@ import type { Credential, SecretRecord } from "./types.js";
  * caller treats it as a no-op).
  *
  * Material shape per provider (flat `SecretRecord`, mirroring the grant table):
- * - `github` / `google` / `shopify`: `{ accessToken, refreshToken?, expiresAt? }`.
+ * - `github` / `google` / `shopify` / `microsoft`: `{ accessToken, refreshToken?, expiresAt? }`.
  * - `slack`: `{ botToken, userToken? }` — Slack v2 issues a bot token (`xoxb-`,
  *   the bundle's `accessToken`) plus a user token (`xoxp-`) that rides in `raw`
  *   (the verbatim oauth.v2.access response), same extraction the token-file
@@ -111,6 +112,11 @@ export function grantProfileFromBundle(
     case "google":
       // Google's schema has no login key — a raw handle never lands.
       return googleGrantProfileSchema.parse(withScopes(pickRawKeys(account, IDENTITY_KEYS)));
+    case "microsoft":
+      // Microsoft serves no avatar URL and mints no handle.
+      return microsoftGrantProfileSchema.parse(
+        withScopes(pickRawKeys(account, ["subject", "displayName", "email"])),
+      );
     case "github":
       return githubGrantProfileSchema.parse(
         withScopes(pickRawKeys(account, [...IDENTITY_KEYS, "login"])),
