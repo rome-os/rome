@@ -1,3 +1,4 @@
 @import "tailwindcss";
 @import "@rome-os/ui/styles.css";
+@import "@rome-os/node-ui/activity.css";
 @import "./generated-theme.css";

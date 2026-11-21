@@ -1,7 +1,7 @@
 // State of a rome-node daemon, read over a console socket that carries the daemon's JSON-RPC
 // unchanged. Wire contract: ./protocol.ts.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { resultOf } from "./format.js";
+import { activeTextFilter, resultOf } from "./format.js";
 import {
   nodeActionRowSchema,
   nodeConsoleDaemonStateSchema,
@@ -246,10 +246,7 @@ export interface ActionFilters {
   text?: string;
 }
 
-export function activeTextFilter(text: string | undefined): string | undefined {
-  const trimmed = text?.trim();
-  return trimmed && [...trimmed].length >= 3 ? trimmed : undefined;
-}
+export { activeTextFilter } from "./format.js";
 
 function matches(row: NodeActionRow, filters: ActionFilters): boolean {
   if (filters.peer && row.peer?.toLowerCase() !== filters.peer.toLowerCase()) return false;

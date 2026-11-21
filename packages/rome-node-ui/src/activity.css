@@ -1,0 +1,5 @@
+/* Lets the host's Tailwind build generate only the utilities used by `@rome-os/node-ui/activity`.
+   Import it after `@rome-os/ui/styles.css`, which supplies the theme tokens. */
+@source "./activity-view.tsx";
+@source "./load-chart.tsx";
+@source "./parts.tsx";

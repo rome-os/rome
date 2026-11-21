@@ -9,6 +9,7 @@ on:
       - infra/rome-node/**
       - packages/rome-node-cli/**
       - packages/rome-node-core/**
+      - packages/rome-node-ui/**
       - packages/rome-node-web/**
       - packages/ui/**
       - packages/web/src/lib/theme.ts
@@ -25,6 +26,7 @@ on:
       - infra/rome-node/**
       - packages/rome-node-cli/**
       - packages/rome-node-core/**
+      - packages/rome-node-ui/**
       - packages/rome-node-web/**
       - packages/ui/**
       - packages/web/src/lib/theme.ts
@@ -57,6 +59,7 @@ jobs:
           node-version: 24
       - run: pnpm install --frozen-lockfile --ignore-scripts --filter @rome-os/node... --filter @rome-os/node-web...
       - run: pnpm --filter @rome-os/ui build
+      - run: pnpm --filter @rome-os/node-ui build
       - run: pnpm --filter @rome-os/node build
       - run: pnpm --filter @rome-os/node-web build
       - run: pnpm --filter @rome-os/node-web test
@@ -127,6 +130,8 @@ jobs:
                 if (!html.includes("id=\"root\"")) throw new Error("missing SPA root");
                 const unauth = await fetch(`${base}/api/status`);
                 if (unauth.status !== 401) throw new Error(`expected 401 unauthenticated, got ${unauth.status}`);
+                const unauthAudit = await fetch(`${base}/api/audit/summary`);
+                if (unauthAudit.status !== 401) throw new Error(`expected 401 unauthenticated /api/audit/summary, got ${unauthAudit.status}`);
                 const login = await fetch(`${base}/api/auth/login`, {
                   method: "POST",
                   headers: { "content-type": "application/json", origin: base },
@@ -139,6 +144,18 @@ jobs:
                 const snap = await statusRes.json();
                 if (snap.phase !== "unconfigured" || snap.audit?.status?.state !== "ok") {
                   throw new Error(`unexpected status snapshot: ${JSON.stringify(snap)}`);
+                }
+                const auditSummaryRes = await fetch(`${base}/api/audit/summary`, { headers: { cookie } });
+                if (auditSummaryRes.status !== 200) throw new Error(`authenticated /api/audit/summary failed: ${auditSummaryRes.status}`);
+                const auditSummary = await auditSummaryRes.json();
+                if (auditSummary.status?.state !== "ok" || "path" in auditSummary) {
+                  throw new Error(`unexpected audit summary: ${JSON.stringify(auditSummary)}`);
+                }
+                const auditItemsRes = await fetch(`${base}/api/audit/items?limit=10`, { headers: { cookie } });
+                if (auditItemsRes.status !== 200) throw new Error(`authenticated /api/audit/items failed: ${auditItemsRes.status}`);
+                const auditItems = await auditItemsRes.json();
+                if (!Array.isArray(auditItems.items)) {
+                  throw new Error(`unexpected audit items: ${JSON.stringify(auditItems)}`);
                 }
               '\''
               kill "$WEB_PID" 2>/dev/null || true

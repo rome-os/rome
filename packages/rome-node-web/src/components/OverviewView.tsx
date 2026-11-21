@@ -8,6 +8,7 @@ import {
   Link2,
   Power,
   RefreshCw,
+  ScrollText,
   ShieldAlert,
   Trash2,
 } from "lucide-react";
@@ -53,6 +54,7 @@ export interface OverviewViewProps {
   passwordSource: PasswordSource;
   canRemovePassword: boolean;
   onSessionChange: (next: AuthSession) => void;
+  onOpenLog?: () => void;
 }
 
 export function phaseBadgeVariant(phase: HostPhase): BadgeProps["variant"] {
@@ -79,6 +81,7 @@ export function OverviewView({
   passwordSource,
   canRemovePassword,
   onSessionChange,
+  onOpenLog,
 }: OverviewViewProps) {
   const [deviceName, setDeviceName] = useState(snapshot.deviceName);
   const [cloudUrl, setCloudUrl] = useState(snapshot.cloudUrl);
@@ -321,15 +324,25 @@ export function OverviewView({
               </ListRow>
             </List>
           </CardContent>
-          {snapshot.configured ? (
+          {onOpenLog || snapshot.configured ? (
             <CardFooter className="flex-wrap justify-between gap-2 border-t border-border-subtle">
               <span className="text-aux text-muted-foreground">{t.overview.auditCloudHint}</span>
-              <Button asChild variant="outline" size="sm">
-                <a href={cloudDashboardUrl} target="_blank" rel="noreferrer noopener">
-                  <ExternalLink data-icon="inline-start" />
-                  {t.overview.openCloud}
-                </a>
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {onOpenLog ? (
+                  <Button type="button" variant="outline" size="sm" onClick={onOpenLog}>
+                    <ScrollText data-icon="inline-start" />
+                    {t.overview.viewLog}
+                  </Button>
+                ) : null}
+                {snapshot.configured ? (
+                  <Button asChild variant="outline" size="sm">
+                    <a href={cloudDashboardUrl} target="_blank" rel="noreferrer noopener">
+                      <ExternalLink data-icon="inline-start" />
+                      {t.overview.openCloud}
+                    </a>
+                  </Button>
+                ) : null}
+              </div>
             </CardFooter>
           ) : null}
         </Card>
