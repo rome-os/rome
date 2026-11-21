@@ -2,15 +2,20 @@
 // that copy is the connection's own business: what it exposes is reading,
 // searching and sending messages, never the copy. So only the connection,
 // connections/kinds/slack-app/, imports the copy's repository, and the wiring
-// constructs it. Tests count, except the end-to-end backlog test in test/,
-// which builds the whole graph and counts what the copy kept.
+// constructs it. Tests count, except two end-to-end tests in test/: the
+// backlog test, which builds the whole graph and counts what the copy kept,
+// and the opening test, which wipes the copy to show a new session reads the
+// same without it.
 
 import type { Import, ImportRule } from "../import-rules.js";
 
 const COPY = "connections/kinds/slack-app/message-copy.ts";
 const CONNECTION = "connections/kinds/slack-app/";
 const WIRING = "index.ts";
-const BACKLOG_TEST = "test/slack-app-backlog.test.ts";
+const END_TO_END_TESTS = new Set([
+  "test/slack-app-backlog.test.ts",
+  "test/slack-app-opening.test.ts",
+]);
 
 export const slackAppCopyRules: ImportRule[] = [
   {
@@ -22,6 +27,6 @@ export const slackAppCopyRules: ImportRule[] = [
       imp.to === COPY &&
       !imp.from.startsWith(CONNECTION) &&
       imp.from !== WIRING &&
-      imp.from !== BACKLOG_TEST,
+      !END_TO_END_TESTS.has(imp.from),
   },
 ];

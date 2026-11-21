@@ -4144,6 +4144,7 @@ class AgentSessionImpl implements AgentSession {
         // opened, and Rome's record may not hold it: its first turn reads the
         // chat's latest messages from where the chat lives
         // (docs/domains/participation.md#projection).
+        const first = earliestOf(unseen, byId(sink.currentId));
         const opening =
           // Not when the unseen messages fill the catch-up already, so a
           // platform that rations reads, such as Slack, keeps its read.
@@ -4153,10 +4154,7 @@ class AgentSessionImpl implements AgentSession {
           unseen.length < CATCH_UP_LIMIT &&
           promptFacts.earlier
             ? await promptFacts
-                .earlier(
-                  sink.threadContext as ThreadContext,
-                  earliestOf(unseen, byId(sink.currentId)) ?? new Date(),
-                )
+                .earlier(sink.threadContext as ThreadContext, first?.at ?? new Date(), first?.id)
                 // A read that fails opens the session as if there were none.
                 .catch(() => null)
             : null;
@@ -4589,7 +4587,19 @@ function subagentsOf(agents: AgentCatalog, config: AgentDefinition): Subagent[] 
 }
 
 /** When the first of the messages a turn catches up on or answers was said. */
-function earliestOf(unseen: readonly { at: Date }[], current: { at: Date } | null): Date | null {
-  const times = [...unseen, ...(current ? [current] : [])].map((message) => message.at.getTime());
-  return times.length > 0 ? new Date(Math.min(...times)) : null;
+/** The earliest of the unseen messages and the current one, the one first
+ *  recorded where two share a second. */
+function earliestOf<M extends { at: Date; id: number }>(
+  unseen: readonly M[],
+  current: M | null,
+): M | null {
+  let earliest: M | null = null;
+  for (const message of [...unseen, ...(current ? [current] : [])]) {
+    const t = message.at.getTime();
+    const e = earliest?.at.getTime();
+    if (earliest === null || e === undefined || t < e || (t === e && message.id < earliest.id)) {
+      earliest = message;
+    }
+  }
+  return earliest;
 }

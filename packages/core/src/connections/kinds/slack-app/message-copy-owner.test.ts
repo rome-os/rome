@@ -9,9 +9,13 @@ import { describe, expect, it } from "@rstest/core";
 
 const SRC = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
 const CONNECTION = "connections/kinds/slack-app/";
-// The schema declares the table, and the end-to-end backlog test counts what
-// the copy kept.
-const OTHERS = new Set(["db/schema/system.ts", "test/slack-app-backlog.test.ts"]);
+// The schema declares the table, the end-to-end backlog test counts what the
+// copy kept, and the end-to-end opening test wipes it.
+const OTHERS = new Set([
+  "db/schema/system.ts",
+  "test/slack-app-backlog.test.ts",
+  "test/slack-app-opening.test.ts",
+]);
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

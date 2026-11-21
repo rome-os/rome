@@ -22,6 +22,9 @@ export interface SlackAppInstall {
   scopes: string[];
   mailbox: SlackAppMailbox;
   forwardSecret: string;
+  /** Which claim of the workspace this connect made. A release that names it
+   *  ends this claim only. Absent from a Rome Cloud that predates it. */
+  generation?: number;
 }
 
 /** A refusal Rome Cloud explained, in words the guardian can read. */
@@ -37,11 +40,26 @@ export class SlackAppRefused extends Error {
 
 export interface SlackAppCloud {
   start(input: { callbackOrigin: string; state: string; codeChallenge: string }): Promise<string>;
-  redeem(input: { handoff: string; codeVerifier: string }): Promise<SlackAppInstall>;
+  /** `signal` is the setup's: an install that lands once it aborted is
+   *  held by no grant. */
+  redeem(
+    input: { handoff: string; codeVerifier: string },
+    signal?: AbortSignal,
+  ): Promise<SlackAppInstall>;
   refreshMailbox(teamId: string): Promise<SlackAppMailbox>;
+  /** Let go of the workspace, so its events go nowhere and any Rome may
+   *  connect it again. Releasing one no longer bound is not an error. Given
+   *  the `generation` its connect was given, it ends that connect's claim
+   *  only, so a release that lands late spares a later connect. */
+  release(teamId: string, signal?: AbortSignal, generation?: number): Promise<void>;
 }
 
-async function post(path: string, body: unknown, fetchImpl: typeof fetch): Promise<unknown> {
+async function post(
+  path: string,
+  body: unknown,
+  fetchImpl: typeof fetch,
+  signal?: AbortSignal,
+): Promise<unknown> {
   const origin = getRomeCloudOrigin();
   if (!origin) {
     throw new SlackAppRefused("unconfigured", "This Rome is not set up to reach Rome Cloud.");
@@ -62,7 +80,9 @@ async function post(path: string, body: unknown, fetchImpl: typeof fetch): Promi
     },
     cache: "no-store",
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(30_000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+      : AbortSignal.timeout(30_000),
   });
   const data = (await response.json().catch(() => null)) as
     | ({ error?: string; error_description?: string } & Record<string, unknown>)
@@ -107,7 +127,14 @@ export function romeCloudSlackApp(fetchImpl: typeof fetch = globalThis.fetch): S
       ) {
         throw new SlackAppRefused("invalid_response", "Rome Cloud's answer was incomplete.");
       }
-      return { scopes: [], ...data } as SlackAppInstall;
+      const { generation, ...install } = data;
+      return {
+        scopes: [],
+        ...install,
+        ...(typeof generation === "number" && Number.isInteger(generation) && generation > 0
+          ? { generation }
+          : {}),
+      } as SlackAppInstall;
     },
     async refreshMailbox(teamId) {
       const data = (await post("/api/slack/app/mailbox", { teamId }, fetchImpl)) as {
@@ -117,6 +144,14 @@ export function romeCloudSlackApp(fetchImpl: typeof fetch = globalThis.fetch): S
         throw new SlackAppRefused("invalid_response", "Rome Cloud's answer was incomplete.");
       }
       return data.mailbox;
+    },
+    async release(teamId, signal, generation) {
+      await post(
+        "/api/slack/app/release",
+        { teamId, ...(generation !== undefined ? { generation } : {}) },
+        fetchImpl,
+        signal,
+      );
     },
   };
 }
