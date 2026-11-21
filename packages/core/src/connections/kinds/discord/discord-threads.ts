@@ -1,3 +1,5 @@
+import type { DiscordGet } from "./discord-history.js";
+
 /**
  * The threads a Discord server has archived, read from Discord's REST API:
  * the public ones in each chat, and the private ones the bot has joined.
@@ -24,10 +26,6 @@ export interface ArchivedThread {
   name: string;
   parentId: string;
 }
-
-/** What a listing needs of Discord: a GET of a REST route. It rejects as
- *  discord.js does, with the HTTP `status` on the error. */
-export type DiscordGet = (route: `/${string}`, query?: URLSearchParams) => Promise<unknown>;
 
 const PAGE = 100;
 

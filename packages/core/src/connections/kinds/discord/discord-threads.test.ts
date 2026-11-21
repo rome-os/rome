@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import { archivedDiscordThreads, type DiscordGet } from "./discord-threads.js";
+import type { DiscordGet } from "./discord-history.js";
+import { archivedDiscordThreads } from "./discord-threads.js";
 
 // The archived threads of a Discord server, read page by page as Discord
 // answers them.

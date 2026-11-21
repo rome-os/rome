@@ -274,6 +274,33 @@ describe("DiscordAdapter REST broker capability", () => {
     expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
 
+  it("refuses an archive scan once the credential epoch has stopped, sending nothing", async () => {
+    rs.spyOn(Client.prototype, "destroy").mockResolvedValue();
+    const queued = rs.spyOn(REST.prototype, "queueRequest");
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    rs.spyOn(adapter, "listGuildChannels").mockReturnValue([
+      { id: "1", name: "general", guildId: "9", guildName: "Rome", type: "text" },
+    ]);
+    await adapter.stop();
+
+    await expect(adapter.listArchivedThreads()).rejects.toThrow("Discord connection has stopped");
+    expect(queued).not.toHaveBeenCalled();
+  });
+
+  it("reports a 401 during an archive scan as a rejected credential", async () => {
+    rs.spyOn(REST.prototype, "get").mockRejectedValue(
+      Object.assign(new Error("401: Unauthorized"), { status: 401 }),
+    );
+    const onGatewayFault = rs.fn();
+    const adapter = new DiscordAdapter({ botToken: "not-exposed", onGatewayFault });
+    rs.spyOn(adapter, "listGuildChannels").mockReturnValue([
+      { id: "1", name: "general", guildId: "9", guildName: "Rome", type: "text" },
+    ]);
+
+    await expect(adapter.listArchivedThreads()).rejects.toThrow();
+    expect(onGatewayFault).toHaveBeenCalledWith(expect.objectContaining({ kind: "credential" }));
+  });
+
   it("sees a private thread only as a member of it, or as one who manages threads", () => {
     const adapter = new DiscordAdapter({ botToken: "not-exposed" });
     const granted = (manages: boolean) => ({

@@ -490,26 +490,7 @@ export class DiscordAdapter {
     const byId = new Map(chats.map((chat) => [chat.id, chat]));
     // The scan must not outlive this credential's epoch: `stop` aborts it,
     // and no request is sent once it has.
-    const controller = new AbortController();
-    this.activeApiRequestControllers.add(controller);
-    const aborted = new Promise<never>((_resolve, reject) => {
-      controller.signal.addEventListener(
-        "abort",
-        () => reject(new Error("Discord connection stopped during the listing")),
-        { once: true },
-      );
-    });
-    void aborted.catch(() => undefined);
-    const get: DiscordGet = async (route, query) => {
-      if (controller.signal.aborted) return aborted;
-      const request = this.rest.get(route, {
-        ...(query ? { query } : {}),
-        signal: controller.signal,
-      });
-      // discord.js does not observe the signal while it waits on a bucket.
-      void request.catch(() => undefined);
-      return Promise.race([request, aborted]);
-    };
+    const { get, done } = this.epochGet("Discord connection stopped during the listing");
     let threads: Awaited<ReturnType<typeof archivedDiscordThreads>>;
     try {
       threads = await archivedDiscordThreads(
@@ -518,8 +499,7 @@ export class DiscordAdapter {
       );
     } finally {
       // A failed listing leaves the other readers mid-chat: they stop too.
-      controller.abort();
-      this.activeApiRequestControllers.delete(controller);
+      done();
     }
     return threads.flatMap((thread) => {
       const chat = byId.get(thread.parentId);
@@ -1524,15 +1504,31 @@ Use \`/channel agent clear\` to undo.`,
   async readHistory(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]> {
     // A read must not outlive this credential's epoch: `stop` aborts it, and
     // no request is sent once it has.
+    const { get, signal, done } = this.epochGet("Discord connection stopped during the read");
+    try {
+      return await this.readHistoryWith(get, chatId, read, signal);
+    } finally {
+      // Whatever ended the read, nothing it started sends on.
+      done();
+    }
+  }
+
+  /** A GET bound to this credential's epoch: `stop` aborts it, after which it
+   *  sends nothing and rejects with `stoppedMessage`. A 401 is reported as a
+   *  rejected credential. `done` ends it, aborting whatever is still in
+   *  flight. Throws once the connection has stopped. */
+  private epochGet(stoppedMessage: string): {
+    get: DiscordGet;
+    signal: AbortSignal;
+    done: () => void;
+  } {
     if (this.stopped) throw new Error("Discord connection has stopped");
     const controller = new AbortController();
     this.activeApiRequestControllers.add(controller);
     const aborted = new Promise<never>((_resolve, reject) => {
-      controller.signal.addEventListener(
-        "abort",
-        () => reject(new Error("Discord connection stopped during the read")),
-        { once: true },
-      );
+      controller.signal.addEventListener("abort", () => reject(new Error(stoppedMessage)), {
+        once: true,
+      });
     });
     void aborted.catch(() => undefined);
     const get: DiscordGet = async (route, query) => {
@@ -1547,13 +1543,11 @@ Use \`/channel agent clear\` to undo.`,
       void request.catch(() => undefined);
       return Promise.race([request, aborted]);
     };
-    try {
-      return await this.readHistoryWith(get, chatId, read, controller.signal);
-    } finally {
-      // Whatever ended the read, nothing it started sends on.
+    const done = () => {
       controller.abort();
       this.activeApiRequestControllers.delete(controller);
-    }
+    };
+    return { get, signal: controller.signal, done };
   }
 
   private async readHistoryWith(
