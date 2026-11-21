@@ -44,4 +44,23 @@ describe("MessageWriting", () => {
     expect(messageWritingModeOf("openai")).toBe("simulated");
     expect(messageWritingModeOf(undefined)).toBe("simulated");
   });
+
+  it("writes while a turn's text streams, where the text is its message, until it lands", () => {
+    const writing = new MessageWriting("exact", { textIsMessage: true });
+    expect(writing.on({ type: "text_delta" })).toBe(true);
+    expect(writing.on({ type: "text_delta" })).toBeNull();
+    expect(writing.on({ type: "text" })).toBe(false);
+    // Text before a tool call is not the reply: the call ends it.
+    expect(writing.on({ type: "text_delta" })).toBe(true);
+    expect(writing.on({ type: "tool_use", id: "t1", tool: "chat_start" })).toBe(false);
+    expect(writing.on({ type: "text_delta" })).toBe(true);
+    expect(writing.on({ type: "result" })).toBe(false);
+  });
+
+  it("leaves text alone on the dashboard, and never writes text on a simulated turn", () => {
+    expect(new MessageWriting("exact").on({ type: "text_delta" })).toBeNull();
+    expect(
+      new MessageWriting("simulated", { textIsMessage: true }).on({ type: "text_delta" }),
+    ).toBeNull();
+  });
 });

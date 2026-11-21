@@ -237,6 +237,12 @@ export function createDiscordAppDescriptor(deps: DiscordAppDescriptorDeps): Conn
               unregister = null;
               adapter.stop();
             },
+            // Shown while a message is being written, by the dashboard's rule
+            // for its typing dots (core/connection-typing.ts).
+            typing: { show: (chatId) => adapter.showTyping(chatId) },
+            reactions: {
+              add: (chatId, messageId, emoji) => adapter.react(chatId, messageId, emoji),
+            },
             async send(chatId, message) {
               try {
                 return await adapter.send(chatId, message);

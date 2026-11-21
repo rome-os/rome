@@ -13,6 +13,8 @@ function cloud(over: Partial<DiscordAppCloud> = {}): DiscordAppCloud {
     bindings: async () => ({ servers: [], users: [] }),
     removeServer: async () => ({ removed: true, left: true }),
     send: async () => ({ id: "9" }),
+    typing: async () => {},
+    react: async () => {},
     installUrl: async () => "https://discord.com/oauth2/authorize",
     ...over,
   };
@@ -114,6 +116,9 @@ describe("Rome's Discord bot connection", () => {
     ) as Talker;
     // A failure of ours is never handed back to the shared mailbox.
     expect(talker.awaitsAcceptance).toBeUndefined();
+    // Typing, by the dashboard's rule, and reactions, through the Worker.
+    expect(talker.typing).toBeDefined();
+    expect(talker.reactions).toBeDefined();
     talker.start(
       () => Promise.resolve(),
       () => {},

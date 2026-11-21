@@ -180,6 +180,22 @@ export class DiscordAppAdapter {
     return { status: 200 };
   }
 
+  /** Shows the bot typing in `chatId`. Discord drops it after about ten
+   *  seconds, or when the bot posts. */
+  async showTyping(chatId: ChatId): Promise<void> {
+    await this.config.cloud.typing(chatId);
+  }
+
+  /** Reacts to message `messageId` in `chatId` with `emoji`, as the bot. */
+  async react(chatId: ChatId, messageId: string, emoji: string): Promise<void> {
+    if (!SNOWFLAKE.test(messageId)) {
+      throw new Error(
+        `Discord cannot react to message "${messageId}": it is not a Discord message id`,
+      );
+    }
+    await this.config.cloud.react({ channelId: chatId, messageId, emoji });
+  }
+
   /** Posts `message` as the bot, in parts of at most 2000 characters; the
    *  first part replies to the message it answers. */
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
