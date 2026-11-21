@@ -32,7 +32,7 @@ import type {
 } from "../../connections/types.js";
 import type { SetupManager } from "../../connections/setup/manager.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
-import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
+import { agentOfKindIn } from "../../concierge/on-connection.js";
 import { accountLinkOf } from "../../chats/connected-accounts/account-links.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
@@ -265,7 +265,6 @@ async function serializeConnection(
   conn: Connection,
   manager: SetupManager | null,
   channels: ChannelRecordsRepository,
-  accounts: ConnectedAccountsRepository,
 ): Promise<ConnectionView> {
   return buildConnectionView(
     registry,
@@ -273,7 +272,7 @@ async function serializeConnection(
     await loadGrant(registry, conn),
     manager,
     channels.byConnection(conn.id) ?? null,
-    accounts.agentOf(conn.id),
+    agentOfKindIn(registry)(conn.connectionKind),
   );
 }
 
@@ -369,13 +368,10 @@ export async function listConnectionViews(
   const registry = requireConnectionRegistry(deps as ApiDeps);
   const manager = deps.setupManager ?? null;
   const channels = new ChannelRecordsRepository(deps.db, accountLinkOf(deps.connectionRegistry));
-  const accounts = new ConnectedAccountsRepository(deps.db);
   const { platform, accountId } = filter;
   const connected = (
     await Promise.all(
-      registry
-        .all()
-        .map((conn) => serializeConnection(registry, conn, manager, channels, accounts)),
+      registry.all().map((conn) => serializeConnection(registry, conn, manager, channels)),
     )
   ).filter(
     (view) =>
@@ -400,7 +396,6 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
   const findConnection = (registry: ConnectionRegistry, id: string): Connection | undefined =>
     registry.all().find((c) => c.id === id);
   const channels = new ChannelRecordsRepository(deps.db, accountLinkOf(deps.connectionRegistry));
-  const accounts = new ConnectedAccountsRepository(deps.db);
 
   // `?platform=&accountId=` finds the connection that reaches an account, so
   // it lists no placeholders. An account id means nothing without its platform.
@@ -429,7 +424,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
           record,
           deps.setupManager ?? null,
           channels.byConnection(conn.id) ?? null,
-          accounts.agentOf(conn.id),
+          agentOfKindIn(registry)(conn.connectionKind),
         ),
         grantDetails: buildGrantDetails(conn, record),
       },

@@ -103,7 +103,6 @@
       "endedAnother": "This is a different account, so Rome ended the connection to the earlier account and connected this one.",
       "newAccount": "New account",
       "noAgent": "None. Rome does not listen to this account.",
-      "changeInEnvoys": "Change in Envoys",
       "agentSpeaksAs": "Speaks as this account",
       "agentAnswersForYou": "Answers for you from this account",
       "noAgentTitle": "No agent",
@@ -476,7 +475,6 @@
       "mainAgent": "main (default)",
       "accountAgent": "{{agent}} (this account's agent)",
       "silentAccount": "Messages here do not reach Rome until this connected account has an agent.",
-      "silentAccountLink": "<account>Link one in Envoys</account>.",
       "silentAccountOverride": "This chat's choice, {{agent}}, applies once one is linked.",
       "sessionReset": {
         "never": "Never",
