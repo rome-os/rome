@@ -21,11 +21,7 @@ import { CredentialRejected, Disconnected } from "../errors.js";
 import { isSlackCredentialError } from "../kinds/slack/slack.js";
 import type { SlackAppCloud, SlackAppInstall } from "../kinds/slack-app/rome-cloud.js";
 import { SlackAppRefused } from "../kinds/slack-app/rome-cloud.js";
-import {
-  type OpenMailbox,
-  SlackAppAdapter,
-  type SlackMessageCopy,
-} from "../kinds/slack-app/slack-app.js";
+import { type OpenMailbox, SlackAppAdapter } from "../kinds/slack-app/slack-app.js";
 import type { SlackAppWebApi } from "../kinds/slack-app/web-api.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
@@ -216,8 +212,6 @@ export interface SlackAppDescriptorDeps {
   api: SlackAppWebApi;
   cloud: SlackAppCloud;
   openMailbox: OpenMailbox;
-  /** The connection's own copy of the direct messages it hears. */
-  copy: SlackMessageCopy;
   /** Whether Rome listens to the account behind a connection. */
   listens: (connectionId: string) => boolean;
   instanceOrigin?: () => string;
@@ -269,7 +263,6 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
             // keeps the adapter on the stored key, which the relay still takes.
             onMailboxRefreshed: (mailbox) => kit.persist({ ...material, ...mailbox }),
             onFault: ({ kind, cause }) => routeFault(cause, kind),
-            copy: deps.copy,
             listened: () => deps.listens(kit.connectionId),
           });
           return {

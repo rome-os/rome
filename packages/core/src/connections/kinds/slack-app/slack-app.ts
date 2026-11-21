@@ -4,9 +4,9 @@
 // Cloud, not to the instance. Rome Cloud checks Slack's signature, finds the
 // instance the workspace is bound to, and deposits the event, signed with the
 // workspace's forward secret, into that workspace's relay mailbox. This adapter
-// drains that mailbox, checks the forward signature and the workspace, drops
-// what it has already seen by Slack's event id, and delivers each direct
-// message as the connection's own record. Replies go straight to Slack's Web
+// drains that mailbox, checks the forward signature and the workspace, and
+// hands each direct message to Rome, telling the mailbox it arrived only once
+// Chats has it on record. The connection keeps no record of its own. Replies go straight to Slack's Web
 // API with the bot token the instance got at sign-in.
 //
 // Phase 1 hears direct messages only. Mentions in a group come in phase 2.
@@ -29,9 +29,6 @@ import {
   splitSlackText,
 } from "../slack/slack.js";
 import { isForwardedBy } from "./forward.js";
-import type { SlackMessageCopy } from "./message-copy.js";
-
-export type { SlackMessageCopy } from "./message-copy.js";
 import type { SlackAppMailbox } from "./rome-cloud.js";
 import type { SlackAppWebApi } from "./web-api.js";
 import type { Message } from "../../message.js";
@@ -44,10 +41,6 @@ const HOUR_MS = 60 * 60 * 1000;
 /** Renew the drain key this long before it expires. Rome Cloud issues 90-day keys. */
 const RENEW_BEFORE_EXPIRY_MS = 7 * 24 * HOUR_MS;
 const RENEW_RETRY_MS = HOUR_MS;
-/** A message handed to Rome this soon before the last hand-off is handed over
- *  again on start: handing over does not wait for Rome to record it, so a
- *  stop may have cut it off. Rome ignores a message it already holds. */
-const HAND_OVER_AGAIN_MS = 15 * 60 * 1000;
 /** Under setTimeout's 24.8-day ceiling; a longer wait is taken in steps. */
 const MAX_TIMER_MS = 24 * HOUR_MS;
 
@@ -95,14 +88,10 @@ export interface SlackAppAdapterConfig {
    *  leave a restart with a refused one. */
   onMailboxRefreshed?: (mailbox: SlackAppMailbox) => Promise<void>;
   onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
-  /** The connection's own copy of the direct messages it hears. */
-  copy: SlackMessageCopy;
   /** Whether Rome listens to the account now. A message heard while it does
-   *  not is neither kept nor handed over, so linking an agent later brings
+   *  not is not handed over, so linking an agent later brings
    *  none of it back (docs/domains/chats.md). Absent, Rome always listens. */
   listened?: () => boolean;
-  /** Now, for the copy's times. */
-  now?: () => Date;
 }
 
 function isExternalAuthor(payload: SlackEventCallback): boolean {
@@ -113,11 +102,11 @@ function isExternalAuthor(payload: SlackEventCallback): boolean {
 }
 
 /**
- * The connection's `Message` for `kept`, a message as its copy keeps it, said
- * to the bot account `receivedBy`. Platform facts only: Rome works out whom it
+ * The connection's `Message` for `kept`, a message as the connection reads
+ * it, said to the bot account `receivedBy`. Platform facts only: Rome works out whom it
  * addresses (docs/domains/connections.md#message). The app hears a group only
- * when it is mentioned, so a mention lists the bot's account; the copy keeps
- * no other account a message mentions, so none is listed.
+ * when it is mentioned, so a mention lists the bot's account; no other account
+ * a message mentions is listed.
  */
 export function messageOf(kept: ChannelMessage, receivedBy: string): Message {
   const direct = kept.thread?.kind === "dm";
@@ -143,7 +132,7 @@ function describe(error: unknown): string {
 }
 
 export class SlackAppAdapter {
-  private handler?: (message: Message) => void;
+  private handler?: (message: Message) => void | Promise<void>;
   private drain: { stop(): Promise<void> | void } | null = null;
   private readonly dedup = new InboundDedup(5_000);
   private readonly userNames = new Map<string, SlackUserName>();
@@ -156,7 +145,7 @@ export class SlackAppAdapter {
     this.mailbox = config.mailbox;
   }
 
-  onInbound(handler: (message: Message) => void): void {
+  onInbound(handler: (message: Message) => void | Promise<void>): void {
     this.handler = handler;
   }
 
@@ -187,7 +176,6 @@ export class SlackAppAdapter {
     if (this.keyExpired()) {
       throw new Error("The Slack mailbox key expired and Rome Cloud could not renew it.");
     }
-    this.handOverKept();
     this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
     this.scheduleRenewal();
     log.info("slack app started", { teamId: this.config.teamId });
@@ -315,34 +303,6 @@ export class SlackAppAdapter {
     return this.handleEvent(payload, payload.event_id);
   }
 
-  /** Hand Rome again what it may not hold: what the copy kept but never
-   *  handed over, and what it handed over just before it last stopped,
-   *  however long ago. Rome ignores a message it already holds. */
-  private handOverKept(): void {
-    const kept = this.config.copy.mayNotHold(this.config.teamId, HAND_OVER_AGAIN_MS);
-    if (kept.length > 0) {
-      log.info("slack app handing over kept messages", { count: kept.length });
-    }
-    for (const { eventId, message } of kept) {
-      this.handOver(eventId, { ...message, channel: this.config.channel });
-    }
-  }
-
-  /** Hand `message` to Rome without waiting on it, and note it was handed. */
-  private handOver(eventId: string, message: ChannelMessage): void {
-    if (!this.handler) return;
-    try {
-      this.handler(messageOf(message, slackSenderId(this.config.teamId, this.config.botUserId)));
-    } catch (error) {
-      log.error("message handler error", { messageId: message.messageId, error: describe(error) });
-    }
-    this.config.copy.handedOver(this.config.teamId, eventId, this.now());
-  }
-
-  private now(): Date {
-    return this.config.now?.() ?? new Date();
-  }
-
   private async handleEvent(
     payload: SlackEventCallback,
     eventId: string,
@@ -383,35 +343,24 @@ export class SlackAppAdapter {
       ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
       thread: { kind: "dm" },
     };
-    // The mailbox is told the message was received only once the copy holds
-    // it: a write that fails answers 500, and the mailbox delivers it again.
-    // The drain gives up on a frame after a few retries and waits to be
-    // resumed, so the failure also reports the connection down: the runtime
-    // starts it again after a backoff, with a fresh drain that retries the
-    // frame. An event the copy holds already is a redelivery.
-    let fresh: boolean;
+    // The mailbox is told the message was received only once Chats has it on
+    // record (docs/domains/connections.md#message). A delivery that is
+    // refused or not recorded in time answers 500, and the mailbox delivers it
+    // again; Chats records a message it already holds only once. The drain
+    // gives up on a frame after a few retries and waits to be resumed, so the
+    // refusal also reports the connection down: the runtime starts it again
+    // after a backoff, with a fresh drain that retries the frame.
+    if (!this.handler) return { status: 500 };
     try {
-      fresh = this.config.copy.keep(
-        {
-          teamId: payload.team_id,
-          eventId,
-          channelId: event.channel,
-          ts: event.ts,
-          ...(event.thread_ts ? { threadTs: event.thread_ts } : {}),
-          userId: event.user,
-          text,
-          message,
-        },
-        this.now(),
+      await this.handler(
+        messageOf(message, slackSenderId(this.config.teamId, this.config.botUserId)),
       );
     } catch (error) {
-      log.error("slack app could not keep a message", { error: describe(error) });
+      log.error("slack app message not accepted", { error: describe(error) });
       this.config.onFault?.({ kind: "transport", cause: error });
       return { status: 500 };
     }
-    if (!fresh) return { status: 200 };
     log.info("message received", { chatId: message.chatId });
-    this.handOver(eventId, message);
     return { status: 200 };
   }
 
