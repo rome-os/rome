@@ -52,6 +52,9 @@ x-rome-env: &rome-env
   # builder names the variable). Without it, https://slack.com still reaches
   # the fake inside this network.
   SLACK_API_BASE_URL: http://127.0.0.1:${FAKE_SLACK_PORT}
+  # Where a Rome on the slack-gateway contract reaches the Worker. Its
+  # default is the same name, which the network alias keeps inside the stack.
+  SLACK_GATEWAY_URL: https://slack.romeos.io
   # The instances hold a placeholder; model-proxy adds the real credential
   # and pins the model (DIFFERENCES.md).
   ANTHROPIC_API_KEY: sk-ant-slackenv-placeholder
