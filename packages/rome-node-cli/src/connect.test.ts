@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
+import { COMPUTER_USE_ACTIONS } from "@rome-os/node-core/computer-use";
 import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -172,7 +173,17 @@ describe("connect authorization modes", () => {
       to: "caller",
       payload: {
         ok: true,
-        result: { name: "Remote Linux", actions: ["system.info", "exec", "fs.list"] },
+        result: {
+          name: "Remote Linux",
+          actions: [
+            "system.info",
+            "exec",
+            "fs.list",
+            ...(process.platform === "darwin" && process.arch === "arm64"
+              ? COMPUTER_USE_ACTIONS
+              : []),
+          ],
+        },
       },
     });
     expect(JSON.parse(await readFile(join(f.root, "credential.json"), "utf8"))).toEqual({

@@ -29,6 +29,17 @@ on:
         required: false
         type: boolean
         default: false
+    secrets:
+      CSC_LINK:
+        required: false
+      CSC_KEY_PASSWORD:
+        required: false
+      APP_STORE_CONNECT_KEY_ID:
+        required: false
+      APP_STORE_CONNECT_ISSUER_ID:
+        required: false
+      APP_STORE_CONNECT_P8_CONTENT:
+        required: false
 
 jobs:
   prepare:
@@ -63,8 +74,8 @@ jobs:
   publish:
     name: Publish ${{ matrix.path }}
     needs: prepare
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ${{ matrix.path == 'packages/rome-node-core' && 'macos-15' || 'ubuntu-latest' }}
+    timeout-minutes: 35
     permissions:
       contents: read
       id-token: write
@@ -91,6 +102,18 @@ jobs:
 
       - name: Build
         run: pnpm --dir "${{ matrix.path }}" run build
+
+      - name: Build signed and notarized computer-use helper
+        if: matrix.path == 'packages/rome-node-core'
+        uses: ./.github/actions/build-computer-use
+        with:
+          sign: "true"
+          notarize: "true"
+          certificate: ${{ secrets.CSC_LINK }}
+          certificate-password: ${{ secrets.CSC_KEY_PASSWORD }}
+          api-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          api-issuer: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          api-key: ${{ secrets.APP_STORE_CONNECT_P8_CONTENT }}
 
       # pnpm 11 publishes natively, rewrites workspace protocol dependencies
       # in the packed manifest, and supports npm OIDC Trusted Publisher auth.

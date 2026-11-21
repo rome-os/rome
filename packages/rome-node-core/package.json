@@ -9,7 +9,9 @@
   },
   "files": [
     "bin",
-    "dist",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/native/Rome Computer Use.app",
     "README.md"
   ],
   "exports": {
@@ -52,6 +54,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "build:native": "node scripts/build-computer-use.ts --output 'dist/native/Rome Computer Use.app'",
+    "prepack": "node scripts/verify-native-package.ts",
+    "prepublishOnly": "node scripts/verify-native-package.ts --release",
     "prepare": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && ../../scripts/test-env.sh rstest --include 'src/**/*.test.ts'"

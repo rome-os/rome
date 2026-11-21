@@ -81,6 +81,12 @@ jobs:
     needs: release-please
     if: github.event_name == 'push' && needs.release-please.outputs.releases_created == 'true'
     uses: ./.github/workflows/sdk-publish.yml
+    secrets:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_P8_CONTENT: ${{ secrets.APP_STORE_CONNECT_P8_CONTENT }}
     with:
       paths: ${{ needs.release-please.outputs.paths_released }}
       dry_run: false
@@ -104,6 +110,12 @@ jobs:
     name: Publish manual package
     if: github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/sdk-publish.yml
+    secrets:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_P8_CONTENT: ${{ secrets.APP_STORE_CONNECT_P8_CONTENT }}
     with:
       package: ${{ inputs.package }}
       dry_run: ${{ inputs.dry_run }}
