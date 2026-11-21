@@ -1,133 +1,80 @@
 # Slack app verifier
 
-Scores the official Slack app on rule set v3, phases 1 to 3: R1, R3, R4, R6, R7 and R11 (phase 1), R5, R8, R12 and R13 (phase 2) and R2, R9, R10 and R14 (phase 3) pass or fail. R9 is "read, search and send only", as Ouou ruled on 2026-11-20. It does not build the product or the environment. What it expects of them is in [CONTRACT.md](CONTRACT.md).
+Scores Rome's Slack app on rule set v4 (`/mnt/project-files/features/slack-official-app/rules.md`): R1 to R11 and R14, each a promise the Slack connection keeps. Every check reads the connection's two edges: the fake Slack on one side, and on the other what Rome has on record in Chats and what Slack received. No rule asks the Concierge anything or judges what it says. It does not build the product or the environment; what it expects of them is in [CONTRACT.md](CONTRACT.md).
 
 ```bash
-verifiers/slack-app/run.sh [--r6-stop <seconds>] <env.json> [out dir]
+verifiers/slack-app/run.sh [--r6-stop <seconds>] [--only <ids>] [--min-free-gb <n>] <env.json> [out dir]
 ```
 
-It refuses to run when this folder has uncommitted changes, so a report always names the code that made it. It writes `report.json` and `report.md` (default `out/<time>/`, gitignored) with the commits of rome, rome-cloud, the environment and the verifier, the model, and each rule's result, reason and evidence: event ids, reply counts, and the screens Connect passed. It exits 1 when a rule fails.
+It refuses to run when this folder has uncommitted changes, so a report always names the code that made it. It writes `report.json` and `report.md` (default `out/<time>/`, gitignored) with the commits of rome, rome-cloud, the environment and the verifier, the model, and each rule's result, reason and evidence. It exits 1 when a scored rule fails.
 
 ## How each rule is checked
 
-Every seeded message asks the Concierge something harmless and carries a tag unique to the message and the run. A reply is matched to its message by where and when the fake Slack records it, not by what it says: a post in the message's direct message after it and before the next message is its reply, since messages go one at a time, each after the previous one's reply. A post in any other conversation is listed apart and fails the rule. The tag is only for finding Rome's records and Slack calls about a message; no reply needs to repeat it. Reasons say how many replies were posted in the direct message and how many messages got exactly one. Only R12 and R13 read what a reply says, and only for seeded values. Each fact is an ordinary thing made distinctive by unusual words (a boat called Spindrift Marlowe), never by digits or anything that looks like a code, and a reply holds it when one of its telling words appears.
+Every seeded message carries a tag unique to the message and the run. "On record" means Rome's record of the chat holds a message with that tag: the environment's `record` control when it gives one, else the chat's session. "Arrived" means the fake Slack recorded the post.
 
-| Rule | Run |
-|---|---|
-| R1 | Signs in to Slack as workspace A's guardian and walks Connect on the first instance the way the dashboard and a browser would, pressing Allow and filling nothing. Fails on any field from Rome's setup or Rome's own screens (Slack's own approve screen is not counted), on more than one sign-in or Slack approval, on a connected account whose agent is not `core:concierge`, and when the first direct message does not get exactly one reply. The evidence keeps "connected" and "replied" apart, and R3's keeps "second refused" and "first replied" apart, so a silent agent is not read as a failed connect. The verifier never calls an agent link route. With `rome_cloud.query` in env.json, R1 also reads Rome Cloud's newest sign-in attempt after the connect, and fails if its outcome (`result`) is still held after the redemption. No row left counts as cleared. |
-| R3 | Walks Connect for workspace A on the second instance. Passes when the setup ends `failed` with a reason saying the workspace is already connected, the second instance gains no connected account, and one more direct message to the first gets exactly one reply. |
-| R4 | 20 direct messages from the guardian, one at a time, each after the previous one's reply. Each must be answered within `replySeconds`, before the next is sent, and get exactly one reply in the same direct message, no reply may match no message, and the bot may post nowhere else in the workspace. |
-| R7 | 10 direct messages with a bad signature, then one good message to show the path was open. No forged one may get a reply or be recorded in the direct message's session (which must show the good message, or the read proves nothing and R7 is not checked), and nothing but the good message's one reply may follow them anywhere in the workspace; each forged event is sent up to 3 times until Rome Cloud answers it with a status below 500, and R7 is not checked if one never is; the report keeps every delivery status. Then R4's 20 messages from workspace A: the instance bound to workspace B may not record them, post anything in workspace B, observe an account of workspace A, or make any Slack call naming their codes, workspace A, its guardian or the direct message. |
-| R5 | 10 mentions of the app in workspace A's `general` group, one at a time. Each must get exactly one reply in a thread under it (`thread_ts` is the mention's `ts`). Nothing may be posted at the top of the group, in another thread or outside the group. Then a group message that does not mention the app (`POST /_control/group-message`) must get no post anywhere; if that route is missing, R5 is not checked. Slack sends the app no event for it, since the app subscribes to no group messages, so this catches only a product that reads the group's history and answers. |
-| R12 | Rule set v3 (Ouou, 2026-11-20): guardian only, other members opt-in per connection. The guardian tells the Concierge 8 private facts that are plainly harmless to keep (names of friends, family and a pet, plans, a gift, favourite places, a hobby; no opinion of anyone, and nothing about money, health, addresses, ids or credentials), then asks each back. R12 uses the first 5 that came back, in seeding order; fewer than 5 leaves it not checked. Not checked when `GET /connections/{id}` shows no `answerMembers`. (a) A fresh connection shows it off; a full member's 10 questions about the guardian draw no post anywhere and reveal nothing, and the guardian is still answered. (b) `PUT /connections/{id}/answer-members {on: true}`: each of the member's 10 questions gets exactly one reply in their direct message, and no reply to them, nor any post outside the guardian's direct message, holds a telling word of any of the 8 values; the instance-wide `replyToBondLevels` (`GET /settings`) stays as it was. (e) With it on, a guest's (`is_restricted`) 5 messages draw no post; not checked when the fake has no guest. (c) Another connection on the instance is unaffected; not checked, since the environment offers none. (d) Off again: the member's next message draws no post. The Connections page, in a browser, shows the switch "Answer other members of this workspace", and flipping it changes what `GET` shows (then it is flipped back); an unreadable page leaves that part not checked. Parts not checked are named in the reason and do not by themselves keep R12 from passing. A few seconds pass after each flip before the next message. |
-| R13 | The guardian states 10 facts in two messages of five, then asks them back in two messages of five questions, with Rome's copy. With the replies that is 8 messages, so the facts sit within the last 15 messages of the direct message, the most Slack gives an app like this one in one request. Then `control.wipe_chat` wipes Rome's copy of that direct message and, through `--text`, every row holding a fact's value, memory included (exit 3 or `ok: false` leaves R13 not checked). Before any question, the instance's memory search and chat search must show none of the values, or R13 is not checked: right answers after that can only have come through the connection. Then the 10 questions are asked one at a time. The first may take up to 150 s, since one history request may wait out Slack's minute; the rest keep `replySeconds`. All 10 must come back right, one reply each, the same as before the wipe. The connection's view (less its live setups) and the connection's connected accounts must read the same before and after. The reason states how many history requests Slack saw after the wipe (counted at the fake Slack, refused ones too) and how long the first answer took. Without `wipe_chat`, R13 is not checked. |
-| R6 | Stops the first instance, sends 20 direct messages, holds the stop for `stopSeconds`, starts it, and wants exactly 20 replies in that direct message after the restart, none while stopped and none anywhere else. |
-| R8 | Runs after the rest, before R2. Removes the app from workspace A (`POST /_control/uninstall`) and polls the connection's view until its `state` is `broken`, which must come within 60 s. Walks Connect again with the same sign-in: the new connection must have the same connected account (`account`) with agent `core:concierge`, no field may be asked, and a direct message must get exactly one reply. Then disconnects in Rome (`DELETE /connections/{id}`): `POST /_control/auth-test` must answer ok before and `token_revoked` (or any refusal) after. If auth.test cannot be run, R8 is not checked. |
-| R2 | Runs last, on the first instance, which R8 left with no Slack connection (any one still there is disconnected first). The workspace is the fake's third one: not the home workspace in `GET /_control/state` `distribution.home_team`, and bound to no instance. First the negative: with distribution off (`POST /_control/config {distributed: false}`), Connect from that workspace must not connect, and `GET /_control/approvals` must record Slack refusing it; if Slack never refuses, R2 is not checked, and if Rome connects anyway, R2 fails. Distribution is then turned back on, and R1's whole check runs from that workspace, with Slack recording its approval there. |
-| R9 | Two halves, both needed. Tests: the connector app's four test files for its Slack actions on main (`rome_apps/connector/src/api/slack-proxy.test.ts`, and `connector-proxy`, `connector-tool-execute` and `connector-actions` under `src/actions/`) must run and pass on the product commit, through the environment's `product_tests` (the paths appended; without it, rstest through `packages/core` in `repos.rome`). A runner that cannot start is not checked, never a fail. A test file the product deleted, or an `expect`, `it` or `describe` line it changed or removed since the base, is a fail. Live, through the Concierge on the first instance: the guardian asks in the dashboard's own chat with it (`POST /chat/sessions/concierge/turns`, read back from `GET /chat/sessions/concierge/messages`), since in a Slack direct message its actions are withheld, up to 3 times in different words each, naming each chat by its id. The Concierge may answer "On it" and post a task's result later, so each ask reads the chat again for up to `timeouts.answerSeconds` (default 180) until the result is right, before the next ask. Results are judged at the fake Slack. The evidence keeps a timeline of every seed (with the control call's answer and whether the app replied under the mention), wipe and ask, and each Slack action execution with everything the listing gives. Scored: 3 sends to #general (the post must arrive there with the bot token); 3 reads of the guardian's direct message (values the app heard there must be in the reply), and one more after Rome's copy of the chat was wiped; 3 searches (a value from a mention of the app in #news must be in the reply, while the same word in #quiet, which the app is not in, must never show); a search naming the direct message after Rome's copy of it was wiped; and 2 reactions (no `reactions.add` may reach Slack). No call from R9's start may carry a user token, and the connector's token file (`control.token_file`) must be absent or not hold the new connection's bot token (`bot_token_tail` in `GET /_control/state`). An operation never attempted in 3 asks (no call at Slack, no Slack action execution in `GET /action-executions`) is not checked; one attempted and wrong all 3 times fails. Groups are R14's. The history limit is lifted for R9 and restored after. |
-| R10 | Runs last, on the second instance. Connect (`GET /connections`, connected entries and placeholders alike) must show exactly one entry of the official kind, and no old kind as a placeholder offered for a new connection, before the old connections exist, after, and at the end. The dashboard's `/settings/connections` page, loaded in a browser (the environment's `browser` server, else a local Playwright) with the guardian's cookies and read once its list renders, must offer at most one entry whose visible name mentions Slack under "Add a connection"; a page that cannot be read leaves that part not checked. Starting a new `slack_bot` (`POST /connections/slack_bot/grants/bot/setup`) or old OAuth `slack` (`GET /oauth/slack/start`) must be refused. The environment then seeds one connection of each old kind (`control.old_connections`). Before and after a restart of the instance: the `slack_bot` must answer a direct message it hears over Socket Mode (`POST /_control/socket-event`) from its own app, and a post to #general the guardian asks for in the dashboard's chat must arrive from the old OAuth app (asked up to 3 times; never posted is not checked). The official app on that instance is disconnected first, since with both present the product sends as the app. Then each is disconnected (`DELETE /connections/{id}`) and starting it again must be refused. Which app a Concierge send came from with both present is asked once before that and reported, unscored. |
-| R14 | Rule set v3 (Ouou, 2026-11-20). Not checked when workspace A's install holds no `channels:history`, since then the product commit does not carry the group work. On the first instance with workspace A, asked on the dashboard as in R9 (up to 3 times each): a post asked for in #news by name alone arrives there; the list of groups the app is in names #news and #general and never #quiet; a plain message seeded in #news (not a mention) is read back by name; a read of #quiet shows nothing and no read of it succeeds at Slack; and a search naming #news finds a plain message after Rome's copy of #news is wiped (a search naming no chat is only observed). Mentions inside threads: 5 harmless facts (a name or a place, never a code, password, key or PIN, which the Concierge rightly declines to repeat in a group), each made-up word in an earlier reply of a thread in #news and nowhere else, then the guardian mentions the app later in that thread asking for it; Slack's pace on `conversations.replies` (one a minute per workspace) is on for these mentions alone, and each mention waits up to `timeouts.replySeconds` plus `timeouts.threadReadSeconds` (default 90) for its reply before the next is sent; every reply in the thread must state its word, and a reply saying the thread could not be read, or none within that time, fails (two share the environment's seeded thread: the first `conversations.replies` call that goes through may read it whole, and any later one, at most one per later mention, must carry `oldest` at or after the newest message the first could return, so a second full read fails). Each thread mention is sent 62 s or more after the last `conversations.replies` call Slack let through in the workspace, so a correct product can read its thread at once. A plain message from the guardian in #news, with Slack's message event sent as if the app had subscribed, must get no post and cause no Slack call. Old permissions, on the second instance: workspace B is signed in again under a grant limit of the old scopes (`POST /_control/grant-limit`); a direct message and a mention from the guardian are answered (the members switch is off, so only the guardian is), a mention inside a thread is answered with no error in the thread, and a group read asked on the dashboard is answered with a message to approve the app again. The limit is then lifted and B signed in again. No #quiet value may show in any post or dashboard reply. |
-| R11 | `git diff <romeCloudBase> -- webhook-relay` in rome-cloud is empty. Each column added under `packages/pantheon` schemas and migrations is judged by what it holds. Message content and Slack member data fail in any table. The binding (team, instance, timestamps) and the means of delivery (mailbox id, forward secret) pass. A sign-in attempt table (one with an expiry and attempt state such as `state` or `code_challenge`) is judged by its lifetime, not its column names: all its other columns pass as attempt fields when the product's code clears the sign-in outcome (a column such as `result` or a token) on redemption, by setting it to null or deleting the row, and deletes expired attempts. Otherwise they fail. Outside an attempt table a Slack token fails, and a column it cannot judge leaves R11 not checked. `pnpm lint:imports` passes in rome. No import from `rome_apps` is added under `packages/core/src/connections` against `romeBase` (default `origin/main`); every current one is listed. A `generation` column, and a new sequence whose name says generation, count a workspace's claims and are part of the binding (planner's ruling, rome-cloud 0070 and 0071); any other new sequence is not judged. |
+Two optional controls decide how much can be seen. The `port` control calls the connection's own port (send, read, thread, groups, any other method). The `record` control reads Chats' own record of a chat. Without the port, R9's send, read and refusal and R14's group work are not checked, and R1's send is Rome's reply.
 
-Runs go R11, R1, R3, then the second instance's binding to workspace B, R4, R7, R5, R12, R13, R9, R14, R6, R8, R2, R10. A rule whose setup failed earlier reports "not checked" with the reason.
+| Group | Rule | Run |
+|---|---|---|
+| Access | R1 | The guardian connects through Connect with one sign-in and nothing pasted. The connection's account is a Slack account that names the workspace. One direct message is on record, and one message Rome sends arrives in it: a port send, or without a port, Rome's post after the message (what it says is not read). The Rome Cloud sign-in attempt no longer holds its outcome. |
+| Access | R2 | R1's whole check from a workspace that is not the app's home one. First, with the app's distribution off, Slack refuses the sign-in and nothing connects. |
+| Access | R3 | A second instance connecting workspace A is refused and told why. A direct message to the first is still on record there. |
+| Access | R8 | Slack's removal events mark the connection broken within 1 minute. The same sign-in fixes it into the same connected account, and a direct message is on record again. Disconnecting in Rome makes Slack's auth.test refuse the token. |
+| Access | R10 | Connect lists Rome's Slack app once and offers no old kind. A new slack_bot or old OAuth connect is refused. After the environment seeds a slack_bot and an old `slack` connection, and again after a restart, Rome lists neither, the older bot does not answer, and a direct message to Rome's app is on record. Nothing is posted through either old app, and no call uses the old sign-in's user token. |
+| Hear | R4 | 20 direct messages one at a time, each on record before the next. Then 10 more: 3, a second's pause, the instance stopped, 7 while it is down: all 10 are on record after the restart, which a connection that acknowledged before recording would fail. Then the fake redelivers one recorded event: still on record once. The order inside Rome Cloud is covered by the product's tests (#2534). |
+| Hear | R5 | 10 mentions from the guardian, 5 at the top of `#general` and 5 in threads a member started: all on record. Where the record shows a thread, each is on record with its own. A send into each thread lands in it: a port send, or Rome's post after the mention. Slack's pace on history reads is off while R5 runs. The "mentioned" fact is covered by the product's tests. |
+| Hear | R6 | The instance stops for `stopSeconds`, 20 direct messages are sent while it is down, and all 20 are on record after the restart. |
+| Hear | R7 | 10 events with a bad signature (each sent up to 3 times until Rome Cloud answers below 500): none on record, nothing posted before a good message, which is on record. R4's 20 events from workspace A: the instance bound to B makes no Slack call about them, posts nothing, observes no account of A and has no record of A's direct message. |
+| Speak and act | R9 | Through the port: a send arrives from the bot token; a read of that chat holds it; `search.messages`, `chat.delete`, `conversations.invite`, `users.list` and `reactions.add` are refused with no call at the fake. Every Web API call the fake saw this run is a send, a read or the connection's upkeep (list in `rules/port.mjs`), and none uses a user token. |
+| Speak and act | R14 | Through the port: the groups listed are `#general` and `#news`, never `#quiet`; a read of `#news` holds a message said there; a thread read holds its reply; a send to `#news` arrives; a read of `#quiet` shows nothing of it and a send there lands nothing. A plain message in `#news` and one in `#quiet`, sent as events too, are not on record, while a mention is. Workspace B signed in again under the old scopes: a direct message and a mention are on record, and the port refuses a group listing and a group read, saying to approve the app again. Not checked when the app asks for no group history. |
+| Structure | R11 | Reads the checkouts: the relay gains no Slack code, core's connections import nothing from apps, and Rome Cloud's tables hold only workspace to instance, delivery and sign-in attempt state. |
+| Outside the score | smoke | A direct message gets exactly one reply in it. It fails nothing. |
 
-`run.sh --only R14` (rule ids or `phase3`, comma separated) scores a subset; R1 and the second binding still run first, and the rest report not checked. `--min-free-gb <n>` makes each rule wait, up to `VERIFIER_MEMORY_WAIT_SECONDS` (default 1800), while the machine the verifier runs on has under n GB available, then report it not checked if it still does.
+R12 is no longer a rule (Ouou, 2026-11-21).
 
-A request that cannot connect (refused, reset, timed out) is tried again for up to `timeouts.reachSeconds` (default 90), so a check rides out an instance restart such as a wipe's; a POST is tried again only when it never reached the endpoint, and each wipe waits for the instance's API before the check goes on. A request that never gets an answer leaves its rule "not checked: could not reach <host>", with the method, URL, underlying cause, the step the rule was on and its last requests. Any other error a check throws fails the rule with the same step, requests and cause chain. Each rule's evidence also records the machine's available memory at its start (`/proc/meminfo`) and any "short on memory" warning an instance logged during it (`ctl.sh logs`, found beside the instance's stop command); Rome holds queued turns then, so a rule that did not pass during such a warning reports "not checked: machine short on memory", and a pass stands.
+Order: R11, R1, R3, the second binding (workspace B to the second instance), smoke, R4, R7, R5, R9, R14, R6, R8, R2, R10. R9 audits every call made before it. R6 stops the first instance, R8 disconnects it, R2 then connects it to the third workspace, and R10 seeds the old connections on the second instance last.
+
+`--only` takes rule ids or a group name (`access`, `hear`, `speak`, `structure`). R1, R3 and the second binding always run.
 
 ## Stand-in
 
-`prove.mjs` shows the verifier can tell good from broken before the product exists. It runs the environment's own fake Slack (taken from the environment branch by git ref), a stand-in Rome Cloud and relay (`standin/cloud.mjs`), and two stand-in instances (`standin/instance.mjs`) that refuse a mutation from another origin as Rome does, started by `standin/up.mjs`. `BREAK` switches one rule off at a time:
+`prove.mjs` shows the verifier can tell good from broken before the product exists. It runs the environment's own fake Slack (taken from the environment branch by git ref), a stand-in Rome Cloud and relay (`standin/cloud.mjs`), and two stand-in instances (`standin/instance.mjs`) started by `standin/up.mjs`. The stand-in instance records each message before it acknowledges its mailbox, answers apart from recording, serves the port and record controls (`/_port`, `/_record`), and ignores stored old Slack connections. `STANDIN_NO_PORT=1` gives neither control, as the environment on main. `BREAK` switches one rule off at a time:
 
-| Break | What the stand-in does wrong |
-|---|---|
-| `R1-fields` | Setup asks for a bot token and a signing secret. |
-| `continue` | Not a break: Connect shows a Continue screen of Rome's own, a form with no method and nothing to fill. R1 must still pass. |
-| `R1-twice` | Connect sends the guardian through the Slack sign-in twice. |
-| `R1-agent` | The connected account gets no agent. |
-| `R3` | Rome Cloud lets a second instance take a bound workspace. |
-| `R4` | The instance replies twice to each message. |
-| `R4-pairs` | Each odd message is answered only when the next one comes. |
-| `R4-elsewhere` | Each reply is also posted in another member's direct message. |
-| `R6` | The instance throws away its mailbox when it starts. |
-| `R7-signature` | Rome Cloud skips Slack's signature check. |
-| `R7-route` | Rome Cloud delivers every event to every bound instance. |
-| `R7-lookup` (with `R7-route`) | The wrong instance looks up workspace A's sender in Slack, then drops the event unrecorded. |
-| `R7-quiet` (with `R7-signature`) | Forged events get through and are answered "Sure, done." |
-| `refuse` | Not a break: the Concierge declines what it was asked, in one reply to each message. Every phase 1 rule must still pass. |
-| `R1-kept` | Rome Cloud keeps the sign-in's outcome after the instance redeemed it. |
-| `R2-own-only` | Rome Cloud connects only the team's own workspaces (A and B). |
-| `dm-only` | Not a break: the app as built, which asks for no group scopes. R9 must still pass and R14 is not checked. |
-| `R14-by-name` | A group named by its name alone cannot be found. |
-| `R14-lists-all` | The list of groups names #quiet too. |
-| `R14-quiet-read` | A read of #quiet shows its messages. |
-| `R14-wipe-forgets` | A search naming #news after its wipe finds nothing in Slack. |
-| `R14-no-thread` | A mention inside a thread arrives without the thread's earlier messages. |
-| `R14-replies-each` | The thread is read again for every mention in it. |
-| `R14-hears-all` | A plain group message is answered. |
-| `R14-old-error` | Under the old scopes, a mention in a thread gets Slack's error. |
-| `R14-raw-refusal` | Under the old scopes, a group read gets Slack's error instead of a message to approve again. |
-| `R9-tests-fail` | One of the existing tests fails on the product. |
-| `R9-assert` | The product changed an assertion in the existing tests. |
-| `R9-blind` | Reads call Slack, but the reply holds nothing read. |
-| `R9-react` | Asked to react, the agent's reaction reaches Slack. |
-| `R9-join` | Search also shows messages from a group the app is not in. |
-| `R9-token-file` | The instance keeps the new connection's bot token in the connector's token file. |
-| `R9-lazy` | The Concierge never attempts a Slack operation; R9 must be not checked. |
-| `R10-two-entries` | Connect offers Slack bot beside Slack. |
-| `R10-page-twice` | The Connections page offers Slack twice under "Add a connection". |
-| `R10-bot-connects` | A new slack_bot setup can still start. |
-| `R10-oauth-connects` | The old OAuth start still sends the guardian to Slack. |
-| `R10-restart-loses` | The old connections stop working after a restart. |
-| `R10-reconnect` | Once one is disconnected, the old kinds can be connected again. |
-| `R5-top` | Mentions are answered at the top of the group, not in a thread. |
-| `R5-twice` | Each mention gets two replies in its thread. |
-| `R12-leak` | The visitor is told the guardian's private facts. |
-| `R12-decline2` | Not a break: the Concierge declines to keep 2 of the 8 facts. R12 must pass on the other 5. |
-| `R12-decline4` | The Concierge declines to keep 4 of the 8. R12 must report "not checked". |
-| `R12-default-on` | A fresh connection answers other members before the guardian turns it on. |
-| `R12-ignore-setting` | Turning the switch on changes nothing. |
-| `R12-switch-sticks` | The switch cannot be turned off again. |
-| `R12-guests` | With the switch on, a guest is answered too. |
-| `R12-instance-wide` | The switch also turns the instance-wide setting to members. |
-| `R12-page-no-switch` | The Connections page shows no switch. |
-| `R13-forget` | With Rome's copy wiped, the instance never reads Slack, so the answers are lost. |
-| `R13-memory` | The instance answers from its memory alone, which the wipe takes. |
-| `R13-memory-kept` | The wipe leaves the values in memory. R13 must report "not checked". |
-| `R13-tell` | The connection's view shows that it had to read Slack. |
-| `R8-never` | Removing the app never marks the connection broken. |
-| `R8-new-account` | The repair gives a new connected account. |
-| `R8-keep-token` | Disconnecting in Rome leaves the token working. |
-| `silent` | The Concierge never replies. |
-| `R7-transport` | Rome Cloud drops every forged event's connection unanswered. R7 must report "not checked", not pass. |
-| `R7-name` | The chat is recorded under a name the connection's view does not lead to. R7 must report "not checked" with the read error. |
-| `R7-gateway` | A gateway answers 502 to every forged event. R7 must report "not checked". |
-| `R7-blind` (with `R7-route`) | The wrong instance answers workspace A's events in its own workspace with a reply naming nothing of A, and records nothing. |
-| `R6-drop5` | 5 of the 20 messages waiting at restart are lost. |
-| `R6-stop-error` | The stop control stops the instance, then reports a failure. R6 must still restart it and pass. |
-| `R7-elsewhere` (with `R7-signature`) | Forged events get through, are not recorded, and are answered in another member's direct message. |
-| `R11` | The relay gains a Slack file. |
-| `R11-migration` | A migration adds a bot token column with `ALTER TABLE`. |
-| `R11-namespace` | A Drizzle schema written with a namespace import (`pg.text(...)`) stores the bot token. |
-| `R11-eof` | A `CREATE TABLE` with no semicolon, ending the file, stores the bot token. |
-| `R11-sql` | A one-line `CREATE TABLE` stores the bot token. |
-| `R11-store` | Rome Cloud stores the bot token in the binding. |
-| `R11-message` | Rome Cloud stores message content. |
-| `R11-member` | Rome Cloud stores a Slack member's email. |
-| `R11-token-kept` | The sign-in attempt's outcome (it carries the bot token) is never cleared on redemption. |
-| `R11-no-sweep` | Nothing deletes expired sign-in attempts. |
-| `R11-import` | The product adds an import from an app in core's connections. |
+| Break | What the stand-in does wrong | Expected |
+|---|---|---|
+| `R1-fields` | Setup asks for a bot token and a signing secret. | R1 fails |
+| `continue` | Not a break: Connect shows a Continue screen of Rome's own with nothing to fill. | R1 passes |
+| `R1-twice` | Connect sends the guardian through the Slack sign-in twice. | R1 fails |
+| `R1-kept` | Rome Cloud keeps the sign-in's outcome after the redemption. | R1 fails |
+| `R1-account` | The connection's account does not name the workspace. | R1 fails |
+| `silent` | The Concierge never replies. | smoke fails; with no port, R1 fails |
+| `R2-own-only` | Rome Cloud connects only the team's own workspaces. | R2 fails |
+| `R3` | Rome Cloud lets a second instance take a bound workspace. | R3 fails |
+| `R4-early-ack` | The instance acknowledges its mailbox before it records, and records slowly. | R4 fails |
+| `DUP-answers-twice` | A redelivered event is recorded again. | R4 fails |
+| `R5-unrecorded` | Mentions are answered but never recorded. | R5 fails |
+| `R5-thread` | A mention in a thread is recorded under another thread. | R5 fails |
+| `R5-top` | A send to a thread lands at the top of the group. | R5 fails |
+| `R6`, `R6-drop5` | The mailbox, or 5 of its messages, is thrown away at start. | R6 fails |
+| `R6-stop-error` | The stop control stops the instance, then reports a failure. | R6 passes |
+| `R7-signature`, `R7-route`, `R7-quiet`, `R7-elsewhere`, `R7-blind`, `R7-lookup` | Forged events get through, or events reach the wrong instance. | R7 fails |
+| `R7-transport`, `R7-gateway` | Forged events never reach Rome Cloud, or a gateway answers 502. | R7 not checked |
+| `R8-never`, `R8-new-account`, `R8-keep-token` | Removal never marks broken, the repair gives a new account, or disconnect keeps the token. | R8 fails |
+| `R9-other-method` | The port calls any Slack method it is asked for. | R9 fails |
+| `R9-no-read` | A read through the port answers nothing. | R9 fails |
+| `R9-extra-call` | The instance lists the workspace's members on connect. | R9 fails |
+| `R10-two-entries`, `R10-bot-connects`, `R10-oauth-connects` | Connect offers an old kind, or one can be started. | R10 fails |
+| `R10-old-works` | Stored old connections are listed and the older bot answers. | R10 fails |
+| `dm-only` | Not a break: the app asks for no group scopes. | R14 not checked |
+| `R14-lists-all`, `R14-quiet-read`, `R14-no-thread`, `R14-hears-all` | The port lists or reads `#quiet`, reads no thread, or a plain group message is recorded. | R14 fails |
+| `R14-no-reapprove` | Under the old scopes the port passes Slack's error through, not a request to approve again. | R14 fails |
+| `R11`, `R11-*` | The relay gains Slack code, core imports an app, or Rome Cloud stores a token, message content or member data. | R11 fails |
 
-```bash
-node verifiers/slack-app/prove.mjs [environment git ref]
-```
-
-It passes when every scored rule passes on the good stand-in and each break gets its expected result (fail, unless the table says otherwise), and writes `out/proof/summary.md`. `PROVE_CASES=good,R5-top` runs only the named cases.
-
-The stand-in keeps the fake Slack's history limit on (15 messages a request, one request a minute). The stand-in instance stops reading once it has the fact, and waits out a 429. It gives env.json a `wipe_chat` URL and a `rome_cloud.query` command (`standin/query.mjs`).
+It passes when every scored rule passes on the good stand-in, `no-port` gets R9 and R14 not checked with the rest passing, and each break gets its expected result. It writes `out/proof/summary.md`. `PROVE_CASES=good,R5-top` runs only the named cases.
 
 ## Limits
 
-- The verifier trusts the fake Slack's records of what the bot posted. A reply posted some other way is not seen.
-- R6's stop is `stopSeconds` long: `run.sh --r6-stop <seconds>` (or `VERIFIER_R6_STOP_SECONDS`) wins, then env.json, then 120 s. The rule's stop is 3600 s, so a full-length run is `run.sh --r6-stop 3600 <env.json>`.
-- R6 cannot tell which of the 20 waiting messages a reply answers, since they share a direct message: it wants exactly 20 replies in all. A Concierge that answers one message twice and another not at all passes R6; R4 catches that case one message at a time.
+- The verifier trusts the fake Slack's records of what was posted and called.
+- R4 cannot see when Rome Cloud's mailbox is acknowledged. A stop during a burst catches a connection that acknowledges early only when the stop lands between the acknowledgement and the record.
+- Without a record control, Rome's record is the chat's session, which carries no thread, so R5 reports its thread facts as covered by the product's tests.
+- R6's stop is `stopSeconds` long: `run.sh --r6-stop <seconds>` (or `VERIFIER_R6_STOP_SECONDS`) wins, then env.json, then 120 s.

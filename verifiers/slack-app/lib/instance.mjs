@@ -3,7 +3,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { follow, forms, json, sleep, waitFor } from "./http.mjs";
+import { follow, forms, json, sleep } from "./http.mjs";
 
 const run = promisify(execFile);
 
@@ -12,9 +12,7 @@ const SLACK_KIND = "slack_app";
 
 /** Wraps instance `inst` from env.json. */
 export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
-  // The dashboard's Concierge chat; replaced by a made one if it is missing.
-  let conciergeChat = "concierge";
-  const api = inst.api.replace(/\/$/, "");
+    const api = inst.api.replace(/\/$/, "");
   const origin = new URL(api).origin;
   // Rome refuses a mutation that does not come from its own origin, as the
   // dashboard's requests do, so every call carries it.
@@ -29,32 +27,36 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
       },
     });
 
-  /** Runs the environment's wipe of `conversation`; see `wipeChat`. */
-  async function wipe(conversation, texts) {
-    const target = inst.control.wipeChat;
-    const extra = texts.flatMap((t) => ["--text", t]);
+  // Set when the environment's record control fails once; the session route
+  // is read from then on.
+  let recordFailed = null;
+
+  /**
+   * Runs control `target` with `args` and parses the JSON it prints last. A
+   * URL is POSTed `{args}`; a 404 there reads as null. A command that exits
+   * non-zero with JSON on stdout still answers that JSON.
+   */
+  async function jsonControl(target, args, { name }) {
     if (typeof target === "string" && /^https?:\/\//.test(target)) {
-      const q = new URLSearchParams([["conversation", conversation], ...texts.map((t) => ["text", t])]);
-      const res = await json(`${target}?${q}`, { method: "POST" });
-      if (!res.ok) throw new Error(`wipe_chat ${inst.name}: ${res.status}`);
+      const res = await json(target, { method: "POST", body: { args } });
+      if (res.status === 404) return null;
+      if (!res.ok && !res.data) throw new Error(`${name} ${inst.name}: ${res.status}`);
       return res.data;
     }
-    // Exit 3: the command ran, and a copy is left. Its JSON says what.
-    const { stdout } = await (
+    const out = await (
       Array.isArray(target)
-        ? run(target[0], [...target.slice(1), conversation, ...extra], { timeout: 600_000 })
-        : run("sh", ["-c", `${target} "$@"`, "wipe", conversation, ...extra], {
-            timeout: 600_000,
-          })
+        ? run(target[0], [...target.slice(1), ...args], { timeout: 300_000 })
+        : run("sh", ["-c", `${target} "$@"`, name, ...args], { timeout: 300_000 })
     ).catch((err) => {
-      if (err.code === 3 && err.stdout) return { stdout: err.stdout, left: true };
-      throw new Error(`wipe_chat on ${inst.name}: ${err.message}`);
+      if (err.stdout?.trim()) return { stdout: err.stdout };
+      throw new Error(`${name} on ${inst.name} exited ${err.code}: ${(err.stderr ?? "").slice(-400)}`);
     });
     try {
-      return JSON.parse(stdout);
-    } catch {
-      return stdout.trim();
-    }
+      return JSON.parse(out.stdout);
+    } catch {}
+    const last = out.stdout.trim().split("\n").reverse().find((l) => /^[[{]/.test(l.trim()));
+    if (!last) throw new Error(`${name} on ${inst.name} printed no JSON: ${out.stdout.slice(-300)}`);
+    return JSON.parse(last);
   }
 
   async function control(what) {
@@ -116,34 +118,6 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
     },
 
     /**
-     * Root action executions started at or after `sinceMs`, each with its
-     * children, from the instance's own listing (`GET /action-executions`).
-     * Null when the route cannot be read.
-     */
-    async executions(sinceMs = 0) {
-      const res = await call("/action-executions?limit=200");
-      if (!res.ok || !Array.isArray(res.data)) return null;
-      const t = (x) => new Date(x?.startedAt ?? x?.createdAt ?? 0).getTime();
-      return res.data.filter((g) => t(g.rootExecution) >= sinceMs);
-    },
-
-    /**
-     * What the environment's probe says of the connector's Slack token file
-     * inside the instance: {exists, bot_token_tail, user_token_tail, team_id}.
-     * Null when the environment gives no probe.
-     */
-    async tokenFile() {
-      const target = inst.control.tokenFile;
-      if (!target) return null;
-      const { stdout } = Array.isArray(target)
-        ? await run(target[0], target.slice(1), { timeout: 60_000 })
-        : /^https?:\/\//.test(target)
-          ? { stdout: JSON.stringify((await json(target)).data) }
-          : await run("sh", ["-c", target], { timeout: 60_000 });
-      return JSON.parse(stdout);
-    },
-
-    /**
      * Runs the environment's seed of the older slack_bot and slack
      * connections an upgrade leaves (R10), and returns what it printed last:
      * per kind its connection_id, account_id and app_id, plus `checks`.
@@ -168,81 +142,6 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
       return JSON.parse(last);
     },
 
-    /**
-     * Starts a new dashboard chat with the Concierge, as the dashboard's "new
-     * chat" does (`POST /chat/sessions {agentName}`), and returns its id. A
-     * fresh chat carries nothing an earlier one read. Throws, naming the path
-     * and status, when no id comes back.
-     */
-    async newConciergeChat(name = "Verifier") {
-      const made = await call("/chat/sessions", { method: "POST", body: { agentName: "core:concierge", name } });
-      const id = made.data?.id ?? made.data?.session?.id ?? made.data?.sessionId;
-      if (!made.ok || !id)
-        throw new Error(`POST /api/chat/sessions on ${inst.name} answered ${made.status} without a chat id: ${JSON.stringify(made.data).slice(0, 200)}`);
-      return id;
-    },
-
-    /**
-     * Asks the Concierge in the dashboard's own chat, as the guardian
-     * (`POST /chat/sessions/concierge/turns`), and returns the text of its
-     * replies once they stop changing, with {chat, turnId, at}. Reads the
-     * chat through `GET /chat/sessions/{id}/messages`.
-     */
-    async askDashboard(text, { timeoutMs = 180_000, settleMs = 5_000, chat: given } = {}) {
-      let chat = given ?? conciergeChat;
-      let sent = await call(`/chat/sessions/${chat}/turns`, { method: "POST", body: { text } });
-      if (sent.status === 404 && !given) {
-        const made = await call("/chat/sessions", { method: "POST", body: { agentName: "core:concierge" } });
-        chat = conciergeChat = made.data?.id ?? made.data?.session?.id ?? chat;
-        sent = await call(`/chat/sessions/${chat}/turns`, { method: "POST", body: { text } });
-      }
-      const at = Date.now();
-      if (!sent.ok)
-        return {
-          chat,
-          at,
-          error: `POST /chat/sessions/${chat}/turns: ${sent.status} ${JSON.stringify(sent.data)}`,
-          reply: "",
-          refresh: async () => "",
-        };
-      const turnId = sent.data?.turnId ?? null;
-      const textOf = (m) => {
-        const c = m?.content;
-        if (typeof c === "string") return c;
-        if (Array.isArray(c)) {
-          const parts = c.filter((p) => p?.type === "text" || typeof p === "string");
-          if (parts.length) return parts.map((p) => (typeof p === "string" ? p : (p.text ?? p.content ?? ""))).join("\n");
-        }
-        return typeof m?.text === "string" ? m.text : JSON.stringify(c ?? "");
-      };
-      const replies = async () => {
-        const res = await call(`/chat/sessions/${chat}/messages`);
-        const list = Array.isArray(res.data) ? res.data : (res.data?.messages ?? []);
-        // Ours is the last user message carrying the text; replies follow it.
-        let mine = -1;
-        list.forEach((m, i) => {
-          if (m.role === "user" && (textOf(m).includes(text) || (turnId && m.turnId === turnId))) mine = i;
-        });
-        if (mine < 0) return [];
-        return list.slice(mine + 1).filter((m) => m.role === "assistant").map(textOf);
-      };
-      let last = "";
-      let stableSince = null;
-      while (Date.now() - at < timeoutMs) {
-        await sleep(1000);
-        const now = (await replies()).join("\n");
-        if (!now) continue;
-        if (now !== last) {
-          last = now;
-          stableSince = Date.now();
-        } else if (Date.now() - stableSince >= settleMs) break;
-      }
-      // The Concierge may answer "On it" and deliver a task's result later;
-      // the caller reads the chat again with refresh().
-      return { chat, at, turnId, reply: last, refresh: async () => (await replies()).join("\n") };
-    },
-
-    /** Whether the environment can wipe Rome's copy of one chat. */
     /** The instance's recent log lines, or null when the environment gives no logs command. */
     async logs() {
       const target = inst.control.logs;
@@ -251,42 +150,6 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
         ? await run(target[0], target.slice(1), { timeout: 60_000, maxBuffer: 32 << 20 })
         : await run("sh", ["-c", target], { timeout: 60_000, maxBuffer: 32 << 20 });
       return stdout.split("\n");
-    },
-
-    canWipe: () => Array.isArray(inst.control.wipeChat) || typeof inst.control.wipeChat === "string",
-
-    /**
-     * Runs the environment's command that wipes Rome's copy of the Slack
-     * conversation `conversation`, and with `texts` every row holding one of
-     * them, memory included. Each text goes as `--text <text>` after the
-     * conversation id (assumed until the environment publishes its option).
-     * It returns once the instance is healthy again, with what it printed.
-     */
-    async wipeChat(conversation, { texts = [] } = {}) {
-      const out = await wipe(conversation, texts);
-      // The wipe restarts the instance; its API may come back a little after
-      // the command returns, so nothing asks it anything before then.
-      await waitFor(() => this.up(), { timeoutMs: restartSeconds * 1000, everyMs: 2000 });
-      return out;
-    },
-
-    /**
-     * Where the instance still shows `text` through the dashboard's own
-     * search routes: its memory files (`GET /memory/search`) and its chats
-     * (`GET /chat/sessions/search`). Each count is null when that route
-     * cannot be read.
-     */
-    async holds(text) {
-      const count = async (path) => {
-        const res = await call(path);
-        if (!res.ok) return { count: null, status: res.status };
-        return { count: Array.isArray(res.data) ? res.data.length : null, status: res.status };
-      };
-      const q = encodeURIComponent(text);
-      return {
-        memory: await count(`/memory/search?q=${q}`),
-        chats: await count(`/chat/sessions/search?q=${q}`),
-      };
     },
 
     /**
@@ -420,15 +283,32 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
     },
 
     /**
-     * The messages Rome recorded as coming in through the Slack direct message
-     * `dm` (its D... id) on `connection`: the content of each inbound entry
-     * in that chat's session (role notification or user), oldest first. The
-     * session is found from the connection's channel, not from `dm` alone. A
-     * 404 throws unless `noneIfMissing`, where it means this instance never
-     * recorded that direct message.
+     * What Rome recorded as coming in through the Slack chat `chat` on
+     * `connection`, oldest first: `{text, at, thread}` per inbound message.
+     * `chat` is a D... or C... id, or `C...:<thread ts>` for a thread. The
+     * environment's `record` control is read when it gives one (`<control>
+     * '{"chat": ...}'`, printing `{messages: [{key, text, at, thread?}]}`
+     * from Chats' own table); otherwise, or when that control fails, the
+     * chat's session (`GET /sessions/channel:<channel>:<chat>/messages`),
+     * whose entries carry no thread. A chat Rome never recorded throws
+     * unless `noneIfMissing`, where it reads [].
      */
-    async recordedIn(dm, { connection, noneIfMissing = false } = {}) {
-      const session = encodeURIComponent(`channel:${await channelOf(connection)}:${dm}`);
+    async recorded(chat, { connection, noneIfMissing = false } = {}) {
+      if (inst.control.record && !recordFailed) {
+        try {
+          const got = await jsonControl(inst.control.record, [JSON.stringify({ chat })], { name: "record" });
+          if (got === null && noneIfMissing) return [];
+          const list = Array.isArray(got) ? got : (got?.messages ?? []);
+          return list.map((m) => ({
+            text: typeof m.text === "string" ? m.text : JSON.stringify(m.text ?? m.body ?? ""),
+            at: m.at ?? m.createdAt ?? null,
+            thread: m.thread ?? m.threadId ?? m.thread_ts ?? null,
+          }));
+        } catch (err) {
+          recordFailed = err.message;
+        }
+      }
+      const session = encodeURIComponent(`channel:${await channelOf(connection)}:${chat}`);
       const res = await call(`/sessions/${session}/messages`);
       if (res.status === 404 && noneIfMissing) return [];
       if (!res.ok)
@@ -441,8 +321,51 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
           // Rome records an inbound message as "notification", and as "user"
           // once it starts a turn.
           .filter((m) => m.role === "notification" || m.role === "user")
-          .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+          .map((m) => ({
+            text: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+            at: m.createdAt ?? null,
+            thread: undefined,
+          }))
       );
+    },
+
+    /** Why the record control was given up for the session route, or null. */
+    recordFailed: () => recordFailed,
+
+    /** The text of each message {@link recorded} finds. */
+    async recordedIn(chat, opts) {
+      return (await this.recorded(chat, opts)).map((m) => m.text);
+    },
+
+    /** Whether the environment gives a port control (R9, R14). */
+    hasPort: Boolean(inst.control.port),
+
+    /**
+     * Tries the port control once, with a method it must refuse, and drops
+     * it when it prints no JSON (an environment without `ctl.sh port`).
+     * Returns why it was dropped, or null.
+     */
+    async checkPort() {
+      if (!this.hasPort) return "the environment names no port control";
+      try {
+        await jsonControl(inst.control.port, ["call", JSON.stringify({ method: "api.test", args: {} })], { name: "port" });
+        return null;
+      } catch (err) {
+        this.hasPort = false;
+        return err.message;
+      }
+    },
+
+    /**
+     * One operation on the connection's own port, through the environment's
+     * `port` control (`<control> <op> '<json>'`, JSON out): send {chat, text,
+     * thread?}, read {chat}, thread {chat, ts}, groups {}, call {method,
+     * args}. A refusal answers {refused: why}. Null when the environment gives
+     * no port.
+     */
+    async port(op, args = {}) {
+      if (!inst.control.port) return null;
+      return jsonControl(inst.control.port, [op, JSON.stringify(args)], { name: "port" });
     },
 
     /**

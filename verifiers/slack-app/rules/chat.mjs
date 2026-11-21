@@ -1,59 +1,106 @@
-// R4 (direct messages work), R6 (nothing lost while offline) and R7 (nothing
-// forged or misrouted arrives).
+// R4 (direct messages), R6 (while Rome is down) and R7 (forged and
+// misrouted). Rule text: rule set v4 in the planner's rules.md. Each is
+// checked at the connection's edges: what the fake Slack sent, and what Rome
+// has on record.
 
 import { ask, code } from "../lib/codes.mjs";
 import { sleep, waitFor } from "../lib/http.mjs";
-import { allOnce, replyAfter, summary, tally } from "../lib/replies.mjs";
-import { oneReply } from "./connect.mjs";
+import { dmOnRecord, onRecord } from "../lib/record.mjs";
+
+/** Waits for the instance to stop answering, then for `body`; starts it again whatever happens. */
+async function whileStopped(ctx, inst, body) {
+  let stopError;
+  try {
+    await inst.stop().catch((err) => {
+      stopError = err.message;
+    });
+    const down = await waitFor(async () => !(await inst.up()), { timeoutMs: 60_000 });
+    if (!down) return { stopped: false, stopError };
+    return { stopped: true, stopError, ...(await body()) };
+  } finally {
+    await inst.start();
+  }
+}
 
 export async function r4(ctx) {
   if (!ctx.bound.a) return { result: "not checked", reason: "R1 made no connection to build on." };
   const ws = ctx.wsA;
+  const cid = ctx.bound.a;
+  const evidence = { workspace: ws.id };
+  const problems = [];
+  const unchecked = [];
+
+  // 20 direct messages, one at a time: each is on record before the next.
   const since = await ctx.slack.seq();
-  const codes = [];
-  const eventIds = [];
-  const sentList = [];
-  const unansweredInTime = [];
-  let channel;
-  for (let i = 1; i <= 20; i++) {
-    const tag = code("R4", i);
-    const before = await ctx.slack.seq();
+  const steady = [];
+  for (let i = 1; i <= 20; i++) steady.push(await dmOnRecord(ctx, ctx.a, ws, cid, "R4", i));
+  const channel = steady[0].channel;
+  ctx.fromA = {
+    codes: steady.map((m) => m.tag),
+    eventIds: steady.map((m) => m.eventId),
+    since,
+    channel,
+  };
+  const missed = steady.filter((m) => !m.ok).map((m) => m.tag);
+  evidence.steady = { channel, eventIds: ctx.fromA.eventIds, notOnRecordInTime: missed };
+  if (missed.length)
+    problems.push(`${missed.length} of 20 direct messages were not on record within ${ctx.env.timeouts.replySeconds} s`);
+
+  // None acknowledged before Rome accepted it. The order inside Rome Cloud
+  // cannot be seen from the edges; the nearest sign of an early
+  // acknowledgement is a loss when the instance stops while messages are in
+  // flight. 10 sent: 3, a second for Rome to take them, the stop, then 7
+  // while it is down.
+  const burst = [];
+  let stopAnswer = null;
+  for (let i = 1; i <= 10; i++) {
+    if (i === 4) {
+      await sleep(1000);
+      stopAnswer = await ctx.a.stop().catch((err) => ({ error: err.message }));
+    }
+    const tag = code("R4B", i);
     const sent = await ctx.slack.dm(ws.id, ws.guardian, ask(tag));
-    channel = sent.channel;
-    codes.push(tag);
-    eventIds.push(sent.eventId);
-    sentList.push({ tag, since: before });
-    // One message at a time, as a person would write: wait for its reply. A
-    // reply that comes only after the next message is a failure, even if
-    // the final count adds up.
-    const answered = await replyAfter(ctx.slack, {
-      team: ws.id,
-      channel,
-      since: before,
-      timeoutMs: ctx.env.timeouts.replySeconds * 1000,
-    });
-    if (!answered) unansweredInTime.push(tag);
+    burst.push({ tag, eventId: sent.eventId });
   }
-  await sleep(ctx.env.timeouts.settleSeconds * 1000);
-  const t = tally(await ctx.slack.posts({ team: ws.id, since }), { channel, sent: sentList });
-  ctx.fromA = { codes, eventIds, since, channel };
-  const evidence = { workspace: ws.id, channel, eventIds, unansweredInTime, ...t };
-  const late = unansweredInTime.length
-    ? `${unansweredInTime.length} of 20 got no reply within ${ctx.env.timeouts.replySeconds}s, before the next message`
+  await ctx.a.start();
+  const up = await waitFor(() => ctx.a.up(), { timeoutMs: ctx.env.timeouts.restartSeconds * 1000 });
+  const inFlight = up
+    ? await onRecord(ctx.a, channel, cid, burst.map((b) => b.tag), ctx.env.timeouts.replySeconds * 5 * 1000)
     : null;
-  if (late)
-    return {
-      result: "fail",
-      reason: allOnce(t) ? late : `${late}; ${summary(t)}`,
-      evidence,
-    };
-  return allOnce(t)
-    ? {
-        result: "pass",
-        reason: "20 of 20 direct messages got exactly one reply in the same direct message.",
-        evidence,
-      }
-    : { result: "fail", reason: summary(t), evidence };
+  evidence.stopDuringBurst = {
+    stopAnswer: stopAnswer ?? null,
+    restarted: Boolean(up),
+    eventIds: burst.map((b) => b.eventId),
+    notOnRecord: inFlight?.missing ?? "instance did not come back",
+  };
+  if (!up) problems.push("the instance did not come back after the stop during the burst");
+  else if (inFlight.missing.length)
+    problems.push(`${inFlight.missing.length} of 10 direct messages sent while the instance stopped were not on record after it restarted`);
+
+  // Slack sends one recorded event again: it is still on record once.
+  const again = steady.find((m) => m.ok);
+  if (!again) unchecked.push("no direct message was on record to redeliver");
+  else {
+    const r = await ctx.slack.redeliver(again.eventId);
+    if (r === null) unchecked.push("the fake has no redeliver route");
+    else {
+      await sleep(ctx.env.timeouts.settleSeconds * 1000);
+      const after = await onRecord(ctx.a, channel, cid, [again.tag], ctx.env.timeouts.replySeconds * 1000);
+      evidence.redelivered = { eventId: again.eventId, answer: r, timesOnRecord: after.counts[again.tag] };
+      if (after.counts[again.tag] !== 1)
+        problems.push(`a redelivered event is on record ${after.counts[again.tag]} times, not once`);
+    }
+  }
+
+  const parts = `steady ${20 - missed.length} of 20 on record; stop during a burst ${inFlight ? `${10 - inFlight.missing.length} of 10` : "not restarted"}; redelivered on record ${evidence.redelivered?.timesOnRecord ?? "?"} time(s)`;
+  if (problems.length) return { result: "fail", reason: `${parts}. ${problems.join("; ")}`, evidence };
+  if (unchecked.length)
+    return { result: "not checked", reason: `${parts}. Not checked: ${unchecked.join("; ")}`, evidence };
+  return {
+    result: "pass",
+    reason: `20 of 20 direct messages on record; 10 of 10 sent while the instance stopped mid-burst on record after restart; a redelivered event on record once. The order of acknowledgement inside Rome Cloud is covered by the product's tests (#2534).`,
+    evidence,
+  };
 }
 
 /** A delivery Rome Cloud itself answered: any status but none or a 5xx. */
@@ -78,8 +125,8 @@ export async function r7(ctx) {
     }
   };
 
-  // Forged: 10 events with a bad signature, then one good message. Its reply
-  // shows the path was open while the forged ones went by.
+  // Forged: 10 events with a bad signature, then one good message. That it
+  // is on record shows the path was open while the forged ones went by.
   const since = await ctx.slack.seq();
   const forged = [];
   for (let i = 1; i <= 10; i++) {
@@ -102,7 +149,7 @@ export async function r7(ctx) {
   // a forged event, whatever it says. One that comes later shows up as more
   // than the good message's one reply.
   await sleep(ctx.env.timeouts.settleSeconds * 1000);
-  const control = await oneReply(ctx, ws, "R7C");
+  const control = await dmOnRecord(ctx, ctx.a, ws, ctx.bound.a, "R7C");
   const others = (await ctx.slack.posts({ team: ws.id, since })).filter(
     (p) => p.seq <= control.since,
   );
@@ -110,7 +157,7 @@ export async function r7(ctx) {
   const recorded = control.channel ? await readable(() => ctx.a.recordedIn(control.channel, { connection: ctx.bound.a })) : null;
   // The good message must show in the same read, or an empty read proves
   // nothing about the forged ones.
-  const sawGood = recorded?.some((b) => b.includes(code("R7C", 0)));
+  const sawGood = recorded?.some((b) => b.includes(control.tag));
   if (recorded && !sawGood)
     partial ??=
       "the read of what Rome recorded does not show the good message, so it cannot show the forged ones are absent";
@@ -125,12 +172,9 @@ export async function r7(ctx) {
     })),
     recorded: recordedForged?.map((f) => f.eventId) ?? "not readable",
     goodMessageVisibleInRecord: Boolean(sawGood),
-    goodMessageAfter: { eventId: control.eventId, replies: control.replies, said: control.said },
+    goodMessageAfter: { eventId: control.eventId, onRecord: control.ok },
   };
-  if (!control.ok)
-    problems.push(
-      `the good message after the forged ones did not get exactly one reply (${control.said})`,
-    );
+  if (!control.ok) problems.push("the good message after the forged ones was not on record");
   if (others.length)
     problems.push(
       `${others.length} post(s) answered the forged events before the good message was sent`,
@@ -206,7 +250,7 @@ export async function r7(ctx) {
   return {
     result: "pass",
     reason:
-      "10 of 10 forged events dropped with no reply or record; 0 of 20 events from workspace A reached the instance bound to B.",
+      "10 of 10 forged events dropped: none on record, nothing posted; the good message after them is on record. 0 of 20 events from workspace A reached the instance bound to B.",
     evidence,
   };
 }
@@ -215,84 +259,30 @@ export async function r6(ctx) {
   if (!ctx.bound.a) return { result: "not checked", reason: "R1 made no connection to build on." };
   const ws = ctx.wsA;
   const env = ctx.env;
-  const since = await ctx.slack.seq();
-  const codes = [];
+  const tags = [];
   const eventIds = [];
   let channel;
-  let whileStopped;
-  // Whatever fails while the instance is down, start it again, so a crash
-  // here leaves the environment as it found it.
-  let stopError;
-  // What the instance holds before the stop and after the restart, so a
-  // lost connection reads apart from a slow one.
-  const holds = async () => {
-    try {
-      const got = await ctx.a.call("/connections");
-      const list = Array.isArray(got.data) ? got.data : (got.data?.connections ?? []);
-      return { status: got.status, held: list.filter((c) => c.id).map((c) => ({ id: c.id, kind: c.connectionKind, state: c.state ?? null })) };
-    } catch (err) {
-      return { error: err.message };
-    }
-  };
-  const heldBefore = await holds();
-  try {
-    // A stop control can stop the instance and still report an error, so it
-    // runs inside the block that starts the instance again.
-    await ctx.a.stop().catch((err) => {
-      stopError = err.message;
-    });
-    const down = await waitFor(async () => !(await ctx.a.up()), { timeoutMs: 60_000 });
-    if (!down && stopError)
-      return { result: "not checked", reason: `The stop control failed: ${stopError}.` };
-    if (!down)
-      return { result: "fail", reason: "The instance still answered a minute after stop." };
+  const run = await whileStopped(ctx, ctx.a, async () => {
     const stoppedAt = Date.now();
     for (let i = 1; i <= 20; i++) {
-      const c = code("R6", i);
-      const sent = await ctx.slack.dm(ws.id, ws.guardian, ask(c));
+      const tag = code("R6", i);
+      const sent = await ctx.slack.dm(ws.id, ws.guardian, ask(tag));
       channel = sent.channel;
-      codes.push(c);
+      tags.push(tag);
       eventIds.push(sent.eventId);
     }
     await sleep(Math.max(0, env.stopSeconds * 1000 - (Date.now() - stoppedAt)));
-    whileStopped = (await ctx.slack.posts({ team: ws.id, since })).length;
-  } finally {
-    await ctx.a.start();
-  }
+    return {};
+  });
+  const evidence = { workspace: ws.id, channel, stopSeconds: env.stopSeconds, stopError: run.stopError, eventIds };
+  if (!run.stopped && run.stopError)
+    return { result: "not checked", reason: `The stop control failed: ${run.stopError}.`, evidence };
+  if (!run.stopped)
+    return { result: "fail", reason: "The instance still answered a minute after stop.", evidence };
   const up = await waitFor(() => ctx.a.up(), { timeoutMs: env.timeouts.restartSeconds * 1000 });
-  const evidence = {
-    workspace: ws.id,
-    channel,
-    stopSeconds: env.stopSeconds,
-    stopError,
-    eventIds,
-    repliesWhileStopped: whileStopped,
-  };
-  if (!up)
-    return { result: "fail", reason: "The instance did not come back after start.", evidence };
-
-  // All 20 waited in the same chat, so their replies cannot be told apart
-  // by order: after the restart that chat must get exactly 20, and nothing
-  // may go anywhere else.
-  const restartedAt = await ctx.slack.seq();
-  await waitFor(
-    async () => (await ctx.slack.posts({ team: ws.id, channel, since: restartedAt })).length >= 20,
-    { timeoutMs: env.timeouts.replySeconds * 1000 * 5 },
-  );
-  await sleep(env.timeouts.settleSeconds * 1000);
-  const posts = await ctx.slack.posts({ team: ws.id, since });
-  const inChat = posts.filter((p) => p.channel === channel).length;
-  const t = {
-    sent: 20,
-    repliesInChat: inChat,
-    postsElsewhere: posts
-      .filter((p) => p.channel !== channel)
-      .map((p) => ({ channel: p.channel, seq: p.seq, text: p.text?.slice(0, 120) })),
-  };
-  Object.assign(evidence, t);
-  evidence.connectionsBeforeStop = heldBefore;
-  evidence.connectionsAfterRestart = await holds();
-  // Each event's delivery attempts at Slack's side, and when each reply came.
+  if (!up) return { result: "fail", reason: "The instance did not come back after start.", evidence };
+  const got = await onRecord(ctx.a, channel, ctx.bound.a, tags, env.timeouts.replySeconds * 5 * 1000);
+  evidence.notOnRecord = got.missing;
   evidence.deliveries = await Promise.all(
     eventIds.map(async (id) => {
       try {
@@ -302,27 +292,15 @@ export async function r6(ctx) {
       }
     }),
   );
-  evidence.repliesAfterRestart = posts.filter((p) => p.channel === channel).map((p) => ({ seq: p.seq, at: p.at ?? null }));
-  if (whileStopped)
-    return {
-      result: "fail",
-      reason: `${whileStopped} replies came while the instance was stopped`,
-      evidence,
-    };
-  const ok = inChat === 20 && t.postsElsewhere.length === 0;
-  return ok
+  return got.missing.length
     ? {
-        result: "pass",
-        reason: `20 messages sent during a ${env.stopSeconds}s stop got 20 replies after restart, in their direct message and nowhere else.`,
+        result: "fail",
+        reason: `${20 - got.missing.length} of 20 messages sent during a ${env.stopSeconds} s stop were on record after the restart`,
         evidence,
       }
     : {
-        result: "fail",
-        reason:
-          `20 messages sent while stopped; ${inChat} repl${inChat === 1 ? "y" : "ies"} posted in their direct message after the restart, so at most ${Math.min(inChat, 20)} of 20 answered` +
-          (t.postsElsewhere.length
-            ? `; ${t.postsElsewhere.length} posted in other conversations`
-            : ""),
+        result: "pass",
+        reason: `20 of 20 messages sent during a ${env.stopSeconds} s stop are on record after the restart.`,
         evidence,
       };
 }

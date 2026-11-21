@@ -1,12 +1,12 @@
-// R1 (one sign-in, nothing pasted) and R3 (one workspace binds to one
-// instance). Rule text: rule set v1 in the planner's rules.md.
+// R1 (one sign-in, nothing pasted) and R3 (one workspace, one instance), and
+// R2 (any workspace) as R1 from another workspace. Rule text: rule set v4 in
+// the planner's rules.md. Checked at the connection's edges: the fake Slack,
+// and what Rome has on record.
 
 import { query } from "../lib/cloud.mjs";
-import { ask, code } from "../lib/codes.mjs";
-import { sleep } from "../lib/http.mjs";
-import { allOnce, replyAfter, summary, tally } from "../lib/replies.mjs";
-
-const CONCIERGE = "core:concierge";
+import { code } from "../lib/codes.mjs";
+import { waitFor } from "../lib/http.mjs";
+import { dmOnRecord } from "../lib/record.mjs";
 
 // The newest sign-in attempt: whether its outcome is gone and it is used up.
 const ATTEMPT_SQL =
@@ -16,37 +16,6 @@ const ATTEMPT_SQL =
 // to another Rome.
 const TOLD_WHY = /already (connected|bound)|another Rome|workspace_bound/i;
 
-/**
- * Seeds one direct message from the workspace's guardian and reports whether
- * it got exactly one reply, in any words, and nothing anywhere else.
- */
-export async function oneReply(ctx, ws, rule) {
-  const tag = code(rule, 0);
-  const since = await ctx.slack.seq();
-  const sent = await ctx.slack.dm(ws.id, ws.guardian, ask(tag));
-  await replyAfter(ctx.slack, {
-    team: ws.id,
-    channel: sent.channel,
-    since,
-    timeoutMs: ctx.env.timeouts.replySeconds * 1000,
-  });
-  await sleep(ctx.env.timeouts.settleSeconds * 1000);
-  const t = tally(await ctx.slack.posts({ team: ws.id, since }), {
-    channel: sent.channel,
-    sent: [{ tag, since }],
-  });
-  return {
-    ok: allOnce(t),
-    tag,
-    since,
-    eventId: sent.eventId,
-    channel: sent.channel,
-    replies: t.repliesInChat,
-    said: summary(t),
-    ...t,
-  };
-}
-
 /** Connects `inst` to workspace `ws` as its guardian, by Connect and the approve screen. */
 export async function connectAs(ctx, inst, ws) {
   await ctx.slack.signIn(ws.id, ws.guardian);
@@ -54,6 +23,30 @@ export async function connectAs(ctx, inst, ws) {
 }
 
 const yn = (b) => (b ? "yes" : "no");
+
+/**
+ * Whether a message Rome sends into `channel` arrives there. Through the
+ * connection's port when the environment gives one: a send of a tagged text,
+ * found at the fake by its tag. Without one, the post Rome makes in that
+ * chat after `since` (the Concierge's answer to the message just recorded;
+ * what it says is not read). Returns {ok, how, post}.
+ */
+export async function romeSends(ctx, inst, ws, channel, since, rule) {
+  if (inst.hasPort) {
+    const tag = code(`${rule}S`, 0);
+    const sent = await inst.port("send", { chat: channel, text: `Sent through the port (${tag})` });
+    const post = await waitFor(
+      async () => (await ctx.slack.posts({ team: ws.id, channel, since })).find((p) => p.text?.includes(tag)),
+      { timeoutMs: ctx.env.timeouts.replySeconds * 1000 },
+    );
+    return { ok: Boolean(post) && post.tokenKind !== "user", how: "port send", answered: sent, post: post ?? null };
+  }
+  const post = await waitFor(
+    async () => (await ctx.slack.posts({ team: ws.id, channel, since }))[0],
+    { timeoutMs: ctx.env.timeouts.replySeconds * 1000 },
+  );
+  return { ok: Boolean(post) && post.tokenKind !== "user", how: "Rome's post after the message (no port)", post: post ?? null };
+}
 
 export async function r1(ctx) {
   const { bound, ...scored } = await signInCheck(ctx, ctx.a, ctx.wsA, "R1");
@@ -63,9 +56,10 @@ export async function r1(ctx) {
 
 /**
  * R1's whole check: `inst` connects workspace `ws` in one sign-in with
- * nothing pasted, and its guardian's first direct message is answered by the
- * Concierge. `rule` tags the message. Returns the result plus `bound`, the
- * new connection's id (true when Rome names none), or null.
+ * nothing pasted, into a connection that names the workspace's account; one
+ * direct message reaches Rome and one message Rome sends arrives. `rule` tags
+ * the message. Returns the result plus `bound`, the new connection's id (true
+ * when Rome names none), or null.
  */
 async function signInCheck(ctx, inst, ws, rule) {
   const walk = await connectAs(ctx, inst, ws);
@@ -80,10 +74,9 @@ async function signInCheck(ctx, inst, ws, rule) {
     signIns: walk.signIns,
     screens: walk.approveScreens,
     path: walk.visited,
-    agentLinkCalls: 0,
   };
   if (walk.outcome !== "connected") {
-    evidence.parts = { connected: "no", replied: "not tried" };
+    evidence.parts = { connected: "no", reached: "not tried", sent: "not tried" };
     return {
       result: "fail",
       reason: `Connected: no. Connect did not finish: ${walk.reason}`,
@@ -100,14 +93,11 @@ async function signInCheck(ctx, inst, ws, rule) {
   evidence.connectionId = walk.connectionId;
   evidence.account = account ?? null;
 
-  const reply = await oneReply(ctx, ws, rule);
-  evidence.firstMessage = {
-    eventId: reply.eventId,
-    replies: reply.replies,
-    postsElsewhere: reply.postsElsewhere,
-  };
-  // Kept apart so a silent agent is not read as a failed connect.
-  evidence.parts = { connected: yn(Boolean(account)), replied: yn(reply.ok) };
+  const heard = await dmOnRecord(ctx, inst, ws, walk.connectionId, rule);
+  const sent = await romeSends(ctx, inst, ws, heard.channel, heard.since, rule);
+  evidence.firstMessage = { eventId: heard.eventId, tag: heard.tag, onRecord: heard.ok };
+  evidence.romeSent = sent;
+  evidence.parts = { connected: yn(Boolean(account)), reached: yn(heard.ok), sent: yn(sent.ok) };
 
   // Live: the newest sign-in attempt in Rome Cloud no longer holds its
   // outcome once the instance redeemed it.
@@ -134,22 +124,27 @@ async function signInCheck(ctx, inst, ws, rule) {
   if (!account) problems.push("no connected account for the new connection");
   else if (account.account?.platform !== "slack")
     problems.push(`the new connection's account is ${JSON.stringify(account.account)}, not a Slack account`);
-  else if (account.agent !== CONCIERGE)
-    problems.push(`the connected account's agent is ${account.agent ?? "none"}, not the Concierge`);
-  if (!reply.ok)
-    problems.push(`the first direct message did not get exactly one reply (${reply.said})`);
+  else if (account.account.id && !new RegExp(`(^|[^A-Z0-9])${ws.id}([^A-Z0-9]|$)`).test(String(account.account.id)))
+    problems.push(`the new connection's account ${account.account.id} does not name workspace ${ws.id}`);
+  if (!heard.ok)
+    problems.push(`the first direct message was not on record in Rome within ${ctx.env.timeouts.replySeconds} s`);
+  if (!sent.ok)
+    problems.push(
+      sent.post?.tokenKind === "user"
+        ? "Rome's message went out with a user token"
+        : `no message Rome sent arrived in the direct message (${sent.how})`,
+    );
 
   return problems.length
     ? {
         result: "fail",
-        reason: `Connected: ${evidence.parts.connected}; replied: ${evidence.parts.replied}. ${problems.join("; ")}`,
+        reason: `Connected: ${evidence.parts.connected}; reached Rome: ${evidence.parts.reached}; Rome's send arrived: ${evidence.parts.sent}. ${problems.join("; ")}`,
         evidence,
         bound,
       }
     : {
         result: "pass",
-        reason:
-          "Connected in one sign-in with 0 fields from Rome; the Concierge answers as the account with no link step.",
+        reason: `Connected in one sign-in with 0 fields from Rome, as ${account.account.id ?? "a Slack account"}; a direct message is on record and Rome's send arrived (${sent.how}).`,
         evidence,
         bound,
       };
@@ -251,18 +246,17 @@ export async function r3(ctx) {
   const before = (await ctx.b.accounts()).filter((x) => x.connection).length;
   const walk = await connectAs(ctx, ctx.b, ws);
   const after = (await ctx.b.accounts()).filter((x) => x.connection).length;
-  const first = await oneReply(ctx, ws, "R3");
+  const first = await dmOnRecord(ctx, ctx.a, ws, ctx.bound.a, "R3");
   const evidence = {
     workspace: ws.id,
     secondInstance: ctx.b.name,
     outcome: walk.outcome,
     toldWhy: walk.reason ?? null,
     connectedAccountsOnSecond: { before, after },
-    firstStillWorks: { eventId: first.eventId, replies: first.replies },
-    // Kept apart so a silent agent is not read as a failed refusal.
+    firstStillWorks: { eventId: first.eventId, tag: first.tag, onRecord: first.ok },
     parts: {
       secondRefused: yn(walk.outcome === "refused" && after === before),
-      firstReplied: yn(first.ok),
+      firstStillHears: yn(first.ok),
     },
   };
   const problems = [];
@@ -273,17 +267,16 @@ export async function r3(ctx) {
       `the second connect ended ${walk.outcome} without saying the workspace is already connected (${walk.reason ?? "no reason"})`,
     );
   if (after !== before) problems.push("the second instance gained a connected account");
-  if (!first.ok)
-    problems.push(`a direct message to the first did not get exactly one reply (${first.said})`);
+  if (!first.ok) problems.push("a direct message to the first instance was not on record there");
   return problems.length
     ? {
         result: "fail",
-        reason: `Second refused: ${evidence.parts.secondRefused}; first replied: ${evidence.parts.firstReplied}. ${problems.join("; ")}`,
+        reason: `Second refused: ${evidence.parts.secondRefused}; first still hears: ${evidence.parts.firstStillHears}. ${problems.join("; ")}`,
         evidence,
       }
     : {
         result: "pass",
-        reason: `Refused and told why: "${walk.reason}". The first still answers.`,
+        reason: `Refused and told why: "${walk.reason}". A direct message to the first is on record there.`,
         evidence,
       };
 }

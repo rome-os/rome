@@ -1,9 +1,10 @@
 // Stand-in for one Rome instance: the dashboard routes the verifier calls
-// (Connect through setups, connected accounts, a session's recorded messages,
-// observed accounts) and a loop
-// that drains its relay mailbox and has "the Concierge" repeat each seeded
-// code. Runs as its own process so it can be stopped and started; its state
-// lives in STATE_FILE across restarts. Breaks: README.md, "Stand-in".
+// (Connect through setups, connections, a session's recorded messages,
+// observed accounts), the environment's port and record controls, and a loop
+// that drains its relay mailbox, records each message before it acknowledges
+// it, and has "the Concierge" answer apart from that. Runs as its own process
+// so it can be stopped and started; its state lives in STATE_FILE across
+// restarts. Breaks: README.md, "Stand-in".
 //
 // Env: NAME, PORT, CLOUD, SLACK, SECRET, STATE_FILE, BREAK (comma list).
 
@@ -14,6 +15,9 @@ import { readBody, send, serve } from "./serve.mjs";
 
 const { NAME, PORT, CLOUD, SLACK, SECRET, STATE_FILE } = process.env;
 const breaks = new Set((process.env.BREAK ?? "").split(",").filter(Boolean));
+// The old Slack kinds are gone, as in the product (R10): a stored one is
+// ignored. Broken R10-old-works keeps them listed and working.
+const NOOLD = !breaks.has("R10-old-works");
 const rand = () => randomBytes(8).toString("hex");
 const TASK_DELAY_MS = 4000;
 
@@ -35,6 +39,24 @@ const cloudAuth = { authorization: `Bearer ${SECRET}` };
 
 const server = await serve(async (req, res, url) => {
   const p = url.pathname;
+  // The environment's controls, not the dashboard's API: the connection's
+  // port (R9, R14) and Chats' record of one chat.
+  if (p === "/_port" && req.method === "POST") {
+    const { args } = JSON.parse((await readBody(req)) || "{}");
+    const [op, json] = args ?? [];
+    return send(res, 200, await port(op, JSON.parse(json || "{}")));
+  }
+  if (p === "/_record" && req.method === "POST") {
+    const { args } = JSON.parse((await readBody(req)) || "{}");
+    // As the environment's ctl.sh record: `{"chat": "D…"}` or `{"chat": "C…:ts"}`.
+    const { chat } = JSON.parse(args?.[0] ?? "{}");
+    const [channel, thread] = String(chat).split(":");
+    const held = db.messages.filter((m) => m.channel === channel && (!thread || m.thread === thread));
+    return send(res, 200, {
+      chat,
+      messages: held.map((m) => ({ key: m.ts ?? m.eventId, text: m.text, at: m.at ?? null, ...(m.thread ? { thread: m.thread } : {}) })),
+    });
+  }
   // Like Rome, refuse a mutation that does not show it comes from this origin.
   const sameOrigin =
     req.headers["sec-fetch-site"] === "same-origin" ||
@@ -123,7 +145,7 @@ const server = await serve(async (req, res, url) => {
       db.accounts.push({
         account: {
           platform: "slack",
-          id: kept ? `${accountId}:${rand()}` : accountId,
+          id: kept ? `${accountId}:${rand()}` : breaks.has("R1-account") ? `bot-${rand()}` : accountId,
         },
         name: `Rome in ${grant.team}`,
         agent: breaks.has("R1-agent") ? null : "core:concierge",
@@ -131,6 +153,8 @@ const server = await serve(async (req, res, url) => {
       });
     }
     save();
+    // Broken R9-extra-call lists the workspace's members on every connect.
+    if (breaks.has("R9-extra-call")) await api(grant.botToken, "users.list", {});
     setup.state = { status: "done", grant: { connectionId } };
     return send(res, 200, { matched: true, state: setup.state });
   }
@@ -196,7 +220,7 @@ const server = await serve(async (req, res, url) => {
         };
       }),
       ...(db.old ?? [])
-        .filter(() => !breaks.has("NOOLD"))
+        .filter(() => !NOOLD)
         .map((c) => ({ id: c.id, connectionKind: c.kind, label: c.kind, state: "working" })),
     ];
     return send(res, 200, { connections: [...held, ...placeholders] });
@@ -427,12 +451,12 @@ async function act(conn, text, dmChannel) {
   }
   // Under NOOLD the guardian's old Slack sign-in is gone: a send asked
   // through it gets a plain answer and nothing is posted.
-  if (send && breaks.has("NOOLD") && /sign-?in/i.test(text))
+  if (send && NOOLD && /sign-?in/i.test(text))
     return "Sending through your own Slack sign-in isn't available any more. I can post through Rome's Slack app instead if you like.";
   if (send) {
     // Like the product, the official app sends when connected; an old OAuth
     // slack connection's token file serves when it is alone.
-    const token = conn.botToken ?? (breaks.has("NOOLD") ? undefined : db.tokenFile?.botToken);
+    const token = conn.botToken ?? (NOOLD ? undefined : db.tokenFile?.botToken);
     const channel = id ?? (await byName(send[1]));
     if (!channel) return `I can't find #${send[1]}.`;
     const r = await api(token, "chat.postMessage", { channel, text: send[2] });
@@ -714,12 +738,31 @@ async function threadContext(conn, ev) {
   return earlier.length ? `From this thread: ${earlier.join(" / ")}` : null;
 }
 
+// The Concierge answers after the message is on record, one at a time and
+// apart from the drain, as Rome's turns run apart from its connection: a
+// slow answer (a paced thread read) holds up no recording.
+let answering = Promise.resolve();
+const later = (task) => {
+  answering = answering.then(task).catch(() => {});
+};
+
+const ack = (ids) =>
+  fetch(`${CLOUD}/relay/${NAME}/ack`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...cloudAuth },
+    body: JSON.stringify({ ids }),
+  });
+
 async function drainOnce() {
   const res = await fetch(`${CLOUD}/relay/${NAME}/drain`, { headers: cloudAuth });
   const { frames } = await res.json();
   const done = [];
+  // Broken R4-early-ack acknowledges the mailbox before it records, and
+  // records slowly, so a stop in between loses what it acknowledged.
+  if (breaks.has("R4-early-ack") && frames.length) await ack(frames.map((f) => f.id));
   for (const f of frames) {
     done.push(f.id);
+    if (breaks.has("R4-early-ack")) await new Promise((r) => setTimeout(r, 700));
     if (f.sig !== frameSignature(SECRET, f.body)) continue;
     const payload = JSON.parse(f.body);
     // Like Chats, a message is recorded once, whatever event carries it.
@@ -740,13 +783,24 @@ async function drainOnce() {
     }
     if (ev?.type === "app_mention") {
       // Rome keeps the mentions it heard.
-      db.messages.push({ team: payload.team_id, user: ev.user, channel: ev.channel, text: ev.text, ts: ev.ts });
+      // Broken R5-unrecorded keeps none; R5-thread keeps no thread.
+      if (!breaks.has("R5-unrecorded"))
+        db.messages.push({
+          team: payload.team_id,
+          user: ev.user,
+          channel: ev.channel,
+          text: ev.text,
+          ts: ev.ts,
+          thread: breaks.has("R5-thread") ? ev.ts : (ev.thread_ts ?? null),
+        });
       save();
-      if (conn && !breaks.has("silent")) await answerMention(conn, ev);
+      if (conn && !breaks.has("silent")) later(() => answerMention(conn, ev));
       continue;
     }
     // A plain group message: heard only by broken R14-hears-all.
     if (ev?.type === "message" && ev.channel_type !== "im" && !ev.bot_id && breaks.has("R14-hears-all") && conn) {
+      db.messages.push({ team: payload.team_id, user: ev.user, channel: ev.channel, text: ev.text, ts: ev.ts, thread: ev.thread_ts ?? null });
+      save();
       await post(conn.botToken, ev.channel, "I saw that.", ev.ts);
       continue;
     }
@@ -786,14 +840,67 @@ async function drainOnce() {
         text: ev.text,
       });
     save();
-    await answer(ev, payload.team_id);
+    later(() => answer(ev, payload.team_id));
   }
-  if (done.length) {
-    await fetch(`${CLOUD}/relay/${NAME}/ack`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...cloudAuth },
-      body: JSON.stringify({ ids: done }),
-    });
+  if (done.length && !breaks.has("R4-early-ack")) await ack(done);
+}
+
+/** The scopes workspace `team` granted the app, as the fake Slack holds them. */
+async function workspaceScopes(team) {
+  return (await slackState()).workspaces.find((w) => w.id === team)?.scopes ?? [];
+}
+
+/**
+ * The connection's own port (R9, R14): send, read, a thread's read, the
+ * groups it is in, and a refusal of every other Slack method. Broken
+ * R9-other-method calls any method it is asked; R9-no-read reads nothing;
+ * R5-top sends to the top of a group, never into the thread; R14-lists-all
+ * lists every group; R14-quiet-read reads a group it is not in through
+ * Slack's own export; R14-no-thread reads no thread.
+ */
+async function port(op, a) {
+  const conn = db.connections[0];
+  if (!conn) return { refused: "no Slack connection" };
+  // R14: a workspace connected before the group permissions is told to
+  // approve the app again, at the port, for a group listing or a group read.
+  // Broken R14-no-reapprove passes Slack's own error through.
+  const groupWork = op === "groups" || ((op === "read" || op === "thread") && !String(a.chat).startsWith("D"));
+  if (groupWork && !breaks.has("R14-no-reapprove") && !(await workspaceScopes(conn.team)).includes("channels:history"))
+    return { error: "Approve Rome's Slack app again in Slack so it can see your groups.", at: "rome" };
+  const refusedBy = (r) => (r.ok ? null : { refused: r.error });
+  switch (op) {
+    case "send": {
+      const r = await api(conn.botToken, "chat.postMessage", {
+        channel: a.chat,
+        text: a.text,
+        ...(a.thread && !breaks.has("R5-top") ? { thread_ts: a.thread } : {}),
+      });
+      return refusedBy(r) ?? { ok: true, ts: r.ts };
+    }
+    case "read": {
+      if (breaks.has("R14-quiet-read") && !a.chat.startsWith("D")) {
+        const x = await (await fetch(`${SLACK}/_control/history?team=${conn.team}&channel=${a.chat}`)).json();
+        if (x.messages?.length) return { messages: x.messages.map((m) => ({ ts: m.ts, text: m.text })) };
+      }
+      const r = await api(conn.botToken, "conversations.history", { channel: a.chat, limit: 15 });
+      if (!r.ok) return { refused: r.error };
+      return { messages: breaks.has("R9-no-read") ? [] : r.messages.map((m) => ({ ts: m.ts, text: m.text })) };
+    }
+    case "thread": {
+      if (breaks.has("R14-no-thread")) return { messages: [] };
+      const r = await api(conn.botToken, "conversations.replies", { channel: a.chat, ts: a.ts, limit: 15 });
+      return refusedBy(r) ?? { messages: r.messages.map((m) => ({ ts: m.ts, text: m.text })) };
+    }
+    case "groups": {
+      const r = await api(conn.botToken, "conversations.list", { types: "public_channel" });
+      if (!r.ok) return { refused: r.error };
+      return { groups: r.channels.filter((c) => c.is_member || breaks.has("R14-lists-all")).map((c) => ({ id: c.id, name: c.name })) };
+    }
+    case "call":
+      if (breaks.has("R9-other-method")) return api(conn.botToken, a.method, a.args ?? {});
+      return { refused: `${a.method} is not one of send and read` };
+    default:
+      return { refused: `no operation ${op}` };
   }
 }
 
@@ -847,11 +954,13 @@ if (db.old?.length) {
   save();
   // Stand-in mode NOOLD (draft R10): the old kinds are gone, so a stored one
   // is skipped at boot and answers nothing.
-  if (!breaks.has("NOOLD"))
+  if (!NOOLD)
     for (const c of db.old.filter((x) => x.kind === "slack_bot")) await openSocket(c).catch(() => {});
 }
 
 process.on("SIGTERM", () => {
+  // Broken R4-early-ack dies at once, with what it acknowledged unrecorded.
+  if (breaks.has("R4-early-ack")) process.exit(0);
   log(`SIGTERM, connections ${heldList()}`);
   server.close().then(() => {
     log("exit");

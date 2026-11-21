@@ -105,35 +105,6 @@ const stopInstance = (name) =>
     child.kill("SIGTERM");
   });
 const control = await serve(async (req, res, url) => {
-  // Wipes the instance's copy of one Slack conversation: stop, wipe, start.
-  const w = url.pathname.match(/^\/instances\/(a|b)\/wipe$/);
-  if (w && req.method === "POST") {
-    const conversation = url.searchParams.get("conversation");
-    await stopInstance(w[1]);
-    const file = join(workDir, `instance-${w[1]}.json`);
-    const db = JSON.parse(readFileSync(file, "utf8"));
-    const texts = url.searchParams.getAll("text");
-    const holds = (t) => texts.some((x) => (t ?? "").includes(x));
-    const before = db.messages.length;
-    // The chat, and with texts every row holding one, memory included.
-    // Broken R13-memory-kept leaves memory as it is.
-    db.messages = db.messages.filter((m) => m.channel !== conversation && !holds(m.text));
-    if (!breaks.has("R13-memory-kept")) db.memory = (db.memory ?? []).filter((t) => !holds(t));
-    writeFileSync(file, JSON.stringify(db));
-    // Broken R13-gone never starts again; R13-slow-start answers the wipe
-    // first and starts 15 s later, past the instance's restart wait.
-    // Broken R13-short-memory logs Rome's warning, then answers as R13-forget.
-    if (breaks.has("R13-short-memory"))
-      writeFileSync(join(workDir, `instance-${w[1]}-warnings.log`), `${new Date().toISOString()} WARN instance short on memory; holding queued roots\n`, { flag: "a" });
-    if (breaks.has("R13-gone")) return send(res, 200, { messages: before - db.messages.length });
-    if (breaks.has("R13-slow-start")) {
-      setTimeout(() => startInstance(w[1]), 15_000);
-      return send(res, 200, { messages: before - db.messages.length });
-    }
-    startInstance(w[1]);
-    await listening(`http://127.0.0.1:${ports[w[1]]}/`);
-    return send(res, 200, { messages: before - db.messages.length });
-  }
   // R10's seed: the older slack_bot and slack an upgrade leaves, written
   // into the stopped instance, which then starts again.
   const oc = url.pathname.match(/^\/instances\/(a|b)\/old-connections$/);
@@ -169,21 +140,7 @@ const control = await serve(async (req, res, url) => {
       checks: { bot_listed: true, oauth_listed: true },
     });
   }
-  // The connector's Slack token file inside the instance. The stand-in keeps
-  // none; broken R9-token-file holds the new connection's bot token in it.
-  const tf = url.pathname.match(/^\/instances\/(a|b)\/token-file$/);
-  if (tf) {
-    if (!breaks.has("R9-token-file")) return send(res, 200, { instance: tf[1], exists: false });
-    const db = JSON.parse(readFileSync(join(workDir, `instance-${tf[1]}.json`), "utf8"));
-    const conn = db.connections[0];
-    return send(res, 200, {
-      instance: tf[1],
-      exists: true,
-      bot_token_tail: conn?.botToken?.slice(-6) ?? null,
-      user_token_tail: null,
-      team_id: conn?.team ?? null,
-    });
-  }
+
   const m = url.pathname.match(/^\/instances\/(a|b)\/(stop|start)$/);
   if (!m || req.method !== "POST") return send(res, 404, { error: "not found" });
   if (m[2] === "stop") await stopInstance(m[1]);
@@ -320,28 +277,8 @@ write(
   "packages/core/src/connections/legacy.ts",
   "import { old } from '../../../../rome_apps/legacy/index.js';\n",
 );
-// R9's four test files, as on main. Broken R9-assert changes one assertion
-// on the product branch.
-const connectorTests = [
-  "rome_apps/connector/src/api/slack-proxy.test.ts",
-  "rome_apps/connector/src/actions/connector-proxy.test.ts",
-  "rome_apps/connector/src/actions/connector-tool-execute.test.ts",
-  "rome_apps/connector/src/actions/connector-actions.test.ts",
-];
-for (const f of connectorTests)
-  write(
-    rome,
-    f,
-    `import { expect, it } from "@rstest/core";\nit("${f}", () => {\n  expect(selectSlackToken("search.messages")).toBe("xoxp-user");\n});\n`,
-  );
 commitAll(rome, "main");
 git(rome, "checkout", "-q", "-b", "product");
-if (breaks.has("R9-assert"))
-  write(
-    rome,
-    connectorTests[0],
-    `import { expect, it } from "@rstest/core";\nit("${connectorTests[0]}", () => {\n  expect(selectSlackToken("search.messages")).toBe("xoxb-bot");\n});\n`,
-  );
 write(
   rome,
   "packages/core/src/connections/slack-app.ts",
@@ -353,7 +290,7 @@ write(
 commitAll(rome, "product");
 
 const env = {
-  ruleSet: "v2",
+  ruleSet: "v4",
   commits: {
     rome: git(rome, "rev-parse", "HEAD").toString().trim(),
     romeCloud: git(romeCloud, "rev-parse", "HEAD").toString().trim(),
@@ -362,15 +299,8 @@ const env = {
   model: "stand-in (no model)",
   differences: { product: "stand-in", stopSeconds: 2, breaks: [...breaks] },
   stopSeconds: 2,
-  timeouts: { replySeconds: 5, settleSeconds: 1, restartSeconds: 10, answerSeconds: 15, reachSeconds: 30, threadReadSeconds: 75 },
+  timeouts: { replySeconds: 5, settleSeconds: 1, restartSeconds: 10, reachSeconds: 30 },
   repos: { rome, romeCloud, romeCloudBase: "main", romeBase: "main" },
-  // R9's existing tests: the stand-in's rome has the four files but no test
-  // runner, so a stand-in command plays it. Broken R9-tests-fail fails.
-  r9: {
-    testCommand: breaks.has("R9-tests-fail")
-      ? [process.execPath, "-e", "console.log('Tests 13 passed | 1 failed'); process.exit(1)"]
-      : [process.execPath, "-e", "console.log('Tests 14 passed')"],
-  },
   slack: { url: slackUrl, control: `${slackUrl}/_control` },
   romeCloud: { url: cloud.url, query: [process.execPath, join(here, "query.mjs"), cloud.url] },
   instances: ["a", "b"].map((name) => ({
@@ -379,9 +309,12 @@ const env = {
     control: {
       stop: `${control.url}/instances/${name}/stop`,
       start: `${control.url}/instances/${name}/start`,
-      wipeChat: `${control.url}/instances/${name}/wipe`,
-      tokenFile: `${control.url}/instances/${name}/token-file`,
       oldConnections: `${control.url}/instances/${name}/old-connections`,
+      // The connection's port and Chats' record, served by the instance
+      // itself. Variant no-port gives neither, as the environment on main.
+      ...(process.env.STANDIN_NO_PORT
+        ? {}
+        : { port: `http://127.0.0.1:${ports[name]}/_port`, record: `http://127.0.0.1:${ports[name]}/_record` }),
       // Warnings the stand-in logs; only R13-short-memory writes any.
       logs: `cat ${JSON.stringify(join(workDir, `instance-${name}-warnings.log`))} 2>/dev/null || true`,
     },

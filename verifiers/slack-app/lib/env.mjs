@@ -38,17 +38,12 @@ export function loadEnv(path) {
     throw new Error(`VERIFIER_R6_STOP_SECONDS must be a positive number of seconds`);
   if (stop > 0) env.stopSeconds = stop;
   env.stopSeconds ??= 120;
-  env.r9 ??= {};
   env.timeouts ??= {};
   env.timeouts.replySeconds ??= 90;
   env.timeouts.settleSeconds ??= 10;
-  // How long a dashboard ask waits for a task to deliver its answer.
-  env.timeouts.answerSeconds ??= 180;
   env.timeouts.restartSeconds ??= 300;
   // How long a request retries an endpoint it cannot connect to.
   env.timeouts.reachSeconds ??= 90;
-  // How long a thread read may wait for Slack's pace on conversations.replies.
-  env.timeouts.threadReadSeconds ??= 90;
   // The environment does not name its checkouts yet, so R11 can take them
   // from the shell.
   env.repos ??= {};
@@ -87,9 +82,6 @@ function fromEnvironment(raw) {
       romeDependencies: raw.repos.rome_dependencies,
     },
     slack: { control: raw.fake_slack?.control },
-    // R9's existing tests run in the environment's image of the product
-    // commit, the file paths appended.
-    r9: raw.product_tests ? { testCommand: raw.product_tests, appendFiles: true } : undefined,
     // R10's browser: a Playwright server, and the client folder to load.
     browser: raw.browser,
     romeCloud: { query: raw.rome_cloud?.query },
@@ -100,9 +92,18 @@ function fromEnvironment(raw) {
       control: {
         stop: i.stop,
         start: i.start,
-        wipeChat: i.control?.wipe_chat ?? i.wipe_chat,
-        tokenFile: i.control?.token_file,
         oldConnections: i.control?.old_connections,
+        // Optional: the connection's port (R9, R14) and Chats' record of a chat.
+        // ctl.sh's own port command when env.json names none; dropped at
+        // the start of a run if it prints no JSON.
+        port:
+          i.control?.port ??
+          (Array.isArray(i.stop) && i.stop[1] === "stop" ? [i.stop[0], "port", i.stop[2]] : undefined),
+        // ctl.sh's own record command (`ctl.sh record <instance> <json>`),
+        // found beside its stop command like logs, when env.json names none.
+        record:
+          i.control?.record ??
+          (Array.isArray(i.stop) && i.stop[1] === "stop" ? [i.stop[0], "record", i.stop[2]] : undefined),
         // The instance's recent log lines. env.json names no logs command, so
         // it is ctl.sh's own (`ctl.sh logs <service>`, last 500 lines), found
         // beside its stop command.

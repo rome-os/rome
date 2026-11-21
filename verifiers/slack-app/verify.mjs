@@ -1,6 +1,9 @@
-// Scores the official Slack app against rule set v3, phases 1 to 3, in one
-// environment. Usage: node verify.mjs <env.json> <out dir> <verifier commit>.
-// run.sh is the entry point: it refuses uncommitted verifier code first.
+// Scores the official Slack app against rule set v4 in one environment.
+// Each rule is a promise the Slack connection keeps, checked at its two
+// edges: the fake Slack, and what Rome has on record. No rule asks the
+// Concierge or judges its replies. Usage: node verify.mjs <env.json> <out
+// dir> <verifier commit>. run.sh is the entry point: it refuses uncommitted
+// verifier code first.
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -11,83 +14,38 @@ import { instance } from "./lib/instance.mjs";
 import { fakeSlack } from "./lib/slack.mjs";
 import { r4, r6, r7 } from "./rules/chat.mjs";
 import { connectAs, r1, r2, r3 } from "./rules/connect.mjs";
-import { r5, r8, r12, r13 } from "./rules/phase2.mjs";
+import { r5 } from "./rules/mentions.mjs";
+import { r8 } from "./rules/repair.mjs";
+import { r9 } from "./rules/port.mjs";
+import { r10 } from "./rules/old.mjs";
 import { r14 } from "./rules/groups.mjs";
-import { dedup } from "./rules/dedup.mjs";
-import { r9, r10, r10NoOld } from "./rules/phase3.mjs";
+import { smoke } from "./rules/smoke.mjs";
 import { r11 } from "./rules/structure.mjs";
 
 const RULES = [
-  { id: "R1", phase: 1, title: "One sign-in, nothing pasted", check: r1 },
-  { id: "R2", phase: 3, title: "Any workspace can add it", check: r2 },
-  { id: "R3", phase: 1, title: "One workspace binds to one instance", check: r3 },
-  { id: "R4", phase: 1, title: "Direct messages work", check: r4 },
-  { id: "R5", phase: 2, title: "Mentions in a group work", check: r5 },
-  { id: "R6", phase: 1, title: "Nothing is lost while the instance is offline", check: r6 },
-  { id: "R7", phase: 1, title: "Nothing forged or misrouted arrives", check: r7 },
-  {
-    id: "R8",
-    phase: 2,
-    title: "Removal marks broken; fix returns the same connected account",
-    check: r8,
-  },
-  {
-    id: "R9",
-    phase: 3,
-    title: "Every connector Slack action passes on the new connection",
-    check: r9,
-  },
-  { id: "R10", phase: 3, title: "Connect shows one Slack entry", check: r10 },
-  { id: "R11", phase: 1, title: "Lower layers stay ignorant", check: r11 },
-  {
-    id: "R12",
-    phase: 2,
-    title: "A member who is not the guardian is answered as a visitor",
-    check: r12,
-  },
-  { id: "R13", phase: 2, title: "Slack holds what was said", check: r13 },
-  { id: "R14", phase: 3, title: "Groups the app was added to", check: r14 },
+  { id: "R1", group: "Access", title: "One sign-in", check: r1 },
+  { id: "R2", group: "Access", title: "Any workspace", check: r2 },
+  { id: "R3", group: "Access", title: "One workspace, one instance", check: r3 },
+  { id: "R8", group: "Access", title: "Broken, fixed, disconnected", check: r8 },
+  { id: "R10", group: "Access", title: "One Slack entry", check: r10 },
+  { id: "R4", group: "Hear", title: "Direct messages", check: r4 },
+  { id: "R5", group: "Hear", title: "Mentions", check: r5 },
+  { id: "R6", group: "Hear", title: "While Rome is down", check: r6 },
+  { id: "R7", group: "Hear", title: "Forged and misrouted", check: r7 },
+  { id: "R9", group: "Speak and act", title: "Send and read, nothing else", check: r9 },
+  { id: "R14", group: "Speak and act", title: "Groups", check: r14 },
+  { id: "R11", group: "Structure", title: "Layers", check: r11 },
+  { id: "smoke", group: "Outside the score", title: "A direct message gets a reply", check: smoke, unscored: true },
 ];
+const UNSCORED = new Set(RULES.filter((r) => r.unscored).map((r) => r.id));
 
 // Order matters: R3 and the second binding need R1's connection; R7 reads
-// R4's messages; R6 stops the instance; R8 removes the app and disconnects,
-// so it runs after the rest; R14 signs workspace B in again on the second
-// instance under the old scopes and back, before R8; R2 then signs the first instance in to a third
-// workspace. R10 seeds the old connections on the second instance, whose
-// connector token file would turn R9's path to the old one, so it runs last.
-const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R5", "R12", "R13", "R9", "R14", "R6", "R8", "R2", "R10"];
-
-// Drafts run only when asked for (VERIFIER_DRAFTS, comma list) and are
-// reported apart from the rule set: "dedup" is the check proposed in place of
-// R13 (as R13-dedup, never failing the run); "r9-search" scores R9's
-// searches by the proposed wording (named chat only), and the report names it.
-const DRAFTS_IDS = new Set(["R13-dedup", "R9-search-draft", "R10-noold-draft"]);
-const DRAFTS = new Set((process.env.VERIFIER_DRAFTS ?? "").split(",").filter(Boolean));
-if (DRAFTS.has("dedup")) {
-  RULES.push({ id: "R13-dedup", phase: 2, title: "Draft: no record of its own; a message delivered twice is recorded and answered once", check: dedup, draft: true });
-  ORDER.splice(ORDER.indexOf("R13") + 1, 0, "R13-dedup");
-}
-if (DRAFTS.has("r9-search")) {
-  // Its operations run inside R9, which leaves the result on ctx.
-  RULES.push({
-    id: "R9-search-draft",
-    phase: 3,
-    title: "Draft: search within a named chat; across chats is not offered",
-    check: async (c) => c.r9SearchDraft ?? { result: "not checked", reason: "R9 did not run its searches" },
-    draft: true,
-  });
-  ORDER.splice(ORDER.indexOf("R9") + 1, 0, "R9-search-draft");
-}
-if (DRAFTS.has("r10-noold")) {
-  RULES.push({
-    id: "R10-noold-draft",
-    phase: 3,
-    title: "Draft: one Slack entry, Rome's Slack app; the older Slack bot and the old sign-in are removed",
-    check: r10NoOld,
-    draft: true,
-  });
-  ORDER.splice(ORDER.indexOf("R10") + 1, 0, "R10-noold-draft");
-}
+// R4's messages; R9 audits every call made before it; R14 signs workspace B
+// in again on the second instance under the old scopes and back; R6 stops
+// the instance; R8 removes the app and disconnects, so it runs after the
+// rest; R2 then signs the first instance in to a third workspace. R10 seeds
+// the old connections on the second instance, so it runs last.
+const ORDER = ["R11", "R1", "R3", "bindB", "smoke", "R4", "R7", "R5", "R9", "R14", "R6", "R8", "R2", "R10"];
 
 const [envPath, outDir, verifierCommit] = process.argv.slice(2);
 const env = loadEnv(envPath);
@@ -112,12 +70,14 @@ const ctx = {
   wsC: workspaces.slice(2).find((w) => homeTeam && w.id !== homeTeam) ?? null,
   homeTeam,
   bound: { a: null, b: null },
+  // Where the run starts in the fake's log, for R9's audit of every call.
+  runSince: await slack.seq(),
 };
-ctx.drafts = DRAFTS;
 
-// VERIFIER_ONLY (run.sh --only) scores a subset: rule ids, or phase1 to
-// phase3. R1 and the second binding still run, since every later rule needs
-// their connections; R3 runs when R1 does, as in the full order.
+// VERIFIER_ONLY (run.sh --only) scores a subset: rule ids, or a group's
+// name (access, hear, speak, structure). R1 and the second binding still
+// run, since every later rule needs their connections; R3 runs when R1 does,
+// as in the full order.
 const only = selection(process.env.VERIFIER_ONLY);
 const minFreeMiB = Number(process.env.VERIFIER_MIN_FREE_GB || 0) * 1024;
 const memoryWaitMs = Number(process.env.VERIFIER_MEMORY_WAIT_SECONDS || 1800) * 1000;
@@ -125,6 +85,9 @@ const memoryWaitMs = Number(process.env.VERIFIER_MEMORY_WAIT_SECONDS || 1800) * 
 const startedAt = new Date().toISOString();
 const results = {};
 const setup = {};
+// Without a working port control, R9 and R14's port checks are not checked.
+setup.port = { [ctx.a.name]: (await ctx.a.checkPort()) ?? "works", [ctx.b.name]: (await ctx.b.checkPort()) ?? "works" };
+log(`port control: ${JSON.stringify(setup.port)}`);
 for (const step of ORDER) {
   const started = Date.now();
   if (step === "bindB") {
@@ -198,8 +161,7 @@ for (const step of ORDER) {
 }
 
 const report = {
-  ruleSet: "v3",
-  phases: [1, 2, 3],
+  ruleSet: "v4",
   startedAt,
   finishedAt: new Date().toISOString(),
   commits: {
@@ -212,21 +174,19 @@ const report = {
   differences: env.differences ?? null,
   setup,
   only: only ? [...only] : null,
-  drafts: DRAFTS.size ? [...DRAFTS] : null,
   minFreeGB: minFreeMiB ? minFreeMiB / 1024 : null,
   rules: RULES.map((r) => ({
     id: r.id,
     title: r.title,
-    phase: r.phase,
-    ...(r.check
-      ? results[r.id]
-      : { result: "not checked", reason: `Phase ${r.phase} rule; this verifier does not score it yet.` }),
+    group: r.group,
+    ...(r.unscored ? { unscored: true } : {}),
+    ...results[r.id],
   })),
 };
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
 writeFileSync(join(outDir, "report.md"), markdown(report));
-const failed = report.rules.filter((r) => r.result === "fail" && !DRAFTS_IDS.has(r.id)).map((r) => r.id);
+const failed = report.rules.filter((r) => r.result === "fail" && !UNSCORED.has(r.id)).map((r) => r.id);
 log(`report: ${join(outDir, "report.md")}; failed: ${failed.join(", ") || "none"}`);
 process.exit(failed.length ? 1 : 0);
 
@@ -252,20 +212,18 @@ function crashed(err) {
   };
 }
 
-/** The rule ids `spec` names ("R14,R9", "phase3"), or null for every rule. */
+/** The rule ids `spec` names ("R14,R9", "hear"), or null for every rule. */
 function selection(spec) {
   if (!spec) return null;
   const ids = new Set();
   for (const part of spec.split(",").map((x) => x.trim()).filter(Boolean)) {
-    const ph = part.match(/^phase:?([123])$/i);
-    if (ph) for (const r of RULES.filter((x) => x.phase === Number(ph[1]))) ids.add(r.id);
+    const grp = RULES.filter((x) => x.group.toLowerCase().startsWith(part.toLowerCase()) && part.length > 2 && !/^r\d/i.test(part));
+    if (grp.length) for (const r of grp) ids.add(r.id);
     else if (RULES.some((r) => r.id.toUpperCase() === part.toUpperCase()))
       ids.add(RULES.find((r) => r.id.toUpperCase() === part.toUpperCase()).id);
-    else throw new Error(`--only: no rule or phase named ${part}`);
+    else throw new Error(`--only: no rule or group named ${part}`);
   }
   if (ids.has("R1")) ids.add("R3");
-  if (ids.has("R9") && RULES.some((r) => r.id === "R9-search-draft")) ids.add("R9-search-draft");
-  if (ids.has("R10") && RULES.some((r) => r.id === "R10-noold-draft")) ids.add("R10-noold-draft");
   return ids;
 }
 
@@ -276,25 +234,25 @@ function log(msg) {
 function markdown(r) {
   const mark = { pass: "pass", fail: "FAIL", "not checked": "not checked" };
   const rows = r.rules.map(
-    (x) => `| ${x.id} | ${x.title} | ${mark[x.result]} | ${x.reason.replaceAll("|", "\\|")} |`,
+    (x) => `| ${x.id} | ${x.group} | ${x.title} | ${mark[x.result]} | ${x.reason.replaceAll("|", "\\|")} |`,
   );
   const evidence = r.rules
     .filter((x) => x.evidence)
     .map((x) => `### ${x.id}\n\n\`\`\`json\n${JSON.stringify(x.evidence, null, 2)}\n\`\`\``);
   return [
-    `# Slack app verifier report, rule set ${r.ruleSet}, phases ${r.phases.join(", ")}`,
+    `# Slack app verifier report, rule set ${r.ruleSet}`,
     "",
     `- rome: \`${r.commits.rome}\``,
     `- rome-cloud: \`${r.commits.romeCloud}\``,
     `- environment: \`${r.commits.environment}\``,
     `- verifier: \`${r.commits.verifier}\``,
     `- model: ${r.model}`,
-    r.drafts ? `- drafts on (not the agreed rules): ${r.drafts.join(", ")}` : "",
+    "- the smoke check is outside the score",
     `- run: ${r.startedAt} to ${r.finishedAt}`,
     r.differences ? `- differences from production: ${JSON.stringify(r.differences)}` : "",
     "",
-    "| Rule | Title | Result | Reason |",
-    "|---|---|---|---|",
+    "| Rule | Group | Title | Result | Reason |",
+    "|---|---|---|---|---|",
     ...rows,
     "",
     "## Evidence",

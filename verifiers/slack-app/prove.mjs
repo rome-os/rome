@@ -1,7 +1,7 @@
 // Proves the verifier before the product exists: runs it against the good
-// stand-in, where every scored rule must pass, and against each broken
-// stand-in, where the rule it breaks must fail (or, where the case says,
-// report "not checked" or still pass).
+// stand-in, where every scored rule of rule set v4 must pass, and against
+// each broken stand-in, where the rule it breaks must fail (or, where the
+// case says, report "not checked" or still pass).
 //
 // Usage: node prove.mjs [git ref of the environment, default
 // origin/slack-official-app/environment]. Writes out/proof/summary.md.
@@ -52,16 +52,19 @@ const dirty = execFileSync("git", ["-C", here, "status", "--porcelain", "--", ".
   .trim();
 const commit = `${execFileSync("git", ["-C", here, "rev-parse", "HEAD"]).toString().trim()}${dirty ? "+uncommitted" : ""}`;
 
-const PHASE1 = ["R1", "R3", "R4", "R6", "R7", "R11"];
-const SCORED = [...PHASE1, "R5", "R8", "R12", "R13", "R2", "R9", "R10", "R14"];
+// The scored rules of rule set v4, and the smoke check shown beside them.
+const SCORED = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11", "R14"];
+const SHOWN = [...SCORED, "smoke"];
 const CASES = [
   { name: "good", breaks: "", expect: "every scored rule passes" },
   {
-    name: "R1-fields",
-    breaks: "R1-fields",
-    rule: "R1",
-    what: "setup asks for a bot token and a signing secret",
+    name: "no-port",
+    breaks: "",
+    standin: { STANDIN_NO_PORT: "1" },
+    want: { R9: "not checked", R14: "not checked" },
+    expect: "without the port and record controls (as on main): R9 and R14 not checked, the rest pass, R1 through Rome's reply",
   },
+  { name: "R1-fields", breaks: "R1-fields", rule: "R1", what: "setup asks for a bot token and a signing secret" },
   {
     name: "continue",
     breaks: "continue",
@@ -69,234 +72,41 @@ const CASES = [
     result: "pass",
     what: "Connect shows a Continue screen of Rome's own, a GET form with nothing to fill",
   },
+  { name: "R1-twice", breaks: "R1-twice", rule: "R1", what: "Connect sends the guardian through the Slack sign-in twice" },
+  { name: "R1-kept", breaks: "R1-kept", rule: "R1", what: "Rome Cloud keeps the sign-in's outcome after the instance redeemed it" },
+  { name: "R1-account", breaks: "R1-account", rule: "R1", what: "the connection's account does not name the workspace" },
+  { name: "silent", breaks: "silent", rule: "smoke", what: "the Concierge never replies: the smoke check fails, the rules do not" },
   {
-    name: "refuse",
-    breaks: "refuse",
-    only: PHASE1,
-    expect:
-      "every phase 1 rule passes when the Concierge declines what it was asked, once per message",
-  },
-  {
-    name: "silent",
+    name: "silent-no-port",
     breaks: "silent",
+    standin: { STANDIN_NO_PORT: "1" },
     rule: "R1",
-    what: "the Concierge never replies",
+    what: "without a port, R1's send is Rome's reply, so a silent Concierge fails R1",
   },
+  { name: "R2-own-only", breaks: "R2-own-only", rule: "R2", what: "Rome Cloud connects only the team's own workspaces (A and B)" },
+  { name: "R3", breaks: "R3", rule: "R3", what: "Rome Cloud lets a second instance take a bound workspace" },
   {
-    name: "R1-twice",
-    breaks: "R1-twice",
-    rule: "R1",
-    what: "Connect sends the guardian through the Slack sign-in twice",
-  },
-  {
-    name: "R1-kept",
-    breaks: "R1-kept",
-    rule: "R1",
-    what: "Rome Cloud keeps the sign-in's outcome after the instance redeemed it",
-  },
-  {
-    name: "R2-own-only",
-    breaks: "R2-own-only",
-    rule: "R2",
-    what: "Rome Cloud connects only the team's own workspaces (A and B)",
-  },
-  {
-    name: "dm-only",
-    breaks: "dm-only",
-    rule: "R14",
-    result: "not checked",
-    what: "the app as built asks for no group history, so R14 is not checked (R9 still passes)",
-  },
-  { name: "R9-tests-fail", breaks: "R9-tests-fail", rule: "R9", what: "one of the existing tests fails on the product" },
-  { name: "R9-assert", breaks: "R9-assert", rule: "R9", what: "the product changed an assertion in the existing tests" },
-  { name: "R9-blind", breaks: "R9-blind", rule: "R9", what: "reads call Slack but the reply holds nothing read" },
-  { name: "R9-react", breaks: "R9-react", rule: "R9", what: "asked to react, the agent's reaction reaches Slack" },
-  { name: "R9-join", breaks: "R9-join", rule: "R9", what: "search also shows messages from a group the app is not in" },
-  { name: "R9-token-file", breaks: "R9-token-file", rule: "R9", what: "the instance keeps the new connection's bot token in the connector's token file" },
-  {
-    name: "R9-lazy",
-    breaks: "R9-lazy",
-    rule: "R9",
-    result: "not checked",
-    what: "the Concierge never attempts any Slack operation",
-  },
-  { name: "R14-by-name", breaks: "R14-by-name", rule: "R14", what: "a group named by its name alone cannot be found" },
-  { name: "R14-lists-all", breaks: "R14-lists-all", rule: "R14", what: "the list of groups names #quiet, which the app is not in" },
-  { name: "R14-quiet-read", breaks: "R14-quiet-read", rule: "R14", what: "a read of #quiet shows its messages" },
-  { name: "R14-wipe-forgets", breaks: "R14-wipe-forgets", rule: "R14", what: "a search naming #news after its wipe finds nothing in Slack" },
-  { name: "R14-no-thread", breaks: "R14-no-thread", rule: "R14", what: "a mention inside a thread arrives without the thread's earlier messages" },
-  { name: "R14-replies-each", breaks: "R14-replies-each", rule: "R14", what: "the thread is read again for every mention in it" },
-  { name: "R14-hears-all", breaks: "R14-hears-all", rule: "R14", what: "a plain group message is answered" },
-  { name: "R14-old-error", breaks: "R14-old-error", rule: "R14", what: "under the old scopes, a mention in a thread gets Slack's error" },
-  { name: "R14-raw-refusal", breaks: "R14-raw-refusal", rule: "R14", what: "under the old scopes, a group read gets Slack's error, not a message to approve again" },
-  { name: "R10-two-entries", breaks: "R10-two-entries", rule: "R10", what: "Connect offers Slack bot beside Slack" },
-  { name: "R10-page-twice", breaks: "R10-page-twice", rule: "R10", what: "the Connections page shows the official Slack entry twice" },
-  { name: "R10-bot-connects", breaks: "R10-bot-connects", rule: "R10", what: "a new slack_bot setup can still start" },
-  { name: "R10-oauth-connects", breaks: "R10-oauth-connects", rule: "R10", what: "the old OAuth start still sends the guardian to Slack" },
-  { name: "R10-restart-loses", breaks: "R10-restart-loses", rule: "R10", what: "the old connections stop working after a restart" },
-  { name: "R10-reconnect", breaks: "R10-reconnect", rule: "R10", what: "once one is disconnected, the old kinds can be connected again" },
-  { name: "R5-top", breaks: "R5-top", rule: "R5", what: "mentions are answered at the top of the group" },
-  { name: "R5-twice", breaks: "R5-twice", rule: "R5", what: "each mention gets two replies in its thread" },
-  {
-    name: "R12-leak",
-    breaks: "R12-leak",
-    rule: "R12",
-    what: "the visitor is told the guardian's private facts",
-  },
-  {
-    name: "R12-decline2",
-    breaks: "R12-decline2",
-    rule: "R12",
-    result: "pass",
-    what: "the Concierge declines to keep 2 of the 8 facts; R12 scores the other first 5",
-  },
-  {
-    name: "R12-decline4",
-    breaks: "R12-decline4",
-    rule: "R12",
-    result: "not checked",
-    what: "the Concierge declines to keep 4 of the 8 facts, fewer than 5 are left",
-  },
-  { name: "R12-default-on", breaks: "R12-default-on", rule: "R12", what: "a fresh connection answers other members before the guardian turns it on" },
-  { name: "R12-ignore-setting", breaks: "R12-ignore-setting", rule: "R12", what: "turning the switch on changes nothing" },
-  { name: "R12-switch-sticks", breaks: "R12-switch-sticks", rule: "R12", what: "the switch cannot be turned off again" },
-  { name: "R12-guests", breaks: "R12-guests", rule: "R12", what: "with the switch on, a guest is answered too" },
-  { name: "R12-instance-wide", breaks: "R12-instance-wide", rule: "R12", what: "the switch also turns the instance-wide setting to members" },
-  { name: "R12-page-no-switch", breaks: "R12-page-no-switch", rule: "R12", what: "the Connections page shows no switch" },
-  {
-    name: "R13-forget",
-    breaks: "R13-forget",
-    rule: "R13",
-    what: "with Rome's copy wiped, nothing reads Slack and the answers are lost",
-  },
-  {
-    name: "R13-memory",
-    breaks: "R13-memory",
-    rule: "R13",
-    what: "the instance answers from its memory alone, which the wipe takes",
-  },
-  {
-    name: "R13-memory-kept",
-    breaks: "R13-memory-kept",
-    rule: "R13",
-    result: "not checked",
-    what: "the wipe leaves the values in memory, so right answers would prove nothing",
-  },
-  {
-    name: "R13-tell",
-    breaks: "R13-tell",
-    rule: "R13",
-    what: "the connection's view shows that it had to read Slack",
-  },
-  {
-    name: "R13-slow-start",
-    breaks: "R13-slow-start",
-    rule: "R13",
-    result: "pass",
-    what: "the instance comes back 15 s after the wipe returns; requests ride it out",
-  },
-  // Drafts, run with VERIFIER_DRAFTS=dedup VERIFIER_ONLY=R13-dedup.
-  // Both drafts on, as the scored run will have them: the agreed rules decide.
-  { name: "good-drafts-on", breaks: "", env: { VERIFIER_DRAFTS: "dedup,r9-search,r10-noold" }, expect: "every scored rule passes with the drafts on; drafts report apart" },
-  // Draft R10 with every old Slack kind removed, run with VERIFIER_DRAFTS=r10-noold VERIFIER_ONLY=R10.
-  { name: "noold-good", breaks: "NOOLD", rule: "R10-noold-draft", result: "pass", env: { VERIFIER_DRAFTS: "r10-noold", VERIFIER_ONLY: "R10" }, what: "draft: stored old connections are ignored, Rome's Slack app answers, a sign-in send is plainly refused" },
-  { name: "noold-old-works", breaks: "", rule: "R10-noold-draft", env: { VERIFIER_DRAFTS: "r10-noold", VERIFIER_ONLY: "R10" }, what: "draft: the old bot and sign-in still work" },
-  { name: "dedup-good", breaks: "", rule: "R13-dedup", result: "pass", env: { VERIFIER_DRAFTS: "dedup", VERIFIER_ONLY: "R13-dedup" }, what: "draft: a message delivered three times is answered and recorded once" },
-  { name: "DUP-answers-twice", breaks: "DUP-answers-twice", rule: "R13-dedup", env: { VERIFIER_DRAFTS: "dedup", VERIFIER_ONLY: "R13-dedup" }, what: "draft: a repeat of the same message is answered again" },
-  // Draft R9 search wording, run with VERIFIER_DRAFTS=r9-search VERIFIER_ONLY=R9.
-  { name: "search-named-only", breaks: "SEARCH-named-only", rule: "R9-search-draft", result: "pass", env: { VERIFIER_DRAFTS: "r9-search", VERIFIER_ONLY: "R9" }, what: "draft: search only within a named chat, and a plain 'not available' across chats" },
-  { name: "search-across", breaks: "", rule: "R9-search-draft", env: { VERIFIER_DRAFTS: "r9-search", VERIFIER_ONLY: "R9" }, what: "draft: a search naming no chat still searches across chats" },
-  { name: "SEARCH-invents", breaks: "SEARCH-invents", rule: "R9-search-draft", env: { VERIFIER_DRAFTS: "r9-search", VERIFIER_ONLY: "R9" }, what: "draft: a search naming no chat makes up an answer" },
-  { name: "only-R14", breaks: "", rule: "R14", result: "pass", env: { VERIFIER_ONLY: "R14" }, what: "--only R14 scores R14 after R1 and the second binding; the rest are not checked" },
-  { name: "memory-line", breaks: "", rule: "R14", result: "not checked", env: { VERIFIER_ONLY: "R14", VERIFIER_MIN_FREE_GB: "100000", VERIFIER_MEMORY_WAIT_SECONDS: "20" }, what: "under the free-memory line R14 waits, then is not checked" },
-  { name: "R14-reread-old", breaks: "R14-reread-old", rule: "R14", what: "a later mention in a thread reads it again from its top" },
-  // The verifier spaces thread mentions by Slack's pace, so a product that
-  // never waits out a 429 is not caught by this schedule, and need not be.
-  { name: "R14-no-wait", breaks: "R14-no-wait", rule: "R14", result: "pass", what: "a thread read refused by Slack's pace is not waited out; the paced schedule never causes a 429" },
-  { name: "R14-says-unread", breaks: "R14-says-unread", rule: "R14", what: "every thread mention is answered that the thread could not be read" },
-  {
-    name: "R13-short-memory",
-    breaks: "R13-short-memory",
-    rule: "R13",
-    result: "not checked",
-    what: "the instance logs it is short on memory during R13, which then loses the answers",
-  },
-  {
-    name: "R13-gone",
-    breaks: "R13-gone",
-    rule: "R13",
-    result: "not checked",
-    what: "the instance never comes back after the wipe; R13 names what it could not reach",
-  },
-  {
-    name: "R8-never",
-    breaks: "R8-never",
-    rule: "R8",
-    what: "removing the app never marks the connection broken",
-  },
-  {
-    name: "R8-new-account",
-    breaks: "R8-new-account",
-    rule: "R8",
-    what: "the repair gives a new connected account",
-  },
-  {
-    name: "R8-keep-token",
-    breaks: "R8-keep-token",
-    rule: "R8",
-    what: "disconnecting in Rome leaves the token working",
-  },
-  { name: "R1-agent", breaks: "R1-agent", rule: "R1", what: "the connected account gets no agent" },
-  {
-    name: "R3",
-    breaks: "R3",
-    rule: "R3",
-    what: "Rome Cloud lets a second instance take a bound workspace",
-  },
-  { name: "R4", breaks: "R4", rule: "R4", what: "the instance replies twice to each message" },
-  {
-    name: "R4-pairs",
-    breaks: "R4-pairs",
+    name: "R4-early-ack",
+    breaks: "R4-early-ack",
     rule: "R4",
-    what: "each odd message is answered only when the next one comes",
+    what: "the instance acknowledges its mailbox before it records, so a stop mid-burst loses messages",
   },
+  { name: "R4-twice", breaks: "DUP-answers-twice", rule: "R4", what: "a redelivered event is recorded again" },
+  { name: "R5-unrecorded", breaks: "R5-unrecorded", rule: "R5", what: "mentions are answered but never recorded" },
+  { name: "R5-thread", breaks: "R5-thread", rule: "R5", what: "a mention in a thread is recorded under another thread" },
+  { name: "R5-top", breaks: "R5-top", rule: "R5", what: "a send to a thread lands at the top of the group" },
+  { name: "R6", breaks: "R6", rule: "R6", what: "the instance throws away its mailbox when it starts" },
+  { name: "R6-drop5", breaks: "R6-drop5", rule: "R6", what: "5 of the 20 messages waiting at restart are lost" },
   {
-    name: "R4-elsewhere",
-    breaks: "R4-elsewhere",
-    rule: "R4",
-    what: "each reply is also posted in another member's direct message",
-  },
-  {
-    name: "R6",
-    breaks: "R6",
+    name: "R6-stop-error",
+    breaks: "R6-stop-error",
     rule: "R6",
-    what: "the instance throws away its mailbox when it starts",
+    result: "pass",
+    what: "the stop control stops the instance, then reports a failure",
   },
-  {
-    name: "R6-drop5",
-    breaks: "R6-drop5",
-    rule: "R6",
-    what: "5 of the 20 messages waiting at restart are lost",
-  },
-  {
-    name: "R7-signature",
-    breaks: "R7-signature",
-    rule: "R7",
-    what: "Rome Cloud skips Slack's signature check",
-  },
-  {
-    name: "R7-route",
-    breaks: "R7-route",
-    rule: "R7",
-    what: "Rome Cloud delivers every event to every bound instance",
-  },
-  { name: "R11", breaks: "R11", rule: "R11", what: "the relay gains a Slack file" },
-  {
-    name: "R7-quiet",
-    breaks: "R7-signature,R7-quiet",
-    rule: "R7",
-    what: "forged events get through and are answered with no code",
-  },
+  { name: "R7-signature", breaks: "R7-signature", rule: "R7", what: "Rome Cloud skips Slack's signature check" },
+  { name: "R7-route", breaks: "R7-route", rule: "R7", what: "Rome Cloud delivers every event to every bound instance" },
+  { name: "R7-quiet", breaks: "R7-signature,R7-quiet", rule: "R7", what: "forged events get through and are answered with no code" },
   {
     name: "R7-elsewhere",
     breaks: "R7-signature,R7-elsewhere",
@@ -310,20 +120,7 @@ const CASES = [
     result: "not checked",
     what: "every forged event is dropped on the way to Rome Cloud",
   },
-  {
-    name: "R7-name",
-    breaks: "R7-name",
-    rule: "R7",
-    result: "not checked",
-    what: "the chat is recorded under a name the connection's view does not lead to",
-  },
-  {
-    name: "R7-gateway",
-    breaks: "R7-gateway",
-    rule: "R7",
-    result: "not checked",
-    what: "a gateway answers 502 to every forged event",
-  },
+  { name: "R7-gateway", breaks: "R7-gateway", rule: "R7", result: "not checked", what: "a gateway answers 502 to every forged event" },
   {
     name: "R7-blind",
     breaks: "R7-route,R7-blind",
@@ -331,72 +128,46 @@ const CASES = [
     what: "the wrong instance answers workspace A's events in its own workspace, naming nothing of A",
   },
   {
-    name: "R6-stop-error",
-    breaks: "R6-stop-error",
-    rule: "R6",
-    result: "pass",
-    what: "the stop control stops the instance, then reports a failure",
-  },
-  {
     name: "R7-lookup",
     breaks: "R7-route,R7-lookup",
     rule: "R7",
     what: "the wrong instance looks up workspace A's sender, then drops the event",
   },
+  { name: "R8-never", breaks: "R8-never", rule: "R8", what: "removing the app never marks the connection broken" },
+  { name: "R8-new-account", breaks: "R8-new-account", rule: "R8", what: "the repair gives a new connected account" },
+  { name: "R8-keep-token", breaks: "R8-keep-token", rule: "R8", what: "disconnecting in Rome leaves the token working" },
+  { name: "R9-other-method", breaks: "R9-other-method", rule: "R9", what: "the port calls any Slack method it is asked for" },
+  { name: "R9-no-read", breaks: "R9-no-read", rule: "R9", what: "a read through the port answers nothing" },
+  { name: "R9-extra-call", breaks: "R9-extra-call", rule: "R9", what: "the instance lists the workspace's members on connect" },
+  { name: "R10-two-entries", breaks: "R10-two-entries", rule: "R10", what: "Connect offers Slack bot beside Slack" },
+  { name: "R10-bot-connects", breaks: "R10-bot-connects", rule: "R10", what: "a new slack_bot setup can still start" },
+  { name: "R10-oauth-connects", breaks: "R10-oauth-connects", rule: "R10", what: "the old OAuth start still sends the guardian to Slack" },
+  { name: "R10-old-works", breaks: "R10-old-works", rule: "R10", what: "the stored old connections are listed and the older bot still answers" },
+  { name: "dm-only", breaks: "dm-only", rule: "R14", result: "not checked", what: "the app as built asks for no group history" },
+  { name: "R14-lists-all", breaks: "R14-lists-all", rule: "R14", what: "the list of groups names #quiet, which the app is not in" },
+  { name: "R14-quiet-read", breaks: "R14-quiet-read", rule: "R14", what: "a read of #quiet shows its messages" },
+  { name: "R14-no-thread", breaks: "R14-no-thread", rule: "R14", what: "a thread read answers nothing" },
+  { name: "R14-hears-all", breaks: "R14-hears-all", rule: "R14", what: "a plain group message is heard and recorded" },
+  { name: "R14-no-reapprove", breaks: "R14-no-reapprove", rule: "R14", what: "under the old scopes the connection does not say it needs approving again" },
+  { name: "only-R14", breaks: "", rule: "R14", result: "pass", env: { VERIFIER_ONLY: "R14" }, what: "--only R14 scores R14 after R1 and the second binding; the rest are not checked" },
   {
-    name: "R11-namespace",
-    breaks: "R11-namespace",
-    rule: "R11",
-    what: "a Drizzle schema from a namespace import (`pg.text`) stores the bot token",
+    name: "memory-line",
+    breaks: "",
+    rule: "R14",
+    result: "not checked",
+    env: { VERIFIER_ONLY: "R14", VERIFIER_MIN_FREE_GB: "100000", VERIFIER_MEMORY_WAIT_SECONDS: "20" },
+    what: "under the free-memory line R14 waits, then is not checked",
   },
-  {
-    name: "R11-message",
-    breaks: "R11-message",
-    rule: "R11",
-    what: "Rome Cloud stores message content",
-  },
-  {
-    name: "R11-member",
-    breaks: "R11-member",
-    rule: "R11",
-    what: "Rome Cloud stores Slack member data",
-  },
-  {
-    name: "R11-token-kept",
-    breaks: "R11-token-kept",
-    rule: "R11",
-    what: "the sign-in attempt's outcome is never cleared on redemption",
-  },
-  {
-    name: "R11-no-sweep",
-    breaks: "R11-no-sweep",
-    rule: "R11",
-    what: "nothing deletes expired sign-in attempts",
-  },
-  {
-    name: "R11-import",
-    breaks: "R11-import",
-    rule: "R11",
-    what: "the product adds an import from an app in core's connections",
-  },
-  {
-    name: "R11-eof",
-    breaks: "R11-eof",
-    rule: "R11",
-    what: "a CREATE TABLE with no semicolon at the end of the file stores the bot token",
-  },
-  {
-    name: "R11-migration",
-    breaks: "R11-migration",
-    rule: "R11",
-    what: "a migration adds a bot token column",
-  },
-  {
-    name: "R11-sql",
-    breaks: "R11-sql",
-    rule: "R11",
-    what: "a one-line CREATE TABLE stores the bot token",
-  },
+  { name: "R11", breaks: "R11", rule: "R11", what: "the relay gains a Slack file" },
+  { name: "R11-namespace", breaks: "R11-namespace", rule: "R11", what: "a Drizzle schema from a namespace import (`pg.text`) stores the bot token" },
+  { name: "R11-message", breaks: "R11-message", rule: "R11", what: "Rome Cloud stores message content" },
+  { name: "R11-member", breaks: "R11-member", rule: "R11", what: "Rome Cloud stores Slack member data" },
+  { name: "R11-token-kept", breaks: "R11-token-kept", rule: "R11", what: "the sign-in attempt's outcome is never cleared on redemption" },
+  { name: "R11-no-sweep", breaks: "R11-no-sweep", rule: "R11", what: "nothing deletes expired sign-in attempts" },
+  { name: "R11-import", breaks: "R11-import", rule: "R11", what: "the product adds an import from an app in core's connections" },
+  { name: "R11-eof", breaks: "R11-eof", rule: "R11", what: "a CREATE TABLE with no semicolon at the end of the file stores the bot token" },
+  { name: "R11-migration", breaks: "R11-migration", rule: "R11", what: "a migration adds a bot token column" },
+  { name: "R11-sql", breaks: "R11-sql", rule: "R11", what: "a one-line CREATE TABLE stores the bot token" },
   { name: "R11-store", breaks: "R11-store", rule: "R11", what: "Rome Cloud stores the bot token" },
 ];
 
@@ -411,7 +182,7 @@ for (const c of CASES.filter((x) => !only.length || only.includes(x.name))) {
     [join(here, "standin/up.mjs"), join(out, "fake-slack"), work],
     {
       stdio: ["ignore", "inherit", "inherit"],
-      env: { ...process.env, BREAK: c.breaks },
+      env: { ...process.env, BREAK: c.breaks, ...(c.standin ?? {}) },
     },
   );
   const envPath = join(work, "env.json");
@@ -433,14 +204,14 @@ for (const c of CASES.filter((x) => !only.length || only.includes(x.name))) {
   const result = Object.fromEntries(report.rules.map((r) => [r.id, r.result]));
   const proved = c.rule
     ? result[c.rule] === (c.result ?? "fail")
-    : (c.only ?? SCORED).every((id) => result[id] === "pass");
+    : SCORED.every((id) => result[id] === (c.want?.[id] ?? "pass"));
   ok &&= proved;
   rows.push(
-    `| ${c.name} | ${c.rule ? `${c.rule} ${c.result ?? "fail"}: ${c.what}` : c.expect} | ${SCORED.map((id) => result[id]).join(" | ")} | ${proved ? "yes" : "NO"} |`,
+    `| ${c.name} | ${c.rule ? `${c.rule} ${c.result ?? "fail"}: ${c.what}` : c.expect} | ${SHOWN.map((id) => result[id]).join(" | ")} | ${proved ? "yes" : "NO"} |`,
   );
   if (c.rule)
     rows.push(
-      `|  | ${report.rules.find((r) => r.id === c.rule).reason.replaceAll("|", "\\|")} |${" |".repeat(SCORED.length + 1)}`,
+      `|  | ${report.rules.find((r) => r.id === c.rule).reason.replaceAll("|", "\\|")} |${" |".repeat(SHOWN.length + 1)}`,
     );
 }
 
@@ -451,8 +222,8 @@ const md = [
   `- fake Slack: \`${envCommit}\` (environments/slack-app/fake-slack)`,
   `- product: the stand-in in standin/`,
   "",
-  `| Case | Expected | ${SCORED.join(" | ")} | Proved |`,
-  `|---|---|${SCORED.map(() => "---|").join("")}---|`,
+  `| Case | Expected | ${SHOWN.join(" | ")} | Proved |`,
+  `|---|---|${SHOWN.map(() => "---|").join("")}---|`,
   ...rows,
   "",
 ].join("\n");
