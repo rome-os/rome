@@ -39,6 +39,7 @@ struct TranscriptList<Row: View>: View {
                 insets: proxy.safeAreaInsets,
                 alignTop: alignTop,
                 scroll: scroll,
+                selection: store.textSelection,
                 row: row,
                 onNearTop: {
                     Task {
@@ -59,8 +60,12 @@ struct TranscriptList<Row: View>: View {
                 onSwipeReply: { [actions = store.actions] message, row in actions.reply(to: message, row: row) }
             )
             .environment(\.shareTurns, store.share.isSelecting ? ShareTurns(messages: store.messages, rows: rows) : nil)
+            .environment(\.textSelection, store.textSelection)
             .ignoresSafeArea()
         }
+        // The composer taking focus, or share mode, ends select mode.
+        .onChange(of: composerFocused) { if composerFocused { store.textSelection.end() } }
+        .onChange(of: store.share.isSelecting) { if store.share.isSelecting { store.textSelection.end() } }
         .onChange(of: rows.last?.id) {
             if let until = catchUpUntil, Date.now < until { scroll.toBottom() }
         }
@@ -306,6 +311,7 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
     let insets: EdgeInsets
     let alignTop: Bool
     let scroll: TranscriptScroll
+    let selection: TextSelection
     let row: (TranscriptRow, TranscriptRow?) -> Row
     let onNearTop: () -> Void
     let onDividerAbove: (Bool) -> Void
@@ -335,6 +341,7 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
         coordinator.replyTarget = replyTarget
         coordinator.swipe.onReply = onSwipeReply
         coordinator.scroll = scroll
+        coordinator.selection = selection
         scroll.target = coordinator
         PerfProbe.count("listUpdate")
         coordinator.cells.environment = context.environment
@@ -346,13 +353,15 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
 
 /// Keeps the collection view's items, insets and scroll for `ChatCollection`.
 @MainActor
-private final class TranscriptCoordinator<RowView: View>: NSObject, UICollectionViewDelegate, ChatLayoutDelegate, TranscriptScrollTarget {
+private final class TranscriptCoordinator<RowView: View>: NSObject, UICollectionViewDelegate, UIGestureRecognizerDelegate, ChatLayoutDelegate, TranscriptScrollTarget {
     var row: (TranscriptRow, TranscriptRow?) -> RowView
     var onNearTop: () -> Void = {}
     var onDividerAbove: (Bool) -> Void = { _ in }
     var replyTarget: (TranscriptRow) -> String? = { _ in nil }
     let swipe = SwipeToReply()
     weak var scroll: TranscriptScroll?
+    /// The transcript's select mode, which a scroll or a tap outside the message ends.
+    weak var selection: TextSelection?
     let cells = CellContext()
     private let alignTop: Bool
     private var boxes: [String: RowBox] = [:]
@@ -419,6 +428,10 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
             return (message, id)
         }
         swipe.attach(to: view)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(tappedOutsideSelection))
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
+        view.addGestureRecognizer(tap)
         #if DEBUG
         // A fling `ROME_PERF=paging` drives in code is a drag away from the bottom.
         NotificationCenter.default.addObserver(forName: PerfProbe.flingStarted, object: nil, queue: .main) { [weak self] _ in
@@ -734,6 +747,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        selection?.end()
         revealing = nil
         keeping = nil
         // A drag stops a status-bar scroll short of the top, and UIKit then
@@ -846,6 +860,29 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         guard let id = items[safe: indexPath.item] else { return }
         heights[id] = cell.bounds.height
+    }
+
+    // MARK: Select mode
+
+    /// A tap on the transcript outside the message in select mode ends it.
+    @objc private func tappedOutsideSelection() {
+        selection?.end()
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard selection?.isActive == true else { return false }
+        // A tap in the text itself moves the selection, and its handles and
+        // links are the text view's.
+        var view = touch.view
+        while let current = view {
+            if current is SelectingTextView { return false }
+            view = current.superview
+        }
+        return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
     }
 }
 

@@ -688,6 +688,9 @@ struct MarkdownText: View {
     /// Draws links as their text and images as their description, so the
     /// Markdown opens and loads nothing, as a chat card's must not.
     var textOnly = false
+    /// Select mode (`TextSelection`): the text blocks are drawn as text views
+    /// that select in part, the rest as they are.
+    var selectable = false
 
     private var blocks: [MarkdownBlock] {
         let parsed = MarkdownParser.parse(source)
@@ -699,6 +702,7 @@ struct MarkdownText: View {
     @Environment(\.chatLinkOpener) private var linkOpener
     @Environment(\.taskLinks) private var taskLinks
     @Environment(\.openTaskChat) private var openTaskChat
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// The message's images, for paging in the viewer.
     private var gallery: [ViewerImage] {
@@ -725,9 +729,13 @@ struct MarkdownText: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { position, block in
-                view(for: block, at: position)
+        VStack(alignment: .leading, spacing: SelectableText.blockSpacing) {
+            if selectable {
+                selectableBlocks
+            } else {
+                ForEach(Array(blocks.enumerated()), id: \.offset) { position, block in
+                    view(for: block, at: position)
+                }
             }
         }
         .foregroundStyle(color)
@@ -750,6 +758,31 @@ struct MarkdownText: View {
         }
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(images: gallery, start: viewerStart)
+        }
+    }
+
+    /// The blocks in select mode: each run of text one text view, the first
+    /// of them opening selected.
+    @ViewBuilder
+    private var selectableBlocks: some View {
+        let style = SelectableTextStyle(fontSize: fontSize, lineSpacing: lineSpacing, color: UIColor(color), dynamicTypeSize: dynamicTypeSize)
+        let segments = SelectableText.segments(blocks, style: style, tasks: textOnly ? nil : taskLinks)
+        let first = segments.firstIndex { if case .block = $0 { false } else { true } }
+        ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+            switch segment {
+            case .text(let text, let quotes):
+                SelectableTextView(text: text, quotes: quotes, selectsAll: index == first)
+                    .padding(.top, SelectableText.topSpace(text))
+            case .code(let text):
+                ScrollView(.horizontal, showsIndicators: false) {
+                    SelectableTextView(text: text, wraps: false, selectsAll: index == first)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                }
+                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            case .block(let position, let block):
+                view(for: block, at: position)
+            }
         }
     }
 

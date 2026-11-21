@@ -100,6 +100,8 @@ final class TranscriptStore {
     private var approvalPolls: [String: Task<Void, Never>] = [:]
     /// What the rows do when acted on; the same object for the store's life.
     let actions = ChatActions()
+    /// The message whose text is drawn selectable, if any.
+    let textSelection = TextSelection()
     /// Where a send is kept until the server takes it.
     var drafts: ChatDrafts?
     /// Where the newest messages are kept across launches: the main Chat and

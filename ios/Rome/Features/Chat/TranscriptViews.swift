@@ -29,7 +29,7 @@ extension EnvironmentValues {
 /// The guardian's bubble: coral, right-aligned, fully round. Photos sent with
 /// it sit above the text.
 /// The long-press menu of a message bubble: its time on top, then Reply
-/// where a message can be replied to, Copy and Share.
+/// where a message can be replied to, Copy, Select text and Share.
 struct BubbleMenu {
     /// When the message was written; nil leaves the title out.
     var date: Date? = nil
@@ -45,6 +45,8 @@ struct BubbleMenu {
 private struct BubbleMenuItems: View {
     let text: String
     let menu: BubbleMenu
+    /// Puts the message in select mode; nil where its text cannot be selected.
+    let onSelect: (() -> Void)?
     @Environment(\.today) private var today
 
     var body: some View {
@@ -59,6 +61,9 @@ private struct BubbleMenuItems: View {
                 Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
             }
             CopyButton(text: text)
+            if let onSelect {
+                Button(action: onSelect) { Label("Select text", systemImage: "selection.pin.in.out") }
+            }
             if let onShare = menu.onShare {
                 Button(action: onShare) { Label("Share", systemImage: "square.and.arrow.up") }
             } else {
@@ -76,7 +81,30 @@ private extension View {
     /// also a swipe to the right (`SwipeToReply`), and an action of its own
     /// for VoiceOver.
     func bubbleMenu(text: String, menu: BubbleMenu) -> some View {
-        contextMenu { BubbleMenuItems(text: text, menu: menu) }
+        modifier(BubbleMenuModifier(text: text, menu: menu))
+    }
+}
+
+/// The bubble's menu, with Select text where the transcript has a select
+/// mode. In select mode it has no menu: a long press there selects text.
+private struct BubbleMenuModifier: ViewModifier {
+    let text: String
+    let menu: BubbleMenu
+    @Environment(\.textSelection) private var selection
+    @Environment(\.transcriptRowID) private var rowID
+
+    func body(content: Content) -> some View {
+        let selecting = selection?.isSelecting(row: rowID, text: text) ?? false
+        let onSelect: (() -> Void)? = {
+            guard let selection, let rowID, !text.isEmpty else { return nil }
+            return { [text] in selection.begin(row: rowID, text: text) }
+        }()
+        content
+            .contextMenu {
+                if !selecting { BubbleMenuItems(text: text, menu: menu, onSelect: onSelect) }
+            }
+            // A message that streams on, or is edited, leaves select mode.
+            .onChange(of: text) { selection?.messageChanged(row: rowID, text: text) }
             .accessibilityActions {
                 if menu.problem == nil, let onReply = menu.onReply {
                     Button("Reply", action: onReply)
@@ -101,6 +129,9 @@ struct UserBubble: View {
     /// The quote's tap: it goes to the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
     @Environment(\.rowTinted) private var tinted
+    @Environment(\.textSelection) private var selection
+    @Environment(\.transcriptRowID) private var rowID
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// The message has a bubble under its photos: text, or a quote drawn in it.
     private var hasBubble: Bool { !Self.badgeOnPhotos(text: text, quoteInBubble: quote != nil) }
@@ -137,10 +168,16 @@ struct UserBubble: View {
                     if hasBubble {
                         Group {
                             if !text.isEmpty {
-                                Text(text)
-                                    .romeFont(16)
-                                    .lineSpacing(5)
-                                    .foregroundStyle(.white)
+                                if selection?.isSelecting(row: rowID, text: text) == true {
+                                    SelectableTextView(
+                                        text: SelectableText.plain(text, style: SelectableTextStyle(color: .white, dynamicTypeSize: dynamicTypeSize)),
+                                        selectsAll: true, tint: .white)
+                                } else {
+                                    Text(text)
+                                        .romeFont(16)
+                                        .lineSpacing(5)
+                                        .foregroundStyle(.white)
+                                }
                             }
                         }
                             .quotedAbove(quote, tone: .sent, hasContent: !text.isEmpty, onTap: onQuote)
@@ -334,6 +371,7 @@ struct AgentBubble: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.rowTopHold) private var rowTopHold
     @Environment(\.transcriptRowID) private var rowID
+    @Environment(\.textSelection) private var selection
 
     /// How many lines a bubble shows before it folds.
     nonisolated static let foldedLines = 15
@@ -375,7 +413,7 @@ struct AgentBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            MarkdownText(source: text)
+            MarkdownText(source: text, selectable: selection?.isSelecting(row: rowID, text: text) == true)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
                 .frame(maxHeight: capped ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
@@ -436,6 +474,8 @@ struct ConciergeBubble: View {
     let name: String
     let text: String
     var menu = BubbleMenu()
+    @Environment(\.textSelection) private var selection
+    @Environment(\.transcriptRowID) private var rowID
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -445,7 +485,7 @@ struct ConciergeBubble: View {
                     .romeFont(12)
                     .foregroundStyle(Palette.sub)
                     .lineLimit(1)
-                MarkdownText(source: text)
+                MarkdownText(source: text, selectable: selection?.isSelecting(row: rowID, text: text) == true)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
