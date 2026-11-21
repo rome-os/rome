@@ -91,6 +91,7 @@ What a platform delivered through a connection: where it was said, who said it, 
 - Its mentions list only individual accounts. A mention of everyone, of a channel or of a role names no one.
 - Some facts only the platform has, such as whether a bot said it or who said the message it replies to. The connection reports them when the platform tells, and leaves them out when it does not.
 - Two of Rome's accounts in one chat each receive the same message through their own connection.
+- A connection tells the platform it has a message only after the message's consumer has accepted it, and the consumer says what accepted means: for Chats, recorded in its chat. Rome goes down between hearing and recording sometimes, and a message the platform still holds then comes again instead of vanishing. Where a platform holds nothing after delivering, the loss window is the platform's. A connection keeps no record of what it heard: the record is the chat's (Ouou, 2026-11-21).
 
 ## Decided against
 

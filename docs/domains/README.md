@@ -45,6 +45,7 @@ Each word has a heading, its meaning in one or two sentences, and the rules that
 - A new word enters its context file before it enters code, UI copy or a doc. If it fits no context, it is not one of these words and belongs in [`concepts/`](../concepts/index.md).
 - A change to a rule lands in the same PR as the code that follows it.
 - One meaning per word within a context. A word that needs two meanings is two words.
+- A new table, row kind or state says why it is needed, which guarantee it serves, and what it stores, before it is added. A record that repeats another context's record is not needed (Ouou, 2026-11-21).
 - The rules for writing here are in [`authoring/domains.md`](../authoring/domains.md).
 
 ## Where the code stands
