@@ -80,6 +80,10 @@ export function slackAppAccountId(record: ProfileRecord): string | null {
     : null;
 }
 
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function materialOf(material: unknown): SlackAppMaterial {
   const record = material as Partial<SlackAppMaterial> | null;
   if (
@@ -99,7 +103,19 @@ function materialOf(material: unknown): SlackAppMaterial {
     forwardSecret: record.forwardSecret,
     connectUrl: record.connectUrl,
     drainKey: record.drainKey,
+    // Kept through a mailbox refresh, which writes the material back.
+    ...(typeof record.generation === "string" ? { generation: record.generation } : {}),
   };
+}
+
+/** The claim of the workspace a grant's connect made, which its release
+ *  names, kept in the material as `generation` (a decimal). Undefined for a
+ *  grant made before Rome Cloud counted claims. */
+function generationOf(material: unknown): number | undefined {
+  const raw = (material as { generation?: unknown } | null)?.generation;
+  if (typeof raw !== "string") return undefined;
+  const generation = Number(raw);
+  return Number.isInteger(generation) && generation > 0 ? generation : undefined;
 }
 
 function base64Url(buffer: Buffer): string {
@@ -153,7 +169,7 @@ export function makeSlackAppSetup(deps: SlackAppSetupDeps): SetupFn {
     let install: SlackAppInstall;
     try {
       install = await ctx.step("slack-app-redeem", () =>
-        deps.cloud.redeem({ handoff, codeVerifier }),
+        deps.cloud.redeem({ handoff, codeVerifier }, ctx.signal),
       );
     } catch (error) {
       // Rome Cloud's refusal, such as a workspace another Rome holds, is
@@ -176,6 +192,7 @@ export function makeSlackAppSetup(deps: SlackAppSetupDeps): SetupFn {
       forwardSecret: install.forwardSecret,
       connectUrl: install.mailbox.connectUrl,
       drainKey: install.mailbox.drainKey,
+      ...(install.generation !== undefined ? { generation: String(install.generation) } : {}),
     };
     const workspace = install.teamName ?? "your workspace";
     return {
@@ -217,7 +234,111 @@ export interface SlackAppDescriptorDeps {
   instanceOrigin?: () => string;
 }
 
-export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): ConnectionDescriptor {
+/** How long a release of a workspace may run at Rome Cloud. */
+const RELEASE_LIMIT_MS = 60_000;
+
+/**
+ * `cloud`, with each release fenced off from a later connect. Rome Cloud goes
+ * on releasing after Rome stops waiting, and a release that lands after a
+ * connect bound the workspace again would release that connection. So a
+ * release runs to its end, or to {@link RELEASE_LIMIT_MS}, whoever stops
+ * waiting for it, and a connect redeems its install only once every release
+ * has ended. A release that outlasts that, or one Rome restarted under, is
+ * fenced at Rome Cloud: it names the generation of the claim it ends, and a
+ * later connect holds a newer one.
+ *
+ * A release also waits for every redeem already running, and names the newest
+ * claim of its workspace this Rome was given. A setup cancelled while its
+ * redeem ran, such as by the disconnect itself, has its claim made at Rome
+ * Cloud all the same, and a release naming the older claim would leave that
+ * one bound. This Rome holds one connection per workspace, so the newest claim
+ * of the workspace is that connection's.
+ */
+export interface FencedSlackAppCloud extends SlackAppCloud {
+  /** The bot tokens of the installs of `teamId` redeemed since this was last
+   *  asked, once every redeem already running has ended. A setup cancelled
+   *  while its redeem ran keeps no grant, so a disconnect revokes its token
+   *  from here. */
+  redeemedTokens(teamId: string): Promise<string[]>;
+  /** The installs of workspaces other than `teamId` that a cancelled setup
+   *  redeemed, such as a fix the guardian pointed at another workspace, once
+   *  every redeem already running has ended. No grant holds them, so a
+   *  disconnect revokes and releases each one. Each is handed out once. */
+  cancelledElsewhere(teamId: string): Promise<SlackAppInstall[]>;
+}
+
+export function fencedCloud(cloud: SlackAppCloud): FencedSlackAppCloud {
+  const releasing = new Set<Promise<void>>();
+  const redeeming = new Set<Promise<void>>();
+  const newest = new Map<string, number>();
+  const tokens = new Map<string, Set<string>>();
+  const cancelled: SlackAppInstall[] = [];
+  return {
+    start: (input) => cloud.start(input),
+    refreshMailbox: (teamId) => cloud.refreshMailbox(teamId),
+    async redeem(input, signal) {
+      await Promise.allSettled([...releasing]);
+      const run = cloud.redeem(input, signal).then((install) => {
+        if (signal?.aborted) cancelled.push(install);
+        const held = tokens.get(install.teamId) ?? new Set<string>();
+        held.add(install.botToken);
+        tokens.set(install.teamId, held);
+        const generation = install.generation;
+        if (generation !== undefined && generation > (newest.get(install.teamId) ?? 0)) {
+          newest.set(install.teamId, generation);
+        }
+        return install;
+      });
+      const tracked: Promise<void> = run.then(
+        () => {},
+        () => {},
+      );
+      redeeming.add(tracked);
+      void tracked.finally(() => redeeming.delete(tracked));
+      return run;
+    },
+    async redeemedTokens(teamId) {
+      await Promise.allSettled([...redeeming]);
+      const held = [...(tokens.get(teamId) ?? [])];
+      tokens.delete(teamId);
+      // This workspace's cancelled installs are among `held`.
+      for (let i = cancelled.length - 1; i >= 0; i--) {
+        if (cancelled[i]?.teamId === teamId) cancelled.splice(i, 1);
+      }
+      return held;
+    },
+    async cancelledElsewhere(teamId) {
+      await Promise.allSettled([...redeeming]);
+      const elsewhere = cancelled.filter((install) => install.teamId !== teamId);
+      for (const install of elsewhere) cancelled.splice(cancelled.indexOf(install), 1);
+      return elsewhere;
+    },
+    release(teamId, signal, generation) {
+      const pending = [...redeeming];
+      const run = (async () => {
+        await Promise.allSettled(pending);
+        const claimed = newest.get(teamId);
+        const named =
+          generation !== undefined && claimed !== undefined && claimed > generation
+            ? claimed
+            : generation;
+        await cloud.release(teamId, AbortSignal.timeout(RELEASE_LIMIT_MS), named);
+      })();
+      const tracked: Promise<void> = run.catch(() => {}).finally(() => releasing.delete(tracked));
+      releasing.add(tracked);
+      if (!signal) return run;
+      return new Promise<void>((resolve, reject) => {
+        const stop = () => reject(signal.reason ?? new Error("Rome stopped waiting"));
+        if (signal.aborted) return stop();
+        signal.addEventListener("abort", stop, { once: true });
+        run.then(resolve, reject).finally(() => signal.removeEventListener("abort", stop));
+      });
+    },
+  };
+}
+
+export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): ConnectionDescriptor {
+  const deps = { ...input, cloud: fencedCloud(input.cloud) };
   const scheme = slackAppScheme();
   scheme.setup = makeSlackAppSetup({ cloud: deps.cloud, instanceOrigin: deps.instanceOrigin });
   return {
@@ -235,8 +356,50 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
     chatRules: { offers: [] },
     grant: "bot",
     auth: scheme,
+    // Revoke the token at Slack, then release the workspace at Rome Cloud.
+    // Removing the app in Slack does neither, so a fix through the same
+    // sign-in returns the same connection. If the instance stops between the
+    // two, the workspace stays bound with a dead token: the connection reads
+    // broken, and a second disconnect, which takes a refused token as
+    // revoked, finishes the release.
+    async onDisconnect({ material: record }, { signal }) {
+      const material = materialOf(record);
+      // The grant's token, then any a fix cancelled by this disconnect was
+      // given while its redeem ran, in this workspace or another the guardian
+      // picked on Slack's screen: no grant holds those.
+      let elsewhere: SlackAppInstall[] = [];
+      try {
+        await deps.api.revoke(material.botToken, signal);
+        const orphaned = await deps.cloud.redeemedTokens(material.teamId);
+        for (const token of orphaned) {
+          if (token !== material.botToken) await deps.api.revoke(token, signal);
+        }
+        elsewhere = await deps.cloud.cancelledElsewhere(material.teamId);
+        for (const install of elsewhere) await deps.api.revoke(install.botToken, signal);
+      } catch (error) {
+        throw new Error(`Slack did not revoke Rome's token (${describe(error)})`);
+      }
+      // Past the disconnect's wait, the workspace may be connected again, and
+      // releasing it now would release that connection. A release already
+      // under way holds off a connect until it ends (fencedCloud), and names
+      // this connect's claim, so one that lands later still, or after a
+      // restart, ends nothing newer.
+      if (signal.aborted) throw new Error("Rome stopped waiting before releasing the workspace");
+      try {
+        await deps.cloud.release(material.teamId, signal, generationOf(record));
+        // Phase 1 holds one workspace per Rome, so another workspace's claim
+        // is the cancelled fix's alone.
+        for (const install of elsewhere) {
+          await deps.cloud.release(install.teamId, signal, install.generation);
+        }
+      } catch (error) {
+        throw new Error(`Rome Cloud did not release the workspace (${describe(error)})`);
+      }
+    },
     capabilities: {
       talker: {
+        // The connection reads a chat from Slack (slack-app/timeline.ts).
+        reads: true,
         build(cred, kit): Talker {
           const material = materialOf(cred.material);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
@@ -286,6 +449,18 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
                 }
                 throw error;
               }
+            },
+            history: {
+              async read(chatId, read) {
+                try {
+                  return await adapter.readHistory(chatId, read);
+                } catch (error) {
+                  if (isSlackCredentialError(error)) {
+                    throw new CredentialRejected({ grant: "bot", cause: error });
+                  }
+                  throw error;
+                }
+              },
             },
             directMessaging: {
               async chatFor(senderId) {
