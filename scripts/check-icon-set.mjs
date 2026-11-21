@@ -14,10 +14,10 @@
  */
 
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { blankComments } from "./check-padding-scale.mjs";
+import { renderLucideSvg } from "../packages/web/scripts/render-lucide-svg.mjs";
 import { AREA_PATHS } from "./ci-changed-areas.mjs";
 
 export const repoRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -141,19 +141,7 @@ export const BUILTIN_ICON_DIR = join(repoRoot, "packages/web/public/builtin-icon
 const BUILTIN_STROKE = "#374151";
 
 /** The SVG file for one lucide glyph, rendered by the dashboard's installed `lucide-react`. */
-export function renderBuiltinIcon(glyph) {
-  const require = createRequire(join(repoRoot, "packages/web/package.json"));
-  const { createElement } = require("react");
-  const { renderToStaticMarkup } = require("react-dom/server");
-  const Icon = require("lucide-react")[glyph];
-  if (!Icon) throw new Error(`lucide-react has no icon named ${glyph}`);
-  // Only the root's size and class go: a child <rect> needs its own width and height.
-  const markup = renderToStaticMarkup(createElement(Icon, { color: BUILTIN_STROKE })).replace(
-    /^<svg[^>]*>/,
-    (root) => root.replace(/ (width|height|class)="[^"]*"/g, ""),
-  );
-  return `${markup}\n`;
-}
+export const renderBuiltinIcon = (glyph) => renderLucideSvg(glyph, BUILTIN_STROKE);
 
 if (process.argv.includes("--write")) {
   for (const [file, glyph] of Object.entries(BUILTIN_ICONS)) {
