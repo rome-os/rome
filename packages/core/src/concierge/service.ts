@@ -253,6 +253,10 @@ export interface ConciergeDeps {
   approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved" | "findById">;
   messages: TaskChatMessages;
   sessionRepository: Pick<SessionRepository, "current">;
+  /** The agent that answers on a channel: the agent of the account the
+   *  channel is, as the inbox routes it. A chat on a connection stores no
+   *  agent of its own. Absent, a chat's stored agent is read. */
+  channelAgentOf?: (channel: string) => string | null | undefined;
   accounts: Pick<ModelAccounts, "read">;
   /** The default provider. Absent, none is set, and chats keep their models. */
   defaults?: Pick<DefaultProviders, "current">;
@@ -630,13 +634,15 @@ export class ConciergeService {
       // A dashboard chat is a channel row too, on the webchat channel.
       chat.sourceChannel === "webchat" ||
       chat.archivedAt ||
-      !chat.agentName ||
-      !isConciergeAgent(chat.agentName) ||
       !chat.sourceChannel ||
       !chat.sourceThreadId
     ) {
       return null;
     }
+    // A chat on a connection records no agent: the account's agent answers it,
+    // as the inbox routes each message.
+    const agent = this.deps.channelAgentOf?.(chat.sourceChannel) ?? chat.agentName;
+    if (!agent || !isConciergeAgent(agent)) return null;
     return { id: chat.id, channel: chat.sourceChannel, threadId: chat.sourceThreadId };
   }
 
