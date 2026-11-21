@@ -147,9 +147,10 @@ export function renderBuiltinIcon(glyph) {
   const { renderToStaticMarkup } = require("react-dom/server");
   const Icon = require("lucide-react")[glyph];
   if (!Icon) throw new Error(`lucide-react has no icon named ${glyph}`);
+  // Only the root's size and class go: a child <rect> needs its own width and height.
   const markup = renderToStaticMarkup(createElement(Icon, { color: BUILTIN_STROKE })).replace(
-    / (width|height|class)="[^"]*"/g,
-    "",
+    /^<svg[^>]*>/,
+    (root) => root.replace(/ (width|height|class)="[^"]*"/g, ""),
   );
   return `${markup}\n`;
 }

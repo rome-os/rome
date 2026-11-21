@@ -41,6 +41,12 @@ test("every tool icon file is the lucide glyph it names", () => {
   }
 });
 
+test("a tool icon keeps its child shapes' geometry", () => {
+  // Image draws its frame as a <rect>; without width and height it renders nothing.
+  assert.match(renderBuiltinIcon("Image"), /<rect [^>]*width="18" height="18"/);
+  assert.doesNotMatch(renderBuiltinIcon("Image"), /^<svg[^>]* (width|height|class)=/);
+});
+
 test("matches a library and its subpaths, and nothing that only shares a prefix", () => {
   assert.ok(isOtherIconLibrary("@radix-ui/react-icons"));
   assert.ok(isOtherIconLibrary("react-icons/fa"));
