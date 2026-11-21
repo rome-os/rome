@@ -180,14 +180,14 @@ Whenever `@rome-os/node` (`packages/rome-node-cli`) releases via the
 `linux/amd64` and `linux/arm64` and publish the multi-platform image to
 `ghcr.io/rome-os/rome-node` with:
 
-- `<version>` matching `packages/rome-node-cli/package.json` (immutable; the workflow refuses to overwrite an already-published version tag)
+- `<version>` matching `packages/rome-node-cli/package.json` (immutable, so the workflow refuses to overwrite an already-published version tag)
 - `latest` (moved only for stable semver releases without a prerelease suffix)
 - `<commit-sha>`
 
 For an ad-hoc build outside a `@rome-os/node` release (for example, changes
 that only touch `packages/rome-node-web` or `infra/rome-node`), run the
 [Rome Node package workflow](../.github/workflows/rome-node.yml) on `main` with
-**Publish the Docker image to GitHub Container Registry** selected; ad-hoc runs
+**Publish the Docker image to GitHub Container Registry** selected. Ad-hoc runs
 publish only the `<commit-sha>` tag without moving `latest`. A package admin
 sets the GHCR package visibility to public once and verifies anonymous pulls on
 both architectures.
