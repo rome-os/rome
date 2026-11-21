@@ -165,18 +165,9 @@ describe("the Slack app talker", () => {
         return { stop: () => {} };
       },
       copy: {
-        keep: (kept) => kept.message,
+        keep: () => true,
         handedOver: () => {},
         mayNotHold: () => [],
-        keepRun: () => [],
-        timelineRow: () => null,
-        timelineBefore: () => [],
-        timelineAfter: () => null,
-        holdsNewer: () => false,
-        unlinkAcross: () => {},
-        change: () => true,
-        deleted: () => false,
-        search: () => [],
       },
       listens: () => true,
     });
@@ -241,18 +232,9 @@ describe("the Slack app's channels in chat settings", () => {
       cloud: cloud(),
       openMailbox: () => ({ stop: () => {} }),
       copy: {
-        keep: (kept) => kept.message,
+        keep: () => true,
         handedOver: () => {},
         mayNotHold: () => [],
-        keepRun: () => [],
-        timelineRow: () => null,
-        timelineBefore: () => [],
-        timelineAfter: () => null,
-        holdsNewer: () => false,
-        search: () => [],
-        unlinkAcross: () => {},
-        change: () => true,
-        deleted: () => false,
       },
     });
     const talker = descriptor.capabilities.talker?.build(

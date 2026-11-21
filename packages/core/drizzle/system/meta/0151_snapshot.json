@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7ab6c1ff-0910-4594-9665-a2b074f6915d",
+  "id": "ffac4df4-23f3-4f15-a9fd-8139ec4b6abc",
   "prevId": "c6f319ab-7c4b-46c0-b557-490acc5be371",
   "tables": {
     "account_profiles": {
@@ -4748,64 +4748,20 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "slack_app_timeline": {
-      "name": "slack_app_timeline",
+    "slack_app_open_to_members": {
+      "name": "slack_app_open_to_members",
       "columns": {
-        "team_id": {
-          "name": "team_id",
+        "connection_id": {
+          "name": "connection_id",
           "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "channel_id": {
-          "name": "channel_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "ts": {
-          "name": "ts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "prev_ts": {
-          "name": "prev_ts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "said_at": {
-          "name": "said_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "message": {
-          "name": "message",
-          "type": "text",
-          "primaryKey": false,
+          "primaryKey": true,
           "notNull": true,
           "autoincrement": false
         }
       },
       "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "slack_app_timeline_team_id_channel_id_ts_pk": {
-          "columns": [
-            "team_id",
-            "channel_id",
-            "ts"
-          ],
-          "name": "slack_app_timeline_team_id_channel_id_ts_pk"
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

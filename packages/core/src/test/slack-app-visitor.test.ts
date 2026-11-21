@@ -106,18 +106,9 @@ describe("Slack app members who did not sign in (R12)", () => {
       // The connection's copy is its own business: this test reads only what
       // it hands over.
       copy: {
-        keep: (kept) => kept.message,
+        keep: () => true,
         handedOver: () => {},
         mayNotHold: () => [],
-        keepRun: () => [],
-        timelineRow: () => null,
-        timelineBefore: () => [],
-        timelineAfter: () => null,
-        holdsNewer: () => false,
-        unlinkAcross: () => {},
-        change: () => true,
-        deleted: () => false,
-        search: () => [],
       },
     });
     const heard: ChannelMessage[] = [];
