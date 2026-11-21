@@ -76,11 +76,14 @@ export interface KeptSlackMessage {
 export type SearchedTimeline = "all" | "direct" | "none";
 
 /** A kept message to hand Rome again, with whether its sender was a full
- *  member of the workspace when it was heard. */
+ *  member of the workspace when it was heard, and when that was. */
 export interface KeptForHandOver {
   eventId: string;
   message: ChannelMessage;
   senderFullMember?: true;
+  /** When the copy kept the message, which is when Slack last named its
+   *  sender's membership. */
+  receivedAt: Date;
 }
 
 /** Where the Slack app connection keeps its copy. */
@@ -199,7 +202,11 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
       .get()?.at;
     const since = new Date((last ? last.getTime() : 0) - windowMs);
     return this.db
-      .select({ eventId: slackAppMessages.eventId, message: slackAppMessages.message })
+      .select({
+        eventId: slackAppMessages.eventId,
+        message: slackAppMessages.message,
+        receivedAt: slackAppMessages.receivedAt,
+      })
       .from(slackAppMessages)
       .where(
         and(
@@ -212,6 +219,7 @@ export class SlackMessageCopyRepository implements SlackMessageCopy {
       .map((row) => ({
         eventId: row.eventId,
         message: revive(row.message),
+        receivedAt: row.receivedAt,
         ...((row.message as { senderFullMember?: boolean }).senderFullMember
           ? { senderFullMember: true as const }
           : {}),

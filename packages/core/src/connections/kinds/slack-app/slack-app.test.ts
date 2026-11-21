@@ -2646,4 +2646,52 @@ describe("Slack app opened to the workspace's other members (R12)", () => {
     expect(again.delivered).toHaveLength(1);
     expect(again.delivered[0]).not.toHaveProperty("openToMembers");
   });
+
+  it("hands a kept message over again unmarked once Slack's answer on its sender is ten minutes old", async () => {
+    const copy = testCopy();
+    let at = Date.parse("2026-11-21T00:00:00Z");
+    const build = () => {
+      const delivered: ChannelMessage[] = [];
+      const a = new SlackAppAdapter({
+        channel: "slack_app",
+        botToken: "xoxb-a",
+        teamId: TEAM,
+        botUserId: BOT,
+        forwardSecret: SECRET,
+        mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+        api: fakeApi({
+          userName: rs.fn(async () => ({ displayName: "Kim", fullMemberOf: TEAM })),
+        }),
+        openMailbox: fakeMailbox().open,
+        copy,
+        readGate: openGate(),
+        now: () => new Date(at),
+      });
+      a.onInbound((message) =>
+        delivered.push(channelMessageOf(message, "slack_app", { openToMembers: true })),
+      );
+      return { a, delivered };
+    };
+    const first = build();
+    await first.a.start();
+    await first.a.handleFrame(from(1, "U_KIM"));
+    await first.a.stop();
+
+    // Rome restarts within ten minutes: the answer still counts.
+    at += 9 * 60 * 1000;
+    const soon = build();
+    await soon.a.start();
+    await soon.a.stop();
+
+    // A long stop: Kim may have been made a guest meanwhile.
+    at += 60 * 60 * 1000;
+    const late = build();
+    await late.a.start();
+    await late.a.stop();
+
+    expect(first.delivered[0]?.openToMembers).toBe(true);
+    expect(soon.delivered.map((m) => m.openToMembers)).toEqual([true]);
+    expect(late.delivered).toHaveLength(1);
+    expect(late.delivered[0]).not.toHaveProperty("openToMembers");
+  });
 });

@@ -444,14 +444,23 @@ export class SlackAppAdapter {
 
   /** Hand Rome again what it may not hold: what the copy kept but never
    *  handed over, and what it handed over just before it last stopped,
-   *  however long ago. Rome ignores a message it already holds. */
+   *  however long ago. Rome ignores a message it already holds. A sender's
+   *  membership is trusted as long as a fresh answer from Slack is, so a
+   *  message kept longer than that goes without it: after a long stop, a
+   *  member's message reads as anyone else's, and fails closed. */
   private handOverKept(): void {
     const kept = this.config.copy.mayNotHold(this.config.teamId, HAND_OVER_AGAIN_MS);
     if (kept.length > 0) {
       log.info("slack app handing over kept messages", { count: kept.length });
     }
-    for (const { eventId, message, senderFullMember } of kept) {
-      this.handOver(eventId, { ...message, channel: this.config.channel }, senderFullMember);
+    const now = this.now().getTime();
+    for (const { eventId, message, senderFullMember, receivedAt } of kept) {
+      const fresh = now - receivedAt.getTime() < USER_CACHE_TTL_MS;
+      this.handOver(
+        eventId,
+        { ...message, channel: this.config.channel },
+        senderFullMember && fresh,
+      );
     }
   }
 
