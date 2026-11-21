@@ -682,7 +682,6 @@
       "needsReauth": "需要重新登录",
       "apiKeyActive": "API 密钥生效中",
       "apiKeyNeedsUpdate": "API 密钥需要更新",
-      "comingSoon": "即将推出",
       "signedInWith": "已通过 <1>{{method}}</1> 登录",
       "signedIn": "已登录",
       "accountType": "账号类型：<1>{{type}}</1>"

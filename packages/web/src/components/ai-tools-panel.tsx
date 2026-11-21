@@ -1027,7 +1027,7 @@ export function AiToolsPanel({
     (provider) => provider.id === selectedAnthropicProvider,
   );
   const visibleProviders = AI_TOOL_PROVIDERS.filter(
-    (provider) => !hiddenProviders.includes(provider.statusKey),
+    (provider) => provider.available && !hiddenProviders.includes(provider.statusKey),
   );
   const anyConnected = hasConnectedAiProvider(toolStatus, hiddenProviders);
   const logoutConfig = logoutProvider ? LOGOUT_PROVIDER_CONFIG[logoutProvider] : null;
@@ -1125,11 +1125,6 @@ export function AiToolsPanel({
                                   ? t("aiTools.status.apiKeyNeedsUpdate")
                                   : t("aiTools.status.needsReauth")
                                 : t("aiTools.status.notConnected")}
-                          </span>
-                        )}
-                        {!provider.available && (
-                          <span className="text-aux text-muted-foreground">
-                            {t("aiTools.status.comingSoon")}
                           </span>
                         )}
                       </div>
