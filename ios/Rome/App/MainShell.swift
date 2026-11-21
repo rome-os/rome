@@ -66,6 +66,10 @@ struct MainShell: View {
     /// A blank topic chat that started its chat keeps its view under the new id.
     @State private var startedTopics: [String: UUID] = [:]
     @State private var showSettings = false
+    /// The Archived sheet, from the drawer's row under the topic chats.
+    @State private var showArchived = false
+    /// The archived chat tapped in that sheet: it opens once the sheet is gone.
+    @State private var openArchived: String?
     /// Goes up with each widget link followed: a later one wins.
     @State private var linkSerial = 0
     /// A short notice after a widget link, such as an app that is gone.
@@ -87,6 +91,7 @@ struct MainShell: View {
     @State private var pagePreview: URL?
     @State private var appPreview: InstalledApp?
     @State private var connectPreview: String?
+    @State private var archivedPreview = false
     #endif
 
     /// The drawer pinned beside the page rather than pushed aside.
@@ -135,6 +140,11 @@ struct MainShell: View {
                     // Chat shows, as from the chat's own header; the drawer stays.
                     onTopicGone: { id in
                         if section == .topic(id) { show(.chat) }
+                    },
+                    // Over the open drawer, as Settings is.
+                    onArchived: {
+                        openArchived = nil
+                        showArchived = true
                     }
                 )
                 .frame(width: width, height: geometry.size.height)
@@ -195,6 +205,19 @@ struct MainShell: View {
         .sheet(isPresented: $showSettings) {
             settingsSheet
         }
+        .sheet(isPresented: $showArchived, onDismiss: {
+            // The chat opens once the sheet is gone, and the drawer goes with it.
+            guard let id = openArchived else { return }
+            openArchived = nil
+            show(.topic(id))
+            closeDrawer()
+        }) {
+            archivedSheet
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Palette.sheet)
+                .presentationCornerRadius(22)
+        }
         // A connect card's device connection: its authorization, then the card checks.
         .sheet(item: Binding(get: { model.connections.request }, set: { if $0 == nil { model.connections.request?.finish(false) } })) { request in
             ConnectDeviceSheet(request: request)
@@ -216,6 +239,16 @@ struct MainShell: View {
             }
             if settingsPreview {
                 SheetStandIn { settingsSheet }
+            }
+            if archivedPreview {
+                // A sheet at medium height, over the open drawer.
+                ZStack(alignment: .bottom) {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    archivedSheet
+                        .frame(height: 420)
+                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
+                }
+                .ignoresSafeArea(edges: .bottom)
             }
             if let connectPreview {
                 ZStack(alignment: .bottom) {
@@ -252,6 +285,7 @@ struct MainShell: View {
             if open {
                 Keyboard.dismiss()
                 workspace.topics.refresh()
+                workspace.archivedTopics.refresh()
             }
         }
         // Whatever covers or replaces the chat takes the keyboard with it;
@@ -337,6 +371,8 @@ struct MainShell: View {
                 photoViewerPreview = open
             case .connectSheet(let id):
                 connectPreview = id
+            case .archivedSheet(let open):
+                archivedPreview = open
             case .composerPhotos, .appIdeas, nil: break
             }
         }
@@ -522,11 +558,23 @@ struct MainShell: View {
                         show(.chat)
                     } else if workspace.topics.chat(hit.session.id) != nil {
                         show(.topic(hit.session.id))
+                    } else if hit.session.isArchivedTopicChat {
+                        // Read only, with its Restore banner.
+                        workspace.archivedTopics.note(hit.session)
+                        show(.topic(hit.session.id))
                     } else {
                         path.append(.taskChat(chatId: hit.session.id, title: hit.session.name))
                     }
                 }
             }
+        }
+    }
+
+    /// The Archived sheet: a tapped row closes it, and its chat opens after.
+    private var archivedSheet: some View {
+        ArchivedTopicsSheet(workspace: workspace) { id in
+            openArchived = id
+            showArchived = false
         }
     }
 
@@ -661,7 +709,10 @@ struct MainShell: View {
         guard usesSidebar else { return openDrawer() }
         Keyboard.dismiss()
         withAnimation(Self.drawerSpring) { sidebarShown.toggle() }
-        if sidebarShown { workspace.topics.refresh() }
+        if sidebarShown {
+            workspace.topics.refresh()
+            workspace.archivedTopics.refresh()
+        }
     }
 
     private func closeDrawer() {

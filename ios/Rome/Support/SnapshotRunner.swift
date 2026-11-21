@@ -28,6 +28,8 @@ enum DebugCommand: Equatable {
     case app(InstalledApp?)
     /// A card's connect sheet for a capability, in a stand-in frame; nil closes it.
     case connectSheet(String?)
+    /// The drawer's Archived sheet, in a stand-in frame, or closed.
+    case archivedSheet(Bool)
 }
 
 /// Health sync's demo: a few syncs of today and yesterday.
@@ -263,6 +265,26 @@ enum SnapshotRunner {
                 model.debugCommand = .drawer(false)
                 model.openDemo()
                 try? await Task.sleep(for: .seconds(2))
+            }
+            // Archived topic chats: the drawer's row under a short list, its
+            // sheet, and an archived chat, read only with its Restore banner.
+            let archivedShots = ["05h-drawer-archived", "05i-archived-sheet", "24b-topic-archived"]
+            if only.isEmpty || !only.isDisjoint(with: archivedShots), let workspace = model.workspace {
+                // Ten more archived, so the row shows under the five left.
+                let moved = workspace.topics.chats.suffix(10).map(\.id)
+                for id in moved { await workspace.archiveTopic(id) }
+                workspace.archivedTopics.refresh()
+                try? await Task.sleep(for: .seconds(0.6))
+                await capture("05h-drawer-archived", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .drawer(true) }
+                await capture("05i-archived-sheet", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .archivedSheet(true) }
+                model.debugCommand = .archivedSheet(false)
+                try? await Task.sleep(for: .seconds(0.3))
+                model.debugCommand = .drawer(false)
+                try? await Task.sleep(for: .seconds(0.4))
+                await capture("24b-topic-archived", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-archived-car")) }
+                model.debugCommand = .section(.chat)
+                for id in moved { await workspace.restoreTopic(id) }
+                try? await Task.sleep(for: .seconds(0.6))
             }
             await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.tasks) }
             await capture("06b-agent-task-chat", style: styleName, in: directory, wait: 2) {
