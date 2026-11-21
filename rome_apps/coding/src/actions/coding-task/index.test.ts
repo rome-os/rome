@@ -4,7 +4,7 @@ import type { RomeAppContext } from "@rome-os/app-runtime";
 import { validateActionArgs } from "../../../../../packages/core/src/apps/actions/validate-action-args.js";
 import { createCodingTaskAction } from "./index.js";
 
-describe("coding_task", () => {
+describe("coding:coding_task", () => {
   beforeEach(() => {
     rs.clearAllMocks();
   });
@@ -17,7 +17,7 @@ describe("coding_task", () => {
 
     const action = createCodingTaskAction(
       {
-        name: "coding_task",
+        name: "coding:coding_task",
         type: "custom",
         description: "Run coding work",
         complexity: "complex",
@@ -37,7 +37,7 @@ describe("coding_task", () => {
       sessionId: "resume-me",
     });
 
-    expect(runAction).toHaveBeenCalledWith("summon", {
+    expect(runAction).toHaveBeenCalledWith("system:summon", {
       agentName: "coding",
       prompt: "fix the failing test",
       sessionId: "resume-me",
@@ -51,7 +51,7 @@ describe("coding_task", () => {
   it("declares a schema that rejects every prompt execute rejects", async () => {
     const action = createCodingTaskAction(
       {
-        name: "coding_task",
+        name: "coding:coding_task",
         type: "custom",
         description: "Run coding work",
         complexity: "complex",
@@ -64,8 +64,10 @@ describe("coding_task", () => {
 
     for (const args of [{}, { prompt: "" }, { prompt: " \n\t" }, { prompt: 42 }]) {
       expect(await action.execute(args)).toEqual({ status: "error", error: "prompt is required" });
-      expect(validateActionArgs("coding_task", args, action.inputSchema)).not.toBeNull();
+      expect(validateActionArgs("coding:coding_task", args, action.inputSchema)).not.toBeNull();
     }
-    expect(validateActionArgs("coding_task", { prompt: "fix it" }, action.inputSchema)).toBeNull();
+    expect(
+      validateActionArgs("coding:coding_task", { prompt: "fix it" }, action.inputSchema),
+    ).toBeNull();
   });
 });

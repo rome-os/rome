@@ -34,7 +34,10 @@ const scheduleTriggerSchema = z.object({
 
 const eventBusTriggerSchema = z.object({
   type: z.literal("event-bus"),
-  eventName: z.string().min(1).describe("Watchable event type (find it with search_event_catalog)"),
+  eventName: z
+    .string()
+    .min(1)
+    .describe("Watchable event type (find it with system:search_event_catalog)"),
   sourcePattern: z.string().optional(),
   filter: z
     .array(z.object({ field: z.string().min(1), equals: z.string() }))
@@ -111,7 +114,7 @@ export function createAction(
   // The deps bag is untyped at the wiring seam; a missing dep must fail the
   // action load at boot, not on first invocation.
   if (typeof deps.routineCreation?.create !== "function") {
-    throw new Error("create_routine requires a routineCreation dep");
+    throw new Error("system:create_routine requires a routineCreation dep");
   }
   return createCreateRoutineAction(config, deps);
 }

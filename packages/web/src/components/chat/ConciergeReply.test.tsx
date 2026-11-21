@@ -86,7 +86,6 @@ function renderChat(rows: ChatRow[]) {
     const draft = useReplyDraftState({
       chatId: "concierge",
       sessionId: "concierge",
-      messageIds: new Set(["m1"]),
       jump: () => {},
       focusComposer: () => {},
     });

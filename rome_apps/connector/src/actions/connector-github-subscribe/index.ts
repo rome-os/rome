@@ -171,7 +171,7 @@ export async function resolveGithubHookSetup(
 ): Promise<{ ok: true; setup: GithubHookSetup } | { ok: false; error: string }> {
   // GitHub is Rome-managed (Rome Cloud OAuth), with no Composio involvement —
   // we register the hook with the guardian's own OAuth token and verify
-  // deliveries ourselves. No `connector_login` / `connector_connect`.
+  // deliveries ourselves. No `connector:connector_login` / `connector:connector_connect`.
   const token = await readGithubOAuthToken();
   if (!token) return { ok: false, error: romeManagedConnectHint("github") };
   const relayDepositUrl = await resolveRelayDepositUrl(deps.appContext.repositories.settings);

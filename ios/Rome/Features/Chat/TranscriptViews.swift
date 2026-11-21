@@ -29,7 +29,7 @@ extension EnvironmentValues {
 /// The guardian's bubble: coral, right-aligned, fully round. Photos sent with
 /// it sit above the text.
 /// The long-press menu of a message bubble: its time on top, then Reply
-/// where a thread can open, Copy and Share.
+/// where a message can be replied to, Copy and Share.
 struct BubbleMenu {
     /// When the message was written; nil leaves the title out.
     var date: Date? = nil
@@ -37,8 +37,6 @@ struct BubbleMenu {
     var onReply: (() -> Void)? = nil
     /// Opens share mode on the message's turn; nil shares the text.
     var onShare: (() -> Void)? = nil
-    /// Inside a thread view: a tap on the bubble stays on it.
-    var inThread = false
     /// A message that did not go through: its reason and what to do come first.
     var problem: SendProblem? = nil
 }
@@ -74,15 +72,16 @@ private struct BubbleMenuItems: View {
 }
 
 private extension View {
-    /// The bubble lifts under the finger with the system's menu. Inside a
-    /// thread view it keeps its own tap, so one on the message never closes it.
-    @ViewBuilder
+    /// The bubble lifts under the finger with the system's menu. Reply is
+    /// also a swipe to the right (`SwipeToReply`), and an action of its own
+    /// for VoiceOver.
     func bubbleMenu(text: String, menu: BubbleMenu) -> some View {
-        if menu.inThread {
-            self.onTapGesture {}.contextMenu { BubbleMenuItems(text: text, menu: menu) }
-        } else {
-            self.contextMenu { BubbleMenuItems(text: text, menu: menu) }
-        }
+        contextMenu { BubbleMenuItems(text: text, menu: menu) }
+            .accessibilityActions {
+                if menu.problem == nil, let onReply = menu.onReply {
+                    Button("Reply", action: onReply)
+                }
+            }
     }
 }
 
@@ -96,16 +95,15 @@ struct UserBubble: View {
     var menu = BubbleMenu()
     /// The badge on the message: Rome's status, else the Concierge's reaction.
     var mark: MessageMark? = nil
-    /// What the message replies to, quoted at the top of the bubble.
+    /// What the message replies to, quoted at the top of the bubble, when it
+    /// does not sit right under it.
     var quote: MessagePart.ReplyQuote? = nil
-    /// The mark that stands for the quote where the reply sits right under what it answers.
-    var rail: ReplyRail.Kind? = nil
-    /// The quote's tap: the thread view, or the original; nil leaves it plain.
+    /// The quote's tap: it goes to the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
     @Environment(\.rowTinted) private var tinted
 
     /// The message has a bubble under its photos: text, or a quote drawn in it.
-    private var hasBubble: Bool { !Self.badgeOnPhotos(text: text, quoteInBubble: quote != nil && rail == nil) }
+    private var hasBubble: Bool { !Self.badgeOnPhotos(text: text, quoteInBubble: quote != nil) }
 
     /// Where the mark sits: on the text bubble when there is one, and on the
     /// photos' corner only for photos sent alone.
@@ -137,10 +135,7 @@ struct UserBubble: View {
                             .markBadge(hasBubble ? nil : mark)
                     }
                     if hasBubble {
-                        VStack(alignment: .leading, spacing: 4) {
-                            if let quote, rail == nil {
-                                QuotedReply(quote: quote, tone: .sent, onTap: onQuote)
-                            }
+                        Group {
                             if !text.isEmpty {
                                 Text(text)
                                     .romeFont(16)
@@ -148,12 +143,10 @@ struct UserBubble: View {
                                     .foregroundStyle(.white)
                             }
                         }
+                            .quotedAbove(quote, tone: .sent, hasContent: !text.isEmpty, onTap: onQuote)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                            .overlay(alignment: .topTrailing) {
-                                if let rail, let quote { ReplyRail(kind: rail, isUser: true, label: quote.text, onTap: onQuote) }
-                            }
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .bubbleMenu(text: text, menu: bubbleMenu)
                             .markBadge(mark)
@@ -247,6 +240,14 @@ private struct UserImageTile: View {
     @State private var loaded: CGImage?
     @State private var failed = false
 
+    init(image: UserImage) {
+        self.image = image
+        // Already in memory, it shows in the first frame, with no spinner.
+        if case .stored(let upload) = image {
+            _loaded = State(initialValue: StoredImageCache.shared.image(StoredImageCache.shared.key(upload.assetPath)))
+        }
+    }
+
     var body: some View {
         switch image {
         case .local(let photo):
@@ -276,20 +277,14 @@ private struct UserImageTile: View {
     }
 
     private func load(_ upload: UploadLines.Upload) async {
-        let key = StoredImageCache.shared.key(upload.assetPath)
-        if let cached = StoredImageCache.shared.image(key) {
-            loaded = cached
-            return
-        }
         do {
-            let data = try await ImageFetch.data(upload.source, assetLoader: assetLoader, apiLoader: apiLoader, width: Self.assetWidth)
-            // Decoded small and off the main actor: an upload from the web may be huge.
-            let thumbnail = await Task.detached(priority: .userInitiated) {
-                ImageCompressor.thumbnail(from: data, maxPixel: ComposerImage.thumbnailPixels)
-            }.value
-            guard let thumbnail else { throw APIError.network }
-            StoredImageCache.shared.store(thumbnail, for: key)
-            loaded = thumbnail
+            loaded = try await StoredImageCache.shared.load(
+                upload.assetPath, maxPixel: ComposerImage.thumbnailPixels, onDisk: upload.source.isStoredAsset
+            ) {
+                try await ImageFetch.data(
+                    upload.source, assetLoader: assetLoader, apiLoader: apiLoader, width: Self.assetWidth
+                )
+            }
         } catch is CancellationError {
             // Scrolled away mid-load: the next appear loads it.
         } catch {
@@ -311,47 +306,6 @@ private struct UserImageTile: View {
     }
 }
 
-/// Stored photos already loaded, so scrolling back does not fetch them again.
-/// It holds at most 64 MB of decoded pixels. The app uses `shared`; a test
-/// makes its own, so it never sees another test's pictures or resets.
-@MainActor
-final class StoredImageCache {
-    static let shared = StoredImageCache()
-
-    private final class Box {
-        let image: CGImage
-        init(_ image: CGImage) { self.image = image }
-    }
-
-    private let cache: NSCache<NSString, Box> = {
-        let cache = NSCache<NSString, Box>()
-        cache.totalCostLimit = 64 * 1024 * 1024
-        return cache
-    }()
-
-    /// The open workspace's: keys carry it, so a picture loaded for one
-    /// instance or account never shows in another.
-    private var scope = UUID()
-
-    /// The key for a path in the open workspace. Taken before a load starts,
-    /// so a load that ends after a switch lands under the old scope.
-    func key(_ path: String) -> String { "\(scope.uuidString)|\(path)" }
-
-    /// A workspace opened or closed, or a sign-out: nothing cached carries over.
-    func reset() {
-        scope = UUID()
-        cache.removeAllObjects()
-    }
-
-    func image(_ path: String) -> CGImage? {
-        cache.object(forKey: path as NSString)?.image
-    }
-
-    func store(_ image: CGImage, for path: String) {
-        cache.setObject(Box(image), forKey: path as NSString, cost: image.bytesPerRow * image.height)
-    }
-}
-
 /// The agent's bubble. In a run of bubbles the first keeps a small bottom-left
 /// corner and the last a small top-left corner, as on the design's Chat board.
 /// Every reply sits in a bubble, a long one too: past about fifteen lines it
@@ -362,11 +316,10 @@ struct AgentBubble: View {
     let position: BubblePosition
     var onOpenChat: (String, String) -> Void = { _, _ in }
     var menu = BubbleMenu()
-    /// What the message replies to, quoted at the top of the bubble.
+    /// What the message replies to, quoted at the top of the bubble, when it
+    /// does not sit right under it.
     var quote: MessagePart.ReplyQuote? = nil
-    /// The mark that stands for the quote where the reply sits right under what it answers.
-    var rail: ReplyRail.Kind? = nil
-    /// The quote's tap: the thread view, or the original; nil leaves it plain.
+    /// The quote's tap: it goes to the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
     #if DEBUG
     /// Snapshot runs only: long bubbles open unfolded.
@@ -422,9 +375,6 @@ struct AgentBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let quote, rail == nil {
-                QuotedReply(quote: quote, tone: .received, onTap: onQuote)
-            }
             MarkdownText(source: text)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
@@ -438,12 +388,10 @@ struct AgentBubble: View {
             // Open, it sits right under the last line.
             if folds && expanded { expandButton.padding(.top, -6) }
         }
+        .quotedAbove(quote, tone: .received, onTap: onQuote)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Palette.bubble, in: shape)
-        .overlay(alignment: .topLeading) {
-            if let rail, let quote { ReplyRail(kind: rail, isUser: false, label: quote.text, onTap: onQuote) }
-        }
         .contentShape(.contextMenuPreview, shape)
         .bubbleMenu(text: text, menu: menu)
         .bubbleWidth()
@@ -588,8 +536,9 @@ struct TimeSeparator: View {
     }
 }
 
-/// The spacing above a row, which carries the design's rhythm: 3 pt inside a
-/// run, 18 pt when the sender changes, room around time separators.
+/// The spacing above a row, which carries the design's rhythm: 2 pt inside a
+/// run of replies to one message, 8 pt between other bubbles, 18 pt when the
+/// sender changes, room around time separators.
 enum TranscriptSpacing {
     static func top(_ row: TranscriptRow, after previous: TranscriptRow?) -> CGFloat {
         guard let previous else { return 8 }
@@ -608,7 +557,8 @@ enum TranscriptSpacing {
         if row.isGuardian != previous.isGuardian { return 18 }
         if row.isGuardian { return 6 }
         switch (row, previous) {
-        case (.agentText, .agentText): return 3
+        case (.agentText(_, _, _, _, let position), .agentText(_, _, _, _, let above)):
+            return position.joinsAbove && above.joinsBelow ? 2 : 8
         case (.taskCard, .agentText), (.agentText, .taskCard), (.taskCard, .taskCard): return 6
         case (.taskAsk, .agentText), (.agentText, .taskAsk): return 6
         default: return 12

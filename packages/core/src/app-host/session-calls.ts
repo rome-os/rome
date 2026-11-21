@@ -28,7 +28,7 @@ const SessionContinueParams = z.object({
 const NotifySendParams = z.object({ body: z.string().optional() }).strict();
 
 export interface SessionWorkerCallsDeps {
-  /** Runs the turn the `resume_session` action asks for, and delivers its reply. */
+  /** Runs the turn the `system:resume_session` action asks for, and delivers its reply. */
   backendTurnRunner: Pick<MainBackendTurnRunner, "runAndDeliver">;
   /** Sends a push through Rome Cloud's `/api/notify` with the instance token. */
   notify: { send(content?: SystemNotifyContent): Promise<SendOutcome> };

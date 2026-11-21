@@ -32,10 +32,10 @@ import { makePasteTalk } from "../../connections/test-fixtures.js";
 import {
   createFeishuDescriptor,
   type FeishuPendingMaterial,
-} from "../../connections/integrations/feishu.js";
+} from "../../connections/kinds/feishu/descriptor.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
-import { PeopleRepository } from "../../db/repositories/people.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import { createTestDb } from "../../test/db.js";
 import type { ApiDeps } from "../deps.js";
 import { setupsRoutes } from "./setups.js";

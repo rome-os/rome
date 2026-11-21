@@ -105,9 +105,9 @@ export interface SaidInTurn {
   turnId: string;
   chatId: string;
   /**
-   * What the message shows on the lock screen: the Concierge's words, a
-   * forward's title and text, or what a card asks. Null when it shows none:
-   * the push then says {@link FIXED_LINE}.
+   * What the message shows on the lock screen: the Concierge's words, what a
+   * card asks, or a forwarded card's title and preview. Null when it shows
+   * none: the push then says {@link FIXED_LINE}.
    */
   ownWords: string | null;
   /** The Concierge marked the message private: the push says {@link FIXED_LINE}. */

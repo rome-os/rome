@@ -91,7 +91,7 @@ describe("ScheduleTriggerProvider", () => {
     };
     const make = (actionName: string) =>
       repo.create({ name: actionName, trigger: past, actionName, args: {}, enabled: true });
-    const deferId = await make("resume_session");
+    const deferId = await make("system:resume_session");
     const otherId = await make("noop");
     const fired: string[] = [];
     for (const id of [deferId, otherId]) {

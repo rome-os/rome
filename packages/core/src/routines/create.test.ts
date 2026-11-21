@@ -1622,44 +1622,75 @@ describe("create_routine — explicit action targets (#679)", () => {
   });
 });
 
-describe("create_routine — the action name it stores", () => {
-  const manual = (actionName: string) => ({
-    name: "follow up",
-    trigger: { type: "manual" as const },
+describe("create_routine — naming the action", () => {
+  const nightly = (actionName: string) => ({
+    name: "nightly-code",
+    trigger: {
+      type: "schedule" as const,
+      tzid: "UTC",
+      tzMode: "fixed" as const,
+      localTime: "02:00",
+      rrule: "FREQ=DAILY",
+    },
     actionName,
     args: {},
   });
-  const canonical = {
-    ...allActions,
-    getCanonicalName: (name: string) => (name.includes(":") ? name : `system:${name}`),
+  const registry = {
+    has: (n: string) => n === "coding:coding_task",
+    isExplicit: () => false,
+    suggest: (n: string) => (n === "coding_task" ? "coding:coding_task" : undefined),
+    validateArgs: () => null,
   };
 
-  it("keeps the name an action gives, which defers and the upgrade check read", async () => {
-    const result = await createRoutine(manual("resume_session"), {
-      routinesRepo: repo,
-      actionRegistry: canonical,
-      routineEngine: makeFakeEngine(),
-      resolveOneOffDate,
-    });
+  it("names the full ID of a bare target only to an agent that holds it", async () => {
+    const attempt = (holds: boolean) =>
+      actionExecutionContext.run(
+        { executionId: "exec", rootExecutionId: "root", agentName: "main" },
+        () =>
+          createRoutine(nightly("coding_task"), {
+            routinesRepo: repo,
+            actionRegistry: registry,
+            agentRunner: { hasAction: () => holds },
+            routineEngine: makeFakeEngine(),
+            resolveOneOffDate,
+          }),
+      );
 
-    const id = (result as { data: { routineId: string } }).data.routineId;
-    expect((await repo.findById(id))?.actionName).toBe("resume_session");
+    const held = await attempt(true);
+    const notHeld = await attempt(false);
+
+    if (held.status !== "error" || notHeld.status !== "error") throw new Error("expected errors");
+    expect(held.error).toContain('Did you mean "coding:coding_task"?');
+    expect(notHeld.error).not.toContain("coding:coding_task");
+    expect(await repo.findAll()).toHaveLength(0);
   });
 
-  it("stores the full name for a person on the Routines page", async () => {
+  it("names the full ID of a bare target to a person on the Routines page", async () => {
     const result = await createRoutine(
-      manual("resume_session"),
+      nightly("coding_task"),
       {
         routinesRepo: repo,
-        actionRegistry: canonical,
+        actionRegistry: registry,
         routineEngine: makeFakeEngine(),
         resolveOneOffDate,
       },
       { kind: "person" },
     );
 
+    if (result.status !== "error") throw new Error("expected an error");
+    expect(result.error).toContain('Did you mean "coding:coding_task"?');
+  });
+
+  it("stores the full ID it was given", async () => {
+    const result = await createRoutine(nightly("  coding:coding_task "), {
+      routinesRepo: repo,
+      actionRegistry: registry,
+      routineEngine: makeFakeEngine(),
+      resolveOneOffDate,
+    });
+
     const id = (result as { data: { routineId: string } }).data.routineId;
-    expect((await repo.findById(id))?.actionName).toBe("system:resume_session");
+    expect((await repo.findById(id))?.actionName).toBe("coding:coding_task");
   });
 });
 

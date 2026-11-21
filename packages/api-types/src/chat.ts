@@ -40,10 +40,19 @@ export interface ForwardedFrom {
 
 /** A text part as WebChat stores it. `format` is a display hint only the
  * `say` tool sets: `long` shows the text as one long message, `bubble` or
- * absent as a chat bubble where the chat shows bubbles. `forwardedFrom` is set
- * only on text forwarded word for word from a task chat. */
+ * absent as a chat bubble where the chat shows bubbles. `forwardedFrom` marks
+ * text forwarded word for word from a task chat. Stored messages carry it and
+ * older clients read it, but Rome writes it on no new text message: a
+ * forwarded card carries it on its widget part. */
 export type WebchatTextPart = Extract<MessagePart, { type: "text" }> & {
   format?: "bubble" | "long";
+  forwardedFrom?: ForwardedFrom;
+};
+
+/** A widget part as WebChat stores it. `forwardedFrom` is set only on an
+ * agent card forwarded as it is from a task chat, the card that chat's final
+ * answer showed (docs/domains/chats.md#agent-card). */
+export type WebchatWidgetPart = Extract<MessagePart, { type: "widget" }> & {
   forwardedFrom?: ForwardedFrom;
 };
 
@@ -202,8 +211,9 @@ export interface QuotaSwitchPart {
 
 /** One part of a stored WebChat message's content. */
 export type TranscriptPart =
-  | Exclude<MessagePart, { type: "text" }>
+  | Exclude<MessagePart, { type: "text" | "widget" }>
   | WebchatTextPart
+  | WebchatWidgetPart
   | StoredErrorPart
   | TaskChatPart
   | ConnectCardPart

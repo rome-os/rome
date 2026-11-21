@@ -9,7 +9,7 @@ import { ShopifyIcon } from "@/components/brand-icons/shopify-icon";
 import { SlackIcon } from "@/components/brand-icons/slack-icon";
 
 /**
- * Brand marks + colored badges for the Settings → Channels / Integrations cards.
+ * Brand marks + colored badges for the Settings → Connections cards.
  *
  * Brand glyphs are official single-path logos (Simple Icons), drawn with
  * `fill="currentColor"` so the badge wrapper sets their color. Brand background
@@ -144,7 +144,10 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
 };
 
 /** Services drawn with another service's mark: a Slack bot is still Slack. */
-const BADGE_OF_SERVICE: Readonly<Record<string, string>> = { slack_bot: "slack" };
+const BADGE_OF_SERVICE: Readonly<Record<string, string>> = {
+  slack_bot: "slack",
+  slack_app: "slack",
+};
 
 /** Whether a service has a brand mark of its own. */
 export function hasConnectionBrand(connection: string): boolean {

@@ -14,7 +14,9 @@ export interface ArtifactRecord<T> {
 
 /**
  * Reads each source and keys it by its artifact id, in source order. Core and
- * version-1 app sources claim their bare names in `identity.legacyBindings`.
+ * version-1 app agents and skills claim their bare names in
+ * `identity.legacyBindings`. Actions claim none: an action is named by its
+ * full ID only.
  * A core source that fails to read, collides with a legacy binding, or repeats
  * an id throws. An app source that does the same is skipped and reported in
  * `failures`, so one broken app cannot block the rest.
@@ -52,7 +54,10 @@ export async function loadArtifactRecords<T extends { name: string }>(input: {
       continue;
     }
 
-    if (metadata.ownerType === "core" || metadata.formatVersion !== 2) {
+    if (
+      input.kind !== "action" &&
+      (metadata.ownerType === "core" || metadata.formatVersion !== 2)
+    ) {
       const claim = claimLegacyArtifactNames(
         input.identity.legacyBindings,
         input.kind,

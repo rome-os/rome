@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import "@/i18n";
+import { questionCardUi } from "@rome/api-types/question-card";
 import { parseEntries } from "../parse-entries";
 import { renderFlatEntries } from "../render";
 import { READ_ONLY_WIDGET_HOST, WidgetHostContext } from "./turn-fields";
@@ -159,6 +160,20 @@ describe("a question card described as data", () => {
     const send = await screen.findByRole("button", { name: "Send" });
     expect(send.querySelector(".text-foreground")).toBeNull();
     expect(screen.getByText("Which tone?").className).toContain("text-foreground");
+  });
+
+  it("shows the line breaks a question was written with", async () => {
+    const question = "Four fixes are left.\n\n1. The editor closes.\n2. A link leaves the chat.";
+    const card = questionCardUi([
+      { id: "scope", question, type: "single", options: ["All four", "Not now"] },
+    ]);
+    render(
+      <WidgetUiCard widgetId="m1" toolUseId="q9" appId="core" ui={card} text="" waiting={{}} />,
+    );
+    const shown = await screen.findByText(
+      (_, element) => element?.tagName === "SPAN" && element.textContent === question,
+    );
+    expect(shown.className).toContain("whitespace-pre-line");
   });
 
   it("stays usable when core does not take the event", async () => {

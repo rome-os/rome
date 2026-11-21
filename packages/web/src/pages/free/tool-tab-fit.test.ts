@@ -35,4 +35,19 @@ describe("fitTabs", () => {
     expect(fitTabs(ids, null, widthFor(2))).toEqual(["a", "b"]);
     expect(fitTabs(ids, "gone", widthFor(2))).toEqual(["a", "b"]);
   });
+
+  it("fits tabs by their own measured widths, short names more than long ones", () => {
+    const widths: Record<string, number> = { a: 60, b: 60, c: 60, d: 200, e: 60 };
+    const widthOf = (id: string) => widths[id] ?? 0;
+    // 60 + 4 + 60 + 4 + 60 = 188: three short tabs fit where two at the old minimum did.
+    expect(fitTabs(ids, "a", 188, widthOf)).toEqual(["a", "b", "c"]);
+    // The long tab does not fit after them, and nothing after it is drawn first.
+    expect(fitTabs(ids, "a", 300, widthOf)).toEqual(["a", "b", "c"]);
+    // A long active tab takes the place of as many trailing tabs as it needs.
+    expect(fitTabs(ids, "d", 300, widthOf)).toEqual(["a", "d"]);
+  });
+
+  it("takes an unmeasured tab at the minimum width", () => {
+    expect(fitTabs(ids, "a", widthFor(2), () => 0)).toEqual(["a", "b"]);
+  });
 });

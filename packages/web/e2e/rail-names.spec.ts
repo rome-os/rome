@@ -122,20 +122,6 @@ test.describe("desktop", () => {
     expect(geometry).toEqual(
       Array(6).fill({ height: 36, iconX: 20, textX: 48, inset: 12, gap: 12, weight: "400" }),
     );
-
-    const tasksHeading = page.locator("#recent-chats-tasks-heading button");
-    await tasksHeading.click();
-    const tasks = await tasksHeading.evaluate((heading) => {
-      const card = heading.closest("[data-tasks-section]")!;
-      const column = card.parentElement!.getBoundingClientRect();
-      const name = card.querySelector("[data-chat-row] a > span")!;
-      return {
-        iconX: heading.children[0].getBoundingClientRect().left - column.left,
-        headingTextX: heading.children[1].getBoundingClientRect().left - column.left,
-        chatTextX: name.getBoundingClientRect().left - column.left,
-      };
-    });
-    expect(tasks).toEqual({ iconX: 20, headingTextX: 48, chatTextX: 48 });
   });
 });
 

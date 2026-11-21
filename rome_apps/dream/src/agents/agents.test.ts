@@ -19,24 +19,24 @@ function agent(file: string): { tools: string[]; actions: string[] } {
 describe("dream agents", () => {
   it("keeps the agent that reads Rome's account chats to file tools", () => {
     const memory = agent("dream.yaml");
-    expect(memory.actions).toContain("get_account_chats");
+    expect(memory.actions).toContain("dream:get_account_chats");
     // No builtin tool: core confines none of them, and on Codex any file tool
     // brings a full shell. It works with memory through actions that refuse any
     // path outside the memory directory.
     expect(memory.tools).toEqual([]);
     expect(memory.actions).toEqual([
-      "get_webchat_conversations",
-      "get_account_chats",
-      "get_action_logs",
-      "search_chats",
-      "list_memory_files",
-      "read_memory_file",
-      "write_memory_file",
-      "edit_memory_file",
+      "dream:get_webchat_conversations",
+      "dream:get_account_chats",
+      "dream:get_action_logs",
+      "dream:search_chats",
+      "dream:list_memory_files",
+      "dream:read_memory_file",
+      "dream:write_memory_file",
+      "dream:edit_memory_file",
     ]);
   });
 
   it("never gives the agent that runs code Rome's account chats", () => {
-    expect(agent("dream-practice.yaml").actions).not.toContain("get_account_chats");
+    expect(agent("dream-practice.yaml").actions).not.toContain("dream:get_account_chats");
   });
 });

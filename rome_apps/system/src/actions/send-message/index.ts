@@ -398,7 +398,7 @@ async function sendableAccount(
   return target;
 }
 
-/** What `send_message` takes: a message naming the account to send as by its
+/** What `system:send_message` takes: a message naming the account to send as by its
  *  channel, or by its platform in place of one. */
 export type SendMessageRequest = SendMessageInput extends infer Input
   ? Input extends SendMessageInput

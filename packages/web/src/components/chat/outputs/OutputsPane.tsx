@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
-import { type CSSProperties, useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "@/components/ui/icon-button";
 import { Sheet, SheetTitle } from "@/components/ui/sheet";
 import { type OutputsTabOptions, useToolOutputs } from "@/pages/free/tool-outputs";
+import { type LeaveGuard, leaveEditor } from "./OutputEditor";
 import { OutputsPanel } from "./OutputsPanel";
 
 /**
@@ -26,7 +27,10 @@ export function useOutputsPane(chatId: string | null, options: OutputsTabOptions
       setSheet((prev) => ({ outputId: outputId ?? null, seq: (prev?.seq ?? 0) + 1 }));
     } else pane.show(chatId, outputId, options);
   };
-  const close = () => setSheet(null);
+  // Closing the sheet first settles a file being edited in it.
+  const leaveGuard: LeaveGuard = useRef(null);
+  const closeNow = () => setSheet(null);
+  const close = () => leaveEditor(leaveGuard, closeNow);
   const sheetElement = chatId ? (
     <Sheet
       open={sheet !== null}
@@ -49,7 +53,8 @@ export function useOutputsPane(chatId: string | null, options: OutputsTabOptions
           chatId={chatId}
           selectedId={sheet?.outputId ?? null}
           selectionSeq={sheet?.seq}
-          onNavigate={close}
+          onNavigate={closeNow}
+          leaveGuard={leaveGuard}
           heading={false}
           taskChats={options.taskChats}
         />

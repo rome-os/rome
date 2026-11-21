@@ -1295,7 +1295,7 @@ function SessionDetailsSheet({
       </div>
       <div className="flex-1 space-y-7 overflow-y-auto px-5 py-5">
         <section>
-          <h3 className="text-section uppercase text-muted-foreground">Context</h3>
+          <h3 className="text-section text-muted-foreground">Context</h3>
           <dl className="mt-3 divide-y divide-border-subtle">
             {contextRows.map(([label, value]) => (
               <div key={label} className="grid grid-cols-[8rem_1fr] gap-3 py-2 text-ui">
@@ -1306,7 +1306,7 @@ function SessionDetailsSheet({
           </dl>
         </section>
         <section>
-          <h3 className="text-section uppercase text-muted-foreground">Usage</h3>
+          <h3 className="text-section text-muted-foreground">Usage</h3>
           <dl className="mt-3 grid grid-cols-2 gap-x-5 gap-y-4 text-ui">
             <div>
               <dt className="text-muted-foreground">Runs</dt>
@@ -1332,7 +1332,7 @@ function SessionDetailsSheet({
         </section>
         {session.lineage.parent || session.lineage.children.length > 0 ? (
           <section>
-            <h3 className="text-section uppercase text-muted-foreground">Lineage</h3>
+            <h3 className="text-section text-muted-foreground">Lineage</h3>
             <div className="mt-3 space-y-2">
               {session.lineage.parent ? (
                 <Button asChild variant="outline" className="w-full justify-start">

@@ -14,14 +14,14 @@
  *
  * For guardian-initiated "set this up automatically" requests, prefer the
  * routine-from-chat skill (`propose_routine`), which confirms with a card.
- * Reach for `create_routine` for direct or programmatic creation.
+ * Reach for `system:create_routine` for direct or programmatic creation.
  *
  * @example
  * // Recurring: every day at 03:00 UTC
- * await callAction("create_routine", {
+ * await callAction("system:create_routine", {
  *   name: "daily-dream",
  *   trigger: { type: "schedule", tzid: "UTC", localTime: "03:00", rrule: "FREQ=DAILY" },
- *   actionName: "dream",
+ *   actionName: "dream:dream",
  *   args: {},
  * });
  * // → { routineId: "abc-123" }

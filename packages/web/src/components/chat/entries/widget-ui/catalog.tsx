@@ -311,14 +311,22 @@ const Text = createComponentImplementation(TextWithToneApi, ({ props }) => {
           <span className="flex h-5 shrink-0 items-center">
             <Glyph aria-hidden className="size-4" />
           </span>
-          <span className="min-w-0 text-ui text-foreground">{shown(props.text)}</span>
+          <span className="min-w-0 whitespace-pre-line text-ui text-foreground">
+            {shown(props.text)}
+          </span>
         </div>
       </CardLink>
     );
   }
+  // A line break the author wrote shows as one, as on iOS; runs of spaces
+  // still fold to one.
   const text = (
     <span
-      className={cn("min-w-0", !inButton && "text-foreground", textClass[props.variant ?? "body"])}
+      className={cn(
+        "min-w-0 whitespace-pre-line",
+        !inButton && "text-foreground",
+        textClass[props.variant ?? "body"],
+      )}
     >
       {shown(props.text)}
     </span>

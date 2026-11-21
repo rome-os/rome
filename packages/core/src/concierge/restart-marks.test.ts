@@ -142,10 +142,8 @@ describe("messages after a restart", () => {
       "default",
       "core:main",
     );
-    const [cut, idle] = await tasks.upsertMany([
-      { title: "Cut", sessionId: "task-chat", chatId: "concierge" },
-      { title: "Asking", sessionId: "idle-chat", chatId: "concierge" },
-    ]);
+    const cut = await tasks.create("task-chat", { chatId: "concierge" });
+    const idle = await tasks.create("idle-chat", { chatId: "concierge" });
     await tasks.linkMessage(cut!.id, { chatId: "concierge", messageKey: "cut-ask" });
     await boot();
     // A task chat is never continued after a restart, so its work failed. Its
@@ -161,7 +159,8 @@ describe("messages after a restart", () => {
 
   it("leaves a result the process held unsaid for the Concierge to be told again", async () => {
     await running("concierge");
-    const [task] = await tasks.upsertMany([{ title: "Done", chatId: "concierge" }]);
+    await chats.createSession("done-chat", "Done");
+    const task = await tasks.create("done-chat", { chatId: "concierge" });
     await tasks.setLastOutcome(task!.id, "succeeded");
     await boot(Date.now() + 2 * DAY);
     expect(await tasks.tasksWithUnsaidOutcome()).toEqual([task!.id]);

@@ -1,3 +1,4 @@
+import { registerGmailActionProxies } from "./gmail-calls.js";
 import { loadConfig } from "../config.js";
 import { HostExecutionService } from "../apps/host-execution/service.js";
 import { getDb } from "../db/index.js";
@@ -15,7 +16,7 @@ import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { openChannelChat } from "../connections/open-chat.js";
 import type { ChannelsService } from "@rome-os/app-runtime";
 import { ExecutionJournalRepository } from "../apps/repositories/execution-journal.js";
-import { PeopleRepository } from "../db/repositories/people.js";
+import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
 import { appPersonMapping } from "../people/app-person-mapping.js";
 import { appPeople } from "../people/app-people.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
@@ -26,7 +27,9 @@ import { chatsWiring } from "../chats-wiring.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { RpcAgentRunner } from "../core/rpc-agent-runner.js";
 import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { PolicyEngine } from "../core/policy-engine.js";
+import { PolicyEngine } from "../participation/wake-gate/policy/policy-engine.js";
+import { guardedSend } from "../participation/send-gate/index.js";
+import { wakeGateLoader } from "../participation/wake-gate/index.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "../profile-memory.js";
 import {
   ActionRegistryProxy,
@@ -117,7 +120,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
 
   const channelRecords = new ChannelRecordsRepository(db, noAccountLinks);
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
-  const peopleRepo = new PeopleRepository(db);
+  const peopleRepo = new DrizzlePeopleRepository(db);
   const sentinelLogRepo = new SentinelLogRepository(db, (name) =>
     channelRecords.platformOfChannel(name),
   );
@@ -173,6 +176,12 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const channelsService = new ChannelsServiceProxy();
   const chatSettings = new ChatSettingsControlProxy();
   const appChatSettings = legacyChatIdSettings(chatSettings);
+  const wakeGateFor = wakeGateLoader({
+    chatSettings: (chat) => appChatSettings.get(chat),
+    bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
+    policies: () => policiesRepo.findAll(),
+    connectionKindOf: connectionKindOfChannel,
+  });
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
 
   const actionEngine = new ActionEngine(
@@ -224,6 +233,8 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       sentinelLogRepo,
       approvalsRepo,
       policyEngine,
+      sendGate: guardedSend,
+      wakeGateFor,
       routinesRepo,
       resolveOneOffDate: (trigger: Trigger) =>
         resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
@@ -284,6 +295,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     });
   }
 
+  registerGmailActionProxies(actionRegistry);
   return actionEngine;
 }
 

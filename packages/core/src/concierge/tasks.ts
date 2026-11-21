@@ -1,6 +1,7 @@
-// The Concierge's task list as the dashboard reads it: the stored rows with
-// their chat's name, each task's status derived from the facts Rome holds,
-// and the "not synced" mark the event delivery keeps in memory.
+// The Concierge's tasks as the dashboard reads them: a task is its task chat,
+// so each stored row comes with its chat's name, each task's status derived
+// from the facts Rome holds, and the "not synced" mark the event delivery
+// keeps in memory.
 
 import {
   CONCIERGE_DONE_DAYS,
@@ -19,7 +20,6 @@ import {
 } from "@rome/api-types/concierge-task-status";
 import type { OpenWaitItem } from "../webchat/repository.js";
 import { createLogger } from "../logger.js";
-import { cardMessagesOf } from "./task-cards.js";
 import { type ConciergeOwner, GUARDIAN_OWNER } from "../webchat/owner.js";
 import type {
   ConciergeTaskRow,
@@ -45,11 +45,6 @@ export interface TaskFactSources {
   laterOf?(taskIds: readonly string[]): Promise<Map<string, number>>;
   /** The tasks whose pending check is a repeating schedule's next run, not a one-off check. */
   recurringOf?(taskIds: readonly string[]): Promise<Set<string>>;
-  /** The messages of Concierge chat `chatId` said from `since` on that hold a task chat part, in the order said. */
-  taskChatPartMessages?(
-    chatId: string,
-    since: Date,
-  ): Promise<Array<{ id: string; content: string; createdAt: Date }>>;
 }
 
 /**
@@ -134,19 +129,17 @@ export class ConciergeTasks {
     rows: readonly ConciergeTaskRow[],
   ): Promise<Map<string, ConciergeTaskFacts & { openWait: ConciergeOpenWait | null }>> {
     const facts = this.facts;
-    const chats = rows.flatMap((row) => (row.sessionId ? [row.sessionId] : []));
+    const chats = rows.map((row) => row.sessionId);
     const open =
       facts && chats.length > 0 ? await facts.openWaits(chats) : new Map<string, OpenWaitItem[]>();
     const waits = new Map(
       rows.map((row) => [
         row.id,
-        row.sessionId
-          ? currentWait(
-              open.get(row.sessionId) ?? [],
-              row.expiredWaitAt?.getTime() ?? null,
-              this.waitExpiryMs,
-            )
-          : null,
+        currentWait(
+          open.get(row.sessionId) ?? [],
+          row.expiredWaitAt?.getTime() ?? null,
+          this.waitExpiryMs,
+        ),
       ]),
     );
     const pending = new Set(facts?.reportPending() ?? []);
@@ -165,15 +158,12 @@ export class ConciergeTasks {
           stoppedAt: row.stoppedAt?.getTime() ?? null,
           waitingSince: waits.get(row.id)?.since ?? null,
           openWait: openWaitOf(waits.get(row.id) ?? null),
-          running: row.sessionId
-            ? running(row.sessionId) || this.settling.has(row.sessionId)
-            : false,
+          running: running(row.sessionId) || this.settling.has(row.sessionId),
           // Held in memory while the event waits, and on the row once the
           // chat's work ended, so a restart still knows it was never said.
           reportPending: pending.has(row.id) || row.outcomeUnsaid,
-          laterAt: later.get(row.id) ?? legacyLaterOf(row, this.now()),
+          laterAt: later.get(row.id) ?? null,
           lastOutcome: row.lastOutcome ?? null,
-          started: row.linkedAt !== null || row.sessionId !== null || row.lastOutcome !== null,
           waitExpired: row.expiredWaitAt !== null,
         },
       ]),
@@ -321,24 +311,21 @@ export class ConciergeTasks {
   ): ConciergeTaskDto {
     return {
       id: row.id,
-      title: row.title,
+      // The task's name is its task chat's: one name.
+      title: chat.name,
       state: legacyTaskState(status),
       status: status.status,
       endReason: status.endReason,
       waitingSince: status.waitingSince,
       openWait: status.openWait,
       laterAt: finiteOrNull(status.laterAt),
-      summary: row.summary,
-      waitingOn: row.waitingOn,
-      dueAt: row.dueAt?.getTime() ?? null,
-      rank: row.rank,
       chat,
       conciergeChat,
       sourceMessageId,
       createdAt: row.createdAt.getTime(),
       updatedAt: row.updatedAt.getTime(),
       // When it ended, as its status read it; the panel ages ended rows by it.
-      completedAt: (row.endedAt ?? row.completedAt)?.getTime() ?? null,
+      completedAt: row.endedAt?.getTime() ?? null,
       archivedAt: row.archivedAt?.getTime() ?? null,
       notSynced: this.notSynced.has(row.id),
     };
@@ -415,7 +402,6 @@ export class ConciergeTasks {
     const taskIds = [...new Set([...marks.values()].flatMap((mark) => mark.taskIds))];
     const rows = await this.repo.getMany(taskIds);
     const status = await this.statusOf(rows);
-    const cards = await this.shownCardsOf(chatId, rows, status);
     const out = new Map<string, ConciergeMessageStatus>();
     for (const [key, mark] of marks) {
       const found = messageStatus({
@@ -429,13 +415,7 @@ export class ConciergeTasks {
             const of = status.get(id);
             const row = rows.find((candidate) => candidate.id === id);
             if (!of) return [];
-            return [
-              {
-                ...of,
-                reportLost: row?.reportGivenUp === true,
-                ...(cards ? { cardShown: row?.sessionId ? cards.has(row.sessionId) : false } : {}),
-              },
-            ];
+            return [{ ...of, reportLost: row?.reportGivenUp === true }];
           }),
           // A task that ended for it with its result told stays as it ended.
           ...mark.endedAs.map((reason) => ({
@@ -450,36 +430,9 @@ export class ConciergeTasks {
   }
 
   /**
-   * For the tasks of `rows` that wait on their owner, the task chats whose
-   * card for that wait shows in Concierge chat `chatId`
-   * (docs/domains/chats.md#status). Null when no source can tell, so such a
-   * task reads as its card shown.
-   */
-  private async shownCardsOf(
-    chatId: string,
-    rows: readonly ConciergeTaskRow[],
-    status: ReadonlyMap<string, TaskStatusView>,
-  ): Promise<Set<string> | null> {
-    const read = this.facts?.taskChatPartMessages;
-    if (!read) return null;
-    const waits = new Map(
-      rows.flatMap((row) => {
-        const of = status.get(row.id);
-        return of?.status === "needs_you" && of.openWait && row.sessionId
-          ? [[row.sessionId, of.openWait] as const]
-          : [];
-      }),
-    );
-    if (waits.size === 0) return new Set();
-    // A card that shows a wait is said once the wait began.
-    const since = new Date(Math.min(...[...waits.values()].map((wait) => wait.since)) - 1_000);
-    return new Set(cardMessagesOf(await read(chatId, since), waits).keys());
-  }
-
-  /**
-   * Task `taskId`'s result was just said, as a message naming it or a
-   * forward: its messages settle now (docs/domains/chats.md#status), not
-   * when the turn that said it ends.
+   * Task `taskId`'s result was just said, as a message that replies to its
+   * start message or a forwarded card: its messages settle now
+   * (docs/domains/chats.md#status), not when the turn that said it ends.
    */
   async resultSaid(taskId: string): Promise<void> {
     const row = await this.repo.get(taskId);
@@ -579,31 +532,13 @@ export class ConciergeTasks {
 }
 
 /**
- * A row planned or watched before checks named their task, with a time still
- * ahead, is later until then.
- */
-function legacyLaterOf(row: ConciergeTaskRow, now: number): number | null {
-  const due = row.dueAt?.getTime() ?? null;
-  return (row.state === "next" || row.state === "watching") && due !== null && due > now
-    ? due
-    : null;
-}
-
-/**
  * Whether task `row`'s stop still holds over its task chat, so an approval
- * asked for there is the stopped work's: a stop by the Concierge or its
- * owner, which new words in the chat lift, or one by archiving or deleting
- * the chat, while the chat is still archived or gone. A chat unarchived
- * after it, or a row archived with its chat still open, is in use again.
+ * asked for there is the stopped work's: a stopped task takes new words to be
+ * taken up again, so until then whatever its chat asks for is the stopped
+ * work's.
  */
-export function stopHolds(row: {
-  stoppedAt: Date | null;
-  stopReason: string | null;
-  archivedAt: Date | null;
-}): boolean {
-  if (!row.stoppedAt) return false;
-  if (row.stopReason === "archived") return row.archivedAt !== null;
-  return true;
+export function stopHolds(row: { stoppedAt: Date | null }): boolean {
+  return row.stoppedAt !== null;
 }
 
 /**

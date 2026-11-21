@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, identityConnectionKindOf } from "../../test/db.js";
 import type { DrizzleDb } from "../index.js";
 import { WhatsAppStoreRepository } from "./whatsapp-store.js";
-import { PeopleRepository } from "./people.js";
+import { DrizzlePeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
 
 describe("WhatsAppStoreRepository", () => {
   let db: DrizzleDb;
@@ -77,7 +77,7 @@ describe("WhatsAppStoreRepository", () => {
   });
 
   it("carries a person link across the merged account", async () => {
-    const persons = new PeopleRepository(db);
+    const persons = new DrizzlePeopleRepository(db);
     await persons.create({
       displayName: "May",
       bondLevel: "acquaintance",
@@ -162,7 +162,7 @@ describe("WhatsAppStoreRepository", () => {
   });
 
   it("annotates contacts linked to a person", async () => {
-    const persons = new PeopleRepository(db);
+    const persons = new DrizzlePeopleRepository(db);
     await persons.create({
       displayName: "Alice Smith",
       bondLevel: "inner-circle",

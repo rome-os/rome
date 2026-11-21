@@ -1,10 +1,5 @@
 import type { ProviderSessionResetPolicy } from "@rome-os/app-runtime";
 
-export const DEFAULT_PROVIDER_SESSION_RESET_POLICY = {
-  mode: "idle",
-  idleMinutes: 7 * 24 * 60,
-} as const satisfies ProviderSessionResetPolicy;
-
 export function assertProviderSessionResetPolicy(
   value: unknown,
 ): asserts value is ProviderSessionResetPolicy {

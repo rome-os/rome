@@ -131,6 +131,12 @@ describe("buildWorkspaceContextSection", () => {
 describe("buildThreadContextBlock", () => {
   const project = { path: "/projects/default", relativePath: "default" };
 
+  it("names the account the agent speaks as, when there is one", () => {
+    const tc: ThreadContext = { channel: "discord", threadId: "channel-1", threadType: "group" };
+    expect(buildThreadContextBlock(tc, project, "Rome")).toContain("your account here: Rome");
+    expect(buildThreadContextBlock(tc, project, null)).not.toContain("your account here");
+  });
+
   it("returns null when there is no thread context", () => {
     expect(buildThreadContextBlock(undefined, project)).toBeNull();
     expect(buildThreadContextBlock(null, project)).toBeNull();

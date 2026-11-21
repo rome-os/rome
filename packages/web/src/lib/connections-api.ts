@@ -1,3 +1,4 @@
+import type { ChatSettingField, ChatSettings } from "@rome/api-types/chat-settings";
 /**
  * Client types + fetchers for the registry-native connection surface
  * (`GET /api/connections`). The types mirror the backend's
@@ -82,6 +83,12 @@ export interface ApiConnection extends ConnectionAccountFields {
    *  setup (if any). Lets a reopened dashboard re-attach instead of starting
    *  a fresh one. Empty when no setup is in progress. */
   setups: Record<string, string>;
+  /** The chat rules the connection's kind offers on its group chats. Empty
+   *  for a kind that offers none. Absent from a core that predates it. */
+  chatRules?: ChatSettingField[];
+  /** The values the kind's group chats run on where nobody set one. Null
+   *  for a kind with no chats, and absent from a core that predates it. */
+  chatRuleDefaults?: ChatSettings | null;
 }
 
 export async function fetchConnections(): Promise<ApiConnection[]> {
@@ -92,7 +99,9 @@ export async function fetchConnections(): Promise<ApiConnection[]> {
 }
 
 /** Structured, non-throwing result from a teardown call. */
-export type TeardownResult = { ok: true } | { ok: false; error: string };
+/** A disconnect that ended the connection may carry a warning: the service
+ *  may still hold Rome's access, because taking it back there failed. */
+export type TeardownResult = { ok: true; warning?: string } | { ok: false; error: string };
 
 /** Revoke the grant — the registry-native disconnect. The transport relocks
  *  and custody artifacts clear off the transition. The connection ends with
@@ -109,7 +118,10 @@ export async function revokeConnectionGrant(
     const payload = (await response.json().catch(() => null)) as { error?: string } | null;
     return { ok: false, error: payload?.error || "Failed to disconnect." };
   }
-  return { ok: true };
+  const payload = (await response.json().catch(() => null)) as { warning?: unknown } | null;
+  return typeof payload?.warning === "string"
+    ? { ok: true, warning: payload.warning }
+    : { ok: true };
 }
 
 /** Link an agent to a connected account, named by its connection's id, or

@@ -61,7 +61,10 @@ const scheduleTriggerSchema = z.object({
 
 const eventBusTriggerSchema = z.object({
   type: z.literal("event-bus"),
-  eventName: z.string().min(1).describe("Watchable event type (find it with search_event_catalog)"),
+  eventName: z
+    .string()
+    .min(1)
+    .describe("Watchable event type (find it with system:search_event_catalog)"),
   sourcePattern: z.string().optional(),
   filter: z
     .array(z.object({ field: z.string().min(1), equals: z.string() }))
@@ -139,24 +142,38 @@ export interface ActionExistenceChecker {
   has(name: string): boolean | Promise<boolean>;
   /** True when the action is `visibility: explicit`. */
   isExplicit(name: string): boolean | Promise<boolean>;
+  /** The full ID of the one action whose name without its app is `name`. */
+  suggest?(name: string): string | undefined | Promise<string | undefined>;
   /** An error message when `args` fail the action's input schema, else null. */
   validateArgs(name: string, args: Record<string, unknown>): string | null | Promise<string | null>;
-  /** The name an alias stands for, so the routine stores the action's own name. */
-  getCanonicalName?(name: string): string | undefined | Promise<string | undefined>;
 }
 
 /** Error returned when a routine names an action that isn't registered. Names
  * the remedy so the agent routes correctly instead of guessing again: build the
  * missing automation as a workflow (which registers a `<appId>_run` action),
- * or fall back to the always-available `summon` / `send_message`. */
-export function unknownActionError(actionName: string): string {
+ * or fall back to the always-available `system:summon` / `system:send_message`. */
+export function unknownActionError(actionName: string, suggestion?: string): string {
   return (
     `actionName "${actionName}" is not a registered action. ` +
+    (suggestion ? `Did you mean "${suggestion}"? ` : "") +
     `To run multi-step work that doesn't exist yet, build it first with the ` +
     `workflow_creation skill (it registers a "<appId>_run" action), then bind the ` +
     `routine to that action. For one-shot judgement or a notification, use the ` +
-    `built-in "summon" or "send_message".`
+    `built-in "system:summon" or "system:send_message".`
   );
+}
+
+// An agent's hint names only an action it holds, so it learns of nothing more.
+async function suggestFor(
+  deps: CreateRoutineDeps,
+  actionName: string,
+  agentName: string | undefined,
+): Promise<string | undefined> {
+  const suggestion = await deps.actionRegistry.suggest?.(actionName);
+  if (!suggestion || !agentName) return suggestion;
+  return (await deps.agentRunner?.hasAction?.(agentName, suggestion)) === true
+    ? suggestion
+    : undefined;
 }
 
 const LOCAL_TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
@@ -343,7 +360,7 @@ function validateTrigger(trigger: Trigger): string | null {
     // name can never fire. Validate here too (not only in the Zod schema) so a
     // direct/programmatic call is fail-closed regardless of how it was built.
     if (!trigger.eventName.trim()) {
-      return "trigger.eventName must be a non-empty event type (find one with search_event_catalog)";
+      return "trigger.eventName must be a non-empty event type (find one with system:search_event_catalog)";
     }
     // A blank sourcePattern is falsy to EventBusTriggerProvider, which widens
     // the routine to every source — the opposite of what a caller who bothered
@@ -414,12 +431,8 @@ export async function createRoutine(
   }
 
   // A blank/whitespace actionName fails the exact lookup in actionEngine.run on
-  // every fire; reject and persist the trimmed canonical form.
-  const trimmedName = input.actionName.trim();
-  const actionName = (await deps.actionRegistry.getCanonicalName?.(trimmedName)) ?? trimmedName;
-  // An action stores the name as given: defers and the system upgrade check
-  // read their routines by the short name.
-  const storedName = creator.kind === "person" ? actionName : trimmedName;
+  // every fire; reject and persist the trimmed full ID.
+  const actionName = input.actionName.trim();
   if (!actionName) {
     return { status: "error", error: "actionName must be a non-empty action name" };
   }
@@ -427,7 +440,11 @@ export async function createRoutine(
   // error on every fire (actionEngine.run throws "Action not found"). Reject at
   // create time with a remedy the agent can act on.
   if (!(await deps.actionRegistry.has(actionName))) {
-    return { status: "error", error: unknownActionError(actionName) };
+    const agentName = creator.kind === "action" ? creator.agentName : undefined;
+    return {
+      status: "error",
+      error: unknownActionError(actionName, await suggestFor(deps, actionName, agentName)),
+    };
   }
   // A routine fires its action outside the agent tool gate, so an explicit
   // target needs a principal that may call it: the app code that owns the call
@@ -498,7 +515,7 @@ export async function createRoutine(
     key,
     managedBy,
     trigger,
-    actionName: storedName,
+    actionName,
     args,
     enabled,
     ...(madeIn ? { madeIn } : {}),
@@ -514,7 +531,7 @@ export async function createRoutine(
       managedBy,
       enabled: true,
       trigger,
-      actionName: storedName,
+      actionName,
       args,
       createdAt: new Date(),
     };

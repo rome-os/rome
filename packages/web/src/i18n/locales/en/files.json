@@ -149,7 +149,7 @@
     "selectAFile": "Select a file to view and edit"
   },
   "history": {
-    "heading": "Git History",
+    "heading": "Git history",
     "loading": "Loading...",
     "empty": "No history found",
     "closeAria": "Close history",
@@ -197,7 +197,7 @@
     "discardChangesConfirm": "Discard changes",
     "nameLabel": "Name",
     "defaultFileName": "Untitled.md",
-    "defaultFolderName": "New Folder",
+    "defaultFolderName": "New folder",
     "errorNameRequired": "Name is required.",
     "errorNameInvalid": "Name must be a single file or folder name."
   },

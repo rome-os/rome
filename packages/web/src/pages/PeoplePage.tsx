@@ -278,9 +278,7 @@ function DirectoryView({
       {groups.map((group) => (
         <section key={group.level}>
           <div className="flex flex-wrap items-baseline gap-2 border-b border-border pb-1">
-            <h2 className="text-section uppercase tracking-wide text-muted-foreground">
-              {t(levelLabelKey(group.level))}
-            </h2>
+            <h2 className="text-section text-muted-foreground">{t(levelLabelKey(group.level))}</h2>
             {/* The server's total for the level, not the rows on screen: the
                 directory pages, and a heading that counted what had loaded
                 would read as a roster that shrank. */}
