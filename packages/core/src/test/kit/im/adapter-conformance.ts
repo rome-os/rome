@@ -218,7 +218,8 @@ export function describeAdapterConformance(
       said = [];
       addressed = new Map();
       const recording = inboundRecording(
-        { chats, messages, events, adapters: wired.adapters },
+        // No wake to decide here: nothing reads catch-up.
+        { chats, messages, events, adapters: wired.adapters, hold: () => () => {} },
         own.map((at) => at.channel),
       );
       events.subscribe(async (event) => {
