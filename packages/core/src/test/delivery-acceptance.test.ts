@@ -45,8 +45,16 @@ describe("a delivery settles once Chats has the message on record", () => {
   afterEach(() => testDb.close());
 
   async function connect(opts: { acceptTimeoutMs?: number; awaitsAcceptance?: boolean } = {}) {
+    const logged: { level: string; message: string }[] = [];
+    const note = (level: string) => (message: string) => void logged.push({ level, message });
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(testDb.db),
+      logger: {
+        debug: note("debug"),
+        info: note("info"),
+        warn: note("warn"),
+        error: note("error"),
+      } as unknown as NonNullable<ConstructorParameters<typeof ConnectionRegistry>[0]["logger"]>,
     });
     const fx = makePasteTalk({ awaitsAcceptance: opts.awaitsAcceptance ?? true });
     registry.register(fx.descriptor);
@@ -93,7 +101,7 @@ describe("a delivery settles once Chats has the message on record", () => {
     if (!talker?.state.deliver) throw new Error("the talker did not start");
     const deliver = talker.state.deliver as (message: connections.Message) => Promise<void>;
     const forward = talker.state.deliver as (message: connections.Message) => unknown;
-    return { deliver, forward, recorded, events, stop, listen: () => recording!.listen() };
+    return { deliver, forward, recorded, events, stop, logged, listen: () => recording!.listen() };
   }
 
   it("resolves only after the message is recorded, and again for a redelivery already on record", async () => {
@@ -152,10 +160,12 @@ describe("a delivery settles once Chats has the message on record", () => {
   });
 
   it("rejects a message that arrives while nobody records, as during a hook swap", async () => {
-    const { deliver, recorded, stop, listen } = await connect();
+    const { deliver, recorded, stop, listen, logged } = await connect();
     stop();
     await expect(deliver(said("m1", "while away"))).rejects.toBeInstanceOf(RecordingStopped);
     expect(recorded).toEqual([]);
+    // A refusal, not a handler bug: nothing is logged as an error.
+    expect(logged.filter((entry) => entry.level === "error")).toEqual([]);
     // Delivered again once recording is back, it is on record once.
     listen();
     await expect(deliver(said("m1", "while away"))).resolves.toBeUndefined();
