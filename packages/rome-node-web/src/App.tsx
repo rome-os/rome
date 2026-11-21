@@ -242,7 +242,7 @@ export function App() {
                 <div
                   role="tablist"
                   aria-label={t.nav.label}
-                  className="inline-flex w-fit items-center gap-1 rounded-10 border border-border-subtle bg-surface-muted p-1"
+                  className="inline-flex w-fit items-center gap-1 rounded-12 border border-border-subtle bg-surface-muted p-1"
                 >
                   {(
                     [

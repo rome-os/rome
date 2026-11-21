@@ -34,7 +34,7 @@ export const messages = {
     nav: {
       label: "Views",
       overview: "Overview",
-      log: "Computer use log",
+      log: "Log",
     },
     header: {
       themeLight: "Switch to light mode",
@@ -233,7 +233,7 @@ export const messages = {
     nav: {
       label: "视图切换",
       overview: "概览",
-      log: "电脑操作记录",
+      log: "日志",
     },
     header: {
       themeLight: "切换到浅色模式",
