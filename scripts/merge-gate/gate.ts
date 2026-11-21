@@ -69,7 +69,8 @@ export interface Decision {
 }
 
 const POLICY_PATH = ".github/merge-policy.json";
-const BASELINE = /^goals\/[^/]+\/baseline\.json$/;
+/** Matches a goal's `baseline.json`, the only files whose content the gate reads. */
+export const BASELINE = /^goals\/[^/]+\/baseline\.json$/;
 const CHECK_GLOBS = ["scripts/check-*", "scripts/*-baseline.mjs"];
 const CHECK_FILE_NAMES = new Set([
   "biome.jsonc",

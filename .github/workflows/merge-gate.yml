@@ -1,0 +1,72 @@
+name: Merge gate
+
+# Reports on every PR to main whether it could have merged itself, and why, as
+# the `merge gate` check run. It merges nothing. Gate code: scripts/merge-gate/.
+#
+# pull_request_target runs this file and the gate as they are on main, never as
+# the PR has them, so a PR cannot change the rules it is judged by. The PR's
+# content reaches the gate only as data from the GitHub API. Never check out,
+# install or run anything from the PR's head here: this trigger's token can
+# write checks on the base repository.
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+concurrency:
+  group: merge-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    # Not named `merge gate`: the job's own check run would then share the name
+    # of the check run the gate writes.
+    name: merge gate report
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # github.sha is main's head for this trigger. Only the gate and the policy
+      # are checked out, so nothing else on disk can be mistaken for an input.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/merge-gate/
+            .github/merge-policy.json
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # tsx is pinned to an exact version and fetched by npx, because the gate
+      # must run in a repository with no workspace install. run.ts exits 0
+      # whatever the gate decides or fails on.
+      - name: Decide and report
+        id: gate
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npx --yes tsx@4.21.0 scripts/merge-gate/run.ts
+
+      # Runs only when run.ts never started or crashed outright, such as when
+      # npx cannot fetch tsx. The PR still gets a check run saying so.
+      - name: Report that the gate could not run
+        if: steps.gate.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          summary='**Merge gate: needs-you.** The gate could not decide, so this PR waits for you. The "Decide and report" step of this workflow run failed before it reported; its log has the error.'
+          echo "$summary" >>"$GITHUB_STEP_SUMMARY"
+          gh api --method POST "repos/$REPO/check-runs" \
+            -f name='merge gate' -f head_sha="$HEAD_SHA" -f status=completed -f conclusion=neutral \
+            -f 'output[title]=needs you: the gate could not decide' -f "output[summary]=$summary" \
+            || echo "::warning title=merge gate::the gate could not report"
