@@ -70,8 +70,8 @@ export function toSlackAppDisplay(profile: SlackAppGrantProfile): ProfileDisplay
   });
 }
 
-/** The bot is named by its workspace and its bot user, as the Slack bot kind
- *  names one, since Slack issues user ids per workspace. */
+/** The bot is named by its workspace and its bot user, since Slack issues
+ *  user ids per workspace. */
 export function slackAppAccountId(record: ProfileRecord): string | null {
   const { teamId, botUserId } = record;
   return typeof teamId === "string" && teamId && typeof botUserId === "string" && botUserId

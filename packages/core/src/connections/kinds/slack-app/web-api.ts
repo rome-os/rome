@@ -1,7 +1,7 @@
 // The Slack Web API calls Rome's own Slack app makes from the instance, against
 // a configurable Slack origin so a test environment can stand in for Slack.
-// Errors are the Slack bot kind's `SlackApiError`, so `isSlackCredentialError`
-// reads them the same way.
+// Errors are `SlackApiError` from `kinds/slack/slack.ts`, so
+// `isSlackCredentialError` reads them.
 
 import { SlackApiError, type SlackBotIdentity, type SlackUserName } from "../slack/slack.js";
 import type { SlackWireMessage } from "./message.js";
