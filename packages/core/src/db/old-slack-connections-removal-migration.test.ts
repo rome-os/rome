@@ -125,3 +125,49 @@ describe("0152 removes the Slack bot's connections", () => {
     ]);
   });
 });
+
+const SLACK_SIGN_IN = "0153_remove_slack_sign_in_connections";
+
+describe("0153 removes the Slack sign-in's connections", () => {
+  it("deletes the Slack sign-in's connections and grants, and keeps Rome's Slack app", () => {
+    const sqlite = databaseBefore(SLACK_SIGN_IN);
+    connect(sqlite, "conn-sign-in", "slack", "T1:U1");
+    connect(sqlite, "conn-app", "slack_app", "T1:B2");
+    sqlite
+      .prepare("INSERT INTO connected_accounts_unplaced (connection_id, agent) VALUES (?, 'main')")
+      .run("conn-sign-in");
+
+    migrate(sqlite, SLACK_SIGN_IN);
+
+    expect(ids(sqlite, "SELECT id FROM connections")).toEqual(["conn-app"]);
+    expect(ids(sqlite, "SELECT custody FROM connection_grants")).toEqual(["conn-app"]);
+    expect(ids(sqlite, "SELECT connection_id FROM connected_accounts_unplaced")).toEqual([]);
+    // The channels stay, let go of their connection as a disconnect leaves them.
+    expect(sqlite.prepare("SELECT id, connection_id FROM channels ORDER BY id").all()).toEqual([
+      { id: "channel-conn-app", connection_id: "conn-app" },
+      { id: "channel-conn-sign-in", connection_id: null },
+    ]);
+    // Connected accounts, and so their agents, stay.
+    expect(ids(sqlite, "SELECT account_id FROM connected_accounts ORDER BY account_id")).toEqual([
+      "T1:B2",
+      "T1:U1",
+    ]);
+  });
+
+  it("changes nothing on a database with no Slack sign-in", () => {
+    const sqlite = databaseBefore(SLACK_SIGN_IN);
+    connect(sqlite, "conn-app", "slack_app", "T1:B2");
+    connect(sqlite, "conn-github", "github", "octocat");
+
+    migrate(sqlite, SLACK_SIGN_IN);
+
+    expect(ids(sqlite, "SELECT id FROM connections ORDER BY id")).toEqual([
+      "conn-app",
+      "conn-github",
+    ]);
+    expect(ids(sqlite, "SELECT custody FROM connection_grants ORDER BY custody")).toEqual([
+      "conn-app",
+      "conn-github",
+    ]);
+  });
+});

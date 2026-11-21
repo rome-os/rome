@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import {
   clearProviderTokenFile,
   getProviderTokenFilePath,
+  removeRetiredTokenFiles,
   syncProviderTokenFile,
 } from "./provider-token-files.js";
 
@@ -18,12 +19,14 @@ describe("provider token files", () => {
       "ROME_GITHUB_TOKEN_FILE",
       "ROME_GOOGLE_TOKEN_FILE",
       "ROME_SHOPIFY_TOKEN_FILE",
+      "ROME_SLACK_TOKEN_FILE",
     ]) {
       savedEnv[key] = process.env[key];
     }
     process.env.ROME_GITHUB_TOKEN_FILE = join(tempDir, "github-oauth-token");
     process.env.ROME_GOOGLE_TOKEN_FILE = join(tempDir, "google-oauth-token");
     process.env.ROME_SHOPIFY_TOKEN_FILE = join(tempDir, "shopify-oauth-token");
+    process.env.ROME_SLACK_TOKEN_FILE = join(tempDir, "slack-oauth-token");
   });
 
   afterEach(() => {
@@ -90,5 +93,18 @@ describe("provider token files", () => {
   it("owns no file for a provider without a file consumer (google)", async () => {
     await syncProviderTokenFile("google", { accessToken: "ya29.token" }, {});
     expect(existsSync(getProviderTokenFilePath("google"))).toBe(false);
+  });
+
+  it("removes the Slack sign-in's token file an older build left, and keeps the others", async () => {
+    const slack = join(tempDir, "slack-oauth-token");
+    writeFileSync(slack, "xoxp-left-behind\n");
+    writeFileSync(getProviderTokenFilePath("github"), "gho_kept\n");
+
+    await removeRetiredTokenFiles();
+
+    expect(existsSync(slack)).toBe(false);
+    expect(existsSync(getProviderTokenFilePath("github"))).toBe(true);
+    // Nothing left to remove is fine.
+    await expect(removeRetiredTokenFiles()).resolves.toBeUndefined();
   });
 });
