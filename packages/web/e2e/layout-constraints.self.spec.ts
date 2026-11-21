@@ -41,5 +41,5 @@ test("a locator that stops resolving marks the spec stale", async ({ page }) => 
       el.removeAttribute("data-testid");
     }
   });
-  expect(await ids(page)).toContain("stale:row-name-lines-up-with-bubble-text");
+  expect(await ids(page)).toContain("stale:row-name-starts-on-bubble-edge");
 });
