@@ -128,12 +128,35 @@ final class FakeBackend: RomeBackend {
 
     func archiveChat(_ id: String, stoppingWork: Bool) async throws {
         calls.append(stoppingWork ? "archive \(id) stopping work" : "archive \(id)")
+        if let chat = topicChats.first(where: { $0.id == id }) {
+            archivedRows.insert(ChatSession(id: id, name: chat.name, agentName: ChatSession.conciergeAgent, archivedAt: RomeDate.string(.now), activityAt: RomeDate.string(.now)), at: 0)
+        }
         topicChats.removeAll { $0.id == id }
     }
 
     func deleteChat(_ id: String, stoppingWork: Bool) async throws {
         calls.append(stoppingWork ? "delete \(id) stopping work" : "delete \(id)")
         topicChats.removeAll { $0.id == id }
+        archivedRows.removeAll { $0.id == id }
+    }
+
+    /// `GET /chat/sessions?status=archived`, as the server answers it:
+    /// every archived chat, task chats included. `archivedFetches` counts the reads.
+    var archivedRows: [ChatSession] = []
+    var archivedFetches = 0
+    var unarchiveFails = false
+
+    func archivedTopicChats() async throws -> [ChatSession] {
+        archivedFetches += 1
+        return archivedRows.filter(\.isArchivedTopicChat)
+    }
+
+    func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws {
+        calls.append(movingFollowsBack ? "restore \(id) moving follows back" : "restore \(id)")
+        if unarchiveFails { throw APIError.network }
+        guard let row = archivedRows.first(where: { $0.id == id }) else { throw APIError.notFound }
+        archivedRows.removeAll { $0.id == id }
+        topicChats.append(ConciergeChat(id: id, name: row.name, main: false, unread: 0))
     }
 
     func chatWork(chatId: String) async throws -> ConciergeChatWork {

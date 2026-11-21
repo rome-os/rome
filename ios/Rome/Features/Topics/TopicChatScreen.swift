@@ -28,14 +28,21 @@ struct TopicChatScreen: View {
     @State private var renaming = false
     /// Archive or Delete from the header, while it is read and asked.
     @State private var retiring: TopicRetireRequest?
+    /// Restore from the archived chat's banner, while it is read and asked.
+    @State private var restoring: TopicRestoreRequest?
     @State private var newName = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
 
     private var store: TranscriptStore? { chatId.map(workspace.topicStore) }
 
+    /// An archived chat reads only: a banner offers Restore, and there is no
+    /// composer, so nothing sent can bring it back unasked.
+    private var archived: Bool { workspace.isArchivedTopic(chatId) }
+
     /// A blank chat, or one whose transcript loaded empty.
     private var showsStarters: Bool {
+        if archived { return false }
         if let store { return ConciergeStarters.visible(loaded: store.readOnce, empty: store.rowsEmpty) }
         return starting == nil
     }
@@ -72,7 +79,18 @@ struct TopicChatScreen: View {
             )
         }
         .overlay(alignment: .top) {
-            if let store { TranscriptBanners(store: store).padding(.top, 70) }
+            VStack(spacing: 8) {
+                if archived, let chatId {
+                    TopBanner(kind: .archived, text: String(localized: "This chat is archived"), actionTitle: String(localized: "Restore"), busy: restoring != nil) {
+                        guard restoring == nil else { return }
+                        restoring = TopicRestoreRequest(chatId: chatId, name: TopicChatsStore.title(workspace.topicChat(chatId)))
+                    }
+                    .transition(.opacity)
+                }
+                if let store { TranscriptBanners(store: store) }
+            }
+            .padding(.top, 70)
+            .animation(.easeOut(duration: 0.2), value: archived)
         }
         // Reply brings the keyboard up.
         .onChange(of: store?.replies) { composerFocused = true }
@@ -86,6 +104,7 @@ struct TopicChatScreen: View {
             }
         }
         .topicRetire($retiring, workspace: workspace) { _ in onArchived() }
+        .topicRestore($restoring, workspace: workspace)
         .pageBackground()
         .environment(\.taskLinks, chatId.flatMap { workspace.taskLinks(forChat: $0) })
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onReply: { store?.restoreReply($0) }, prefill: Binding(
@@ -97,7 +116,7 @@ struct TopicChatScreen: View {
             VStack(spacing: 10) {
                 // Inside the composer's inset, so the last message rests above it too.
                 UpdatedNotice(agentName: workspace.agentName, visible: chatId.map { visibleChat == $0 } ?? inFront)
-                if let store, store.showsQuoteBar {
+                if !archived, let store, store.showsQuoteBar {
                     QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
@@ -110,7 +129,9 @@ struct TopicChatScreen: View {
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
                 }
-                TopicComposer(workspace: workspace, chatId: chatId, draft: $draft, focused: $composerFocused, attachments: attachments, sharing: store?.share.isSelecting ?? false) { send() }
+                if !archived {
+                    TopicComposer(workspace: workspace, chatId: chatId, draft: $draft, focused: $composerFocused, attachments: attachments, sharing: store?.share.isSelecting ?? false) { send() }
+                }
             }
             .shareModeComposer(store?.share)
             .animation(.easeOut(duration: 0.2), value: showsStarters)
@@ -284,8 +305,11 @@ private struct TopicChatHeader: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        let title = TopicChatsStore.title(chatId.flatMap(workspace.topics.chat))
+        let title = TopicChatsStore.title(chatId.flatMap(workspace.topicChat))
         let activity = workspace.topics.activity(for: chatId)
+        // An archived chat is never pinned and offers no pin; it is restored
+        // from its banner, not archived again.
+        let archived = workspace.isArchivedTopic(chatId)
         ChatHeader(
             // The Concierge's name, as in the main chat; the topic's own
             // title stays in the "…" menu.
@@ -299,9 +323,9 @@ private struct TopicChatHeader: View {
             tasks: chatId.flatMap { workspace.taskList(forChat: $0) },
             // A blank chat has nothing to rename, pin, archive or delete yet.
             onRename: chatId == nil ? nil : { onRename(title) },
-            pinned: chatId.map(workspace.topics.isPinned) ?? false,
-            onPin: chatId == nil ? nil : onPin,
-            onArchive: chatId == nil ? nil : { onArchive(title) },
+            pinned: !archived && (chatId.map(workspace.topics.isPinned) ?? false),
+            onPin: chatId == nil || archived ? nil : onPin,
+            onArchive: chatId == nil || archived ? nil : { onArchive(title) },
             onDelete: chatId == nil ? nil : { onDelete(title) }
         )
         .shareModeHeader(share)

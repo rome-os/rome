@@ -38,6 +38,12 @@ protocol RomeBackend: AnyObject, Sendable {
     /// Archives a topic chat. `stoppingWork` ends its follows and open tasks
     /// instead of moving them to the main chat.
     func archiveChat(_ id: String, stoppingWork: Bool) async throws
+    /// The guardian's archived topic chats, from `GET /chat/sessions?status=archived`,
+    /// in the server's order.
+    func archivedTopicChats() async throws -> [ChatSession]
+    /// Restores an archived topic chat. `movingFollowsBack` moves the follows
+    /// its archive moved to the main chat back to it.
+    func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws
     /// Deletes a chat for good; a Concierge topic chat retires with it.
     func deleteChat(_ id: String) async throws
     /// Deletes a topic chat for good. `stoppingWork` ends its follows and open
@@ -196,6 +202,18 @@ final class LiveBackend: RomeBackend {
         // Without the option, the server moves them, as it always has.
         var body: [String: JSONValue] = ["archived": .bool(true)]
         if stoppingWork { body["followsAndTasks"] = .string("stop") }
+        try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(body))
+    }
+
+    func archivedTopicChats() async throws -> [ChatSession] {
+        let sessions: [ChatSession] = try await client.get("/chat/sessions", query: [URLQueryItem(name: "status", value: "archived")])
+        return sessions.filter(\.isArchivedTopicChat)
+    }
+
+    func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws {
+        // Without the option, the follows stay in the main chat.
+        var body: [String: JSONValue] = ["archived": .bool(false)]
+        if movingFollowsBack { body["follows"] = .string("moveBack") }
         try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(body))
     }
 
@@ -525,6 +543,9 @@ extension RomeBackend {
     func archiveChat(_ id: String, stoppingWork: Bool) async throws { try await archiveChat(id) }
     func deleteChat(_ id: String, stoppingWork: Bool) async throws { try await deleteChat(id) }
     func chatWork(chatId: String) async throws -> ConciergeChatWork { throw APIError.notFound }
+    /// Test doubles archive nothing for good.
+    func archivedTopicChats() async throws -> [ChatSession] { [] }
+    func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws { throw APIError.notFound }
     /// Test doubles keep no pins.
     func pinChat(_ id: String, pinned: Bool) async throws { throw APIError.notFound }
     /// Demo data and test doubles hold every message in the newest page.

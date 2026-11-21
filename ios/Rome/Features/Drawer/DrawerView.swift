@@ -10,6 +10,8 @@ struct DrawerView: View {
     let onSettings: () -> Void
     /// A topic chat was archived or deleted from its row.
     var onTopicGone: (String) -> Void = { _ in }
+    /// The Archived row under the topic chats: its sheet opens.
+    var onArchived: () -> Void = {}
     /// How many topic chats show; a scroll near the end adds a page.
     @State private var topicLimit = TopicChatsStore.pageSize
     /// Archive or Delete from a row, while it is read and asked.
@@ -174,6 +176,13 @@ struct DrawerView: View {
                         .id(shown)
                         .onAppear { topicLimit = shown + TopicChatsStore.pageSize }
                         .accessibilityHidden(true)
+                        .drawerRow()
+                }
+                // After the last topic chat, so it scrolls with them; only
+                // once every one shows, and never folded.
+                let archived = workspace.archivedTopics.count
+                if ArchivedTopicsStore.showsEntry(archived: archived, folded: folded, shownTopics: shown, topics: chats.count) {
+                    ArchivedTopicsEntry(count: archived, action: onArchived)
                         .drawerRow()
                 }
             }
