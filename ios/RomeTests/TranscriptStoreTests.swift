@@ -146,13 +146,14 @@ final class FakeBackend: RomeBackend {
     var archivedFetches = 0
     var unarchiveFails = false
 
-    /// Holds the archived list's answer back, as read when it was asked.
-    var archivedDelay: Duration?
+    /// Runs inside the archived list's fetch, after the list is read and
+    /// before it answers: a change made here lands while the read is under way.
+    var duringArchivedFetch: (() async -> Void)?
 
     func archivedTopicChats() async throws -> [ChatSession] {
         archivedFetches += 1
         let rows = archivedRows.filter(\.isArchivedTopicChat)
-        if let archivedDelay { try await Task.sleep(for: archivedDelay) }
+        await duringArchivedFetch?()
         return rows
     }
 

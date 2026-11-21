@@ -121,13 +121,14 @@ import Testing
     @Test func aStaleListKeepsARestoredChatOut() async {
         let backend = FakeBackend()
         backend.archivedRows = [archived("topic-1", "Car", daysAgo: 1)]
-        backend.archivedDelay = .milliseconds(150)
         let store = ArchivedTopicsStore(backend: backend)
-        store.refresh()
         // The read is under way, still holding the chat, when it is unarchived.
-        try? await Task.sleep(for: .milliseconds(30))
-        store.remove("topic-1")
-        try? await Task.sleep(for: .milliseconds(400))
+        backend.duringArchivedFetch = { [weak store] in
+            store?.remove("topic-1")
+            backend.duringArchivedFetch = nil
+        }
+        store.refresh()
+        await settle()
         #expect(store.loaded)
         #expect(store.count == 0)
     }
