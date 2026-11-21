@@ -14,7 +14,7 @@ import { describe, expect, it } from "@rstest/core";
 import type { ConnectionDescriptor, ProfileRecord } from "../types.js";
 import { makeDiscordDescriptor } from "./discord.js";
 import { makeEmailDescriptor } from "./email.js";
-import { createFeishuDescriptor } from "./feishu.js";
+import { createFeishuDescriptor } from "../kinds/feishu/descriptor.js";
 import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { createWechatDescriptor } from "./wechat.js";

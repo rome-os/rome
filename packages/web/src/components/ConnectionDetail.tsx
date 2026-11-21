@@ -8,6 +8,10 @@ import { AccountControls } from "@/components/connections/account-controls";
 import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import { CHANNEL_CONFIGS, ChannelConnectCard } from "@/components/channels/channel-connect-card";
+import { ChatRulesSection } from "@/components/connections/chat-rules-section";
+import { Section, SectionHeader, SectionHeading } from "@rome-os/ui/page";
+import { useId } from "react";
+import { useTranslation } from "react-i18next";
 
 /**
  * Shared Connection detail body — a list of slot cards. Each slot renders as a
@@ -45,6 +49,14 @@ export function ConnectionDetailBody({
   // follows the primary slot. Telegram is the only multi-slot connection in
   // v1: its personal-account slot is always secondary to the bot.
 
+  // Each connected account whose kind offers chat rules lists its chats'
+  // rules here. A kind that offers none, as an official app, shows none.
+  const chatRuleSlots = card.slots.flatMap((slot) =>
+    slot.connectionId !== null && slot.state !== null && (slot.chatRules?.length ?? 0) > 0
+      ? [{ connectionId: slot.connectionId, identity: slot.identity }]
+      : [],
+  );
+
   const body = (
     <div className="space-y-6">
       {card.slots.map((slot, index) => {
@@ -67,11 +79,50 @@ export function ConnectionDetailBody({
         );
       })}
       <AccountControls card={card} onRefresh={onRefresh} onOpenAccount={onOpenAccount} />
+      {chatRuleSlots.map((slot) => (
+        <ConnectionChatRules
+          key={slot.connectionId}
+          connectionId={slot.connectionId}
+          title={chatRuleSlots.length > 1 ? slot.identity : null}
+        />
+      ))}
     </div>
   );
 
   // A single-slot connection renders its slot bare — the dialog is the card.
   return card.slots.length === 1 ? <SoleSlotScope>{body}</SoleSlotScope> : body;
+}
+
+/** One account's chat rules, under a heading of its own. */
+function ConnectionChatRules({
+  connectionId,
+  title,
+}: {
+  connectionId: string;
+  /** The account's name, where the card holds more than one. */
+  title: string | null;
+}) {
+  const { t } = useTranslation("settings");
+  const headingId = useId();
+  return (
+    <Section aria-labelledby={headingId}>
+      <SectionHeader>
+        <SectionHeading>
+          {/* Under the connection's own heading, so one level below it. */}
+          <h3
+            id={headingId}
+            data-slot="section-title"
+            className="text-section [text-wrap-style:balance] text-foreground"
+          >
+            {title
+              ? `${t("channels.conversationSettings.chatRules.title")} · ${title}`
+              : t("channels.conversationSettings.chatRules.title")}
+          </h3>
+        </SectionHeading>
+      </SectionHeader>
+      <ChatRulesSection connectionId={connectionId} />
+    </Section>
+  );
 }
 
 /**

@@ -516,7 +516,6 @@ describe("Concierge reply", () => {
     set: rs.fn(),
     clear: rs.fn(),
     restore: rs.fn(),
-    has: () => true,
     jump: rs.fn(),
     ...overrides,
   });

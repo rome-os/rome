@@ -11,6 +11,10 @@ enum Palette {
     static let markFill = dynamic(0xFFFFFF, 0x4B433C)
     static let bubble = dynamic(0xEBE4DA, 0x1C1916)
     static let fill = dynamic(0xEFE9E1, 0x272320)
+    /// Behind a task link's name: the text colour, faint, so it reads on any
+    /// bubble, as the web's chip does (foreground at 7%). `fill` is nearly
+    /// the Agent's bubble in light, and the chip vanished on it.
+    static let taskChip = dynamic(rgba: (0x1A130F, 0.09), (0xFFFFFF, 0.12))
     static let fillStrong = dynamic(0xE8E1D7, 0x2A2523)
     static let pressed = dynamic(0xF1ECE5, 0x221E1C)
     static let drawer = dynamic(0xECE7DF, 0x050404)
@@ -26,10 +30,6 @@ enum Palette {
 
     static let fg = dynamic(0x1A130F, 0xF4F3EF)
     static let sub = dynamic(0x7A6857, 0xB0A294)
-    /// The rail that joins a Concierge reply to the message it answers: the
-    /// bubble's fill taken 26% of the way to the text color, since the fill
-    /// itself sits too close to the page. A guardian reply's rail is `primary`.
-    static let replyRail = dynamic(0xB5AEA5, 0x54524E)
     static let hair = dynamic(rgba: (0x1A130F, 0.09), (0xFFFFFF, 0.08))
     static let glass = dynamic(rgba: (0xFFFFFF, 0.78), (0x1E1A17, 0.8))
     static let grabber = dynamic(rgba: (0x1A130F, 0.18), (0xFFFFFF, 0.22))
@@ -118,7 +118,7 @@ enum Palette {
 enum Metrics {
     static let pagePadding: CGFloat = 16
     static let bubbleRadius: CGFloat = 20
-    static let bubbleTight: CGFloat = 6
+    static let bubbleTight: CGFloat = 4
     static let cardRadius: CGFloat = 18
     static let groupRadius: CGFloat = 16
     static let bigCardRadius: CGFloat = 18

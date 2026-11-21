@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +15,7 @@ import type {
 } from "./rome-cloud-mail.js";
 import { MailProviderError } from "./rome-cloud-mail.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
-import type { PeopleRepository } from "../../../db/repositories/people.js";
+import type { PeopleRepository } from "../../../people/model/people-repository.js";
 
 const INBOUND_SECRET = "test-inbound-secret";
 const GUARDIAN = "guardian@example.com";
@@ -108,7 +109,7 @@ describe("EmailAdapter.ingestInbound", () => {
     const adapter = makeAdapter(provider);
     const received: ChannelMessage[] = [];
     adapter.onInbound(async (m) => {
-      received.push(m);
+      received.push(channelMessageOf(m, "email"));
     });
 
     const raw = JSON.stringify(buildEvent());
@@ -137,7 +138,7 @@ describe("EmailAdapter.ingestInbound", () => {
     const adapter = makeAdapter(provider);
     const received: ChannelMessage[] = [];
     adapter.onInbound(async (m) => {
-      received.push(m);
+      received.push(channelMessageOf(m, "email"));
     });
 
     const raw = JSON.stringify(buildEvent());
@@ -153,7 +154,7 @@ describe("EmailAdapter.ingestInbound", () => {
     const adapter = makeAdapter(provider);
     const received: ChannelMessage[] = [];
     adapter.onInbound(async (m) => {
-      received.push(m);
+      received.push(channelMessageOf(m, "email"));
     });
 
     const event = buildEvent({
@@ -174,7 +175,7 @@ describe("EmailAdapter.ingestInbound", () => {
     const adapter = makeAdapter(provider);
     const received: ChannelMessage[] = [];
     adapter.onInbound(async (m) => {
-      received.push(m);
+      received.push(channelMessageOf(m, "email"));
     });
 
     const event = buildEvent({ from: [{ email: "stranger@elsewhere.com" }] });
@@ -190,7 +191,7 @@ describe("EmailAdapter.ingestInbound", () => {
     const adapter = makeAdapter(provider);
     const received: ChannelMessage[] = [];
     adapter.onInbound(async (m) => {
-      received.push(m);
+      received.push(channelMessageOf(m, "email"));
     });
 
     // A spoofed From for a mapped non-guardian contact (e.g. inner-circle).
@@ -213,7 +214,7 @@ describe("EmailAdapter.ingestInbound", () => {
     const adapter = makeAdapter(provider);
     const received: ChannelMessage[] = [];
     adapter.onInbound(async (m) => {
-      received.push(m);
+      received.push(channelMessageOf(m, "email"));
     });
 
     // Same deposit delivered twice (relay redelivers an un-acked seq after a
@@ -597,7 +598,7 @@ describe("EmailAdapter inbound attachments", () => {
     const adapter = makeAdapter(provider);
     const received: ChannelMessage[] = [];
     adapter.onInbound(async (m) => {
-      received.push(m);
+      received.push(channelMessageOf(m, "email"));
     });
 
     const event = buildEvent({

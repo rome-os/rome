@@ -2,7 +2,7 @@
 //
 // WhatsApp is a Talker with a single `session` grant: a linked-device session
 // (Baileys auth state) that comes from scanning a linking QR on the phone. The
-// transport core — the inbound `ChannelMessage`, address-book sync, media
+// transport core — the inbound `Message`, address-book sync, media
 // download, the generation-gated reconnect loop — is `WhatsAppAdapter`
 // (packages/core/src/connections/kinds/whatsapp/whatsapp.ts), wrapped here. The transport already
 // speaks the channel's record, so inbound and send pass through without a
@@ -44,6 +44,7 @@ import type {
 } from "../types.js";
 import { createWhatsAppAuthState, type WhatsAppAuthMaterial } from "./whatsapp-auth-state.js";
 import { addressIsConversationFeature } from "./talk-features.js";
+import { SESSION_RESET_ONLY_CHAT_RULES } from "@rome/api-types/chat-rules";
 
 /** Runtime deps the WhatsApp adapter needs that `kit` cannot supply: the
  *  address-book store mirror and the guardian auto-map callback. Threaded in at
@@ -307,6 +308,9 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
     reviveProfile: (record) => reviveWhatsAppProfile(record),
     accountIdOf: (record) => (typeof record.jid === "string" && record.jid) || null,
     grant: "session",
+    // Today's behaviour, stated: chats wake on every message the platform
+    // delivers, and only the session reset is the guardian's to set.
+    chatRules: SESSION_RESET_ONLY_CHAT_RULES,
     auth: sessionScheme,
     capabilities: {
       talker: {

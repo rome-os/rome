@@ -6,7 +6,7 @@
 
 import { describe, expect, it, rs } from "@rstest/core";
 import type { DrizzleTx } from "../../db/index.js";
-import type { PeopleRepository } from "../../db/repositories/people.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
 import { SetupManager, NoSetupError, type SetupRegistry } from "./manager.js";
 import type { SetupFn } from "./types.js";

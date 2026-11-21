@@ -9,6 +9,7 @@ import type {
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { createLogger } from "../../../logger.js";
+import type * as connections from "../../message.js";
 import { SendRefused } from "@rome-os/app-runtime";
 import {
   EMAIL_MESSAGE_ID,
@@ -17,7 +18,7 @@ import {
   replyToShaped,
 } from "../../outbound/send-refusals.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
-import type { PeopleRepository } from "../../../db/repositories/people.js";
+import type { PeopleRepository } from "../../../people/model/people-repository.js";
 import { linkGuardianToAccount } from "../../../people/guardian-mapping.js";
 import { InboundDedup } from "../../inbound/inbound-dedup.js";
 import {
@@ -137,11 +138,11 @@ function attachmentsFromParts(parts: EmailBodyPart[]): Attachment[] {
 
 /**
  * Email as a first-class channel. Inbound is push-driven by Rome Cloud: the
- * `email_inbound` core-side action calls `ingestInbound()` with the raw relay
+ * `system:email_inbound` core-side action calls `ingestInbound()` with the raw relay
  * deposit, which this adapter verifies (HMAC), gates (authentication + From),
- * pulls the body for, and hands to `onInbound` as the channel's own record, a
- * `ChannelMessage` whose `raw` is the `RomeMailEvent`. The Connection
- * integration delivers it as it is.
+ * pulls the body for, and hands to `onInbound` as a Connections message whose
+ * `raw` is the `RomeMailEvent`. The Connection integration delivers it as it
+ * is.
  */
 export class EmailAdapter {
   private readonly provider: MailProvider;
@@ -154,7 +155,7 @@ export class EmailAdapter {
   private inboundSecret: string;
   private guardianEmail: string;
 
-  private messageHandler: ((msg: ChannelMessage) => Promise<void>) | null = null;
+  private messageHandler: ((msg: connections.Message) => Promise<void>) | null = null;
 
   // The message each thread's replies target: the newest inbound, or the newest
   // message Rome sent, for a thread with no inbound. The mailbox scan applies
@@ -248,7 +249,7 @@ export class EmailAdapter {
     log.info("email channel stopped");
   }
 
-  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+  onInbound(handler: (msg: connections.Message) => Promise<void>): void {
     this.messageHandler = handler;
   }
 
@@ -571,9 +572,9 @@ export class EmailAdapter {
 
   /**
    * Consume one inbound relay deposit (a signed `RomeMailEvent` JSON string).
-   * Called by the `email_inbound` action after the connector transports the
+   * Called by the `system:email_inbound` action after the connector transports the
    * deposit in. Verifies the per-inbox HMAC, applies the guardian gate, pulls
-   * the body on demand, and dispatches a ChannelMessage into the standard
+   * the body on demand, and dispatches a Connections message into the standard
    * channel pipeline. Returns the disposition for logging/tests.
    */
   async ingestInbound(
@@ -665,17 +666,17 @@ export class EmailAdapter {
     const messageId = event.providerMessageId || uuid();
     if (parts.length > 0) this.pendingAttachments.set(messageId, parts);
 
-    const message: ChannelMessage = {
-      channel: "email",
-      direction: "inbound",
-      messageId,
-      chatId: threadId as ChatId,
-      senderId,
-      senderDisplayName: fromName,
-      text,
-      attachments,
-      timestamp: new Date(event.receivedAt ?? Date.now()),
-      thread: { kind: "dm", ...(event.subject ? { name: event.subject } : {}) },
+    const message: connections.Message = {
+      id: messageId,
+      where: {
+        chatId: threadId as ChatId,
+        kind: "direct",
+        ...(event.subject ? { name: event.subject } : {}),
+      },
+      sender: { accountId: senderId, name: fromName },
+      content: { text, attachments },
+      receivedBy: this.address,
+      saidAt: new Date(event.receivedAt ?? Date.now()),
       raw: event,
     };
 

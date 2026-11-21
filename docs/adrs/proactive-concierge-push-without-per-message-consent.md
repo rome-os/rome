@@ -1,6 +1,6 @@
 # Proactive Concierge messages push without per-message consent
 
-- **Status**: Accepted, amended 2026-11-07 (replies push, but not in a chat the phone shows) 2026-11-09 (every message pushes to the person the chat serves, unless their dashboard is active) and 2026-11-14 (a push shows what the message shows)
+- **Status**: Accepted, amended 2026-11-07 (replies push, but not in a chat the phone shows) 2026-11-09 (every message pushes to the person the chat serves, unless their dashboard is active), 2026-11-14 (a push shows what the message shows) and 2026-11-18 (the Concierge tells a result with `say`)
 - **Date**: 2026-11-06
 - **Architecture**: [Notification delivery](../architecture/notification-delivery.md)
 - **Amends**: [The notification body is sender-supplied](sender-supplied-notification-body-over-contentless-push.md)
@@ -44,6 +44,10 @@ This replaces the 2026-11-07 rule that a guardian reading on a computer still ge
 A forward with no lead-in pushes the task's title and a preview of what it brought back. A card pushes what it asks: a task's question, an approval's title, "Connect <service>" for a connect card, or the task's title when it asks nothing. The Concierge's own words push as before.
 
 This reverses the earlier rule that a forward, a task's title and a card push the fixed line because their words were not the Concierge's and could hold a secret. A secret now stays off the lock screen only when the Concierge says it with `say … private`, which still pushes the fixed line, and the Concierge is told to put a secret there and never in a forward. The merge window and ring rules are unchanged.
+
+## Amendment: the Concierge tells a result with `say`
+
+*2026-11-18.* The Concierge has no `chat_forward` tool. It tells a text result with one `say` in its own words, written from the task chat's conclusion, so the push shows that `say`. Only a card is forwarded, by `card_forward` and its id, and its push is the task's title and a preview of the card's line. Where this record says a forward pushes a task's title and text, read that card. A secret still goes in a `say … private`, and never on a card.
 
 ## Alternatives
 

@@ -21,7 +21,7 @@ const inputSchema = z.object({
     .string()
     .min(1)
     .describe(
-      "Trigger slug to fetch the schema for, e.g. 'GMAIL_NEW_GMAIL_MESSAGE' (from connector_event_search)",
+      "Trigger slug to fetch the schema for, e.g. 'GMAIL_NEW_GMAIL_MESSAGE' (from connector:connector_event_search)",
     ),
 });
 
@@ -34,7 +34,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
       if (!client) {
         return {
           status: "error",
-          error: `Not signed in to Composio. Call connector_login once to sign in, then re-run connector_event_schema for "${slug}".`,
+          error: `Not signed in to Composio. Call connector:connector_login once to sign in, then re-run connector:connector_event_schema for "${slug}".`,
         };
       }
       try {

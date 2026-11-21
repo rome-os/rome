@@ -59,7 +59,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         // re-runs connector_connect per toolkit after signing in.
         return {
           status: "error",
-          error: `Not signed in to Composio. Call connector_login once to sign in, then re-run connector_connect with toolkit "${toolkit}" to authorize it.`,
+          error: `Not signed in to Composio. Call connector:connector_login once to sign in, then re-run connector:connector_connect with toolkit "${toolkit}" to authorize it.`,
         };
       }
       try {

@@ -264,7 +264,7 @@ function runtimeSection(runtime: RuntimeFacts): string {
 /**
  * The installed-app catalog, for every core agent and not just main. It also
  * carries the connector catalog: the `connector` app's description lists the
- * connectable toolkits and their `connector_proxy` API hosts, so an agent that
+ * connectable toolkits and their `connector:connector_proxy` API hosts, so an agent that
  * can't see this section can't pick connectors.
  */
 function installedAppsSection(apps: PromptMaterial["installedApps"]): string | null {

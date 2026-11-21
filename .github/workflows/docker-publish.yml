@@ -267,7 +267,9 @@ jobs:
   github-release:
     name: Create GitHub release
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Room for the highlights' model call (release-highlights.mjs) before the
+    # release is created.
+    timeout-minutes: 10
     needs:
       - release
       - publish
@@ -286,6 +288,10 @@ jobs:
           persist-credentials: false
 
       - name: Write release notes
+        env:
+          # Writes the highlights the upgrade dialog shows. Without it, or
+          # when the model fails, release-notes.json has none.
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
 
@@ -303,15 +309,17 @@ jobs:
             jq -r '.results[].name' <<< "$page" >> published-versions.txt
             url=$(jq -r '.next' <<< "$page")
           done
-          node scripts/docker/release-notes.mjs "$RELEASE_TAG" published-versions.txt > release-notes.md
-          cat release-notes.md
+          node scripts/docker/release-notes.mjs "$RELEASE_TAG" published-versions.txt \
+            --json release-notes.json > release-notes.md
+          cat release-notes.md release-notes.json
 
       - name: Create release
         run: |
           set -euo pipefail
 
           # Not Latest: that badge stays with the package releases, which
-          # release-please would take it back for anyway.
+          # release-please would take it back for anyway. Instances download
+          # release-notes.json to show what an upgrade changes.
           prerelease=false
           [[ "$RELEASE_TAG" == *-* ]] && prerelease=true
           gh release create "$RELEASE_TAG" \
@@ -319,4 +327,5 @@ jobs:
             --latest=false \
             --prerelease="$prerelease" \
             --title "Rome ${RELEASE_TAG}" \
-            --notes-file release-notes.md
+            --notes-file release-notes.md \
+            release-notes.json

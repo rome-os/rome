@@ -39,7 +39,7 @@ export interface WatchOption {
 /**
  * What a source lets Rome watch: the kinds of event a follower may turn on, in
  * words the guardian reads, the options that tune them, and the raw bus events
- * behind each kind. Core reads it through the `connector_watch_sources` action.
+ * behind each kind. Core reads it through the `connector:connector_watch_sources` action.
  */
 export interface Watchable {
   source: string;

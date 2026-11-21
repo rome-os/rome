@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -117,7 +118,7 @@ describe("TelegramUserAdapter", () => {
   it("emits an inbound message as a ChannelMessage, field for field", async () => {
     const delivered: ChannelMessage[] = [];
     adapter.onInbound(async (msg) => {
-      delivered.push(msg);
+      delivered.push(channelMessageOf(msg, "telegram_user"));
     });
     const message = documentMessage();
     await internals.handleNewMessage({ message });

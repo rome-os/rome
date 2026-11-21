@@ -3,7 +3,8 @@
 // setup. Observed through the ledger and the setup state.
 
 import { describe, expect, it } from "@rstest/core";
-import { PeopleRepository } from "../db/repositories/people.js";
+import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../people/model/people-repository.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createTestDb, testAccountLinkOf } from "../test/db.js";
 import { platformOf } from "@rome/api-types/platform";
@@ -374,7 +375,7 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
     };
     const { db, registry, close } = setupRegistry(pairOwn);
     try {
-      const people = new PeopleRepository(db);
+      const people = new DrizzlePeopleRepository(db);
       await people.createWithId("guardian", { displayName: "Guardian", bondLevel: "guardian" });
       const manager = new SetupManager({ registry, peopleRepo: people });
       const first = await registry.connect(SERVICE);

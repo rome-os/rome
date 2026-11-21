@@ -2,6 +2,7 @@
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import * as sonner from "sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import i18n from "@/i18n";
@@ -166,6 +167,26 @@ describe("AgentChange", () => {
     await user.click(screen.getByRole("button", { name: "Disconnect" }));
     await waitFor(() => expect(onDisconnected).toHaveBeenCalled());
     expect(calls).toEqual([{ url: "/api/connections/discord-id/grants/bot", method: "DELETE" }]);
+  });
+
+  it("warns, until dismissed, when the service may still hold Rome's access", async () => {
+    const warning = "Disconnected in Rome, but the service may still hold Rome's access: down.";
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ warning }), { status: 200 }),
+    );
+    const toastWarning = rs.spyOn(sonner.toast, "warning").mockImplementation(() => "t");
+    const onDisconnected = rs.fn();
+    renderChange({ account: account(), onDisconnected });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Disconnect Sales" }));
+    await user.click(screen.getByRole("button", { name: "Disconnect" }));
+
+    await waitFor(() => expect(onDisconnected).toHaveBeenCalled());
+    expect(toastWarning).toHaveBeenCalledWith(warning, {
+      duration: Number.POSITIVE_INFINITY,
+      closeButton: true,
+    });
   });
 
   it("keeps the account and shows the error when disconnecting fails", async () => {

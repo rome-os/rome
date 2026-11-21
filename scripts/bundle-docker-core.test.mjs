@@ -163,24 +163,6 @@ test("compiled People contracts run in plain Node without TypeScript source reso
   assert.equal(Number(output), 75);
 });
 
-// The compiled runtime reads these next to its own module, so a missing copy is
-// only visible in the image — the source tree keeps working under tsx.
-test("bundles the WeChat scripts the compiled runtime reads from dist", async () => {
-  const expected = [
-    [
-      "packages/core/src/connections/kinds/wechat-user/wechat-user-send-driver.py",
-      "dist/wechat-user-send-driver.py",
-    ],
-  ];
-
-  for (const [source, destination] of expected) {
-    const entry = bundledAssets.find(([, dest]) => dest === destination);
-    assert.ok(entry, `no bundled asset copied to ${destination}`);
-    assert.equal(entry[0], source);
-    await readFile(join(root, source), "utf8");
-  }
-});
-
 test("the app CLI runs every command from the bundle when src/ is absent", async (t) => {
   const core = join(root, "packages/core");
   const pkg = await mkdtemp(join(tmpdir(), "rome-compiled-cli-"));

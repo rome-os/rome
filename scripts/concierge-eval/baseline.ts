@@ -7,8 +7,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { loadavg } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { Api, DEV_JWT_SECRET } from "./api.js";
+import { Api, DEV_JWT_SECRET, type TaskDto } from "./api.js";
 import { standingRules } from "./baseline-checks.js";
+import { conclusionIn } from "./baseline-rules.js";
 import {
   BASELINE_SCENARIOS,
   BASELINE_VERSION,
@@ -21,7 +22,7 @@ import { judge, type Verdict } from "./judge.js";
 import { Stack, checkSnapshotName, sleep } from "./stack.js";
 import { type TaskPath, readSpans, taskPath } from "./task-path.js";
 import { type TimedTurn, timedTurns } from "./timing.js";
-import { transcriptOf } from "./transcript.js";
+import { textOf, transcriptOf } from "./transcript.js";
 
 const USAGE = `pnpm concierge:baseline --config <label> --model <selection id> --effort <low|high> [--runs N]
 pnpm concierge:baseline --report
@@ -120,6 +121,21 @@ async function belowMaxLoad(id: string): Promise<void> {
   if (waited) console.log(`[${id}] load fell below ${max} after ${waited / 1000}s`);
 }
 
+/** The conclusion each ended task chat's final answer wrote, for the tasks that wrote one. */
+async function conclusionsOf(api: Api, tasks: TaskDto[]): Promise<string[]> {
+  const found: string[] = [];
+  for (const task of tasks) {
+    if (task.status !== "ended" || !task.chat?.id) continue;
+    const answers = (await api.messages(task.chat.id))
+      .filter((message) => message.role === "assistant")
+      .map(textOf)
+      .filter(Boolean);
+    const conclusion = conclusionIn(answers.at(-1) ?? "");
+    if (conclusion) found.push(conclusion);
+  }
+  return found;
+}
+
 async function playScenario(
   api: Api,
   scenario: BaselineScenario,
@@ -184,6 +200,7 @@ async function playScenario(
     said: saidAfter.flat(),
     shown: [...saidAfter.flat(), ...cardsAfter.flat()],
     tasks: driven.tasks,
+    conclusions: await conclusionsOf(api, driven.tasks),
   };
   const notes = [...scenario.check(input), ...standingRules(scenario, input)];
   const setupTurnIds = scenario.steps.flatMap((step, i) =>
@@ -255,7 +272,7 @@ async function taskPathOf(
 ): Promise<TaskPath | null> {
   const [tasks] = stack.query<{ session_id: string }>([
     {
-      sql: "SELECT session_id FROM concierge_tasks WHERE chat_id = ? AND session_id IS NOT NULL ORDER BY created_at",
+      sql: "SELECT t.session_id FROM task_chats t JOIN rome_sessions s ON s.id = t.session_id WHERE t.concierge_chat_id = ? ORDER BY s.created_at",
       params: [chatId],
     },
   ]);

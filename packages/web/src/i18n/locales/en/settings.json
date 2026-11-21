@@ -12,7 +12,6 @@
     "Connections": "Connections",
     "Favors": "Favors",
     "Trust": "Trust",
-    "Channels": "Channels",
     "AI Tools": "AI Tools",
     "Advanced": "Advanced",
     "Devices": "Devices"
@@ -203,6 +202,14 @@
           "bulletsFallback": {
             "reply": "Reply when people message this account in your servers",
             "start": "Start a task when a new message arrives"
+          }
+        }
+      },
+      "slack_app": {
+        "bot": {
+          "title": "Rome in your Slack",
+          "bullets": {
+            "reply": "Answer direct messages in your Slack workspace as your Concierge"
           }
         }
       },
@@ -408,7 +415,7 @@
     "grantedUntil": "Granted until {{time}}"
   },
   "trust": {
-    "title": "Bond Level Rules",
+    "title": "Bond level rules",
     "trustedLevels": {
       "title": "Trusted messages",
       "description": "Messages from persons with these bond levels bypass sentinel triage."
@@ -426,17 +433,7 @@
   },
   "channels": {
     "conversationSettings": {
-      "configure": "Configure chats",
-      "searchPlaceholder": "Search provider, workspace, or chat",
-      "allConnections": "All connections",
-      "anyStatus": "Any status",
-      "connectionFilterAria": "Filter by connection",
-      "statusFilterAria": "Filter by status",
-      "status": {
-        "online": "Online",
-        "offline": "Offline",
-        "notConnected": "Not connected"
-      },
+      "searchPlaceholder": "Search chats",
       "kinds": {
         "channel": "Channel",
         "group": "Group",
@@ -444,12 +441,8 @@
         "topic": "Topic"
       },
       "loading": "Loading chats…",
-      "emptyTitle": "No configurable chats found",
-      "emptyDescription": "Connect an account on a supported platform, or send a message so Rome can discover the chat.",
+      "emptyTitle": "Every chat follows the defaults",
       "loadMore": "Load more",
-      "overrideCount_one": "{{count}} override",
-      "overrideCount_other": "{{count}} overrides",
-      "providerDefaults": "product defaults",
       "sections": {
         "activation": "Activation",
         "replies": "Replies",
@@ -466,24 +459,24 @@
         "sessionReset": "Provider session reset"
       },
       "descriptions": {
-        "sessionReset": "Clears the agent's memory kept by the model provider"
-      },
-      "source": {
-        "overridden": "Overridden"
+        "sessionReset": "Clears the agent's memory kept by the model provider."
       },
       "options": {
-        "mention": "Only when mentioned",
         "mentions": "Only mentions",
         "all": "All",
         "ignore": "Ignore",
         "respond": "Respond",
         "thread": "Native thread",
-        "inline": "Inline"
+        "inline": "Inline",
+        "replyRule": {
+          "mention": "Only when addressed",
+          "all": "Every message"
+        }
       },
       "mainAgent": "main (default)",
       "accountAgent": "{{agent}} (this account's agent)",
-      "silentAccount": "Messages here do not reach Rome until this account has an agent.",
-      "silentAccountLink": "<account>Link one on the account</account>.",
+      "silentAccount": "Messages here do not reach Rome until this connected account has an agent.",
+      "silentAccountLink": "<account>Link one in Envoys</account>.",
       "silentAccountOverride": "This chat's choice, {{agent}}, applies once one is linked.",
       "sessionReset": {
         "never": "Never",
@@ -500,7 +493,38 @@
         "utc": "UTC"
       },
       "saving": "Saving…",
-      "retry": "Retry"
+      "retry": "Retry",
+      "chatRules": {
+        "title": "Chat rules"
+      },
+      "otherChats": "Group chats by default:",
+      "addChat": "Add chat",
+      "noMatches": "No chats match",
+      "findChats": "A chat shows up here once Rome sees a message in it.",
+      "close": "Close",
+      "addDialog": {
+        "title": "Add a chat"
+      },
+      "resetToDefaults": "Reset to defaults",
+      "changed": "Changed from the default",
+      "summary": {
+        "defaults": "Follows the defaults",
+        "on": "On",
+        "off": "Off",
+        "thread": "Replies in a thread",
+        "inline": "Replies inline",
+        "agent": "Answered by {{agent}}",
+        "resetNever": "Never resets",
+        "resetDaily": "Resets daily at {{time}} UTC",
+        "resetIdle": "Resets after {{duration}} idle",
+        "minutes_one": "{{count}} minute",
+        "minutes_other": "{{count}} minutes",
+        "hours_one": "{{count}} hour",
+        "hours_other": "{{count}} hours",
+        "days_one": "{{count}} day",
+        "days_other": "{{count}} days"
+      },
+      "allListed": "Every chat here already has rules of its own."
     },
     "restartNeededFallback": "Backend unreachable — restart required to apply changes",
     "disconnectFailedFallback": "Failed to disconnect.",
@@ -512,8 +536,8 @@
       "connected": "Connected",
       "disconnected": "Disconnected",
       "configured": "Configured",
-      "awaitingVerification": "Awaiting Verification",
-      "codePending": "Code Pending"
+      "awaitingVerification": "Awaiting verification",
+      "codePending": "Code pending"
     },
     "connectedAs": "Connected as",
     "telegram": {
@@ -525,7 +549,7 @@
       "yourBot": "your agent's account",
       "waitingVerification": "Waiting for verification...",
       "codeShownEarlier": "Verification code was shown when you first connected. Disconnect and reconnect to generate a new code.",
-      "botTokenLabel": "Bot Token",
+      "botTokenLabel": "Bot token",
       "botTokenPlaceholder": "Bot token from @BotFather"
     },
     "telegramUser": {
@@ -539,7 +563,7 @@
     "discord": {
       "title": "Discord",
       "guardianLinked": "Your Discord account is linked as guardian.",
-      "botTokenLabel": "Bot Token",
+      "botTokenLabel": "Bot token",
       "botTokenPlaceholder": "Paste your bot token here",
       "routing": {
         "title": "Channel routing",
@@ -576,10 +600,6 @@
     "feishu": {
       "title": "Feishu",
       "guardianLinked": "Your Feishu account is linked as guardian."
-    },
-    "wechatUser": {
-      "fallbackName": "WeChat account",
-      "disconnectFailedFallback": "Failed to disconnect the WeChat account."
     }
   },
   "favors": {
@@ -672,8 +692,8 @@
       "sevenDay": "7D USED",
       "resetsIn": "Resets in <1>{{time}}</1>"
     },
-    "logIn": "Log In",
-    "logOut": "Log Out",
+    "logIn": "Log in",
+    "logOut": "Log out",
     "loggingOut": "Logging out…",
     "codexLogout": {
       "title": "Log out of ChatGPT?",
@@ -693,7 +713,7 @@
     "otherProviders": {
       "title": "Other API providers",
       "experimental": "Experimental",
-      "apiKey": "API Key",
+      "apiKey": "API key",
       "apiProvidersTooltip": "MiniMax, DeepSeek, Kimi, Z.ai, and more",
       "changeProvider": "Change",
       "dialogDescription": "Takes priority over your Claude account until removed.",
@@ -702,8 +722,8 @@
       "apiKeyLabel": "API key",
       "apiKeyPlaceholderReplace": "Enter a new key to replace the saved key",
       "apiKeyPlaceholderNew": "Paste API key",
-      "saveKey": "Save Key",
-      "saveConfiguration": "Save Configuration",
+      "saveKey": "Save key",
+      "saveConfiguration": "Save configuration",
       "envHint": "{{envVar}} is sent to {{baseUrl}} for Anthropic-compatible Claude sessions.",
       "needsApiKeyUpdate": "The saved {{providerName}} API key was rejected. Save a new key to reconnect this provider.",
       "saveFailedFallback": "Failed to save provider key.",
@@ -717,7 +737,7 @@
         "title": "Custom environment",
         "inputModeLabel": "Environment input mode",
         "jsonMode": "Paste JSON",
-        "fieldsMode": "Key / Value",
+        "fieldsMode": "Key / value",
         "jsonLabel": "Custom environment JSON",
         "jsonPlaceholder": "{\n  \"env\": {\n    \"ANTHROPIC_AUTH_TOKEN\": \"...\",\n    \"ANTHROPIC_BASE_URL\": \"https://...\"\n  }\n}",
         "emptyFields": "No environment variables yet.",
@@ -741,10 +761,10 @@
     }
   },
   "sentinelLog": {
-    "title": "Sentinel Log",
+    "title": "Sentinel log",
     "empty": "No sentinel log entries.",
     "responsePrefix": "Response: {{response}}",
-    "markReviewed": "Mark Reviewed",
+    "markReviewed": "Mark reviewed",
     "reviewed": "Reviewed"
   },
   "advanced": {
@@ -958,6 +978,22 @@
     "targetChanged": "A newer version ({{version}}) was published in the meantime — confirm again to upgrade to it.",
     "upgradeFailed": "Upgrade request failed: {{message}}",
     "upgradeFailedFallback": "Upgrade request failed.",
+    "notesSingle": "What's new in {{version}}",
+    "notesRange_one": "What's new: {{from}} → {{to}} ({{count}} release)",
+    "notesRange_other": "What's new: {{from}} → {{to}} ({{count}} releases)",
+    "notesRangePending": "What's new: {{from}} → {{to}}",
+    "notesUpTo_one": "What's new up to {{to}} ({{count}} release)",
+    "notesUpTo_other": "What's new up to {{to}} ({{count}} releases)",
+    "notesReleased": "Released {{date}}",
+    "notesLoading": "Loading what's new",
+    "notesFailed": "Could not load what's new",
+    "notesMissing": "Release notes for {{version}} are not available.",
+    "notesOnGitHub": "Release notes on GitHub",
+    "notesPartial": "Notes for releases before {{version}} are not available, so this list covers part of the upgrade.",
+    "notesPartialUnknown": "Notes for earlier releases are not available, so this list covers part of the upgrade.",
+    "notesShowAll": "Show all {{count}}",
+    "notesShowFewer": "Show fewer",
+    "notesSeeFull": "See full changes on GitHub",
     "restartingBody": "Upgrading to {{version}}.",
     "restartTimeoutBody": "{{name}} hasn't come back on {{version}} after {{minutes}} minutes. The upgrade may still be running, or it may have failed.",
     "restartTimeoutAction": "Check the instance status in Rome Cloud.",
@@ -1009,8 +1045,17 @@
     "starting": "Starting…",
     "startFailed": "Could not start the device service",
     "setup": {
-      "title": "Connect a computer",
-      "description": "Connect each computer separately.",
+      "title": "Connect a device",
+      "linkDevice": "Link device",
+      "methods": {
+        "desktop": "App",
+        "cli": "Rome Node CLI",
+        "container": "Rome Node container"
+      },
+      "desktopHelp": "Sign in to the Rome app with the same Rome Cloud account. On iOS, open Settings → Connections and turn on Live access for the features you want Rome to use.",
+      "desktopDownload": "Download Rome",
+      "comingSoon": "Coming soon",
+      "containerHelp": "Runs Rome Node in a Docker container using Docker Compose.",
       "commandHelp": "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
       "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
       "instructions": "Installation and connection guide"

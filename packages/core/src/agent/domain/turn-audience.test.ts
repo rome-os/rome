@@ -24,7 +24,6 @@ describe("turnAudience", () => {
     "whatsapp",
     "discord",
     "wechat",
-    "wechat_user",
     "linkedin",
     "slack",
     "feishu",
@@ -62,6 +61,17 @@ describe("turnAudience", () => {
     expect(turnAudience(place({ channel: "telegram-2", ...guardianDm }))).toBe("shared");
     expect(turnAudience(place({ senderBondLevel: "guardian" }))).toBe("shared");
     expect(turnAudience(undefined)).toBe("shared");
+  });
+
+  it("reads a turn with no chat of its own as the turn that started it", () => {
+    expect(turnAudience(undefined, { parent: "private" })).toBe("private");
+    expect(turnAudience(undefined, { parent: "shared" })).toBe("shared");
+    // An agent summoned by a summoned agent keeps the first turn's audience.
+    const first = turnAudience(undefined, { parent: "private" });
+    expect(turnAudience(undefined, { parent: first })).toBe("private");
+    expect(turnAudience(undefined, { parent: "private", actor: { kind: "visitor" } })).toBe(
+      "shared",
+    );
   });
 
   it("reads a turn that acts for a visitor as shared, even in a private chat", () => {

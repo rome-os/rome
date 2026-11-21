@@ -9,27 +9,8 @@ import {
   NewFolderSyncSection,
   type NewFolderLinkChoice,
 } from "@/components/sync/NewFolderSyncSection";
+import { getProjectsAutoSavePolicy } from "@/lib/projects-autosave";
 import { emitSessionsChanged } from "@/lib/session-events";
-
-const LARGE_TEXT_FILE_BYTES = 1024 * 1024;
-const STANDARD_AUTOSAVE_DELAY_MS = 2000;
-const LARGE_FILE_AUTOSAVE_DELAY_MS = 5000;
-
-function getProjectsAutoSavePolicy(file: {
-  editable: boolean;
-  kind: string;
-  path: string;
-  size: number;
-}) {
-  if (!file.editable || file.kind !== "text") return null;
-  if (!/\.(md|mdx|txt)$/i.test(file.path)) return null;
-
-  return {
-    commit: false,
-    delayMs:
-      file.size > LARGE_TEXT_FILE_BYTES ? LARGE_FILE_AUTOSAVE_DELAY_MS : STANDARD_AUTOSAVE_DELAY_MS,
-  };
-}
 
 function isProjectChildPath(path: string): boolean {
   return path.startsWith("projects/") && path.length > "projects/".length;

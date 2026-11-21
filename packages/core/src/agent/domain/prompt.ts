@@ -131,6 +131,9 @@ export function buildWorkspaceContextSection(
 export function buildThreadContextBlock(
   threadContext: ThreadContext | undefined | null,
   project: { path: string | undefined; relativePath: string | null },
+  /** The name of Rome's account the agent speaks as in this chat. On a
+   *  platform that shows mentions by name, a mention of it reads `@<name>`. */
+  accountName?: string | null,
 ): string | null {
   if (!threadContext) return null;
 
@@ -145,6 +148,9 @@ export function buildThreadContextBlock(
   }
   if (threadContext.threadName?.trim()) {
     lines.push(`thread name: ${xmlEscape(threadContext.threadName.trim())}`);
+  }
+  if (accountName?.trim()) {
+    lines.push(`your account here: ${xmlEscape(accountName.trim())}`);
   }
 
   lines.push(

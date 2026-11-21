@@ -25,7 +25,7 @@ export function createEmailInboundAction(
 
       const result = await emailInbound.ingest(rawBody, signature);
       if (result.status !== "dispatched") {
-        log.info("email_inbound not dispatched", {
+        log.info("system:email_inbound not dispatched", {
           status: result.status,
           reason: result.reason,
         });

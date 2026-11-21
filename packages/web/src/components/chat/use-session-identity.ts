@@ -26,6 +26,8 @@ export interface SessionIdentity {
   pinnedAgentMention: AgentMention | null;
   /** ISO timestamp when the session was archived, or null when not archived. */
   archivedAt: string | null;
+  /** ISO timestamp when its owner pinned the chat, or null when not pinned. */
+  pinnedAt: string | null;
   /**
    * Whether a turn of this chat can be forked: in a common chat or a fork
    * chat, and not in a main, topic or task chat.
@@ -33,6 +35,8 @@ export interface SessionIdentity {
   forkable: boolean;
   /** A task chat the Concierge started. */
   isTaskChat: boolean;
+  /** For a task chat: the Concierge chat it reports to, or null. */
+  taskOf: { conciergeChatId: string; conciergeChatName: string; main: boolean } | null;
   /** The chat's project, as the chat list names it, or null while loading. */
   projectPath: string | null;
   /**
@@ -64,8 +68,10 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [pinnedAgentMention, setPinnedAgentMention] = useState<AgentMention | null>(null);
   const [archivedAt, setArchivedAt] = useState<string | null>(null);
+  const [pinnedAt, setPinnedAt] = useState<string | null>(null);
   const [forkable, setForkable] = useState(false);
   const [isTaskChat, setIsTaskChat] = useState(false);
+  const [taskOf, setTaskOf] = useState<SessionIdentity["taskOf"]>(null);
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [isConciergeSession, setIsConciergeSession] = useState(false);
   // The session id whose first fetch has settled (success or failure). Keyed by
@@ -82,6 +88,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
       setReasoningEffort(null);
       setSessionName(null);
       setArchivedAt(null);
+      setPinnedAt(null);
       setForkable(false);
       setProjectPath(null);
       setIsConciergeSession(false);
@@ -109,8 +116,10 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setIsForkChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
+        setPinnedAt(session?.pinnedAt ?? null);
         setForkable(!!session && isProjectChat(chatKind(session)));
         setIsTaskChat(!!session && chatKind(session) === "task");
+        setTaskOf(session?.taskOf ?? null);
         setProjectPath(session?.projectPath ?? null);
         setIsConciergeSession(!!session && chatKind(session) === "topic");
         const agentName = session?.agentName ?? null;
@@ -140,8 +149,10 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
           setSessionName(null);
           setPinnedAgentMention(null);
           setArchivedAt(null);
+          setPinnedAt(null);
           setForkable(false);
           setIsTaskChat(false);
+          setTaskOf(null);
           setIsConciergeSession(false);
         }
       }
@@ -152,7 +163,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     };
   }, [sessionId]);
 
-  // Keep the archived flag (and name) in sync when EITHER archive entry point
+  // Keep the archived and pinned flags (and name) in sync when EITHER archive entry point
   // mutates sessions — the navbar handlers here or the sidebar's row actions,
   // which both emit the sessions-changed event. Without this, archiving the
   // currently open chat from the sidebar would leave this view editable until
@@ -171,8 +182,10 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setIsForkChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
+        setPinnedAt(session?.pinnedAt ?? null);
         setForkable(!!session && isProjectChat(chatKind(session)));
         setIsTaskChat(!!session && chatKind(session) === "task");
+        setTaskOf(session?.taskOf ?? null);
         setProjectPath(session?.projectPath ?? null);
         setIsConciergeSession(!!session && chatKind(session) === "topic");
       } catch {
@@ -190,8 +203,10 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     reasoningEffort,
     pinnedAgentMention: presentationMode ? null : pinnedAgentMention,
     archivedAt,
+    pinnedAt,
     forkable,
     isTaskChat,
+    taskOf,
     projectPath,
     isConciergeSession,
   };

@@ -10,7 +10,7 @@ const MINUTE_MS = 60_000;
  * the agent's self-contained note-to-self, which the woken turn always
  * receives, since another session than the one that deferred may wake to it. */
 export type WakeUp =
-  | { kind: "time"; name: string; note: string; fireAtMs: number; taskId?: string }
+  | { kind: "time"; name: string; note: string; fireAtMs: number; chatId?: string }
   | {
       kind: "event";
       name: string;
@@ -21,7 +21,7 @@ export type WakeUp =
        *  milliseconds), for an agent whose policy asks for them. */
       waitingFor?: string;
       deadlineMs?: number;
-      taskId?: string;
+      chatId?: string;
     };
 
 export type ParsedDefer = { ok: true; wakeUp: WakeUp } | { ok: false; error: string };
@@ -93,10 +93,10 @@ const deferInputSchema = z
     afterMinutes: z.number().int().min(1).optional(),
     at: z.string().optional(),
     event: deferEventSchema.optional(),
-    taskId: z
+    chatId: z
       .string()
       .transform((value) => value.trim())
-      .refine((value) => value.length > 0, { message: "defer.taskId must be non-empty" })
+      .refine((value) => value.length > 0, { message: "defer.chatId must be non-empty" })
       .optional(),
   })
   .refine(
@@ -117,8 +117,8 @@ export function parseDeferInput(
   options: { taskChecks?: boolean } = {},
 ): ParsedDefer {
   // Only an agent whose policy checks tasks (the Concierge) links one.
-  if (!options.taskChecks && input && typeof input === "object" && "taskId" in input) {
-    return { ok: false, error: "defer.taskId is not available to this agent" };
+  if (!options.taskChecks && input && typeof input === "object" && "chatId" in input) {
+    return { ok: false, error: "defer.chatId is not available to this agent" };
   }
   const parsed = deferInputSchema.safeParse(input);
   if (!parsed.success) {
@@ -130,8 +130,8 @@ export function parseDeferInput(
     const error = issue.message.startsWith("defer") ? issue.message : `${where}: ${issue.message}`;
     return { ok: false, error };
   }
-  const { name, note, afterMinutes, at, event, taskId } = parsed.data;
-  const task = taskId ? { taskId } : {};
+  const { name, note, afterMinutes, at, event, chatId } = parsed.data;
+  const task = chatId ? { chatId } : {};
 
   if (event) {
     const { deadline, waitingFor, ...match } = event;

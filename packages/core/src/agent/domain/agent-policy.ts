@@ -60,3 +60,29 @@ export function resolveAgentPolicy(agent: {
     delegatesWork: agent.policy?.delegatesWork ?? false,
   };
 }
+
+/** How one place changes an agent's setup for the sessions it serves there. */
+export interface PlaceSetup {
+  /** The agent's `finalText` in this place, in place of its own. */
+  finalText?: AgentPolicy["finalText"];
+  /** The agent's `handoffOnRenewal` in this place, in place of its own. */
+  handoffOnRenewal?: boolean;
+  /** Actions of the agent's own list it may not call in this place. */
+  withoutActions?: readonly string[];
+  /** True when a session here may not wake itself later with `defer`. */
+  withoutDefer?: boolean;
+  /**
+   * The agent's own instructions in this place, in place of its
+   * `systemPromptPrefix`, for an agent whose instructions assume another place.
+   */
+  systemPromptPrefix?: string;
+}
+
+/** The agent's policy in a place: what the place sets wins over the agent's own. */
+export function policyInPlace(policy: AgentPolicy, place: PlaceSetup | null): AgentPolicy {
+  return {
+    ...policy,
+    ...(place?.finalText !== undefined ? { finalText: place.finalText } : {}),
+    ...(place?.handoffOnRenewal !== undefined ? { handoffOnRenewal: place.handoffOnRenewal } : {}),
+  };
+}

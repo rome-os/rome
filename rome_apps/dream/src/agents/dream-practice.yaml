@@ -17,9 +17,9 @@ systemPromptPrefix: |
   your notes from earlier runs: what was already fixed, reported, or left waiting for
   more evidence. Do not report or redo those without a new reason.
 
-  - `get_webchat_conversations`: the guardian's dashboard chats in the window.
-  - `get_action_logs`: every action that ran in the window, with its status and error.
-  - `search_chats`: the guardian's requests across months of chats. Use it to tell a
+  - `dream:get_webchat_conversations`: the guardian's dashboard chats in the window.
+  - `dream:get_action_logs`: every action that ran in the window, with its status and error.
+  - `dream:search_chats`: the guardian's requests across months of chats. Use it to tell a
     one-off task from a repeated one.
   - The skill catalog, the apps' source, Bash, and `system:app_management` to reinstall
     an app you changed.
@@ -109,9 +109,9 @@ tools:
   - Grep
   - Bash
 actions:
-  - get_webchat_conversations
-  - get_action_logs
-  - search_chats
+  - dream:get_webchat_conversations
+  - dream:get_action_logs
+  - dream:search_chats
   - system:app_management
   - system:send_feedback
   - coding:coding_task

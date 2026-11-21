@@ -31,7 +31,7 @@ const DEFER_DESCRIPTION =
 
 /** Only an agent that can read the event catalog is sent to it. */
 const DEFER_EVENT_CATALOG =
-  "Look up the event name and payload fields with the search_event_catalog action first. ";
+  "Look up the event name and payload fields with the system:search_event_catalog action first. ";
 
 const DEFER_EVENTS =
   "For a `subscribable` type, filter on one of its `keys` (e.g. repository.full_name); defer then subscribes " +
@@ -97,10 +97,10 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
         },
         ...(defer.taskChecks
           ? {
-              taskId: {
+              chatId: {
                 type: "string",
                 description:
-                  "Optional: the task this check is for, from your task list. The task shows as later until you wake, and stopping or archiving it cancels the check.",
+                  "Optional: the task chat this check is for, from chat_list. The task shows as later until you wake, and stopping or archiving it cancels the check.",
               },
             }
           : {}),
@@ -114,7 +114,7 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
             eventName: {
               type: "string",
               description:
-                "The exact event type, from search_event_catalog, e.g. provider:event:github.workflow_run.",
+                "The exact event type, from system:search_event_catalog, e.g. provider:event:github.workflow_run.",
             },
             sourcePattern: {
               type: "string",

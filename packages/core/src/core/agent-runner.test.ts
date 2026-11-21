@@ -1903,6 +1903,135 @@ describe("AgentRunner", () => {
       ).rejects.toThrow("Unknown tool: execute_action");
     });
 
+    it("takes away the actions the session's place withholds, and only there", async () => {
+      registerDemoAction();
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Done" }],
+        [{ type: "result", content: "Done" }],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: (_agent, thread) =>
+          thread?.channel === "telegram" ? { withoutActions: ["demo_action"] } : null,
+      });
+      const definition = agentLoader.find("test-main")!.definition as { actions?: string[] };
+      const granted = definition.actions;
+      definition.actions = ["demo_action"];
+      const run = (channel: string, threadId: string) =>
+        collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: `${channel}:${threadId}`,
+            threadContext: { channel, threadId },
+          }),
+        );
+      try {
+        await run("telegram", "place-1");
+        await run("webchat", "place-2");
+      } finally {
+        definition.actions = granted;
+      }
+      expect(await listActionNames(provider.sessions[0].tools)).toEqual([]);
+      expect(await listActionNames(provider.sessions[1].tools)).toEqual(["demo_action"]);
+    });
+
+    it("takes a withheld action away from a wildcard grant too", async () => {
+      registerDemoAction();
+      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: () => ({ withoutActions: ["demo_action"] }),
+      });
+      const definition = agentLoader.find("test-main")!.definition as { actions?: string[] };
+      const granted = definition.actions;
+      definition.actions = ["*"];
+      try {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: "telegram:wild-1",
+            threadContext: { channel: "telegram", threadId: "wild-1" },
+          }),
+        );
+      } finally {
+        definition.actions = granted;
+      }
+      expect(await listActionNames(provider.sessions[0].tools)).not.toContain("demo_action");
+    });
+
+    it("withholds defer where the session's place says so, and only there", async () => {
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Done" }],
+        [{ type: "result", content: "Done" }],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: (_agent, thread) =>
+          thread?.threadId === "no-wake" ? { withoutDefer: true } : null,
+      });
+      for (const threadId of ["no-wake", "wakes"]) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: `webchat:${threadId}`,
+            threadContext: { channel: "webchat", threadId },
+          }),
+        );
+      }
+      expect(toolNames(provider.sessions[0].tools, "ask_user")).not.toContain("defer");
+      expect(toolNames(provider.sessions[1].tools, "ask_user")).toContain("defer");
+    });
+
+    it("gives the agent its place's instructions in place of its own, and only there", async () => {
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Done" }],
+        [{ type: "result", content: "Done" }],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: (_agent, thread) =>
+          thread?.channel === "telegram" ? { systemPromptPrefix: "You answer on a bot." } : null,
+      });
+      for (const [channel, threadId] of [
+        ["telegram", "bot-1"],
+        ["webchat", "chat-1"],
+      ]) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: `${channel}:${threadId}`,
+            threadContext: { channel, threadId },
+          }),
+        );
+      }
+      const [onBot, onDashboard] = provider.sessions.map((session) => session.config.systemPrompt);
+      expect(onBot).toContain("You answer on a bot.");
+      expect(onBot).not.toContain("You are a test main agent.");
+      expect(onDashboard).toContain("You are a test main agent.");
+      expect(onDashboard).not.toContain("You answer on a bot.");
+    });
+
+    it("lets the session's tools read its place while the session first opens", async () => {
+      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
+      const places: Array<string | undefined> = [];
+      const runner = createRunner(provider, undefined, {
+        sessionTools: async (context) => {
+          places.push(context.getThreadContext()?.channel);
+          return [];
+        },
+      });
+      const events = await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "Hi",
+          channelThreadKey: "telegram:cold-1",
+          threadContext: { channel: "telegram", threadId: "cold-1" },
+        }),
+      );
+      expect(events.some((event) => event.type === "error")).toBe(false);
+      expect(places[0]).toBe("telegram");
+    });
+
     it("preserves App Store attribution on isolated forks", async () => {
       const find = agentLoader.find.bind(agentLoader);
       const recordSpy = rs.spyOn(agentLoader, "find").mockImplementation((name) => {
@@ -2360,6 +2489,8 @@ describe("AgentRunner", () => {
       resetPolicy?: ProviderSessionResetPolicy;
       turnLinks?: PromptFacts;
       runLineDeps?: RunLineDeps;
+      placeSetup?: Parameters<typeof createSessions>[0]["placeSetup"];
+      sessionTools?: Parameters<typeof romeToolPorts>[0]["sessionTools"];
     } = {},
   ): AgentRunner {
     const active = provider ?? mockProvider;
@@ -2370,6 +2501,15 @@ describe("AgentRunner", () => {
       {
         ...managerDeps(modelResolver, turnLifecycle, options.appCatalog),
         ...(options.turnLinks ? { promptFacts: options.turnLinks } : {}),
+        ...(options.placeSetup ? { placeSetup: options.placeSetup } : {}),
+        ...(options.sessionTools
+          ? romeToolPorts({
+              actionRegistry,
+              actionEngine,
+              webchatRepo: new ChatsWebChatRepository(testDb.db),
+              sessionTools: options.sessionTools,
+            })
+          : {}),
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
@@ -4310,6 +4450,22 @@ describe("AgentRunner", () => {
           expect(provider.calls.at(-1)?.prompt).toContain("<continuation>");
           expect(provider.calls.at(-1)?.prompt).not.toContain("<handoff>");
           expect(provider.calls.at(-1)?.prompt).toContain("Guardian: Friday at 7 then");
+        });
+
+        it("renews with no handoff and no replay where the session's place turns handoffs off", async () => {
+          const provider = threadedProvider(3);
+          provider["responses"][1] = [{ type: "error", error: "thread gone" }];
+          const { handoffs, asked } = fakeHandoffs({ fallback: async () => null });
+          const runner = renewingRunner(provider, undefined, {
+            handoffs,
+            placeSetup: () => ({ handoffOnRenewal: false }),
+          });
+          await coldTurn(runner);
+          await resetDue();
+          await coldTurn(runner);
+
+          expect(asked.context).toBe(0);
+          expect(provider.calls.at(-1)?.prompt).not.toContain("Guardian: Friday at 7 then");
         });
 
         /** Lets a turn end's background renewal run, as a guardian's pause would. */
@@ -6751,6 +6907,176 @@ describe("AgentRunner", () => {
       expect(seen).toEqual([]);
     });
 
+    it("reads the chat's latest messages from the platform on a new session's first turn only", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "slack_app",
+        threadId: "D_GUARDIAN",
+        agentName: "main",
+      });
+      const said = (minute: number, text: string, from: "guardian" | "member" | "rome") => ({
+        channel: "slack_app",
+        chatId: "D_GUARDIAN",
+        messageId: `m${minute}`,
+        direction: from === "rome" ? "outbound" : "inbound",
+        senderId: from === "rome" ? "U_ROME" : `T_A/U_${from.toUpperCase()}`,
+        senderDisplayName: from === "rome" ? "Rome" : from === "guardian" ? "Ouou" : "Sam",
+        text,
+        attachments: [],
+        timestamp: new Date(Date.UTC(2026, 7, 3, 8, minute)),
+        account: { platform: "slack", id: "T_A/U_ROME" },
+      });
+      // What the platform holds, newest first. Rome's own record holds none
+      // of it, as after its copy was wiped.
+      const platform = [
+        said(3, "and the code is 4417", "member"),
+        said(2, "Noted.", "rome"),
+        said(1, "my sister's birthday is 12 May", "guardian"),
+      ];
+      const people = new SenderLabels({
+        byAccount: async (account) =>
+          account.id === "T_A/U_GUARDIAN"
+            ? ({ id: "p1", displayName: "Ouou", bondLevel: "guardian", links: [] } as never)
+            : null,
+      });
+      const latest = rs.fn(async () => {
+        return platform as never;
+      });
+      const promptFacts = chatPromptFacts({
+        facts: { unseen: () => [], seen: () => undefined },
+        messages: { byIds: () => [] },
+        labels: people,
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+        latest,
+      });
+
+      const providerPrompts: string[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (input) {
+          providerPrompts.push(input.prompt);
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks: promptFacts,
+        keepAliveAcrossTurns: true,
+      });
+      for (const prompt of ["what is my sister's birthday?", "thanks"]) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt,
+            channelThreadKey: "slack_app:D_GUARDIAN",
+            romeSessionId: conversation.id,
+            threadContext: { channel: "slack_app", threadId: "D_GUARDIAN", threadType: "private" },
+          }),
+        );
+      }
+
+      expect(latest).toHaveBeenCalledTimes(1);
+      const [first, second] = providerPrompts;
+      expect(first).toContain("<conversation_context>");
+      // Oldest first, each named as People names its sender, and none of
+      // them the guardian but the guardian's own.
+      const order = ["12 May", "Noted.", "4417"].map((text) => first.indexOf(text));
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+      expect(first).toMatch(/Ouou \[[^\]]*guardian[^\]]*\][^\n]*12 May/);
+      expect(first).not.toMatch(/Sam \[[^\]]*guardian/);
+      expect(second).not.toContain("12 May");
+    });
+
+    it("reads nothing earlier when the unseen messages fill the catch-up already", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "slack_app",
+        threadId: "D_BUSY",
+        agentName: "main",
+      });
+      const unseen = Array.from({ length: 20 }, (_, i) => ({
+        id: i + 1,
+        sender: "Sam",
+        who: null,
+        text: `backlog ${i + 1}`,
+        at: new Date(Date.UTC(2026, 7, 3, 8, i)),
+        fromRome: false,
+        quoted: null,
+        quotesOutside: false,
+      }));
+      const earlier = rs.fn(async () => []);
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* () {
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks: {
+          unseen: async () => unseen,
+          read: async () => [],
+          seen: () => undefined,
+          earlier,
+        },
+      });
+      await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "hi",
+          channelThreadKey: "slack_app:D_BUSY",
+          romeSessionId: conversation.id,
+          threadContext: { channel: "slack_app", threadId: "D_BUSY", threadType: "private" },
+        }),
+      );
+      expect(earlier).not.toHaveBeenCalled();
+    });
+
+    it("opens a session as before when the platform's read fails or takes too long", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      for (const [threadId, latest] of [
+        ["D_FAILS", async () => Promise.reject(new Error("no read here"))],
+        ["D_SLOW", () => new Promise<never>(() => {})],
+      ] as const) {
+        const conversation = await webchatRepo.ensureChannelChat({
+          channel: "slack_app",
+          threadId,
+          agentName: "main",
+        });
+        const promptFacts = chatPromptFacts({
+          facts: { unseen: () => [], seen: () => undefined },
+          messages: { byIds: () => [] },
+          labels: new SenderLabels({ byAccount: async () => null }),
+          channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+          channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+          latest,
+          latestWaitMs: 20,
+        });
+        const providerPrompts: string[] = [];
+        const provider: ModelProvider = {
+          id: "mock",
+          builtinTools: new Set<string>(),
+          openSession: makeOpenSessionFromRun("mock", async function* (input) {
+            providerPrompts.push(input.prompt);
+            yield { type: "result", content: "ok" };
+          }),
+        };
+        await collectMessages(
+          createRunner(provider, undefined, { turnLinks: promptFacts }).run({
+            agentName: "test-main",
+            prompt: "hello",
+            channelThreadKey: `slack_app:${threadId}`,
+            romeSessionId: conversation.id,
+            threadContext: { channel: "slack_app", threadId, threadType: "private" },
+          }),
+        );
+        expect(providerPrompts).toHaveLength(1);
+        expect(providerPrompts[0]).toContain("hello");
+        expect(providerPrompts[0]).not.toContain("<conversation_context>");
+      }
+    });
+
     it("catches up on the lines its turn links have not seen, and marks them seen", async () => {
       const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
@@ -8567,10 +8893,8 @@ describe("AgentRunner", () => {
       ).rejects.toThrow(/Unknown action: send_message/);
     });
 
-    it("executeAction resolves a legacy name before checking the allow-list", async () => {
+    it("executeAction refuses an action's bare name, and names no action the agent lacks", async () => {
       const legacyBindings = createEmptyLegacyArtifactBindings();
-      const actionId = formatArtifactId("review-app", "demo_action");
-      claimLegacyArtifactName(legacyBindings, "action", "demo_action", actionId);
       actionRegistry = new ActionRegistryImpl({ legacyBindings });
       actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
 
@@ -8623,11 +8947,13 @@ describe("AgentRunner", () => {
         createRunner(provider).run({ agentName: "test-main", prompt: "Review" }),
       );
 
-      expect(await listActionNames(captured[0].tools)).toEqual([actionId]);
+      // test-main allows `demo_action`, which names no action now, so the
+      // agent holds no action to suggest.
+      expect(await listActionNames(captured[0].tools)).toEqual([]);
       await expect(
         executeActionTool(captured[0].tools, "demo_action", { path: "src/index.ts" }),
-      ).resolves.toEqual({ reviewed: true });
-      expect(executed).toEqual([{ path: "src/index.ts" }]);
+      ).rejects.toThrow(/^Unknown action: demo_action$/);
+      expect(executed).toEqual([]);
     });
 
     it("passes built-in tools from agent config to model provider", async () => {
