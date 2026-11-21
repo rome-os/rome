@@ -6,9 +6,12 @@
 // Discord accounts the guardian bound to this instance, and deposits each one,
 // signed with this instance's deposit key, into the instance's relay mailbox.
 // The mailbox's drain hands each frame here: the signature is checked, the
-// author is the guardian's account, and the frame is acknowledged once Chats
-// has the message on record (Talker.awaitsAcceptance), so a redelivered one is
-// recorded once. Replies go to the Worker, which posts them as the bot.
+// author is the guardian's account, and the message is handed to Rome. Every
+// frame the Worker signed is acknowledged, whatever happens to it here: the
+// mailbox is shared with the instance's other webhooks, and a failure of ours
+// is logged, never handed back to it. A message lost to a crash between the
+// acknowledgement and its record is the accepted cost. Chats records a
+// redelivered message once. Replies go to the Worker, which posts them as the bot.
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
@@ -122,11 +125,11 @@ export interface IngestResult {
 }
 
 export class DiscordAppAdapter {
-  private deliver?: (message: Message) => void | Promise<void>;
+  private deliver?: (message: Message) => void;
 
   constructor(private readonly config: DiscordAppAdapterConfig) {}
 
-  start(deliver: (message: Message) => void | Promise<void>): void {
+  start(deliver: (message: Message) => void): void {
     this.deliver = deliver;
   }
 
@@ -135,10 +138,11 @@ export class DiscordAppAdapter {
   }
 
   /**
-   * One drained frame. 200 once Chats has the message on record, now or
-   * already; 401 for a frame the Worker did not sign for this instance and 400
-   * for one that is no message, both dropped for good; 503 when the message
-   * was not recorded, so the mailbox delivers it again.
+   * One drained frame. 401 for a frame the Worker did not sign for this
+   * instance and 400 for one that is no message, both dropped for good. Every
+   * other frame answers 200, also when Rome could not take its message (not
+   * started, the author's link failed): that is logged, and the mailbox is
+   * never asked to deliver it again.
    */
   async ingest(body: Uint8Array, signature: string): Promise<IngestResult> {
     if (!signature || !isSignedBy(body, signature, this.config.depositKey)) {
@@ -153,17 +157,27 @@ export class DiscordAppAdapter {
     }
     if (!isDeposit(deposit)) return { status: 400 };
     const deliver = this.deliver;
-    if (!deliver) return { status: 503 };
+    if (!deliver) {
+      log.error("discord message dropped: the connection is not running", { id: deposit.id });
+      return { status: 200 };
+    }
     try {
       await this.config.linkGuardian(deposit.author.id);
-      await deliver(messageOf(deposit, this.config.botId, this.config.botUsername));
-      return { status: 200 };
     } catch (error) {
-      log.warn("discord message not recorded; the mailbox delivers it again", {
+      // The message still reaches Rome; People reads its author as it stands.
+      log.error("discord author not linked to the guardian", {
         error: error instanceof Error ? error.message : String(error),
       });
-      return { status: 503 };
     }
+    try {
+      deliver(messageOf(deposit, this.config.botId, this.config.botUsername));
+    } catch (error) {
+      log.error("discord message dropped: Rome could not take it", {
+        id: deposit.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return { status: 200 };
   }
 
   /** Posts `message` as the bot, in parts of at most 2000 characters; the

@@ -86,7 +86,7 @@ describe("Rome's Discord bot connection", () => {
     expect(disconnect).toHaveBeenCalled();
   });
 
-  it("waits for each message's record, and keeps a key the Worker made anew on start", async () => {
+  it("acknowledges without waiting for the record, and keeps a key the Worker made anew on start", async () => {
     const persisted: unknown[] = [];
     let ingress: ((input: unknown) => Promise<unknown>) | undefined;
     const kit = {
@@ -112,7 +112,8 @@ describe("Rome's Discord bot connection", () => {
       { material: { depositKey: "key-1", botId: "1", botUsername: "Rome" }, expiresAt: "never" },
       kit,
     ) as Talker;
-    expect(talker.awaitsAcceptance).toBe(true);
+    // A failure of ours is never handed back to the shared mailbox.
+    expect(talker.awaitsAcceptance).toBeUndefined();
     talker.start(
       () => Promise.resolve(),
       () => {},
