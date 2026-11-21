@@ -1,8 +1,12 @@
 /** Marks the image that opens a picture's viewer, so the viewer can find its neighbours. */
 export const VIEWER_PICTURE_ATTR = "data-viewer-picture";
 
-/** The root every ChatMarkdown render puts around one message part. */
-const MESSAGE_ROOT = ".rome-markdown";
+/**
+ * The roots of a set of pictures that page together: the one every
+ * ChatMarkdown render puts around one message part, and the one around the
+ * files uploaded with one message (`UploadFiles`).
+ */
+const MESSAGE_ROOT = ".rome-markdown, [data-uploaded-pictures]";
 
 export interface ReplyPicture {
   /** The original address: what the viewer shows and Download saves. */
@@ -32,13 +36,13 @@ export function placeOf(pictures: ReplyPicture[], src: string, near: number): nu
 }
 
 /**
- * The pictures of the message part `trigger` sits in that open a viewer, in
- * document order, the place of `trigger` among them, and the message part's
- * root, which a viewer can watch for pictures that arrive. A linked picture and
- * a picture that failed to load open no viewer, so they carry no mark and are
- * not here. The DOM is read when asked, so a message that grew while it
- * streamed still gives its whole set. `trigger` outside a message part is a set
- * of one.
+ * The pictures of the message part, or of the uploads, `trigger` sits in that
+ * open a viewer, in document order, the place of `trigger` among them, and
+ * the set's root, which a viewer can watch for pictures that arrive. A linked
+ * picture and a picture that failed to load open no viewer, so they carry no
+ * mark and are not here. The DOM is read when asked, so a message that grew
+ * while it streamed still gives its whole set. `trigger` outside a set is a
+ * set of one.
  */
 export function replyPictures(trigger: Element | null): {
   pictures: ReplyPicture[];
