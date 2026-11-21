@@ -14,7 +14,7 @@ import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn } from "../chats/storage/place.js";
 import { createLogger } from "../logger.js";
 import type { ChannelChatAdapter, ChatAdapters, Inbound } from "./chat-adapter.js";
-import { DELIVERY_ACCEPT_TIMEOUT_MS, RecordingStopped } from "./types.js";
+import { DELIVERY_ACCEPT_TIMEOUT_MS, NotRecordedInTime, RecordingStopped } from "./types.js";
 
 const log = createLogger("inbound-recording");
 
@@ -373,7 +373,7 @@ export function inboundRecording(
             if (waiters.length === 0) waiting.delete(key);
           }
           log.warn("inbound message not recorded in time", { channel, ...ref, timeoutMs });
-          reject(new Error(`not recorded within ${timeoutMs}ms`));
+          reject(new NotRecordedInTime(timeoutMs));
         }, timeoutMs);
         const waiters = waiting.get(key) ?? [];
         waiters.push({ resolve, reject, timer });

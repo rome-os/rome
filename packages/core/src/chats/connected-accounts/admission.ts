@@ -6,6 +6,7 @@
  */
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
+import { DeliveryRefused } from "../../connections/types.js";
 import { KeyedMutex } from "../../lib/keyed-mutex.js";
 import { createLogger } from "../../logger.js";
 
@@ -25,7 +26,7 @@ export const ADMISSION_TIMEOUT_MS = 15_000;
 /** An admission that ran past {@link ADMISSION_TIMEOUT_MS}. The message was
  *  not admitted, so its delivery is not accepted and the platform may deliver
  *  it again. */
-export class AdmissionTimedOut extends Error {
+export class AdmissionTimedOut extends DeliveryRefused {
   constructor(timeoutMs: number) {
     super(`not admitted: admission ran past ${timeoutMs}ms`);
     this.name = "AdmissionTimedOut";
