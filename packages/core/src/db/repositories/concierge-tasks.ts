@@ -1382,7 +1382,7 @@ export class ConciergeTasksRepository {
         ...JOINED,
         originName: origin.name,
         originArchivedAt: origin.archivedAt,
-        originType: origin.type,
+        originChannel: origin.sourceChannel,
       })
       .from(taskChats)
       .innerJoin(romeSessions, eq(romeSessions.id, taskChats.sessionId))
@@ -1412,7 +1412,7 @@ export class ConciergeTasksRepository {
       found: {
         originName: string | null;
         originArchivedAt: Date | null;
-        originType: string | null;
+        originChannel: string | null;
       };
     }) => {
       const main = mainChatIdOf(row.ownerKey);
@@ -1421,7 +1421,10 @@ export class ConciergeTasksRepository {
             id: row.chatId,
             name: found.originName,
             main: row.chatId === main,
-            ...(found.originType === "channel" ? { onConnection: true as const } : {}),
+            // A dashboard chat is a channel row too, on the webchat channel.
+            ...(found.originChannel && found.originChannel !== "webchat"
+              ? { onConnection: true as const }
+              : {}),
           }
         : { id: main, name: mainNames.get(main) ?? MAIN_CHAT_NAME, main: true };
     };

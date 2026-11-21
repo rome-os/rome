@@ -837,6 +837,23 @@ describe("Concierge tools", () => {
       expect(result.isError).toBeFalsy();
     });
 
+    it("never takes a dashboard chat, also a channel row, for a chat on a connection", async () => {
+      const s = setup();
+      await s.storedChats.createSession(
+        "topic-x",
+        "Trips",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        CONCIERGE_AGENT_ID,
+      );
+      const topic = await s.storedChats.getSession("topic-x");
+      if (topic) s.sessions.set("topic-x", topic);
+      expect(await s.service.connectionChat("topic-x")).toBeNull();
+      expect(await s.service.connectionChat(await connectionChat(s))).not.toBeNull();
+    });
+
     it("sends a task's report to the main chat once that chat is gone", async () => {
       const s = setup();
       expect(await s.service.deliveryChat("gone-chat", "guardian")).not.toBe("gone-chat");

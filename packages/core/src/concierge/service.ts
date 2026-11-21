@@ -627,6 +627,8 @@ export class ConciergeService {
     if (
       !chat ||
       chat.type !== "channel" ||
+      // A dashboard chat is a channel row too, on the webchat channel.
+      chat.sourceChannel === "webchat" ||
       chat.archivedAt ||
       !chat.agentName ||
       !isConciergeAgent(chat.agentName) ||
