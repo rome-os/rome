@@ -222,6 +222,7 @@ export interface ConciergeDeps {
     WebChatRepository,
     | "createSession"
     | "getSession"
+    | "chatOfSession"
     | "listSessions"
     | "updateSessionName"
     | "updateSessionLargeModelSelection"
@@ -607,7 +608,34 @@ export class ConciergeService {
     owner: ConciergeOwner,
   ): Promise<string | null> {
     if (chatId && (await this.conciergeChat(chatId))) return chatId;
+    // A task started in a chat on one of Rome's connected accounts reports
+    // there while that chat is the Concierge's. Such a chat is the guardian's.
+    if (chatId && owner === GUARDIAN_OWNER && (await this.connectionChat(chatId))) return chatId;
     return this.findChatId(owner);
+  }
+
+  /**
+   * Chat `chatId` when it is a chat on one of Rome's connected accounts where
+   * the Concierge answers, such as a Discord or Slack DM, channel or thread:
+   * the channel it is on and the platform's id for it. Null for any other
+   * chat, and for one that is gone.
+   */
+  async connectionChat(
+    chatId: string,
+  ): Promise<{ id: string; channel: string; threadId: string } | null> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (
+      !chat ||
+      chat.type !== "channel" ||
+      chat.archivedAt ||
+      !chat.agentName ||
+      !isConciergeAgent(chat.agentName) ||
+      !chat.sourceChannel ||
+      !chat.sourceThreadId
+    ) {
+      return null;
+    }
+    return { id: chat.id, channel: chat.sourceChannel, threadId: chat.sourceThreadId };
   }
 
   /** An owner's Concierge chats: the main chat first, then the topic chats, oldest first. */
@@ -1085,6 +1113,8 @@ export class ConciergeService {
     prompt: string,
     options: SystemTurnOptions = {},
   ): Promise<"completed" | "stopped" | "interrupted" | "failed"> {
+    const onConnection = await this.connectionChat(chatId);
+    if (onConnection) return this.connectionTurnOutcome(onConnection, prompt, options);
     const params = await this.resolveTurn({
       agentName: CONCIERGE_AGENT_ID,
       sessionId: "",
@@ -1105,6 +1135,41 @@ export class ConciergeService {
     // The tasks it reported on settle with the flush that carried them: the
     // coalescer settles exactly the news a completed turn carried
     // (docs/domains/chats.md#reaction).
+    return outcome;
+  }
+
+  /**
+   * A system turn, such as a task's report, in a chat on a connected account.
+   * It runs in the chat's own session, and its text is the reply, sent to the
+   * same DM, channel or thread. A chat that never had a turn has no session,
+   * and nothing runs.
+   */
+  private async connectionTurnOutcome(
+    chat: { id: string; channel: string; threadId: string },
+    prompt: string,
+    options: SystemTurnOptions,
+  ): Promise<"completed" | "stopped" | "interrupted" | "failed"> {
+    const stored = await this.deps.sessionRepository.current(
+      `${chat.channel}:${chat.threadId}`,
+      CONCIERGE_AGENT_ID,
+    );
+    if (!stored) return "failed";
+    const taskIds = options.taskIds ?? [];
+    const reportedTask = await this.reportedTaskOf(taskIds, chat.id);
+    const params: ResolvedTurn = {
+      agentName: CONCIERGE_AGENT_ID,
+      sessionId: stored.id,
+      channel: chat.channel,
+      threadId: chat.threadId,
+      prompt,
+      ...(options.taskIds ? { taskIds: options.taskIds } : {}),
+      ...(reportedTask ? { reportedTask } : {}),
+    };
+    const outcome = (await this.deps.runBackendTurn(params, options)) ?? "failed";
+    if (outcome === "interrupted") {
+      const carried = await this.ownTasks(taskIds, chat.id);
+      if (carried.length > 0) this.carriedReports.set(chat.id, carried);
+    }
     return outcome;
   }
 

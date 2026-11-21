@@ -208,7 +208,17 @@
         "bot": {
           "title": "Rome in your Slack",
           "bullets": {
-            "reply": "Answer direct messages in your Slack workspace as your Concierge"
+            "reply": "Answer your direct messages and mentions in your Slack workspace",
+            "tasks": "Run tasks you ask for there and reply with the result"
+          }
+        }
+      },
+      "discord_app": {
+        "bot": {
+          "title": "Rome in your Discord",
+          "bullets": {
+            "reply": "Answer your direct messages, and your @mentions in your servers",
+            "tasks": "Run tasks you ask for there and reply with the result"
           }
         }
       },
@@ -545,6 +555,19 @@
       "codeShownEarlier": "Verification code was shown when you first connected. Disconnect and reconnect to generate a new code.",
       "botTokenLabel": "Bot token",
       "botTokenPlaceholder": "Bot token from @BotFather"
+    },
+    "discordApp": {
+      "servers": "Servers",
+      "accounts": "Your Discord accounts",
+      "add": "Add to server",
+      "remove": "Remove",
+      "removing": "Removing…",
+      "retry": "Retry",
+      "empty": "Add Rome to a server you manage, then message it there or in a direct message.",
+      "loadFailed": "Couldn't load your servers.",
+      "addFailed": "Couldn't open Discord. Try again.",
+      "removeFailed": "Couldn't remove {{name}}. Try again.",
+      "howTo": "Message Rome in a direct message, or @Rome in a channel. When you reply to Rome, keep @ on."
     },
     "telegramUser": {
       "fallbackName": "Telegram user",

@@ -2,7 +2,7 @@
 // with the instance's token. Rome Cloud holds the app's secrets and the
 // workspace-to-instance binding; the instance holds the bot token.
 
-import { cloudBearer } from "../../../instance/instance-identity.js";
+import { romeCloudRequest } from "../../../instance/rome-cloud-request.js";
 import { getRomeCloudOrigin } from "../../../instance/rome-cloud-origin.js";
 
 /** The relay mailbox a workspace's events arrive in. */
@@ -64,36 +64,16 @@ async function post(
   if (!origin) {
     throw new SlackAppRefused("unconfigured", "This Rome is not set up to reach Rome Cloud.");
   }
-  const token = await cloudBearer();
-  if (!token) {
-    throw new SlackAppRefused(
-      "not_enrolled",
-      "Rome's Slack app needs this Rome linked to Rome Cloud. Link it in Settings, then connect again.",
-    );
-  }
-  const response = await fetchImpl(new URL(path, origin), {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store",
-    },
-    cache: "no-store",
-    body: JSON.stringify(body),
-    signal: signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
-      : AbortSignal.timeout(30_000),
-  });
-  const data = (await response.json().catch(() => null)) as
-    | ({ error?: string; error_description?: string } & Record<string, unknown>)
-    | null;
-  if (!response.ok) {
-    throw new SlackAppRefused(
-      data?.error ?? `http_${response.status}`,
-      data?.error_description ?? `Rome Cloud answered ${response.status}.`,
-    );
-  }
-  return data;
+  return romeCloudRequest(
+    { url: new URL(path, origin), body, fetchImpl, ...(signal ? { signal } : {}) },
+    (code, message, status) =>
+      code === "not_enrolled"
+        ? new SlackAppRefused(
+            code,
+            "Rome's Slack app needs this Rome linked to Rome Cloud. Link it in Settings, then connect again.",
+          )
+        : new SlackAppRefused(code, message ?? `Rome Cloud answered ${status}.`),
+  );
 }
 
 function isMailbox(value: unknown): value is SlackAppMailbox {

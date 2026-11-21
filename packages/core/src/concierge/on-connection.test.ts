@@ -3,6 +3,7 @@ import {
   agentOfKind,
   CONCIERGE_CHAT_ACTIONS,
   CONNECTION_PROMPT,
+  CONNECTION_TASK_TOOLS,
   conciergePlaceSetup,
 } from "./on-connection.js";
 
@@ -41,9 +42,15 @@ describe("the Concierge on a connection", () => {
       "never repeat it in a chat that someone other than the guardian can read",
     );
     // The dashboard's ways of speaking are never named, so nothing invites a call.
-    for (const name of ["`say`", "`react`", "`defer`", "chat_start", "show_card"]) {
+    for (const name of ["`say`", "`react`", "`defer`", "show_card", "card_forward"]) {
       expect(CONNECTION_PROMPT).not.toContain(name);
     }
+  });
+
+  it("runs tasks with the tools it keeps, and approves nothing itself", () => {
+    for (const name of CONNECTION_TASK_TOOLS) expect(CONNECTION_PROMPT).toContain(`\`${name}\``);
+    expect(CONNECTION_PROMPT).toContain("Only the guardian may ask for one");
+    expect(CONNECTION_PROMPT).toContain("Never approve anything yourself.");
   });
 
   it("reads the chat's earlier messages from the connection, never sending anyone to the dashboard for them", () => {
