@@ -900,7 +900,7 @@ describe("Webchat API", () => {
     deps.concierge = {
       deps: { tasks },
       conciergeChat: async () => null,
-      switchIfExhausted: async () => {},
+      followDefault: async () => {},
     } as never;
     rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
       name === "core:concierge" ? buildAgent(name) : undefined,
@@ -3320,7 +3320,7 @@ describe("Webchat API", () => {
       buildAgent(name, { name: "concierge", policy: { finalText: "private", autoTitle: false } }),
     );
     deps.concierge = {
-      switchIfExhausted: async () => null,
+      followDefault: async () => null,
       conciergeChat: async () => null,
       turnFailedBeforeStart: () => undefined,
     } as never;
@@ -4723,7 +4723,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
         deps: { tasks: { repo: new ConciergeTasksRepository(testDb.db) } },
-        switchIfExhausted: async () => null,
+        followDefault: async () => null,
         conciergeChat: async (id: string) => ({ id, name: "Calendar", main: false }),
         turnHeader: async () =>
           '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n<concierge_owner role="guardian"/>',
@@ -4767,7 +4767,7 @@ describe("Webchat API", () => {
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
         deps: { tasks: {} },
-        switchIfExhausted: async () => null,
+        followDefault: async () => null,
         conciergeChat: async (id: string) =>
           id === "topic-1" ? { id, name: "Calendar", main: false } : null,
         turnHeader: async (chat: { id: string; name: string; main: boolean }) =>
@@ -4854,7 +4854,7 @@ describe("Webchat API", () => {
       mockScriptedManager();
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       deps.concierge = {
-        switchIfExhausted: async (chatId: string) => {
+        followDefault: async (chatId: string) => {
           await deps.webchatRepo.updateSessionLargeModelSelection(chatId, "gpt-6-luna", "owner");
           return null;
         },
@@ -4884,7 +4884,7 @@ describe("Webchat API", () => {
       );
     });
 
-    it("fails over only the Concierge pre-turn and leaves an ordinary quota failure unchanged", async () => {
+    it("moves a Concierge chat Rome chose a model for to the default before its turn, and no chat fails over on quota", async () => {
       mockScriptedManager();
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
       rs.spyOn(deps.modelAccounts, "read").mockReturnValue({
@@ -4894,6 +4894,7 @@ describe("Webchat API", () => {
       deps.concierge = new ConciergeService({
         ...deps,
         accounts: deps.modelAccounts,
+        defaults: { current: () => "openai" },
         tasks: { onMessageStatus: () => () => {} },
       } as unknown as ConciergeDeps);
       const open = deps.agentSessionManager.open;
@@ -4913,9 +4914,14 @@ describe("Webchat API", () => {
           "Quota",
           undefined,
           undefined,
-          "claude-sonnet",
+          id === "concierge" ? "claude-opus-5-5" : "claude-sonnet",
           undefined,
           id === "concierge" ? "core:concierge" : "main",
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          id === "concierge" ? "auto" : "owner",
         );
         const sent = await app.request(`/chat/sessions/${id}/turns`, {
           method: "POST",
@@ -6248,7 +6254,7 @@ describe("Webchat API", () => {
       const service = new ConciergeService({ webchatRepo: deps.webchatRepo } as never);
       deps.concierge = {
         deps: { tasks: { repo: new ConciergeTasksRepository(testDb.db) } },
-        switchIfExhausted: async () => null,
+        followDefault: async () => null,
         conciergeChat: async () => null,
         cardSettled: async () => {},
         addCard: service.addCard.bind(service),
@@ -10089,7 +10095,7 @@ describe("Webchat API", () => {
       };
       deps.concierge = {
         conciergeChat: async () => null,
-        switchIfExhausted: async () => null,
+        followDefault: async () => null,
         taskCardSources: () => ({
           taskCardsOf: async () =>
             new Map([

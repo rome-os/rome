@@ -1,3 +1,4 @@
+import type { DefaultModelProvider } from "@rome/api-types/chat";
 import type { ReasoningEffort } from "./chat-types";
 
 export const DEFAULT_PROJECT_NAME = "default";
@@ -39,6 +40,41 @@ export const COMMON_LARGE_MODEL_IDS: ReadonlyArray<(typeof LARGE_MODEL_OPTIONS)[
   "claude-opus-5-5",
   "gpt-6-astra",
 ];
+
+/** Which provider family runs a model id: claude-* on Claude, gpt-* on ChatGPT. */
+export function modelFamily(modelId: string): "anthropic" | "openai" | null {
+  if (modelId.startsWith("claude-")) return "anthropic";
+  if (modelId.startsWith("gpt-")) return "openai";
+  return null;
+}
+
+/**
+ * Whether a model can run with the providers signed in. Rome credits run
+ * ChatGPT models. An unknown sign-in state (null) hides nothing.
+ */
+export function canRunModel(
+  modelId: string,
+  signedIn: Record<DefaultModelProvider, boolean> | null | undefined,
+): boolean {
+  if (!signedIn) return true;
+  const family = modelFamily(modelId);
+  if (family === "anthropic") return signedIn.anthropic;
+  if (family === "openai") return signedIn.openai || signedIn.rome_credits;
+  return true;
+}
+
+/**
+ * The model options to offer: models of signed-in providers, plus `selected`
+ * so a chat's own pick stays visible after its provider signs out.
+ */
+export function runnableLargeModelOptions(
+  signedIn: Record<DefaultModelProvider, boolean> | null | undefined,
+  selected: string,
+): ReadonlyArray<(typeof LARGE_MODEL_OPTIONS)[number]> {
+  return LARGE_MODEL_OPTIONS.filter(
+    (option) => option.id === selected || canRunModel(option.id, signedIn),
+  );
+}
 
 export const DEFAULT_REASONING_EFFORT = "high" satisfies ReasoningEffort;
 export const REASONING_EFFORT_OPTIONS: ReadonlyArray<{

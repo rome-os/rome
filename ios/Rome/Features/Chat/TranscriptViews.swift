@@ -29,7 +29,7 @@ extension EnvironmentValues {
 /// The guardian's bubble: coral, right-aligned, fully round. Photos sent with
 /// it sit above the text.
 /// The long-press menu of a message bubble: its time on top, then Reply
-/// where a message can be replied to, Copy and Share.
+/// where a message can be replied to, Copy, Select text and Share.
 struct BubbleMenu {
     /// When the message was written; nil leaves the title out.
     var date: Date? = nil
@@ -45,6 +45,8 @@ struct BubbleMenu {
 private struct BubbleMenuItems: View {
     let text: String
     let menu: BubbleMenu
+    /// Puts the message in select mode; nil where its text cannot be selected.
+    let onSelect: (() -> Void)?
     @Environment(\.today) private var today
 
     var body: some View {
@@ -59,6 +61,9 @@ private struct BubbleMenuItems: View {
                 Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
             }
             CopyButton(text: text)
+            if let onSelect {
+                Button(action: onSelect) { Label("Select text", systemImage: "selection.pin.in.out") }
+            }
             if let onShare = menu.onShare {
                 Button(action: onShare) { Label("Share", systemImage: "square.and.arrow.up") }
             } else {
@@ -75,8 +80,34 @@ private extension View {
     /// The bubble lifts under the finger with the system's menu. Reply is
     /// also a swipe to the right (`SwipeToReply`), and an action of its own
     /// for VoiceOver.
-    func bubbleMenu(text: String, menu: BubbleMenu) -> some View {
-        contextMenu { BubbleMenuItems(text: text, menu: menu) }
+    /// `selects` says whether the text has anything Select text can select.
+    func bubbleMenu(text: String, menu: BubbleMenu, selects: Bool) -> some View {
+        modifier(BubbleMenuModifier(text: text, menu: menu, selects: selects))
+    }
+}
+
+/// The bubble's menu, with Select text where the transcript has a select
+/// mode. In select mode it has no menu: a long press there selects text.
+private struct BubbleMenuModifier: ViewModifier {
+    let text: String
+    let menu: BubbleMenu
+    /// The text has something to select: not only pictures or a table.
+    let selects: Bool
+    @Environment(\.textSelection) private var selection
+    @Environment(\.transcriptRowID) private var rowID
+
+    func body(content: Content) -> some View {
+        let selecting = selection?.isSelecting(row: rowID, text: text) ?? false
+        let onSelect: (() -> Void)? = {
+            guard let selection, let rowID, selects else { return nil }
+            return { [text] in selection.begin(row: rowID, text: text) }
+        }()
+        content
+            .contextMenu {
+                if !selecting { BubbleMenuItems(text: text, menu: menu, onSelect: onSelect) }
+            }
+            // A message that streams on, or is edited, leaves select mode.
+            .onChange(of: text) { selection?.messageChanged(row: rowID, text: text) }
             .accessibilityActions {
                 if menu.problem == nil, let onReply = menu.onReply {
                     Button("Reply", action: onReply)
@@ -101,6 +132,9 @@ struct UserBubble: View {
     /// The quote's tap: it goes to the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
     @Environment(\.rowTinted) private var tinted
+    @Environment(\.textSelection) private var selection
+    @Environment(\.transcriptRowID) private var rowID
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// The message has a bubble under its photos: text, or a quote drawn in it.
     private var hasBubble: Bool { !Self.badgeOnPhotos(text: text, quoteInBubble: quote != nil) }
@@ -141,6 +175,16 @@ struct UserBubble: View {
                                     .romeFont(16)
                                     .lineSpacing(5)
                                     .foregroundStyle(.white)
+                                    // Select mode lays a text view over it that
+                                    // selects it but draws none of it, so the
+                                    // text never moves as select mode starts or ends.
+                                    .overlay(alignment: .topLeading) {
+                                        if selection?.isSelecting(row: rowID, text: text) == true {
+                                            SelectableTextView(
+                                                text: SelectableText.invisible(SelectableText.plain(text, style: SelectableTextStyle(color: .white, dynamicTypeSize: dynamicTypeSize))),
+                                                start: SelectionStart(point: selection?.target?.point, first: true), tint: .white)
+                                        }
+                                    }
                             }
                         }
                             .quotedAbove(quote, tone: .sent, hasContent: !text.isEmpty, onTap: onQuote)
@@ -148,7 +192,7 @@ struct UserBubble: View {
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                            .bubbleMenu(text: text, menu: bubbleMenu)
+                            .bubbleMenu(text: text, menu: bubbleMenu, selects: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .markBadge(mark)
                     }
                 }
@@ -334,6 +378,7 @@ struct AgentBubble: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.rowTopHold) private var rowTopHold
     @Environment(\.transcriptRowID) private var rowID
+    @Environment(\.textSelection) private var selection
 
     /// How many lines a bubble shows before it folds.
     nonisolated static let foldedLines = 15
@@ -361,6 +406,16 @@ struct AgentBubble: View {
         )
     }
 
+    private var selecting: Bool { selection?.isSelecting(row: rowID, text: text) == true }
+    /// How far a selection handle's knob reaches past the text.
+    private static let handleRoom: CGFloat = 24
+
+    /// Where the fold hides the text, down from its top: above the fade over
+    /// the last folded lines, where the text is still in sight.
+    private var foldBottom: CGFloat { Self.foldHeight(for: dynamicTypeSize) - Self.fadeHeight }
+    /// The fade over a folded reply's last lines (`expandButton`).
+    static let fadeHeight: CGFloat = 40
+
     private var folds: Bool { Self.folds(height: fullHeight, size: dynamicTypeSize) }
     /// Held to the folded height until it is measured, so a long reply is
     /// folded from its first frame. Unfolded first, it shrank by hundreds of
@@ -368,18 +423,24 @@ struct AgentBubble: View {
     private var capped: Bool { Self.capped(measured: fullHeight, expanded: expanded, size: dynamicTypeSize) }
 
     /// Whether the text is held to the folded height: until it is measured
-    /// (`measured` is 0), and while a long one is folded.
+    /// (`measured` is 0), and while a long one is folded. Select mode leaves
+    /// the fold as it is: its first selection is the paragraph pressed, which
+    /// is in sight, and text inside the fold is selected once it is unfolded.
     nonisolated static func capped(measured: CGFloat, expanded: Bool, size: DynamicTypeSize) -> Bool {
         !expanded && (measured == 0 || folds(height: measured, size: size))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            MarkdownText(source: text)
+            MarkdownText(source: text, selectable: selecting, selectFrom: selection?.target?.point,
+                         foldBottom: selecting && capped ? foldBottom : nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
                 .frame(maxHeight: capped ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
-                .clipped()
+                // In select mode the clip leaves room for the selection's
+                // handles above and beside the text; folded, it still hides
+                // the text under the fold.
+                .clipShape(FoldClip(handleRoom: selecting ? Self.handleRoom : 0, folded: capped))
                 .overlay(alignment: .bottom) {
                     // Folded, the chevron sits on the fade over the last
                     // lines, so the bubble does not grow for it.
@@ -393,7 +454,7 @@ struct AgentBubble: View {
         .padding(.vertical, 10)
         .background(Palette.bubble, in: shape)
         .contentShape(.contextMenuPreview, shape)
-        .bubbleMenu(text: text, menu: menu)
+        .bubbleMenu(text: text, menu: menu, selects: MarkdownText.hasSelectableText(text))
         .bubbleWidth()
     }
 
@@ -405,7 +466,7 @@ struct AgentBubble: View {
             Image(systemName: expanded ? "chevron.up" : "chevron.down")
                 .romeFont(13, .semibold)
                 .foregroundStyle(Palette.sub.opacity(0.6))
-                .frame(maxWidth: .infinity, minHeight: expanded ? 16 : 40, alignment: .bottom)
+                .frame(maxWidth: .infinity, minHeight: expanded ? 16 : Self.fadeHeight, alignment: .bottom)
                 .background {
                     if !expanded {
                         LinearGradient(colors: [Palette.bubble.opacity(0), Palette.bubble], startPoint: .top, endPoint: .bottom)
@@ -436,6 +497,8 @@ struct ConciergeBubble: View {
     let name: String
     let text: String
     var menu = BubbleMenu()
+    @Environment(\.textSelection) private var selection
+    @Environment(\.transcriptRowID) private var rowID
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -445,13 +508,13 @@ struct ConciergeBubble: View {
                     .romeFont(12)
                     .foregroundStyle(Palette.sub)
                     .lineLimit(1)
-                MarkdownText(source: text)
+                MarkdownText(source: text, selectable: selection?.isSelecting(row: rowID, text: text) == true, selectFrom: selection?.target?.point)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(Palette.bubble, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                     .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                    .bubbleMenu(text: text, menu: menu)
+                    .bubbleMenu(text: text, menu: menu, selects: MarkdownText.hasSelectableText(text))
             }
             Mascot()
                 .frame(height: 16)
@@ -941,5 +1004,19 @@ struct CameraPicker: UIViewControllerRepresentable {
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             parent.dismiss()
         }
+    }
+}
+
+/// The clip of a reply's text: `handleRoom` past its top and sides for a
+/// selection's handles, and past its bottom too unless the reply is folded,
+/// whose text below the fold stays hidden.
+struct FoldClip: Shape {
+    let handleRoom: CGFloat
+    let folded: Bool
+
+    func path(in rect: CGRect) -> Path {
+        Path(CGRect(x: rect.minX - handleRoom, y: rect.minY - handleRoom,
+                    width: rect.width + handleRoom * 2,
+                    height: rect.height + handleRoom + (folded ? 0 : handleRoom)))
     }
 }

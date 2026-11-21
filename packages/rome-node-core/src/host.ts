@@ -12,6 +12,7 @@ export { loginDeviceCode, type DeviceAuthorizationPrompt } from "./device-author
 export { createFileCredentialStore, type CredentialStore } from "./storage.js";
 export {
   AuditStore,
+  type AuditContentPreview,
   type AuditItem,
   type AuditQuery,
   type AuditResult,

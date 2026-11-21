@@ -165,16 +165,27 @@ export {
   type ProviderAvailabilityState,
 } from "./domain/model-account-report.js";
 export {
+  isDefaultProvider,
+  providerOfDefault,
+  runsOnRomeCredits,
+  type DefaultProvider,
+  type DefaultProviderNote,
+  type SignedInProviders,
+} from "./domain/default-provider.js";
+export {
+  createDefaultProviders,
+  type DefaultProviderChange,
+  type DefaultProviders,
+} from "./application/default-providers.js";
+export { createDefaultProviderSetting } from "./infrastructure/settings/default-provider-setting.js";
+export {
   codexStrongSelection,
+  followingSelection,
+  strengthOfSelection,
   selectionOfStrength,
   type ModelStrength,
 } from "./domain/model-strength.js";
-export {
-  sameProviderTarget,
-  soleProviderAtUsageLimit,
-  usageSwitchTarget,
-  type UsageSwitchTarget,
-} from "./domain/usage-switch.js";
+export { sameProviderTarget, type UsageSwitchTarget } from "./domain/usage-switch.js";
 export {
   createModelAccounts,
   type CreateModelAccountsOptions,
@@ -314,5 +325,7 @@ export { fetchRomeCredits } from "./infrastructure/model/codex/rome-credits.js";
 export {
   ambiguousQuota,
   failoverReason,
+  providerFailureReason,
   type FailoverReason,
+  type ProviderFailureReason,
 } from "./domain/failover-reason.js";

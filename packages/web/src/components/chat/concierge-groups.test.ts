@@ -71,6 +71,7 @@ describe("buildConciergeItems", () => {
       kind: "model_switch" as const,
       key: "generic",
       model: "gpt-6-luna",
+      fromModel: "claude-opus-5-5",
       turnId: "recovered",
       sessionId: "concierge",
     };
@@ -87,6 +88,35 @@ describe("buildConciergeItems", () => {
         ]),
       ),
     ).toEqual(["notice", "sep", "A:recovered", "notice"]);
+  });
+
+  it("draws a provider outage as a notice, not a bubble", () => {
+    const outage = {
+      type: "provider_outage",
+      outageId: "o1",
+      provider: "anthropic",
+      reason: "quota",
+      chatIds: ["t1", "t2"],
+      alternatives: ["openai"],
+    };
+    const message = { ...say("outage", 1_000, "host"), content: JSON.stringify([outage]) };
+    const items = build([agentRow(say("before", 0)), agentRow(message)]);
+    expect(shape(items)).toEqual(["sep", "A:before", "notice"]);
+    expect(items[2]).toMatchObject({ kind: "notice", outage: { outageId: "o1" } });
+  });
+
+  it("keeps the earlier model on a model-switch notice", () => {
+    const items = build([
+      {
+        kind: "model_switch",
+        key: "switch",
+        model: "claude-opus-5-5",
+        fromModel: "gpt-6-luna",
+        turnId: "t2",
+        sessionId: "concierge",
+      },
+    ]);
+    expect(items[0]).toMatchObject({ kind: "notice", fromModel: "gpt-6-luna" });
   });
 
   it("opens with a separator before the first message", () => {

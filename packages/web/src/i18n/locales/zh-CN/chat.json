@@ -550,7 +550,7 @@
     "quota": "{{from}} 额度已用完，已切换到 {{to}}",
     "login": "{{from}} 登录失败，已切换到 {{to}}",
     "temporary": "{{from}} 暂时无法使用，已切换到 {{to}}",
-    "model_limit": "{{fromModel}} 已达限制，已切换到 {{toModel}}",
+    "model_limit": "已换成 {{toModel}}，{{fromModel}} 暂时用不了",
     "notice": "已切换到 {{model}}"
   },
   "modelSelector": {
@@ -562,6 +562,7 @@
     "noMatches": "没有匹配的模型。",
     "options": {
       "auto": "自动",
+      "autoFollowsDefault": "自动（默认提供方）",
       "claudeOpus": "Claude Opus",
       "opus55": "Opus 5.5",
       "opus5": "Opus 5",
@@ -780,6 +781,62 @@
       "provider_unavailable": "Rome Cloud 的转写服务暂不可用，已停止收听",
       "insufficient_credits": "Rome 额度不足，无法使用语音输入，已停止收听"
     }
+  },
+  "providerFailure": {
+    "quota": "{{provider}} 用量已到上限，重置后可以继续。",
+    "quotaUntil": "{{provider}} 用量已到上限，{{date}} {{time}} 之后 Rome 会接着做。",
+    "quotaUntilToday": "{{provider}} 用量已到上限，{{time}} 之后 Rome 会接着做。",
+    "quotaUntilTomorrow": "{{provider}} 用量已到上限，明天 {{time}} 之后 Rome 会接着做。",
+    "temporary": "{{provider}} 暂时用不了。",
+    "login": "{{provider}} 需要重新登录",
+    "removed": "{{provider}} 未登录",
+    "creditsUsedUp": "Rome 额度用完了",
+    "spendCap": "{{provider}} 已达到消费上限",
+    "account": "{{provider}} 的账号目前无法运行",
+    "modelUnavailable": "{{model}} 用不了了",
+    "reasonQuota": "{{provider}} 额度用完了",
+    "reasonTemporary": "{{provider}} 暂时用不了",
+    "status": {
+      "pausedToday": "已暂停 · {{time}} 之后继续",
+      "pausedTomorrow": "已暂停 · 明天 {{time}} 之后继续",
+      "pausedOn": "已暂停 · {{date}} {{time}} 之后继续",
+      "needsYou": "需要处理",
+      "modelUnavailable": "模型不可用",
+      "paused": "已暂停",
+      "pausedUntilToday": "已暂停，到 {{time}}",
+      "pausedUntilTomorrow": "已暂停，到明天 {{time}}",
+      "pausedUntilOn": "已暂停，到 {{date}} {{time}}"
+    },
+    "logIn": "登录",
+    "switchTo": "切换到 {{target}}",
+    "useCredits": "改用 Rome 额度",
+    "alsoMakeDefault": "同时设为默认",
+    "details": "详情",
+    "switchFailed": "未能切换",
+    "switched": "已切换到 {{target}}",
+    "switchedContinued": "已切换到 {{target}}，已继续",
+    "recovered": "已恢复",
+    "recoveredContinued": "已恢复，已继续",
+    "confirm": {
+      "title": "切换到 {{provider}}？",
+      "body": "这个对话改用 {{provider}} 继续，停下的那一轮会接着跑。",
+      "bodyCredits": "所有对话都改用 Rome credits（剩余 {{balance}}），停下的那一轮会接着跑。",
+      "makeDefaultHelp": "其他跟随默认的对话会在下一次回复时切到 {{provider}}。",
+      "moveExisting": "已有聊天也一起切过去",
+      "moveExistingHelp": "其他对话会在下一次回复时切到 {{provider}}。",
+      "switch": "切换",
+      "cancel": "取消",
+      "bodyCreditsAll": "所有对话都改用 Rome credits，停下的那一轮会接着跑。"
+    },
+    "continue": "继续",
+    "quotaPausedUntil": "{{provider}} 用量已到上限，{{date}} {{time}} 之后可以继续。",
+    "quotaPausedUntilToday": "{{provider}} 用量已到上限，{{time}} 之后可以继续。",
+    "quotaPausedUntilTomorrow": "{{provider}} 用量已到上限，明天 {{time}} 之后可以继续。",
+    "retry": "重试"
+  },
+  "providerOutage": {
+    "waiting_one": "{{count}} 个任务在等待",
+    "waiting_other": "{{count}} 个任务在等待"
   },
   "outputs": {
     "title": "产出",

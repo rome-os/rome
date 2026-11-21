@@ -18,6 +18,7 @@ import { postWidgetEvent, type WidgetEventOutcome } from "@/lib/chat-api";
 import { formatAccuracy, geolocationPermission, readDevicePosition } from "@/lib/device-location";
 import { fetchJson } from "@/lib/fetch-json";
 import { ChatNotice } from "@/components/chat/ChatNotice";
+import { cn } from "@/lib/utils";
 import { CardBoundary } from "./CardBoundary";
 import { isDrawableCard } from "./drawable";
 import { WidgetHostContext } from "./turn-fields";
@@ -405,7 +406,14 @@ export function WidgetUiCard({
   return (
     <div
       tabIndex={waiting ? -1 : undefined}
-      className="flex w-full max-w-md flex-col gap-2 rounded-12 border border-border bg-surface px-4 py-3"
+      // A card that waits for an answer is a small form and keeps the narrow
+      // width. A card that only shows content (a comparison, a report, steps)
+      // reads as wide as a text bubble.
+      className={cn(
+        "flex w-full flex-col gap-2 rounded-12 border border-border bg-surface px-4 py-3",
+        waits ? "max-w-md" : "max-w-[min(100%,var(--container-2xl))]",
+      )}
+      data-widget-width={waits ? "narrow" : "wide"}
       aria-busy={busy}
       data-widget-app={appId}
       data-chat-pending-card={waiting && !locked ? "" : undefined}

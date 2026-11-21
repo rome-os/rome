@@ -716,6 +716,9 @@ importers:
 
   packages/rome-node-web:
     devDependencies:
+      '@rome-os/node-ui':
+        specifier: workspace:*
+        version: link:../rome-node-ui
       '@rome-os/ui':
         specifier: workspace:*
         version: link:../ui

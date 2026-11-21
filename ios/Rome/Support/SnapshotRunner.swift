@@ -184,6 +184,27 @@ enum SnapshotRunner {
                 chat.reply(to: said.id)
             }
             model.workspace?.concierge.cancelQuote()
+            // Select text on the newest Agent reply, then on the guardian's own
+            // message: its text selectable in place, all of it selected.
+            await capture("04f-chat-select-text", style: styleName, in: directory, wait: 1.5) {
+                guard let chat = model.workspace?.concierge,
+                      case .agentText(let id, let text, _, _, _)? = chat.rows.last(where: { if case .agentText = $0 { true } else { false } })
+                else { return }
+                chat.textSelection.begin(row: id, text: text)
+            }
+            await capture("04g-chat-select-own-text", style: styleName, in: directory, wait: 3) {
+                guard let chat = model.workspace?.concierge,
+                      case .userText(let id, let text, _, _)? = chat.rows.last(where: { if case .userText(_, let text, _, _) = $0 { !text.isEmpty } else { false } })
+                else { return }
+                // A row's id is its message's, then its part's place.
+                chat.jump(to: String(id[..<(id.lastIndex(of: ":") ?? id.endIndex)]))
+                Task {
+                    // After the jump's tint has faded.
+                    try? await Task.sleep(for: .seconds(2.2))
+                    chat.textSelection.begin(row: id, text: text)
+                }
+            }
+            model.workspace?.concierge.textSelection.end()
             // The header's status line in each state, then back to the name alone.
             let states: [(String, ConciergeActivity)] = [
                 ("working", .working), ("tool", .tool(.searchingWeb)), ("tasks", .tasks(title: "整理本周会议纪要", more: 1)),

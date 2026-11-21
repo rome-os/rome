@@ -1,5 +1,10 @@
 import { expect, it } from "@rstest/core";
-import { failoverReason, type FailoverReason } from "./failover-reason.js";
+import {
+  failoverReason,
+  providerFailureReason,
+  type FailoverReason,
+  type ProviderFailureReason,
+} from "./failover-reason.js";
 import type { ModelAccountStatus } from "./model-account.js";
 import type {
   ModelAccountReport,
@@ -157,4 +162,71 @@ it.each([
   const raw = state();
   raw.openai = reportOf("available", { accountType: "api_key", usageLimited: false });
   expect(failoverReason(failure, raw)).toBeNull();
+});
+
+it.each<[string, Parameters<typeof providerFailureReason>[0], ProviderFailureReason | null]>([
+  ["a rate limit", { provider: "anthropic", message: "x", httpStatus: 429 }, "temporary"],
+  ["a 5xx", { provider: "openai", message: "API Error: 503" }, "temporary"],
+  ["the network", { provider: "openai", message: "fetch failed" }, "temporary"],
+  [
+    "one model's limit",
+    { provider: "anthropic", message: "You've hit your Opus limit" },
+    "capacity",
+  ],
+  [
+    "a model at capacity",
+    { provider: "openai", message: "Selected model is at capacity." },
+    "capacity",
+  ],
+  [
+    "a model not in the plan",
+    { provider: "openai", message: "nope", reason: "model_access_denied" },
+    "model_unavailable",
+  ],
+  [
+    "a model no longer offered",
+    { provider: "anthropic", message: "x", providerError: "model_not_found" },
+    "model_unavailable",
+  ],
+  ["the quota", { provider: "anthropic", message: "x", code: "usage_limit" }, "quota"],
+  [
+    "a spending limit",
+    { provider: "anthropic", message: "monthly spend limit reached" },
+    "spend_cap",
+  ],
+  [
+    "a shared budget",
+    { provider: "anthropic", message: "Your team's shared budget is spent" },
+    "spend_cap",
+  ],
+  [
+    "used-up credits",
+    { provider: "openai", message: "x", code: "credits_used_up" },
+    "credits_used_up",
+  ],
+  ["a revoked login", { provider: "openai", message: "x", code: "auth_revoked" }, "login"],
+  ["no login", { provider: "anthropic", message: "x", reason: "not_logged_in" }, "removed"],
+  ["a prompt too long", { provider: "anthropic", message: "Prompt is too long" }, null],
+])("classifies %s for its card", (_label, failure, expected) => {
+  expect(providerFailureReason(failure, state())).toBe(expected);
+});
+
+it("classifies Codex on Rome credits as the credits fail, not as a missing ChatGPT login", () => {
+  const onCredits = { ...state(), openai: reportOf("unauthorized") };
+  expect(
+    providerFailureReason({ provider: "openai", message: "x", code: "usage_limit" }, onCredits),
+  ).toBe("credits_used_up");
+  expect(providerFailureReason({ provider: "openai", message: "API Error: 502" }, onCredits)).toBe(
+    "temporary",
+  );
+});
+
+it("cards an API key's failures too, which have no subscription to recover", () => {
+  const apiKey = {
+    ...state(),
+    anthropic: reportOf("available", { authMethod: "environment", usageLimited: false }),
+  };
+  expect(
+    providerFailureReason({ provider: "anthropic", message: "x", httpStatus: 401 }, apiKey),
+  ).toBe("login");
 });

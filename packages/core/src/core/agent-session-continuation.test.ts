@@ -32,7 +32,14 @@ import {
   type ModelSessionParams,
   type ProviderId,
 } from "./agent-runner.js";
-import { createSessions, type AgentSession, type Sessions } from "../agent/index.js";
+import {
+  createSessions,
+  type AgentSession,
+  type ModelResolver,
+  type RenewalHandoffs,
+  type Sessions,
+} from "../agent/index.js";
+import { createRenewalHandoffs } from "./renewal-handoffs.js";
 import type { ModelSelectionId } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
@@ -59,6 +66,8 @@ function createProvider(id: ProviderId) {
   const opened: ModelSessionParams[] = [];
   /** How many of the next turns fail before reaching the thread. */
   const failing = { next: 0 };
+  /** How many of the next turns answer only after `ms`. */
+  const stalling = { next: 0, ms: 1_000 };
   /** Claude names a new thread only after its first assistant message. */
   const naming = { atOpen: true };
   /** A completed turn can leave no position to branch at. */
@@ -69,6 +78,10 @@ function createProvider(id: ProviderId) {
       id,
       async function* (input): AsyncIterable<AgentEvent | ModelSessionEvent> {
         calls.push(input);
+        if (stalling.next > 0) {
+          stalling.next -= 1;
+          await new Promise((resolve) => setTimeout(resolve, stalling.ms));
+        }
         if (failing.next > 0) {
           failing.next -= 1;
           yield { type: "error", error: "quota exhausted" };
@@ -101,7 +114,7 @@ function createProvider(id: ProviderId) {
     builtinTools: new Set<string>(),
     openSession,
   };
-  return { provider, openSession, calls, opened, failing, naming, positions };
+  return { provider, openSession, calls, opened, failing, stalling, naming, positions };
 }
 
 function healthyState() {
@@ -132,7 +145,15 @@ describe("continuation notice through Sessions", () => {
     rs.setSystemTime(new Date(now));
   }
 
-  function createManager(): Sessions {
+  function createManager(
+    options: {
+      state?: ReturnType<typeof healthyState>;
+      handoffs?: (resolver: ModelResolver) => RenewalHandoffs;
+      /** Codex runs on the Rome credits login, with ChatGPT the default. */
+      creditsLogin?: boolean;
+      onRomeCredits?: () => boolean;
+    } = {},
+  ): Sessions {
     const actionRegistry = new ActionRegistryImpl();
     actionRegistry.register({
       config: {
@@ -144,18 +165,24 @@ describe("continuation notice through Sessions", () => {
     } as never);
     const systemPrompts = createTestSystemPrompts();
     rs.spyOn(systemPrompts, "build").mockReturnValue("Continuation test prompt");
-    const state = healthyState();
+    const state = options.state ?? healthyState();
+    const modelResolver = createModelResolver({
+      providers: [openai.provider, anthropic.provider],
+      accounts: fakeAccounts(() => state),
+      codexLogins: loginsOn(options.creditsLogin === true),
+      ...(options.creditsLogin
+        ? { defaults: { ready: async () => {}, current: () => "openai" as const } }
+        : {}),
+    });
     const manager = createSessions(
       {
+        ...(options.handoffs ? { handoffs: options.handoffs(modelResolver) } : {}),
+        ...(options.onRomeCredits ? { onRomeCredits: options.onRomeCredits } : {}),
         agentLoader: loader,
         sessionRepository,
         sessionSettings: new ChatSessionSettings({ webchatRepo: webchatRepo }),
         systemPrompts,
-        modelResolver: createModelResolver({
-          providers: [openai.provider, anthropic.provider],
-          accounts: fakeAccounts(() => state),
-          codexLogins: loginsOn(false),
-        }),
+        modelResolver,
         networkMcpServers: () => ({}),
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
@@ -277,6 +304,133 @@ describe("continuation notice through Sessions", () => {
       provider: "openai",
       model: "gpt-6-luna",
     });
+  });
+
+  /** Rome's handoff side over this chat's stored messages. */
+  const handoffsOver =
+    (executedActions?: string, timeoutMs = 5_000) =>
+    (modelResolver: ModelResolver): RenewalHandoffs => {
+      const handoffs = createRenewalHandoffs({
+        timeoutMs,
+        fallbackTimeoutMs: 5_000,
+        modelResolver,
+        page: async (chatId, limit, before) => {
+          const page = await webchatRepo.getMessagesPage(chatId, {
+            limit,
+            before: before as never,
+          });
+          return { rows: page.rows, next: page.nextCursor };
+        },
+        openTasks: async () => null,
+      });
+      return executedActions === undefined
+        ? handoffs
+        : { ...handoffs, executedActions: async () => executedActions };
+    };
+
+  it("has the old model write a handoff when the default moves off a provider that still runs", async () => {
+    const manager = createManager({ handoffs: handoffsOver("- send_email(to: a@b.c)") });
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "My locker code is 4417.");
+    await acquire(manager, "gpt-6-luna");
+    await chatTurn(session, "What is my locker code?");
+
+    // One private turn on the old thread, on the old model, asked for the note.
+    const asked = anthropic.calls.at(-1);
+    expect(asked?.prompt).toContain("<handoff_request>");
+    expect(anthropic.opened.at(-1)?.thread).toEqual({
+      kind: "resume",
+      modelThreadId: "anthropic-thread-1",
+    });
+    const prompt = openai.calls[0]?.prompt ?? "";
+    expect(prompt).toContain("<handoff>\ndone\n</handoff>");
+    expect(prompt).toContain("My locker code is 4417.");
+    expect(prompt).not.toContain("<executed_actions>");
+  });
+
+  it("carries what the latest turns did when the old provider cannot run any more", async () => {
+    const state = healthyState();
+    const manager = createManager({
+      state,
+      handoffs: handoffsOver("- send_email(to: a@b.c, subject: Rent)"),
+    });
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "Email the landlord about rent.");
+    const anthropicCalls = anthropic.calls.length;
+    state.anthropic = reportOf("usage_limit_reached");
+    await acquire(manager, "gpt-6-luna");
+    await chatTurn(session, "Did that go out?");
+
+    expect(anthropic.calls).toHaveLength(anthropicCalls);
+    const prompt = openai.calls[0]?.prompt ?? "";
+    expect(prompt).toContain("<executed_actions>\n- send_email(to: a@b.c, subject: Rent)");
+    expect(prompt).toContain("Email the landlord about rent.");
+    expect(prompt).not.toContain("<handoff>");
+  });
+
+  it("spends Rome credits only while every chat runs on them, whoever opens the session", async () => {
+    const onCredits = { instance: false };
+    const manager = createManager({
+      state: { openai: reportOf("unauthorized"), anthropic: reportOf("unauthorized") },
+      creditsLogin: true,
+      onRomeCredits: () => onCredits.instance,
+    });
+    // ChatGPT is the default and logged out: the open refuses rather than spend credits.
+    await expect(acquire(manager, "gpt-6-luna")).rejects.toThrow(/not signed in|unavailable/i);
+    // Credits made the instance's choice, the same open runs, with no flag from the opener.
+    onCredits.instance = true;
+    const session = await acquire(manager, "gpt-6-luna");
+    await chatTurn(session, "Hello on credits.");
+    expect(openai.calls.at(-1)?.prompt).toContain("Hello on credits.");
+  });
+
+  it("carries what the latest turns did when the old model's handoff fails", async () => {
+    const manager = createManager({
+      handoffs: (resolver) => ({
+        ...handoffsOver("- send_email(to: a@b.c, subject: Rent)")(resolver),
+        fallback: async () => {
+          throw new Error("The fallback handoff timed out");
+        },
+      }),
+    });
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "Email the landlord about rent.");
+    // The old provider still runs, but its private handoff turn fails.
+    anthropic.failing.next = 1;
+    await acquire(manager, "gpt-6-luna");
+    await chatTurn(session, "Did that go out?");
+
+    const prompt = openai.calls[0]?.prompt ?? "";
+    expect(anthropic.calls.at(-1)?.prompt).toContain("<handoff_request>");
+    expect(prompt).toContain("<executed_actions>\n- send_email(to: a@b.c, subject: Rent)");
+    expect(prompt).toContain("Email the landlord about rent.");
+    expect(prompt).not.toContain("<handoff>");
+  });
+
+  it("moves on without the note when the old model does not write it in time", async () => {
+    const manager = createManager({
+      handoffs: (resolver) => ({
+        ...handoffsOver("- send_email(to: a@b.c, subject: Rent)", 50)(resolver),
+        fallback: async () => null,
+      }),
+    });
+    const session = await acquire(manager, "claude-sonnet");
+    await chatTurn(session, "Email the landlord about rent.");
+    // The old provider runs, but its handoff turn answers long after the deadline.
+    anthropic.stalling.next = 1;
+    anthropic.stalling.ms = 2_000;
+    await acquire(manager, "gpt-6-luna");
+    // Date is faked here: the wall clock tells whether the switch waited.
+    const started = performance.now();
+    await chatTurn(session, "Did that go out?");
+
+    expect(performance.now() - started).toBeLessThan(1_500);
+    expect(anthropic.calls.at(-1)?.prompt).toContain("<handoff_request>");
+    const prompt = openai.calls[0]?.prompt ?? "";
+    // What the turns did, and the chat itself, stand in for the note.
+    expect(prompt).not.toContain("<handoff>");
+    expect(prompt).toContain("<executed_actions>\n- send_email(to: a@b.c, subject: Rent)");
+    expect(prompt).toContain("Email the landlord about rent.");
   });
 
   it("has no position to branch at until a turn runs on the new provider's thread", async () => {
@@ -455,16 +609,16 @@ describe("continuation notice through Sessions", () => {
     ).events()) {
     }
     if (concierge) {
-      const raw = healthyState();
-      raw[source] = reportOf("usage_limit_reached");
-      await webchatRepo.updateSessionLargeModelSelection(chatId, from, "owner");
+      // Rome chose the model, so the chat follows the default to the other provider.
+      await webchatRepo.updateSessionLargeModelSelection(chatId, from, "auto");
       const service = new ConciergeService({
         webchatRepo,
         sessionRepository,
         agentSessionManager: manager,
-        accounts: fakeAccounts(() => raw),
+        accounts: fakeAccounts(healthyState),
+        defaults: { current: () => target },
       } as unknown as ConciergeDeps);
-      expect(await service.switchIfExhausted(chatId)).toMatchObject({ selectionId: to });
+      expect(await service.followDefault(chatId)).toEqual({ from: source, to: target });
     } else await webchatRepo.updateSessionLargeModelSelection(chatId, to, "owner");
     await manager.shutdown();
     const runner = new AgentRunner(createManager(), loader);
@@ -475,18 +629,16 @@ describe("continuation notice through Sessions", () => {
       threadContext: context,
     })) {
     }
-    const calls = (concierge ? target : source) === "openai" ? openai.calls : anthropic.calls;
+    // Both move: a model Rome chose follows the default, and an owner's pick is
+    // the chat's exact selection, which outranks the session's pin on a cold resume.
+    const calls = target === "openai" ? openai.calls : anthropic.calls;
     const prompt = calls.at(-1)?.prompt;
     expect(continuationOf(prompt)).toEqual(
-      concierge ? expect.stringContaining("system:fetch_channel_history") : null,
+      concierge ? expect.stringContaining("system:fetch_channel_history") : expect.any(String),
     );
     expect(await sessionRepository.session(session.sessionId)).toMatchObject({
-      provider: concierge ? target : source,
-      model: concierge
-        ? MODEL_SELECTIONS[to].model
-        : from === "claude-sonnet"
-          ? "claude-sonnet-5-5"
-          : from,
+      provider: target,
+      model: MODEL_SELECTIONS[to].model,
     });
   });
 

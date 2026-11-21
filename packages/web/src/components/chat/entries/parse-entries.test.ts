@@ -77,3 +77,35 @@ describe("parseEntries", () => {
     expect(parseEntries(content)).toEqual([reply, { type: "text", content: "answer" }]);
   });
 });
+
+describe("provider parts", () => {
+  it("keeps a provider failure card and an outage notice, and drops malformed ones", () => {
+    const failure = {
+      type: "provider_failure",
+      provider: "anthropic",
+      reason: "quota",
+      until: "2026-11-16T15:00:00.000Z",
+      followsDefault: true,
+      alternatives: ["openai"],
+      chatId: "c1",
+    };
+    const outage = {
+      type: "provider_outage",
+      outageId: "o1",
+      provider: "anthropic",
+      reason: "quota",
+      chatIds: ["t1", "t2"],
+      alternatives: ["openai"],
+    };
+    expect(
+      parseEntries(
+        JSON.stringify([
+          failure,
+          { ...failure, alternatives: undefined },
+          outage,
+          { ...outage, chatIds: "t1" },
+        ]),
+      ),
+    ).toEqual([failure, outage]);
+  });
+});

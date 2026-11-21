@@ -9,7 +9,14 @@ import {
   createFileCredentialStore,
   defaultDeviceName,
   loginDeviceCode,
+  type AuditContentPreview,
+  type AuditItem,
+  type AuditQuery,
+  type AuditResult,
+  type AuditStats,
+  type AuditStatus,
   type AuditSummary,
+  type ContentName,
   type CredentialStore,
   type DeviceAuthorizationPrompt,
   type DeviceSession,
@@ -97,6 +104,12 @@ class CredentialInvalidError extends Error {
 export class ControllerInputError extends Error {
   constructor(message: string) {
     super(message);
+  }
+}
+
+export class AuditUnavailableError extends Error {
+  constructor(public readonly auditStatus: AuditStatus) {
+    super(auditStatus.state === "unavailable" ? auditStatus.message : "Audit log is unavailable.");
   }
 }
 
@@ -304,6 +317,70 @@ export class HostController {
         requests: summary.requests,
       },
     };
+  }
+
+  private async readyAudit(): Promise<AuditStore> {
+    if (!this.auditStore) {
+      throw new AuditUnavailableError({
+        state: "unavailable",
+        code: "io",
+        message: "Audit log is not open.",
+      });
+    }
+    const status = await this.auditStore.status();
+    if (status.state !== "ok") {
+      throw new AuditUnavailableError(status);
+    }
+    return this.auditStore;
+  }
+
+  async getAuditSummary(): Promise<AuditSummary> {
+    if (!this.auditStore) {
+      return {
+        path: "",
+        status: { state: "unavailable", code: "io", message: "Audit log is not open." },
+        bytes: 0,
+        records: 0,
+        requests: 0,
+        oldestAt: null,
+        newestAt: null,
+        lastPrune: null,
+        retention: { maxAgeDays: 30, maxBytes: 1024 * 1024 * 1024 },
+      };
+    }
+    await this.auditStore.status();
+    return this.auditStore.summary();
+  }
+
+  async getAuditCounts(): Promise<Record<AuditResult | "all", number>> {
+    const store = await this.readyAudit();
+    return store.resultCounts();
+  }
+
+  async getAuditStats(since: number, until: number, bucketMs: number): Promise<AuditStats> {
+    const store = await this.readyAudit();
+    return store.stats(since, until, bucketMs);
+  }
+
+  async listAuditItems(query: AuditQuery): Promise<AuditItem[]> {
+    const store = await this.readyAudit();
+    return store.list({ ...query, requestsOnly: true });
+  }
+
+  async getAuditItem(seq: number): Promise<AuditItem | null> {
+    const store = await this.readyAudit();
+    const item = store.get(seq);
+    if (!item || item.kind !== "start") return null;
+    return item;
+  }
+
+  async getAuditContentPreview(
+    seq: number,
+    name: ContentName,
+    maxBytes: number,
+  ): Promise<AuditContentPreview | null> {
+    const store = await this.readyAudit();
+    return store.contentPreview(seq, name, maxBytes);
   }
 
   async start(): Promise<void> {

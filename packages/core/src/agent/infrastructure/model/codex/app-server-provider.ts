@@ -1216,6 +1216,10 @@ export class CodexAppServerProvider implements ModelProvider {
           {
             threadId: tid,
             input: turnInput,
+            // Codex keeps a loaded thread's model across thread/resume, so a
+            // session that moved to another model of the provider names it
+            // on each turn (docs/domains/agents.md#provider-failure).
+            ...(params.config.model ? { model: params.config.model } : {}),
             effort,
             ...(params.config.outputSchema ? { outputSchema: params.config.outputSchema } : {}),
             ...(inputs[0]?.inputId ? { clientUserMessageId: inputs[0].inputId } : {}),
