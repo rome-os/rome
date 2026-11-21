@@ -149,6 +149,8 @@
     },
     "packages/lib": { "entry": ["src/**/*.test.ts"] },
     "packages/rome-node-core": {
+      // scripts/*.ts and native/check-*.ts are standalone macOS native helper
+      // build/verification scripts and node --test checks invoked directly.
       "entry": [
         "src/**/*.test.ts",
         "src/index.ts",
@@ -158,7 +160,9 @@
         "src/host.ts",
         "src/auth.ts",
         "src/storage.ts",
-        "src/daemon.ts"
+        "src/daemon.ts",
+        "scripts/*.ts",
+        "native/check-*.ts"
       ]
     },
     "packages/rome-node-cli": {
