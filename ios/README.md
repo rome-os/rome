@@ -82,7 +82,7 @@ TestFlight ships under Rome's own Apple Developer team, not a personal one. The 
    gh release create ios-v<MARKETING_VERSION>-<build> --verify-tag --prerelease --latest=false --title "iOS <MARKETING_VERSION> (<build>) — TestFlight" --notes-file <notes>
    ```
 
-   The archived commit is the one that carries the raised minimums. A squash merge gives main a different commit, so tag the archived one. The tag keeps it reachable after its branch is deleted. The notes list the PRs since the previous `ios-v*` tag and the minimum instance versions before and after the bump. The `ios-` prefix keeps these tags out of `bump-minimum.mjs`, which reads only `v1.*`, and out of the server image build, which runs on `v*`. A prerelease never becomes the repository's latest release.
+   The archived commit is the one that carries the raised minimums. A squash merge gives main a different commit, so tag the archived one. The tag keeps it reachable after its branch is deleted. The notes say what changed for a tester: one line per PR since the previous `ios-v*` tag, grouped under New and Fixes, with the PR number. They also give the minimum instance versions before and after the bump. The `ios-` prefix keeps these tags out of `bump-minimum.mjs`, which reads only `v1.*`, and out of the server image build, which runs on `v*`. A prerelease never becomes the repository's latest release.
 
 5. Merge the archived commit's branch into main.
 
