@@ -128,6 +128,10 @@ describe("GET /connections", () => {
       agent: null,
       link: "own_account",
       severalAccounts: false,
+      chatRules: ["session.reset"],
+      chatRuleDefaults: expect.objectContaining({
+        activation: { mode: "all", botMessages: "all", whenOthersMentioned: "respond" },
+      }),
     });
 
     // Nothing granted on discord yet: its grant unauthorized, everything
@@ -233,6 +237,49 @@ describe("GET /connections", () => {
       account: null,
       link: null,
       severalAccounts: false,
+      // A kind that declares no chat rules offers the session reset alone.
+      chatRules: ["session.reset"],
+      chatRuleDefaults: expect.objectContaining({
+        activation: { mode: "all", botMessages: "all", whenOthersMentioned: "respond" },
+      }),
+    });
+  });
+
+  it("lists the chat rules each kind offers, in the dashboard's order, and none for a kind with no chats", async () => {
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
+    const telegram = makePasteTalkWithProfile();
+    telegram.descriptor.chatRules = { offers: ["session.reset", "enabled"] };
+    const discord = makeBotAll();
+    discord.descriptor.chatRules = { offers: [] };
+    delete (discord.descriptor.capabilities as { talker?: unknown }).talker;
+    registry.register(telegram.descriptor);
+    registry.register(discord.descriptor);
+
+    const res = await makeApp(registry).request("/connections");
+    const { connections } = await res.json();
+
+    expect(
+      connections.map((c: { connectionKind: string; chatRules: string[] }) => [
+        c.connectionKind,
+        c.chatRules,
+      ]),
+    ).toEqual([
+      ["fake-discord", []],
+      ["fake-telegram", ["enabled", "session.reset"]],
+    ]);
+    // A kind that fixes nothing runs its group chats on Core's defaults.
+    const byKind = new Map(
+      connections.map((c: { connectionKind: string; chatRuleDefaults: unknown }) => [
+        c.connectionKind,
+        c.chatRuleDefaults,
+      ]),
+    );
+    expect(byKind.get("fake-discord")).toBeNull();
+    expect(byKind.get("fake-telegram")).toMatchObject({
+      enabled: true,
+      activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
+      replies: { placement: "thread" },
+      routing: { agentName: null },
     });
   });
 

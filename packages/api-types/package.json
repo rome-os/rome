@@ -17,6 +17,7 @@
     "./concierge-task-status": "./src/concierge-task-status.ts",
     "./computer-use": "./src/computer-use.ts",
     "./chat-settings": "./src/chat-settings.ts",
+    "./chat-rules": "./src/chat-rules.ts",
     "./trace-segments": "./src/trace-segments.ts",
     "./app-manager-errors": "./src/app-manager-errors.ts",
     "./dashboard-access": "./src/dashboard-access.ts",

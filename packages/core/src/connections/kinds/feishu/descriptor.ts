@@ -54,7 +54,7 @@ import type {
 } from "../../types.js";
 import { addressIsConversationFeature, directoryPage } from "../../integrations/talk-features.js";
 import { createLogger } from "../../../logger.js";
-import { type KindChatRules, WAKES_ON_EVERY_MESSAGE } from "../../../chat-settings/rules.js";
+import { FEISHU_CHAT_RULES } from "@rome/api-types/chat-rules";
 import type { ChatSettingsPort } from "../../types.js";
 
 const log = createLogger("feishu-setup");
@@ -84,17 +84,6 @@ export const feishuGrantProfileSchema = z
   })
   .strict();
 export type FeishuGrantProfile = z.infer<typeof feishuGrantProfileSchema>;
-
-/** A Feishu app offers every rule but the two on whose messages wake the
- *  agent: another bot's message and one addressed only to others wake it,
- *  as they did before kinds declared their rules. */
-export const FEISHU_CHAT_RULES: KindChatRules = {
-  offers: ["enabled", "activation.mode", "replies.placement", "routing.agentName", "session.reset"],
-  fixed: {
-    "activation.botMessages": WAKES_ON_EVERY_MESSAGE["activation.botMessages"],
-    "activation.whenOthersMentioned": WAKES_ON_EVERY_MESSAGE["activation.whenOthersMentioned"],
-  },
-};
 
 /** Pure display projection: the bot's name reads as the display name and the
  *  appId as the handle. `domain`/`appType` are owner-side and never widen the

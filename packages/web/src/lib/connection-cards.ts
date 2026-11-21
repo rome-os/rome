@@ -28,6 +28,7 @@ import type {
   GrantDisplay,
 } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+import type { ChatSettingField } from "@rome/api-types/chat-settings";
 
 /** The copy key a slot renders under (`connections.cards.<service>.<key>`). */
 export type SlotKey = "bot" | "session" | "user";
@@ -52,6 +53,9 @@ export interface ConnectionSlot {
   /** The kind of link an agent has to this slot's account, or null when its
    *  kind of connection takes none. */
   link: AccountLink | null;
+  /** The chat rules this slot's kind offers on its group chats. Empty or
+   *  absent where it offers none, and the slot then shows no chat rules. */
+  chatRules?: ChatSettingField[];
 }
 
 export interface ConnectionCard {
@@ -167,6 +171,7 @@ function toSlots(connection: ApiConnection, key?: SlotKey): ConnectionSlot[] {
       identity: foldIdentity(display),
       activeSetupCid: connection.setups[grant] ?? null,
       link: connection.link ?? null,
+      ...(connection.chatRules ? { chatRules: connection.chatRules } : {}),
     };
   });
 }
