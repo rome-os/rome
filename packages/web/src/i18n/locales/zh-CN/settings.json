@@ -634,10 +634,7 @@
       "name": "Rome 额度",
       "status": {
         "inUse": "使用中",
-        "ready": "就绪",
-        "standby": "待用",
         "usedUp": "已用完",
-        "usedUpWithClaude": "已用完",
         "paused": "已暂停"
       },
       "ofGranted": "共 {{amount}}",
@@ -663,7 +660,6 @@
       "needsReauth": "需要重新登录",
       "apiKeyActive": "API 密钥生效中",
       "apiKeyNeedsUpdate": "API 密钥需要更新",
-      "comingSoon": "即将推出",
       "signedInWith": "已通过 <1>{{method}}</1> 登录",
       "signedIn": "已登录",
       "accountType": "账号类型：<1>{{type}}</1>"
@@ -743,6 +739,23 @@
           "emptyEnv": "请至少添加一个环境变量。"
         }
       }
+    },
+    "defaultProvider": {
+      "badge": "默认",
+      "setAsDefault": "设为默认",
+      "confirmTitle": "将 {{provider}} 设为默认？",
+      "confirmBody": "进行中的聊天会在下一次回复时切换到 {{provider}}。",
+      "confirmBodyStay": "新聊天使用 {{provider}}，进行中的聊天保留原来的提供方。",
+      "moveExisting": "已有聊天也一起切过去",
+      "confirm": "设为默认",
+      "saveFailed": "未能更改默认提供方",
+      "removedNote": "你已退出 {{from}}，{{to}} 现在是默认。",
+      "dismissNote": "关闭"
+    },
+    "logoutOutcome": {
+      "otherBecomesDefault": "{{provider}} 会成为默认，聊天在下一次回复时切换过去。",
+      "pause": "聊天会暂停，直到你重新登录。",
+      "pauseOrCredits": "聊天会暂停，直到你重新登录，或让所有聊天改用 Rome 额度。"
     }
   },
   "sentinelLog": {

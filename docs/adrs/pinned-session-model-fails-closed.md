@@ -1,6 +1,6 @@
 # A session runs the model that produced it, and fails closed when that model cannot run
 
-- **Status**: Superseded for the Concierge chat by [Concierge provider failover](concierge-provider-failover.md)
+- **Status**: Amended by [Default provider over automatic failover](default-provider-over-automatic-failover.md): the pin keeps a model within one provider and never holds a chat on another
 - **Date**: 2026-08-11
 - **Concept**: [sessions — model pin](../concepts/sessions.md#model-pin)
 

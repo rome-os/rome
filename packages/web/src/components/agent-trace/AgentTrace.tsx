@@ -56,10 +56,13 @@ export function CollapsedTraceButton({
   summary,
   onClick,
   live = false,
+  errorExplained = false,
 }: {
   summary?: TraceSummary;
   onClick: () => void;
   live?: boolean;
+  /** Something beside the turn, such as a provider failure card, says why it failed. */
+  errorExplained?: boolean;
 }) {
   return (
     <Button
@@ -69,15 +72,25 @@ export function CollapsedTraceButton({
       onClick={onClick}
       className="-mx-2 max-w-none select-text justify-start text-left hover:no-underline"
     >
-      <CollapsedTraceContent summary={summary} live={live} />
+      <CollapsedTraceContent summary={summary} live={live} errorExplained={errorExplained} />
     </Button>
   );
 }
 
-function CollapsedTraceContent({ summary, live }: { summary?: TraceSummary; live: boolean }) {
+function CollapsedTraceContent({
+  summary,
+  live,
+  errorExplained,
+}: {
+  summary?: TraceSummary;
+  live: boolean;
+  errorExplained: boolean;
+}) {
   const { t } = useTranslation("activity");
 
-  if (summary?.terminalError) {
+  // A card beside the turn says why it stopped: the line stays calm, as for a
+  // turn that ran.
+  if (summary?.terminalError && !errorExplained) {
     // A guided error shows its guidance beside the trace (`TraceTrigger`), so
     // the line names the failure without the raw provider text.
     return (

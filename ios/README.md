@@ -74,7 +74,19 @@ TestFlight ships under Rome's own Apple Developer team, not a personal one. The 
 
    The archive is signed with the development profile, so its app reads `aps-environment` = `development` even in Release. The export re-signs it with `production`. To check that before uploading, export once with `destination` set to `export` in a copy of `ExportOptions.plist`, then read the entitlements of the app in the `.ipa`.
 
-4. Delete `/tmp/rome-archive` when the build shows up in App Store Connect.
+4. Once App Store Connect shows the build as VALID, tag the commit you archived, and publish a GitHub prerelease for it:
+
+   ```bash
+   git tag -a ios-v<MARKETING_VERSION>-<build> <archived commit> -m "iOS TestFlight build <build> (<MARKETING_VERSION>)"
+   git push origin ios-v<MARKETING_VERSION>-<build>
+   gh release create ios-v<MARKETING_VERSION>-<build> --verify-tag --prerelease --latest=false --title "iOS <MARKETING_VERSION> (<build>) — TestFlight" --notes-file <notes>
+   ```
+
+   The archived commit is the one that carries the raised minimums. A squash merge gives main a different commit, so tag the archived one. The tag keeps it reachable after its branch is deleted. The notes say what changed for a tester: one line per PR since the previous `ios-v*` tag, grouped under New and Fixes, with the PR number. They also give the minimum instance versions before and after the bump. The `ios-` prefix keeps these tags out of `bump-minimum.mjs`, which reads only `v1.*`, and out of the server image build, which runs on `v*`. A prerelease never becomes the repository's latest release.
+
+5. Merge the archived commit's branch into main.
+
+6. Delete `/tmp/rome-archive` when the build shows up in App Store Connect.
 
 ### Signing with the API key
 

@@ -40,6 +40,7 @@ import {
   sessions,
   webchatTurnFeedback,
   webchatWorkspaceLayouts,
+  type ModelSelectionBy,
 } from "../db/schema.js";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import {
@@ -864,6 +865,24 @@ export class WebChatRepository {
     };
   }
 
+  private messageUpdatedListeners = new Set<WebchatMessageInsertedListener>();
+
+  /**
+   * Told when a stored message's content is rewritten in place, as a provider
+   * failure card is when it settles, with the message as it now reads. Not
+   * told of new messages.
+   */
+  onMessageUpdated(listener: WebchatMessageInsertedListener): () => void {
+    this.messageUpdatedListeners.add(listener);
+    return () => {
+      this.messageUpdatedListeners.delete(listener);
+    };
+  }
+
+  protected emitMessageUpdated(message: StoredWebchatMessage): void {
+    for (const listener of this.messageUpdatedListeners) listener(message);
+  }
+
   protected emitMessageInserted(message: StoredWebchatMessage): void {
     for (const listener of this.messageInsertedListeners) {
       listener(message);
@@ -1095,7 +1114,7 @@ export class WebChatRepository {
     // Set only here: a chat's device folder never changes after creation.
     deviceFolder: DeviceFolder | null = null,
     // Who chose largeModelSelection: its owner, or Rome; null when unknown.
-    largeModelSelectionBy: "owner" | "auto" | null = "owner",
+    largeModelSelectionBy: ModelSelectionBy | null = "owner",
   ) {
     const now = new Date();
     if (projectPath?.trim()) {
@@ -1868,16 +1887,74 @@ export class WebChatRepository {
       .where(eq(romeSessions.id, id));
   }
 
-  /** Stores the chat's model, with who chose it: its owner, or Rome. */
+  /**
+   * Stores the chat's model, with who chose it: its owner, or Rome. `kept` is
+   * Rome's choice that a change of the default does not move: the chat stays
+   * on that model's provider (docs/domains/agents.md#kept-provider).
+   */
   async updateSessionLargeModelSelection(
     id: string,
     largeModelSelection: string | null,
-    by: "owner" | "auto",
+    by: ModelSelectionBy,
   ) {
     await this.db
       .update(romeSessions)
       .set({ largeModelSelection, largeModelSelectionBy: largeModelSelection ? by : null })
       .where(eq(romeSessions.id, id));
+  }
+
+  /**
+   * The top-level dashboard chats that follow the default provider and have
+   * said something: no model stored, or one Rome chose. A change of the
+   * default moves them, unless the guardian keeps them where they are.
+   */
+  async followingChats(): Promise<Array<{ id: string; largeModelSelection: string | null }>> {
+    return await this.db
+      .select({ id: romeSessions.id, largeModelSelection: romeSessions.largeModelSelection })
+      .from(romeSessions)
+      .where(
+        and(
+          isWebchatChat,
+          isNull(romeSessions.parentSessionId),
+          or(
+            isNull(romeSessions.largeModelSelection),
+            eq(romeSessions.largeModelSelectionBy, "auto"),
+          ),
+          // Qualified by hand: inside the subquery an interpolated column
+          // renders unqualified and would name the message's own id.
+          sql`exists (select 1 from ${romeAgentMessages} m where m.session_id = "rome_sessions"."id")`,
+        ),
+      );
+  }
+
+  /**
+   * The kept chats: a change of the default that moves existing chats lets
+   * them follow it again.
+   */
+  async keptChatCount(): Promise<number> {
+    const rows = await this.db
+      .select({ count: sql<number>`count(*)`.mapWith(Number) })
+      .from(romeSessions)
+      .where(eq(romeSessions.largeModelSelectionBy, "kept"));
+    return rows[0]?.count ?? 0;
+  }
+
+  /**
+   * Lets every kept chat follow the default again, from its next run. Returns
+   * the chats it released.
+   */
+  async releaseKeptChats(): Promise<
+    Array<{ id: string; agentName: string | null; largeModelSelection: string | null }>
+  > {
+    return await this.db
+      .update(romeSessions)
+      .set({ largeModelSelectionBy: "auto" })
+      .where(eq(romeSessions.largeModelSelectionBy, "kept"))
+      .returning({
+        id: romeSessions.id,
+        agentName: romeSessions.agentName,
+        largeModelSelection: romeSessions.largeModelSelection,
+      });
   }
 
   /** The effort a message to the chat runs at when it names none; null takes the dashboard's. */
@@ -2437,14 +2514,16 @@ export class WebChatRepository {
     });
   }
 
-  async updateMessageContent(id: string, content: string) {
+  /** Rewrites a message's content. False when no message has the id: nothing was written. */
+  async updateMessageContent(id: string, content: string): Promise<boolean> {
     assertWidgetAloneInContent(content);
     const rows = await this.db
       .select({ role: romeAgentMessages.role })
       .from(romeAgentMessages)
       .where(eq(romeAgentMessages.id, id))
       .limit(1);
-    const accounting = rows[0] ? traceAccountingColumns(rows[0].role, content) : null;
+    if (!rows[0]) return false;
+    const accounting = traceAccountingColumns(rows[0].role, content);
 
     await this.db
       .update(romeAgentMessages)
@@ -2457,6 +2536,7 @@ export class WebChatRepository {
         outputTokens: accounting?.hasAccounting ? accounting.outputTokens : null,
       })
       .where(eq(romeAgentMessages.id, id));
+    return true;
   }
 
   async getMessages(sessionId: string) {

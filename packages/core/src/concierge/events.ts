@@ -264,7 +264,21 @@ export async function renderTaskEvents(
 export function startConciergeEvents(
   service: ConciergeService,
   turns: Pick<TurnListeners, "listen">,
-  options: { delay?: (ms: number) => Promise<void> } = {},
+  options: {
+    delay?: (ms: number) => Promise<void>;
+    /**
+     * A temporary failure whose retry failed too, or a model limit no other
+     * model of the provider could take: the chat shows a card. Absent, it
+     * shows only the error.
+     */
+    unrecovered?: (failed: {
+      chatId: string;
+      agentName: string;
+      sessionId: string;
+      turnId: string;
+      failure: AgentTurnFailure;
+    }) => Promise<void>;
+  } = {},
 ): () => void {
   /** Per chat, the reminder turn that runs, and its end once it fires. */
   const remindersRunning = new Map<string, { finished?: EndedAgentTurn }>();
@@ -503,26 +517,41 @@ export function startConciergeEvents(
           );
           return chain.finished;
         };
-        let crossed = false;
-        let next: AgentTurnFinishedEvent | undefined;
+        // A temporary failure gets one retry on the same model after a wait,
+        // and a single model's limit another model of the same provider. A
+        // quota or a lost login stops here: the chat shows a card, and no
+        // other provider takes over.
+        let unrecovered: EndedAgentTurn | undefined;
         if (reason === "temporary") {
           await (options.delay ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))))(
             30_000,
           );
           // The wait may have ended the subscription that paid for this turn.
           if (!failoverReason(failure, service.deps.accounts.read())) return;
-          next = await recover(failure, reason, true);
-        } else {
-          const moved = await service.switchForFailure(chatId, failure, reason);
-          if (!moved) return;
-          crossed = moved.from !== moved.to;
-          next = await recover(failure, reason, !crossed);
+          const retried = await recover(failure, reason, true);
+          if (retried?.status === "error") unrecovered = retried;
+        } else if (reason === "model_limit") {
+          const moved = await service.switchForModelLimit(chatId, failure);
+          if (!moved) unrecovered = event;
+          else {
+            const retried = await recover(failure, reason, true);
+            if (retried?.status === "error") unrecovered = retried;
+          }
         }
-        if (crossed || next?.status !== "error" || !next.output.failure) return;
-        const second = failoverReason(next.output.failure, service.deps.accounts.read());
-        if (!second) return;
-        const moved = await service.switchForFailure(chatId, next.output.failure, second, true);
-        if (moved) await recover(next.output.failure, second, false);
+        const stopped = unrecovered?.status === "error" ? unrecovered.output.failure : undefined;
+        if (unrecovered && stopped && options.unrecovered) {
+          await options
+            .unrecovered({
+              chatId,
+              agentName: unrecovered.turn.agentName,
+              sessionId: unrecovered.turn.sessionId,
+              turnId: unrecovered.turn.turnId,
+              failure: stopped,
+            })
+            .catch((error: unknown) =>
+              log.warn("provider failure card failed", { chatId, error: String(error) }),
+            );
+        }
       } finally {
         recoveriesRunning.delete(chatId);
         const left = await settleTurnMarks(

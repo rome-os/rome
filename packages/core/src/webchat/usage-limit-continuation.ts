@@ -62,12 +62,52 @@ function usageLimitProviderOf(
   return stated ? provider : null;
 }
 
+type ContinuationRepo = Pick<
+  ChatsWebChatRepository,
+  "getLatestErroredTurns" | "canContinueAfterUsageLimit" | "getRestartLastActivityAt"
+>;
+
+/**
+ * The provider whose return continues this stopped turn, when the sweep at
+ * `at` (ms) would take it, else null. The sweep and a card's promise read
+ * this one rule.
+ */
+function continuationProvider(
+  repo: ContinuationRepo,
+  stop: ErroredTurn,
+  reports: ModelAccountReports,
+  at: number,
+): ProviderId | null {
+  const { turn } = stop;
+  // The marker lives in turn_start's prompt, so a recovery can never be recovered again.
+  if (!turn.runtimeSessionId || turn.prompt.includes(USAGE_LIMIT_MARKER)) return null;
+  const provider = usageLimitProviderOf(stop, reports);
+  if (!provider || !repo.canContinueAfterUsageLimit(turn)) return null;
+  return isRecentActivity(repo.getRestartLastActivityAt(turn), at) ? provider : null;
+}
+
+/**
+ * Whether the continuation, sweeping once the limit ends at `until`, would run
+ * the chat's stopped turn again: what a quota card may promise.
+ */
+export function usageLimitContinuationTakes(
+  repo: ContinuationRepo,
+  chatId: string,
+  until: number,
+  reports: ModelAccountReports,
+): boolean {
+  const stop = repo
+    .getLatestErroredTurns(until - MAX_RESTART_INACTIVITY_MS)
+    .find((candidate) => candidate.turn.sessionId === chatId);
+  return stop !== undefined && continuationProvider(repo, stop, reports, until) !== null;
+}
+
 export interface UsageLimitContinuationOptions {
   accounts: Pick<ModelAccounts, "read" | "refresh" | "onChanged">;
   repo: Pick<
     ChatsWebChatRepository,
     | "getLatestErroredTurns"
-    | "canContinueAfterRestart"
+    | "canContinueAfterUsageLimit"
     | "getRestartGuardianPrompt"
     | "getRestartLastActivityAt"
   >;
@@ -82,11 +122,12 @@ export interface UsageLimitContinuationOptions {
 }
 
 /**
- * Continues guardian turns a usage limit stopped, once the limit has cleared.
- * Call once after startup. Each settled read of an account that shows its
- * provider available sweeps that provider's stopped turns, one chat at a time.
- * A turn with activity in the last day, in a top-level dashboard chat nobody
- * has written in since, gets one continuation.
+ * Continues turns a usage limit stopped, once the limit has cleared: the
+ * guardian's own, and a task chat's, which runs unattended. Call once after
+ * startup. Each settled read of an account that shows its provider available
+ * sweeps that provider's stopped turns, one chat at a time. A turn with
+ * activity in the last day, in a top-level dashboard chat nobody has written
+ * in since, gets one continuation.
  * Returns what stops it.
  */
 export function startUsageLimitContinuation(options: UsageLimitContinuationOptions): () => void {
@@ -104,13 +145,11 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
     for (const stop of repo.getLatestErroredTurns(Date.now() - MAX_RESTART_INACTIVITY_MS)) {
       if (stopped) return;
       const { turn } = stop;
-      // The marker lives in turn_start's prompt, so a recovery can never be recovered again.
-      if (attempted.has(turn.messageId) || !turn.runtimeSessionId) continue;
-      if (turn.prompt.includes(USAGE_LIMIT_MARKER)) continue;
-      if (usageLimitProviderOf(stop, accounts.read()) !== provider) continue;
+      if (attempted.has(turn.messageId)) continue;
       try {
-        if (!repo.canContinueAfterRestart(turn)) continue;
-        if (!isRecentActivity(repo.getRestartLastActivityAt(turn), Date.now())) continue;
+        if (continuationProvider(repo, stop, accounts.read(), Date.now()) !== provider) continue;
+        const runtimeSessionId = turn.runtimeSessionId;
+        if (!runtimeSessionId) continue;
         // A continuation against a provider that is limited again would fail at once.
         if (!available(provider)) return;
         attempted.add(turn.messageId);
@@ -119,7 +158,7 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
         const outcome = await runner.runAndReport(
           {
             agentName: turn.agentName,
-            sessionId: turn.runtimeSessionId,
+            sessionId: runtimeSessionId,
             channel: "webchat",
             threadId: turn.sessionId,
             prompt: usageLimitContinuationPrompt(
@@ -132,7 +171,7 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
             inputLabel: "Usage limit recovery",
             ...(actor ? { actor } : {}),
             shouldRun: () => {
-              const run = !stopped && available(provider) && repo.canContinueAfterRestart(turn);
+              const run = !stopped && available(provider) && repo.canContinueAfterUsageLimit(turn);
               if (!run) dropped = true;
               else void Promise.resolve(options.onContinue?.(turn)).catch(() => undefined);
               return run;

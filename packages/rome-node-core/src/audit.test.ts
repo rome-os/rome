@@ -324,4 +324,30 @@ describe("viewer queries", () => {
     expect(stats.groups.reduce((n, g) => n + g.count, 0)).toBe(6);
     expect(new Set(stats.groups.map((g) => g.bucket))).toEqual(new Set([6]));
   });
+
+  it("reads bounded content previews without loading the entire stored payload", async () => {
+    const audit = await store();
+    const seq = (await audit.start("exec", { args: { command: "cat" } }))!;
+    const payload = Buffer.concat([
+      Buffer.from("0123456789"),
+      Buffer.from([0, 1, 2, 3]),
+      Buffer.alloc(1024, 0x61),
+    ]);
+    audit.end(seq, "exec", "ok", { exitCode: 0 }, { stdout: payload });
+    const endSeq = audit.get(seq)!.end!.seq;
+
+    const short = audit.contentPreview(endSeq, "stdout", 14);
+    expect(short).not.toBeNull();
+    expect(short!.size).toBe(payload.byteLength);
+    expect(short!.truncated).toBe(true);
+    expect(short!.preview.equals(payload.subarray(0, 14))).toBe(true);
+
+    const full = audit.contentPreview(endSeq, "stdout", payload.byteLength);
+    expect(full).not.toBeNull();
+    expect(full!.size).toBe(payload.byteLength);
+    expect(full!.truncated).toBe(false);
+    expect(full!.preview.equals(payload)).toBe(true);
+
+    expect(audit.contentPreview(endSeq, "stderr", 100)).toBeNull();
+  });
 });

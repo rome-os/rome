@@ -20,6 +20,12 @@ packages/ui/src/test/
 !packages/rome-node-core/src/
 !packages/rome-node-core/src/**
 packages/rome-node-core/src/**/*.test.ts
+!packages/rome-node-ui/package.json
+!packages/rome-node-ui/tsconfig*.json
+!packages/rome-node-ui/src/
+!packages/rome-node-ui/src/**
+packages/rome-node-ui/src/**/*.test.ts
+packages/rome-node-ui/src/**/*.test.tsx
 !packages/rome-node-cli/package.json
 !packages/rome-node-cli/tsconfig*.json
 !packages/rome-node-cli/bin/

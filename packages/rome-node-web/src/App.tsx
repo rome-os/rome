@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import { Languages, LogOut, Monitor, Moon, RefreshCw, Sun } from "lucide-react";
+import {
+  Languages,
+  LayoutDashboard,
+  LogOut,
+  Monitor,
+  Moon,
+  RefreshCw,
+  ScrollText,
+  Sun,
+} from "lucide-react";
 import { Alert, AlertDescription } from "@rome-os/ui/alert";
 import { Badge } from "@rome-os/ui/badge";
 import { Button } from "@rome-os/ui/button";
+import { cn } from "@rome-os/ui/cn";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@rome-os/ui/empty-state";
 import { IconButton } from "@rome-os/ui/icon-button";
 import {
@@ -16,6 +26,7 @@ import {
 import { Spinner } from "@rome-os/ui/spinner";
 import { UiScaleProvider } from "@rome-os/ui/ui-scale";
 import { ApiError, api, subscribeEvents } from "./api";
+import { AuditLogView } from "./components/AuditLogView";
 import { LoginView } from "./components/LoginView";
 import { OverviewView, phaseBadgeVariant } from "./components/OverviewView";
 import { RomeLogo } from "./components/RomeLogo";
@@ -28,6 +39,14 @@ import {
 } from "./theme";
 import type { AuthSession, HostSnapshot } from "./types";
 
+type ActiveTab = "overview" | "log";
+
+function readTabFromLocation(): ActiveTab {
+  if (typeof window === "undefined") return "overview";
+  const path = window.location.pathname;
+  return path === "/log" || path.startsWith("/log/") ? "log" : "overview";
+}
+
 function ThemeIcon({ pref }: { pref: ThemePreference }) {
   if (pref === "light") return <Sun />;
   if (pref === "dark") return <Moon />;
@@ -37,12 +56,28 @@ function ThemeIcon({ pref }: { pref: ThemePreference }) {
 export function App() {
   const [locale, setLocale] = useState<Locale>(() => initialLocale());
   const [theme, setTheme] = useState<ThemePreference>(() => readThemePreference());
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() => readTabFromLocation());
   const [session, setSession] = useState<AuthSession | null>(null);
   const [snapshot, setSnapshot] = useState<HostSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [logRefreshSignal, setLogRefreshSignal] = useState(0);
 
   const t = messages[locale];
+
+  useEffect(() => {
+    const onPopState = () => setActiveTab(readTabFromLocation());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const navigateTab = useCallback((next: ActiveTab) => {
+    setActiveTab(next);
+    const targetPath = next === "log" ? "/log" : "/";
+    if (typeof window !== "undefined" && window.location.pathname !== targetPath) {
+      window.history.pushState(null, "", targetPath);
+    }
+  }, []);
 
   useEffect(() => {
     applyThemePreference(theme);
@@ -53,6 +88,15 @@ export function App() {
     return () => mq.removeEventListener("change", listener);
   }, [theme]);
 
+  const handleUnauthorized = useCallback(() => {
+    setSession((prev) => ({
+      authRequired: true,
+      authenticated: false,
+      passwordSource: prev?.passwordSource ?? "file",
+    }));
+    setSnapshot(null);
+  }, []);
+
   const loadStatus = useCallback(async () => {
     setRefreshing(true);
     setLoadError(null);
@@ -61,19 +105,14 @@ export function App() {
       setSnapshot(next);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        setSession((prev) => ({
-          authRequired: true,
-          authenticated: false,
-          passwordSource: prev?.passwordSource ?? "file",
-        }));
-        setSnapshot(null);
+        handleUnauthorized();
       } else {
         setLoadError(err instanceof Error ? err.message : String(err));
       }
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [handleUnauthorized]);
 
   const bootstrap = useCallback(async () => {
     setLoadError(null);
@@ -111,16 +150,18 @@ export function App() {
     setTheme((current) => nextThemePreference(current));
   }
 
+  function handleRefresh() {
+    void loadStatus();
+    if (activeTab === "log") {
+      setLogRefreshSignal((n) => n + 1);
+    }
+  }
+
   async function handleLogout() {
     try {
       await api.logout();
     } finally {
-      setSession((prev) => ({
-        authRequired: true,
-        authenticated: false,
-        passwordSource: prev?.passwordSource ?? "file",
-      }));
-      setSnapshot(null);
+      handleUnauthorized();
     }
   }
 
@@ -148,7 +189,7 @@ export function App() {
         />
       ) : (
         <main className="min-h-screen bg-background text-foreground">
-          <div className="mx-auto w-full max-w-5xl">
+          <div className="mx-auto w-full max-w-6xl">
             <Page>
               <PageHeader>
                 <PageHeading>
@@ -168,7 +209,7 @@ export function App() {
                     label={t.header.refresh}
                     size="sm"
                     disabled={refreshing}
-                    onClick={() => void loadStatus()}
+                    onClick={handleRefresh}
                     icon={<RefreshCw className={refreshing ? "animate-spin" : undefined} />}
                   />
                   <IconButton
@@ -197,6 +238,41 @@ export function App() {
                 </PageActions>
               </PageHeader>
 
+              {snapshot ? (
+                <div
+                  role="tablist"
+                  aria-label={t.nav.label}
+                  className="inline-flex w-fit items-center gap-1 rounded-12 border border-border-subtle bg-surface-muted p-1"
+                >
+                  {(
+                    [
+                      { id: "overview", label: t.nav.overview, icon: LayoutDashboard },
+                      { id: "log", label: t.nav.log, icon: ScrollText },
+                    ] as const
+                  ).map(({ id, label, icon: Icon }) => {
+                    const active = activeTab === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => navigateTab(id)}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-8 px-3 py-1.5 text-ui font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          active
+                            ? "bg-background text-foreground shadow-xs"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        <Icon className="size-3.5" aria-hidden />
+                        <span>{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+
               {loadError ? (
                 <Alert variant="destructive">
                   <AlertDescription>{loadError}</AlertDescription>
@@ -210,6 +286,14 @@ export function App() {
                   </EmptyStateIcon>
                   <EmptyStateTitle>{t.loading}</EmptyStateTitle>
                 </EmptyState>
+              ) : activeTab === "log" ? (
+                <AuditLogView
+                  locale={locale}
+                  t={t}
+                  snapshot={snapshot}
+                  refreshSignal={logRefreshSignal}
+                  onUnauthorized={handleUnauthorized}
+                />
               ) : (
                 <OverviewView
                   t={t}
@@ -218,6 +302,7 @@ export function App() {
                   passwordSource={session?.passwordSource ?? "none"}
                   canRemovePassword={session?.canRemovePassword ?? false}
                   onSessionChange={setSession}
+                  onOpenLog={() => navigateTab("log")}
                 />
               )}
             </Page>
