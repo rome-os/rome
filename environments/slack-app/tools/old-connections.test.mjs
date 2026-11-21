@@ -205,19 +205,21 @@ test("write reads each old app the way rome did, and leaves the rows an upgrade 
   assert.equal(new DatabaseSync(dbPath).prepare("SELECT count(*) n FROM connections").get().n, 2);
 });
 
-test("link counts only a Socket Mode connection open now, not one that said hello and closed", async () => {
+test("check counts only a Socket Mode connection open now, not one that said hello and closed", async () => {
   const bot = await tokensOf("socket_bot", "Rome Bot");
   const cloud = await tokensOf("oauth", "Rome");
-  // A stand-in for the instance's two routes.
+  // A stand-in for the instance's connections route: only GET exists.
+  let botAgent = "core:main";
   const instance = createServer((req, res) => {
     res.setHeader("content-type", "application/json");
-    if (req.method === "PUT") {
-      return res.end(JSON.stringify({ account: { agent: "core:concierge" } }));
+    if (req.method !== "GET") {
+      res.statusCode = 404;
+      return res.end("{}");
     }
-    res.end(JSON.stringify({ connections: [{ id: "c-bot" }, { id: "c-cloud" }] }));
+    res.end(JSON.stringify({ connections: [{ id: "c-bot", agent: botAgent }, { id: "c-cloud" }] }));
   }).listen(0);
   await new Promise((r) => instance.once("listening", r));
-  const dir = mkdtempSync(join(tmpdir(), "old-link-"));
+  const dir = mkdtempSync(join(tmpdir(), "old-check-"));
   const cloudState = (await (await fetch(`${base}/_control/state`)).json()).other_apps.find(
     (a) => a.app_id === cloud.app_id,
   );
@@ -230,7 +232,7 @@ test("link counts only a Socket Mode connection open now, not one that said hell
     return join(dir, name);
   };
   const args = [
-    "link",
+    "check",
     `http://127.0.0.1:${instance.address().port}`,
     file("cookies.json", { s: "1" }),
     base,
@@ -272,7 +274,7 @@ test("link counts only a Socket Mode connection open now, not one that said hell
       if (!open_sockets.length) break;
       await new Promise((r) => setTimeout(r, 10));
     }
-    // Shorten link's wait: the fake has no open connection, so link fails.
+    // Shorten check's wait: the fake has no open connection, so check fails.
     const failed = await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }).catch((e) => e);
     assert.equal(failed.code, 1);
     assert.equal(JSON.parse(failed.stdout).checks.bot_socket_open, false);
@@ -292,13 +294,21 @@ test("link counts only a Socket Mode connection open now, not one that said hell
     const noUser = await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }).catch((e) => e);
     assert.equal(noUser.code, 1);
     assert.equal(JSON.parse(noUser.stdout).checks.oauth_token_file, false);
+    file("token-file.json", { exists: true, ...cloudTails });
+    // The bot's agent comes from the connections list, with no route that sets one.
+    assert.equal(passed.checks.bot_agent, "core:main");
+    // A Rome that reports no agent for the bot fails the check.
+    botAgent = null;
+    const silent = await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }).catch((e) => e);
+    assert.equal(silent.code, 1);
+    assert.equal(JSON.parse(silent.stdout).checks.bot_agent, null);
     live.close();
   } finally {
     instance.close();
   }
 });
 
-// write and link talk to the fake, which runs in this process, so they cannot block it.
+// write and check talk to the fake, which runs in this process, so they cannot block it.
 function runAsync(args, env = {}) {
   return new Promise((resolve, reject) =>
     execFile(process.execPath, [tool, ...args], { env: { ...process.env, ...env } }, (err, out) =>

@@ -9,11 +9,11 @@
 //     kind that already has a connection keeps it. Runs in the instance's
 //     image with the instance stopped, so the tokens never leave the process;
 //     it prints the result without them.
-//   node old-connections.mjs link <instance url> <cookies.json> <fake-slack url> <written.json> <token-file.json>
-//     Links the bot's account to the Concierge through the dashboard's own
-//     route, then checks that each connection came back: listed, the bot's
-//     Socket Mode connection open now, the OAuth tokens in the connector's token
-//     file (ctl.sh token-file's answer). Runs on the host.
+//   node old-connections.mjs check <instance url> <cookies.json> <fake-slack url> <written.json> <token-file.json>
+//     Checks that each connection came back: listed, the bot's account with
+//     the agent its kind decides, the bot's Socket Mode connection open now,
+//     the OAuth tokens in the connector's token file (ctl.sh token-file's
+//     answer). Runs on the host.
 //
 // What each row holds, and where in rome it comes from, is in DIFFERENCES.md.
 
@@ -42,11 +42,10 @@ const OLD_OAUTH_BOT_SCOPES = [
   "files:read",
 ];
 const OLD_OAUTH_USER_SCOPES = ["search:read"];
-const CONCIERGE = "core:concierge";
 
 if (mode === "write") await write(rest);
-else if (mode === "link") await link(...rest);
-else fail(2, "usage: old-connections.mjs write|link …");
+else if (mode === "check") await check(...rest);
+else fail(2, "usage: old-connections.mjs write|check …");
 
 async function prepare(fake, team, guardian) {
   if (!fake || !team || !guardian)
@@ -232,11 +231,11 @@ async function write(argv) {
   console.log(JSON.stringify(out));
 }
 
-async function link(instance, cookiesFile, fake, writtenFile, tokenFile) {
+async function check(instance, cookiesFile, fake, writtenFile, tokenFile) {
   if (!tokenFile) {
     fail(
       2,
-      "usage: link <instance url> <cookies.json> <fake-slack url> <written.json> <token-file.json>",
+      "usage: check <instance url> <cookies.json> <fake-slack url> <written.json> <token-file.json>",
     );
   }
   const tokens = JSON.parse(readFileSync(tokenFile, "utf8"));
@@ -246,17 +245,8 @@ async function link(instance, cookiesFile, fake, writtenFile, tokenFile) {
     cookie: Object.entries(cookies)
       .map(([k, v]) => `${k}=${v}`)
       .join("; "),
-    origin: instance,
-    "content-type": "application/json",
   };
   const bot = written.slack_bot;
-  // What a guardian does on main after connecting a bot: pick the agent that
-  // answers in it (Settings → Connections). Rome hears the bot only then.
-  const linked = await fetch(
-    `${instance}/api/connected-accounts/slack/${encodeURIComponent(bot.account_id)}/agent`,
-    { method: "PUT", headers, body: JSON.stringify({ agent: CONCIERGE }) },
-  );
-  const linkBody = await linked.json().catch(() => null);
 
   const listed = await fetch(`${instance}/api/connections`, { headers }).then((r) => r.json());
   const views = Array.isArray(listed) ? listed : (listed.connections ?? []);
@@ -275,9 +265,11 @@ async function link(instance, cookiesFile, fake, writtenFile, tokenFile) {
   // Both tokens: search.messages and the other user-token calls need the user's.
   const cloudApp = other_apps.find((a) => a.app_id === written.slack.app_id);
   const checks = {
-    bot_agent_linked: linked.ok,
-    bot_agent: linkBody?.account?.agent ?? null,
     bot_listed: view(bot.connection_id) !== null,
+    // The bot's kind decides its agent and nobody picks it, so it answers
+    // from its first message. A Rome from before that reports null here
+    // until a guardian links one, and fails this check.
+    bot_agent: view(bot.connection_id)?.agent ?? null,
     bot_socket_open: open,
     oauth_listed: view(written.slack.connection_id) !== null,
     oauth_token_file:

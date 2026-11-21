@@ -139,7 +139,7 @@ case "$action" in
       sleep 1
     done
     set +e
-    result="$(node "$ENV_DIR/tools/old-connections.mjs" link "$instance" "$STATE_DIR/$svc-cookies.json" "$fake" \
+    result="$(node "$ENV_DIR/tools/old-connections.mjs" check "$instance" "$STATE_DIR/$svc-cookies.json" "$fake" \
       "$STATE_DIR/$svc-old-connections.json" "$STATE_DIR/$svc-token-file.json")"
     code=$?
     set -e
