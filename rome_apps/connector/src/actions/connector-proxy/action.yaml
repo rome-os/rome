@@ -31,7 +31,8 @@ description: |
   ({ channel, text, thread_ts? }) sends, `/api/conversations.history`
   ({ channel, limit?, latest?, oldest? }) and `/api/conversations.replies`
   ({ channel, ts, limit?, cursor? }) read, and `/api/conversations.list`
-  ({ query?, limit? }) lists the channels the app is a member of. A channel
+  ({ query?, limit?, cursor? }) lists the channels the app is a member of,
+  reading on by passing `response_metadata.next_cursor` as `cursor`. A channel
   is named by its id or as `#name`. History answers newest first, and a page
   can hold fewer messages than `limit` with more before it: page back by
   passing the oldest `ts` as `latest` until a page comes back empty, which is
