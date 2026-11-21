@@ -228,6 +228,7 @@ private final class DirectedSession: @unchecked Sendable {
     }
 
     let state: NativeSessionStop
+    let owner: PeerIdentity?
     let pointer = VirtualPointer()
     let binding: ProcessBinding
     let window: CGWindowID
@@ -269,8 +270,10 @@ private final class DirectedSession: @unchecked Sendable {
     var actions: [String: DirectedAction] = [:]
 
     init(id: String, candidate: DirectedCandidate, root: AXUIElement, viewport: WindowViewport, directory: URL,
-         semanticOnly: Bool, foregroundNavigationFallback: Bool = false, leased: Bool = false, started: ContinuousClock.Instant = .now) {
+         semanticOnly: Bool, foregroundNavigationFallback: Bool = false, leased: Bool = false,
+         owner: PeerIdentity? = nil, started: ContinuousClock.Instant = .now) {
         state = NativeSessionStop(id: id, directory: directory)
+        self.owner = owner
         binding = candidate.binding; window = candidate.window; self.root = root; self.viewport = viewport; self.semanticOnly = semanticOnly
         self.foregroundNavigationFallback = foregroundNavigationFallback && !semanticOnly && !candidate.allowOffscreen
         allowOffscreen = candidate.allowOffscreen
@@ -583,8 +586,29 @@ final class NativeWindow: @unchecked Sendable {
         for value in values { value.closeAdmission(reason) }
         for value in values { value.stop(reason) }
     }
+    @discardableResult func stopOwnedBy(_ owner: PeerIdentity, reason: String) -> Int {
+        let matching = current.filter { $0.owner == owner && $0.state.terminal == nil }
+        for value in matching { value.closeAdmission(reason) }
+        for value in matching { value.stop(reason) }
+        return matching.count
+    }
+    @discardableResult func stopIfOwned(_ id: String, owner: PeerIdentity, reason: String) -> Bool {
+        let value = lock.withLock { sessions[id] }
+        guard let value, value.owner == owner, value.state.terminal == nil else { return false }
+        value.closeAdmission(reason)
+        value.stop(reason)
+        return true
+    }
+    func hasActiveSessions(ownedBy owner: PeerIdentity) -> Bool {
+        current.contains { $0.owner == owner && $0.state.terminal == nil }
+    }
     func poll() {
         for value in current where value.state.terminal == nil {
+            if let owner = value.owner, !owner.isAlive() {
+                value.closeAdmission("connection_lost")
+                value.stop("connection_lost")
+                continue
+            }
             try? value.checkFocus()
         }
     }
@@ -816,7 +840,8 @@ final class NativeWindow: @unchecked Sendable {
     }
 
     // Only the native lane admits bindings and starts workers for existing bindings.
-    func bind(_ params: [String: Any], epoch: UInt64, checkEpoch: () throws -> Void, preempt shouldPreempt: Bool = false) throws -> [String: Any] {
+    func bind(_ params: [String: Any], epoch: UInt64, checkEpoch: () throws -> Void, preempt shouldPreempt: Bool = false,
+              owner: PeerIdentity? = nil) throws -> [String: Any] {
         guard let ref = params["windowRef"] as? String, let candidate = candidates[ref],
               candidate.epoch == epoch, ProcessInfo.processInfo.systemUptime - candidate.created <= 15,
               let id = params["sessionId"] as? String,
@@ -869,7 +894,8 @@ final class NativeWindow: @unchecked Sendable {
         let window = try shareable(candidate.binding, candidate.window, allowOffscreen: candidate.allowOffscreen)
         let viewport = try WindowViewport(bounds: bounds, scale: CGFloat(SCContentFilter(desktopIndependentWindow: window).pointPixelScale))
         let value = DirectedSession(id: id, candidate: candidate, root: root, viewport: viewport, directory: directory,
-                                    semanticOnly: semanticOnly, foregroundNavigationFallback: params["foregroundNavigationFallback"] as? Bool == true, leased: leased)
+                                    semanticOnly: semanticOnly, foregroundNavigationFallback: params["foregroundNavigationFallback"] as? Bool == true,
+                                    leased: leased, owner: owner)
         try checkEpoch()
         // Failed and in-flight bindings still own resources that shutdown must wait for.
         try occupancy.claim(candidate.identity.storageKey, sessionId: id)
@@ -2050,6 +2076,22 @@ final class NativeWindow: @unchecked Sendable {
             try check(!transientWindowRead(NativeFailure("window_binding_changed", details: waiting.merging(replacement) { _, b in b }), pid: 123))
         }
         return count
+    }
+
+    func selfTestRegisterSession(owner: PeerIdentity, windowID: CGWindowID) throws -> String {
+        let id = UUID().uuidString
+        let binding = ProcessBinding(pid: getpid(), startSeconds: 1, startMicroseconds: 2,
+                                     executable: "/self-check", bundleId: "com.rome.self-check")
+        let candidate = DirectedCandidate(binding: binding, window: windowID, allowOffscreen: false)
+        let viewport = try WindowViewport(bounds: CGRect(x: 0, y: 0, width: 400, height: 300), scale: 1)
+        let session = DirectedSession(id: id, candidate: candidate, root: AXUIElementCreateApplication(getpid()),
+                                      viewport: viewport, directory: directory, semanticOnly: true, owner: owner)
+        store(session)
+        return id
+    }
+
+    func selfTestTerminal(_ id: String) -> String? {
+        lock.withLock { sessions[id]?.state.terminal }
     }
     #endif
 }

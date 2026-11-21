@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -34,15 +34,24 @@ test(
   async () => {
     await mkdir(join(repo, ".scratch"), { recursive: true });
     const directory = await mkdtemp(join(repo, ".scratch/build-lock-"));
+    const alias = `${directory}-alias`;
+    await symlink(directory, alias);
     const output = join(directory, "Rome Computer Use.app");
+    const aliasedOutput = join(alias, "Rome Computer Use.app");
     const args = [
       "packages/rome-node-core/scripts/build-computer-use.ts",
       "--output",
       output,
       "--unsigned",
     ];
+    const aliasedArgs = [
+      "packages/rome-node-core/scripts/build-computer-use.ts",
+      "--output",
+      aliasedOutput,
+      "--unsigned",
+    ];
     const first = execute([...args, "--build-number", "43.1"]);
-    const second = execute([...args, "--build-number", "43.2"]);
+    const second = execute([...aliasedArgs, "--build-number", "43.2"]);
     try {
       const results = await Promise.all([
         first.done.then((result) => ({ build: "43.1", ...result })),
@@ -68,6 +77,7 @@ test(
       if (first.child.exitCode === null) first.child.kill("SIGTERM");
       if (second.child.exitCode === null) second.child.kill("SIGTERM");
       await Promise.allSettled([first.done, second.done]);
+      await rm(alias, { force: true });
       await rm(directory, { recursive: true, force: true });
     }
   },

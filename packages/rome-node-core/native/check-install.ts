@@ -7,28 +7,28 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
+  realpath,
   rename,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const execute = promisify(execFile);
 const app = process.env.ROME_COMPUTER_USE_TEST_APP;
-const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
 const options = {
   skip: process.platform !== "darwin" || !app,
   timeout: 20_000,
 };
 test("staged app installation", options, async () => {
-  await mkdir(join(repo, ".scratch"), { recursive: true });
-  const state = await mkdtemp(join(repo, ".scratch/native-install-"));
+  const state = await realpath(await mkdtemp(join(tmpdir(), "rome-native-install-")));
   await chmod(state, 0o700);
   try {
     const stage = async (name: string) => {
@@ -79,6 +79,7 @@ test("staged app installation", options, async () => {
       (await execute(second, ["--install-staged-app", "--state-dir", state])).stdout,
     );
     assert.equal(replaced.path, installed.path);
+    assert.equal(replaced.previousPath, join(state, ".staging-second", "Rome Computer Use.app"));
     assert.equal((await lstat(replaced.previousPath)).isDirectory(), true);
     assert.equal(
       await readFile(join(replaced.previousPath, "Contents/Resources/stage-marker.txt"), "utf8"),
@@ -87,6 +88,12 @@ test("staged app installation", options, async () => {
     assert.equal(
       await readFile(join(installed.path, "Contents/Resources/stage-marker.txt"), "utf8"),
       "second",
+    );
+    const entries = await readdir(state);
+    assert.equal(
+      entries.some((entry) => entry.startsWith(".previous-app-")),
+      false,
+      `Atomic swap must not leak orphaned .previous-app-* backups: ${JSON.stringify(entries)}`,
     );
 
     const unsafe = await stage("unsafe");

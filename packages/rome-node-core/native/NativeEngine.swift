@@ -10,26 +10,18 @@ final class NativeEngine: @unchecked Sendable {
     private var workspaceSuspended = false
     private var workspaceEpoch: UInt64 = 0
     private var focusCleanupScheduled = false
+    private var ownerWatchers: [PeerIdentity: DispatchSourceProcess] = [:]
     private let stopDirectory: URL
     private let windowControl: NativeWindow
 
     init(stateDirectory: URL) throws {
-        var directoryInfo = stat()
-        guard lstat(stateDirectory.path, &directoryInfo) == 0, directoryInfo.st_uid == getuid(),
-              directoryInfo.st_mode & S_IFMT == S_IFDIR, directoryInfo.st_mode & 0o777 == 0o700,
-              stateDirectory.resolvingSymlinksInPath().path == stateDirectory.standardizedFileURL.path else {
-            throw NativeFailure("unsafe_state_directory")
-        }
+        try NativePath.requireSafeDirectory(stateDirectory, privateMode: true, errorCode: "unsafe_state_directory")
         stopDirectory = stateDirectory.appendingPathComponent("native-stops", isDirectory: true)
         if !FileManager.default.fileExists(atPath: stopDirectory.path) {
             try FileManager.default.createDirectory(at: stopDirectory, withIntermediateDirectories: false,
                                                     attributes: [.posixPermissions: 0o700])
         }
-        var info = stat()
-        guard lstat(stopDirectory.path, &info) == 0, info.st_uid == getuid(),
-              info.st_mode & S_IFMT == S_IFDIR, info.st_mode & 0o777 == 0o700 else {
-            throw NativeFailure("unsafe_stop_directory")
-        }
+        try NativePath.requireSafeDirectory(stopDirectory, privateMode: true, errorCode: "unsafe_stop_directory")
         windowControl = NativeWindow(stopDirectory: stopDirectory)
     }
 
@@ -150,12 +142,65 @@ final class NativeEngine: @unchecked Sendable {
     }
 
     func cancelAll(reason: String = "cancelled") {
+        let watchers = stateLock.withLock {
+            let current = Array(ownerWatchers.values)
+            ownerWatchers.removeAll()
+            return current
+        }
+        for watcher in watchers { watcher.cancel() }
         windowControl.cancelAll(reason: reason)
         requestFocusCleanup()
     }
 
+    func watchOwner(_ owner: PeerIdentity) {
+        let source: DispatchSourceProcess? = stateLock.withLock {
+            guard ownerWatchers[owner] == nil else { return nil }
+            let watcher = DispatchSource.makeProcessSource(
+                identifier: owner.pid,
+                eventMask: .exit,
+                queue: DispatchQueue.global(qos: .userInitiated)
+            )
+            watcher.setEventHandler { [weak self] in
+                self?.ownerDisconnected(owner)
+            }
+            ownerWatchers[owner] = watcher
+            return watcher
+        }
+        if let source {
+            source.resume()
+            if !owner.isAlive() { ownerDisconnected(owner) }
+        }
+    }
+
+    func ownerDisconnected(_ owner: PeerIdentity) {
+        let watcher = stateLock.withLock { ownerWatchers.removeValue(forKey: owner) }
+        watcher?.cancel()
+        if windowControl.stopOwnedBy(owner, reason: "connection_lost") > 0 {
+            requestFocusCleanup()
+        }
+    }
+
+    func disconnectSession(_ sessionId: String, owner: PeerIdentity) {
+        if windowControl.stopIfOwned(sessionId, owner: owner, reason: "connection_lost") {
+            requestFocusCleanup()
+        }
+    }
+
+    private func pruneOwnerWatchers() {
+        let stale: [DispatchSourceProcess] = stateLock.withLock {
+            var removed: [DispatchSourceProcess] = []
+            for (owner, watcher) in ownerWatchers where !windowControl.hasActiveSessions(ownedBy: owner) {
+                ownerWatchers.removeValue(forKey: owner)
+                removed.append(watcher)
+            }
+            return removed
+        }
+        for watcher in stale { watcher.cancel() }
+    }
+
     func pollStops() {
         windowControl.poll()
+        pruneOwnerWatchers()
         requestFocusCleanup()
         checkpointStopsIfIdle()
     }
@@ -181,7 +226,7 @@ final class NativeEngine: @unchecked Sendable {
         }
     }
 
-    func handle(_ method: String, params: [String: Any]) throws -> [String: Any] {
+    func handle(_ method: String, params: [String: Any], owner: PeerIdentity? = nil) throws -> [String: Any] {
         guard !["bind", "preempt"].contains(method) || (params["windowRef"] as? String)?.isEmpty == false else {
             throw NativeFailure("window_selection_required", "Select a background window. Global desktop input is disabled.")
         }
@@ -197,7 +242,14 @@ final class NativeEngine: @unchecked Sendable {
                 return result
             case "bind", "preempt":
                 let result = try windowControl.bind(params, epoch: epoch, checkEpoch: { try checkAdmission(epoch) },
-                    preempt: method == "preempt")
+                    preempt: method == "preempt", owner: owner)
+                if let owner {
+                    watchOwner(owner)
+                    if !owner.isAlive() {
+                        ownerDisconnected(owner)
+                        throw NativeFailure("connection_lost", details: ["terminalCause": "connection_lost"])
+                    }
+                }
                 do { try checkAdmission(epoch) }
                 catch {
                     cancelAll(reason: (error as? NativeFailure)?.code == "system_sleep" ? "system_sleep" : "host_stopped")
@@ -315,6 +367,54 @@ final class NativeEngine: @unchecked Sendable {
         } catch let error as NativeFailure {
             try check(error.code == "system_sleep", "Work from an older wake epoch must stay stopped.")
         }
+        #if ROME_COMPUTER_USE_UNSIGNED
+        try check(!Permissions.requestsAllowed, "Unsigned compile-time builds must never allow live permissions.")
+        #endif
+        let canonicalTmp = URL(fileURLWithPath: "/private/tmp/rome-cu-canon-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: canonicalTmp, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: canonicalTmp) }
+        try NativePath.requireSafeDirectory(canonicalTmp, privateMode: true, errorCode: "unsafe_state_directory")
+        assertions += 1
+        let symlinkedTmp = URL(fileURLWithPath: "/tmp/" + canonicalTmp.lastPathComponent, isDirectory: true)
+        do {
+            try NativePath.requireSafeDirectory(symlinkedTmp, privateMode: true, errorCode: "unsafe_state_directory")
+            throw NativeFailure("self_check_failed", "A symlinked /tmp alias was admitted.")
+        } catch let error as NativeFailure {
+            try check(error.code == "unsafe_state_directory", "Non-canonical symlink aliases must be rejected.")
+        }
+
+        // Verify host-crash cleanup runs independently of a busy input lane and isolates unrelated clients.
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        child.arguments = ["30"]
+        try child.run()
+        defer { if child.isRunning { kill(child.processIdentifier, SIGKILL); child.waitUntilExit() } }
+        let childPeer = try PeerIdentity.read(child.processIdentifier)
+        let selfPeer = try PeerIdentity.read(getpid())
+        let ownedId = try engine.windowControl.selfTestRegisterSession(owner: childPeer, windowID: 901)
+        let unrelatedId = try engine.windowControl.selfTestRegisterSession(owner: selfPeer, windowID: 902)
+        engine.watchOwner(childPeer)
+        let busyEntered = DispatchSemaphore(value: 0)
+        let busyRelease = DispatchSemaphore(value: 0)
+        group.enter()
+        DispatchQueue.global().async {
+            try? engine.withLane { busyEntered.signal(); busyRelease.wait() }
+            group.leave()
+        }
+        busyEntered.wait()
+        kill(child.processIdentifier, SIGKILL)
+        child.waitUntilExit()
+        let stopDeadline = ProcessInfo.processInfo.systemUptime + 2.0
+        while engine.windowControl.selfTestTerminal(ownedId) == nil && ProcessInfo.processInfo.systemUptime < stopDeadline {
+            usleep(10_000)
+        }
+        try check(engine.windowControl.selfTestTerminal(ownedId) == "connection_lost",
+                  "Killing an owning host must latch connection_lost even while the input lane is busy.")
+        try check(engine.windowControl.selfTestTerminal(unrelatedId) == nil,
+                  "Disconnecting one host must not stop an unrelated host's session.")
+        busyRelease.signal()
+        group.wait()
+
         engine.beginPermissionRecovery()
         do {
             _ = try engine.admissionEpoch()

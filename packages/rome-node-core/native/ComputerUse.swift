@@ -16,7 +16,13 @@ struct NativeFailure: Error {
 }
 
 enum Permissions {
-    static var requestsAllowed: Bool { Bundle.main.object(forInfoDictionaryKey: "RomeComputerUseUnsigned") as? Bool != true }
+    static var requestsAllowed: Bool {
+        #if ROME_COMPUTER_USE_UNSIGNED
+        return false
+        #else
+        return Bundle.main.object(forInfoDictionaryKey: "RomeComputerUseUnsigned") as? Bool != true
+        #endif
+    }
     static func status() -> [String: Any] {
         ["accessibility": AXIsProcessTrusted(), "screenCapture": CGPreflightScreenCaptureAccess(),
          "postEvents": CGPreflightPostEventAccess(), "inputMonitoring": CGPreflightListenEventAccess()]
@@ -33,20 +39,19 @@ enum Permissions {
 final class RPCServer: @unchecked Sendable {
     let stateDirectory: URL
     let token: String
-    let handler: ([String: Any]) -> [String: Any]
+    let handler: ([String: Any], PeerIdentity) -> [String: Any]
+    let onDisconnect: ((PeerIdentity, String?) -> Void)?
     private var listener: Int32 = -1
     private var lockFile: Int32 = -1
     private var socketInode: ino_t = 0
     private let maxFrame = 8 * 1024 * 1024
 
-    init(directory: URL, handler: @escaping ([String: Any]) -> [String: Any]) throws {
+    init(directory: URL,
+         onDisconnect: ((PeerIdentity, String?) -> Void)? = nil,
+         handler: @escaping ([String: Any], PeerIdentity) -> [String: Any]) throws {
         stateDirectory = directory
+        try NativePath.requireSafeDirectory(directory, privateMode: true, errorCode: "unsafe_state_directory")
         var info = stat()
-        guard lstat(directory.path, &info) == 0, info.st_uid == getuid(),
-              info.st_mode & S_IFMT == S_IFDIR, info.st_mode & 0o777 == 0o700,
-              directory.resolvingSymlinksInPath().path == directory.standardizedFileURL.path else {
-            throw NativeFailure("unsafe_state_directory")
-        }
         let tokenPath = directory.appendingPathComponent("token").path
         let tokenFile = open(tokenPath, O_RDONLY | O_NOFOLLOW)
         guard tokenFile >= 0 else { throw NativeFailure("unsafe_token_file") }
@@ -61,6 +66,7 @@ final class RPCServer: @unchecked Sendable {
         guard token.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
             throw NativeFailure("invalid_token")
         }
+        self.onDisconnect = onDisconnect
         self.handler = handler
     }
 
@@ -110,13 +116,18 @@ final class RPCServer: @unchecked Sendable {
                 if connection < 0 { break }
                 var uid: uid_t = 0
                 var gid: gid_t = 0
+                var peerPid: pid_t = 0
+                var pidLength = socklen_t(MemoryLayout<pid_t>.size)
+                // Darwin sys/un.h: SOL_LOCAL = 0, LOCAL_PEERPID = 0x002.
                 guard fcntl(connection, F_SETFD, FD_CLOEXEC) == 0,
-                      getpeereid(connection, &uid, &gid) == 0, uid == getuid() else {
+                      getpeereid(connection, &uid, &gid) == 0, uid == getuid(),
+                      getsockopt(connection, 0, 0x002, &peerPid, &pidLength) == 0, peerPid > 0,
+                      let peer = try? PeerIdentity.read(peerPid) else {
                     close(connection)
                     continue
                 }
                 setsockopt(connection, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout.size(ofValue: noSignal)))
-                DispatchQueue.global(qos: .userInitiated).async { [self] in serve(connection) }
+                DispatchQueue.global(qos: .userInitiated).async { [self] in serve(connection, peer: peer) }
             }
         }
     }
@@ -157,24 +168,48 @@ final class RPCServer: @unchecked Sendable {
         }
     }
 
-    private func serve(_ fd: Int32) {
+    private func serve(_ fd: Int32, peer: PeerIdentity) {
         defer { close(fd) }
         while let header = readExactly(4, from: fd) {
             let length = header.enumerated().reduce(0) { $0 | Int($1.element) << ($1.offset * 8) }
             guard length > 0, length <= maxFrame, let body = readExactly(length, from: fd),
                   let request = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return }
+            let sessionId = (request["params"] as? [String: Any])?["sessionId"] as? String
             let reply: [String: Any]
             if request["token"] as? String != token {
                 reply = ["id": request["id"] ?? NSNull(), "ok": false,
                          "error": ["code": "unauthorized", "message": "The helper credential is invalid."]]
             } else {
-                reply = handler(request)
+                // Monitor the peer socket independently of the synchronous request worker so a
+                // mid-action hangup or host crash latches connection_lost immediately.
+                let cancelled = DispatchSemaphore(value: 0)
+                let disconnectMonitor = DispatchSource.makeReadSource(
+                    fileDescriptor: fd,
+                    queue: DispatchQueue.global(qos: .userInitiated)
+                )
+                disconnectMonitor.setCancelHandler { cancelled.signal() }
+                disconnectMonitor.setEventHandler { [weak self] in
+                    var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                    let polled = poll(&pfd, 1, 0)
+                    let hungUp = polled > 0 && (pfd.revents & Int16(POLLHUP | POLLERR)) != 0
+                    if hungUp || !peer.isAlive() {
+                        disconnectMonitor.cancel()
+                        self?.onDisconnect?(peer, sessionId)
+                    }
+                }
+                disconnectMonitor.resume()
+                reply = handler(request, peer)
+                disconnectMonitor.cancel()
+                cancelled.wait()
             }
             guard let output = try? JSONSerialization.data(withJSONObject: reply, options: [.sortedKeys]),
                   output.count <= maxFrame else { return }
             var size = UInt32(output.count).littleEndian
             let prefix = withUnsafeBytes(of: &size) { Data($0) }
-            guard writeAll(prefix + output, to: fd) else { return }
+            guard writeAll(prefix + output, to: fd) else {
+                onDisconnect?(peer, sessionId)
+                return
+            }
         }
     }
 }
@@ -443,7 +478,14 @@ final class RPCServer: @unchecked Sendable {
                 let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") ?? "1"
                 let instance = instanceId
                 let gate = restartGate
-                server = try RPCServer(directory: directory) { [weak self] request in
+                server = try RPCServer(directory: directory, onDisconnect: { [weak native] peer, sessionId in
+                    guard let native else { return }
+                    if !peer.isAlive() {
+                        native.ownerDisconnected(peer)
+                    } else if let sessionId {
+                        native.disconnectSession(sessionId, owner: peer)
+                    }
+                }) { [weak self] request, peer in
                     let id = request["id"] ?? NSNull()
                     do {
                         guard let method = request["method"] as? String else { throw NativeFailure("invalid_method") }
@@ -467,7 +509,7 @@ final class RPCServer: @unchecked Sendable {
                             }
                             guard let params = request["params"] as? [String: Any] else { throw NativeFailure("invalid_params") }
                             // Each connection has a worker. Stop admission may close while the input lane is still busy.
-                            result = try native.handle(method, params: params)
+                            result = try native.handle(method, params: params, owner: peer)
                         }
                         return ["id": id, "ok": true, "result": result]
                     } catch let failure as NativeFailure {

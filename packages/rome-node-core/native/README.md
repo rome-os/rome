@@ -295,25 +295,13 @@ tests exclude production Cloud and the outer Desktop account/settings flow.
 Distribution signatures, other OS versions and arbitrary applications require
 separate qualification.
 
-The cross-Space E2E creates its own AppKit windows and moves its foreground
-fixture into a fullscreen Space. Run it in the Nix dev shell with an already
-authorized, private signed helper build:
+The cross-Space acceptance harness (added alongside the host coordinator in the
+follow-up stack) creates its own AppKit windows and moves its foreground fixture
+into a fullscreen Space, verifying exact discovery, deep AX observation, deltas,
+permitted and rejected actions, and focus, pointer, and process cleanup. Do not
+replace a helper during a GUI acceptance run.
 
-```sh
-pnpm --filter @rome-os/node-core build
-node packages/rome-node-core/native/tests/window-space-acceptance.ts \
-  "$PWD/.scratch/computer-use-candidate/Rome Computer Use.app"
-```
-
-The test checks exact discovery, deep AX observation, deltas, permitted and
-rejected actions, and focus, pointer and process cleanup. The older foreground
-prototype fixtures and legacy TextEdit driver do not qualify the window-directed
-backend. Do not replace a helper during a GUI acceptance run.
-
-The implementation adapts safety mechanisms from the user-supplied
-`macOS-Computer-Use-Sol-Handoff-20261116.zip`, particularly `stop-cause-v2`.
-The handoff references the MIT-licensed
-[Cua driver](https://github.com/trycua/cua/tree/ed9026fd4cbd7ebcf3a44e23c3881752165bc6cb).
-Upstream research attribution is retained in `THIRD_PARTY_NOTICES.md`.
-The helper excludes the PID-only driver, fixture oracle, global event filtering
-and frontend focus restoration.
+Upstream research attribution for the MIT-licensed
+[Cua driver](https://github.com/trycua/cua/tree/ed9026fd4cbd7ebcf3a44e23c3881752165bc6cb)
+is retained in `THIRD_PARTY_NOTICES.md`. The helper excludes the PID-only
+driver, fixture oracle, global event filtering, and frontend focus restoration.

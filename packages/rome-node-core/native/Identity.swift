@@ -9,7 +9,7 @@ struct ProcessBinding: Equatable {
     let executable: String
     let bundleId: String
 
-    private static func kernel(_ pid: pid_t) throws -> (seconds: UInt64, microseconds: UInt64, executable: String) {
+    static func kernel(_ pid: pid_t) throws -> (seconds: UInt64, microseconds: UInt64, executable: String) {
         var seconds: UInt64 = 0
         var microseconds: UInt64 = 0
         var path = [CChar](repeating: 0, count: 4096)
@@ -36,6 +36,45 @@ struct ProcessBinding: Equatable {
         let identity = try Self.kernel(pid)
         guard identity.seconds == startSeconds, identity.microseconds == startMicroseconds,
               identity.executable == executable else { throw NativeFailure("process_identity_changed") }
+    }
+}
+
+struct PeerIdentity: Hashable {
+    let pid: pid_t
+    let startSeconds: UInt64
+    let startMicroseconds: UInt64
+    let executable: String
+
+    static func read(_ pid: pid_t) throws -> PeerIdentity {
+        let identity = try ProcessBinding.kernel(pid)
+        return PeerIdentity(pid: pid, startSeconds: identity.seconds, startMicroseconds: identity.microseconds,
+                            executable: identity.executable)
+    }
+
+    func isAlive() -> Bool {
+        guard let current = try? ProcessBinding.kernel(pid) else { return false }
+        return current.seconds == startSeconds && current.microseconds == startMicroseconds
+            && current.executable == executable
+    }
+}
+
+enum NativePath {
+    static func canonical(_ path: String) -> String? {
+        guard let resolved = realpath(path, nil) else { return nil }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
+    static func requireSafeDirectory(_ url: URL, privateMode: Bool = true, errorCode: String) throws {
+        let standardized = url.standardized.path
+        var info = stat()
+        guard lstat(standardized, &info) == 0,
+              info.st_uid == getuid(),
+              info.st_mode & S_IFMT == S_IFDIR,
+              info.st_mode & (privateMode ? 0o777 : 0o022) == (privateMode ? 0o700 : 0),
+              canonical(standardized) == standardized else {
+            throw NativeFailure(errorCode)
+        }
     }
 }
 

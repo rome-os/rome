@@ -5,11 +5,12 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmdirSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -39,7 +40,12 @@ if (process.platform !== "darwin")
 nativeEnvironment.DEVELOPER_DIR = run("/usr/bin/xcode-select", ["-p"]).trim();
 const sdkPath = run("/usr/bin/xcrun", ["--sdk", "macosx", "--show-sdk-path"]).trim();
 nativeEnvironment.SDKROOT = sdkPath;
-const output = resolve(option("--output") ?? resolve(root, "dist/native/Rome Computer Use.app"));
+const requestedOutput = resolve(
+  option("--output") ?? resolve(root, "dist/native/Rome Computer Use.app"),
+);
+mkdirSync(dirname(requestedOutput), { recursive: true });
+const canonicalParent = realpathSync(dirname(requestedOutput));
+const output = resolve(canonicalParent, basename(requestedOutput));
 const identity =
   option("--identity") ??
   process.env.ROME_COMPUTER_USE_SIGNING_IDENTITY ??
@@ -59,13 +65,11 @@ if (!unsigned && (!identity || identity === "-"))
 const build = option("--build-number") ?? "1";
 if (!/^\d+(?:\.\d+)*$/.test(build))
   throw new Error("--build-number must contain numeric version components.");
+// Store the lock beside the canonical output parent so symlink aliases and separate checkouts share one lock.
 const lockDirectory = resolve(
-  root,
-  "../..",
-  ".scratch/computer-use-build-locks",
-  createHash("sha256").update(output).digest("hex"),
+  canonicalParent,
+  `.rome-computer-use-build-lock-${createHash("sha256").update(output).digest("hex").slice(0, 16)}`,
 );
-mkdirSync(dirname(lockDirectory), { recursive: true });
 try {
   mkdirSync(lockDirectory, { mode: 0o700 });
 } catch (error) {
@@ -75,12 +79,21 @@ try {
   );
 }
 const lockOwner = resolve(lockDirectory, "owner.json");
-process.once("exit", () => {
+const releaseLock = () => {
   try {
     unlinkSync(lockOwner);
+  } catch {}
+  try {
     rmdirSync(lockDirectory);
   } catch {}
-});
+};
+process.once("exit", releaseLock);
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    releaseLock();
+    process.exit(128 + (signal === "SIGINT" ? 2 : 15));
+  });
+}
 writeFileSync(lockOwner, JSON.stringify({ pid: process.pid, output }), { mode: 0o600 });
 const contents = resolve(output, "Contents");
 const executable = resolve(contents, "MacOS/RomeComputerUse");
@@ -147,6 +160,7 @@ run("/usr/bin/swiftc", [
   "-swift-version",
   "5",
   "-parse-as-library",
+  ...(unsigned ? ["-D", "ROME_COMPUTER_USE_UNSIGNED"] : []),
   ...(selfTest ? ["-D", "ROME_COMPUTER_USE_SELF_TEST"] : []),
   "-O",
   "-target",
