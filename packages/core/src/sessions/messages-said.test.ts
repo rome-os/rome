@@ -538,7 +538,9 @@ describe("messagesSaid", () => {
     expect(heard).toEqual(["tg-1", "tg-2"]);
   });
 
-  it("drops what was queued for a hook that left, even when a new one subscribes at once", async () => {
+  it("raises what was queued for a hook that left to the one that subscribes in its place", async () => {
+    // tg-2 is on record and its delivery settled when the hook swaps, so the
+    // platform will not deliver it again: the reloaded hook must hear it.
     const blocked = gate();
     const firstHeard = gate();
     const heard: string[] = [];
@@ -561,7 +563,7 @@ describe("messagesSaid", () => {
     await settled();
 
     expect(heard).toEqual(["tg-1"]);
-    expect(reloaded).toEqual(["tg-3"]);
+    expect(reloaded).toEqual(["tg-2", "tg-3"]);
     expect(lines()).toHaveLength(3);
   });
   it("holds a line until every hook hearing it has decided its wake", async () => {

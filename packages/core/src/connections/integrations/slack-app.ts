@@ -432,6 +432,9 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
             listened: () => deps.listens(kit.connectionId),
           });
           return {
+            // The mailbox is told a message is had only once Chats has it on
+            // record, so `deliver` must hand back its acceptance.
+            awaitsAcceptance: true,
             start(deliver, fault): void {
               faultSink = fault;
               adapter.onInbound(deliver);

@@ -61,6 +61,7 @@ describe("a delivery settles once Chats has the message on record", () => {
   async function connect(
     opts: {
       acceptTimeoutMs?: number;
+      awaitsAcceptance?: boolean;
       /** Held until it resolves, before the channel hands a message over, as
        *  fetching its attachments would hold it. */
       handOver?: Promise<void>;
@@ -69,7 +70,7 @@ describe("a delivery settles once Chats has the message on record", () => {
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(testDb.db),
     });
-    const fx = makePasteTalk();
+    const fx = makePasteTalk({ awaitsAcceptance: opts.awaitsAcceptance ?? true });
     registry.register(fx.descriptor);
     let recording: InboundRecording | undefined;
     const ports = connectionPorts(
@@ -126,7 +127,8 @@ describe("a delivery settles once Chats has the message on record", () => {
     const talker = fx.talkerFactory.instances.at(-1);
     if (!talker?.state.deliver) throw new Error("the talker did not start");
     const deliver = talker.state.deliver as (message: connections.Message) => Promise<void>;
-    return { deliver, recorded, events, stop };
+    const forward = talker.state.deliver as (message: connections.Message) => unknown;
+    return { deliver, forward, recorded, events, stop, listen: () => recording!.listen() };
   }
 
   it("resolves only after the message is recorded, and again for a redelivery already on record", async () => {
@@ -194,5 +196,32 @@ describe("a delivery settles once Chats has the message on record", () => {
     stop();
     await expect(waiting).rejects.toBeInstanceOf(RecordingStopped);
     handingOver.open();
+  });
+
+  it("rejects a message that arrives while nobody records, as during a hook swap", async () => {
+    const { deliver, recorded, stop, listen } = await connect();
+    stop();
+    await expect(deliver(said("m1", "while away"))).rejects.toBeInstanceOf(RecordingStopped);
+    expect(recorded).toEqual([]);
+    // Delivered again once recording is back, it is on record once.
+    listen();
+    await expect(deliver(said("m1", "while away"))).resolves.toBeUndefined();
+    expect(recorded).toEqual(["while away"]);
+  });
+
+  it("gives a Talker that does not wait nothing to wait on, while its message is still recording", async () => {
+    const { forward, events, recorded } = await connect({ awaitsAcceptance: false });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    events.subscribe(async () => held);
+    expect(forward(said("m1", "first"))).toBeUndefined();
+    // The chat's next message waits behind the first one's listener, and the
+    // Talker that forwarded it is not held.
+    expect(forward(said("m2", "second"))).toBeUndefined();
+    release();
+    await settle();
+    expect(recorded).toEqual(["first", "second"]);
   });
 });

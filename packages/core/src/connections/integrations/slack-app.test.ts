@@ -191,6 +191,9 @@ describe("the Slack app talker", () => {
     );
     for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     expect(faults).toEqual([]);
+    // The registry hands `deliver`'s acceptance only to a Talker that declares
+    // it waits, and the mailbox is answered only once Chats has the message.
+    expect(talker?.awaitsAcceptance).toBe(true);
     expect(opened).toEqual(["fresh"]);
     expect(persisted[0]?.drainKey).toBe("fresh");
     // The release still names the connect's claim after a refresh.

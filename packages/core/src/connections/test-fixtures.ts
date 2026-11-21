@@ -87,6 +87,8 @@ export interface FakeTalkerOptions {
    *  bumps state.stopResolved when it resolves — models grammy's async drain so
    *  awaitable-shutdown tests can prove stopAll() waits for it. */
   asyncStop?: boolean;
+  /** Declares Talker.awaitsAcceptance, so `deliver` returns the acceptance. */
+  awaitsAcceptance?: boolean;
 }
 
 export function makeFakeTalker(cred: Credential, opts?: FakeTalkerOptions): FakeTalker {
@@ -103,6 +105,7 @@ export function makeFakeTalker(cred: Credential, opts?: FakeTalkerOptions): Fake
 
   const talker: FakeTalker = {
     state,
+    ...(opts?.awaitsAcceptance ? { awaitsAcceptance: true } : {}),
     start(deliver, fault) {
       state.deliver = deliver;
       state.fault = fault;

@@ -1125,7 +1125,8 @@ class ConnectionImpl implements Connection {
   private startInstance(slot: CapabilitySlot, epoch: Epoch): void {
     const fault = (err: StreamFault) => this.handleFault(slot, err, epoch);
     if (slot.kind === "talker") {
-      (epoch.instance as Talker).start((msg) => {
+      const talker = epoch.instance as Talker;
+      talker.start((msg) => {
         epoch.disconnectStreak = 0; // a successful delivery ends any backoff run
         // Settles once every handler has: the Talker's acceptance (Talker.start).
         const accepted = Promise.all(
@@ -1139,10 +1140,11 @@ class ConnectionImpl implements Connection {
             }),
           ),
         ).then(() => undefined);
-        // A Talker that ignores the promise leaves no unhandled rejection; one
-        // that awaits it still sees the rejection.
+        // Only a Talker that declares it waits gets the promise (Talker.start),
+        // so one that forwards `deliver` cannot wait on recording by accident.
+        // The catch leaves no unhandled rejection when nobody awaits it.
         accepted.catch(() => {});
-        return accepted;
+        return talker.awaitsAcceptance ? accepted : undefined;
       }, fault);
     } else if (slot.kind === "watcher") {
       (epoch.instance as Watcher).start((event) => {
