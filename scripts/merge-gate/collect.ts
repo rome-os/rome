@@ -6,7 +6,7 @@
 // and the text of a changed goal baseline. Nothing from the PR's head is
 // checked out, imported or run.
 
-import { BASELINE, type ChangedFile, type Decision, decide } from "./gate.js";
+import { BASELINE, type ChangedFile, type Decision, decide, SUMMARY_HEAD } from "./gate.js";
 import { parseInput } from "./input.js";
 
 export const CHECK_NAME = "merge gate";
@@ -173,7 +173,9 @@ export function errorReport(error: unknown): CheckReport {
     title: "needs you: the gate could not decide",
     summary: fit(
       [
-        "**Merge gate: needs-you.** The gate could not decide, so this PR waits for you.",
+        SUMMARY_HEAD.needsYou,
+        "",
+        "The gate could not decide, so this PR waits for you.",
         "",
         "```",
         message.replaceAll("```", "'''"),

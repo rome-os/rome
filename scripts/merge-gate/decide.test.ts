@@ -66,6 +66,13 @@ describe("parseInput", () => {
       { ...valid, files: [{ ...valid.files[0], status: "renamed" }] },
     ],
     ["fractional additions", { ...valid, files: [{ ...valid.files[0], additions: 1.5 }] }],
+    ["negative deletions", { ...valid, files: [{ ...valid.files[0], deletions: -1 }] }],
+    ["an unknown status", { ...valid, files: [{ ...valid.files[0], status: "copied" }] }],
+    ["a file without path", { ...valid, files: [{ ...valid.files[0], path: undefined }] }],
+    ...(["enabled", "author", "maxChangedLines", "selfMerge"] as const).map((key) => [
+      `a policy without ${key}`,
+      { ...valid, policy: { ...valid.policy, [key]: undefined } },
+    ]),
   ])("rejects %s", (_, raw) => {
     expect(() => parseInput(raw)).toThrow(MalformedInput);
   });
@@ -76,6 +83,13 @@ describe("parseInput", () => {
       { ...valid.files[0], patch: null },
     ];
     expect(parseInput({ ...valid, files }).files.map((f) => f.patch)).toEqual(["", undefined]);
+  });
+
+  it("treats a null baseContent or headContent as missing", () => {
+    const files = [{ ...valid.files[0], baseContent: null, headContent: null }];
+    const [f] = parseInput({ ...valid, files }).files;
+    expect(f).not.toHaveProperty("baseContent");
+    expect(f).not.toHaveProperty("headContent");
   });
 
   it("accepts the policy file in the repo", () => {

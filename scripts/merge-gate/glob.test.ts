@@ -20,6 +20,18 @@ describe("matchesGlob", () => {
     ["file?.ts", "file1.ts", true],
     ["file?.ts", "file/.ts", false],
     ["a+b(c).ts", "a+b(c).ts", true],
+    ["*.ts", ".hidden.ts", true],
+    ["a*.ts", "a.ts", true],
+    ["file?.ts", "file.ts", false],
+    ["file?.ts", "file12.ts", false],
+    ["a/**/b", "a/b", true],
+    ["a/**/b", "a/x/y/b", true],
+    ["a/**", "a", false],
+    ["a/**", "a/x/y", true],
+    ["{a,b}.ts", "a.ts", false],
+    ["{a,b}.ts", "{a,b}.ts", true],
+    ["[ab].ts", "a.ts", false],
+    ["[ab].ts", "[ab].ts", true],
   ])("%s against %s is %s", (glob, path, want) => {
     expect(matchesGlob(glob, path)).toBe(want);
   });

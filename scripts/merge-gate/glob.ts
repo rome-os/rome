@@ -25,8 +25,8 @@ export function globToRegExp(glob: string): RegExp {
       const atSegmentEnd = i + 2 === glob.length || glob[i + 2] === "/";
       if (atSegmentStart && atSegmentEnd) {
         if (i + 2 === glob.length) {
-          // Trailing `**`: everything below the folder.
-          out += ".*";
+          // Trailing `**`: everything below the folder, but not the folder.
+          out += i === 0 ? ".*" : ".+";
           i += 2;
         } else {
           // `**/`: zero or more whole segments.

@@ -68,6 +68,13 @@ export interface Decision {
   summary: string;
 }
 
+/** The first line of `summary`, one per outcome. */
+export const SUMMARY_HEAD = {
+  wouldMerge: "**Merge gate: would merge itself.**",
+  qualifies: "**Merge gate: qualifies.**",
+  needsYou: "**Merge gate: needs you.**",
+} as const;
+
 const POLICY_PATH = ".github/merge-policy.json";
 /** Matches a goal's `baseline.json`, the only files whose content the gate reads. */
 export const BASELINE = /^goals\/[^/]+\/baseline\.json$/;
@@ -127,7 +134,10 @@ export function decide(input: GateInput): Decision {
     paths.forEach((p, i) => {
       const glob = globs[i];
       const role = p === file.path ? "" : ` (renamed to ${file.path})`;
-      if (glob === undefined) {
+      const guards = guardsFor(p, file.status);
+      // A guard path never qualifies, so its guards alone say why; whether a
+      // glob lists it adds nothing.
+      if (guards.length === 0 && glob === undefined) {
         fileReasons.push({
           code: "unlisted-path",
           path: p,
@@ -135,7 +145,7 @@ export function decide(input: GateInput): Decision {
           detail: `${p}${role} matches no selfMerge glob.`,
         });
       }
-      for (const guard of guardsFor(p, file.status)) {
+      for (const guard of guards) {
         fileReasons.push({
           code: guard.code,
           path: p,
@@ -261,6 +271,9 @@ export function baselineNotLowered(
   let lowered = false;
   for (const [key, before] of base) {
     const after = head.get(key);
+    // A key that is an object on one side and a number on the other changes
+    // the set of leaves.
+    if ((before === null) !== (after === null)) return `${displayKey(key)} changes shape`;
     if (before === null || after === null || after === undefined) continue;
     if (after > before) return `${displayKey(key)} rises from ${before} to ${after}`;
     if (after < before) lowered = true;
@@ -314,19 +327,22 @@ export function castsOrIgnores(patch: string): string[] {
 
 function summarize(verdict: Decision["verdict"], policy: MergePolicy, reasons: Reason[]): string {
   let head: string;
+  let because: string;
   if (verdict === "needs-you") {
-    head = "**Merge gate: needs-you.** This PR cannot merge itself; it waits for you.";
+    head = SUMMARY_HEAD.needsYou;
+    because = "This PR cannot merge itself; it waits for you.";
   } else if (policy.enabled) {
-    head =
-      "**Merge gate: qualifies.** Every changed path is listed in the merge policy, so this PR merges itself.";
+    head = SUMMARY_HEAD.qualifies;
+    because = "Every changed path is listed in the merge policy, so this PR merges itself.";
   } else {
-    head =
-      "**Merge gate: qualifies.** This PR would merge itself, but the merge policy has `enabled` false, so it only reports.";
+    head = SUMMARY_HEAD.wouldMerge;
+    because =
+      "Every changed path is listed, but the merge policy has `enabled` false, so it only reports.";
   }
   const lines = reasons.map((r) => {
     const where = r.path ? ` \`${r.path}\`` : "";
     const entry = r.entry ? ` (policy entry \`${r.entry}\`)` : "";
     return `- \`${r.code}\`${where}${entry}: ${r.detail}`;
   });
-  return [head, "", ...lines].join("\n");
+  return [head, "", because, "", ...lines].join("\n");
 }
