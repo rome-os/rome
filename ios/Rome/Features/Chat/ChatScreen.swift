@@ -655,8 +655,8 @@ enum MenuTitle {
 /// The right of a chat's header: one glass capsule holding Tasks and "…".
 /// Tasks opens the Agent page on its Tasks tab, with a dot while a task needs
 /// the guardian; a chat with no task list yet (a blank topic chat) has "…"
-/// alone, as the web does. "…" holds what else the Agent page shows (Outputs,
-/// Routines), then what is done to the chat: a topic chat's Rename and Pin
+/// alone, as the web does. "…" holds what else the Agent page shows (Outputs),
+/// then what is done to the chat: a topic chat's Rename and Pin
 /// or Unpin, then Share and Shared links, then Archive and Delete. The main Chat is only
 /// shared. Each button keeps a 44 pt target; the targets overlap so the
 /// icons sit as close as iOS's own paired toolbar buttons.
@@ -695,7 +695,6 @@ struct ChatHeaderButtons: View {
             Menu {
                 Section {
                     Button { onAgent(.outputs) } label: { Label("Outputs", systemImage: "doc.on.doc") }
-                    Button { onAgent(.routines) } label: { Label("Routines", systemImage: "calendar.badge.clock") }
                 } header: {
                     // A system menu wraps its title whatever the line limit: it is cut here.
                     if !title.isEmpty { Text(verbatim: MenuTitle.oneLine(title)) }

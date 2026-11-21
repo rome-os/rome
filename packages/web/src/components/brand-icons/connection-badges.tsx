@@ -9,7 +9,7 @@ import { ShopifyIcon } from "@/components/brand-icons/shopify-icon";
 import { SlackIcon } from "@/components/brand-icons/slack-icon";
 
 /**
- * Brand marks + colored badges for the Settings → Channels / Integrations cards.
+ * Brand marks + colored badges for the Settings → Connections cards.
  *
  * Brand glyphs are official single-path logos (Simple Icons), drawn with
  * `fill="currentColor"` so the badge wrapper sets their color. Brand background

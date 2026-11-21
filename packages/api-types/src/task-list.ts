@@ -13,8 +13,8 @@ import {
 /**
  * The groups of the two-view grouping, in order: the task chats in
  * `needs_you`, `active`, `later` and `ended`, and the rest in `on_its_own`.
- * The iOS app reads it as its Tasks and Routines tabs, so a read without
- * `?grouping=panel` keeps answering it.
+ * iOS builds before the one panel read it as their Tasks and Routines tabs,
+ * so a read without `?grouping=panel` keeps answering it.
  */
 export const TASK_LIST_GROUPS = ["needs_you", "active", "later", "on_its_own", "ended"] as const;
 
