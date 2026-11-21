@@ -190,8 +190,12 @@ export function chatWorkerCalls(
         }),
       );
     },
-    "channels.chats": async (params) => {
+    "channels.chats": async (params, caller) => {
       const { channel, ...query } = parseWorkerCallParams("channels.chats", ChatsParams, params);
+      // A turn others read reads only its own chat, so it lists none.
+      if (!readsAnyChat(caller?.callerActionContext)) {
+        throw new Error("A turn others read lists no chats");
+      }
       if (!channelsService.chats) throw new Error("This host lists no chats");
       return channelsService.chats(channel, query);
     },
