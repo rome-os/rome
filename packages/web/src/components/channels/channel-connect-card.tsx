@@ -5,6 +5,7 @@ import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { ConnectionSlotCard } from "@/components/connection-slot-card";
+import { warnIfAccessKept } from "@/components/connections/access-kept-warning";
 import {
   SetupRenderer,
   StandardSetupRenderer,
@@ -224,6 +225,8 @@ export function ChannelConnectCard({
     } else {
       // Drop any stale terminal setup state so the unconnected card offers a
       // fresh Connect instead of the previous "done" view (no page reload).
+      // Warned first, so a refresh that fails still shows it.
+      warnIfAccessKept(result);
       setup.reset();
       await onRefresh();
     }

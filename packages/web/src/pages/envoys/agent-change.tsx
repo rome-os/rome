@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { warnIfAccessKept } from "@/components/connections/access-kept-warning";
 import { linkAccountAgent, revokeConnectionGrant } from "@/lib/connections-api";
 import { AgentText } from "./agent-text";
 import { CONNECTED_ACCOUNTS_KEY, CONNECTIONS_KEY, type EnvoyAccount } from "./envoys-model";
@@ -51,6 +52,7 @@ function useDisconnect() {
     mutationFn: async (account: EnvoyAccount) => {
       const result = await revokeConnectionGrant(account.connectionId, account.grant);
       if (!result.ok) throw new Error(result.error || t("disconnect.failed"));
+      warnIfAccessKept(result);
     },
     onSuccess: refetch,
   });
