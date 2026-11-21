@@ -43,9 +43,10 @@ export class RoutineEngine {
   // consults this so a guardian-requested stop is recorded as "cancelled"
   // (not "error") and is never retried.
   private cancellingExecutions = new Set<string>();
-  // rootExecutionIds whose run is recorded but whose action has not started
-  // yet. A stop in that window has nothing to kill, so dispatch checks the
-  // marker before starting the action.
+  // rootExecutionIds whose run is recorded but whose root the action engine
+  // cannot cancel yet. A stop in that window has nothing to kill, so it leaves
+  // its marker: dispatch checks it before starting the action, and cancels the
+  // root once the action engine accepts it.
   private admitting = new Set<string>();
 
   constructor(
@@ -377,7 +378,6 @@ export class RoutineEngine {
           ...(keep ? {} : { omitFromRecord: ["__triggerPayload"] }),
         };
 
-        this.admitting.delete(rootExecutionId);
         if (this.cancellingExecutions.delete(rootExecutionId)) {
           outcome = { status: "cancelled" };
           log.info("routine run stopped before it started", {
@@ -387,11 +387,31 @@ export class RoutineEngine {
           return;
         }
 
+        // The action engine records the root before it can cancel it. A stop
+        // in that time is carried out once the root is accepted, after the
+        // engine has registered it (setImmediate runs after that).
+        const accepted = () => {
+          this.admitting.delete(rootExecutionId);
+          if (this.cancellingExecutions.has(rootExecutionId)) {
+            setImmediate(() => void this.actionEngine.cancel(rootExecutionId));
+          }
+        };
+
         try {
           const result = await runWithoutHookInvocationContext(() =>
-            this.actionEngine.run(routine.actionName, mergedArgs, context),
+            this.actionEngine.run(
+              routine.actionName,
+              mergedArgs,
+              context,
+              undefined,
+              undefined,
+              accepted,
+            ),
           );
           const durationMs = this.clock.now().getTime() - startTime;
+          // An action that runs in main cannot be cancelled, so a stop that came
+          // while it was set up did not stop it; its outcome stands.
+          this.cancellingExecutions.delete(rootExecutionId);
 
           // The action engine returns a structured `{status:"error"}` for a
           // domain failure that didn't throw (the catch below handles thrown
