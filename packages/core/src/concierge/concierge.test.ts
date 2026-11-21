@@ -529,7 +529,7 @@ function setup(
     /** A newer input cut the turn short and took its work on. */
     handedOn?: boolean;
     /** Where the turn ran, when not the dashboard chat `chatId`. */
-    threadContext?: { channel: string; threadId: string };
+    threadContext?: { channel: string; threadId: string; senderBondLevel?: string };
   }) => {
     if (!isConciergeChatId(event.chatId) && !event.handedOn) runningTaskChats.delete(event.chatId);
     for (const listener of listeners) {
@@ -834,6 +834,11 @@ describe("Concierge tools", () => {
       const result = await run(there(s, chatId, "guardian"), s, "react", { emoji: "👍" });
       expect(result.isError).toBeFalsy();
       expect(reacted).toEqual([["discord_app", "900", "800000000000000001", "👍"]]);
+      // The model sees no message ids there: an id it guessed, such as the
+      // channel's, reacts to the turn's message all the same.
+      await run(there(s, chatId, "guardian"), s, "react", { emoji: "❤️", message_id: "900" });
+      expect(reacted[1]).toEqual(["discord_app", "900", "800000000000000001", "❤️"]);
+      reacted.splice(1);
       // Anyone else's turn gets no reaction, and one cannot be taken back here.
       expect((await run(there(s, chatId, "other"), s, "react", { emoji: "👍" })).isError).toBe(
         true,
@@ -869,6 +874,8 @@ describe("Concierge tools", () => {
           chat: { id: chatId, channel: "discord_app", threadId: "900" },
           message: {
             text: "Hey!",
+            // The turn's first message quotes the one it answers, as the inbox did.
+            replyTo: "800000000000000001",
             turnId: expect.any(String),
             place: "group",
             recipient: { bondLevel: "guardian", shownName: expect.any(String), said: "@Rome hi" },
@@ -877,6 +884,12 @@ describe("Concierge tools", () => {
       ]);
       // Nothing went into a dashboard chat.
       expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+      // A second message of the turn quotes nothing, and an id the model
+      // guessed, such as the channel's, quotes nothing either.
+      await run(there(s, chatId, "guardian"), s, "say", { text: "Anything else?" });
+      expect((said[1] as { message: { replyTo?: string } }).message.replyTo).toBeUndefined();
+      await run(there(s, chatId, "guardian"), s, "say", { text: "Sure", replyTo: "900" });
+      expect((said[2] as { message: { replyTo?: string } }).message.replyTo).toBeUndefined();
     });
 
     it("lets anyone's turn say something, and tells the gate whom it answers", async () => {
@@ -942,6 +955,16 @@ describe("Concierge tools", () => {
         chatId,
         text: "done",
         threadContext: where,
+      });
+      expect(s.backendTurns).toHaveLength(1);
+      // A reminder runs with no sender, so only the guardian's turn, or a
+      // report, gets one: never another person's.
+      await s.finish({
+        turnId: "c-3",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId,
+        text: "hi",
+        threadContext: { ...where, senderBondLevel: "acquaintance" },
       });
       expect(s.backendTurns).toHaveLength(1);
     });

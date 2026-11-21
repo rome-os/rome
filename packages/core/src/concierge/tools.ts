@@ -261,6 +261,14 @@ export async function buildConciergeTools(
   // A reaction in a chat on a connection: one emoji on the guardian's
   // message, sent to the platform. It cannot be taken back there, and no
   // message status follows it.
+  // The keys of this turn's messages in a chat on a connection, oldest first.
+  // The model sees no message ids there, so a reply and a reaction name one
+  // of these, never an id it guessed.
+  const turnMessageKeys = async (chatId: string, turnId: string) =>
+    (await webchatRepo.getTurnChatMessages(chatId, turnId))
+      .filter((row) => row.role === "user")
+      .map((row) => row.id);
+
   const reactOnConnection = async (args: Record<string, unknown>) => {
     const { chatId, turnId } = currentTurn();
     const { emoji } = args;
@@ -270,11 +278,9 @@ export async function buildConciergeTools(
     }
     const chat = await service.connectionChat(chatId);
     if (!chat) throw new Error("This chat takes no reaction.");
-    const target =
-      optionalString(args, "message_id") ??
-      (await webchatRepo.getTurnChatMessages(chatId, turnId))
-        .filter((row) => row.role === "user")
-        .at(-1)?.id;
+    const keys = await turnMessageKeys(chatId, turnId);
+    const asked = optionalString(args, "message_id");
+    const target = asked && keys.includes(asked) ? asked : keys.at(-1);
     if (!target) throw new Error("No message of the guardian's in this turn to react to.");
     if (!service.deps.reactInChat) throw new Error("This chat takes no reaction.");
     await service.deps.reactInChat(chat, target, emoji as string);
@@ -676,13 +682,18 @@ export async function buildConciergeTools(
 
   // Says `text` in this chat on a connection, through the account's send
   // gate to the platform. Answers the platform's key, or why it was not sent.
+  // The turn's first message quotes the message it answers, as the inbox
+  // quoted every reply.
   const sayOnConnection = async (text: string, replyTo: string | undefined) => {
     const { chatId, turnId } = currentTurn();
     const chat = await service.connectionChat(chatId);
     if (!chat || !service.deps.sayInChat) throw new Error("Nothing can be said in this chat.");
+    const quoting =
+      replyTo ??
+      (service.saidAnyInTurn(turnId) ? undefined : (await turnMessageKeys(chatId, turnId)).at(-1));
     return service.deps.sayInChat(chat, {
       text,
-      ...(replyTo ? { replyTo } : {}),
+      ...(quoting ? { replyTo: quoting } : {}),
       turnId,
       place: context.getThreadContext()?.threadType === "private" ? "direct" : "group",
       recipient: await connectionRecipient(chatId, turnId),
@@ -703,7 +714,13 @@ export async function buildConciergeTools(
         "Nothing here is private: others may read this chat. Say it without the secret, or tell the guardian to ask you for it on the dashboard.",
       );
     }
-    const target = replyTo ? await requireReplyTarget(replyTo) : undefined;
+    // On a connection the model sees no message ids: a replyTo that names
+    // none of the chat's quotes the turn's message instead of failing.
+    const target = replyTo
+      ? onConnection
+        ? ((await webchatRepo.getReplyTarget(chatId, replyTo)) ?? undefined)
+        : await requireReplyTarget(replyTo)
+      : undefined;
     const parts: Parameters<typeof webchatRepo.addBackendMessage>[2] = [
       { type: "text", content: text, ...(format === "long" ? { format } : {}) },
     ];
@@ -964,24 +981,37 @@ export async function buildConciergeTools(
     },
     {
       name: "react",
-      description:
-        "React to one guardian message with an emoji, or clear its reaction. A reaction never rings the phone and never answers the message. A message holds one reaction; a new one replaces it, and it stays until you change it.",
-      inputSchema: {
-        type: "object",
-        required: ["emoji"],
-        properties: {
-          emoji: {
-            type: ["string", "null"],
-            enum: [...CONCIERGE_REACTIONS, null],
-            description: "The reaction, or null to clear the message's reaction.",
+      description: onConnection
+        ? "React to the guardian's message of this turn with an emoji. It cannot be taken back here."
+        : "React to one guardian message with an emoji, or clear its reaction. A reaction never rings the phone and never answers the message. A message holds one reaction; a new one replaces it, and it stays until you change it.",
+      inputSchema: onConnection
+        ? {
+            type: "object",
+            required: ["emoji"],
+            properties: {
+              emoji: {
+                type: "string",
+                enum: [...CONCIERGE_REACTIONS],
+                description: "The reaction.",
+              },
+            },
+          }
+        : {
+            type: "object",
+            required: ["emoji"],
+            properties: {
+              emoji: {
+                type: ["string", "null"],
+                enum: [...CONCIERGE_REACTIONS, null],
+                description: "The reaction, or null to clear the message's reaction.",
+              },
+              message_id: {
+                type: "string",
+                description:
+                  "The message_id of the guardian message, from its <chat_thread> line. Leave it out when this turn holds one guardian message: it reacts to that one. Required when the turn carries several.",
+              },
+            },
           },
-          message_id: {
-            type: "string",
-            description:
-              "The message_id of the guardian message, from its <chat_thread> line. Leave it out when this turn holds one guardian message: it reacts to that one. Required when the turn carries several.",
-          },
-        },
-      },
       handler: (input) =>
         runTool("react", input, async (args) => {
           if (onConnection) return reactOnConnection(args);

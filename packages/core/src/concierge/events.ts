@@ -857,8 +857,14 @@ export function startConciergeEvents(
   // it for the chat, which never saw it: one reminder turn asks it to `say`
   // it, as on the dashboard.
   const onConnectionTurn = async (event: EndedAgentTurn) => {
+    // What the turn said is out: its repeats need no keeping.
+    service.forgetTurn(event.turn.turnId);
     const thread = event.turn.threadContext;
     if (!thread?.threadId) return;
+    // A reminder runs with no sender, so its words would pass the send gate
+    // as the guardian's: only a turn the guardian started, or one no person
+    // started, such as a task's report, gets one.
+    if (thread.senderBondLevel !== undefined && thread.senderBondLevel !== "guardian") return;
     // Read before any await: the reminder's own end fires while it still runs.
     const place = `${thread.channel}:${thread.threadId}`;
     const reminderRunning = connectionReminders.has(place);

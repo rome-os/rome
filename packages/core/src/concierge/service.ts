@@ -1219,6 +1219,11 @@ export class ConciergeService {
     return this.saidByKey.get(turnId)?.get(key);
   }
 
+  /** Whether Concierge turn `turnId` has said any message yet. */
+  saidAnyInTurn(turnId: string): boolean {
+    return (this.saidByKey.get(turnId)?.size ?? 0) > 0;
+  }
+
   /** Concierge turn `turnId` said message `id` as `key`; forgotten once the turn ends. */
   keepSaid(turnId: string, key: string, id: string): void {
     const said = this.saidByKey.get(turnId) ?? new Map<string, string>();
