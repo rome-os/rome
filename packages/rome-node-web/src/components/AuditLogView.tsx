@@ -30,6 +30,7 @@ import type {
 
 const PAGE = 200;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_SEARCH_LENGTH = 256;
 
 type Result = "all" | "running" | "succeeded" | "failed" | "no_result";
 
@@ -384,6 +385,7 @@ export function AuditLogView({
   const [items, setItems] = useState<AuditItem[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [result, setResult] = useState<Result>("all");
   const [bucket, setBucket] = useState<number | null>(null);
   const [search, setSearch] = useState("");
@@ -392,6 +394,10 @@ export function AuditLogView({
   const [expandedDetail, setExpandedDetail] = useState<AuditItem | null>(null);
 
   const refreshAbortRef = useRef<AbortController | null>(null);
+  const loadMoreAbortRef = useRef<AbortController | null>(null);
+  const queryGenRef = useRef(0);
+  const loadedExtraPagesRef = useRef(false);
+  const prevRefreshSignalRef = useRef(refreshSignal);
 
   useEffect(() => {
     const trimmed = search.trim();
@@ -399,7 +405,8 @@ export function AuditLogView({
       setText("");
       return;
     }
-    const timer = window.setTimeout(() => setText(trimmed), 300);
+    const clamped = trimmed.slice(0, MAX_SEARCH_LENGTH);
+    const timer = window.setTimeout(() => setText(clamped), 300);
     return () => window.clearTimeout(timer);
   }, [search]);
 
@@ -416,63 +423,106 @@ export function AuditLogView({
     [result, bucket, text],
   );
 
-  const refresh = useCallback(async () => {
-    refreshAbortRef.current?.abort();
-    const controller = new AbortController();
-    refreshAbortRef.current = controller;
+  const refresh = useCallback(
+    async (mode: "reset" | "background") => {
+      refreshAbortRef.current?.abort();
+      const controller = new AbortController();
+      refreshAbortRef.current = controller;
 
-    const at = Date.now();
-    setNow(at);
-    try {
-      const next = await api.auditSummary(controller.signal);
-      if (controller.signal.aborted) return;
-      setSummary(next);
-      if (next.status.state !== "ok") {
-        setSeries(undefined);
-        setCounts(undefined);
-        setItems([]);
-        setHasMore(false);
-        return;
+      if (mode === "reset") {
+        queryGenRef.current += 1;
+        loadMoreAbortRef.current?.abort();
+        loadMoreAbortRef.current = null;
+        loadedExtraPagesRef.current = false;
+        setLoadingMore(false);
+        setLoading(true);
       }
-      const since = windowStart(at);
-      const [stats, page] = await Promise.all([
-        api.auditStats(since, since + DAY_MS, BUCKET_MS, controller.signal),
-        // Requests never stay "running" in the audit log, so that filter shows none.
-        result === "running"
-          ? Promise.resolve({ items: [], hasMore: false })
-          : api.auditItems(queryParams(), controller.signal),
-      ]);
-      if (controller.signal.aborted) return;
-      setSeries(statsByPeer(stats).get(""));
-      setCounts(
-        next.counts
-          ? { ...next.counts, running: 0 }
-          : { all: 0, running: 0, succeeded: 0, failed: 0, no_result: 0 },
-      );
-      setItems(page.items);
-      setHasMore(page.hasMore);
-      setNotice(null);
-    } catch (err) {
-      if (controller.signal.aborted || isAbortError(err)) return;
-      if (err instanceof ApiError && err.status === 401) {
-        onUnauthorized();
-        return;
+      const gen = queryGenRef.current;
+
+      const at = Date.now();
+      setNow(at);
+      try {
+        const next = await api.auditSummary(controller.signal);
+        if (controller.signal.aborted || queryGenRef.current !== gen) return;
+        setSummary(next);
+        if (next.status.state !== "ok") {
+          setSeries(undefined);
+          setCounts(undefined);
+          setItems([]);
+          setHasMore(false);
+          loadedExtraPagesRef.current = false;
+          return;
+        }
+        const since = windowStart(at);
+        const [stats, page] = await Promise.all([
+          api.auditStats(since, since + DAY_MS, BUCKET_MS, controller.signal),
+          // Requests never stay "running" in the audit log, so that filter shows none.
+          result === "running"
+            ? Promise.resolve({ items: [], hasMore: false })
+            : api.auditItems(queryParams(), controller.signal),
+        ]);
+        if (controller.signal.aborted || queryGenRef.current !== gen) return;
+        setSeries(statsByPeer(stats).get(""));
+        setCounts(
+          next.counts
+            ? { ...next.counts, running: 0 }
+            : { all: 0, running: 0, succeeded: 0, failed: 0, no_result: 0 },
+        );
+        if (
+          mode === "background" &&
+          loadedExtraPagesRef.current &&
+          page.hasMore &&
+          page.items.length > 0
+        ) {
+          const oldestFreshSeq = page.items[page.items.length - 1]!.seq;
+          setItems((current) => {
+            const seen = new Set(page.items.map((item) => item.seq));
+            const preservedTail = current.filter(
+              (item) => item.seq < oldestFreshSeq && !seen.has(item.seq),
+            );
+            return [...page.items, ...preservedTail];
+          });
+        } else {
+          setItems(page.items);
+          setHasMore(page.hasMore);
+          if (!page.hasMore) loadedExtraPagesRef.current = false;
+        }
+        setNotice(null);
+      } catch (err) {
+        if (controller.signal.aborted || isAbortError(err) || queryGenRef.current !== gen) return;
+        if (err instanceof ApiError && err.status === 401) {
+          onUnauthorized();
+          return;
+        }
+        if (mode === "reset") {
+          setItems([]);
+          setHasMore(false);
+          loadedExtraPagesRef.current = false;
+        }
+        setNotice(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!controller.signal.aborted && queryGenRef.current === gen) setLoading(false);
       }
-      setNotice(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (!controller.signal.aborted) setLoading(false);
-    }
-  }, [queryParams, result, onUnauthorized]);
+    },
+    [queryParams, result, onUnauthorized],
+  );
 
   useEffect(() => {
-    void refresh();
+    void refresh("reset");
     return () => {
       refreshAbortRef.current?.abort();
+      loadMoreAbortRef.current?.abort();
     };
+  }, [refresh]);
+
+  useEffect(() => {
+    if (prevRefreshSignalRef.current === refreshSignal) return;
+    prevRefreshSignalRef.current = refreshSignal;
+    void refresh("background");
   }, [refresh, refreshSignal]);
 
   useEffect(() => {
-    const onFocus = () => void refresh();
+    const onFocus = () => void refresh("background");
     window.addEventListener("focus", onFocus);
     const timer = window.setInterval(onFocus, 30_000);
     return () => {
@@ -492,9 +542,13 @@ export function AuditLogView({
     [items, selectedId],
   );
   const selectedSeq = listSelected?.seq ?? null;
-  const selectedTruncated = Boolean(listSelected?.record.recordTruncated);
+  const selectedEndSeq = listSelected?.end?.seq ?? null;
+  const selectedTruncated = Boolean(
+    listSelected?.record.recordTruncated || listSelected?.end?.record.recordTruncated,
+  );
 
   // If the selected list row had fields truncated at the 4 KiB list limit, fetch the full detail record.
+  // Also re-fetch when `selectedEndSeq` changes so a row selected while running refreshes once its end record arrives.
   useEffect(() => {
     setExpandedDetail(null);
     if (selectedSeq === null || !selectedTruncated) return;
@@ -509,10 +563,15 @@ export function AuditLogView({
         if (err instanceof ApiError && err.status === 401) onUnauthorized();
       });
     return () => controller.abort();
-  }, [selectedSeq, selectedTruncated, onUnauthorized]);
+  }, [selectedSeq, selectedEndSeq, selectedTruncated, onUnauthorized]);
 
   const selected =
-    expandedDetail && expandedDetail.seq === selectedId ? expandedDetail : listSelected;
+    expandedDetail &&
+    listSelected &&
+    expandedDetail.seq === listSelected.seq &&
+    (expandedDetail.end?.seq ?? null) === (listSelected.end?.seq ?? null)
+      ? expandedDetail
+      : listSelected;
   const rows = useMemo(() => items.map(toRow), [items]);
   const selectedRow = useMemo(() => (selected ? toRow(selected) : null), [selected]);
 
@@ -550,22 +609,35 @@ export function AuditLogView({
 
   function handleLoadMore() {
     const oldest = items.at(-1)?.seq;
-    if (oldest === undefined || loading) return;
-    setLoading(true);
+    if (oldest === undefined || loading || loadingMore) return;
+    const gen = queryGenRef.current;
+    loadMoreAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadMoreAbortRef.current = controller;
+    setLoadingMore(true);
     void api
-      .auditItems(queryParams(oldest))
+      .auditItems(queryParams(oldest), controller.signal)
       .then((page) => {
-        setItems((current) => [...current, ...page.items]);
+        if (controller.signal.aborted || queryGenRef.current !== gen) return;
+        loadedExtraPagesRef.current = true;
+        setItems((current) => {
+          const seen = new Set(current.map((item) => item.seq));
+          const appended = page.items.filter((item) => !seen.has(item.seq));
+          return [...current, ...appended];
+        });
         setHasMore(page.hasMore);
       })
       .catch((err) => {
+        if (controller.signal.aborted || isAbortError(err) || queryGenRef.current !== gen) return;
         if (err instanceof ApiError && err.status === 401) {
           onUnauthorized();
           return;
         }
         setNotice(err instanceof Error ? err.message : String(err));
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!controller.signal.aborted && queryGenRef.current === gen) setLoadingMore(false);
+      });
   }
 
   return (
@@ -597,7 +669,7 @@ export function AuditLogView({
       searching={Boolean(text)}
       minSearchLength={1}
       rows={rows}
-      loading={loading}
+      loading={loading || loadingMore}
       hasMore={hasMore}
       onLoadMore={handleLoadMore}
       selectedId={selectedId}

@@ -592,4 +592,234 @@ describe("Rome Node Web UI", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(await screen.findByText("Unlock Web UI")).toBeTruthy();
   });
+
+  it("discards stale pagination on filter change, preserves older pages on focus refresh, refreshes completed truncated detail, and clamps long searches", async () => {
+    window.history.replaceState(null, "", "/log");
+    const now = Date.now();
+    const snapshot = makeSnapshot({
+      phase: "online",
+      configured: true,
+      audit: { status: { state: "ok" }, bytes: 2048, requests: 3 },
+    });
+
+    const runningItem = {
+      seq: 30,
+      at: now - 10_000,
+      kind: "start" as const,
+      action: "exec",
+      startSeq: null,
+      outcome: null,
+      record: {
+        requestId: "req-long-running",
+        from: "caller-1",
+        args: { command: "python3", args: ["run_long_task.py"], cwd: "/workspace" },
+        recordTruncated: true,
+      },
+      end: null,
+    };
+
+    const completedItem = {
+      ...runningItem,
+      end: {
+        seq: 31,
+        at: now - 5_000,
+        kind: "end" as const,
+        action: "exec",
+        startSeq: 30,
+        outcome: "ok" as const,
+        record: {
+          durationMs: 5000,
+          exitCode: 0,
+          content: { stdout: { size: 12, sha256: "abc123", storedBytes: 12 } },
+        },
+      },
+    };
+
+    const olderSucceededItem = {
+      seq: 10,
+      at: now - 120_000,
+      kind: "start" as const,
+      action: "exec",
+      startSeq: null,
+      outcome: null,
+      record: {
+        requestId: "req-older-page",
+        from: "caller-1",
+        args: { command: "echo", args: ["older-page-row"], cwd: "/tmp" },
+      },
+      end: {
+        seq: 11,
+        at: now - 119_000,
+        kind: "end" as const,
+        action: "exec",
+        startSeq: 10,
+        outcome: "ok" as const,
+        record: { durationMs: 12, exitCode: 0 },
+      },
+    };
+
+    const failedItem = {
+      seq: 20,
+      at: now - 60_000,
+      kind: "start" as const,
+      action: "exec",
+      startSeq: null,
+      outcome: null,
+      record: {
+        requestId: "req-failed-only",
+        from: "caller-1",
+        args: { command: "false", args: ["failed-only-row"], cwd: "/tmp" },
+      },
+      end: {
+        seq: 21,
+        at: now - 59_000,
+        kind: "end" as const,
+        action: "exec",
+        startSeq: 20,
+        outcome: "exit_nonzero" as const,
+        record: { durationMs: 9, exitCode: 1 },
+      },
+    };
+
+    let requestFinished = false;
+    let detailFetchCount = 0;
+    let resolveDelayedLoadMore: ((res: Response) => void) | null = null;
+    const seenTextParams: string[] = [];
+
+    globalThis.fetch = rstest.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/auth/session") {
+        return jsonResponse({ authRequired: false, authenticated: true, passwordSource: "none" });
+      }
+      if (url === "/api/status") {
+        return jsonResponse(snapshot);
+      }
+      if (url === "/api/audit/summary") {
+        return jsonResponse({
+          status: { state: "ok" },
+          bytes: 2048,
+          records: 6,
+          requests: 3,
+          oldestAt: now - 120_000,
+          newestAt: now - 5_000,
+          retention: { maxAgeDays: 30, maxBytes: 1024 * 1024 * 1024 },
+          counts: { all: 3, succeeded: 2, failed: 1, no_result: 0 },
+        });
+      }
+      if (url.startsWith("/api/audit/stats")) {
+        return jsonResponse({ since: now - 86_400_000, until: now, bucketMs: 600_000, groups: [] });
+      }
+      if (url.startsWith("/api/audit/items?")) {
+        const parsed = new URL(url, "http://localhost");
+        const resultFilter = parsed.searchParams.get("result");
+        const beforeSeq = parsed.searchParams.get("beforeSeq");
+        const textParam = parsed.searchParams.get("text");
+        if (textParam !== null) seenTextParams.push(textParam);
+
+        if (beforeSeq && resultFilter === null) {
+          if (resolveDelayedLoadMore === null) {
+            return new Promise<Response>((resolve) => {
+              resolveDelayedLoadMore = resolve;
+            });
+          }
+          return jsonResponse({ items: [olderSucceededItem], hasMore: false });
+        }
+        if (resultFilter === "failed") {
+          return jsonResponse({ items: [failedItem], hasMore: false });
+        }
+        return jsonResponse({
+          items: [requestFinished ? completedItem : runningItem],
+          hasMore: true,
+        });
+      }
+      if (url === "/api/audit/items/30") {
+        detailFetchCount += 1;
+        return jsonResponse({ item: requestFinished ? completedItem : runningItem });
+      }
+      if (url === "/api/audit/items/30/content/stdout") {
+        return jsonResponse({
+          seq: 30,
+          name: "stdout",
+          available: true,
+          size: 12,
+          storedBytes: 12,
+          sha256: "abc123",
+          previewBytes: 12,
+          truncated: false,
+          isBinary: false,
+          text: "task done!\n",
+        });
+      }
+      return jsonResponse({ error: "not_found" }, 404);
+    }) as typeof fetch;
+
+    render(<App />);
+
+    // 1. Select truncated running item -> initial expanded detail has end: null (No result).
+    fireEvent.click(await screen.findByRole("button", { name: /run_long_task\.py/ }));
+    expect(await screen.findByText("req-long-running")).toBeTruthy();
+    expect(detailFetchCount).toBe(1);
+
+    // 2. While the detail sheet stays open, the command finishes and a focus refresh arrives ->
+    // expandedDetail must refetch for the new end seq and display stdout.
+    requestFinished = true;
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => {
+      expect(detailFetchCount).toBeGreaterThanOrEqual(2);
+    });
+    expect(await screen.findByText(/task done!/)).toBeTruthy();
+
+    // Close the detail sheet so the underlying list controls are interactive.
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByText("req-long-running")).toBeNull();
+    });
+
+    // 3. Trigger Load older (stays in-flight), then switch to Failed before it resolves.
+    fireEvent.click(screen.getByRole("button", { name: /Load older/i }));
+    await waitFor(() => {
+      expect(resolveDelayedLoadMore).not.toBeNull();
+    });
+    fireEvent.click(screen.getByRole("radio", { name: /Failed/ }));
+    expect(await screen.findByRole("button", { name: /failed-only-row/ })).toBeTruthy();
+
+    // Resolve the delayed All-query Load older response; it must be discarded.
+    const resolveStale = resolveDelayedLoadMore as unknown as (res: Response) => void;
+    resolveStale(jsonResponse({ items: [olderSucceededItem], hasMore: false }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /older-page-row/ })).toBeNull();
+    });
+
+    // 4. Switch back to All, load older page cleanly, select the older-page row, then fire
+    // window focus background refresh; the older row and open sheet must stay intact.
+    fireEvent.click(screen.getByRole("radio", { name: /All/ }));
+    expect(await screen.findByRole("button", { name: /run_long_task\.py/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Load older/i }));
+    const olderRow = await screen.findByRole("button", { name: /older-page-row/ });
+    fireEvent.click(olderRow);
+    expect(await screen.findByText("req-older-page")).toBeTruthy();
+
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => {
+      expect(screen.getByText("req-older-page")).toBeTruthy();
+    });
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByText("req-older-page")).toBeNull();
+    });
+    expect(screen.getByRole("button", { name: /older-page-row/ })).toBeTruthy();
+
+    // 5. Pasting a search string > 256 characters clamps to 256 chars instead of sending >256.
+    const longQuery = "x".repeat(300);
+    const searchInput = screen.getByRole("searchbox", { name: "Search commands" });
+    fireEvent.change(searchInput, { target: { value: longQuery } });
+    await waitFor(
+      () => {
+        expect(seenTextParams.some((q) => q.length === 256)).toBe(true);
+      },
+      { timeout: 1500 },
+    );
+    expect(seenTextParams.every((q) => q.length <= 256)).toBe(true);
+  });
 });
