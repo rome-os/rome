@@ -742,6 +742,26 @@ async function botSends(ctx, ws, bot) {
   return { ok: false, tries };
 }
 
+// The old sign-in's sends once the official app is disconnected: the ask
+// names the route, since which route the Concierge picks in a chat that sent
+// through the app before is not what R10 asks (planner, 2026-11-21).
+const SIGN_IN_SEND_ASKS = [
+  (s, g) => `Send "${s}" to #general (${g.general}) on Slack through my Slack sign-in, not Rome's Slack app.`,
+  (s, g) => `Please post this exact sentence in #general (channel ${g.general}) using my own Slack sign-in, not Rome's Slack app: "${s}"`,
+  (s, g) => `On Slack, through my Slack sign-in and not Rome's Slack app, post to #general, ${g.general}, word for word: ${s}`,
+];
+
+/** The first `via` anywhere in an action's input, or undefined. */
+function viaOf(input, depth = 0) {
+  if (!input || typeof input !== "object" || depth > 4) return undefined;
+  if (typeof input.via === "string") return input.via;
+  for (const v of Object.values(input)) {
+    const found = viaOf(v, depth + 1);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
 /** The old OAuth slack sends: a Concierge post to #general arrives from that app. */
 async function oauthSends(ctx, ws, oauth, sentence, markWord, asks = SEND_ASKS) {
   const w = (await ctx.slack.state()).workspaces.find((x) => x.id === ws.id);
@@ -750,13 +770,21 @@ async function oauthSends(ctx, ws, oauth, sentence, markWord, asks = SEND_ASKS) 
     (await ctx.slack.posts({ team: ws.id, channel: general, since })).filter((p) => holds(p.text, markWord));
   const tries = [];
   for (const f of asks) {
-    const asked = await askConcierge(ctx, ctx.b, f(sentence, { general }), {
+    const text = f(sentence, { general });
+    const asked = await askConcierge(ctx, ctx.b, text, {
       right: async (a) => (await marked(a.since)).length > 0,
     });
     const posts = await marked(asked.since);
+    // The route each Slack action of the task took, as the instance lists it.
+    const execs = slackExecutions(await ctx.b.executions(asked.at).catch(() => null), [general ?? ""]);
+    const via = execs.length
+      ? execs.map((e) => `${e.action}: ${viaOf(e.input) ?? (typeof e.input === "string" ? e.input : "(no via)")}`)
+      : ["(no Slack action listed)"];
     tries.push({
+      asked: text,
       at: new Date(asked.at).toISOString(),
       waitedSeconds: asked.waitedSeconds,
+      via,
       posts: posts.map((p) => ({ appId: p.appId ?? null, tokenKind: p.tokenKind })),
       reply: asked.reply.slice(0, 200),
     });
@@ -848,7 +876,7 @@ export async function r10(ctx) {
     }
     const b = await botSends(ctx, ws, bot);
     const word = when === "before restart" ? "Corrandale" : "Pellbrook";
-    const o = await oauthSends(ctx, ws, oauth, `The harvest supper is at the ${word} barn.`, word);
+    const o = await oauthSends(ctx, ws, oauth, `The harvest supper is at the ${word} barn.`, word, SIGN_IN_SEND_ASKS);
     sends[when] = { slack_bot: b, slack: o };
     if (!b.ok) problems.push(`slack_bot's reply did not arrive ${when}`);
     if (!alone) unchecked.push(`the old OAuth slack's send ${when}: the official app could not be disconnected first`);
@@ -880,6 +908,7 @@ export async function r10(ctx) {
     `New slack_bot and slack refused: ${evidence.newConnect_slack_bot.refused && evidence.newConnect_slack.refused ? "yes" : "no"}. ` +
     `slack_bot answered before/after restart: ${said(sends["before restart"].slack_bot)}/${said(sends["after restart"].slack_bot)}; ` +
     `old slack (official app disconnected) sent before/after restart: ${said(sends["before restart"].slack)}/${said(sends["after restart"].slack)}. ` +
+    `The old slack's asks took via ${["before restart", "after restart"].map((w) => `${w}: ${sends[w].slack.tries.map((t, i) => `ask ${i + 1} ${t.via.join(" + ")}`).join(", ")}`).join("; ")}. ` +
     `Reconnect after disconnect refused: ${evidence.reconnect_slack_bot?.refused && evidence.reconnect_slack?.refused ? "yes" : "no"}. ` +
     `Unscored: with the official app also connected, the send came from ${both.fromApps?.join(", ") || "no app"}.`;
   if (problems.length) return { result: "fail", reason: `${problems.join("; ")}. ${summary}`, evidence };

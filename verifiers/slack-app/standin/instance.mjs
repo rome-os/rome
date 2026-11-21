@@ -170,6 +170,7 @@ const server = await serve(async (req, res, url) => {
     save();
     return send(res, 200, { replyToBondLevels: db.replyTo ?? ["guardian"] });
   }
+  if (p === "/api/action-executions" && req.method === "GET") return send(res, 200, db.executions ?? []);
   // R10: the Connect picker, one Slack entry among placeholders (id null).
   // Broken R10-two-entries also offers slack_bot.
   if (p === "/api/connections" && req.method === "GET") {
@@ -366,7 +367,10 @@ async function groups(conn) {
  */
 async function act(conn, text, dmChannel) {
   const react = /\breact|reaction\b/i.test(text);
-  const send = text.match(/(?:post|send a message to)\b.*?(?:#|the )(\w+)\b.*?:\s*"?(.+?)"?$/i);
+  const quoted = text.match(/\bsend "(.+?)" to #(\w+)/i);
+  const send = quoted
+    ? [quoted[0], quoted[2], quoted[1]]
+    : text.match(/(?:post|send a message to)\b.*?(?:#|the )(\w+)\b.*?:\s*"?(.+?)"?$/i);
   const list = /which .*channels|list the slack groups|channels can you see/i.test(text);
   const search = /search|find|look up/i.test(text);
   const read = /read|messages|history|look back|said/i.test(text);
@@ -402,6 +406,13 @@ async function act(conn, text, dmChannel) {
     const channel = id ?? (await byName(send[1]));
     if (!channel) return `I can't find #${send[1]}.`;
     const r = await api(token, "chat.postMessage", { channel, text: send[2] });
+    // Listed as the product's action listing does, with the route it took.
+    db.executions ??= [];
+    db.executions.unshift({
+      rootExecution: { actionName: "slack.send", status: r.ok ? "succeeded" : "failed", startedAt: new Date().toISOString(), args: { channel, via: conn.botToken ? "slack_app" : "slack" } },
+      children: [],
+    });
+    save();
     return r.ok ? `Posted it in #${send[1]}.` : `I could not post it: ${r.error}.`;
   }
   if (list) {
