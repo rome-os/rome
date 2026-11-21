@@ -74,6 +74,9 @@ export interface TalkTyping {
 /** Reacting to a message in a chat with an emoji, as the account. */
 export interface TalkReactions {
   add(chatId: ChatId, messageId: string, emoji: string): Promise<void>;
+  /** Takes the account's own reaction `emoji` off the message. One that is
+   *  not there counts as taken off. */
+  remove(chatId: ChatId, messageId: string, emoji: string): Promise<void>;
 }
 
 export interface TalkFeatureMap {

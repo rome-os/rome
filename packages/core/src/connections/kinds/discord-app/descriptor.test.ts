@@ -15,6 +15,7 @@ function cloud(over: Partial<DiscordAppCloud> = {}): DiscordAppCloud {
     send: async () => ({ id: "9" }),
     typing: async () => {},
     react: async () => {},
+    unreact: async () => {},
     installUrl: async () => "https://discord.com/oauth2/authorize",
     ...over,
   };

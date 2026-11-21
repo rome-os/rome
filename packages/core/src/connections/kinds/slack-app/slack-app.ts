@@ -51,6 +51,9 @@ const SLACK_EMOJI_NAMES: Readonly<Record<string, string>> = {
   "😂": "joy",
   "🎉": "tada",
   "🤔": "thinking_face",
+  // The status Rome shows on a message, not one the Concierge picks.
+  "👀": "eyes",
+  "⚠️": "warning",
 };
 const USER_NAME_CACHE_SIZE = 500;
 const HOUR_MS = 60 * 60 * 1000;
@@ -581,17 +584,31 @@ export class SlackAppAdapter {
   /** Reacts to message `messageId` in `chatId` with `emoji`, as the app's
    *  bot. Slack names its emoji, so only those Rome reacts with are known. */
   async react(chatId: ChatId, messageId: string, emoji: string): Promise<void> {
+    await this.config.api.addReaction(
+      this.config.botToken,
+      this.reactionOf(chatId, messageId, emoji),
+      this.abort.signal,
+    );
+  }
+
+  /** Takes the bot's own reaction `emoji` off message `messageId` in `chatId`. */
+  async unreact(chatId: ChatId, messageId: string, emoji: string): Promise<void> {
+    await this.config.api.removeReaction(
+      this.config.botToken,
+      this.reactionOf(chatId, messageId, emoji),
+      this.abort.signal,
+    );
+  }
+
+  // Slack names its emoji, so only those Rome reacts with are known.
+  private reactionOf(chatId: ChatId, messageId: string, emoji: string) {
     const name = SLACK_EMOJI_NAMES[emoji];
     if (!name) throw new Error(`Slack has no emoji name Rome knows for ${emoji}`);
     const timestamp = messageId.slice(messageId.lastIndexOf(":") + 1);
     if (!/^\d+\.\d+$/.test(timestamp)) {
       throw new Error(`Slack cannot react to message "${messageId}": it is not a Slack message id`);
     }
-    await this.config.api.addReaction(
-      this.config.botToken,
-      { channel: parseSlackChatId(chatId).channelId, timestamp, name },
-      this.abort.signal,
-    );
+    return { channel: parseSlackChatId(chatId).channelId, timestamp, name };
   }
 
   private context(chatId: string) {

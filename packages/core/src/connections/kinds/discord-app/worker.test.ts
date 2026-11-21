@@ -76,6 +76,11 @@ describe("the Discord gateway Worker and Rome Cloud, as the instance calls them"
       messageId: "333333333333333333",
       emoji: "1️⃣",
     });
+    await cloud.unreact({
+      channelId: "444444444444444444",
+      messageId: "333333333333333333",
+      emoji: "👀",
+    });
     const base = "https://discord.romeos.io/v1/discord/channels/444444444444444444";
     expect(calls).toEqual([
       {
@@ -98,6 +103,12 @@ describe("the Discord gateway Worker and Rome Cloud, as the instance calls them"
       {
         url: `${base}/messages/333333333333333333/reactions/${encodeURIComponent("1️⃣")}/@me`,
         method: "PUT",
+        auth: "Bearer instance-jwt",
+        body: undefined,
+      },
+      {
+        url: `${base}/messages/333333333333333333/reactions/${encodeURIComponent("👀")}/@me`,
+        method: "DELETE",
         auth: "Bearer instance-jwt",
         body: undefined,
       },

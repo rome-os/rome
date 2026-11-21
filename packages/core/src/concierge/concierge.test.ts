@@ -969,6 +969,81 @@ describe("Concierge tools", () => {
       expect(s.backendTurns).toHaveLength(1);
     });
 
+    it("shows the guardian's message working while the turn works, and settles it when the turn ends", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      s.deps.webchatRepo.chatOfSession = (async () => ({ id: chatId })) as never;
+      const reacted: unknown[] = [];
+      s.deps.reactInChat = async (_chat, messageId, emoji) => {
+        reacted.push([messageId, emoji]);
+      };
+      const turn = {
+        agentName: CONCIERGE_AGENT_ID,
+        turnId: "c-work",
+        channel: "discord_app",
+        chatId,
+        messageKey: "800000000000000001",
+        senderBondLevel: "guardian",
+      };
+      // Anyone else's message, and a dashboard turn, are not watched here.
+      expect(s.service.observeConnectionTurn({ ...turn, senderBondLevel: "other" })).toBeNull();
+      expect(s.service.observeConnectionTurn({ ...turn, channel: "webchat" })).toBeNull();
+      const watch = s.service.observeConnectionTurn(turn);
+      expect(watch).not.toBeNull();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Two working tool calls show it working, as on the dashboard.
+      watch?.event({ type: "tool_use", tool: "web_search", id: "t1" });
+      watch?.event({ type: "tool_use", tool: "web_search", id: "t2" });
+      await rs.waitFor(async () =>
+        expect(
+          (await s.service.deps.tasks.messageStatusesOf(chatId, ["800000000000000001"])).get(
+            "800000000000000001",
+          ),
+        ).toBe("working"),
+      );
+      // The turn ends having said nothing: its message settles, and showed working, so no ✅.
+      await s.finish({
+        turnId: "c-work",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId,
+        text: "done",
+        threadContext: { channel: "discord_app", threadId: "900", senderBondLevel: "guardian" },
+      });
+      expect(
+        (await s.service.deps.tasks.messageStatusesOf(chatId, ["800000000000000001"])).get(
+          "800000000000000001",
+        ),
+      ).toBeUndefined();
+      expect(reacted).toEqual([]);
+    });
+
+    it("reacts ✅ on the platform to a message a turn there left without any sign", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      s.deps.webchatRepo.chatOfSession = (async () => ({ id: chatId })) as never;
+      const reacted: unknown[] = [];
+      s.deps.reactInChat = async (chat, messageId, emoji) => {
+        reacted.push([chat.threadId, messageId, emoji]);
+      };
+      s.service.observeConnectionTurn({
+        agentName: CONCIERGE_AGENT_ID,
+        turnId: "c-quiet",
+        channel: "discord_app",
+        chatId,
+        messageKey: "800000000000000002",
+        senderBondLevel: "guardian",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await s.finish({
+        turnId: "c-quiet",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId,
+        text: "done",
+        threadContext: { channel: "discord_app", threadId: "900", senderBondLevel: "guardian" },
+      });
+      await rs.waitFor(() => expect(reacted).toEqual([["900", "800000000000000002", "✅"]]));
+    });
+
     it("refuses the task tools to anyone but the guardian", async () => {
       const s = setup();
       const chatId = await connectionChat(s);

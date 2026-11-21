@@ -205,7 +205,8 @@ import { ActionWorkerCoordinator } from "./apps/actions/action-subprocess.js";
 import { endInterruptedRuns } from "./apps/actions/restart-recovery.js";
 import { WorkerRpcServer } from "./apps/actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./apps/actions/worker-rpc-client.js";
-import { connectionTyping } from "./core/connection-typing.js";
+import { connectionTyping, observeTurnWith } from "./core/connection-typing.js";
+import { ConnectionStatusMarks } from "./concierge/connection-status.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import type { ChatResetPolicy } from "./core/chat-reset-policy.js";
 import {
@@ -1463,6 +1464,26 @@ async function main() {
     phoneWatching,
     dashboardActivity,
   });
+  // A chat on a connection shows a message's status as the account's own
+  // reaction on it, since the platform draws none (docs/domains/chats.md#status).
+  const connectionStatus = new ConnectionStatusMarks({
+    chatOf: (chatId) => concierge.connectionChat(chatId),
+    add: async (chat, messageKey, emoji) => {
+      const added = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.add(chat.threadId as ChatId, messageKey, emoji),
+      );
+      if (added) await added;
+    },
+    remove: async (chat, messageKey, emoji) => {
+      const removed = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.remove(chat.threadId as ChatId, messageKey, emoji),
+      );
+      if (removed) await removed;
+    },
+  });
+  concierge.onMessageStatus((event) => {
+    void connectionStatus.statusChanged(event.sessionId, event.messageId, event.status);
+  });
   const channelSurface: ChannelSurfaces = (channel) => {
     if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
     const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))?.capabilities
@@ -1620,16 +1641,20 @@ async function main() {
     chatResetPolicy,
     openingFor,
     (chat, turn) => chatTurns.start(chat, turn),
-    // A connected chat's typing indicator, by the dashboard's typing-dots rule.
-    connectionTyping({
-      typingOf: (channel) => {
-        const connection = connectionOfChannel(channel);
-        if (!connection?.withTalker((talker) => talker.typing !== undefined)) return null;
-        return (chatId) =>
-          connection.withTalker((talker) => talker.typing?.show(chatId as ChatId)) ??
-          Promise.resolve();
-      },
-    }),
+    observeTurnWith(
+      // A connected chat's typing indicator, by the dashboard's typing-dots rule.
+      connectionTyping({
+        typingOf: (channel) => {
+          const connection = connectionOfChannel(channel);
+          if (!connection?.withTalker((talker) => talker.typing !== undefined)) return null;
+          return (chatId) =>
+            connection.withTalker((talker) => talker.typing?.show(chatId as ChatId)) ??
+            Promise.resolve();
+        },
+      }),
+      // The status of the guardian's message a Concierge turn there works on.
+      (turn) => concierge.observeConnectionTurn(turn),
+    ),
     isTextPrivate,
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);

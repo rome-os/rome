@@ -48,6 +48,7 @@ function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
     postMessage: rs.fn(async () => ({ ts: "2.0" })),
     openDirectMessage: rs.fn(async () => "D_NEW"),
     addReaction: rs.fn(async () => {}),
+    removeReaction: rs.fn(async () => {}),
     userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou" })),
     conversationHistory: rs.fn(async () => ({ messages: [], hasMore: false })),
     conversationReplies: rs.fn(async () => ({ messages: [] })),

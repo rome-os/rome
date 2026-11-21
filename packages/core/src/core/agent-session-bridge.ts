@@ -44,7 +44,7 @@ import {
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
-import type { TurnTyping, TurnTypingFor } from "./connection-typing.js";
+import type { ObservedTurn, TurnTyping } from "./connection-typing.js";
 import {
   findSessionChat,
   noteOpenerChat,
@@ -134,9 +134,9 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     }),
     /** Told when a turn starts in a connected account's chat. Absent, nobody is told. */
     private turnStartedInChat?: TurnStartedInChat,
-    /** A connected chat's typing indicator for each turn, by the dashboard's
-     *  typing-dots rule. Absent, no chat shows one. */
-    private turnTyping?: TurnTypingFor,
+    /** What watches each turn's events: a connected chat's typing indicator,
+     *  and the status of the message that started it. Absent, nothing does. */
+    private observeTurn?: (turn: ObservedTurn) => TurnTyping | null,
     /** Whether an agent's text stays private on a channel, as the Concierge's
      *  does: its words reach a chat only through `say`, so a turn's result
      *  reaches the worker that asked for it without them. Absent, none is. */
@@ -394,11 +394,17 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
 
         const stream = ctx.openStream<StreamAgentEvent>(`agent.turn:${handle.id}`);
         // A turn a person's message started shows the chat's typing indicator
-        // while it writes a message, as the dashboard shows its dots.
+        // while it writes a message, as the dashboard shows its dots, and the
+        // message's status as the work on it stands.
         const typing =
-          this.turnTyping?.({
+          this.observeTurn?.({
+            agentName: req.key.agentName,
+            turnId: handle.id,
             channel: thread?.channel,
             threadId: thread?.threadId,
+            chatId: romeSessionId,
+            ...(req.platformMessageId ? { messageKey: req.platformMessageId } : {}),
+            ...(thread?.senderBondLevel ? { senderBondLevel: thread.senderBondLevel } : {}),
             initiatedBy: req.platformMessageId ? "user" : "system",
             // Read at the turn's first event, once the session has its provider.
             providerId: () => session.providerId,

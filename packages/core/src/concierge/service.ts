@@ -1219,6 +1219,53 @@ export class ConciergeService {
     return this.saidByKey.get(turnId)?.get(key);
   }
 
+  /**
+   * The events of a Concierge turn the guardian's message started in a chat on
+   * a connection, as the dashboard's route takes a Concierge chat's turn: it
+   * takes the message, and its working tool calls show it working
+   * (docs/domains/chats.md#status). Null for any other turn.
+   */
+  observeConnectionTurn(turn: {
+    agentName: string;
+    turnId: string;
+    channel?: string;
+    chatId?: string;
+    messageKey?: string;
+    senderBondLevel?: string;
+  }): {
+    event(msg: { type: string; tool?: string; id?: string; toolUseId?: string }): void;
+    end(): void;
+  } | null {
+    const { chatId, messageKey, turnId } = turn;
+    if (
+      !isConciergeAgent(turn.agentName) ||
+      !turn.channel ||
+      turn.channel === "webchat" ||
+      !chatId ||
+      !messageKey ||
+      turn.senderBondLevel !== "guardian"
+    ) {
+      return null;
+    }
+    this.messageStatus.taken(chatId, messageKey, turnId);
+    void this.deps.tasks.repo.takeMessage(turnId, { chatId, messageKey }).catch((error: unknown) =>
+      log.warn("failed to record the message a turn took", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return {
+      event: (msg) => {
+        if (msg.type === "tool_use" && msg.tool && msg.id) {
+          void this.messageStatus.toolCalled(chatId, turnId, msg.tool, msg.id);
+        } else if (msg.type === "tool_result" && msg.toolUseId) {
+          this.messageStatus.toolEnded(chatId, turnId, msg.toolUseId);
+        }
+      },
+      end: () => {},
+    };
+  }
+
   /** Whether Concierge turn `turnId` has said any message yet. */
   saidAnyInTurn(turnId: string): boolean {
     return (this.saidByKey.get(turnId)?.size ?? 0) > 0;

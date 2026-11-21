@@ -509,6 +509,16 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
                   throw error;
                 }
               },
+              async remove(chatId, messageId, emoji) {
+                try {
+                  await adapter.unreact(chatId, messageId, emoji);
+                } catch (error) {
+                  if (isSlackCredentialError(error)) {
+                    throw new CredentialRejected({ grant: "bot", cause: error });
+                  }
+                  throw error;
+                }
+              },
             },
             directMessaging: {
               async chatFor(senderId) {

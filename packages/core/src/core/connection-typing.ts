@@ -34,6 +34,39 @@ export interface TypingTurn {
 
 export type TurnTypingFor = (turn: TypingTurn) => TurnTyping | null;
 
+/** A turn as the agent session bridge runs it, for what watches its events. */
+export interface ObservedTurn extends TypingTurn {
+  agentName: string;
+  turnId: string;
+  /** The chat the turn runs in, Rome's id for it, when the caller named one. */
+  chatId?: string;
+  /** The message that started the turn, by the chat's key for it. */
+  messageKey?: string;
+  /** The bond level of that message's sender, as the inbox passed it. */
+  senderBondLevel?: string;
+}
+
+/** Several watchers of one turn's events, as one. */
+export function observeTurnWith(
+  ...watchers: Array<(turn: ObservedTurn) => TurnTyping | null>
+): (turn: ObservedTurn) => TurnTyping | null {
+  return (turn) => {
+    const each = watchers.flatMap((watch) => {
+      const found = watch(turn);
+      return found ? [found] : [];
+    });
+    if (each.length === 0) return null;
+    return {
+      event: (msg) => {
+        for (const one of each) one.event(msg);
+      },
+      end: () => {
+        for (const one of each) one.end();
+      },
+    };
+  };
+}
+
 export function connectionTyping(deps: {
   /** Shows the typing indicator in a chat of channel `channel`, or null when
    *  the channel shows none. */

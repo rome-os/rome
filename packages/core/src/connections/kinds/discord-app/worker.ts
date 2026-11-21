@@ -68,6 +68,8 @@ export interface DiscordAppCloud {
   typing(channelId: string): Promise<void>;
   /** Reacts to a message as the bot with a Unicode emoji. */
   react(input: { channelId: string; messageId: string; emoji: string }): Promise<void>;
+  /** Takes the bot's own reaction off a message. */
+  unreact(input: { channelId: string; messageId: string; emoji: string }): Promise<void>;
   /** Discord's page where the guardian adds the bot to a server. */
   installUrl(): Promise<string>;
 }
@@ -195,6 +197,10 @@ export function romeCloudDiscordApp(fetchImpl: typeof fetch = globalThis.fetch):
     async react({ channelId, messageId, emoji }) {
       const path = `/v1/discord/channels/${snowflake(channelId)}/messages/${snowflake(messageId)}/reactions/${encodeURIComponent(emoji)}/@me`;
       await worker(path, "PUT");
+    },
+    async unreact({ channelId, messageId, emoji }) {
+      const path = `/v1/discord/channels/${snowflake(channelId)}/messages/${snowflake(messageId)}/reactions/${encodeURIComponent(emoji)}/@me`;
+      await worker(path, "DELETE");
     },
     async send({ channelId, content, replyTo }) {
       const data = (await worker(`/v1/discord/channels/${snowflake(channelId)}/messages`, "POST", {

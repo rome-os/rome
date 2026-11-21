@@ -283,7 +283,14 @@ export async function buildConciergeTools(
     const target = asked && keys.includes(asked) ? asked : keys.at(-1);
     if (!target) throw new Error("No message of the guardian's in this turn to react to.");
     if (!service.deps.reactInChat) throw new Error("This chat takes no reaction.");
+    // A message shows one emoji for its whole life, as on the dashboard: one
+    // that showed working takes no reaction (docs/domains/chats.md#reaction).
+    if (await tasks.repo.showedWorking(chatId, target)) {
+      return "Not reacted: this message already showed 👀 working, and a message shows one emoji. Answer it in one short line with say instead.";
+    }
     await service.deps.reactInChat(chat, target, emoji as string);
+    // The reaction is how the turn handles the message: it shows working never.
+    await service.messageStatus.reactedTo(chatId, target);
     return `Reacted ${emoji as string}.`;
   };
 

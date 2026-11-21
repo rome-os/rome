@@ -196,6 +196,12 @@ export class DiscordAppAdapter {
     await this.config.cloud.react({ channelId: chatId, messageId, emoji });
   }
 
+  /** Takes the bot's own reaction `emoji` off message `messageId` in `chatId`. */
+  async unreact(chatId: ChatId, messageId: string, emoji: string): Promise<void> {
+    if (!SNOWFLAKE.test(messageId)) return;
+    await this.config.cloud.unreact({ channelId: chatId, messageId, emoji });
+  }
+
   /** Posts `message` as the bot, in parts of at most 2000 characters; the
    *  first part replies to the message it answers. */
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {

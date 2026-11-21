@@ -242,6 +242,7 @@ export function createDiscordAppDescriptor(deps: DiscordAppDescriptorDeps): Conn
             typing: { show: (chatId) => adapter.showTyping(chatId) },
             reactions: {
               add: (chatId, messageId, emoji) => adapter.react(chatId, messageId, emoji),
+              remove: (chatId, messageId, emoji) => adapter.unreact(chatId, messageId, emoji),
             },
             async send(chatId, message) {
               try {
