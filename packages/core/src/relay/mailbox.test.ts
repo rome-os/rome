@@ -76,6 +76,28 @@ describe("ensureRelayMailbox (instance-token relay provisioning)", () => {
     expect(reloads).toHaveLength(1);
   });
 
+  it("keeps the mailbox draining for a connection that claims it, with no app taking webhooks", async () => {
+    http.when("POST", MINT_URL).reply(200, {
+      mailboxId: "MBOX",
+      connectUrl: "wss://relay.example/c/MBOX",
+      drainKey: "99.sig",
+    });
+    setInstanceTokenInMemory(INSTANCE_TOKEN);
+
+    await ensureRelayMailbox({ ...deps(), mailboxClaims: { any: true } });
+
+    expect(reloads).toEqual([
+      [
+        {
+          connectUrl: "wss://relay.example/c/MBOX",
+          drainKey: "99.sig",
+          targetAppId: "",
+          targetPath: [],
+        },
+      ],
+    ]);
+  });
+
   it("stores a Rome Cloud-supplied deposit URL as-is instead of deriving one", async () => {
     http.when("POST", MINT_URL).reply(200, {
       mailboxId: "MBOX",
