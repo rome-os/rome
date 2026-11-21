@@ -64,6 +64,8 @@ export interface FailureFacts {
   provider: DefaultModelProvider;
   reason: ProviderFailureReason;
   until?: string;
+  /** For a quota: Rome continues by itself once it resets. */
+  continues?: boolean;
   card?: ProviderFailureCardKind;
   model?: string;
   alternatives: DefaultModelProvider[];
@@ -74,7 +76,7 @@ export interface FailureFacts {
 
 /** The card's one line on what stopped. */
 export function failureText(
-  facts: Pick<FailureFacts, "provider" | "reason" | "until" | "card" | "model">,
+  facts: Pick<FailureFacts, "provider" | "reason" | "until" | "continues" | "card" | "model">,
   t: TFunction<"chat">,
   providerName: (provider: DefaultModelProvider) => string,
   locale: string,
@@ -86,11 +88,13 @@ export function failureText(
       return facts.until
         ? (() => {
             const { day, date, time } = formatUntil(facts.until, locale);
+            // Rome promises to continue only where it will.
+            const key = facts.continues ? "quotaUntil" : "quotaPausedUntil";
             return day === "today"
-              ? t("providerFailure.quotaUntilToday", { provider, time })
+              ? t(`providerFailure.${key}Today`, { provider, time })
               : day === "tomorrow"
-                ? t("providerFailure.quotaUntilTomorrow", { provider, time })
-                : t("providerFailure.quotaUntil", { provider, date, time });
+                ? t(`providerFailure.${key}Tomorrow`, { provider, time })
+                : t(`providerFailure.${key}`, { provider, date, time });
           })()
         : t("providerFailure.quota", { provider });
     case "temporary":
@@ -119,9 +123,9 @@ export function failureText(
 }
 
 /**
- * The open card's status line: whether the turn waits by itself, needs the
- * guardian, or needs another model. A wait carries the reset time here, so
- * the reason below it does not repeat it.
+ * The open card's status line: whether the turn waits, needs the guardian, or
+ * needs another model. A wait carries the reset time here, so the reason
+ * below it does not repeat it, and says Rome continues only where it will.
  */
 export function cardStatus(
   facts: FailureFacts,
@@ -131,14 +135,18 @@ export function cardStatus(
   const kind = failureCardKind(facts);
   if (kind === "account") return { kind, label: t("providerFailure.status.needsYou") };
   if (kind === "model") return { kind, label: t("providerFailure.status.modelUnavailable") };
-  if (!facts.until) return { kind, label: t("providerFailure.status.pausedRetrying") };
+  // Once the reset has passed, the time is no longer news: the card offers [Continue].
+  if (!facts.until || Date.parse(facts.until) <= Date.now()) {
+    return { kind, label: t("providerFailure.status.paused") };
+  }
   const { day, date, time } = formatUntil(facts.until, locale);
+  const key = facts.continues ? "paused" : "pausedUntil";
   const label =
     day === "today"
-      ? t("providerFailure.status.pausedToday", { time })
+      ? t(`providerFailure.status.${key}Today`, { time })
       : day === "tomorrow"
-        ? t("providerFailure.status.pausedTomorrow", { time })
-        : t("providerFailure.status.pausedOn", { date, time });
+        ? t(`providerFailure.status.${key}Tomorrow`, { time })
+        : t(`providerFailure.status.${key}On`, { date, time });
   return { kind, label };
 }
 
@@ -206,8 +214,8 @@ function usePassed(time: string | undefined): boolean {
 /**
  * The buttons a failure offers, grouped by what the guardian has to do:
  * switch to another account (`wait`), log in or switch (`account`), or move
- * to another model (`model`). A quota card also offers [Continue] once its
- * reset time has passed. A provider switch moves this chat only, unless "Also
+ * to another model (`model`). A wait card also runs its turn again on a
+ * click: [Retry] at once, or for a quota [Continue] once its reset has passed. A provider switch moves this chat only, unless "Also
  * make default" is checked; Rome credits are always the default.
  */
 export function FailureActions({
@@ -229,8 +237,13 @@ export function FailureActions({
   const [detailOpen, setDetailOpen] = useState(false);
   // The provider a switch asks to confirm, in the dialog.
   const [confirming, setConfirming] = useState<DefaultModelProvider | null>(null);
-  const reset = usePassed(facts.reason === "quota" ? facts.until : undefined);
+  const quota = facts.reason === "quota";
+  const resetPassed = usePassed(quota ? facts.until : undefined);
   const kind = failureCardKind(facts);
+  // A wait card runs its turn again on a click: a quota once its reset has
+  // passed (or when no reset is known), anything else at once.
+  const again =
+    kind !== "wait" ? null : !quota ? "retry" : !facts.until || resetPassed ? "continue" : null;
   const providers =
     kind === "model"
       ? []
@@ -239,14 +252,15 @@ export function FailureActions({
           ...(kind === "account" && facts.credits ? (["rome_credits"] as const) : []),
         ];
   const replacement = kind === "model" ? facts.replacement : undefined;
-  const canLogIn = kind === "account" && facts.reason !== "credits_used_up";
+  // Rome credits used up leave no account logged in: logging in is the way on.
+  const canLogIn = kind === "account";
   return (
     <div>
-      {(reset || canLogIn || providers.length > 0 || replacement) && (
+      {(again || canLogIn || providers.length > 0 || replacement) && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          {reset && (
+          {again && (
             <Button type="button" size="sm" disabled={pending} onClick={onContinue}>
-              {t("providerFailure.continue")}
+              {t(again === "retry" ? "providerFailure.retry" : "providerFailure.continue")}
             </Button>
           )}
           {canLogIn && (
@@ -264,7 +278,7 @@ export function FailureActions({
               key={provider}
               type="button"
               size="sm"
-              variant={!canLogIn && !reset && index === 0 ? "default" : "outline"}
+              variant={!canLogIn && !again && index === 0 ? "default" : "outline"}
               disabled={pending}
               onClick={() => setConfirming(provider)}
             >

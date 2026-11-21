@@ -163,6 +163,11 @@ export interface ProviderFailuresDeps {
    * Absent, nobody did.
    */
   movedOnSince?: (chatId: string, since: number) => boolean;
+  /**
+   * Whether the usage-limit continuation, sweeping once the limit ends at
+   * `until`, would run the chat's stopped turn again. Absent, it would not.
+   */
+  continuesAfterLimit?: (chatId: string, until: string) => boolean;
   /** Rome credits can be spent now: linked, enabled and with a balance. */
   creditsUsable?: () => boolean;
   /** Who a recovery turn acts for: the chat's owner. Absent, no one. */
@@ -210,9 +215,11 @@ export interface ProviderFailures {
    * the chat's stopped turn: when it succeeds, the chat's card settles.
    */
   continuing(chatId: string): void;
+  /** A turn of the chat was interrupted: a recovery it was ends unfinished. */
+  interrupted(chatId: string): void;
   /** A card's switch: this chat moves, and its stopped turn runs again at once. */
   switchCard(messageId: string, change: ProviderSwitch): Promise<void>;
-  /** A card's [Continue]: its stopped turn runs again at once, where it ran. */
+  /** A card's [Continue] or [Retry]: its stopped turn runs again at once, where it ran. */
   continueCard(messageId: string): Promise<void>;
   /**
    * The message `cardFor` named is written now: a card that settled before it
@@ -288,6 +295,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
   const swapped = new Set<string>();
   // Chats with a card not settled, kept in memory so a read can ask synchronously.
   const cardedChats = new Set<string>();
+  // Each chat's open card, by its message.
+  const openCardOf = new Map<string, string>();
   // The silent retry each chat waits on, until it starts. Dropping it leaves
   // the turn to whatever settled its card.
   const retries = new Map<string, { started: boolean }>();
@@ -315,7 +324,11 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
   const writeCards = async (cards: OpenProviderCard[]) => {
     await deps.settings.set(PROVIDER_CARDS_SETTING_KEY, cards);
     cardedChats.clear();
-    for (const card of cards) cardedChats.add(card.chatId);
+    openCardOf.clear();
+    for (const card of cards) {
+      cardedChats.add(card.chatId);
+      openCardOf.set(card.chatId, card.messageId);
+    }
   };
   const readOutages = () => readList<ProviderOutage>(PROVIDER_OUTAGES_SETTING_KEY);
   const writeOutages = (outages: ProviderOutage[]) =>
@@ -427,6 +440,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     agentName: string,
     provider: string,
     decided?: (runs: boolean) => Promise<unknown>,
+    /** The card a click runs it for: once that card settled or moved on, nothing runs. */
+    forCard?: string,
   ): Promise<void> => {
     const asked = now().getTime();
     const sessionId = await deps.runtimeOf(chatId, agentName).catch(() => null);
@@ -449,7 +464,10 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         ...(actor ? { actor } : {}),
         shouldRun: () => {
           // A restart cuts it: the card stays as it is, for a click or a message.
-          if (stopped) return false;
+          // The usage-limit continuation runs the turn already: its outcome settles the card.
+          if (stopped || resuming.has(chatId)) return false;
+          // Another recovery ran it meanwhile, or a newer failure replaced the card.
+          if (forCard && openCardOf.get(chatId) !== forCard) return false;
           const runs = !(deps.movedOnSince?.(chatId, asked) ?? false);
           if (runs) resuming.add(chatId);
           void decided?.(runs).catch(() => undefined);
@@ -481,8 +499,9 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     agentName: string,
     provider: string,
     decided?: (runs: boolean) => Promise<unknown>,
+    forCard?: string,
   ) => {
-    const running = run(chatId, agentName, provider, decided)
+    const running = run(chatId, agentName, provider, decided, forCard)
       .catch((error: unknown) =>
         log.warn("provider recovery turn failed", { chatId, error: String(error) }),
       )
@@ -777,7 +796,9 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     const card = (await readCards()).find((candidate) => candidate.messageId === messageId);
     if (!card) throw new Error("This card is already settled");
     // Taken before anything awaits, so a second click or another tab finds it taken.
-    if (recovering.has(card.chatId)) throw new Error("This chat is already continuing");
+    if (recovering.has(card.chatId) || resuming.has(card.chatId)) {
+      throw new Error("This chat is already continuing");
+    }
     recovering.add(card.chatId);
     try {
       await before(card);
@@ -785,42 +806,80 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       recovering.delete(card.chatId);
       throw error;
     }
-    runClaimed(card.chatId, card.agentName, failedName(card), (runs) =>
-      settle(
-        (open) => open.messageId === messageId,
-        () => resolution(runs),
-      ),
+    runClaimed(
+      card.chatId,
+      card.agentName,
+      failedName(card),
+      (runs) =>
+        settle(
+          (open) => open.messageId === messageId,
+          () => resolution(runs),
+        ),
+      messageId,
     );
   };
 
+  /**
+   * Inside `serial`: whether each quota card's turn will be continued once its
+   * limit ends, as the usage-limit continuation decides, so the card promises
+   * only what will happen. True when it changed.
+   */
+  const promise = (card: OpenProviderCard): boolean => {
+    if (card.part.reason !== "quota" || !card.part.until) return false;
+    const continues = deps.continuesAfterLimit?.(card.chatId, card.part.until) === true;
+    if ((card.part.continues === true) === continues) return false;
+    const { continues: _was, ...part } = card.part;
+    card.part = continues ? { ...part, continues: true } : part;
+    return true;
+  };
+
+  /** Rereads what the chats' quota cards may promise, and rewrites the ones that changed. */
+  const repromise = (match: (card: OpenProviderCard) => boolean) =>
+    serial(async () => {
+      const cards = await readCards();
+      let changed = false;
+      for (const card of cards) {
+        if (!match(card) || !promise(card)) continue;
+        changed = true;
+        await deps.webchatRepo
+          .updateMessageContent(card.messageId, content(card))
+          .catch(() => undefined);
+      }
+      if (changed) await writeCards(cards);
+    });
+
   // A usage limit names when it ends: a quota card written without that time
-  // learns it from the account read, for its copy.
+  // learns it from the account read, for its copy, and what it may promise.
   const stopAccounts = deps.accounts.onChanged((provider, _change, succeeded) => {
     if (stopped || succeeded === false) return;
     if (provider !== "anthropic" && provider !== "openai") return;
     const report = deps.accounts.read()[provider];
     const until = report?.state === "usage_limit_reached" ? report.usageLimitUntil : undefined;
     if (!until) return;
+    const waiting = (card: OpenProviderCard) =>
+      card.runsOn === provider && card.part.reason === "quota";
     void serial(async () => {
       const cards = await readCards();
-      const learning = cards.filter(
-        (card) => card.runsOn === provider && card.part.reason === "quota" && !card.part.until,
-      );
+      const learning = cards.filter((card) => waiting(card) && !card.part.until);
       if (learning.length === 0) return;
       for (const card of learning) {
         card.part = { ...card.part, until };
+        promise(card);
         await deps.webchatRepo
           .updateMessageContent(card.messageId, content(card))
           .catch(() => undefined);
       }
       await writeCards(cards);
-    });
+    }).then(() => repromise(waiting));
   });
 
   // The open cards, known at once, so a read of the chat can ask synchronously.
   void readCards()
     .then((cards) => {
-      for (const card of cards) cardedChats.add(card.chatId);
+      for (const card of cards) {
+        cardedChats.add(card.chatId);
+        openCardOf.set(card.chatId, card.messageId);
+      }
     })
     .catch((error: unknown) =>
       log.warn("provider cards could not be read", { error: String(error) }),
@@ -855,10 +914,11 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       if (quiet) await writeCard(turn, { ...quiet, retrying: true }, classified.provider);
     };
     if (classified.reason === "temporary" && !last) {
+      // The Concierge retries its own chats, and writes their final card: one owner.
+      if (conciergeRecovers("temporary")) return null;
       // Nothing of the turn reads as failed while its one retry waits: a
       // quiet card stands in for the error.
       await quietCard();
-      if (conciergeRecovers("temporary")) return null;
       const sessionId = turn.sessionId ?? (await deps.runtimeOf(turn.chatId, turn.agentName));
       if (!sessionId) return null;
       // The wait counts as recovering: a card's button meanwhile leaves the
@@ -933,6 +993,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       const decided = await decide(turn, options?.final === true, retried);
       if (!decided) return;
       await writeCard(turn, decided.part, decided.runsOn);
+      // The stopped turn is stored now: what the continuation will do with it is known.
+      await repromise((card) => card.chatId === turn.chatId);
       if (decided.unattended) await groupIn(turn, decided.part);
       // The account read that knows when the limit ends.
       if (decided.part.reason === "quota" && !decided.part.until) {
@@ -982,9 +1044,16 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       ),
     async written(messageId) {
       const late = lateContent.get(messageId);
-      if (late === undefined) return;
-      lateContent.delete(messageId);
-      await deps.webchatRepo.updateMessageContent(messageId, late);
+      if (late !== undefined) {
+        lateContent.delete(messageId);
+        await deps.webchatRepo.updateMessageContent(messageId, late);
+        return;
+      }
+      // The refused send is stored now: what the continuation will do with it is known.
+      await repromise((card) => card.messageId === messageId);
+    },
+    interrupted(chatId) {
+      resuming.delete(chatId);
     },
     carded: (chatId) => cardedChats.has(chatId),
     cards: readCards,

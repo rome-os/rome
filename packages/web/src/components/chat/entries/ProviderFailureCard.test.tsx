@@ -90,12 +90,17 @@ describe("ProviderFailureCard", () => {
   it("waits out a usage limit and switches this chat only, unless also made default", async () => {
     const calls = mockApi();
     const settled = rs.fn();
-    const until = new Date();
-    until.setHours(14, 20, 0, 0);
-    renderCard({ until: until.toISOString() }, settled);
-    const { time } = formatUntil(until.toISOString(), "en");
+    const until = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
+    renderCard({ until, continues: true }, settled);
+    const { day, time } = formatUntil(until, "en");
     // The status line carries the reset time; the reason under it does not.
-    expect(screen.getByText(`Paused · continues after ${time}`)).toBeTruthy();
+    expect(
+      screen.getByText(
+        day === "today"
+          ? `Paused · continues after ${time}`
+          : `Paused · continues tomorrow after ${time}`,
+      ),
+    ).toBeTruthy();
     // Before the reset nothing offers to continue: the usage-limit sweep does.
     expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
     expect(screen.getByText("ChatGPT quota used up")).toBeTruthy();
@@ -311,10 +316,46 @@ describe("ProviderFailureCard", () => {
 });
 
 describe("cardStatus", () => {
-  it("says the wait retries by itself when no reset time is known", () => {
+  it("promises nothing for a failure no retry is coming for, and offers Retry", async () => {
+    const calls = mockApi();
     renderCard({ reason: "temporary", card: "wait" });
-    expect(screen.getByText("Paused · Rome tries again by itself")).toBeTruthy();
+    expect(screen.getByText("Paused")).toBeTruthy();
     expect(screen.getByText("ChatGPT is unavailable for now")).toBeTruthy();
+    expect(screen.queryByText(/tries again/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === "POST")).toMatchObject({
+        url: "/api/ai-tools/provider-failures/m1/continue",
+      }),
+    );
+    expect(await screen.findByText("Recovered, continued")).toBeTruthy();
+  });
+
+  it("says a quota pauses until its reset where Rome will not continue by itself", () => {
+    mockApi();
+    const until = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
+    renderCard({ until });
+    const { day, time } = formatUntil(until, "en");
+    expect(
+      screen.getByText(day === "today" ? `Paused until ${time}` : `Paused until tomorrow ${time}`),
+    ).toBeTruthy();
+    expect(screen.queryByText(/continues after/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  });
+});
+
+describe("a card for used-up Rome credits", () => {
+  it("offers Log in, the way on with no account and no balance left", async () => {
+    mockApi();
+    renderCard({
+      provider: "rome_credits",
+      reason: "credits_used_up",
+      card: "account",
+      alternatives: [],
+    });
+    expect(screen.getByText("Rome credits are used up")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Log in" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Use Rome credits" })).toBeNull();
   });
 });
 

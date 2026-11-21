@@ -1074,8 +1074,40 @@ transcripts[PROVIDER_CARDS_CHAT_ID] = [
       reason: "quota",
       card: "wait",
       until: new Date(Date.now() + 90 * 60 * 1000).toISOString(),
+      continues: true,
       followsDefault: true,
       alternatives: ["anthropic"],
+    }),
+  ]),
+  // A weekly limit the usage-limit continuation will not take: no promise.
+  ...turn(PROVIDER_CARDS_CHAT_ID, 8, "2026-08-08T09:01:00.000Z", "Plan the Osaka leg.", [
+    providerCard({
+      provider: "openai",
+      reason: "quota",
+      card: "wait",
+      until: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      followsDefault: true,
+      alternatives: [],
+    }),
+  ]),
+  // A temporary failure its silent retry did not get past: [Retry].
+  ...turn(PROVIDER_CARDS_CHAT_ID, 9, "2026-08-08T09:03:00.000Z", "Check the hotel reviews.", [
+    providerCard({
+      provider: "anthropic",
+      reason: "temporary",
+      card: "wait",
+      followsDefault: true,
+      alternatives: [],
+    }),
+  ]),
+  // Rome credits used up, no account logged in: [Log in].
+  ...turn(PROVIDER_CARDS_CHAT_ID, 10, "2026-08-08T09:04:00.000Z", "Book the ryokan.", [
+    providerCard({
+      provider: "rome_credits",
+      reason: "credits_used_up",
+      card: "account",
+      followsDefault: true,
+      alternatives: [],
     }),
   ]),
   // Its reset passed before the sweep ran: the card offers [Continue].

@@ -269,6 +269,11 @@ export interface ProviderFailurePart {
   reason: ProviderFailureReason;
   /** When the usage limit ends, for `quota`. */
   until?: string;
+  /**
+   * For `quota`: Rome continues the stopped turn by itself once the limit
+   * ends. Absent, the card promises nothing and offers [Continue] after it.
+   */
+  continues?: boolean;
   /** The chat follows the default provider; false for a model its owner picked. */
   followsDefault: boolean;
   /** Other logged-in accounts that can run now: "Switch to {provider}". */

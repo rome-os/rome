@@ -3,7 +3,10 @@ import { STICKY_HEADERS } from "./core/sticky-headers.js";
 import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
 import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
-import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
+import {
+  startUsageLimitContinuation,
+  usageLimitContinuationTakes,
+} from "./webchat/usage-limit-continuation.js";
 import { webchatSessionKey } from "./core/agent-session-key.js";
 import { createChatProviders, type ChatProviders } from "./webchat/chat-providers.js";
 import { createProviderFailures } from "./webchat/provider-failures.js";
@@ -1607,6 +1610,9 @@ async function main() {
     },
     // A newer message in the chat answers instead of a card's resumed turn.
     movedOnSince: (chatId, since) => webchatRepo.chatMovedOnSince(chatId, since),
+    // A quota card promises only what the usage-limit continuation will do.
+    continuesAfterLimit: (chatId, until) =>
+      usageLimitContinuationTakes(webchatRepo, chatId, Date.parse(until), modelAccounts.read()),
     selectModel: selectChatModel,
     canonicalAgent: (agentName) => agentLoader.find(agentName)?.name ?? agentName,
     webchatRepo,
@@ -1681,6 +1687,10 @@ async function main() {
           }).length > 0;
         void providerFailures.succeeded(thread.threadId, answers).catch(() => undefined);
         return;
+      }
+      // A turn that did not run to its end leaves its recovery unfinished.
+      if (event.status === "interrupted" || event.status === "stopped") {
+        providerFailures.interrupted(thread.threadId);
       }
       if (event.status !== "error" || !event.output.failure) return;
       void providerFailures

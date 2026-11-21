@@ -783,11 +783,11 @@
     }
   },
   "providerFailure": {
-    "quota": "{{provider}} hit its usage limit. Rome continues after it resets.",
+    "quota": "{{provider}} hit its usage limit. You can continue once it resets.",
     "quotaUntil": "{{provider}} hit its usage limit. Rome continues after {{date}}, {{time}}.",
     "quotaUntilToday": "{{provider}} hit its usage limit. Rome continues after {{time}}.",
     "quotaUntilTomorrow": "{{provider}} hit its usage limit. Rome continues tomorrow after {{time}}.",
-    "temporary": "{{provider}} is unavailable for now. Rome tries again by itself.",
+    "temporary": "{{provider}} is unavailable for now.",
     "login": "{{provider}} needs you to log in again",
     "removed": "{{provider}} is not logged in",
     "creditsUsedUp": "Rome credits are used up",
@@ -800,9 +800,12 @@
       "pausedToday": "Paused · continues after {{time}}",
       "pausedTomorrow": "Paused · continues tomorrow after {{time}}",
       "pausedOn": "Paused · continues after {{date}}, {{time}}",
-      "pausedRetrying": "Paused · Rome tries again by itself",
       "needsYou": "Needs you",
-      "modelUnavailable": "Model unavailable"
+      "modelUnavailable": "Model unavailable",
+      "paused": "Paused",
+      "pausedUntilToday": "Paused until {{time}}",
+      "pausedUntilTomorrow": "Paused until tomorrow {{time}}",
+      "pausedUntilOn": "Paused until {{date}}, {{time}}"
     },
     "logIn": "Log in",
     "switchTo": "Switch to {{target}}",
@@ -825,7 +828,11 @@
       "cancel": "Cancel",
       "bodyCreditsAll": "Every chat runs on Rome credits, and the stopped turn picks up again."
     },
-    "continue": "Continue"
+    "continue": "Continue",
+    "quotaPausedUntil": "{{provider}} hit its usage limit. You can continue after {{date}}, {{time}}.",
+    "quotaPausedUntilToday": "{{provider}} hit its usage limit. You can continue after {{time}}.",
+    "quotaPausedUntilTomorrow": "{{provider}} hit its usage limit. You can continue tomorrow after {{time}}.",
+    "retry": "Retry"
   },
   "providerOutage": {
     "waiting_one": "{{count}} task waiting",

@@ -151,9 +151,48 @@ const SECRET_KEY = /pass|secret|token|key|auth|cookie|credential/i;
 const SECRET_VALUE =
   /\bBearer\s+[\w.~+/=-]+|\b(?:sk|pk|rk|ghp|gho|ghs|xox[abpors])[-_][\w-]{8,}|\b[0-9a-f]{32,}\b|(?=[\w+/-]*\d)(?=[\w+/-]*[A-Za-z])[\w+/-]{40,}={0,2}/gi;
 
+/** One shell word: quoted, or up to the next space. */
+const WORD = String.raw`(?:"[^"]*"|'[^']*'|[^\s"']+)`;
+/**
+ * Credentials inside a command or a URL, whatever the argument is named: each
+ * keeps its prefix and loses its value. An `Authorization` or similar header,
+ * a URL's user and password, `-u`/`--user` with a password, an environment
+ * assignment whose name reads as secret, a `--password`-style flag, a password
+ * glued to `-p` (`mysql -psecret`), and `sshpass -p`.
+ */
+const SECRET_IN_COMMAND: Array<[RegExp, string]> = [
+  [/\b((?:proxy-)?authorization|x-api-key|api-key|cookie)\s*:\s*[^"'\n]+/gi, "$1: [redacted]"],
+  [/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[redacted]@"],
+  [
+    new RegExp(
+      String.raw`((?:^|\s)(?:-u|--user)(?:\s+|=))(?:"[^"]*:[^"]*"|'[^']*:[^']*'|[^\s"':]*:[^\s"']*)`,
+      "g",
+    ),
+    "$1[redacted]",
+  ],
+  [
+    new RegExp(
+      String.raw`\b(\w*(?:pass|pwd|token|secret|key|auth|credential|cookie)\w*)=${WORD}`,
+      "gi",
+    ),
+    "$1=[redacted]",
+  ],
+  [
+    new RegExp(
+      String.raw`((?:^|\s)--?(?:password|passwd|pass|token|secret|api-?key|auth-?token)(?:\s+|=))${WORD}`,
+      "gi",
+    ),
+    "$1[redacted]",
+  ],
+  [/((?:^|\s)-p)(?=[^\s\d-])[^\s"']+/g, "$1[redacted]"],
+  [new RegExp(String.raw`(\bsshpass\s+-p\s*)${WORD}`, "g"), "$1[redacted]"],
+];
+
 /** A value as it may be shown: whatever reads as a credential is masked. */
 function masked(text: string): string {
-  return text.replace(SECRET_VALUE, "[redacted]");
+  let out = text;
+  for (const [pattern, replacement] of SECRET_IN_COMMAND) out = out.replace(pattern, replacement);
+  return out.replace(SECRET_VALUE, "[redacted]");
 }
 
 /** Argument names that hold what a tool types or fills in. */

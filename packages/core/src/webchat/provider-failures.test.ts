@@ -58,6 +58,8 @@ function harness(
     queue?: Promise<void>;
     /** Whether someone wrote in the chat since. Default: nobody did. */
     movedOnSince?: (chatId: string, since: number) => boolean;
+    /** Whether the usage-limit continuation takes the chat. Default: it does not. */
+    continuesAfterLimit?: (chatId: string, until: string) => boolean;
   } = {},
 ) {
   const messages = new Map<string, { chatId: string; parts: unknown[] }>();
@@ -165,6 +167,7 @@ function harness(
     actorOf: async (chatId) =>
       chatId === "visitors" ? ({ kind: "visitor", accountId: "acct-v" } as never) : undefined,
     ...(options.movedOnSince ? { movedOnSince: options.movedOnSince } : {}),
+    ...(options.continuesAfterLimit ? { continuesAfterLimit: options.continuesAfterLimit } : {}),
     selectModel: (chatId, _agentName, selection) => {
       selected.push({ chatId, selection });
     },
@@ -1002,5 +1005,121 @@ describe("Rome credits, the instance's choice", () => {
     signedIn.rome_credits = false;
     await h.fail("chat", revoked);
     expect(h.cardIn("chat")).toMatchObject({ provider: "openai", reason: "login" });
+  });
+});
+
+describe("round 9: what a card promises, and who runs its turn", () => {
+  it("promises to continue a quota only where the usage-limit continuation will", async () => {
+    const taken = new Set(["mine"]);
+    const h = harness(
+      { mine: {}, visitors: { ownerKey: "visitor:acct-v" } },
+      { anthropic: reportOf("usage_limit_reached", {}, "2026-11-21T14:20:00.000Z") },
+      { continuesAfterLimit: (chatId) => taken.has(chatId) },
+    );
+    await h.fail("mine", quota);
+    await h.fail("visitors", quota);
+    expect(h.cardIn("mine")).toMatchObject({ until: "2026-11-21T14:20:00.000Z", continues: true });
+    expect(h.cardIn("visitors")?.until).toBe("2026-11-21T14:20:00.000Z");
+    expect(h.cardIn("visitors")?.continues).toBeUndefined();
+  });
+
+  it("decides a refused send's promise once its message is written", async () => {
+    let stored = false;
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("usage_limit_reached", {}, "2026-11-21T14:20:00.000Z") },
+      { continuesAfterLimit: () => stored },
+    );
+    const part = await h.failures.cardFor(
+      { chatId: "chat", agentName: "main", failure: refused("anthropic", "quota_exhausted") },
+      "sent",
+      [],
+    );
+    expect(part?.continues).toBeUndefined();
+    h.messages.set("sent", { chatId: "chat", parts: [part] });
+    stored = true;
+    await h.failures.written("sent");
+    expect(h.cardIn("chat")?.continues).toBe(true);
+  });
+
+  it("refuses a click while the usage-limit continuation runs the chat", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("available") });
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    h.failures.continuing("chat");
+    await expect(h.failures.continueCard(card!.messageId)).rejects.toThrow(/already continuing/);
+    await expect(
+      h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" }),
+    ).rejects.toThrow(/already continuing/);
+    await flush();
+    expect(h.runs).toEqual([]);
+  });
+
+  it("steps aside when the continuation reached the chat while a click waited in the queue", async () => {
+    const queue = held();
+    const h = harness({ chat: {} }, { anthropic: reportOf("available") }, { queue: queue.wait });
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    await h.failures.continueCard(card!.messageId);
+    h.failures.continuing("chat");
+    queue.release();
+    await flush();
+    expect(h.runs).toEqual([]);
+    // The continuation's own outcome settles the card.
+    expect(h.cardIn("chat")?.resolved).toBeUndefined();
+    await h.failures.succeeded("chat", false);
+    expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "recovered", continued: true });
+  });
+
+  it("runs nothing when the continuation ran and settled the card while a click waited", async () => {
+    const queue = held();
+    const h = harness({ chat: {} }, { anthropic: reportOf("available") }, { queue: queue.wait });
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    // Clicked before the continuation took the chat, queued behind it.
+    await h.failures.continueCard(card!.messageId);
+    h.failures.continuing("chat");
+    await h.failures.succeeded("chat", false);
+    queue.release();
+    await flush();
+    expect(h.runs).toEqual([]);
+    expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "recovered", continued: true });
+  });
+
+  it("[Retry] runs a final temporary failure's turn at once", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("available") });
+    await h.fail("chat", temporary, true);
+    const [card] = await h.failures.cards();
+    await h.failures.continueCard(card!.messageId);
+    await flush();
+    expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
+    expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "recovered", continued: true });
+  });
+
+  it("leaves the Concierge's own retry to the Concierge: one owner writes its final card", async () => {
+    const h = harness({ main: { agentName: "concierge" } }, { anthropic: reportOf("available") });
+    // The first failure, and the Concierge's retry failing, each heard by the generic path.
+    await h.fail("main", temporary);
+    await h.fail("main", temporary);
+    expect(await h.failures.cards()).toEqual([]);
+    expect(h.messages.size).toBe(0);
+    // The Concierge's retry succeeded: no hidden card was left behind.
+    await h.failures.succeeded("main", false);
+    expect(h.failures.carded("main")).toBe(false);
+    // What it could not get past it hands over, final: the one card.
+    await h.fail("main", temporary, true);
+    expect(h.shownCards("main")).toEqual([
+      expect.objectContaining({ card: "wait", reason: "temporary" }),
+    ]);
+  });
+
+  it("forgets an interrupted continuation: a later system turn settles nothing", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("usage_limit_reached") });
+    await h.fail("chat", quota);
+    h.failures.continuing("chat");
+    h.failures.interrupted("chat");
+    await h.failures.succeeded("chat", false);
+    expect(h.cardIn("chat")?.resolved).toBeUndefined();
+    expect(h.failures.carded("chat")).toBe(true);
   });
 });

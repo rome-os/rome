@@ -56,9 +56,7 @@ function renderNotice(part: Partial<ProviderOutagePart>, open = true) {
 describe("ProviderOutageNotice", () => {
   it("lists the waiting tasks and offers no buttons: each task's own card acts", () => {
     renderNotice({});
-    expect(
-      screen.getByText("Claude is unavailable for now. Rome tries again by itself."),
-    ).toBeTruthy();
+    expect(screen.getByText("Claude is unavailable for now.")).toBeTruthy();
     expect(screen.getByText("2 tasks waiting")).toBeTruthy();
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /Switch|Log in|Use Rome credits/ })).toBeNull();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import {
   executedActionsOf,
+  keyArguments,
   createRenewalHandoffs,
   recentMessagesOf,
   rowsSince,
@@ -319,5 +320,96 @@ describe("the executed-actions list", () => {
     expect(list).not.toContain("tool_t1");
     expect(list).toContain("tool_t6");
     expect(executedActionsOf([trace("t1", [{ type: "text", content: "hi" }])])).toBeNull();
+  });
+});
+
+describe("credentials inside a command or a URL", () => {
+  const shown = (command: string) => keyArguments({ command }, "Bash");
+
+  it.each([
+    [
+      "a URL's user and password",
+      "git clone https://alice:hunter2@example.com/repo.git",
+      "hunter2",
+      "https://[redacted]@example.com",
+    ],
+    [
+      "a URL's token as its user",
+      "curl https://ghp_token@github.com/x",
+      "ghp_token",
+      "https://[redacted]@github.com",
+    ],
+    [
+      "-u user:password",
+      "curl -u alice:hunter2 https://api.example.com",
+      "hunter2",
+      "-u [redacted]",
+    ],
+    [
+      "--user=user:password",
+      "curl --user=alice:hunter2 https://api.example.com",
+      "hunter2",
+      "--user=[redacted]",
+    ],
+    [
+      "a secret-named environment assignment",
+      "PGPASSWORD=short-secret psql -h db",
+      "short-secret",
+      "PGPASSWORD=[redacted]",
+    ],
+    [
+      "an API key exported",
+      "export OPENAI_API_KEY='abc 123' && run",
+      "abc 123",
+      "OPENAI_API_KEY=[redacted]",
+    ],
+    [
+      "an Authorization header",
+      `curl -H "Authorization: Basic YWxpY2U6aHVudGVyMg" https://x`,
+      "YWxpY2U6aHVudGVyMg",
+      "Authorization: [redacted]",
+    ],
+    [
+      "a bearer token",
+      "curl -H 'X-Trace: 1' -H 'authorization: Bearer abc.def' https://x",
+      "abc.def",
+      "authorization: [redacted]",
+    ],
+    ["--password", "mysql --password hunter2 db", "hunter2", "--password [redacted]"],
+    ["--token=", "gh auth --token=gho_short db", "gho_short", "--token=[redacted]"],
+    ["a password glued to -p", "mysql -uroot -phunter2 db", "hunter2", "-p[redacted]"],
+    ["sshpass -p", "sshpass -p 'hunter 2' ssh host", "hunter 2", "sshpass -p [redacted]"],
+  ])("masks %s", (_label, command, secret, kept) => {
+    const text = shown(command);
+    expect(text).not.toContain(secret);
+    expect(text).toContain(kept);
+  });
+
+  it("leaves a command with no credential readable", () => {
+    expect(shown("mkdir -p build && sort -u names.txt && ssh -p 2222 host")).toBe(
+      "command: mkdir -p build && sort -u names.txt && ssh -p 2222 host",
+    );
+  });
+
+  it("keeps them out of the executed-actions list a chat carries to another provider", () => {
+    const list =
+      executedActionsOf([
+        {
+          role: "trace",
+          turnId: "t1",
+          createdAt: new Date(0),
+          content: JSON.stringify([
+            {
+              type: "tool_use",
+              tool: "Bash",
+              id: "a",
+              input: { command: "curl -u alice:hunter2 https://bob:pw@x.example" },
+            },
+          ]),
+        },
+      ]) ?? "";
+    expect(list).toContain("Bash(");
+    expect(list).not.toContain("hunter2");
+    expect(list).not.toContain("bob:pw");
   });
 });
