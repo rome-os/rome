@@ -95,12 +95,11 @@ try {
       windowRef: candidateA.windowRef,
     })
   ).sessionId;
-  bID = (
-    await call<{ sessionId: string }>(b, peerB, "computer.bind", {
-      windowRef: candidateB.windowRef,
-    })
-  ).sessionId;
-  assert.notEqual(aID, bID);
+  // The helper admits one live binding per exact window; a competing bind must fail with busy.
+  const competingBind = await b.run("computer.bind", { windowRef: candidateB.windowRef }, peerB);
+  rows.push({ action: "computer.bind.competing", reply: competingBind });
+  assert.equal(competingBind.ok, false);
+  assert.equal(competingBind.error?.code, "busy");
   const before = await hello();
   const image = await a.runBinary(
     "computer.observe",
@@ -130,11 +129,6 @@ try {
     actionId,
   });
   assert.equal(verification.effectVerified, true);
-  const independent = await call<ComputerUseObservation>(b, peerB, "computer.observe", {
-    sessionId: bID,
-    screenshot: false,
-  });
-  assert(independent.elements.some((e) => e.role === "AXTextArea" && e.value === value));
   const final = await a.runBinary(
     "computer.observe",
     { sessionId: aID, screenshot: true },
@@ -143,6 +137,33 @@ try {
   );
   assert(final.response.ok);
   await writeFile(resolve(directory, "after.png"), final.body, { flag: "wx", mode: 0o600 });
+  // Release A and confirm its stop before B refreshes the window reference for independent readback.
+  const releasedAID = aID;
+  await waitFor(
+    () => call<{ stopConfirmed: boolean }>(a, peerA, "computer.end", { sessionId: releasedAID }),
+    (receipt) => receipt.stopConfirmed,
+    "Session A stop was not confirmed",
+  );
+  aID = undefined;
+  const refreshedWindowsB = await call<{ windows: ComputerUseWindow[] }>(
+    b,
+    peerB,
+    "computer.windows",
+    {},
+  );
+  const refreshedCandidateB = refreshedWindowsB.windows.find((w) => w.title === title);
+  assert(refreshedCandidateB);
+  bID = (
+    await call<{ sessionId: string }>(b, peerB, "computer.bind", {
+      windowRef: refreshedCandidateB.windowRef,
+    })
+  ).sessionId;
+  assert.notEqual(releasedAID, bID);
+  const independent = await call<ComputerUseObservation>(b, peerB, "computer.observe", {
+    sessionId: bID,
+    screenshot: false,
+  });
+  assert(independent.elements.some((e) => e.role === "AXTextArea" && e.value === value));
   const after = await hello();
   rows.push({ before, after, independent, verification });
   const beforeFocus = before.focus as { frontPID: number; keyFocusPID: number; pointer: unknown },

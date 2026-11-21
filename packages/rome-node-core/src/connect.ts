@@ -13,7 +13,7 @@ export type { HostCredential, HostEvent };
 export interface HostOptions extends HostConnectionOptions {
   /** Every remote request is recorded here before it runs. An unavailable log refuses them. */
   audit: HostAudit;
-  /** A shared native executor, or false/omitted to leave computer actions disabled. */
+  /** Native computer-use host for one active connection at a time (`disconnect()` stops all of its sessions), or false/omitted to leave computer actions disabled. */
   computerUse?: ComputerUseHost | false;
   /** Accept ordinary window actions only from this instance's authenticated Gateway peer. */
   windowPeer?: string;

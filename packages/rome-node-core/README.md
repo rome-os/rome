@@ -224,8 +224,8 @@ credential, and failure semantics.
 ## Shared macOS computer use
 
 Import the shared local host from `/computer-use`.
-Desktop and the Node CLI use this implementation. The signed native app is included
-under `dist/native/Rome Computer Use.app`. On first use, the default host verifies
+Desktop and the Node CLI use this implementation. When packaged for distribution,
+the signed native app is bundled under `dist/native/Rome Computer Use.app`. On first use, the default host verifies
 and copies those bundled bytes into the owner-only application state directory.
 It restores the Mach-O executable bits that npm normalizes, then verifies the
 signature again. No compiler, installer download, or postinstall script is needed.
@@ -259,11 +259,12 @@ Elements advertise their available actions. `press`, `setValue`, `selectText` an
 `performAction` require a fresh ref. `click` and `scroll` can use a ref without coordinates.
 Legacy bindings without window capabilities retain `setValue` only and its 180-unit limit.
 
-`observe` returns materialized `observation` state, the original wire `changes`,
-and optional `image` bytes. The client sends its cached baseline version.
-Pass `{ full: true }` as the third argument to request a full reset.
-The host retains the baseline after an action consumes its observation authority.
-Stopping a session or changing the helper instance invalidates the cache and refs.
+`computer.observe` returns the observation payload (and raw PNG bytes via `runBinary`
+when `screenshot: true`). Pass `baseVersion` to request incremental changes and
+`full: true` to force a full snapshot; callers merge deltas with
+`mergeComputerUseObservation`. The host retains the baseline after an action
+consumes its observation authority. Stopping a session or changing the helper
+instance invalidates the cache and refs.
 
 Act receipts remain unverified until an independent postcondition or readback succeeds.
 Generic input without a checkable postcondition remains `unverifiable`.
@@ -284,14 +285,6 @@ controls are excluded because tracking can acquire system key focus. Production
 Cloud, outer Desktop account/settings, other systems and distribution permission
 continuity require separate qualification.
 
-For a development archive, build on an arm64 Mac with a real signing identity:
-
-```sh
-pnpm --filter @rome-os/node-core build
-pnpm --filter @rome-os/node-core build:native --identity "Apple Development: Your Name (TEAMID)"
-pnpm --filter @rome-os/node-core pack --pack-destination /tmp
-```
-
 The default running app has a stable path under
 `~/Library/Application Support/Rome/ComputerUse/`. Desktop supplies `bundledAppPath`
 as the source of its packaged helper. This source is installed at the same stable
@@ -304,9 +297,9 @@ protocol, and architecture, so independent signatures of the same source can sha
 one helper. The native build keeps `com.rome.computer-use` as its bundle identifier. Keep its
 path and signing identity stable to retain privacy grants across builds. Explicit
 `--unsigned` builds are CI-only: their helper refuses input and permission requests.
-The package gate checks that the executable is arm64 and included in the archive.
-Publication also requires Developer ID signing and a stapled notarization
-on an arm64 Mac. The release workflow fails when those credentials are missing.
+Once native packaging scripts are wired, the package gate checks that the executable
+is arm64 and included in the archive, and release publication requires Developer ID
+signing with stapled notarization on an arm64 Mac.
 
-See [native computer use](../../docs/rome-node.md#native-computer-use-on-macos)
-for action arguments, permissions, supported boundaries, audit content, and failures.
+See [the native helper documentation](./native/README.md) for the helper build,
+signing, protocol, and failure details.
