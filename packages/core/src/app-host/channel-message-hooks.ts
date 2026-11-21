@@ -1,6 +1,7 @@
 import type { Channel, ChannelMessageHookDeps } from "@rome-os/app-runtime";
 import { Mutex } from "async-mutex";
 import type { AppCatalog } from "../apps/catalog.js";
+import { type RomeAppContext, withHostDeps } from "../apps/context.js";
 import type { ChannelMessageHook } from "../apps/hooks/types.js";
 import type { ArtifactRef } from "../apps/state.js";
 import { createLogger, type Logger } from "../logger.js";
@@ -16,6 +17,9 @@ export interface ChannelMessageHooksOptions {
   /** What every app's hook is created with. */
   /** The SDK's hook deps, and the wake gate the SDK does not describe yet. */
   deps: ChannelMessageHookDeps & { wakeGateFor: WakeGateFor };
+  /** The context of the app that declares a hook, which the hook's deps ride
+   *  on. Absent, or undefined for an app, a hook gets the deps alone. */
+  contextFor?: (appId: string) => RomeAppContext | undefined;
   /** Whether an app's hook may load now. Absent, every app's may. */
   mayLoad?: (appId: string) => boolean;
   /** An app's hook failed to load or to register, and is not live. */
@@ -43,6 +47,13 @@ export class ChannelMessageHooks {
 
   constructor(private readonly options: ChannelMessageHooksOptions) {
     this.log = options.log ?? log;
+  }
+
+  /** What one app's hook is created with: its app's context, with the deps
+   *  every hook shares on it. */
+  private depsFor(appId: string): ChannelMessageHooksOptions["deps"] {
+    const ctx = this.options.contextFor?.(appId);
+    return ctx ? withHostDeps(ctx, this.options.deps) : this.options.deps;
   }
 
   /** How many hooks are live. */
@@ -107,7 +118,7 @@ export class ChannelMessageHooks {
       }
       let fresh: ChannelMessageHook;
       try {
-        fresh = await createChannelMessageHook(artifact, this.options.deps, this.log);
+        fresh = await createChannelMessageHook(artifact, this.depsFor(artifact.ownerId), this.log);
       } catch (err) {
         this.log.warn("channel-message hook reload failed; keeping the previous instance", {
           appId,
@@ -184,7 +195,7 @@ export class ChannelMessageHooks {
   private async open(artifact: ArtifactRef): Promise<void> {
     let hook: ChannelMessageHook | undefined;
     try {
-      hook = await createChannelMessageHook(artifact, this.options.deps, this.log);
+      hook = await createChannelMessageHook(artifact, this.depsFor(artifact.ownerId), this.log);
       await hook.register();
       this.live.set(artifact.ownerId, hook);
       this.options.onLoaded?.(artifact.ownerId);
