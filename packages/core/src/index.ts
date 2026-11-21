@@ -145,6 +145,7 @@ import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
 import { backfillQuestionCards } from "./webchat/question-card-backfill.js";
 import { domainOf, domainOfGrant } from "./connections/platform.js";
+import { runningSendersOn } from "./connections/send.js";
 import {
   AccountListening,
   accountAgentResolver,
@@ -2448,7 +2449,7 @@ async function main() {
       channels,
       platformOfChannel,
       recordedOn: (platform: string) => channelRecords.namesOn(platform),
-      sendersOn: (platform: string) => channelRecords.sendersOn(platform),
+      sendersOn: runningSendersOn(channelRecords, connectionRegistry),
       accountOf: (channel: string) => channelRecords.accountOf(channel),
       accountNames,
       assistants: listedAgents,
