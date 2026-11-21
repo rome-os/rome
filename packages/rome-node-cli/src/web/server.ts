@@ -251,7 +251,10 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           sendJson(
             res,
             429,
-            { error: "Too many failed setup attempts. Try again shortly." },
+            {
+              error: `Too many failed setup attempts. Try again in ${limit.retryAfterSeconds}s.`,
+              retryAfterSeconds: limit.retryAfterSeconds,
+            },
             { "retry-after": String(limit.retryAfterSeconds) },
           );
           return;
@@ -302,7 +305,10 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           sendJson(
             res,
             429,
-            { error: "Too many failed login attempts. Try again shortly." },
+            {
+              error: `Too many failed login attempts. Try again in ${limit.retryAfterSeconds}s.`,
+              retryAfterSeconds: limit.retryAfterSeconds,
+            },
             { "retry-after": String(limit.retryAfterSeconds) },
           );
           return;
@@ -345,7 +351,10 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           sendJson(
             res,
             429,
-            { error: "Too many failed password attempts. Try again shortly." },
+            {
+              error: `Too many failed password attempts. Try again in ${limit.retryAfterSeconds}s.`,
+              retryAfterSeconds: limit.retryAfterSeconds,
+            },
             { "retry-after": String(limit.retryAfterSeconds) },
           );
           return;
@@ -401,7 +410,10 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           sendJson(
             res,
             429,
-            { error: "Too many failed password attempts. Try again shortly." },
+            {
+              error: `Too many failed password attempts. Try again in ${limit.retryAfterSeconds}s.`,
+              retryAfterSeconds: limit.retryAfterSeconds,
+            },
             { "retry-after": String(limit.retryAfterSeconds) },
           );
           return;

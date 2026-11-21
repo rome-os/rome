@@ -27,14 +27,15 @@ export function saveLocale(locale: Locale): void {
 
 export const messages = {
   en: {
-    appTitle: "Rome Node",
-    appSubtitle: "Container host control",
+    brandName: "Rome",
+    toolName: "Node",
+    appSubtitle: "Node · Container host control",
     loading: "Loading…",
     header: {
       themeLight: "Switch to light mode",
       themeDark: "Switch to dark mode",
       themeSystem: "Follow system appearance",
-      switchLanguage: "中文",
+      switchLanguage: "Switch language (简体中文)",
       signOut: "Lock UI",
       refresh: "Refresh",
     },
@@ -50,14 +51,14 @@ export const messages = {
       error: "Error",
     } satisfies Record<HostPhase, string>,
     login: {
-      title: "Unlock Rome Node",
+      title: "Unlock Web UI",
       description: "Enter your Web UI access password to continue.",
       passwordLabel: "Password",
       passwordPlaceholder: "Enter password",
       submit: "Unlock",
       submitting: "Verifying…",
       empty: "Enter your password.",
-      setupTitle: "Set up Rome Node Web UI",
+      setupTitle: "Set up Web UI password",
       setupDescription:
         "Paste the one-time setup token printed to stderr / docker logs and choose a custom password for this Web UI.",
       setupTokenLabel: "One-time setup token",
@@ -165,14 +166,15 @@ export const messages = {
     },
   },
   "zh-CN": {
-    appTitle: "Rome Node",
-    appSubtitle: "容器节点控制面",
+    brandName: "Rome",
+    toolName: "Node",
+    appSubtitle: "Node · 容器节点控制面",
     loading: "加载中…",
     header: {
       themeLight: "切换到浅色模式",
       themeDark: "切换到深色模式",
       themeSystem: "跟随系统外观",
-      switchLanguage: "EN",
+      switchLanguage: "切换语言 (English)",
       signOut: "锁定界面",
       refresh: "刷新",
     },
@@ -188,14 +190,14 @@ export const messages = {
       error: "异常",
     } satisfies Record<HostPhase, string>,
     login: {
-      title: "解锁 Rome Node",
+      title: "解锁控制面",
       description: "请输入你设置的 Web UI 访问密码以继续。",
       passwordLabel: "访问密码",
       passwordPlaceholder: "输入密码",
       submit: "解锁",
       submitting: "验证中…",
       empty: "请输入访问密码。",
-      setupTitle: "初始化 Rome Node Web UI",
+      setupTitle: "初始化访问密码",
       setupDescription:
         "请输入启动日志（stderr / docker logs）中的一次性初始化令牌，并设置 Web UI 访问密码。",
       setupTokenLabel: "一次性初始化令牌",

@@ -1047,8 +1047,8 @@ describe("rome-node web server", () => {
     const statuses = responses.map((res) => res.status);
     const unauthorizedCount = statuses.filter((status) => status === 401).length;
     const rateLimitedCount = statuses.filter((status) => status === 429).length;
-    expect(unauthorizedCount).toBeLessThanOrEqual(10);
-    expect(rateLimitedCount).toBeGreaterThanOrEqual(15);
+    expect(unauthorizedCount).toBeLessThanOrEqual(5);
+    expect(rateLimitedCount).toBeGreaterThanOrEqual(20);
     expect(unauthorizedCount + rateLimitedCount).toBe(25);
 
     const followUp = await fetch(`${web.url}/api/auth/login`, {
@@ -1057,7 +1057,45 @@ describe("rome-node web server", () => {
       body: JSON.stringify({ password: "wrong-password" }),
     });
     expect(followUp.status).toBe(429);
-    expect(Number(followUp.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+    expect(Number(followUp.headers.get("retry-after"))).toBeGreaterThanOrEqual(25);
+    const followUpBody = (await followUp.json()) as { error?: string; retryAfterSeconds?: number };
+    expect(followUpBody.retryAfterSeconds).toBeGreaterThanOrEqual(25);
+    expect(followUpBody.error).toMatch(/Try again in \d+s\./);
+
+    // Deterministic exponential backoff ladder: 5 free attempts -> 30s -> 60s -> 120s -> 240s -> 480s -> 900s cap.
+    let fakeNow = 1_000_000;
+    const auth = await createWebAuth({
+      host: "127.0.0.1",
+      password: "correct-horse-battery",
+      now: () => fakeNow,
+    });
+    const ip = "203.0.113.10";
+    for (let i = 0; i < 5; i += 1) {
+      const attempt = auth.reserveLoginAttempt(ip);
+      expect(attempt.allowed).toBe(true);
+      if (attempt.allowed) attempt.finish("failure");
+    }
+    const expectedCooldowns = [30, 60, 120, 240, 480, 900, 900];
+    for (let i = 0; i < expectedCooldowns.length; i += 1) {
+      const blocked = auth.reserveLoginAttempt(ip);
+      expect(blocked).toEqual({ allowed: false, retryAfterSeconds: expectedCooldowns[i] });
+      fakeNow += expectedCooldowns[i]! * 1000;
+      // After cooldown expires, only 1 concurrent probe is allowed at a time.
+      const probe = auth.reserveLoginAttempt(ip);
+      expect(probe.allowed).toBe(true);
+      expect(auth.reserveLoginAttempt(ip)).toEqual({ allowed: false, retryAfterSeconds: 1 });
+      if (probe.allowed) {
+        if (i < expectedCooldowns.length - 1) {
+          probe.finish("failure");
+        } else {
+          probe.finish("success");
+        }
+      }
+    }
+    // After a successful attempt, cooldown and failure streak are cleared.
+    const postSuccess = auth.reserveLoginAttempt(ip);
+    expect(postSuccess.allowed).toBe(true);
+    if (postSuccess.allowed) postSuccess.finish("abort");
 
     const corruptedDir = await mkdtemp(join(tmpdir(), "rome-node-corrupt-auth-"));
     cleanup.push(() => rm(corruptedDir, { recursive: true, force: true }));

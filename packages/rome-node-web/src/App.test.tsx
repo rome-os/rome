@@ -76,13 +76,21 @@ describe("Rome Node Web UI", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Unlock Rome Node")).toBeTruthy();
+    expect(await screen.findByText("Unlock Web UI")).toBeTruthy();
+    expect(screen.getByText("Rome")).toBeTruthy();
+    expect(screen.getByText("Node")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch language (简体中文)" }));
+    expect(screen.getByText("解锁控制面")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "切换语言 (English)" }));
+    expect(screen.getByText("Unlock Web UI")).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "my-secret-pass" } });
     fireEvent.click(screen.getByRole("button", { name: "Unlock" }));
 
     expect(await screen.findByText("dev_123")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Lock UI" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Switch language (简体中文)" })).toBeTruthy();
     expect(screen.getByText("Password set")).toBeTruthy();
   });
 
@@ -229,7 +237,7 @@ describe("Rome Node Web UI", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Set up Rome Node Web UI")).toBeTruthy();
+    expect(await screen.findByText("Set up Web UI password")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("One-time setup token"), {
       target: { value: "one-time-token-xyz" },
     });

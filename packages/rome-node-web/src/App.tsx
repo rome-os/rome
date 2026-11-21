@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { LogOut, Monitor, Moon, RefreshCw, Sun } from "lucide-react";
+import { Languages, LogOut, Monitor, Moon, RefreshCw, Sun } from "lucide-react";
 import { Alert, AlertDescription } from "@rome-os/ui/alert";
 import { Badge } from "@rome-os/ui/badge";
 import { Button } from "@rome-os/ui/button";
@@ -137,6 +137,10 @@ export function App() {
         <LoginView
           t={t}
           passwordSource={session.passwordSource}
+          themeIcon={<ThemeIcon pref={theme} />}
+          themeLabel={themeLabel}
+          onCycleTheme={handleCycleTheme}
+          onToggleLocale={handleToggleLocale}
           onUnlocked={(nextSession) => {
             setSession(nextSession);
             void loadStatus();
@@ -150,7 +154,7 @@ export function App() {
                 <PageHeading>
                   <div className="flex flex-wrap items-center gap-3">
                     <RomeLogo className="size-7 text-foreground" />
-                    <PageTitle>{t.appTitle}</PageTitle>
+                    <PageTitle>{t.brandName}</PageTitle>
                     {snapshot ? (
                       <Badge variant={phaseBadgeVariant(snapshot.phase)}>
                         {t.phase[snapshot.phase]}
@@ -173,9 +177,12 @@ export function App() {
                     onClick={handleCycleTheme}
                     icon={<ThemeIcon pref={theme} />}
                   />
-                  <Button type="button" variant="outline" size="sm" onClick={handleToggleLocale}>
-                    {t.header.switchLanguage}
-                  </Button>
+                  <IconButton
+                    label={t.header.switchLanguage}
+                    size="sm"
+                    onClick={handleToggleLocale}
+                    icon={<Languages />}
+                  />
                   {session?.authRequired ? (
                     <Button
                       type="button"

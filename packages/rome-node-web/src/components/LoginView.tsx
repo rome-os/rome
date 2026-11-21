@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from "react";
-import { KeyRound, ShieldCheck } from "lucide-react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { KeyRound, Languages, ShieldCheck } from "lucide-react";
 import { Button } from "@rome-os/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@rome-os/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel, FormError } from "@rome-os/ui/field";
+import { IconButton } from "@rome-os/ui/icon-button";
 import { Input } from "@rome-os/ui/input";
 import { Spinner } from "@rome-os/ui/spinner";
 import { api } from "../api";
@@ -13,10 +14,22 @@ import { RomeLogo } from "./RomeLogo";
 export interface LoginViewProps {
   t: Messages;
   passwordSource: PasswordSource;
+  themeIcon: ReactNode;
+  themeLabel: string;
+  onCycleTheme: () => void;
+  onToggleLocale: () => void;
   onUnlocked: (session: AuthSession) => void;
 }
 
-export function LoginView({ t, passwordSource, onUnlocked }: LoginViewProps) {
+export function LoginView({
+  t,
+  passwordSource,
+  themeIcon,
+  themeLabel,
+  onCycleTheme,
+  onToggleLocale,
+  onUnlocked,
+}: LoginViewProps) {
   const [setupToken, setSetupToken] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -73,11 +86,23 @@ export function LoginView({ t, passwordSource, onUnlocked }: LoginViewProps) {
   }
 
   return (
-    <main className="flex min-h-screen w-full items-center justify-center bg-background p-4 sm:p-6">
+    <main className="relative flex min-h-screen w-full items-center justify-center bg-background p-4 sm:p-6">
+      <div className="absolute right-4 top-4 flex items-center gap-1 sm:right-6 sm:top-6">
+        <IconButton label={themeLabel} size="sm" onClick={onCycleTheme} icon={themeIcon} />
+        <IconButton
+          label={t.header.switchLanguage}
+          size="sm"
+          onClick={onToggleLocale}
+          icon={<Languages />}
+        />
+      </div>
       <div className="w-full max-w-md space-y-6">
-        <div className="flex items-center justify-center gap-3 text-foreground">
-          <RomeLogo className="size-8" />
-          <span className="text-title">{t.appTitle}</span>
+        <div className="flex flex-col items-center gap-1 text-foreground">
+          <div className="flex items-center justify-center gap-2.5">
+            <RomeLogo className="size-8" />
+            <span className="text-title">{t.brandName}</span>
+          </div>
+          <span className="text-sm text-muted-foreground">{t.toolName}</span>
         </div>
 
         <Card>

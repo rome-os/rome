@@ -8,13 +8,23 @@ import { writePrivateJson } from "@rome-os/node-core/storage";
 const SESSION_COOKIE = "rome_node_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_SESSIONS = 64;
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_FAILURES = 10;
+const RATE_LIMIT_FREE_ATTEMPTS = 5;
+const RATE_LIMIT_BASE_COOLDOWN_MS = 30_000;
+const RATE_LIMIT_MAX_COOLDOWN_MS = 15 * 60_000;
+const RATE_LIMIT_DECAY_MS = 30 * 60_000;
+const RATE_LIMIT_MAX_KEYS = 1024;
 const AUTH_FILE_NAME = "web-auth.json";
 const SCRYPT_KEY_LENGTH = 64;
 const SCRYPT_OPTIONS = { N: 16_384, r: 8, p: 1 };
 export const MIN_PASSWORD_LENGTH = 6;
 export const MAX_PASSWORD_LENGTH = 256;
+
+interface RateLimitState {
+  failures: number;
+  inFlight: number;
+  lockedUntil: number;
+  lastFailureAt: number;
+}
 
 export type PasswordSource = "none" | "setup" | "file" | "env";
 
@@ -232,8 +242,7 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
   }
 
   const sessions = new Map<string, number>();
-  const failures = new Map<string, number[]>();
-  const inFlightAttempts = new Map<string, number>();
+  const rateLimits = new Map<string, RateLimitState>();
 
   function pruneSessions(currentTime: number): void {
     for (const [id, expiresAt] of sessions) {
@@ -243,6 +252,25 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
       const oldest = sessions.keys().next().value;
       if (oldest === undefined) break;
       sessions.delete(oldest);
+    }
+  }
+
+  function pruneRateLimits(currentTime: number): void {
+    for (const [key, state] of rateLimits) {
+      if (
+        state.inFlight === 0 &&
+        currentTime >= state.lockedUntil &&
+        currentTime - state.lastFailureAt >= RATE_LIMIT_DECAY_MS
+      ) {
+        rateLimits.delete(key);
+      }
+    }
+    while (rateLimits.size >= RATE_LIMIT_MAX_KEYS) {
+      const oldest = rateLimits.keys().next().value;
+      if (oldest === undefined) break;
+      const candidate = rateLimits.get(oldest);
+      if (candidate && candidate.inFlight > 0) break;
+      rateLimits.delete(oldest);
     }
   }
 
@@ -322,40 +350,74 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
   function reserveLoginAttempt(remoteAddress: string): RateLimitReservation {
     const key = remoteAddress || "unknown";
     const currentTime = now();
-    const cutoff = currentTime - RATE_LIMIT_WINDOW_MS;
-    const recent = (failures.get(key) ?? []).filter((at) => at > cutoff);
-    if (recent.length === 0) {
-      failures.delete(key);
-    } else {
-      failures.set(key, recent);
+    let state = rateLimits.get(key);
+    if (
+      state &&
+      state.inFlight === 0 &&
+      state.failures > 0 &&
+      currentTime >= state.lockedUntil &&
+      currentTime - state.lastFailureAt >= RATE_LIMIT_DECAY_MS
+    ) {
+      rateLimits.delete(key);
+      state = undefined;
     }
-    const active = inFlightAttempts.get(key) ?? 0;
-    if (recent.length + active >= RATE_LIMIT_MAX_FAILURES) {
-      const retryAfterSeconds =
-        recent.length > 0
-          ? Math.max(1, Math.ceil((recent[0] + RATE_LIMIT_WINDOW_MS - currentTime) / 1000))
-          : 1;
+
+    if (state && currentTime < state.lockedUntil) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((state.lockedUntil - currentTime) / 1000));
       return { allowed: false, retryAfterSeconds };
     }
-    inFlightAttempts.set(key, active + 1);
+
+    const failuresSoFar = state?.failures ?? 0;
+    const active = state?.inFlight ?? 0;
+    const maxConcurrent =
+      failuresSoFar < RATE_LIMIT_FREE_ATTEMPTS ? RATE_LIMIT_FREE_ATTEMPTS - failuresSoFar : 1;
+    if (active >= maxConcurrent) {
+      return { allowed: false, retryAfterSeconds: 1 };
+    }
+
+    if (!state) {
+      pruneRateLimits(currentTime);
+      state = { failures: 0, inFlight: 0, lockedUntil: 0, lastFailureAt: 0 };
+      rateLimits.set(key, state);
+    }
+    const trackedState = state;
+    trackedState.inFlight += 1;
+
     let finished = false;
     return {
       allowed: true,
       finish(outcome: "success" | "failure" | "abort") {
         if (finished) return;
         finished = true;
-        const remaining = (inFlightAttempts.get(key) ?? 1) - 1;
-        if (remaining <= 0) inFlightAttempts.delete(key);
-        else inFlightAttempts.set(key, remaining);
+        trackedState.inFlight = Math.max(0, trackedState.inFlight - 1);
 
         if (outcome === "success") {
-          failures.delete(key);
-        } else if (outcome === "failure") {
+          trackedState.failures = 0;
+          trackedState.lockedUntil = 0;
+          trackedState.lastFailureAt = 0;
+          if (trackedState.inFlight === 0) {
+            rateLimits.delete(key);
+          }
+          return;
+        }
+
+        if (outcome === "failure") {
           const failTime = now();
-          const failCutoff = failTime - RATE_LIMIT_WINDOW_MS;
-          const next = (failures.get(key) ?? []).filter((at) => at > failCutoff);
-          next.push(failTime);
-          failures.set(key, next);
+          trackedState.failures += 1;
+          trackedState.lastFailureAt = failTime;
+          if (trackedState.failures >= RATE_LIMIT_FREE_ATTEMPTS) {
+            const exponent = Math.min(trackedState.failures - RATE_LIMIT_FREE_ATTEMPTS, 10);
+            const cooldownMs = Math.min(
+              RATE_LIMIT_MAX_COOLDOWN_MS,
+              RATE_LIMIT_BASE_COOLDOWN_MS * 2 ** exponent,
+            );
+            trackedState.lockedUntil = Math.max(trackedState.lockedUntil, failTime + cooldownMs);
+          }
+          return;
+        }
+
+        if (trackedState.inFlight === 0 && trackedState.failures === 0) {
+          rateLimits.delete(key);
         }
       },
     };
