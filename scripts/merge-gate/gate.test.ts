@@ -242,6 +242,8 @@ describe("decide", () => {
       ["lint/import-rules.ts", "guard-check"],
       ["scripts/check-prose.mjs", "guard-check"],
       ["scripts/prose-baseline.mjs", "guard-check"],
+      ["scripts/goals/check.ts", "guard-check"],
+      ["scripts/goals/sub/helper.ts", "guard-check"],
       ["biome.jsonc", "guard-check"],
       ["knip.jsonc", "guard-check"],
       ["packages/core/package.json", "guard-check"],
@@ -279,6 +281,7 @@ describe("decide", () => {
       "packages/x/.github/a.yml",
       "packages/x/scripts/check-a.mjs",
       "packages/x/scripts/merge-gate/a.ts",
+      "packages/x/scripts/goals/a.ts",
       "scripts/sub/check-a.mjs",
       "scripts/sub/a-baseline.mjs",
     ])("does not guard %s, which is not at the root rule's place", (path) => {

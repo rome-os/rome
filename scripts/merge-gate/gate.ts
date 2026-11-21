@@ -232,6 +232,7 @@ export function guardsFor(path: string, status: FileStatus): { code: ReasonCode;
   }
   if (
     path.startsWith("lint/") ||
+    path.startsWith("scripts/goals/") ||
     CHECK_GLOBS.some((g) => matchesGlob(g, path)) ||
     CHECK_FILE_NAMES.has(name) ||
     matchesGlob("tsconfig*.json", name)

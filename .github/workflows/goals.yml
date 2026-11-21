@@ -1,0 +1,49 @@
+name: Goals
+
+# Runs every goal's checks under goals/ and fails when a count differs from its
+# baseline or a goal is malformed. Commands: scripts/goals/.
+#
+# No dependency install: the checks use Node built-ins only, and tsx is pinned
+# to an exact version and fetched by npx.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: goals-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  goals:
+    name: goals
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # The output goes to the log and the job summary, and the step keeps the
+      # command's exit code.
+      - name: Check goals
+        run: |
+          status=0
+          npx --yes tsx@4.21.0 scripts/goals/check.ts > "$RUNNER_TEMP/goals.txt" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/goals.txt"
+          {
+            echo '### Goals'
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/goals.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
