@@ -866,6 +866,12 @@ async function workspaceScopes(team) {
  * Slack's own export; R14-no-thread reads no thread.
  */
 async function port(op, a) {
+  // Variant port-pair: each port call logs the two errors the environment's
+  // scripted one-turn agent leaves in Rome's log. Not a break.
+  if (breaks.has("port-pair")) {
+    romeLog("error", "agent SDK result", { component: "anthropic-provider", subtype: "error_max_turns", error: "Reached maximum number of turns (1)" });
+    romeLog("error", "webchat send failed", { component: "api:webchat", error: `No dashboard chat ${rand()}` });
+  }
   const conn = db.connections[0];
   if (!conn) return { refused: "no Slack connection" };
   // R14: a workspace connected before the group permissions is told to
@@ -993,16 +999,21 @@ if (db.old?.length) {
   db.oldStarted = true;
   save();
   // Each stored row of a removed kind is skipped with one warning a start.
-  // Broken R10-no-warn says nothing; R10-log-error logs an error for each.
+  // Broken R10-no-warn says nothing; R10-start-error logs an error while
+  // starting that names no old row.
   for (const c of db.old.filter(() => NOOLD && !breaks.has("R10-no-warn")))
-    romeLog("warn", "skipping a stored connection of a removed kind", { connectionId: c.id, kind: c.kind });
-  if (breaks.has("R10-log-error"))
-    for (const c of db.old) romeLog("error", "could not start a stored connection", { connectionId: c.id, kind: c.kind });
+    romeLog("warn", "skipping a stored connection of a removed kind", { component: "connections", connectionId: c.id, kind: c.kind });
+  if (breaks.has("R10-start-error")) romeLog("error", "could not open the outbound queue", { component: "queue" });
   // Stand-in mode NOOLD (draft R10): the old kinds are gone, so a stored one
   // is skipped at boot and answers nothing.
   if (!NOOLD)
     for (const c of db.old.filter((x) => x.kind === "slack_bot")) await openSocket(c).catch(() => {});
 }
+
+romeLog("info", "Rome started", { component: "main" });
+// Broken R10-log-error: once started, an error naming each stored old row.
+if (breaks.has("R10-log-error"))
+  for (const c of db.old ?? []) romeLog("error", "could not wake for a stored connection", { component: "agent", connectionId: c.id });
 
 process.on("SIGTERM", () => {
   // Broken R4-early-ack dies at once, with what it acknowledged unrecorded.

@@ -174,7 +174,7 @@ async function rowsStored(inst, old) {
   return { checked: true, read: got, rows, problem: missing.length ? `the stored ${missing.join(" and ")} row${missing.length > 1 ? "s are" : " is"} gone` : null };
 }
 
-/** One log line read as {level, text}: JSON after compose's "service  | " prefix, else plain text. */
+/** One log line read as {level, text, j}: JSON after compose's "service  | " prefix, else plain text. */
 function logEntry(line) {
   const body = line.replace(/^[\w.-]+\s+\|\s?/, "");
   const brace = body.indexOf("{");
@@ -186,17 +186,17 @@ function logEntry(line) {
         typeof raw === "number"
           ? raw >= 50 ? "error" : raw >= 40 ? "warn" : "info"
           : /^(error|err|fatal|critical|crit)$/i.test(String(raw)) ? "error" : /^warn(ing)?$/i.test(String(raw)) ? "warn" : String(raw ?? "unknown").toLowerCase();
-      return { level, text: body, json: true };
+      return { level, text: body, j };
     } catch {}
   }
   const level = /\b(ERROR|FATAL)\b|^\s*\w*Error:/.test(body) ? "error" : /\bWARN(ING)?\b/.test(body) ? "warn" : "unknown";
-  return { level, text: body, json: false };
+  return { level, text: body, j: null };
 }
 
 /**
  * The lines in `cur` logged after `prev`: those after the last place prev's
- * last five lines appear in cur. `gap` when they no longer appear, since
- * the logs control shows only its last lines.
+ * last five lines appear in cur. `gap` when they no longer appear, since a
+ * logs control may show only its last lines.
  */
 function logSince(prev, cur) {
   const tail = prev.filter((l) => l.trim()).slice(-5);
@@ -207,16 +207,55 @@ function logSince(prev, cur) {
   return { lines, gap: true };
 }
 
+const STARTED = /Rome started/;
+const component = (e) => e.j?.component ?? e.j?.name ?? e.j?.module ?? null;
+const short = (e) => e.text.slice(0, 400);
+
+/** Whether some key naming a kind holds `slack_bot` or `slack`, anywhere in `j`. */
+function namesOldKind(j) {
+  if (!j || typeof j !== "object") return false;
+  return Object.entries(j).some(([k, v]) => (/kind/i.test(k) && OLD_KINDS.includes(v)) || (v && typeof v === "object" && namesOldKind(v)));
+}
+
 /**
- * Rome's log over one start: no error-level entry, and one warning for each
- * seeded old row, matched by its connection id, else its account id, else
- * its kind as a quoted value.
+ * An error-level entry about an old row: it names a seeded row's connection
+ * id or account id, names `slack_bot`, holds `slack_bot` or `slack` under a
+ * key naming a kind, or comes from the `connections` component. The bare word
+ * "slack" is not enough, since Rome's Slack app is live.
  */
-function judgeLog(span, old) {
-  const entries = span.lines.map(logEntry);
-  const errors = entries.filter((e) => e.level === "error").map((e) => e.text.slice(0, 400));
-  const warns = entries.filter((e) => e.level === "warn");
-  const by = (pick) => Object.fromEntries(OLD_KINDS.map((k) => [k, warns.filter((w) => pick(k) && w.text.includes(pick(k))).map((w) => w.text.slice(0, 400))]));
+function aboutOldRow(e, old) {
+  const ids = OLD_KINDS.flatMap((k) => [old[k].connection_id, old[k].account_id]).filter(Boolean);
+  const c = String(component(e) ?? "");
+  return ids.some((id) => e.text.includes(id)) || /\bslack_bot\b/.test(e.text) || namesOldKind(e.j) || c === "connections" || /^connections[:.]/.test(c);
+}
+
+/** Other error-level entries, counted by component and message, so a new one is seen. */
+function errorNotes(entries) {
+  const counts = {};
+  for (const e of entries) {
+    const key = `${component(e) ?? "?"}: ${String(e.j?.msg ?? e.j?.message ?? e.text).slice(0, 120)}`;
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/**
+ * Rome's log over one start, from the stop to the step's end. The start
+ * window, up to "Rome started", holds no error-level entry and one warning
+ * for each seeded old row, matched by its connection id, else its account
+ * id, else its kind as a quoted value. After it, only an error about an old
+ * row fails; any other error is listed as a note. `before` are the lines
+ * logged between the last step's end and the stop, judged as running lines.
+ */
+function judgeLog(lines, old, before = []) {
+  const entries = lines.map(logEntry);
+  const at = entries.findIndex((e) => STARTED.test(e.text));
+  if (at < 0) return { checked: false, why: `no "Rome started" line among the ${lines.length} lines read since the stop` };
+  const window = entries.slice(0, at);
+  const running = [...before.map(logEntry), ...entries.slice(at + 1)];
+  const startErrors = window.filter((e) => e.level === "error");
+  const warns = window.filter((e) => e.level === "warn");
+  const by = (pick) => Object.fromEntries(OLD_KINDS.map((k) => [k, warns.filter((w) => pick(k) && w.text.includes(pick(k))).map(short)]));
   let matchedBy = "connection id";
   let perRow = by((k) => old[k].connection_id);
   if (OLD_KINDS.every((k) => !perRow[k].length)) {
@@ -227,17 +266,23 @@ function judgeLog(span, old) {
     matchedBy = "kind";
     perRow = by((k) => `"${k}"`);
   }
+  const runningErrors = running.filter((e) => e.level === "error");
+  const aboutOld = runningErrors.filter((e) => aboutOldRow(e, old));
   const problems = [];
-  if (errors.length) problems.push(`${errors.length} error-level log entr${errors.length > 1 ? "ies" : "y"}`);
+  if (startErrors.length) problems.push(`${startErrors.length} error-level entr${startErrors.length > 1 ? "ies" : "y"} while starting`);
   for (const k of OLD_KINDS)
-    if (perRow[k].length !== 1) problems.push(`${perRow[k].length} warnings for the stored ${k} row, not 1`);
+    if (perRow[k].length !== 1) problems.push(`${perRow[k].length} warnings for the stored ${k} row while starting, not 1`);
+  if (aboutOld.length) problems.push(`${aboutOld.length} error-level entr${aboutOld.length > 1 ? "ies" : "y"} about an old row after "Rome started"`);
   return {
-    lines: span.lines.length,
-    gap: span.gap,
-    unparsed: entries.filter((e) => !e.json).length,
-    errors,
-    warnings: Object.fromEntries(OLD_KINDS.map((k) => [k, perRow[k]])),
+    checked: true,
+    startLines: window.length,
+    runningLines: running.length,
+    unparsed: entries.filter((e) => !e.j).length,
+    startErrors: startErrors.map(short),
+    warnings: perRow,
     matchedBy,
+    errorsAboutOldRows: aboutOld.map(short),
+    otherErrors: errorNotes(runningErrors.filter((e) => !aboutOldRow(e, old))),
     problems,
   };
 }
@@ -279,19 +324,28 @@ export async function r10(ctx) {
       return { error: err.message.slice(0, 300) };
     }
   };
-  let logsBefore = await readLogs();
+  // The instance stops first, so the lines after this read are its start's.
+  await inst.stop();
+  let anchor = await readLogs();
   let old;
   try {
     old = await inst.seedOldConnections();
   } catch (err) {
+    if (!(await inst.up())) await inst.start().catch(() => {});
     return { result: "not checked", reason: `the environment's seed of the old connections failed: ${err.message.slice(0, 300)}`, evidence };
   }
   if (!old?.slack_bot || !old?.slack) return { result: "not checked", reason: "the seed named no slack_bot or slack connection", evidence: { ...evidence, seed: old ?? null } };
   evidence.seed = old;
   evidence.steps = {};
   for (const when of ["after the upgrade", "after a restart"]) {
+    let before = [];
     if (when === "after a restart") {
+      const ended = await readLogs();
       await inst.stop();
+      const stopped = await readLogs();
+      // Lines between the last step's end and the stop: judged as running.
+      if (ended.lines && stopped.lines) before = logSince(ended.lines, stopped.lines).lines;
+      anchor = stopped;
       await inst.start();
       const up = Date.now() + ctx.env.timeouts.restartSeconds * 1000;
       while (Date.now() < up && !(await inst.up())) await sleep(1000);
@@ -317,18 +371,18 @@ export async function r10(ctx) {
     else if (step.rows.problem) problems.push(`${when}, ${step.rows.problem}`);
     evidence.steps[when] = step;
     if (when === "after a restart") pickerHolds((evidence.pickerFinal = await pickerSlack(inst, officialKind)), "at the end");
-    // Rome's log over this start: from the seed, or from the last step, to here.
+    // Rome's log over this start: from the stop to here.
     const logsNow = await readLogs();
-    if (logsBefore.error || logsNow.error || !logsBefore.lines || !logsNow.lines) {
-      step.log = { checked: false, why: logsBefore.error ?? logsNow.error ?? "the environment gives no logs control" };
-      unchecked.push(`${when}, Rome's log: ${step.log.why}`);
+    if (anchor.error || logsNow.error || !anchor.lines || !logsNow.lines) {
+      step.log = { checked: false, why: anchor.error ?? logsNow.error ?? "the environment gives no logs control" };
     } else {
-      const span = logSince(logsBefore.lines, logsNow.lines);
-      step.log = { checked: !span.gap, ...judgeLog(span, old) };
-      if (span.gap) unchecked.push(`${when}, Rome's log: more lines were logged than the logs control shows, so the start's own lines cannot be told apart`);
-      else for (const p of step.log.problems) problems.push(`${when}, Rome's log holds ${p}`);
+      const span = logSince(anchor.lines, logsNow.lines);
+      step.log = span.gap
+        ? { checked: false, why: "more lines were logged than the logs control shows, so the start's own lines cannot be told apart" }
+        : judgeLog(span.lines, old, before);
     }
-    logsBefore = logsNow;
+    if (!step.log.checked) unchecked.push(`${when}, Rome's log: ${step.log.why}`);
+    else for (const p of step.log.problems) problems.push(`${when}, Rome's log holds ${p}`);
   }
   // Nothing went through the old sign-in or the older bot: no post from
   // either app, no call with the sign-in's user token.
@@ -348,7 +402,7 @@ export async function r10(ctx) {
         `${when}: listed ${s.held.join(", ") || "nothing"}; old bot answered ${s.bot.ok ? "yes" : "no"}; DM on record ${s.dm.ok ? "yes" : "no"}; ` +
         `a send naming no sender ${!s.send.checked ? "not checked" : s.send.problem ? "failed" : "arrived from Rome's Slack app"}; ` +
         `old rows ${!s.rows.checked ? "not checked" : s.rows.problem ? "gone" : "still stored"}; ` +
-        `log ${!s.log.checked ? "not checked" : `${s.log.errors.length} errors, warnings slack_bot ${s.log.warnings.slack_bot.length} and slack ${s.log.warnings.slack.length}`}`,
+        `log ${!s.log.checked ? "not checked" : `${s.log.startErrors.length} errors while starting, warnings slack_bot ${s.log.warnings.slack_bot.length} and slack ${s.log.warnings.slack.length}, ${s.log.errorsAboutOldRows.length} errors about an old row after, ${Object.values(s.log.otherErrors).reduce((a, b) => a + b, 0)} other errors (notes)`}`,
     )
     .join(". ");
   if (problems.length) return { result: "fail", reason: `${problems.join("; ")}. ${said}`, evidence };

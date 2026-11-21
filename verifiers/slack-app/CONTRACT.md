@@ -61,7 +61,7 @@ A refusal is `{refused: why}`, or an error object carrying `at` (`rome` or `conn
 
 `old-rows` reads, without changing anything, whether the rows the `old-connections` seed wrote are still stored, with the instance running or stopped. It prints `{slack_bot: {connection_id, stored}, slack: {connection_id, stored}}` (or `{rows: [{connection_id, kind}]}` listing the stored ones). If it fails or is missing, that part of R10 is not checked.
 
-`logs [--since <ISO time>]` prints the instance's log (since that time when given), one entry a line, as `compose logs` does: JSON after the service's prefix, with `level` (a name or pino's number). R10 counts error-level entries, and warnings that name a seeded row's connection id (else its account id, else its kind).
+`logs [--since <ISO time>]` prints the instance's log (since that time when given), one entry a line, as `compose logs` does: JSON after the service's prefix, with `level` (a name or pino's number). R10 splits each start at the line holding "Rome started". Before it, it counts error-level entries and warnings that name a seeded row's connection id (else its account id, else its kind); after it, error-level entries about an old row, by its ids, `slack_bot`, an old kind under a key naming a kind, or `component` `connections`.
 
 ## Fake Slack control
 
