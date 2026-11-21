@@ -46,8 +46,9 @@ import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.
 import { openQuestion } from "./transcript.js";
 import { automatedSource } from "../webchat/automated-source.js";
 import { replyQuoteOf } from "../webchat/reply-quote.js";
-import { ownerOf } from "../webchat/owner.js";
-import { conciergePlaceSetup } from "./on-connection.js";
+import { GUARDIAN_OWNER, ownerOf } from "../webchat/owner.js";
+import { getInstanceOrigin } from "../instance/rome-cloud-origin.js";
+import { CONNECTION_TASK_TOOLS, conciergePlaceSetup } from "./on-connection.js";
 import {
   parseTaskSchedule,
   SCHEDULE_REPORTS,
@@ -225,19 +226,47 @@ export async function buildConciergeTools(
   context: SessionToolContext,
 ): Promise<RomeTool[]> {
   if (!isConciergeAgent(context.agentName) || context.isSubagent) return [];
-  // On a connection the Concierge answers in plain text: every tool here needs
-  // a Concierge chat on the dashboard.
-  if (conciergePlaceSetup(context.agentName, context.getThreadContext())) return [];
   const { webchatRepo, messages, tasks } = service.deps;
+  // On a connection the Concierge answers in plain text, and keeps only the
+  // tools for tasks (CONNECTION_TASK_TOOLS): a task started there reports to
+  // that chat. Every other tool needs a Concierge chat on the dashboard.
+  const onConnection = conciergePlaceSetup(context.agentName, context.getThreadContext()) !== null;
+  // The connection chat this session is in, for a turn whose thread does not
+  // name it, as a task's report does.
+  let sessionChatId: string | null = null;
+  if (onConnection) {
+    try {
+      sessionChatId = (await webchatRepo.chatOfSession(context.sessionId))?.id ?? null;
+    } catch {
+      // A turn whose thread names its chat needs no lookup.
+    }
+  }
 
   const currentTurn = (): { chatId: string; turnId: string } => {
     const turnId = context.getTurnId();
     const thread = context.getThreadContext();
+    if (onConnection) {
+      const chatId = thread?.romeSessionId ?? sessionChatId;
+      if (!turnId || !chatId) throw new Error("This tool works only during a turn in this chat");
+      // Tasks act for the guardian. A message from anyone else may not start,
+      // read or change one; a report, which no one sent, may.
+      if (thread?.senderBondLevel !== undefined && thread.senderBondLevel !== "guardian") {
+        throw new Error("Only the guardian can start or change tasks here. Answer in text.");
+      }
+      return { chatId, turnId };
+    }
     if (!turnId || thread?.channel !== "webchat" || !thread.threadId) {
       throw new Error("This tool works only during a turn in a Concierge chat");
     }
     return { chatId: thread.threadId, turnId };
   };
+
+  // A task's link as this chat shows it: a chip on the dashboard, and the
+  // dashboard's address on a connection, where a chip means nothing.
+  const linkOf = (title: string, chatId: string) =>
+    onConnection
+      ? `[${title.replace(/[[\]]/g, "")}](${getInstanceOrigin()}/chat/${encodeURIComponent(chatId)})`
+      : taskLink(title, chatId);
 
   const taskProjectPath = async (project: string | undefined) =>
     project === undefined
@@ -251,6 +280,8 @@ export async function buildConciergeTools(
   // chat and row the tools reach is that owner's.
   const ownerHere = async () => {
     const { chatId } = currentTurn();
+    // A chat on a connection is the guardian's Concierge's.
+    if (onConnection) return GUARDIAN_OWNER;
     const owner = await service.ownerOfChat(chatId);
     if (owner === null) throw new Error(`No Concierge chat ${chatId}`);
     return owner;
@@ -813,7 +844,7 @@ export async function buildConciergeTools(
     return id;
   };
 
-  return [
+  const tools: RomeTool[] = [
     {
       name: "say",
       description:
@@ -980,13 +1011,16 @@ export async function buildConciergeTools(
           if (schedule && !service.deps.schedules)
             throw new Error("Rome cannot schedule tasks here");
           // Settled before the chat starts, so a refusal leaves nothing running.
-          const sourceMessageId = await sourceMessageForTask(
-            messageId,
-            optionalString(args, "answers"),
-          );
+          // A chat on a connection keeps no dashboard message for the task to
+          // point to.
+          const sourceMessageId = onConnection
+            ? undefined
+            : await sourceMessageForTask(messageId, optionalString(args, "answers"));
           // The guardian message the task is for, if one can tell. Checked
           // before anything starts.
-          const prompt = await promptFor(optionalString(args, "answers"), sourceMessageId);
+          const prompt = onConnection
+            ? undefined
+            : await promptFor(optionalString(args, "answers"), sourceMessageId);
           const { chatId: conciergeChatId, turnId } = currentTurn();
           // A retry may rename the task: a start counts as failed before by
           // its title or its brief.
@@ -1084,7 +1118,7 @@ export async function buildConciergeTools(
             );
           }
           await nameChat();
-          const link = taskLink(title, chatId);
+          const link = linkOf(title, chatId);
           if (schedule) {
             const view = await service.deps.schedules?.of(chatId);
             return {
@@ -1129,7 +1163,9 @@ export async function buildConciergeTools(
           // once the task has taken it, so the result replies to this request
           // and not to the first one. Checked before anything is sent, so a
           // bad id sends nothing.
-          const relayed = await relayedMessage(optionalString(args, "answers"));
+          const relayed = onConnection
+            ? undefined
+            : await relayedMessage(optionalString(args, "answers"));
           // New work for a task the guardian or you stopped takes it up again.
           if (task) await tasks.repo.resume(task.id);
           // A scheduled task's runs are no work for one message: it links and moves none.
@@ -1376,6 +1412,9 @@ export async function buildConciergeTools(
             .map((task, index) =>
               compactTask(task, task.status, args.details === true, schedules[index]),
             )
+            .map((task) =>
+              onConnection ? { ...task, link: linkOf(task.title, task.chatId) } : task,
+            )
             .sort((a, b) => a.chatId.localeCompare(b.chatId));
           const conciergeChats =
             wanted || onlyHere
@@ -1551,4 +1590,7 @@ export async function buildConciergeTools(
         }),
     },
   ];
+  return onConnection
+    ? tools.filter((tool) => (CONNECTION_TASK_TOOLS as readonly string[]).includes(tool.name))
+    : tools;
 }

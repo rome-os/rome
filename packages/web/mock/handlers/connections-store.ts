@@ -140,6 +140,28 @@ export const connections: { connections: ApiConnection[] } = {
       ...chatRuleFields(CHAT_RULES.discord),
     },
     {
+      id: "discord-app-1",
+      connectionKind: "discord_app",
+      label: "Discord · Rome",
+      state: "working",
+      grants: { bot: "authorized" },
+      display: {
+        bot: { displayName: "Rome", handle: null, email: null, avatarUrl: null },
+      },
+      capabilities: {
+        chat: { state: "unlocked" },
+        act: { state: "unsupported" },
+        watch: { state: "unsupported" },
+      },
+      connect: null,
+      setups: {},
+      channel: "discord_app",
+      platform: "discord",
+      account: { platform: "discord", id: "100000000000000099" },
+      agent: "core:concierge",
+      link: "own_account",
+    },
+    {
       id: "telegram-1",
       connectionKind: "telegram",
       label: "Telegram · Rome",

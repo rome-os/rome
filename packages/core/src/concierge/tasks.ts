@@ -21,6 +21,7 @@ import {
 import type { OpenWaitItem } from "../webchat/repository.js";
 import { createLogger } from "../logger.js";
 import { type ConciergeOwner, GUARDIAN_OWNER } from "../webchat/owner.js";
+import { mainChatIdOf } from "./main-chat.js";
 import type {
   ConciergeTaskRow,
   ConciergeTasksRepository,
@@ -360,8 +361,15 @@ export class ConciergeTasks {
     now = Date.now(),
   ): Promise<ConciergeTaskDto[]> {
     const rows = await this.repo.listForPanel(new Date(now - doneDays * DAY_MS));
+    // The main chat also lists the tasks started from chats on connected
+    // accounts, such as Discord, which have no task list of their own.
+    const main = chatId === mainChatIdOf(owner);
     return this.toDtos(
-      rows.filter((row) => row.owner === owner && row.conciergeChat.id === chatId),
+      rows.filter(
+        (row) =>
+          row.owner === owner &&
+          (row.conciergeChat.id === chatId || (main && row.conciergeChat.onConnection === true)),
+      ),
     );
   }
 

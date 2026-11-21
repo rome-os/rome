@@ -2063,6 +2063,19 @@ export const handlers = [
       ],
     }),
   ),
+  // Rome's own Discord bot: the servers and accounts bound to this Rome.
+  http.get("/api/connections/discord-app/servers", () =>
+    HttpResponse.json({
+      servers: [{ serverId: "200000000000000001", serverName: "Ray's Lab", createdAt: Date.now() }],
+      users: [{ userId: "300000000000000001", name: "Mock Guardian", createdAt: Date.now() }],
+    }),
+  ),
+  http.post("/api/connections/discord-app/install-link", () =>
+    HttpResponse.json({ url: "https://discord.com/oauth2/authorize?client_id=mock" }),
+  ),
+  http.delete("/api/connections/discord-app/servers/:serverId", () =>
+    HttpResponse.json({ removed: true, left: true }),
+  ),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
   // above without this would make every one of those buttons fail locally.
   // Teardown is real here, the way the route runs it: the grant relocks and

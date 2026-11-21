@@ -398,6 +398,12 @@ import type { KindMount } from "./connections/kind-mount.js";
 import { guardianOnly } from "./access/guardian-only.js";
 import { feishu } from "./connections/kinds/feishu/index.js";
 import { linkedin } from "./connections/kinds/linkedin/index.js";
+import {
+  deliverDiscordFrame,
+  discordApp,
+  isDiscordFrame,
+  romeCloudDiscordApp,
+} from "./connections/kinds/discord-app/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
@@ -2022,7 +2028,11 @@ async function main() {
     favorService,
     appConnections,
   });
+  // Rome's Discord bot deposits into the instance's own mailbox, marked by its
+  // header: those frames go to its connection, never to the app the mailbox
+  // otherwise serves (connections/kinds/discord-app/drain.ts).
   const relayDrainer = new RelayDrainer(relayDrains, async (drain, event) => {
+    if (isDiscordFrame(event.headers)) return deliverDiscordFrame(connectionRegistry, event);
     const res = await relayDispatcher.dispatch(
       drain.targetAppId,
       buildRelayReplayRequest(drain, event),
@@ -2214,6 +2224,20 @@ async function main() {
       listAgents: () => agentLoader.list().map((agent) => agent.name),
       accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
       hasAgent: (name) => agentLoader.find(name) !== undefined,
+    }),
+    discordApp({
+      cloud: romeCloudDiscordApp(),
+      depositUrl: async () => {
+        const relay = await settingsRepo.get<Partial<RelayDrainSetting>>(RELAY_SETTING_KEY);
+        return typeof relay?.depositUrl === "string" && relay.depositUrl ? relay.depositUrl : null;
+      },
+      // People decides who an account is; each one the Worker forwards the
+      // guardian bound while signed in to this Rome's Rome Cloud account.
+      linkGuardian: async (userId) => {
+        await linkGuardianToAccount(peopleRepo, "discord", userId);
+      },
+      nameOf: async (userId) =>
+        (await peopleRepo.byAccount({ platform: "discord", id: userId }))?.displayName,
     }),
     linkedin({
       syncSink: refreshingAfter(
