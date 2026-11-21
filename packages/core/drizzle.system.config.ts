@@ -36,12 +36,13 @@ export default defineConfig({
     "connection_grants",
     "channels",
     "rome_sessions",
-    "concierge_tasks",
+    "task_chats",
     "concierge_follow_items",
     "linkedin_threads",
     "linkedin_messages",
     "linkedin_participants",
     "linkedin_thread_participants",
+    "slack_app_messages",
   ],
   dbCredentials: {
     url:

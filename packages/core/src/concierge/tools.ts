@@ -1,19 +1,18 @@
 // Concierge's session tools: `say` is its only way to speak, the `chat_*`
-// tools run its task chats and read its other Concierge chats, `topic_start`
-// starts a topic chat, `react` puts an emoji on a guardian message,
-// `connect_card` shows a card that connects a service, and `show_card` shows
-// a card the Concierge composes itself.
+// tools run its task chats (a task is its task chat) and read its other
+// Concierge chats, `topic_start` starts a topic chat, `react` puts an emoji on
+// a guardian message, `connect_card` shows a card that connects a service, and
+// `show_card` shows a card the Concierge composes itself.
 
 import { randomUUID } from "node:crypto";
 import { pushBody } from "./push.js";
-import {
-  defaultReplyTarget as defaultReplyTargetOf,
-  ownPrompts as ownPromptsOf,
-  turnPrompts as turnPromptsOf,
-} from "./reply-target.js";
+import { turnPrompts as turnPromptsOf } from "./reply-target.js";
 import { taskCardLine } from "./task-cards.js";
-import type { ForwardedFrom, TaskChatWaitedOn } from "@rome/api-types/chat";
-import { CONCIERGE_REACTIONS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
+import type { ForwardedFrom } from "@rome/api-types/chat";
+import type { AgentPlan } from "@rome/api-types/trace-segments";
+import { CONCIERGE_REACTIONS } from "@rome/api-types/concierge";
+import { CONCIERGE_TASK_STATUSES } from "@rome/api-types/concierge-task-status";
+import { taskLink } from "@rome/api-types/task-link";
 import { finiteOrNull, type TaskStatusView } from "./tasks.js";
 import type { SaidMessage } from "../chats/message.js";
 import {
@@ -25,10 +24,7 @@ import {
 } from "../chats/agent-card.js";
 import { askingDeviceOf } from "../connections/device/live-route.js";
 import type { SendResult } from "../chats/send.js";
-import type {
-  ConciergeTaskWithChat,
-  ConciergeTaskWrite,
-} from "../db/repositories/concierge-tasks.js";
+import type { ConciergeTaskWithChat } from "../db/repositories/concierge-tasks.js";
 import {
   CONVERSATION_TITLE_MAX_LENGTH,
   conversationTitleLength,
@@ -46,17 +42,12 @@ import {
   privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
-import { finalAnswer, hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
-import {
-  CONCLUSION_MAX_CHARS,
-  NOTHING_TO_REPORT,
-  conclusionOf,
-  hasNothingToReport,
-  withoutMarkers,
-} from "./conclusion.js";
+import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
+import { openQuestion } from "./transcript.js";
 import { automatedSource } from "../webchat/automated-source.js";
 import { replyQuoteOf } from "../webchat/reply-quote.js";
 import { ownerOf } from "../webchat/owner.js";
+import { conciergePlaceSetup } from "./on-connection.js";
 import {
   parseTaskSchedule,
   SCHEDULE_REPORTS,
@@ -70,6 +61,30 @@ const runTool = romeToolRunner(log);
 const TASK_STATUSES = ["running", "idle", "waiting_input", "failed"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
 const DEFAULT_READ_LIMIT = 6;
+/** How many steps of a running turn's plan chat_read shows, and how long each may be. */
+const PLAN_STEPS = 8;
+const PLAN_STEP_CHARS = 80;
+
+/**
+ * A running turn's plan as chat_read shows it: each step's text on one line,
+ * cut to PLAN_STEP_CHARS, with its status. A plan of more than PLAN_STEPS
+ * steps drops its first ones, but never the step before the first one not yet
+ * completed, so the step in progress always shows.
+ */
+function planForRead({ steps }: AgentPlan) {
+  const next = steps.findIndex((step) => step.status !== "completed");
+  const from = Math.max(
+    0,
+    Math.min((next === -1 ? steps.length : next) - 1, steps.length - PLAN_STEPS),
+  );
+  return steps.slice(from, from + PLAN_STEPS).map((step) => {
+    const text = step.text.replace(/\s+/g, " ").trim();
+    return {
+      step: text.length > PLAN_STEP_CHARS ? `${text.slice(0, PLAN_STEP_CHARS - 1)}…` : text,
+      status: step.status,
+    };
+  });
+}
 
 function requireString(args: Record<string, unknown>, field: string): string {
   const value = args[field];
@@ -106,27 +121,33 @@ function statusOf(
   return chat?.lastTurnFailed ? "failed" : "idle";
 }
 
+/** How far back `chat_list`'s `recentlyEnded` reaches. */
+const RECENTLY_ENDED_HOURS = 24;
+
 /**
- * A row as `task_list` answers it: compact, with no empty fields. Its id,
- * title, status, task chat, start message and schedule, and with `details`
- * also what the Concierge wrote on it and its schedule's brief. Rome derives
- * its status.
+ * A task chat as `chat_list` answers it: compact, with no empty fields. Its
+ * id, name, link, status, when it ended, the Concierge chat it came from,
+ * start message and schedule, and with `details` also what the Concierge
+ * wrote on it and its schedule's brief. Rome derives its status.
  */
 function compactTask(
-  { row, sourceMessageId }: ConciergeTaskWithChat,
+  { row, chat, conciergeChat, sourceMessageId }: ConciergeTaskWithChat,
   status: TaskStatusView | undefined,
   details: boolean,
   schedule?: TaskScheduleView | null,
 ) {
   return {
-    id: row.id,
-    title: row.title,
+    chatId: chat.id,
+    title: chat.name,
+    kind: "task chat",
+    link: taskLink(chat.name, chat.id),
+    from: conciergeChat.id,
     ...(status ? { status: status.status } : {}),
     ...(status?.endReason ? { endReason: status.endReason } : {}),
+    ...(status?.status === "ended" && row.endedAt ? { endedAt: row.endedAt.toISOString() } : {}),
     ...(finiteOrNull(status?.laterAt ?? null) !== null
       ? { laterAt: new Date(status?.laterAt as number).toISOString() }
       : {}),
-    ...(row.sessionId ? { chatId: row.sessionId } : {}),
     ...(sourceMessageId ? { startMessageId: sourceMessageId } : {}),
     ...(schedule
       ? {
@@ -143,7 +164,6 @@ function compactTask(
       : {}),
     ...(details
       ? {
-          ...(row.summary ? { summary: row.summary } : {}),
           ...(row.note ? { note: row.note } : {}),
           updatedAt: row.updatedAt.toISOString(),
         }
@@ -151,11 +171,11 @@ function compactTask(
   };
 }
 
-/** The `schedule` parameter of chat_start and task_upsert. */
+/** The `schedule` parameter of chat_start and chat_update. */
 const SCHEDULE_PARAMETER = {
   type: ["object", "null"],
   description:
-    "Run this task again and again: at each time, Rome sends `brief` into the task's own task chat, without a turn of yours, and the result comes back to you as any task's does. Between runs the task is later. On task_upsert, null removes the schedule.",
+    "Run this task again and again: at each time, Rome sends `brief` into the task's own task chat, without a turn of yours, and the result comes back to you as any task's does. Between runs the task is later. On chat_update, null removes the schedule.",
   required: ["at"],
   properties: {
     at: { type: "string", description: 'Local time in the guardian\'s zone, "HH:MM".' },
@@ -168,12 +188,12 @@ const SCHEDULE_PARAMETER = {
       type: "string",
       enum: [...SCHEDULE_REPORTS],
       description:
-        "every_run: each run's result is reported to you. when_it_matters: a run that finishes with nothing to ask goes to the next digest as <ran_on_schedule>; a question, an approval or a failure still comes to you.",
+        "every_run: tell the guardian each run's result. when_it_matters: tell them only news or a problem. Every run's result comes to you either way.",
     },
     brief: {
       type: "string",
       description:
-        "What each run asks the task chat, standing on its own. chat_start uses its own brief when you leave it out; task_upsert keeps the one the schedule has.",
+        "What each run asks the task chat, standing on its own. chat_start uses its own brief when you leave it out; chat_update keeps the one the schedule has.",
     },
   },
 } as const;
@@ -182,6 +202,17 @@ function refusal(result: Exclude<SendResult, { ok: true }>): string {
   if ("error" in result) return result.error;
   if ("invalid" in result) return result.invalid;
   return `The task chat cannot take a message (${result.send})`;
+}
+
+/** The tool use the one card part of a stored message waits on, or undefined. */
+function toolUseOf(content: string): string | undefined {
+  try {
+    const parts: unknown = JSON.parse(content);
+    const part = Array.isArray(parts) ? (parts[0] as { toolUseId?: unknown }) : undefined;
+    return typeof part?.toolUseId === "string" ? part.toolUseId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -194,6 +225,9 @@ export async function buildConciergeTools(
   context: SessionToolContext,
 ): Promise<RomeTool[]> {
   if (!isConciergeAgent(context.agentName) || context.isSubagent) return [];
+  // On a connection the Concierge answers in plain text: every tool here needs
+  // a Concierge chat on the dashboard.
+  if (conciergePlaceSetup(context.agentName, context.getThreadContext())) return [];
   const { webchatRepo, messages, tasks } = service.deps;
 
   const currentTurn = (): { chatId: string; turnId: string } => {
@@ -234,30 +268,19 @@ export async function buildConciergeTools(
     return chat;
   };
 
-  // Whether the row `taskId` belongs to this Concierge chat, with the chat
-  // that owns it. A row with no owner to find counts as ours.
-  const rowOwnedElsewhere = async (taskId: string) => {
+  // The Concierge chat that owns task chat `chatId`, when another one than
+  // this does.
+  const rowOwnedElsewhere = async (chatId: string) => {
     const { chatId: here } = currentTurn();
-    const found = await tasks.repo.getWithChat(taskId);
+    const found = await tasks.repo.getWithChat(chatId);
     return found && found.conciergeChat.id !== here ? found.conciergeChat : null;
   };
 
-  // Refuses a write that would move a row another Concierge chat owns here:
-  // its result and thread belong to that chat.
-  const requireRowHere = async (taskId: string, then: string) => {
-    const other = await rowOwnedElsewhere(taskId);
-    if (other) {
-      throw new Error(`Task ${taskId} belongs to another Concierge chat (${other.name}). ${then}`);
-    }
-  };
-
-  // A task chat this Concierge chat started, which it may send into or
-  // forward. A task another Concierge chat started is refused. A task chat
-  // with no row yet counts as ours.
+  // A task chat this Concierge chat started, which it may send into. A task
+  // another Concierge chat started is refused.
   const requireOwnTaskChat = async (chatId: string) => {
     const chat = await requireTaskChat(chatId);
-    const task = await tasks.repo.findBySession(chatId);
-    const other = task ? await rowOwnedElsewhere(task.id) : null;
+    const other = await rowOwnedElsewhere(chatId);
     if (other) {
       throw new Error(
         `Task chat ${chatId} belongs to another Concierge chat (${other.name}). ` +
@@ -281,16 +304,7 @@ export async function buildConciergeTools(
     return chat;
   };
 
-  // A row of this owner's task list.
-  const requireTaskRow = async (taskId: string) => {
-    const found = await tasks.repo.getWithChat(taskId);
-    if (!found || found.owner !== (await ownerHere())) {
-      throw new Error(`No task ${taskId}. Use task_list to find it.`);
-    }
-    return found.row;
-  };
-
-  /** This owner's rows, as the agent's list reads them. */
+  /** This owner's task chats, as the agent's list reads them. */
   const ownRows = async (includeEnded: boolean) => {
     const owner = await ownerHere();
     const rows = (await tasks.repo.listForAgent(true)).filter((task) => task.owner === owner);
@@ -317,25 +331,12 @@ export async function buildConciergeTools(
     if (!sent.ok) throw new Error(refusal(sent));
   };
 
-  // A task chat always has a row. One from before the todo list gets its row
-  // when the Concierge next works with it.
-  const ensureTaskRow = async (chat: { id: string; name: string; triggerName?: string | null }) => {
-    if (await tasks.repo.findBySession(chat.id)) return;
-    await tasks.repo.upsertMany([
-      {
-        title: chat.triggerName ?? chat.name,
-        sessionId: chat.id,
-        chatId: currentTurn().chatId,
-      },
-    ]);
-  };
-
-  // A row points back to a message of this chat, so the panel can jump to it.
+  // A task points back to a message of this chat, its start message.
   const requireSourceMessage = async (messageId: string) => {
     const { chatId } = currentTurn();
     if (!(await webchatRepo.getReplyTarget(chatId, messageId))) {
       throw new Error(
-        `No message ${messageId} in this chat. Pass the messageId that say, chat_card, or chat_forward returned.`,
+        `No message ${messageId} in this chat. Pass the messageId that say returned.`,
       );
     }
     return messageId;
@@ -356,17 +357,7 @@ export async function buildConciergeTools(
     JSON.stringify([replyTo ?? null, content]);
 
   const NO_ROW_MESSAGE =
-    "A new row needs a message to point to. Call say first, then pass the messageId it returns.";
-
-  // The message a new row points to: the one passed, else the latest thing
-  // said this turn. The guardian's own words are no default, since a row
-  // starts from what the Concierge told them.
-  const sourceMessageForNewRow = async (explicit: string | undefined) => {
-    if (explicit) return requireSourceMessage(explicit);
-    const latest = await latestSaidThisTurn();
-    if (!latest) throw new Error(NO_ROW_MESSAGE);
-    return latest;
-  };
+    "A new task needs a message to point to. Call say first, then pass the messageId it returns.";
 
   // The message a new task's row points to: the one passed, else the
   // guardian message `answers` names, else the latest thing said this turn
@@ -449,76 +440,16 @@ export async function buildConciergeTools(
     }
   };
 
-  // What the Concierge writes on a row: what Rome cannot know. Rome derives
-  // the status, and a field from before it is refused by name.
-  const parseTaskWrite = async (
-    raw: Record<string, unknown>,
-    where: string,
-  ): Promise<{ write: ConciergeTaskWrite; stop: boolean }> => {
-    const write: ConciergeTaskWrite = {};
-    const text = (field: string) => {
-      const value = raw[field];
-      if (value === null) return null;
-      if (typeof value !== "string") throw new Error(`${where}.${field} must be a string or null`);
-      return value.trim() || null;
-    };
-    for (const field of ["state", "waitingOn", "dueAt", "rank", "chatId"]) {
-      if (raw[field] !== undefined) {
-        throw new Error(
-          `${where}.${field} is no longer written: Rome keeps each task's status from its task chat. ` +
-            "Start a task with chat_start, stop it with stop, and schedule a check with defer.",
-        );
-      }
-    }
-    if (raw.id !== undefined) {
-      write.id = requireString(raw, "id");
-      await requireTaskRow(write.id);
-    }
-    if (raw.title !== undefined) write.title = requireString(raw, "title");
-    if (raw.summary !== undefined) {
-      const summary = text("summary");
-      write.summary =
-        summary && summary.length > CONCIERGE_TASK_SUMMARY_MAX_LENGTH
-          ? `${summary.slice(0, CONCIERGE_TASK_SUMMARY_MAX_LENGTH - 1)}…`
-          : summary;
-    }
-    if (raw.note !== undefined) write.note = text("note");
-    if (raw.archived !== undefined) {
-      if (typeof raw.archived !== "boolean") throw new Error(`${where}.archived must be a boolean`);
-      write.archived = raw.archived;
-    }
-    if (raw.stop !== undefined && typeof raw.stop !== "boolean") {
-      throw new Error(`${where}.stop must be a boolean`);
-    }
-    const stop = raw.stop === true;
-    if (stop && !write.id) throw new Error(`${where}.stop needs the id of the task to stop`);
-    const messageId = raw.messageId === undefined ? undefined : requireString(raw, "messageId");
-    // A row belongs to the Concierge chat it was made in, and moves to the
-    // chat whose message it is pointed at.
-    if (!write.id) {
-      if (!write.title) throw new Error(`${where}.title is required to create a row`);
-      write.sourceMessageId = await sourceMessageForNewRow(messageId);
-      write.chatId = currentTurn().chatId;
-    } else if (messageId) {
-      await requireRowHere(
-        write.id,
-        "Update it there, or start a task here with chat_start. Without a messageId you can still update its summary.",
-      );
-      write.sourceMessageId = await requireSourceMessage(messageId);
-      write.chatId = currentTurn().chatId;
-    }
-    return { write, stop };
-  };
-
   // Stops a task: Rome keeps it stopped, and its task chat's running work stops.
-  const stopTask = (taskId: string) => service.stopTask(taskId, "concierge");
+  const stopTask = (chatId: string) => service.stopTask(chatId, "concierge");
 
   const findListEntry = async (chatId: string) =>
     (await webchatRepo.listSessions("all")).find((chat) => chat.id === chatId);
 
   // Every message of a turn with a push level may also reach the phone. Its
-  // lock-screen line is what the message shows: the Concierge's words, a
-  // forward's preview, or what a card asks; one marked private pushes a fixed line.
+  // lock-screen line is what the message shows: the Concierge's words, what a
+  // card asks, or a forwarded card's preview; one marked private pushes a fixed
+  // line.
   const said = (chatId: string, turnId: string, ownWords: string | null, isPrivate = false) =>
     service.said({
       turnId,
@@ -528,26 +459,11 @@ export async function buildConciergeTools(
       level: context.getTurnPushLevel(),
     });
 
-  // The user-role messages this turn took: one still queued behind it belongs
-  // to the turn that takes it. An automation's or an agent's input is stored
-  // as one too, its source in `senderId`.
-  const ownPrompts = () => {
-    const { chatId, turnId } = currentTurn();
-    return ownPromptsOf(service, chatId, turnId);
-  };
-
   // The messages this turn answers (reply-target.ts).
   const turnPrompts = () => {
     const { chatId, turnId } = currentTurn();
     return turnPromptsOf(service, chatId, turnId);
   };
-
-  // Whether the guardian started this turn: one of the messages it took is
-  // not an automation's or an agent's. A message an earlier, cut-short turn
-  // handed on does not count, so a turn that only reports on tasks, or only
-  // continues work on its own, never counts either.
-  const guardianStartedTurn = async () =>
-    (await ownPrompts()).some((row) => automatedSource(row.senderId) === null);
 
   // The guardian messages turn `turnId` took, as its prompts.
   const promptsOf = async (chatId: string, turnId: string) =>
@@ -647,31 +563,51 @@ export async function buildConciergeTools(
     return id;
   };
 
-  // Points the task in task chat `taskChatId` to `messageId`, its panel's
-  // jump target. Answers the row, or null.
+  // Points task chat `taskChatId` to `messageId`, its start message. Answers
+  // the row, or null.
   const pointTaskTo = async (taskChatId: string, messageId: string) => {
     const { chatId } = currentTurn();
     const task = await tasks.repo.findBySession(taskChatId);
-    // A row another Concierge chat owns stays where it is.
+    // A task another Concierge chat owns stays where it is.
     if (!task || (await rowOwnedElsewhere(task.id))) return null;
     await tasks.repo.setSourceMessage(task.id, chatId, messageId);
     return task;
   };
 
-  // The message a `say` that names none replies to (reply-target.ts).
-  const defaultReplyTarget = () => {
-    const { chatId, turnId } = currentTurn();
-    return defaultReplyTargetOf(service, chatId, turnId);
+  // Whether message `messageKey` of this chat is one the guardian sent: an
+  // automation's or an agent's input is stored as a user message too.
+  const isGuardianMessage = async (messageKey: string) => {
+    const message = await webchatRepo.getReplyTarget(currentTurn().chatId, messageKey);
+    return message?.role === "user" && automatedSource(message.senderId) === null;
+  };
+
+  // The guardian message a `chat_send` passes on: the one `answers` names, in
+  // this turn or an earlier one, which must be a guardian message of this
+  // chat. Without it, the turn's only guardian message. Several, or none, is
+  // none: a guess would link and move the wrong message.
+  const relayedMessage = async (answers: string | undefined) => {
+    if (answers !== undefined) {
+      if (!(await isGuardianMessage(answers))) {
+        throw new Error(
+          `No guardian message ${answers} in this chat. Pass a message_id from a <chat_thread> line.`,
+        );
+      }
+      return answers;
+    }
+    const guardian: string[] = [];
+    for (const key of await turnPrompts()) {
+      if (await isGuardianMessage(key)) guardian.push(key);
+    }
+    return guardian.length === 1 ? guardian[0] : undefined;
   };
 
   const say = async (
     text: string,
     format: "bubble" | "long",
     isPrivate: boolean,
-    named?: string,
+    replyTo?: string,
   ) => {
     const { chatId, turnId } = currentTurn();
-    const replyTo = named ?? (await defaultReplyTarget());
     const target = replyTo ? await requireReplyTarget(replyTo) : undefined;
     const parts: Parameters<typeof webchatRepo.addBackendMessage>[2] = [
       { type: "text", content: text, ...(format === "long" ? { format } : {}) },
@@ -694,9 +630,8 @@ export async function buildConciergeTools(
     return id;
   };
 
-  // A message, said or forwarded, answers the guardian message of this turn
-  // that it replies to, or the one it certainly answers: that message is
-  // settled.
+  // A message answers the guardian message of this turn that it replies to,
+  // or the one it certainly answers: that message is settled.
   const settleAnswered = async (repliedTo: string | undefined, taskId: string | undefined) => {
     const { chatId } = currentTurn();
     const answered =
@@ -761,116 +696,105 @@ export async function buildConciergeTools(
     return only;
   };
 
-  // One message, so the lead-in and the report always arrive together. The
-  // transcript still shows them as two bubbles.
-  const forward = async (text: string, from: ForwardedFrom, intro?: string) => {
+  // The question card message `id` of a task chat holds: its chat, the tool
+  // use it waits on, and its questions in one line. Null for any other
+  // message, such as an approval or an app's own card, which its task chat
+  // answers.
+  const questionCardIn = async (id: string) => {
+    const message = await webchatRepo.widgetMessage(id);
+    if (!message) return null;
+    const holder = await webchatRepo.getSession(message.chatId);
+    if (holder?.triggerKind !== TASK_CHAT_TRIGGER_KIND) return null;
+    const asked = openQuestion([{ id, role: "assistant", content: message.content }]);
+    const toolUseId = toolUseOf(message.content);
+    return asked && toolUseId ? { chatId: message.chatId, toolUseId, line: asked.line } : null;
+  };
+
+  // Forwards task chat question card `cardId` as the card itself: a task
+  // card that shows the question it waits on and answers it in its task chat,
+  // so both chats show the same card and its one answer
+  // (docs/domains/chats.md#task). It replies to the task's start message.
+  // Where this chat cannot draw cards, the questions go as a message, which
+  // the guardian answers in words. Forwarding it twice in one turn is one message.
+  const forwardQuestion = async (
+    question: { chatId: string; toolUseId: string; line: string },
+    cardId: string,
+    title: string,
+  ) => {
     const { chatId, turnId } = currentTurn();
+    const key = sayKey(`card:${cardId}`, undefined);
+    const repeated = service.saidInTurn(turnId, key);
+    if (repeated) return repeated;
+    const task = await tasks.repo.findBySession(question.chatId);
+    const start = await startMessageOf(task?.id);
+    const waitedOn = { kind: "question" as const, id: question.toolUseId, messageId: cardId };
+    // A card replies with no quote, as a forwarded result card does.
+    const id =
+      context.widgets === "card"
+        ? (
+            await webchatRepo.addBackendMessage(
+              chatId,
+              turnId,
+              [{ type: "task_chat", chatId: question.chatId, title, show: "ask", waitedOn }],
+              start ? { replyTo: start.id } : {},
+            )
+          ).id
+        : await addMessage(
+            [
+              {
+                type: "text",
+                content: `${taskLink(title, question.chatId)}: ${question.line}`,
+              },
+            ],
+            start,
+          );
+    said(chatId, turnId, `${title}: ${pushBody(question.line)}`);
+    service.keepSaid(turnId, key, id);
+    return id;
+  };
+
+  // Forwards the card message `cardId` of a task chat, as it is: Rome issues
+  // it again here, checked as `show_card` checks one, so it never rests on
+  // the task chat's stored part. It is a message of its own, as every card
+  // is, replying to the task's start message with no quote. Where this chat
+  // cannot draw cards, the card's plain-text line goes as a message instead.
+  // Forwarding the same card twice in one turn is one message, as a repeated
+  // `say` is.
+  const forwardCard = async (card: AgentCardPart, cardId: string, from: ForwardedFrom) => {
+    const { chatId, turnId } = currentTurn();
+    const key = sayKey(`card:${cardId}`, undefined);
+    const repeated = service.saidInTurn(turnId, key);
+    if (repeated) return repeated;
     const task = await tasks.repo.findBySession(from.chatId);
-    const id = await addMessage(
-      [
-        ...(intro ? [{ type: "text" as const, content: intro }] : []),
-        { type: "text", content: text, format: "long", forwardedFrom: from },
-      ],
-      await startMessageOf(task?.id),
-    );
+    const start = await startMessageOf(task?.id);
+    let id: string;
+    if (context.widgets === "card") {
+      const issued = agentCardPart(card.ui, card.text, `forward-${randomUUID()}`);
+      if ("problems" in issued) {
+        throw new Error(
+          `The task chat's card cannot be shown: ${issued.problems.join("; ")}. Nothing was sent. Tell the result yourself with say, replying to the task's start message.`,
+        );
+      }
+      ({ id } = await webchatRepo.addBackendMessage(
+        chatId,
+        turnId,
+        [{ ...issued.part, forwardedFrom: from }],
+        start ? { replyTo: start.id } : {},
+      ));
+    } else {
+      id = await addMessage([{ type: "text", content: card.text, format: "long" }], start);
+    }
     // Only a result the guardian was shown counts as said.
     if (task) {
       service.noteSaid(task.id);
       await writeStatus("settle", () => tasks.resultSaid(task.id));
     }
     await settleAnswered(undefined, task?.id);
-    // The push shows the message: the Concierge's lead-in, or else the
-    // task's title and a preview of what it brought back (the guardian's
-    // call, 2026-11-14). A secret is kept off the lock screen only by
-    // `say … private`.
-    said(chatId, turnId, intro ?? (task?.title ? `${task.title}: ${pushBody(text)}` : text));
-    return id;
-  };
-
-  // The card a task chat's final answer showed, forwarded as it is: a message
-  // of its own, as every card is, replying to the task's start message with
-  // no quote. Rome issues it again here, checked as `show_card` checks one,
-  // so it never rests on the task chat's stored part. An intro goes before it
-  // as a message of its own.
-  const forwardCard = async (card: AgentCardPart, from: ForwardedFrom, intro?: string) => {
-    const { chatId, turnId } = currentTurn();
-    const issued = agentCardPart(card.ui, card.text, `forward-${randomUUID()}`);
-    if ("problems" in issued) {
-      throw new Error(
-        `The task chat's card cannot be shown: ${issued.problems.join("; ")}. Nothing was sent. Forward without the card: report the outcome yourself with say, replying to the task's start message.`,
-      );
-    }
-    const task = await tasks.repo.findBySession(from.chatId);
-    const start = await startMessageOf(task?.id);
-    if (intro) await addMessage([{ type: "text", content: intro }], start);
-    const { id } = await webchatRepo.addBackendMessage(
-      chatId,
-      turnId,
-      [{ ...issued.part, forwardedFrom: from }],
-      start ? { replyTo: start.id } : {},
-    );
-    if (task) {
-      service.noteSaid(task.id);
-      await writeStatus("settle", () => tasks.resultSaid(task.id));
-    }
-    await settleAnswered(undefined, task?.id);
-    said(
-      chatId,
-      turnId,
-      intro ?? (task?.title ? `${task.title}: ${pushBody(issued.part.text)}` : issued.part.text),
-    );
-    return id;
-  };
-
-  // How `chat_card` shows task chat `chatId`: its question or approval while
-  // the task waits on the guardian; else its task card. An expired question
-  // takes no answer, so it is the task card's then.
-  // An `ask` card keeps what the task waits on, so it shows that item even
-  // after a newer one is asked and settled.
-  const shownAs = async (
-    chatId: string,
-  ): Promise<{ show: "task" | "ask"; waitedOn?: TaskChatWaitedOn }> => {
-    const task = await tasks.repo.findBySession(chatId);
-    if (!task) return { show: "task" };
-    const status = (await tasks.statusOf([task])).get(task.id);
-    if (status?.status !== "needs_you") {
-      return { show: "task" };
-    }
-    const wait = status.openWait;
-    if (!wait) return { show: "ask" };
-    return {
-      show: "ask",
-      waitedOn:
-        wait.kind === "card"
-          ? { kind: "question", id: wait.id, messageId: wait.messageId }
-          : { kind: "approval", id: wait.id },
-    };
-  };
-
-  // A card that opens the task chat; it reads the chat's live status itself.
-  const showCard = async (
-    chatId: string,
-    title: string,
-    { show, waitedOn }: { show: "task" | "ask"; waitedOn?: TaskChatWaitedOn },
-  ) => {
-    const { chatId: conciergeChatId, turnId } = currentTurn();
-    const task = await tasks.repo.findBySession(chatId);
-    const id = await addMessage(
-      [{ type: "task_chat", chatId, title, show, ...(waitedOn ? { waitedOn } : {}) }],
-      await startMessageOf(task?.id),
-    );
-    // The push shows what the card asks: its question or approval, else the
-    // task's title.
-    said(
-      conciergeChatId,
-      turnId,
-      (await taskCardLine(service.taskCardSources(), chatId, waitedOn)) ?? title,
-    );
-    // A question or approval shown answers the message its task works for
-    // (docs/domains/chats.md#status).
-    if (show === "ask" && task) {
-      await writeStatus("settle", () => tasks.repo.retellMessagesOf(task.id));
-    }
+    // The push shows the task's title and a preview of the card's line (the
+    // guardian's call, 2026-11-14). A secret is kept off the lock screen only
+    // by `say … private`.
+    said(chatId, turnId, task?.title ? `${task.title}: ${pushBody(card.text)}` : card.text);
+    service.keepSaid(turnId, key, id);
     return id;
   };
 
@@ -962,188 +886,19 @@ export async function buildConciergeTools(
         }),
     },
     {
-      name: "task_upsert",
-      description:
-        "Write your task list, the guardian's panel of what you are busy with. Rome keeps each task's status from its task chat; you write only what Rome cannot know. Batch only: one call writes every row that changed. " +
-        "An entry without id creates a row (title required, and a message to point to); an entry with id updates it, and fields you leave out stay. " +
-        "Returns each row's id, its status, and the message it points to.",
-      inputSchema: {
-        type: "object",
-        required: ["tasks"],
-        properties: {
-          tasks: {
-            type: "array",
-            minItems: 1,
-            maxItems: 20,
-            items: {
-              type: "object",
-              properties: {
-                id: { type: "string", description: "The row to update. Leave out to create one." },
-                title: { type: "string", description: "A few words naming the task." },
-                summary: {
-                  type: ["string", "null"],
-                  description: `One line the guardian reads, at most ${CONCIERGE_TASK_SUMMARY_MAX_LENGTH} characters: the result, or where the task stands.`,
-                },
-                note: {
-                  type: ["string", "null"],
-                  description:
-                    "What you keep for your later self about the task: links, ids, what to check next. The guardian never sees it.",
-                },
-                stop: {
-                  type: "boolean",
-                  description:
-                    "Stop the task: its task chat's running work stops, and it ends stopped. Only when the guardian calls it off.",
-                },
-                archived: { type: "boolean", description: "Archive the row, or bring it back." },
-                schedule: {
-                  ...SCHEDULE_PARAMETER,
-                  description:
-                    "Add, change or remove (null) the task's repeating schedule. Only a task with a task chat, that is not stopped.",
-                },
-                messageId: {
-                  type: "string",
-                  description:
-                    "The message the row points to, as say, chat_card, or chat_forward returned it. A new row takes your latest message this turn if you leave it out. On an update it replaces the old one; leave it out to keep it. chat_card and chat_forward update this anchor automatically.",
-                },
-              },
-            },
-          },
-        },
-      },
-      handler: (input) =>
-        runTool("task_upsert", input, async (args) => {
-          currentTurn();
-          if (!Array.isArray(args.tasks) || args.tasks.length === 0) {
-            throw new Error("tasks is required: an array with one entry per row to write");
-          }
-          const writes: ConciergeTaskWrite[] = [];
-          const stops: string[] = [];
-          const schedules: Array<{ taskId: string; raw: unknown }> = [];
-          for (const [index, raw] of args.tasks.entries()) {
-            if (!raw || typeof raw !== "object")
-              throw new Error(`tasks[${index}] must be an object`);
-            const { write, stop } = await parseTaskWrite(
-              raw as Record<string, unknown>,
-              `tasks[${index}]`,
-            );
-            writes.push(write);
-            if (stop && write.id) stops.push(write.id);
-            const scheduleRaw = (raw as Record<string, unknown>).schedule;
-            if (scheduleRaw !== undefined) {
-              if (!write.id) {
-                throw new Error(
-                  `tasks[${index}].schedule needs the id of a task with a task chat. Start a scheduled task with chat_start and schedule.`,
-                );
-              }
-              if (stop) throw new Error(`tasks[${index}] cannot both stop and schedule the task`);
-              schedules.push({ taskId: write.id, raw: scheduleRaw });
-            }
-          }
-          // Checked before anything is written, so a refusal changes nothing.
-          const scheduleWrites = await Promise.all(
-            schedules.map(async ({ taskId, raw }) => {
-              const row = await tasks.repo.get(taskId);
-              if (!row?.sessionId) {
-                throw new Error(
-                  `Task ${taskId} has no task chat to run in. Start it with chat_start and schedule.`,
-                );
-              }
-              if (row.stoppedAt) {
-                throw new Error(
-                  `Task ${taskId} is stopped. Take it up again with chat_send first.`,
-                );
-              }
-              if (!service.deps.schedules) throw new Error("Rome cannot schedule tasks here");
-              const kept = raw === null ? null : await service.deps.schedules.of(taskId);
-              const schedule = parseTaskSchedule(raw, kept?.brief);
-              // A changed schedule keeps the skill its runs were started with.
-              if (schedule && kept?.skill) schedule.skill = kept.skill;
-              return { row, schedule };
-            }),
-          );
-          const rows = await tasks.repo.upsertMany(writes);
-          for (const taskId of stops) await stopTask(taskId);
-          for (const { row, schedule } of scheduleWrites) {
-            if (schedule === null) await service.deps.schedules?.remove(row.id);
-            else {
-              await service.deps.schedules?.set(
-                {
-                  id: row.id,
-                  title: rows.find((written) => written.id === row.id)?.title ?? row.title,
-                  owner: ownerOf(row),
-                },
-                schedule,
-              );
-            }
-          }
-          // Archiving a task that is still open stops it, so nothing runs
-          // hidden; an archived task has nothing left to check on.
-          for (const write of writes) {
-            if (!write.id || write.archived !== true) continue;
-            const row = await tasks.repo.get(write.id);
-            const open = row && (await tasks.statusOf([row])).get(row.id)?.status !== "ended";
-            if (open && !stops.includes(write.id)) await stopTask(write.id);
-            await service.cancelChecks(write.id);
-          }
-          const anchors = await Promise.all(
-            rows.map(async (row) => (await tasks.repo.getWithChat(row.id))?.sourceMessageId),
-          );
-          const status = await tasks.statusOf(
-            await Promise.all(rows.map(async (row) => (await tasks.repo.get(row.id)) ?? row)),
-          );
-          // Says which message each row points to, and flags the ones that kept an
-          // earlier message because the entry passed none.
-          return {
-            tasks: rows.map((row, index) => ({
-              id: row.id,
-              title: row.title,
-              ...(status.get(row.id) ? { status: status.get(row.id)?.status } : {}),
-              ...(anchors[index] ? { anchor: anchors[index] } : {}),
-              ...(writes[index].sourceMessageId === undefined ? { anchorKept: true } : {}),
-            })),
-          };
-        }),
-    },
-    {
-      name: "task_list",
-      description:
-        "List your task list: each task's id, title, task chat and status, which Rome keeps: needs_you, active, later, or ended (with endReason done, failed, stopped or no_response). Ended rows only with includeDone. Check it before you start a task, so you do not start one twice.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          includeDone: { type: "boolean", description: "Also list ended rows." },
-          details: {
-            type: "boolean",
-            description:
-              "Also answer each row's summary, the note you wrote for your later self, and when it last changed.",
-          },
-        },
-      },
-      handler: (input) =>
-        runTool("task_list", input, async (args) => {
-          const rows = await ownRows(args.includeDone === true);
-          const schedules = await Promise.all(
-            rows.map((task) => service.deps.schedules?.of(task.row.id) ?? null),
-          );
-          return {
-            tasks: rows.map((task, index) =>
-              compactTask(task, task.status, args.details === true, schedules[index]),
-            ),
-          };
-        }),
-    },
-    {
       name: "chat_start",
       description:
-        "Start a task chat: a normal chat with another agent (main by default) that does the work while you keep talking. " +
-        "Pass skill to invoke a catalog skill on its first turn. Its result comes back to you in a <task_events> batch, in the Concierge chat you start it from. Every task chat has a row on your task list: this call creates one (or links taskId). Returns the chat's id and the row's id.",
+        "Start a task chat: a normal chat with another agent (main by default) that does the work while you keep talking. The task chat is the task: its id is the chatId this returns, and its name is its title. " +
+        "Pass skill to invoke a catalog skill on its first turn. Its result comes back to you in a <task_events> batch, in the Concierge chat you start it from. " +
+        'Returns JSON text, such as {"chatId":"…","link":"[name](#rome-task=…)"}: JSON.parse it before you read a field, in a script too. ' +
+        "`link` is already the whole Markdown link: paste it as it is into the message that tells the guardian about it, never inside another [title](…). It shows as a chip with the task's live status.",
       inputSchema: {
         type: "object",
         required: ["title", "brief"],
         properties: {
           title: {
             type: "string",
-            description: "A short name for the chat, shown in the sidebar.",
+            description: "A short name for the chat, which is the task's name.",
           },
           brief: {
             type: "string",
@@ -1172,15 +927,10 @@ export async function buildConciergeTools(
             type: "string",
             description: `Project the chat works in, as a path relative to the projects root ${getWebchatProjectsRoot()}, such as "website" or "apps/notes". Defaults to "default".`,
           },
-          taskId: {
-            type: "string",
-            description:
-              "Start this existing task row, such as one you wrote earlier with task_upsert, instead of adding a new row for the chat.",
-          },
           messageId: {
             type: "string",
             description:
-              "The message the new row points to, as say returned it. Leave it out to use your latest message this turn. With taskId the row keeps its message unless you pass this.",
+              "The message the task points to, as say returned it. Leave it out to use your latest message this turn.",
           },
           answers: {
             type: "string",
@@ -1188,11 +938,6 @@ export async function buildConciergeTools(
               "The message_id of the guardian message this task is for, from its <chat_thread> line, in this turn or an earlier one: the task starts at it. Required when this turn carries several guardian messages, its own or ones an interrupted turn handed on, or the task is for one from an earlier turn.",
           },
           schedule: SCHEDULE_PARAMETER,
-          card: {
-            type: "boolean",
-            description:
-              "Also show the guardian a card that opens the task chat. The task runs either way. For long work with many details, work that will likely need several rounds with the guardian, or when they ask to see or watch it. The card tells them you are on it. Otherwise leave it off, since its result, question or approval reaches them anyway.",
-          },
         },
       },
       handler: (input) =>
@@ -1209,7 +954,6 @@ export async function buildConciergeTools(
               `Unknown skill: ${requestedSkill}. Pass the exact name from the slash command.`,
             );
           }
-          const taskId = optionalString(args, "taskId");
           const messageId = optionalString(args, "messageId");
           // A scheduled task runs first at its time, not now.
           const schedule =
@@ -1220,41 +964,24 @@ export async function buildConciergeTools(
           if (schedule && skill) schedule.skill = skill.name;
           if (schedule && !service.deps.schedules)
             throw new Error("Rome cannot schedule tasks here");
-          if (taskId) {
-            const planned = await requireTaskRow(taskId);
-            await requireRowHere(taskId, "Start a task here without taskId instead.");
-            if (planned.sessionId) {
-              throw new Error(
-                `Task ${taskId} already has chat ${planned.sessionId}. Use chat_send to continue it.`,
-              );
-            }
-          }
           // Settled before the chat starts, so a refusal leaves nothing running.
-          // A linked row keeps its message unless one is passed.
-          const sourceMessageId = taskId
-            ? messageId
-              ? await requireSourceMessage(messageId)
-              : undefined
-            : await sourceMessageForTask(messageId, optionalString(args, "answers"));
+          const sourceMessageId = await sourceMessageForTask(
+            messageId,
+            optionalString(args, "answers"),
+          );
           // The guardian message the task is for, if one can tell. Checked
           // before anything starts.
-          const prompt = await promptFor(
-            optionalString(args, "answers"),
-            sourceMessageId ??
-              (taskId
-                ? ((await tasks.repo.getWithChat(taskId))?.sourceMessageId ?? undefined)
-                : undefined),
-          );
+          const prompt = await promptFor(optionalString(args, "answers"), sourceMessageId);
           const { chatId: conciergeChatId, turnId } = currentTurn();
           // A retry may rename the task: a start counts as failed before by
-          // its row, its title or its brief.
-          const startKeys = [taskId ?? title, `brief:${brief}`];
+          // its title or its brief.
+          const startKeys = [title, `brief:${brief}`];
           const failedBefore = startKeys
             .map((key) => service.failedStart(conciergeChatId, turnId, key))
             .find((id) => id !== null);
           if (failedBefore) {
             throw new Error(
-              `Task ${failedBefore} already failed to start this turn and is marked failed. Do not start it again; tell the guardian.`,
+              `Task chat ${failedBefore} already failed to start this turn and ended failed. Do not start it again; tell the guardian.`,
             );
           }
           // The task chat is the owner's, private to them as their Concierge is.
@@ -1265,6 +992,9 @@ export async function buildConciergeTools(
           const model = strength
             ? ((await service.taskModel(conciergeChatId, strength)) ?? undefined)
             : undefined;
+          // The chat exists before its first turn runs, so a start that fails
+          // is a task chat whose first turn failed: its owner opens it to read
+          // what went wrong, and writes in it to try again.
           const chatId = await service.dashboard.chats.startChat(
             {
               agentName: optionalString(args, "agent"),
@@ -1274,89 +1004,83 @@ export async function buildConciergeTools(
             },
             await ownerHere(),
           );
-          // The chat, its row and its first message start together: a start
-          // that fails leaves no empty chat, and its row failed, so a retry
-          // makes no second task.
-          let task: { id: string } | undefined;
-          try {
-            // Marked before the first turn, so that turn's event already sees it.
-            await webchatRepo.setSessionTrigger(chatId, {
-              triggerKind: TASK_CHAT_TRIGGER_KIND,
-              triggerName: title,
-            });
-            // Linked before the first turn, so that turn's events find the row.
-            [task] = await tasks.repo.upsertMany([
-              taskId
-                ? {
-                    id: taskId,
-                    sessionId: chatId,
-                    ...(sourceMessageId ? { sourceMessageId, chatId: conciergeChatId } : {}),
-                  }
-                : {
-                    title,
-                    sessionId: chatId,
-                    sourceMessageId,
-                    chatId: conciergeChatId,
-                  },
-            ]);
-            const started = task.id;
-            if (schedule) {
-              await service.deps.schedules?.set(
-                { id: started, title, owner: await ownerHere() },
-                schedule,
-              );
-            } else {
-              await sendLinked(
-                started,
-                prompt,
-                () => sendInput(sender, chatId, brief, skill?.name),
-                { keepOnFailure: true },
-              );
+          // The first message would rename the chat, so it is named again once
+          // that is sent. The task already runs, so a failure here must not read
+          // as a failed start that the agent retries.
+          const nameChat = async () => {
+            if (conversationTitleLength(title) > CONVERSATION_TITLE_MAX_LENGTH) {
+              log.warn("task chat title too long to name the chat", { chatId });
+              return;
             }
-            // A planned row that was stopped is taken up again by its start.
-            if (taskId) await tasks.repo.resume(taskId);
-          } catch (error) {
-            await webchatRepo.deleteSession(chatId).catch((cleanup: unknown) =>
-              log.warn("failed to remove a task chat that did not start", {
-                chatId,
-                error: cleanup instanceof Error ? cleanup.message : String(cleanup),
-              }),
-            );
-            if (!task) throw error;
-            await tasks.repo.markStartFailed(task.id);
-            for (const key of startKeys) {
-              service.noteFailedStart(conciergeChatId, turnId, key, task.id);
-            }
-            const reason = error instanceof Error ? error.message : String(error);
-            throw new Error(
-              `${reason} Task ${task.id} did not start and is marked failed. Do not start it again; tell the guardian.`,
-            );
-          }
-          // Named after the first turn: the first message would rename it.
-          if (conversationTitleLength(title) <= CONVERSATION_TITLE_MAX_LENGTH) {
-            // The task already runs, so a failure here must not read as a
-            // failed start that the agent retries.
             await webchatRepo.updateSessionName(chatId, title).catch((error: unknown) =>
               log.warn("failed to name a task chat", {
                 chatId,
                 error: error instanceof Error ? error.message : String(error),
               }),
             );
-          } else {
-            log.warn("task chat title too long to name the chat", { chatId });
+          };
+          let made = false;
+          try {
+            // Marked before the first turn, so that turn's event already sees it.
+            await webchatRepo.setSessionTrigger(chatId, {
+              triggerKind: TASK_CHAT_TRIGGER_KIND,
+              triggerName: title,
+            });
+            // Named before the first turn: the chat is the task, and its name
+            // is the task's.
+            await nameChat();
+            // Its row exists before the first turn, so that turn's events find it.
+            await tasks.repo.create(chatId, { chatId: conciergeChatId, sourceMessageId });
+            made = true;
+            if (schedule) {
+              await service.deps.schedules?.set(
+                { id: chatId, title, owner: await ownerHere() },
+                schedule,
+              );
+            } else {
+              await sendLinked(
+                chatId,
+                prompt,
+                () => sendInput(sender, chatId, brief, skill?.name),
+                { keepOnFailure: true },
+              );
+            }
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            if (!made) {
+              // No task was made: no chat is left behind.
+              await webchatRepo.deleteSession(chatId).catch((cleanup: unknown) =>
+                log.warn("failed to remove a chat that did not become a task", {
+                  chatId,
+                  error: cleanup instanceof Error ? cleanup.message : String(cleanup),
+                }),
+              );
+              throw error;
+            }
+            // A task chat whose first turn failed: it ended failed, and its
+            // chat stays for its owner to read.
+            await nameChat();
+            await tasks.repo.markStartFailed(chatId);
+            for (const key of startKeys) {
+              service.noteFailedStart(conciergeChatId, turnId, key, chatId);
+            }
+            throw new Error(
+              `${reason} Task chat ${chatId} did not start and ended failed; its owner can read the error there. Do not start it again; tell the guardian.`,
+            );
           }
-          if (args.card === true) await showCard(chatId, title, { show: "task" });
+          await nameChat();
+          const link = taskLink(title, chatId);
           if (schedule) {
-            const view = await service.deps.schedules?.of(task.id);
+            const view = await service.deps.schedules?.of(chatId);
             return {
               chatId,
-              taskId: task.id,
+              link,
               scheduled: view?.nextRunAt
                 ? `First run ${new Date(view.nextRunAt).toISOString()}. Nothing runs before then.`
                 : "Scheduled.",
             };
           }
-          return { chatId, taskId: task.id };
+          return { chatId, link };
         }),
     },
     {
@@ -1370,6 +1094,11 @@ export async function buildConciergeTools(
         properties: {
           chatId: { type: "string" },
           text: { type: "string", description: "The message for the other agent." },
+          answers: {
+            type: "string",
+            description:
+              "The message_id of the guardian message this follow-up passes on, from its <chat_thread> line, in this turn or an earlier one: it shows working while the task works for it, and becomes the task's start message. Required when this turn carries several guardian messages: without it the send links and moves nothing.",
+          },
         },
       },
       handler: (input) =>
@@ -1377,27 +1106,30 @@ export async function buildConciergeTools(
           const sender = context.captureTaskInput?.();
           currentTurn();
           const chatId = requireString(args, "chatId");
-          const chat = await requireOwnTaskChat(chatId);
-          await ensureTaskRow(chat);
+          await requireOwnTaskChat(chatId);
           const task = await tasks.repo.findBySession(chatId);
           const text = requireString(args, "text");
+          // The guardian message whose words go on. It shows working while
+          // the task works for it, and it becomes the task's start message
+          // once the task has taken it, so the result replies to this request
+          // and not to the first one. Checked before anything is sent, so a
+          // bad id sends nothing.
+          const relayed = await relayedMessage(optionalString(args, "answers"));
           // New work for a task the guardian or you stopped takes it up again.
           if (task) await tasks.repo.resume(task.id);
-          // The guardian message whose words go on: the turn's last one. It
-          // shows working while the task works for it. A scheduled task's
-          // runs are no work for one message: it links none.
-          const relayed = (await turnPrompts()).at(-1);
+          // A scheduled task's runs are no work for one message: it links and moves none.
           const scheduled = task ? await service.deps.schedules?.of(task.id) : null;
-          if (task && !scheduled)
+          if (task && !scheduled) {
             await sendLinked(task.id, relayed, () => sendInput(sender, chatId, text));
-          else await sendInput(sender, chatId, text);
+            if (relayed) await pointTaskTo(chatId, relayed);
+          } else await sendInput(sender, chatId, text);
           return "Sent; the task chat takes it as input.";
         }),
     },
     {
       name: "chat_read",
       description:
-        "Read a task chat's status (running, idle, waiting_input, or failed) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there.",
+        "Read a task chat's status (running, idle, waiting_input, or failed) and its latest messages, or the latest messages of another of your Concierge chats when the guardian's question needs what was said there. A card in a task chat shows as a message with its plain-text line and a `cardId` that card_forward sends. While it runs, `plan` is its current turn's plan, each step with its status (completed, in_progress or pending): when there is one, report its progress by the plan.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
@@ -1420,6 +1152,11 @@ export async function buildConciergeTools(
               ? Math.min(MAX_READ_LIMIT, Math.max(1, Math.floor(args.last)))
               : DEFAULT_READ_LIMIT;
           const said = await latestSaid(messages, taskChatPlace(chatId), limit, hasText);
+          const row =
+            chat.triggerKind === TASK_CHAT_TRIGGER_KIND ? await tasks.repo.get(chatId) : null;
+          const taskStatus = row ? (await tasks.statusOf([row])).get(chatId) : undefined;
+          const running = service.dashboard.chats.isRunning(chatId);
+          const plan = running ? service.dashboard.chats.turnPlan(chatId) : null;
           return {
             chatId,
             title: chat.name,
@@ -1429,18 +1166,24 @@ export async function buildConciergeTools(
                 : isMainConciergeChat(chat)
                   ? "main chat"
                   : "topic chat",
-            status: statusOf(
-              service.dashboard.chats.isRunning(chatId),
-              await findListEntry(chatId),
-            ),
+            status: statusOf(running, await findListEntry(chatId)),
+            ...(plan ? { plan: planForRead(plan) } : {}),
+            ...(taskStatus
+              ? {
+                  taskStatus: taskStatus.status,
+                  ...(taskStatus.endReason ? { endReason: taskStatus.endReason } : {}),
+                }
+              : {}),
             messages: said.map((message) => ({
               id: message.id,
               role: message.direction === "fromRome" ? "assistant" : "user",
               text: message.body.text,
-              at: message.at.toISOString(),
-              ...(message.chatThread && message.chatThread !== message.id
-                ? { root: message.chatThread }
+              // A task chat's card is its message, and its id is the one
+              // `card_forward` takes.
+              ...(message.card && chat.triggerKind === TASK_CHAT_TRIGGER_KIND
+                ? { cardId: message.id }
                 : {}),
+              at: message.at.toISOString(),
             })),
           };
         }),
@@ -1448,7 +1191,7 @@ export async function buildConciergeTools(
     {
       name: "chat_stop",
       description:
-        'Stop a task chat\'s running work. Only when the guardian clearly calls the task off ("never mind", "算了", "不用了"). A follow-up or a side question is not a reason.',
+        'Stop a task chat\'s work: its running work stops, its checks and schedule go, and the task ends stopped. The only way to stop a task. Only when the guardian clearly calls the task off ("never mind", "算了", "不用了"). A follow-up or a side question is not a reason.',
       inputSchema: {
         type: "object",
         required: ["chatId"],
@@ -1457,71 +1200,178 @@ export async function buildConciergeTools(
       handler: (input) =>
         runTool("chat_stop", input, async (args) => {
           const chatId = requireString(args, "chatId");
-          await requireTaskChat(chatId);
+          await requireOwnTaskChat(chatId);
           // The task ends stopped, whether or not it was running.
-          const task = await tasks.repo.findBySession(chatId);
-          if (task) return { stopped: await stopTask(task.id) };
-          const { chats } = service.dashboard;
-          const turns = chats.activeTurns(chatId);
-          for (const turnId of turns) await chats.interruptTurn(turnId);
-          return { stopped: turns.length };
+          return { stopped: await stopTask(chatId) };
+        }),
+    },
+    {
+      name: "chat_update",
+      description:
+        "Change a task chat you started. name renames the chat, which is the task's name. note is what you keep for your later self about it: links, ids, what to check next (null clears it); the guardian never sees it. archived archives the chat, which stops its work if it is still open, or brings it back. schedule adds, changes or removes (null) its repeating schedule. Fields you leave out stay. To stop a task, use chat_stop.",
+      inputSchema: {
+        type: "object",
+        required: ["chatId"],
+        properties: {
+          chatId: { type: "string" },
+          name: { type: "string", description: "A few words naming the task." },
+          note: {
+            type: ["string", "null"],
+            description:
+              "What you keep for your later self about the task. The guardian never sees it.",
+          },
+          archived: { type: "boolean", description: "Archive the task chat, or bring it back." },
+          schedule: {
+            ...SCHEDULE_PARAMETER,
+            description:
+              "Add, change or remove (null) the task's repeating schedule. Only a task that is not stopped.",
+          },
+        },
+      },
+      handler: (input) =>
+        runTool("chat_update", input, async (args) => {
+          const chatId = requireString(args, "chatId");
+          await requireOwnTaskChat(chatId);
+          const name = args.name === undefined ? undefined : requireString(args, "name");
+          if (name !== undefined && conversationTitleLength(name) > CONVERSATION_TITLE_MAX_LENGTH) {
+            throw new Error(
+              `name is too long: at most ${CONVERSATION_TITLE_MAX_LENGTH} characters`,
+            );
+          }
+          let note: string | null | undefined;
+          if (args.note !== undefined) {
+            if (args.note !== null && typeof args.note !== "string") {
+              throw new Error("note must be a string or null");
+            }
+            note = args.note === null ? null : args.note.trim() || null;
+          }
+          if (args.archived !== undefined && typeof args.archived !== "boolean") {
+            throw new Error("archived must be a boolean");
+          }
+          const row = await tasks.repo.findBySession(chatId);
+          if (!row)
+            throw new Error(`No task chat ${chatId}. Use chat_list to find your task chats.`);
+          // Checked before anything is written, so a refusal changes nothing.
+          let schedule: ReturnType<typeof parseTaskSchedule> | undefined;
+          if (args.schedule !== undefined) {
+            if (row.stoppedAt) {
+              throw new Error(
+                `Task chat ${chatId} is stopped. Take it up again with chat_send first.`,
+              );
+            }
+            if (args.archived === true) {
+              throw new Error("A task chat cannot both be archived and scheduled");
+            }
+            if (!service.deps.schedules) throw new Error("Rome cannot schedule tasks here");
+            const kept = args.schedule === null ? null : await service.deps.schedules.of(chatId);
+            schedule = parseTaskSchedule(args.schedule, kept?.brief);
+            // A changed schedule keeps the skill its runs were started with.
+            if (schedule && kept?.skill) schedule.skill = kept.skill;
+          }
+          // A rename is the chat's: one name.
+          if (name !== undefined) await webchatRepo.updateSessionName(chatId, name);
+          // Touched even with only a rename, so the Tasks view hears the new name.
+          await tasks.repo.write(chatId, note === undefined ? {} : { note });
+          if (schedule !== undefined) {
+            if (schedule === null) await service.deps.schedules?.remove(chatId);
+            else {
+              await service.deps.schedules?.set(
+                { id: chatId, title: name ?? row.title, owner: ownerOf(row) },
+                schedule,
+              );
+            }
+          } else if (name !== undefined) {
+            // A schedule shows its task's name on the Routines page.
+            await service.deps.schedules?.rename?.(chatId, name);
+          }
+          if (args.archived === true) {
+            // Archiving a task that is still open stops it, so nothing runs
+            // hidden; an archived task has nothing left to check on.
+            await service.endTaskChat(chatId, "archived");
+          } else if (args.archived === false) {
+            await webchatRepo.unarchiveSession(chatId);
+          }
+          const now = (await tasks.repo.getWithChat(chatId)) ?? null;
+          const status = now ? (await tasks.statusOf([now.row])).get(chatId) : undefined;
+          return {
+            chatId,
+            title: now?.chat.name ?? name ?? row.title,
+            link: taskLink(now?.chat.name ?? name ?? row.title, chatId),
+            ...(status ? { status: status.status } : {}),
+            ...(status?.endReason ? { endReason: status.endReason } : {}),
+          };
         }),
     },
     {
       name: "chat_list",
       description:
-        "List your other chats, each with its kind: the main chat and your topic chats (kind main chat or topic chat), then the task chats you started (kind task chat), newest first, each with the id of the Concierge chat it came from and its status. Only the task chats of tasks that have not ended, unless you pass includeEnded or a status. chat_read reads any of them.",
+        "List your other chats, each with its kind: the main chat and your topic chats (kind main chat or topic chat), then the task chats you started (kind task chat), each with its chatId, title, link, the id of the Concierge chat it came from (from), and its status, which Rome keeps: needs_you, active, later, or ended (with endReason done, failed, stopped or no_response). Only the task chats that have not ended, unless you pass includeEnded, recentlyEnded or a status; an ended one says when (endedAt). Pass here for only the task chats started from the chat you are in. Check it before you start a task, so you do not start one twice. chat_read reads any of them.",
       inputSchema: {
         type: "object",
         properties: {
-          status: { type: "string", enum: [...TASK_STATUSES] },
+          status: { type: "string", enum: [...CONCIERGE_TASK_STATUSES] },
           includeEnded: {
             type: "boolean",
             description:
-              "Also list the task chats of ended tasks, such as one to send a follow-up into.",
+              "Also list the task chats that ended, such as one to send a follow-up into.",
+          },
+          details: {
+            type: "boolean",
+            description:
+              "Also answer each task chat's note, the one you wrote for your later self, its schedule's brief, and when it last changed.",
+          },
+          recentlyEnded: {
+            type: "boolean",
+            description: `Also list the task chats that ended in the last ${RECENTLY_ENDED_HOURS} hours, as a progress overview does.`,
+          },
+          here: {
+            type: "boolean",
+            description:
+              "List only the task chats started from the chat you are in (their from is this chat), and no other chats.",
           },
         },
       },
       handler: (input) =>
         runTool("chat_list", input, async (args) => {
-          const wanted = TASK_STATUSES.find((status) => status === args.status);
-          const everyTask = wanted !== undefined || args.includeEnded === true;
-          const { chats } = service.dashboard;
+          const onlyHere = args.here === true;
+          const wanted = CONCIERGE_TASK_STATUSES.find((status) => status === args.status);
           const { chatId: here } = currentTurn();
           const owner = await ownerHere();
-          const all = (await webchatRepo.listSessions("all")).filter(
-            (chat) => privateOwnerOf(chat) === owner,
+          const allEnded = wanted !== undefined || args.includeEnded === true;
+          const endedSince =
+            !allEnded && args.recentlyEnded === true
+              ? Date.now() - RECENTLY_ENDED_HOURS * 60 * 60 * 1000
+              : null;
+          const rows = await ownRows(allEnded || endedSince !== null);
+          // Filter first, so a schedule is read only for a task that is listed.
+          const listed = rows
+            .filter((task) => !wanted || task.status?.status === wanted)
+            .filter((task) => !onlyHere || task.conciergeChat.id === here)
+            // An ended task counts as recent by when it ended, else when it last changed.
+            .filter(
+              (task) =>
+                endedSince === null ||
+                task.status?.status !== "ended" ||
+                (task.row.endedAt ?? task.row.updatedAt).getTime() >= endedSince,
+            );
+          const schedules = await Promise.all(
+            listed.map((task) => service.deps.schedules?.of(task.row.id) ?? null),
           );
-          const rows = (await ownRows(true)).filter(({ row }) => row.sessionId);
-          // The Concierge chat each task chat came from, by its task row.
-          const cameFrom = new Map(
-            rows.map(({ row, conciergeChat }) => [row.sessionId as string, conciergeChat.id]),
-          );
-          const ended = new Set(
-            rows.flatMap(({ row, status }) =>
-              status?.status === "ended" ? [row.sessionId as string] : [],
-            ),
-          );
-          const taskChats = all
-            .filter((chat) => chat.triggerKind === TASK_CHAT_TRIGGER_KIND && !chat.archivedAt)
-            .map((chat) => ({
-              chatId: chat.id,
-              title: chat.name,
-              kind: "task chat",
-              ...(cameFrom.has(chat.id) ? { from: cameFrom.get(chat.id) } : {}),
-              status: statusOf(chats.isRunning(chat.id), chat),
-            }))
-            .filter((chat) => !wanted || chat.status === wanted)
-            .filter((chat) => everyTask || chat.status === "running" || !ended.has(chat.chatId));
-          const conciergeChats = wanted
-            ? []
-            : (await service.listChats(owner))
-                .filter((chat) => chat.id !== here)
-                .map((chat) => ({
-                  chatId: chat.id,
-                  title: chat.name,
-                  kind: chat.main ? "main chat" : "topic chat",
-                }));
+          const taskChats = listed
+            .map((task, index) =>
+              compactTask(task, task.status, args.details === true, schedules[index]),
+            )
+            .sort((a, b) => a.chatId.localeCompare(b.chatId));
+          const conciergeChats =
+            wanted || onlyHere
+              ? []
+              : (await service.listChats(owner))
+                  .filter((chat) => chat.id !== here)
+                  .map((chat) => ({
+                    chatId: chat.id,
+                    title: chat.name,
+                    kind: chat.main ? "main chat" : "topic chat",
+                  }));
           return [...conciergeChats, ...taskChats];
         }),
     },
@@ -1545,108 +1395,46 @@ export async function buildConciergeTools(
         }),
     },
     {
-      name: "chat_forward",
+      name: "card_forward",
       description:
-        "Send the guardian a finished task's conclusion, word for word, without retyping it: the closing section the task chat writes at the end of its final answer. " +
-        "When that answer showed a card (a `card:` line in its task event), the card itself goes, as it is, or its text where this chat cannot show cards. " +
-        `A conclusion over ${CONCLUSION_MAX_CHARS} characters, or none, is refused and nothing is sent: then report the outcome yourself in a few sentences with the key specifics. ` +
-        "Set full to send the whole answer instead, only when the guardian explicitly asks for the full text in a message they sent this turn. " +
-        "The task chat must be one started from this Concierge chat. The message replies to the task's start message, and the task's row then points to it.",
+        "Send the guardian one card a task chat showed, as it is, by its id: Rome copies the card, so you pass no content. The id is the `id` of a `card id=…` line in a task event, or the `cardId` of a message chat_read shows. Where this chat cannot show cards, the card's plain-text line goes instead. " +
+        "A task's question card goes as the card itself: the guardian answers it here or in the task chat, and both show the one answer. An approval is decided in its task chat, so it is refused. " +
+        "To send several cards, call it once for each: every card is a message of its own. Any card of a task chat started from this Concierge chat can go, from any turn. " +
+        "An id that names no such card is refused and nothing is sent: then tell the result yourself with say, replying to the task's start message. " +
+        "The message replies to the task's start message and leaves it where it is, so several cards all reply to the same one.",
       inputSchema: {
         type: "object",
-        required: ["chatId"],
-        properties: {
-          chatId: { type: "string" },
-          intro: { type: "string", description: "Optional short line sent before it." },
-          full: {
-            type: "boolean",
-            description:
-              "Send the whole answer, not its conclusion. Refused unless the guardian sent a message this turn: a turn that reports on a task never sends a full report.",
-          },
-        },
+        required: ["cardId"],
+        properties: { cardId: { type: "string" } },
       },
       handler: (input) =>
-        runTool("chat_forward", input, async (args) => {
-          const chatId = requireString(args, "chatId");
-          const chat = await requireOwnTaskChat(chatId);
-          const final = await finalAnswer(messages, taskChatPlace(chatId));
-          if (!final) throw new Error("The task chat has no answer yet");
-          const answer = final.answer?.body.text ?? null;
+        runTool("card_forward", input, async (args) => {
+          const cardId = requireString(args, "cardId");
           currentTurn();
-          const full = args.full === true;
-          const from = { chatId, title: chat.name };
-          // A card the final answer showed goes as it is, where this chat
-          // draws cards, and as its plain-text line where it cannot. Only a
-          // conclusion with no news holds it back. A turn that showed only a
-          // card has no text, so its card goes whatever `full` says.
-          const card = full && answer ? undefined : final.card;
-          if (card && !(answer && hasNothingToReport(answer))) {
-            const intro = optionalString(args, "intro");
-            const messageId =
-              context.widgets === "card"
-                ? await forwardCard(card, from, intro)
-                : await forward(card.text, from, intro);
-            const task = await pointTaskTo(chatId, messageId);
-            return {
-              forwarded: context.widgets === "card" ? "card" : "card_text",
-              forwardedChars: card.text.length,
-              messageId,
-              ...(task ? { taskAnchored: task.id } : {}),
-            };
+          const found = await messages.cardIn(cardId);
+          const holder = found ? await webchatRepo.getSession(found.chatId) : undefined;
+          // A task's question card goes as itself: the same card, answered
+          // wherever it is.
+          if (!found) {
+            const question = await questionCardIn(cardId);
+            if (question) {
+              const chat = await requireOwnTaskChat(question.chatId);
+              const messageId = await forwardQuestion(question, cardId, chat.name);
+              return { forwarded: context.widgets === "card" ? "card" : "card_text", messageId };
+            }
           }
-          if (!answer) throw new Error("The task chat has no answer yet");
           // Everything that can refuse comes before anything is said.
-          if (full && !(await guardianStartedTurn())) {
+          if (!found || holder?.triggerKind !== TASK_CHAT_TRIGGER_KIND) {
             throw new Error(
-              "The full text goes to the guardian only in a turn they started, when they explicitly ask for it. Forward the conclusion, or report the outcome yourself in a few sentences with the key specifics.",
+              `No card ${cardId} in a task chat. Pass the id of a \`card id=…\` line from a task event, or a cardId from chat_read. Nothing was sent. To tell the result yourself, use say, replying to the task's start message: pass its start_message_id from chat_list as replyTo.`,
             );
           }
-          const conclusion = full ? null : conclusionOf(answer);
-          if (conclusion && conclusion.kind !== "found") {
-            throw new Error(
-              `${
-                conclusion.kind === "missing"
-                  ? "The task chat's latest answer has no conclusion section."
-                  : `The task chat's conclusion is ${conclusion.length} characters, over the ${CONCLUSION_MAX_CHARS} limit.`
-              } Nothing was sent. Report the outcome yourself with say, in one message of a few sentences with the key specifics, replying to the task's start message: pass its start_message_id from task_list as replyTo.`,
-            );
-          }
-          if (conclusion?.kind === "found" && conclusion.text === NOTHING_TO_REPORT) {
-            throw new Error(
-              "The task chat has nothing to report: its conclusion carries no news. Nothing was sent. Send nothing about it.",
-            );
-          }
-          const text = conclusion?.kind === "found" ? conclusion.text : withoutMarkers(answer);
-          const messageId = await forward(text, from, optionalString(args, "intro"));
-          const task = await pointTaskTo(chatId, messageId);
-          return {
-            forwarded: full ? "full" : "conclusion",
-            forwardedChars: text.length,
-            messageId,
-            ...(task ? { taskAnchored: task.id } : {}),
-          };
-        }),
-    },
-    {
-      name: "chat_card",
-      description:
-        "Show the guardian a task chat as a card. While the task waits on them, the card is its question or approval alone: the guardian answers on it, straight into the task chat, and the task waits for them until they do. Otherwise it is the task's card, with its live status and a link that opens it: use it to open or find a task chat instead of sending its id. " +
-        "The card replies to the task's start message, and the task's row then points to it.",
-      inputSchema: {
-        type: "object",
-        required: ["chatId"],
-        properties: { chatId: { type: "string" } },
-      },
-      handler: (input) =>
-        runTool("chat_card", input, async (args) => {
-          const chatId = requireString(args, "chatId");
-          const chat = await requireTaskChat(chatId);
-          currentTurn();
-          // A task waiting on the guardian shows its question or approval
-          // alone; any other shows its task card, to find it by.
-          const messageId = await showCard(chatId, chat.name, await shownAs(chatId));
-          await pointTaskTo(chatId, messageId);
-          return { sent: "Shown; the guardian sees the card.", messageId };
+          const chat = await requireOwnTaskChat(found.chatId);
+          const messageId = await forwardCard(found.card, cardId, {
+            chatId: found.chatId,
+            title: chat.name,
+          });
+          return { forwarded: context.widgets === "card" ? "card" : "card_text", messageId };
         }),
     },
     {
@@ -1704,17 +1492,9 @@ export async function buildConciergeTools(
               `The card was not shown: ${card.problems.join("; ")}. Fix it and call show_card once more, or say the content with say instead.`,
             );
           }
-          // A card joins the thread a threaded follow-up was said in, as a
-          // `say` does, but shows no quote: a card stands alone in its message.
-          const replyTo = await defaultReplyTarget();
-          const { id } = await webchatRepo.addBackendMessage(
-            chatId,
-            turnId,
-            [card.part],
-            replyTo ? { replyTo } : {},
-          );
+          const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [card.part]);
           said(chatId, turnId, card.part.text);
-          await settleAnswered(replyTo, undefined);
+          await settleAnswered(undefined, undefined);
           return {
             sent: "Shown; the guardian sees the card. Send nothing that repeats it: at most one short line that adds what the card does not hold, or nothing.",
             messageId: id,

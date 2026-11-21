@@ -1030,6 +1030,27 @@
       "when": 1794978112314,
       "tag": "0147_personal_data_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "6",
+      "when": 1795092902102,
+      "tag": "0148_drop_message_read_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "6",
+      "when": 1795107334626,
+      "tag": "0149_task_is_chat",
+      "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "6",
+      "when": 1795118143289,
+      "tag": "0150_slack_app_messages",
+      "breakpoints": true
     }
   ]
 }

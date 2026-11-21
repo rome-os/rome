@@ -23,7 +23,6 @@ import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js"
 import { voiceInputRoutes } from "./routes/voice-input.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
-import { wechatAppRoutes } from "./routes/wechat-app.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
 import { sessionActorMiddleware } from "../access/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
@@ -35,7 +34,6 @@ import { skillsRoutes } from "./routes/skills.js";
 import { discordCliRoutes } from "./routes/discord-cli.js";
 import { chatSettingsRoutes } from "./routes/chat-settings.js";
 import { connectionsRoutes } from "./routes/connections.js";
-import { connectedAccountsRoutes } from "./routes/connected-accounts.js";
 import { setupsRoutes } from "./routes/setups.js";
 import { approvalsRoutes } from "./routes/approvals.js";
 import { appApiDashboardRoutes, appApiPublicRoutes } from "./routes/app-api.js";
@@ -54,9 +52,6 @@ import { hideGatedFeatureRoutes } from "./middleware/feature-routes.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
-import { accountsRoutes } from "./routes/accounts.js";
-import { accountDecisionRoutes } from "./routes/account-decisions.js";
-import { peopleRoutes } from "./routes/people.js";
 import { assistantsRoutes } from "./routes/assistants.js";
 import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
@@ -91,7 +86,7 @@ import { sessionsRoutes } from "./routes/sessions.js";
 import { appConnectionAccessRoutes } from "./routes/app-connection-access.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
-import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
+import { agentOfKindIn } from "../concierge/on-connection.js";
 import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";
 import { byChannel, readAccountAgent } from "../chats/connected-accounts/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
@@ -171,7 +166,9 @@ export function buildApp(
   api.route("/", buildInfoRoutes(deps));
   api.route("/", diagnosisRoutes(deps));
   api.route("/", computerUseRoutes(deps));
-  api.route("/", wechatAppRoutes(deps));
+  for (const kind of deps.connectionKinds) {
+    if (kind.routes) api.route("/", kind.routes);
+  }
   api.route("/", feedbackRoutes(deps));
   api.route("/", systemUpgradeRoutes(deps));
   api.route("/", authRoutes(deps));
@@ -185,7 +182,6 @@ export function buildApp(
   api.route("/", integrationsRoutes(deps));
   api.route("/", connectionsRoutes(deps));
   api.route("/", appConnectionAccessRoutes(deps));
-  api.route("/", connectedAccountsRoutes(deps));
   api.route("/", setupsRoutes(deps));
   api.route("/", desktopRoutes());
   api.route("/", publicAccessRoutes(deps));
@@ -215,10 +211,8 @@ export function buildApp(
   api.route("/", vaultRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
-  api.route("/", peopleRoutes(deps));
+  for (const feature of deps.features ?? []) api.route("/", feature.routes);
   api.route("/", assistantsRoutes(deps));
-  api.route("/", accountsRoutes(deps));
-  api.route("/", accountDecisionRoutes(deps));
   api.route("/", sentinelLogRoutes(deps));
   api.route("/", webhookInvocationsRoutes(deps));
   api.route("/", actionExecutionsRoutes(deps));
@@ -234,8 +228,7 @@ export function buildApp(
   );
   const sessionAccountAgents = {
     kindOf: connectionKindOf(deps.connectionRegistry),
-    linkOf: accountLinkOf(deps.connectionRegistry),
-    accounts: new ConnectedAccountsRepository(deps.db),
+    agentOfKind: agentOfKindIn(deps.connectionRegistry),
   };
   const sessionQueries = new SessionQueryService({
     repository: new SessionQueryRepository(deps.db, "chats"),

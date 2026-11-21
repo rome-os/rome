@@ -97,7 +97,6 @@ afterEach(() => {
 
 describe("Recent apps on the rail", () => {
   it.each([
-    "briefing",
     "inbox",
     "showcases",
     "skills",

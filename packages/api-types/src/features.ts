@@ -2,7 +2,7 @@
 // Core and the dashboard both read the visibility below.
 
 /** Each id is the name the feature's usage is counted under. */
-export const GATED_FEATURES = ["people", "envoys", "inbox"] as const;
+export const GATED_FEATURES = ["people", "inbox"] as const;
 
 export type GatedFeature = (typeof GATED_FEATURES)[number];
 
@@ -22,7 +22,6 @@ export type FeatureVisibility = Record<GatedFeature, boolean>;
 /** Whether each gated feature is shown in this release. */
 export const FEATURE_VISIBILITY: Readonly<FeatureVisibility> = {
   people: false,
-  envoys: false,
   inbox: false,
 };
 

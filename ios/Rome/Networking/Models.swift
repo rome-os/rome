@@ -21,6 +21,8 @@ struct ChatSession: Codable, Identifiable, Hashable, Sendable {
     var lastTurnFailed: Bool?
     var awaitingGuardian: Bool?
     var largeModelSelection: String?
+    /// When its owner pinned it; a topic chat only. Nil when not pinned.
+    var pinnedAt: String?
 }
 
 /// One stored message. `content` is a JSON array of parts, or plain text on old rows.
@@ -32,17 +34,6 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     var content: String
     var createdAt: String
     var traceSummary: TraceSummary?
-    /// The root of the chat thread this one is in: the first message of its
-    /// reply chain, which is the message itself when it replies to nothing.
-    /// Nil on an instance without chat threads.
-    var chatThreadId: String? = nil
-    /// The instance sent `chatThreadId`, null included: it has chat threads.
-    /// An older instance leaves the field out.
-    var knowsThreads = false
-    /// The thread's name when a task's start message is in it: the newest
-    /// such task's title. A thread no task started in has none here: the app
-    /// names it from its root's text.
-    var chatThreadTitle: String? = nil
     /// Who said a guardian-side message, when it was not simply the guardian.
     var sender: MessageSender? = nil
     /// Where a guardian message stands with the agent: `failed` and `unknown`
@@ -54,13 +45,6 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     /// Rome's status on a guardian message of its Chat: `working` or `failed`.
     /// It shows over the reaction. Nil when it has none, and from older instances.
     var status: String? = nil
-    /// Whether the chat's owner has seen the message
-    /// (docs/domains/chats.md#chat-thread). Nil from an instance before read
-    /// marks, and then every message reads as seen.
-    var read: Bool? = nil
-
-    /// The owner has seen it, or the instance keeps no mark.
-    var isRead: Bool { read != false }
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -76,7 +60,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender, inputState, reaction, status, read
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, sender, inputState, reaction, status
     }
 }
 
@@ -106,19 +90,13 @@ extension ChatMessage {
         content = try container.decode(String.self, forKey: .content)
         createdAt = try container.decode(String.self, forKey: .createdAt)
         traceSummary = try container.decodeIfPresent(TraceSummary.self, forKey: .traceSummary)
-        chatThreadId = try container.decodeIfPresent(String.self, forKey: .chatThreadId)
-        knowsThreads = container.contains(.chatThreadId)
-        chatThreadTitle = try container.decodeIfPresent(String.self, forKey: .chatThreadTitle)
         // An unknown shape never costs the message itself.
         sender = try? container.decodeIfPresent(MessageSender.self, forKey: .sender)
         inputState = (try? container.decodeIfPresent(String.self, forKey: .inputState)) ?? nil
         reaction = (try? container.decodeIfPresent(String.self, forKey: .reaction)) ?? nil
         status = (try? container.decodeIfPresent(String.self, forKey: .status)) ?? nil
-        read = (try? container.decodeIfPresent(Bool.self, forKey: .read)) ?? nil
     }
 
-    /// Writes `chatThreadId` as null when the instance sent it as null, so a
-    /// kept copy reads back the same.
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
@@ -128,50 +106,21 @@ extension ChatMessage {
         try container.encode(content, forKey: .content)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(traceSummary, forKey: .traceSummary)
-        if knowsThreads { try container.encode(chatThreadId, forKey: .chatThreadId) }
-        try container.encodeIfPresent(chatThreadTitle, forKey: .chatThreadTitle)
         try container.encodeIfPresent(sender, forKey: .sender)
         try container.encodeIfPresent(inputState, forKey: .inputState)
         try container.encodeIfPresent(reaction, forKey: .reaction)
         try container.encodeIfPresent(status, forKey: .status)
-        try container.encodeIfPresent(read, forKey: .read)
     }
-
-    /// The root of the thread it is in: its own id when it is the root.
-    var threadRoot: String { chatThreadId ?? id }
 }
 
-/// What a message the guardian sends replies to: the quoted message, and
-/// the root of the thread view it was sent from, if one was open. The
-/// instance replies to the message named, so the message is in that thread
-/// (docs/domains/chats.md#chat-thread). A send from a thread view names the
-/// thread's last message with text (`TranscriptStore.wireTarget`); only a
-/// thread with none loaded sends the root alone, which the instance resolves.
-struct ThreadTarget: Codable, Hashable, Sendable {
+/// What a message the guardian sends replies to: the message the Reply button
+/// quoted (docs/domains/chats.md#chat-thread). The instance stores the quote
+/// with the message and draws it.
+struct ReplyTarget: Codable, Hashable, Sendable {
     /// The message replied to, quoted in the reply bar.
     let messageId: String
-    let instanceKnowsThreads: Bool
-    /// Written by a build where Reply quoted; absent from drafts written
-    /// when Reply opened the thread view.
-    var quote: Bool? = nil
-    /// The root of the thread view the reply was sent from.
-    var thread: String? = nil
-    /// Aimed at the thread only: opened from its label, with no message
-    /// replied to, so there is no reply bar and the send names no message.
-    var bare: Bool? = nil
 
-    var isQuote: Bool { quote == true }
-
-    /// The message whose thread view the reply was written in: the thread's
-    /// root. A draft from before quotes was always written in one, at `messageId`.
-    var threadMessage: String? { isQuote ? thread : messageId }
-
-    var body: [String: JSONValue] {
-        var body: [String: JSONValue] = [:]
-        if bare != true { body["replyToMessageId"] = .string(messageId) }
-        if let thread { body["chatThread"] = .string(thread) }
-        return body
-    }
+    var body: [String: JSONValue] { ["replyToMessageId": .string(messageId)] }
 }
 
 struct TraceSummary: Codable, Hashable, Sendable {
@@ -264,106 +213,6 @@ struct BuildInfo: Codable, Hashable, Sendable {
 struct MessagePage: Codable, Sendable {
     var messages: [ChatMessage]
     var nextCursor: String?
-    /// Set when the instance answered by main-line messages (`type=concierge`):
-    /// what the page says of the threads. Nil for a turn page, which an
-    /// instance before it answers whatever is asked.
-    var concierge: ConciergeAnswer? = nil
-
-    private enum CodingKeys: String, CodingKey { case messages, nextCursor }
-}
-
-/// What the newest reply of a thread and its counts say, as the instance
-/// sums them (docs/domains/chats.md#chat-thread): the stack under a root reads
-/// them, and the pills do. The replies themselves are not held.
-struct ThreadSummary: Hashable, Sendable {
-    /// Replies the stack counts: a user or assistant message no automation said.
-    var replyCount: Int
-    /// Counted replies the owner did not say and has not seen.
-    var unreadCount: Int
-    /// The newest reply that counts; for a thread that waits outside the page, its newest unread one.
-    var latest: ChatMessage
-    /// When the newest unread reply was said, in seconds; 0 when none waits. Orders the pills.
-    var unreadAt: Double
-}
-
-/// A page by main-line messages (`GET /chat/sessions/:id/messages?type=concierge`).
-struct ConciergeAnswer: Hashable, Sendable {
-    /// The main line and the newest reply of each thread (every reply, for one
-    /// thread read by itself), in the order the page lists them.
-    var body: [ChatMessage]
-    /// When the oldest main-line message of the page was said.
-    var oldestAt: Date?
-    /// What the page says of each thread with replies, by root: the main
-    /// line's, and the ones that wait outside it.
-    var summaries: [String: ThreadSummary]
-    /// The name of each thread that waits with a root not on the page, by root.
-    var titles: [String: String]
-    /// For one thread read by itself: its root.
-    var root: String?
-}
-
-/// The wire shape of a Concierge page. Every field the instance may leave
-/// out is optional, so a newer instance that adds fields never breaks it.
-struct ConciergeWirePage: Decodable, Sendable {
-    struct Entry: Decodable, Sendable {
-        struct Thread: Decodable, Sendable {
-            var replyCount: Int?
-            var unreadCount: Int?
-            var latestReply: ChatMessage?
-            /// Only in an answer for one thread.
-            var replies: [ChatMessage]?
-        }
-        var message: ChatMessage
-        var thread: Thread?
-    }
-
-    struct Outside: Decodable, Sendable {
-        var root: String
-        var title: String?
-        var replyCount: Int?
-        var unreadCount: Int?
-        var latestUnread: ChatMessage
-    }
-
-    var mainLine: [Entry]
-    var outside: [Outside]?
-    var traces: [ChatMessage]?
-    var nextCursor: String?
-
-    /// The messages the store keeps and what the page says of its threads.
-    func page(thread: Bool = false) -> MessagePage {
-        var body: [ChatMessage] = []
-        var summaries: [String: ThreadSummary] = [:]
-        for entry in mainLine {
-            body.append(entry.message)
-            guard let thread = entry.thread, let latest = thread.latestReply ?? thread.replies?.last else { continue }
-            body.append(contentsOf: thread.replies ?? [latest])
-            let unread = thread.unreadCount ?? 0
-            summaries[entry.message.id] = ThreadSummary(
-                replyCount: thread.replyCount ?? 0, unreadCount: unread, latest: latest,
-                unreadAt: unread > 0 ? latest.date.timeIntervalSince1970 : 0
-            )
-        }
-        var titles: [String: String] = [:]
-        var rest: [ChatMessage] = []
-        for entry in outside ?? [] {
-            let unread = entry.unreadCount ?? 0
-            summaries[entry.root] = ThreadSummary(
-                replyCount: entry.replyCount ?? 0, unreadCount: unread, latest: entry.latestUnread,
-                unreadAt: entry.latestUnread.date.timeIntervalSince1970
-            )
-            if let title = entry.title, !title.isEmpty { titles[entry.root] = title }
-            rest.append(entry.latestUnread)
-        }
-        // A message stands once, whichever list holds it.
-        var seen = Set<String>()
-        let messages = (body + rest + (traces ?? [])).filter { seen.insert($0.id).inserted }
-        let answer = ConciergeAnswer(
-            body: body, oldestAt: mainLine.map(\.message.date).min(), summaries: summaries, titles: titles,
-            root: thread ? mainLine.first?.message.id : nil
-        )
-        return MessagePage(messages: messages, nextCursor: nextCursor, concierge: answer)
-    }
 }
 
 /// `GET /concierge/session`.

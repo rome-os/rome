@@ -86,32 +86,10 @@ private func rows(_ messages: [ChatMessage], notices: Bool = true) -> [Transcrip
         #expect(labels(rows([text("old", role: "user", turn: "t0", at: 0, sender: follow), text("a", turn: "t0", at: 5)])).isEmpty)
     }
 
-    /// A reply in a thread keeps its source label: the source says where the
-    /// turn came from, and nothing else names the thread.
-    @Test func aThreadMessageKeepsItsSourceLabel() {
-        let summary = TraceSummary(automatedInput: .init(type: "agent", name: "Flint"))
-        var inThread = text("a", turn: "t1", at: 60)
-        inThread.chatThreadId = "r"
-        inThread.chatThreadTitle = "Book flights"
-        inThread.knowsThreads = true
-        let options = TranscriptBuilder.Options(showNotices: true)
-        let alone = TranscriptBuilder.rows(messages: [inThread, trace(turn: "t1", at: 61, summary)], pending: [], answers: [:], options: options)
-        #expect(labels(alone) == ["Agent · Flint"])
-        // Another message between the thread's own changes nothing.
-        var later = text("b", turn: "t2", at: 80)
-        later.chatThreadId = "r"
-        later.chatThreadTitle = "Book flights"
-        later.knowsThreads = true
-        let split = TranscriptBuilder.rows(messages: [inThread, text("x", role: "user", turn: "t0", at: 70), later, trace(turn: "t1", at: 61, summary)], pending: [], answers: [:], options: options)
-        #expect(labels(split) == ["Agent · Flint"])
-    }
-
     /// A routine's reply the owner replied to keeps its source label.
     @Test func aRepliedToRoutineMessageKeepsItsSourceLabel() {
         let summary = TraceSummary(automatedInput: .init(type: "routine", name: "Daily"))
-        var thanks = text("g", role: "user", turn: "t0", at: 61)
-        thanks.chatThreadId = "r"
-        thanks.knowsThreads = true
+        let thanks = text("g", role: "user", turn: "t0", at: 61)
         let options = TranscriptBuilder.Options(showNotices: true)
         let built = TranscriptBuilder.rows(messages: [text("r", turn: "t1", at: 60), thanks, trace(turn: "t1", at: 62, summary)], pending: [], answers: [:], options: options)
         #expect(labels(built) == ["Routine · Daily"])

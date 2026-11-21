@@ -13,7 +13,7 @@ import AppsIndexPage from "./AppsIndexPage";
 import type { GatedFeature } from "@rome/api-types/features";
 import { isShownInTest } from "@/test/features";
 
-// These tests reach People, Envoys or Inbox, so they run with every feature
+// These tests reach People or Inbox, so they run with every feature
 // shown.
 rs.mock("@/lib/features", () => ({
   isShown: (feature?: GatedFeature) => isShownInTest(feature),
@@ -412,8 +412,8 @@ describe("AppsIndexPage reactivity", () => {
     expect(screen.queryByText("Chat")).toBeNull();
   });
 
-  it("uses page tiles for exactly four first-party apps and keeps other app images", async () => {
-    const firstParty = ["briefing", "inbox", "showcases", "skills"];
+  it("uses page tiles for exactly three first-party apps and keeps other app images", async () => {
+    const firstParty = ["inbox", "showcases", "skills"];
     mockBackend({
       installed: [
         ...firstParty.map((id) =>
@@ -434,7 +434,7 @@ describe("AppsIndexPage reactivity", () => {
       ],
     });
     renderPage();
-    await screen.findByText("briefing");
+    await screen.findByText("inbox");
     const section = screen.getByRole("region", { name: "Built-in apps" });
     const memoryTile = within(section)
       .getByText("Memory")

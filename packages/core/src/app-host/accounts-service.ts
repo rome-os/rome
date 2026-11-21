@@ -136,6 +136,20 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     // Paging walks back through one chat; across every chat it has no use.
     if (cursor !== undefined && !rest.chatId)
       throw new Error("A query after a cursor names a chat");
+    if ((rest.olderThan !== undefined || rest.newerThan !== undefined) && !rest.chatId)
+      throw new Error("A query by message id names a chat");
+    if (rest.newerThan !== undefined && (rest.olderThan !== undefined || cursor !== undefined))
+      throw new Error("A query reads newer than a message, or older, not both");
+    if (rest.olderThan !== undefined && cursor !== undefined)
+      throw new Error("A query reads older than a message id or after a cursor, not both");
+    // Only a store read live from the platform orders by the platform's ids.
+    if (
+      !messages.live &&
+      (rest.until !== undefined || rest.olderThan !== undefined || rest.newerThan !== undefined)
+    )
+      throw new Error(
+        `Channel "${channel}" reads no messages by message id or until a time; use since and after`,
+      );
     const after = cursor === undefined ? undefined : parseMessageCursor(cursor);
     if (after === null) throw new Error(`Invalid message cursor: ${cursor}`);
     const page = await messages.query({ ...rest, ...(after ? { after } : {}) });

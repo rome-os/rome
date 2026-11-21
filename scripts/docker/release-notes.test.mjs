@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   changesImage,
+  descriptionsOf,
   entryOf,
   lineOf,
   previousRelease,
@@ -161,7 +162,7 @@ test("the JSON lists the same changes by section, with internal ones as a count"
     ],
   });
   assert.deepEqual(notes, {
-    schema: 1,
+    schema: 2,
     version: "1.1.191",
     previousVersion: "1.1.190",
     date: "2026-11-19T00:10:13.000Z",
@@ -173,11 +174,12 @@ test("the JSON lists the same changes by section, with internal ones as a count"
       { scope: null, text: "a direct push", pr: null },
     ],
     internal: 2,
+    highlights: { en: [], zh: [] },
   });
 });
 
 test("the JSON for a first release or one with nothing for the image lists nothing", () => {
-  const empty = { breaking: [], new: [], fixes: [], internal: 0 };
+  const empty = { breaking: [], new: [], fixes: [], internal: 0, highlights: { en: [], zh: [] } };
   const first = releaseNotesJson({
     tag: "v1.0.0",
     previousTag: null,
@@ -186,7 +188,7 @@ test("the JSON for a first release or one with nothing for the image lists nothi
     commits: [{ subject: "feat: ignored", files: ["Dockerfile"] }],
   });
   assert.deepEqual(first, {
-    schema: 1,
+    schema: 2,
     version: "1.0.0",
     previousVersion: null,
     date: "2026-01-01T00:00:00.000Z",
@@ -202,6 +204,19 @@ test("the JSON for a first release or one with nothing for the image lists nothi
   });
   assert.equal(quiet.previousVersion, "1.0.0");
   assert.deepEqual([quiet.breaking, quiet.new, quiet.fixes, quiet.internal], [[], [], [], 0]);
+});
+
+test("each pull request's description is its squash commit body, without trailers", () => {
+  const descriptions = descriptionsOf([
+    {
+      subject: "feat(web): dictate (#11)",
+      body: "## Why\nScope: the composer.\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n",
+      files: [],
+    },
+    { subject: "fix: no body (#12)", body: "", files: [] },
+    { subject: "fix: a direct push", body: "Details.", files: [] },
+  ]);
+  assert.deepEqual([...descriptions], [[11, "## Why\nScope: the composer."]]);
 });
 
 test("a release with nothing for the image says so", () => {

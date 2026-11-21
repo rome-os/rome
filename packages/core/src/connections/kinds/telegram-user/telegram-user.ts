@@ -8,6 +8,7 @@ import {
 import type { NewMessageEvent } from "telegram/events/NewMessage.js";
 import type { StringSession } from "telegram/sessions/StringSession.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
+import type * as connections from "../../message.js";
 import type { Attachment, OutgoingMessage } from "../../../types.js";
 import { createLogger } from "../../../logger.js";
 import { readFile } from "node:fs/promises";
@@ -157,13 +158,13 @@ export class TelegramUserSessionNotAuthorizedError extends Error {
 }
 
 /**
- * The Telegram user-account transport. Inbound messages and history lines
- * arrive as the channel's own record, a `ChannelMessage` whose `raw` is the
- * GramJS `Api.Message`, so the Connection integration delivers them as they are.
+ * The Telegram user-account transport. Inbound messages arrive as a
+ * Connections message whose `raw` is the GramJS `Api.Message`, so the
+ * Connection integration delivers them as they are.
  */
 export class TelegramUserAdapter {
   private client: TelegramClient;
-  private handler?: (msg: ChannelMessage) => Promise<void>;
+  private handler?: (msg: connections.Message) => Promise<void>;
 
   constructor(private settings: TelegramUserSettings) {
     this.client = createTelegramClient(settings.apiId, settings.apiHash, settings.sessionString);
@@ -244,7 +245,7 @@ export class TelegramUserAdapter {
     return { chatId, ...(messageId ? { messageId } : {}) };
   }
 
-  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+  onInbound(handler: (msg: connections.Message) => Promise<void>): void {
     this.handler = handler;
   }
 
@@ -334,7 +335,7 @@ export class TelegramUserAdapter {
     await this.handler(this.normalizeMessage(event.message));
   }
 
-  private normalizeMessage(message: Api.Message): ChannelMessage {
+  private normalizeMessage(message: Api.Message): connections.Message {
     const threadId = peerToThreadId(message.peerId);
     const fromId = message.fromId ? peerToThreadId(message.fromId) : threadId;
     const isOutgoing = message.out === true;
@@ -343,21 +344,23 @@ export class TelegramUserAdapter {
     // consumer.
     const senderDisplayName = isOutgoing ? this.settings.displayName : undefined;
     return {
-      channel: "telegram_user",
-      direction: "inbound",
-      messageId: String(message.id),
-      chatId: threadId as ChatId,
-      senderId: isOutgoing ? this.settings.userId : fromId,
-      ...(senderDisplayName ? { senderDisplayName } : {}),
-      text: message.message ?? "",
-      attachments: extractTelegramAttachments(message.media),
-      timestamp: new Date((message.date ?? Math.floor(Date.now() / 1000)) * 1000),
+      id: String(message.id),
+      // A live message carries no dialog context, so it reads as a group even
+      // in a private chat.
+      where: { chatId: threadId as ChatId, kind: "group" },
+      sender: {
+        accountId: isOutgoing ? this.settings.userId : fromId,
+        ...(senderDisplayName ? { name: senderDisplayName } : {}),
+      },
+      content: {
+        text: message.message ?? "",
+        attachments: extractTelegramAttachments(message.media),
+      },
+      receivedBy: this.settings.userId,
       ...(message.replyTo?.replyToMsgId
         ? { replyTo: { messageId: String(message.replyTo.replyToMsgId) } }
         : {}),
-      // A live message carries no dialog context, so it reads as a group even
-      // in a private chat.
-      thread: { kind: "group" },
+      saidAt: new Date((message.date ?? Math.floor(Date.now() / 1000)) * 1000),
       raw: message,
     };
   }

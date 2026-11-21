@@ -8,10 +8,6 @@ import {
 /** The API routes only a gated feature's pages call, by path under `/api`.
  *  The first match names the route's feature. */
 const GATED_ROUTES: ReadonlyArray<{ feature: GatedFeature; path: RegExp }> = [
-  // Linking an agent to a connected account is Envoys, though it sits under
-  // the accounts People lists.
-  { feature: "envoys", path: /^\/connected-accounts(\/|$)/ },
-  { feature: "envoys", path: /^\/accounts\/[^/]+\/agent$/ },
   { feature: "people", path: /^\/people(\/|$)/ },
   { feature: "people", path: /^\/accounts(\/|$)/ },
   { feature: "inbox", path: /^\/sentinel-log(\/|$)/ },

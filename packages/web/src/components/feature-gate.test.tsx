@@ -18,8 +18,8 @@ afterEach(() => {
 });
 
 describe("this release", () => {
-  it("hides People, Envoys and Inbox", () => {
-    expect(FEATURE_VISIBILITY).toEqual({ people: false, envoys: false, inbox: false });
+  it("hides People and Inbox", () => {
+    expect(FEATURE_VISIBILITY).toEqual({ people: false, inbox: false });
   });
 });
 
@@ -47,16 +47,16 @@ describe("FeatureGate", () => {
 
 describe("FeatureRoute", () => {
   it("sends a hidden feature's address to the home page", () => {
-    hiddenFeatures.add("envoys");
+    hiddenFeatures.add("people");
     render(
-      <MemoryRouter initialEntries={["/envoys"]}>
+      <MemoryRouter initialEntries={["/people"]}>
         <Routes>
           <Route path="/" element={<p>home</p>} />
           <Route
-            path="/envoys"
+            path="/people"
             element={
-              <FeatureRoute feature="envoys">
-                <p>envoys</p>
+              <FeatureRoute feature="people">
+                <p>people</p>
               </FeatureRoute>
             }
           />
@@ -109,7 +109,7 @@ describe("useBuiltinNav", () => {
     const { result } = renderHook(() => useBuiltinNav());
     const ids = result.current.map((entry) => entry.id);
     expect(ids).not.toContain("people");
-    expect(ids).toContain("envoys");
+    expect(ids).toContain("assistants");
     expect(ids).toContain("memory");
   });
 });

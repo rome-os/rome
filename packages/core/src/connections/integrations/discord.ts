@@ -1,7 +1,7 @@
 // Discord connection integration. Channel contract: docs/architecture/channels.md.
 //
 // Discord is a Talker with a single `bot` grant (a pasted bot token). The
-// transport core — gateway lifecycle, the inbound `ChannelMessage`, slash
+// transport core — gateway lifecycle, the inbound `Message`, slash
 // commands, send formatting — is `DiscordAdapter`
 // (packages/core/src/connections/kinds/discord/discord.ts), wrapped here so the runtime's
 // grant-epoch lifecycle and fault→grant-state mapping (registry.ts) drive it.
@@ -18,14 +18,15 @@ import { z } from "zod";
 import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures } from "../types.js";
 import { DiscordAdapter } from "../kinds/discord/discord.js";
-import type { PeopleRepository } from "../../db/repositories/people.js";
-import type { ChatSettingsService } from "../../chat-settings/service.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
 import { directoryPage } from "./talk-features.js";
 import { requireOnFirstUse } from "../../lib/require-on-first-use.js";
+import type { ChatSettingsPort } from "../types.js";
+import { DISCORD_CHAT_RULES } from "@rome/api-types/chat-rules";
 
 const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
 
@@ -105,17 +106,13 @@ export function isDiscordAuthError(err: unknown): boolean {
  * validation + autocomplete).
  */
 export interface DiscordDeps {
-  chatSettings: ChatSettingsService;
+  chatSettings: ChatSettingsPort;
   chatStop?: ChatStopHandler;
   peopleRepo: PeopleRepository;
   listAgents: () => string[];
   /** The agent linked to a Connection's channel, as `accountAgentResolver`
    *  answers it for that channel. */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
-  /** A test-only back door: whether an agent keeps the Inbox app off the
-   *  accounts linked to it (`app-host/inbox-bypass.ts`). Such an account hears
-   *  every message, whatever its chats' settings say. */
-  unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
   /** Injectable token validator so the connect route / tests can drive the
@@ -249,9 +246,11 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
     accountIdOf: (record) => (typeof record.botId === "string" && record.botId) || null,
     link: "own_account",
     grant: "bot",
+    chatRules: DISCORD_CHAT_RULES,
     auth: botScheme,
     capabilities: {
       talker: {
+        reads: true,
         build(cred, kit): Talker {
           const token = cred.material as { token: string };
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
@@ -263,12 +262,6 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             chatStop: deps.chatStop,
             listAgents: deps.listAgents,
             accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
-            unsafeTestOnlyHearEveryMessage: () => {
-              const agent = deps.accountAgentOf?.(kit.connectionId);
-              return (
-                typeof agent === "string" && deps.unsafeTestOnlyBypassesInbox?.(agent) === true
-              );
-            },
             hasAgent: deps.hasAgent,
             resolveDiscordPerson: (channelUserId) =>
               deps.peopleRepo.byAccount({ platform: "discord", id: channelUserId }),
@@ -358,6 +351,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             inboundMedia,
             activity,
             directory,
+            history: { read: (chatId, read) => adapter.readHistory(chatId, read) },
           };
           return {
             start(deliver, fault): void {

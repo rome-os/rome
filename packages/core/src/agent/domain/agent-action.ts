@@ -30,6 +30,9 @@ export interface AgentActions {
   list(turn: TurnFacts): readonly AgentAction[];
   /** Whether the turn's agent may call action `name`, under any of its names. */
   permits(turn: TurnFacts, name: string): boolean;
+  /** The action the turn's agent may call by `name`, under any of its names,
+   *  or undefined for a name it may not call. */
+  find(turn: TurnFacts, name: string): AgentAction | undefined;
   /**
    * Runs an action the turn's agent may call, attributed to the turn. Resolves
    * with the action's result, its domain rejections included. Throws

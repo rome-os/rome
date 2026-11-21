@@ -17,7 +17,7 @@ import PersonDetailPage from "./PersonDetailPage";
 import type { GatedFeature } from "@rome/api-types/features";
 import { isShownInTest } from "@/test/features";
 
-// These tests reach People, Envoys or Inbox, so they run with every feature
+// These tests reach People or Inbox, so they run with every feature
 // shown.
 rs.mock("@/lib/features", () => ({
   isShown: (feature?: GatedFeature) => isShownInTest(feature),

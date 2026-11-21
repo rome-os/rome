@@ -141,7 +141,10 @@ export class DiscordPeer implements Peer {
   }
 
   createAdapter(token = DISCORD_TOKEN): DiscordAdapter {
-    return new DiscordAdapter({ botToken: token, rest: this.restOptions() });
+    return new DiscordAdapter({
+      botToken: token,
+      rest: this.restOptions(),
+    });
   }
 
   /** A user's message, dispatched to every connected gateway session. In a
@@ -149,8 +152,20 @@ export class DiscordPeer implements Peer {
   emitMessage(
     text: string,
     channelId = DISCORD_DM,
-    /** Whom a guild message names: the first bot, or every bot. */
-    options: { mentionsEveryBot?: boolean } = {},
+    options: {
+      /** Whom a guild message names: the first bot, every bot, the second
+       *  bot alone, or nobody. */
+      mentionsEveryBot?: boolean;
+      names?: "second" | "nobody";
+      /** The message it replies to. */
+      replyTo?: string;
+      /** The frame carries the reply's reference but not the message it
+       *  answers, as Discord sends it when it cannot resolve that message, so
+       *  a bot that never saw it fetches it. */
+      referenceOnly?: boolean;
+      /** The first bot hears it well before any other, as one gateway can. */
+      firstBotHearsFirst?: boolean;
+    } = {},
   ): VisibleMessage {
     if (!this.sessions.size) throw new Error("No discord.js gateway session is connected");
     // A person's message is said now, and Discord's id says when: discord.js
@@ -160,25 +175,51 @@ export class DiscordPeer implements Peer {
       conversation: channelId,
       from: "user",
       text,
+      ...(options.replyTo ? { replyTo: options.replyTo } : {}),
     });
     this.stamp(message.id);
-    const wire = this.wire(message);
+    const wire = this.wire(message, options.referenceOnly === true);
     const guild = this.channels.get(channelId)?.guild_id;
-    const named = options.mentionsEveryBot ? [...BOTS.values()] : [BOT];
+    const named =
+      options.names === "nobody"
+        ? []
+        : options.names === "second"
+          ? [SECOND_BOT]
+          : options.mentionsEveryBot
+            ? [...BOTS.values()]
+            : [BOT];
     // A DM is with the first bot alone; every bot is in the guild.
-    this.dispatch(
-      "MESSAGE_CREATE",
-      guild
-        ? {
-            ...wire,
-            guild_id: guild,
-            content: `${named.map((bot) => `<@${bot.id}>`).join(" ")} ${text}`,
-            mentions: named,
-            member: memberOf(),
-          }
-        : wire,
-      guild ? undefined : BOT,
-    );
+    const data = guild
+      ? {
+          ...wire,
+          guild_id: guild,
+          content: [...named.map((bot) => `<@${bot.id}>`), text].join(" "),
+          mentions: named,
+          member: memberOf(),
+        }
+      : wire;
+    if (guild && options.firstBotHearsFirst) {
+      this.dispatch("MESSAGE_CREATE", data, BOT);
+      setTimeout(() => this.dispatch("MESSAGE_CREATE", data, SECOND_BOT), 100);
+    } else {
+      this.dispatch("MESSAGE_CREATE", data, guild ? undefined : BOT);
+    }
+    return message;
+  }
+
+  /** A user's message the bots never heard, as one said before they joined:
+   *  on record, and fetched by id, but never dispatched. */
+  sayUnheard(text: string, channelId: string): VisibleMessage {
+    const message = this.store.add({
+      // The upper half of the low bits keeps it apart from a dispatched id.
+      id: String(
+        ((BigInt(Date.now()) - DISCORD_EPOCH) << 22n) | BigInt((this.sequence + 0x800) & 0xfff),
+      ),
+      conversation: channelId,
+      from: "user",
+      text,
+    });
+    this.stamp(message.id);
     return message;
   }
 

@@ -43,10 +43,7 @@ const CODE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const ROOT_CONFIG = /^(tsconfig.*\.json|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$/;
 
 /** Unit tests that fail on hosts without flock or a D-Bus session bus. */
-const HOST_BOUND_TESTS = [
-  "../../scripts/docker/**",
-  "src/connections/kinds/wechat-user/wechat-user-session.test.ts",
-];
+const HOST_BOUND_TESTS = ["../../scripts/docker/**"];
 
 interface Check {
   name: string;

@@ -78,15 +78,22 @@
       }
     },
     "topicEmpty": {
-      "title": "开一个长期话题",
-      "description": "这里的提醒和任务只出现在这个对话里。",
+      "welcome": "有什么想法？",
+      "label": "建议",
       "starters": {
-        "life": "当我的生活小助手：日程、账单、快递这些琐事都放这里",
-        "work": "帮我跟进工作上的事：项目进度、PR、会议都放这里",
-        "trip": "帮我规划下个月的旅行，相关的事都放这里"
-      },
-      "justAsk": "只是问个问题？",
-      "backToMain": "回主对话问 →"
+        "life": {
+          "label": "账单和杂事放这里",
+          "text": "把我的账单、快递和其他杂事放在这里，到期前提醒我"
+        },
+        "work": {
+          "label": "跟进工作和会议",
+          "text": "在这里跟进我的工作：项目进度、PR 和会议"
+        },
+        "trip": {
+          "label": "规划下个月的旅行",
+          "text": "帮我规划下个月的旅行，相关的事都放在这里"
+        }
+      }
     },
     "activity": {
       "idle": "空闲",
@@ -120,10 +127,10 @@
         "needs_you": "需要你",
         "active": "进行中",
         "later": "稍后",
-        "on_its_own": "自动运行",
+        "scheduled": "定时",
         "ended": "已结束"
       },
-      "empty": "这里还没有在运行的事。",
+      "empty": "还没有任务。",
       "loading": "正在加载任务",
       "loadFailed": "任务加载失败",
       "showMore": "再显示 {{count}} 条",
@@ -132,16 +139,13 @@
         "waitingApproval": "等你批准",
         "running": "运行中",
         "checksIn": "{{when}}检查",
-        "notStarted": "未开始",
-        "stopping": "正在停止…",
-        "opening": "正在打开…",
         "ended": {
           "done": "已完成",
           "failed": "失败",
           "stopped": "已停止",
           "no_response": "无回应"
         },
-        "notStartedAge": "未开始 · {{age}}创建"
+        "active": "进行中"
       },
       "schedule": {
         "daily": "每天 {{time}}",
@@ -157,7 +161,8 @@
       "follow": {
         "digest": "每天 {{times}} 汇总",
         "unavailable": "不可用",
-        "off": "已关闭"
+        "off": "已关闭",
+        "next": "下次 {{when}}"
       },
       "routine": {
         "paused": "已暂停",
@@ -165,28 +170,55 @@
         "fromTask": "来自 {{title}}"
       },
       "actions": {
-        "respond": "去处理",
-        "respondTo": "处理「{{title}}」",
+        "more": "「{{title}}」的更多操作",
         "stop": "停止",
-        "stopTask": "停止「{{title}}」",
-        "openChat": "打开「{{title}}」的聊天"
+        "markDone": "标记完成",
+        "markDoneTask": "将「{{title}}」标记完成",
+        "cancel": "取消",
+        "unfollow": "取消关注",
+        "pause": "暂停",
+        "resume": "恢复",
+        "delete": "删除"
       },
       "failed": {
-        "stop": "停止任务失败"
+        "stop": "停止任务失败",
+        "markDone": "标记完成失败",
+        "cancel": "取消提醒失败",
+        "unfollow": "取消关注失败",
+        "pause": "暂停定时任务失败",
+        "resume": "恢复定时任务失败",
+        "delete": "删除定时任务失败"
       },
-      "created": "创建于 {{when}}",
-      "endedAt": "结束于 {{when}}"
+      "endedAt": "结束于 {{when}}",
+      "needsYouDot": "有任务需要你",
+      "pending": {
+        "stopping": "正在停止…",
+        "finishing": "正在标记完成…",
+        "cancelling": "正在取消…",
+        "unfollowing": "正在取消关注…",
+        "pausing": "正在暂停…",
+        "resuming": "正在恢复…",
+        "deleting": "正在删除…"
+      },
+      "deleteRoutine": {
+        "title": "删除「{{name}}」？",
+        "description": "它将不再运行并被移除，无法撤销。"
+      },
+      "unfollowConfirm": {
+        "title": "取消关注 {{target}}？",
+        "description": "它的提醒和汇总将不再发到这里。要重新关注，请让 Concierge 帮你关注。"
+      }
     },
     "menu": {
       "tasks": "任务",
-      "outputs": "产出"
+      "outputs": "产出",
+      "needsYouDot": "有任务需要你"
     }
   },
   "reply": {
     "action": "回复",
     "dismiss": "取消回复",
-    "jump": "跳到原消息",
-    "openThread": "打开对话串"
+    "jump": "跳到原消息"
   },
   "senderGuardian": "守护者",
   "inputState": {
@@ -221,7 +253,6 @@
     "title": "分享对话",
     "loading": "加载中…",
     "createError": "无法创建链接。",
-    "hydrateError": "无法加载完整的对话以进行分享。",
     "selectedCount_one": "已选择 {{count}} 条消息",
     "selectedCount_other": "已选择 {{count}} 条消息",
     "createTitle": "创建分享链接",
@@ -687,16 +718,6 @@
       "prompt": "构建一个带前端设计的早间简报应用,读取我过去 24 小时的 Gmail 邮件和即将到来的 Google 日历事件。每天上午 8:00 更新仪表盘,展示最新的优先事项、紧急邮件、重要会议、截止日期和推荐的后续行动。识别最需要我关注的事项,并在每次每日更新后通过 Telegram 给我发送简短摘要。"
     }
   },
-  "thread": {
-    "back": "返回对话：{{title}}",
-    "replyPlaceholder": "回复：{{title}}",
-    "untitled": "话题",
-    "open": "打开话题：{{title}}",
-    "stack": "打开话题，最新一条：{{preview}}",
-    "stackCount_one": "{{count}} 条",
-    "stackCount_other": "{{count}} 条",
-    "newReplies": "「{{title}}」有新回复"
-  },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
     "kinds": {
@@ -807,5 +828,20 @@
     "menu": "聊天菜单",
     "project": "项目 · {{name}}",
     "lastModel": "上次回答：{{model}}"
+  },
+  "taskLink": {
+    "status": {
+      "needs_you": "需要你",
+      "active": "进行中",
+      "later": "稍后",
+      "done": "已完成",
+      "failed": "失败",
+      "stopped": "已停止",
+      "no_response": "无回应"
+    },
+    "label": "{{name}},{{status}}",
+    "untitled": "任务",
+    "mainChat": "主对话",
+    "backTo": "返回{{name}}"
   }
 }

@@ -70,6 +70,8 @@ function useIdleAndVisible(): boolean {
 export interface UpgradeAvailability {
   /** The newer release to offer, or null when there is none or the check failed. */
   latest: string | null;
+  /** The running release, set whenever `latest` is. */
+  current: string | null;
   recheck: () => unknown;
   rechecking: boolean;
 }
@@ -95,5 +97,10 @@ export function useUpgradeAvailable(enabled: boolean): UpgradeAvailability {
   // must not leave a stale offer up.
   const check = query.error ? null : query.data;
   const latest = check ? offeredVersion(check) : null;
-  return { latest, recheck: () => query.refetch(), rechecking: query.isFetching };
+  return {
+    latest,
+    current: latest !== null ? (check?.current.version ?? null) : null,
+    recheck: () => query.refetch(),
+    rechecking: query.isFetching,
+  };
 }

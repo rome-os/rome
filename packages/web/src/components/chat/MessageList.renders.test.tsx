@@ -27,7 +27,7 @@ import { type AgentIdentity, buildRows } from "./chat-view";
 import { MessageList, type BlockActions, type LivePreview } from "./MessageList";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
-import { mergeChatMessage } from "@/lib/chat-message-ordering";
+import { mergeChatMessage } from "@/lib/chat-message-merge";
 import type { ChatMessage } from "@/lib/chat-types";
 
 afterEach(() => cleanup());
