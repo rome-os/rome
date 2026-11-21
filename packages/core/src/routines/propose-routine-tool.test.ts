@@ -141,7 +141,7 @@ describe("normalizeRoutineDraftForCard", () => {
     const result = normalizeRoutineDraftForCard({
       ...validSchedule,
       rrule: undefined,
-      date: "2026-07-01",
+      date: "2099-07-01",
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -151,7 +151,7 @@ describe("normalizeRoutineDraftForCard", () => {
       // A dated one-off pins to a fixed absolute zone at creation.
       tzMode: "fixed",
       localTime: "09:00",
-      date: "2026-07-01",
+      date: "2099-07-01",
     });
   });
 
@@ -170,8 +170,27 @@ describe("normalizeRoutineDraftForCard", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("rejects a MONTHLY rrule without BYMONTHDAY (would silently never fire)", () => {
-    const result = normalizeRoutineDraftForCard({ ...validSchedule, rrule: "FREQ=MONTHLY" });
+  // "Turn it on" creates the routine, so a draft that a new routine's rules
+  // refuse never reaches the card.
+  it.each([
+    ["a MONTHLY rule without a day of the month", { rrule: "FREQ=MONTHLY" }],
+    [
+      "a biweekly rule the scheduler would run weekly",
+      { rrule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO" },
+    ],
+    ["a WEEKLY rule without a day", { rrule: "FREQ=WEEKLY" }],
+    ["a rule that ends after a count", { rrule: "FREQ=DAILY;COUNT=3" }],
+    ["a date no calendar has", { rrule: undefined, date: "2099-02-30" }],
+  ])("refuses %s", (_label, fields) => {
+    const result = normalizeRoutineDraftForCard({ ...validSchedule, ...fields });
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses an event filter field with an empty part", () => {
+    const result = normalizeRoutineDraftForCard({
+      ...validInput,
+      filter: [{ field: "from..email", equals: "a@example.test" }],
+    });
     expect(result.ok).toBe(false);
   });
 

@@ -1,135 +1,17 @@
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
-import { publicRoutineRow, toRoutine } from "../../db/repositories/routines.js";
+import { publicRoutineRow } from "../../db/repositories/routines.js";
 import { ownerOfChat } from "../../webchat/owner.js";
-import { didYouMean } from "../../apps/actions/registry.js";
 import { conciergeCallerOwner } from "./concierge.js";
-import {
-  parseDateAndLocalTime,
-  resolveOneOffDate,
-} from "../../routines/schedule-trigger-provider.js";
+import { resolveOneOffDate } from "../../routines/schedule-trigger-provider.js";
 import { resolveGuardianTimezone } from "../../instance/timezone.js";
 import type { ApiDeps } from "../deps.js";
-import { validateActionArgs } from "../../apps/actions/validate-action-args.js";
 import { CHAT_ROUTINE_KEY_PREFIX } from "../../routines/chat-routine-key.js";
 import type { Trigger } from "../../routines/types.js";
-
-// The engine merges trigger payloads into action args under this key. Forbid
-// it in user-supplied args so we never silently overwrite caller data.
-const RESERVED_ARG_KEY = "__triggerPayload";
-
-const LOCAL_TIME_RE = /^\d{2}:\d{2}$/;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** Error when a routine names an action that isn't registered. Names the remedy
- * so the agent routes to building a workflow instead of guessing again. Kept in
- * sync with the create_routine action's copy (core can't import from rome_apps). */
-function unknownActionError(actionName: string, hint: string): string {
-  return (
-    `actionName "${actionName}" is not a registered action${hint} ` +
-    `To run multi-step work that doesn't exist yet, build it first with the ` +
-    `workflow_creation skill (it registers a "<appId>_run" action), then bind the ` +
-    `routine to that action. For one-shot judgement or a notification, use the ` +
-    `built-in "system:summon" or "system:send_message".`
-  );
-}
-
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return (
-    typeof v === "object" &&
-    v !== null &&
-    !Array.isArray(v) &&
-    Object.getPrototypeOf(v) === Object.prototype
-  );
-}
-
-/** Validates against the engine's registered providers and per-type required
- * fields. Fails closed — anything unrecognized is rejected rather than
- * silently persisted as a never-firing routine. */
-function validateTrigger(trigger: Trigger, hasProvider: (type: string) => boolean): string | null {
-  if (!hasProvider(trigger.type)) {
-    return `trigger type "${trigger.type}" is not supported on this server`;
-  }
-  if (trigger.type === "schedule") {
-    if (!trigger.tzid || typeof trigger.tzid !== "string") {
-      return "schedule.tzid is required";
-    }
-    if (!trigger.localTime || !LOCAL_TIME_RE.test(trigger.localTime)) {
-      return 'schedule.localTime must match "HH:mm"';
-    }
-    const [h, m] = trigger.localTime.split(":").map(Number);
-    if (h < 0 || h > 23 || m < 0 || m > 59) {
-      return "schedule.localTime hour/minute out of range";
-    }
-    if (trigger.rrule !== undefined && typeof trigger.rrule !== "string") {
-      return "schedule.rrule must be a string";
-    }
-    if (trigger.date !== undefined) {
-      if (typeof trigger.date !== "string" || !DATE_RE.test(trigger.date)) {
-        return 'schedule.date must match "YYYY-MM-DD"';
-      }
-      if (trigger.rrule?.trim()) {
-        return "schedule.date and schedule.rrule are mutually exclusive";
-      }
-    }
-    // Validate tzid by asking Intl whether it's a real timezone. Avoids
-    // persisting "Asia/Notarealplace" and finding out at fire time.
-    try {
-      new Intl.DateTimeFormat("en-US", { timeZone: trigger.tzid });
-    } catch {
-      return `schedule.tzid "${trigger.tzid}" is not a valid IANA timezone`;
-    }
-    // Every schedule must declare its tz binding explicitly — the
-    // type marks it required, so the API enforces it rather than persisting a
-    // legacy row the read path would have to paper over.
-    if (trigger.tzMode !== "fixed" && trigger.tzMode !== "floating") {
-      return 'schedule.tzMode is required and must be "fixed" or "floating"';
-    }
-  }
-  if (trigger.type === "event-bus") {
-    if (!trigger.eventName || typeof trigger.eventName !== "string") {
-      return "event-bus.eventName is required";
-    }
-    if (trigger.once !== undefined && typeof trigger.once !== "boolean") {
-      return "event-bus.once must be a boolean";
-    }
-  }
-  return null;
-}
-
-/** Reject a dated one-off whose real fire instant has already passed. Resolves
- * date+localTime against the trigger's `tzid` — the same tz-aware
- * conversion the scheduler and create_routine use — rather than treating the
- * wall-clock as UTC, so a one-off in any zone can't slip through as a dead job. */
-function datedOneOffError(trigger: {
-  date?: string;
-  localTime: string;
-  tzid: string;
-}): string | null {
-  const state = datedOneOffState(trigger);
-  if (state === "unparseable") return "schedule.date / localTime is unparseable";
-  if (state === "past") return "schedule.date is in the past";
-  return null;
-}
-
-/** Whether a dated one-off can still fire. A stored tzid Intl rejects makes the
- * parse throw rather than return NaN, so that counts as unparseable too. */
-export function datedOneOffState(trigger: {
-  date?: string;
-  localTime: string;
-  tzid: string;
-}): "unparseable" | "past" | null {
-  if (!trigger.date) return null;
-  let fireAt: Date;
-  try {
-    fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, trigger.tzid);
-  } catch {
-    return "unparseable";
-  }
-  if (Number.isNaN(fireAt.getTime())) return "unparseable";
-  return fireAt.getTime() < Date.now() ? "past" : null;
-}
+import { createRoutine } from "../../routines/create.js";
+import { listRoutineRuns, readRoutineRun } from "../../routines/runs.js";
+import { updateRoutine } from "../../routines/update.js";
 
 interface CreateRoutineBody {
   name?: string;
@@ -156,96 +38,8 @@ interface UpdateRoutineBody {
   enabled?: boolean;
 }
 
-// Rebuilds the action-execution tree for a run from the flat `action_executions`
-// rows that share its root executionId. Two subtleties:
-//  - The root is found by `parentId == null`, NOT `id === rootExecutionId`: on
-//    the routine path the root action gets a fresh id while rootExecutionId is a
-//    pre-seeded group key, so no row's id equals it.
-//  - `{mode:"timestamp"}` is second-resolution, so ordering siblings by
-//    startedAt can tie; the build order is ascending createdAt with a stable
-//    sort — best-effort for same-second siblings.
-
-interface ActionExecutionRowLike {
-  id: string;
-  actionName: string;
-  actionType: string | null;
-  status: string;
-  args: unknown;
-  error: string | null;
-  durationMs: number | null;
-  initiator: string | null;
-  actor?: unknown;
-  parentId: string | null;
-  startedAt: Date | null;
-  finishedAt: Date | null;
-  createdAt: Date;
-}
-
-/** Mirror of the web `ActionNode` shape (minus the recursive type name). */
-export interface ActionTraceNode {
-  id: string;
-  actionName: string;
-  status: string;
-  durationMs: number | null;
-  error: string | null;
-  actionType: string | null;
-  initiator: string | null;
-  actor: unknown;
-  args: unknown;
-  startedAt: number | null;
-  finishedAt: number | null;
-  children: ActionTraceNode[];
-}
-
-const toEpochSeconds = (d: Date | null): number | null =>
-  d ? Math.floor(d.getTime() / 1000) : null;
-
-export function buildActionTrace(rows: ActionExecutionRowLike[]): ActionTraceNode[] {
-  // Ascending createdAt so same-second siblings keep DB insertion order.
-  const ordered = [...rows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  const byId = new Map<string, ActionTraceNode>();
-  for (const r of ordered) {
-    byId.set(r.id, {
-      id: r.id,
-      actionName: r.actionName,
-      status: r.status,
-      durationMs: r.durationMs ?? null,
-      error: r.error ?? null,
-      actionType: r.actionType ?? null,
-      initiator: r.initiator ?? null,
-      actor: r.actor ?? null,
-      args: r.args ?? null,
-      startedAt: toEpochSeconds(r.startedAt),
-      finishedAt: toEpochSeconds(r.finishedAt),
-      children: [],
-    });
-  }
-  const roots: ActionTraceNode[] = [];
-  for (const r of ordered) {
-    const node = byId.get(r.id)!;
-    const parent = r.parentId ? byId.get(r.parentId) : undefined;
-    // Root = no parent. An orphan (parentId set but absent from the set) is
-    // reparented to root rather than silently dropped.
-    if (parent) parent.children.push(node);
-    else roots.push(node);
-  }
-  const sortChildren = (nodes: ActionTraceNode[]) => {
-    nodes.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
-    for (const n of nodes) sortChildren(n.children);
-  };
-  sortChildren(roots);
-  return roots;
-}
-
 export function routinesRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
-
-  // Reject binding a routine to an action that isn't registered, so POST can't
-  // persist a routine that errors on every fire.
-  const unregisteredActionError = (actionName: string): string | null =>
-    !deps.actionRegistry.has(actionName)
-      ? unknownActionError(actionName, didYouMean(deps.actionRegistry, actionName) || ".")
-      : null;
 
   // Enriches each routine with its latest run so the dashboard can render the
   // status badge (Active / Running / Failed) and the "last run failed" line
@@ -292,28 +86,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     const takenId = await existingIdForKey(body.key);
     if (takenId) return keyTaken(takenId);
 
-    if (!body.trigger || !body.trigger.type) {
-      return c.json({ error: "trigger is required" }, 400);
-    }
-    if (!body.actionName) {
-      return c.json({ error: "actionName is required" }, 400);
-    }
-    // The propose_routine card toggles through here, so this also guards the
-    // chat-driven path.
-    const actionError = unregisteredActionError(body.actionName);
-    if (actionError) {
-      return c.json({ error: actionError }, 400);
-    }
-    if (body.args !== undefined && !isPlainObject(body.args)) {
-      // Routine args are a single object; arrays / primitives are rejected
-      // because the engine spreads them into the action invocation and an
-      // array would silently become {0:..., 1:...}. Fan-out semantics from
-      // the legacy event system are intentionally not supported.
-      return c.json({ error: "args must be a plain object" }, 400);
-    }
-    if (body.args && RESERVED_ARG_KEY in body.args) {
-      return c.json({ error: `args may not contain reserved key "${RESERVED_ARG_KEY}"` }, 400);
-    }
+    let madeIn: string | undefined;
     if (body.chatId !== undefined) {
       const owner = await conciergeCallerOwner(deps.dashboardAccessState);
       const chatOwner =
@@ -323,45 +96,33 @@ export function routinesRoutes(deps: ApiDeps): Hono {
               : ownerOfChat((id) => deps.webchatRepo.getSession(id), body.chatId))
           : null;
       if (!owner || chatOwner !== owner) return c.json({ error: "No such chat" }, 404);
-    }
-    const resolvedActionName = body.actionName;
-    const argsError = validateActionArgs(
-      resolvedActionName,
-      body.args ?? {},
-      deps.actionRegistry.get(resolvedActionName)?.inputSchema,
-    );
-    if (argsError) {
-      return c.json({ error: argsError }, 400);
-    }
-    const triggerError = validateTrigger(body.trigger, (t) => deps.routineEngine.hasProvider(t));
-    if (triggerError) {
-      return c.json({ error: triggerError }, 400);
-    }
-    body.trigger = await resolveOneOffDate(body.trigger, () =>
-      resolveGuardianTimezone(deps.settingsRepo),
-    );
-    if (body.trigger.type === "schedule" && body.trigger.date) {
-      body.trigger.tzMode = "fixed";
-      const datedError = datedOneOffError(body.trigger);
-      if (datedError) {
-        return c.json({ error: datedError }, 400);
-      }
+      madeIn = body.chatId;
     }
 
-    let id: string;
+    let result: Awaited<ReturnType<typeof createRoutine>>;
     try {
       // The one creation path, so the routine works for the right chat
       // (routineChatOf) and acts for the person turning it on, from Settings
       // or a chat's card.
-      id = await deps.routinesRepo.create({
-        name: body.name ?? "",
-        ...(body.key !== undefined ? { key: body.key } : {}),
-        enabled: body.enabled ?? true,
-        trigger: body.trigger,
-        actionName: resolvedActionName,
-        args: body.args ?? {},
-        ...(body.chatId ? { madeIn: body.chatId } : {}),
-      });
+      result = await createRoutine(
+        {
+          name: body.name,
+          ...(body.key !== undefined ? { key: body.key } : {}),
+          trigger: body.trigger,
+          actionName: body.actionName,
+          ...(body.args !== undefined ? { args: body.args } : {}),
+          enabled: body.enabled ?? true,
+        },
+        {
+          routinesRepo: deps.routinesRepo,
+          routineEngine: deps.routineEngine,
+          actionRegistry: deps.actionRegistry,
+          resolveOneOffDate: (trigger) =>
+            resolveOneOffDate(trigger, () => resolveGuardianTimezone(deps.settingsRepo)),
+          hasTriggerType: (type) => deps.routineEngine.hasProvider(type),
+        },
+        { kind: "person", ...(madeIn ? { madeIn } : {}) },
+      );
     } catch (err) {
       // Lost a race with a concurrent create of the same key: the UNIQUE
       // constraint is the backstop for the check above.
@@ -369,11 +130,12 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       if (existingId) return keyTaken(existingId);
       throw err;
     }
-    const [inserted] = await deps.db.select().from(routines).where(eq(routines.id, id));
-
-    if (inserted?.enabled) {
-      await deps.routineEngine.activate(toRoutine(inserted));
+    if (result.status === "error") {
+      if (result.existingId) return keyTaken(result.existingId);
+      return c.json({ error: result.error }, 400);
     }
+    const id = result.data.routineId;
+    const [inserted] = await deps.db.select().from(routines).where(eq(routines.id, id));
 
     return c.json(inserted ? publicRoutineRow(inserted) : inserted, 201);
   });
@@ -392,57 +154,21 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       );
     }
 
-    // Turning a one-off back on after its date has passed would leave it
-    // enabled with nothing left to fire.
-    if (body.enabled === true) {
-      const [current] = await deps.db.select().from(routines).where(eq(routines.id, id));
-      const trigger = current ? toRoutine(current).trigger : undefined;
-      // Writers and migration 0076 date every one-off, so only a malformed row
-      // reaches here with neither date nor rrule, and the scheduler refuses it.
-      if (trigger?.type === "schedule" && !trigger.date && !trigger.rrule?.trim()) {
-        return c.json(
-          {
-            error: `This one-off at ${trigger.localTime} has no date and can no longer run. Create a new routine to run it.`,
-          },
-          400,
-        );
-      }
-      const state = trigger?.type === "schedule" ? datedOneOffState(trigger) : null;
-      if (state === "past" && trigger?.type === "schedule") {
-        return c.json(
-          {
-            error: `This one-off was set for ${trigger.date} at ${trigger.localTime}, which has passed. Create a new routine to run it again.`,
-          },
-          400,
-        );
-      }
-      if (state === "unparseable") {
-        return c.json({ error: "schedule.date / localTime is unparseable" }, 400);
-      }
-    }
-
-    const updates: Record<string, unknown> = {};
-    if (body.name !== undefined) updates.name = body.name;
-    if (body.enabled !== undefined) updates.enabled = body.enabled;
-
-    if (Object.keys(updates).length === 0) {
+    if (body.name === undefined && body.enabled === undefined) {
       return c.json({ error: "No fields to update" }, 400);
     }
 
-    const result = await deps.db.update(routines).set(updates).where(eq(routines.id, id));
-    if (Number(result.changes ?? 0) === 0) {
-      return c.json({ error: "Routine not found" }, 404);
-    }
-
+    const result = await updateRoutine(
+      { routines: deps.routinesRepo, engine: deps.routineEngine },
+      id,
+      {
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.enabled !== undefined ? { enabled: body.enabled } : {}),
+      },
+    );
+    if (result.status === "not-found") return c.json({ error: "Routine not found" }, 404);
+    if (result.status === "refused") return c.json({ error: result.error }, 400);
     const [updated] = await deps.db.select().from(routines).where(eq(routines.id, id));
-
-    if (updated) {
-      await deps.routineEngine.deactivate(id);
-      if (updated.enabled) {
-        await deps.routineEngine.activate(toRoutine(updated));
-      }
-    }
-
     return c.json(updated ? publicRoutineRow(updated) : updated);
   });
 
@@ -521,29 +247,20 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     const id = c.req.param("id");
     const limit = parseInt(c.req.query("limit") ?? "20", 10);
     const offset = parseInt(c.req.query("offset") ?? "0", 10);
-
-    const runs = await deps.routineRunsRepo.findByRoutineId(id, {
-      limit,
-      offset,
-    });
-    return c.json(runs);
+    return c.json(
+      await listRoutineRuns({ routineRuns: deps.routineRunsRepo }, id, { limit, offset }),
+    );
   });
 
   // Lazy-loaded when a run row is expanded.
   app.get("/routines/:id/runs/:runId/trace", async (c) => {
-    const id = c.req.param("id");
-    const runId = c.req.param("runId");
-    const run = await deps.routineRunsRepo.findById(runId);
-    if (!run || run.routineId !== id) {
-      return c.json({ error: "Run not found" }, 404);
-    }
-    const rows = await deps.actionExecutionsRepo.findByRootExecutionIds([run.executionId]);
-    return c.json({
-      runId: run.id,
-      status: run.status,
-      error: run.error ?? null,
-      roots: buildActionTrace(rows),
-    });
+    const detail = await readRoutineRun(
+      { routineRuns: deps.routineRunsRepo, actionExecutions: deps.actionExecutionsRepo },
+      c.req.param("id"),
+      c.req.param("runId"),
+    );
+    if (!detail) return c.json({ error: "Run not found" }, 404);
+    return c.json(detail);
   });
 
   return app;
