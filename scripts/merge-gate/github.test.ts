@@ -105,7 +105,34 @@ describe("restClient.putCheckRun", () => {
   });
 });
 
+describe("restClient.putCheckRun, in progress", () => {
+  it("writes an in-progress run with no conclusion when the report has none", async () => {
+    const f = fakeFetch([json({ check_runs: [] }), json({ id: 1 }, 201)]);
+    await client(f.fetch).putCheckRun("o/r", "sha1", {
+      title: "deciding",
+      summary: "s",
+      conclusion: null,
+    });
+    expect(f.calls[1]?.body).toEqual({
+      name: "merge gate",
+      head_sha: "sha1",
+      status: "in_progress",
+      output: { title: "deciding", summary: "s" },
+    });
+  });
+});
+
 describe("restClient auto-merge", () => {
+  it("names the HTTP status when GraphQL fails without errors", async () => {
+    const f = fakeFetch([json({ message: "Server Error" }, 502)]);
+    await expect(client(f.fetch).disableAutoMerge("PR_7")).rejects.toThrow(/^HTTP 502$/);
+  });
+
+  it("joins GitHub's messages with a semicolon, also on a non-2xx response", async () => {
+    const f = fakeFetch([json({ errors: [{ message: "a" }, { message: "b" }] }, 403)]);
+    await expect(client(f.fetch).enableAutoMerge("PR_7", "sha1")).rejects.toThrow(/^a; b$/);
+  });
+
   it("reads the PR's node id and whether auto-merge is on from GraphQL", async () => {
     const pr = { id: "PR_7", autoMergeRequest: { enabledAt: "2026-11-20T00:00:00Z" } };
     const f = fakeFetch([json({ data: { repository: { pullRequest: pr } } })]);

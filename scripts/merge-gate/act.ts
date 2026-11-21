@@ -1,20 +1,25 @@
 // Acts on the gate's decision for one head commit and writes the `merge gate`
 // check run. The gate never merges a PR itself: it only turns GitHub's
 // auto-merge on or off, and GitHub merges once every required check on the head
-// commit is green.
+// commit is green. With the policy's `enabled` false it makes no auto-merge call
+// at all.
 //
 // `merge gate` is a required check, and a new head commit has none until the
-// gate writes it, so every auto-merge call comes before the check run. Turning
-// auto-merge off before a neutral run closes the window in which a commit that
-// no longer qualifies could merge on an earlier commit's decision.
+// gate writes it. On `merge` the gate first writes the run as in progress, so
+// the PR is not yet mergeable when auto-merge is turned on: GitHub refuses to
+// turn auto-merge on for a PR it could merge at once. Turning auto-merge off
+// before a neutral run closes the window in which a commit that no longer
+// qualifies could merge on an earlier commit's decision.
 
 import {
   type CheckReport,
+  DECIDING,
   disableFailedReport,
   enableFailedReport,
   errorReport,
   type GitHub,
   mergingReport,
+  type Outcome,
   type PullRequest,
   reportFor,
   runGate,
@@ -23,7 +28,7 @@ import {
 /**
  * Decides the PR, turns auto-merge on or off to match, then writes the check run
  * on `pr.headSha`. `show` receives the report before the check run is written.
- * Throws only when the check run cannot be written.
+ * Throws only when a check run cannot be written.
  */
 export async function judge(
   gh: GitHub,
@@ -40,27 +45,33 @@ export async function judge(
 
 /**
  * Makes the auto-merge calls the outcome calls for and returns the check run to
- * write. Never throws. `report-only` makes no call that changes the PR.
+ * write. On `merge` it also writes the in-progress check run before it turns
+ * auto-merge on. Throws only when that check run cannot be written, and then
+ * makes no enable call.
  */
-export async function act(
-  gh: GitHub,
-  pr: PullRequest,
-  outcome: Awaited<ReturnType<typeof runGate>>,
-): Promise<CheckReport> {
-  if ("decision" in outcome && outcome.decision.action === "report-only") {
-    return reportFor(outcome.decision);
-  }
+export async function act(gh: GitHub, pr: PullRequest, outcome: Outcome): Promise<CheckReport> {
+  const report = "decision" in outcome ? reportFor(outcome.decision) : errorReport(outcome.error);
+  if (!outcome.enabled) return report;
+
   if ("decision" in outcome && outcome.decision.action === "merge") {
+    const { decision } = outcome;
+    let state: Awaited<ReturnType<GitHub["autoMerge"]>>;
     try {
-      const { pullRequestId } = await gh.autoMerge(pr.repo, pr.number);
-      await gh.enableAutoMerge(pullRequestId, pr.headSha);
+      state = await gh.autoMerge(pr.repo, pr.number);
     } catch (error) {
-      return enableFailedReport(outcome.decision, error);
+      return enableFailedReport(decision, error);
     }
-    return mergingReport(outcome.decision);
+    await gh.putCheckRun(pr.repo, pr.headSha, DECIDING);
+    if (!state.enabled) {
+      try {
+        await gh.enableAutoMerge(state.pullRequestId, pr.headSha);
+      } catch (error) {
+        return enableFailedReport(decision, error);
+      }
+    }
+    return mergingReport(decision);
   }
 
-  const report = "decision" in outcome ? reportFor(outcome.decision) : errorReport(outcome.error);
   try {
     const state = await gh.autoMerge(pr.repo, pr.number);
     if (state.enabled) await gh.disableAutoMerge(state.pullRequestId);

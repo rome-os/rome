@@ -43,6 +43,13 @@ export interface CheckReport {
   conclusion: "success" | "neutral" | "failure";
 }
 
+/** A check run that is still running: it has no conclusion yet, so it holds the required check pending. */
+export interface PendingReport {
+  title: string;
+  summary: string;
+  conclusion: null;
+}
+
 /** A PR's auto-merge state, as the API reports it at the time of the call. */
 export interface AutoMerge {
   /** The PR's GraphQL node id, which the auto-merge mutations take. */
@@ -56,8 +63,11 @@ export interface GitHub {
   listFiles(repo: string, number: number): Promise<ApiFile[]>;
   /** The file's text at `ref`, or undefined when no file exists there. */
   readFile(repo: string, path: string, ref: string): Promise<string | undefined>;
-  /** Creates the check run on `headSha`, or updates the one this workflow made there before. */
-  putCheckRun(repo: string, headSha: string, report: CheckReport): Promise<void>;
+  /**
+   * Creates the check run on `headSha`, or updates the one this workflow made
+   * there before. A report with a null conclusion leaves the run `in_progress`.
+   */
+  putCheckRun(repo: string, headSha: string, report: CheckReport | PendingReport): Promise<void>;
   /** Reads whether auto-merge is on for the PR. */
   autoMerge(repo: string, number: number): Promise<AutoMerge>;
   /** Turns auto-merge on with the squash method. GitHub refuses it once the head is no longer `headSha`. */
@@ -145,22 +155,40 @@ export function wholeFileAdded(content: string): string {
 }
 
 /**
- * Decides the PR against the policy text from main. Returns the decision, or
- * the error that kept the gate from deciding. Never throws.
+ * What the gate concluded for one PR: the decision, or the error that kept it
+ * from deciding. `enabled` is the policy's `enabled`, and true whenever the
+ * policy cannot be read, so an unreadable policy never leaves auto-merge on.
  */
+export type Outcome = ({ decision: Decision } | { error: unknown }) & { enabled: boolean };
+
+/** Decides the PR against the policy text from main. Never throws. */
 export async function runGate(
   gh: GitHub,
   pr: PullRequest,
   policyText: () => string,
-): Promise<{ decision: Decision } | { error: unknown }> {
+): Promise<Outcome> {
+  let enabled = true;
   try {
     const policy: unknown = JSON.parse(policyText());
+    enabled = enabledIn(policy);
     const files = await gatherFiles(gh, pr);
     const input = parseInput({ pr: { author: pr.author, fromFork: pr.fromFork }, policy, files });
-    return { decision: decide(input) };
+    return { decision: decide(input), enabled };
   } catch (error) {
-    return { error };
+    return { error, enabled };
   }
+}
+
+/**
+ * The policy's `enabled` when it is a boolean, else true. A policy that parses
+ * but is malformed elsewhere still says whether a person switched the gate on.
+ */
+function enabledIn(policy: unknown): boolean {
+  const value =
+    typeof policy === "object" && policy !== null
+      ? (policy as Record<string, unknown>).enabled
+      : undefined;
+  return typeof value === "boolean" ? value : true;
 }
 
 /** The check run for a decision. */
@@ -191,7 +219,17 @@ export function mergingReport(decision: Decision): CheckReport {
   return { ...reportFor(decision), summary: fit(lines.join("\n")) };
 }
 
-/** The check run for a `merge` decision when auto-merge could not be turned on. */
+/** The in-progress check run a `merge` decision writes before it turns auto-merge on. */
+export const DECIDING: PendingReport = {
+  title: "deciding",
+  summary: "The gate is turning auto-merge on for this commit.",
+  conclusion: null,
+};
+
+/**
+ * The check run for a `merge` decision when auto-merge could not be turned on,
+ * or whether it was on could not be read.
+ */
 export function enableFailedReport(decision: Decision, error: unknown): CheckReport {
   const lines = decision.summary.split("\n");
   lines.splice(3, 0, "", `Auto-merge could not be turned on: ${messageOf(error)}.`);

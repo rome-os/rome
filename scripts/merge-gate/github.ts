@@ -12,8 +12,9 @@ const MAX_FILE_PAGES = 30;
 
 /**
  * A GitHub client that authenticates with `token`. Every non-2xx response
- * throws, except a 404 from readFile, and so does a GraphQL response that
- * carries errors, with GitHub's messages as the error's message.
+ * throws, except a 404 from readFile. A GraphQL call also throws when the
+ * response carries errors. A GraphQL error's message is GitHub's messages
+ * joined by "; ", or `HTTP <status>` when there are none.
  */
 export function restClient(opts: { token: string; apiUrl: string; fetch?: Fetch }): GitHub {
   const doFetch = opts.fetch ?? fetch;
@@ -40,12 +41,16 @@ export function restClient(opts: { token: string; apiUrl: string; fetch?: Fetch 
       headers: { ...headers(), "Content-Type": "application/json" },
       body: JSON.stringify({ query, variables }),
     });
-    if (!res.ok) throw await httpError("POST", "/graphql", res);
-    const body = (await res.json()) as { data?: unknown; errors?: { message?: string }[] };
-    if (body.errors && body.errors.length > 0) {
-      throw new Error(body.errors.map((e) => e.message ?? "unknown error").join("; "));
+    const body = (await res.json().catch(() => ({}))) as {
+      data?: unknown;
+      errors?: { message?: string }[];
+    } | null;
+    const errors = Array.isArray(body?.errors) ? body.errors : [];
+    if (errors.length > 0) {
+      throw new Error(errors.map((e) => e.message ?? "unknown error").join("; "));
     }
-    return body.data;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return body?.data;
   }
 
   return {
@@ -80,13 +85,17 @@ export function restClient(opts: { token: string; apiUrl: string; fetch?: Fetch 
       // Only a run this workflow's token made is updated. Another app may use the
       // same name, and its run is not ours to overwrite.
       const own = listed.check_runs.find((r) => r.app?.slug === "github-actions");
-      const body = {
-        name: CHECK_NAME,
-        status: "completed",
-        conclusion: report.conclusion,
-        completed_at: new Date().toISOString(),
-        output: { title: report.title, summary: report.summary },
-      };
+      const output = { title: report.title, summary: report.summary };
+      const body =
+        report.conclusion === null
+          ? { name: CHECK_NAME, status: "in_progress", output }
+          : {
+              name: CHECK_NAME,
+              status: "completed",
+              conclusion: report.conclusion,
+              completed_at: new Date().toISOString(),
+              output,
+            };
       if (own) await call("PATCH", `/repos/${repo}/check-runs/${own.id}`, body);
       else await call("POST", `/repos/${repo}/check-runs`, { ...body, head_sha: headSha });
     },

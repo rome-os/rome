@@ -6,7 +6,13 @@ import { restClient } from "./github.js";
 interface Request {
   method: string;
   url: string;
-  body?: { query?: string; variables?: Record<string, unknown>; conclusion?: string };
+  body?: {
+    query?: string;
+    variables?: Record<string, unknown>;
+    status?: string;
+    conclusion?: string;
+    output?: { title?: string };
+  };
 }
 
 /** What the fake API answers. Each GraphQL answer is the response body, or an HTTP status. */
@@ -22,6 +28,8 @@ interface Api {
 /** A fake GitHub API over an injected fetch that records every request in order. */
 function fakeApi(api: Api) {
   const requests: Request[] = [];
+  /** Ids of the check runs this workflow has created on head1. */
+  const runs: number[] = [];
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   const fetch = async (url: string, init?: RequestInit) => {
@@ -33,8 +41,14 @@ function fakeApi(api: Api) {
       const files = api.files ?? [];
       return typeof files === "number" ? json({ message: "boom" }, files) : json(files);
     }
-    if (path.startsWith("/repos/o/rome/commits/head1/check-runs")) return json({ check_runs: [] });
-    if (path === "/repos/o/rome/check-runs" && method === "POST") return json({ id: 1 }, 201);
+    if (path.startsWith("/repos/o/rome/commits/head1/check-runs")) {
+      return json({ check_runs: runs.map((id) => ({ id, app: { slug: "github-actions" } })) });
+    }
+    if (path === "/repos/o/rome/check-runs" && method === "POST") {
+      runs.push(runs.length + 1);
+      return json({ id: runs.length }, 201);
+    }
+    if (/^\/repos\/o\/rome\/check-runs\/\d+$/.test(path) && method === "PATCH") return json({});
     if (path === "/graphql") {
       const query = String(body.query);
       if (query.includes("enablePullRequestAutoMerge")) return answer(api.enable);
@@ -90,8 +104,10 @@ async function run(api: Api, enabled: boolean) {
     if (q.includes("enablePullRequestAutoMerge")) return "enable";
     if (q.includes("disablePullRequestAutoMerge")) return "disable";
     if (r.url.endsWith("/graphql")) return "read auto-merge";
-    if (r.method === "POST" && r.url.endsWith("/check-runs"))
-      return `check run ${r.body?.conclusion}`;
+    if (r.method === "POST" || r.method === "PATCH") {
+      const verb = r.method === "POST" ? "create" : "update";
+      return `${verb} check run ${r.body?.conclusion ?? r.body?.status}`;
+    }
     return `${r.method} ${r.url.replace("https://api.test", "").split("?")[0]}`;
   };
   return { report, requests: f.requests, steps: f.requests.map(step) };
@@ -99,16 +115,24 @@ async function run(api: Api, enabled: boolean) {
 
 const AUTO_MERGE_ON = { enabledAt: "2026-11-20T00:00:00Z" };
 
+const LIST = "GET /repos/o/rome/commits/head1/check-runs";
+const FILES = "GET /repos/o/rome/pulls/7/files";
+
 describe("judge, by decision", () => {
-  it("merge: turns auto-merge on bound to the head, then writes a success check run", async () => {
+  it("merge: marks the run in progress, turns auto-merge on bound to the head, then succeeds", async () => {
     const { report, requests, steps } = await run({ files: [listed] }, true);
     expect(steps).toEqual([
-      "GET /repos/o/rome/pulls/7/files",
+      FILES,
       "read auto-merge",
+      LIST,
+      "create check run in_progress",
       "enable",
-      "GET /repos/o/rome/commits/head1/check-runs",
-      "check run success",
+      LIST,
+      "update check run success",
     ]);
+    const pending = requests.find((r) => r.body?.status === "in_progress");
+    expect(pending?.body).not.toHaveProperty("conclusion");
+    expect(pending?.body?.output?.title).toBe("deciding");
     const enables = requests.filter((r) => r.body?.query?.includes("enablePullRequestAutoMerge"));
     expect(enables).toHaveLength(1);
     expect(enables[0]?.url).toBe("https://api.test/graphql");
@@ -125,10 +149,17 @@ describe("judge, by decision", () => {
     ]);
   });
 
-  it("merge: turns auto-merge on even when an earlier commit turned it on", async () => {
-    const { steps } = await run({ files: [listed], autoMergeRequest: AUTO_MERGE_ON }, true);
-    expect(steps.filter((s) => s === "enable")).toHaveLength(1);
-    expect(steps).not.toContain("disable");
+  it("merge: makes no enable call when auto-merge is already on", async () => {
+    const { report, steps } = await run({ files: [listed], autoMergeRequest: AUTO_MERGE_ON }, true);
+    expect(steps).toEqual([
+      FILES,
+      "read auto-merge",
+      LIST,
+      "create check run in_progress",
+      LIST,
+      "update check run success",
+    ]);
+    expect(report.summary.split("\n")[2]).toBe(MERGING_LINE);
   });
 
   it("report-only: makes only reads and the check run write", async () => {
@@ -138,75 +169,109 @@ describe("judge, by decision", () => {
     expect(writes[0]).toMatchObject({
       method: "POST",
       url: "https://api.test/repos/o/rome/check-runs",
-      body: { conclusion: "success" },
+      body: { status: "completed", conclusion: "success" },
     });
     expect(requests.some((r) => r.url.endsWith("/graphql"))).toBe(false);
     expect(report.title).toBe("would merge itself");
   });
 
-  it.each([
-    true,
-    false,
-  ])("none, enabled %s: turns auto-merge off before a neutral check run", async (enabled) => {
+  it("none: turns auto-merge off before a neutral check run", async () => {
     const { report, steps } = await run(
       { files: [unlisted], autoMergeRequest: AUTO_MERGE_ON },
-      enabled,
+      true,
     );
-    expect(steps).toEqual([
-      "GET /repos/o/rome/pulls/7/files",
-      "read auto-merge",
-      "disable",
-      "GET /repos/o/rome/commits/head1/check-runs",
-      "check run neutral",
-    ]);
+    expect(steps).toEqual([FILES, "read auto-merge", "disable", LIST, "create check run neutral"]);
     expect(report.title).toBe("needs you: 1 reason");
   });
 
   it("none: leaves auto-merge alone when it is off", async () => {
     const { steps } = await run({ files: [unlisted] }, true);
-    expect(steps).toEqual([
-      "GET /repos/o/rome/pulls/7/files",
-      "read auto-merge",
-      "GET /repos/o/rome/commits/head1/check-runs",
-      "check run neutral",
-    ]);
+    expect(steps).toEqual([FILES, "read auto-merge", LIST, "create check run neutral"]);
   });
 
   it("error: turns auto-merge off before a neutral check run, like none", async () => {
     const { report, steps } = await run({ files: 502, autoMergeRequest: AUTO_MERGE_ON }, true);
-    expect(steps).toEqual([
-      "GET /repos/o/rome/pulls/7/files",
-      "read auto-merge",
-      "disable",
-      "GET /repos/o/rome/commits/head1/check-runs",
-      "check run neutral",
-    ]);
+    expect(steps).toEqual([FILES, "read auto-merge", "disable", LIST, "create check run neutral"]);
+    expect(report.title).toBe("needs you: the gate could not decide");
+  });
+
+  it("error, policy unreadable: acts as if enabled and turns auto-merge off", async () => {
+    const f = fakeApi({ files: [listed], autoMergeRequest: AUTO_MERGE_ON });
+    const gh = restClient({ token: "t", apiUrl: "https://api.test", fetch: f.fetch });
+    const report = await judge(gh, pr, () => "{");
+    expect(
+      f.requests.filter((r) => r.body?.query?.includes("disablePullRequestAutoMerge")),
+    ).toHaveLength(1);
+    expect(report.title).toBe("needs you: the gate could not decide");
+  });
+});
+
+describe("judge, with the policy's enabled false", () => {
+  it.each([
+    ["none", { files: [unlisted] }, "needs you: 1 reason"],
+    ["error", { files: 502 }, "needs you: the gate could not decide"],
+    ["report-only", { files: [listed] }, "would merge itself"],
+  ] as const)("%s: never reads or changes auto-merge, even when it is on", async (_, api, title) => {
+    const { report, requests, steps } = await run(
+      { ...api, autoMergeRequest: AUTO_MERGE_ON },
+      false,
+    );
+    expect(requests.some((r) => r.url.endsWith("/graphql"))).toBe(false);
+    expect(steps.slice(-2)).toEqual([LIST, `create check run ${report.conclusion}`]);
+    expect(requests.filter((r) => r.method !== "GET")).toHaveLength(1);
+    expect(report.title).toBe(title);
+  });
+
+  it("error, policy malformed but enabled false: still hands off", async () => {
+    const f = fakeApi({ files: [listed], autoMergeRequest: AUTO_MERGE_ON });
+    const gh = restClient({ token: "t", apiUrl: "https://api.test", fetch: f.fetch });
+    const report = await judge(gh, pr, () => JSON.stringify({ enabled: false }));
+    expect(f.requests.some((r) => r.url.endsWith("/graphql"))).toBe(false);
     expect(report.title).toBe("needs you: the gate could not decide");
   });
 });
 
 describe("judge, when auto-merge cannot be changed", () => {
-  it("writes a neutral run with the API's message when auto-merge cannot be turned on", async () => {
-    const enable = { errors: [{ message: "Auto merge is not allowed for this repository" }] };
+  it("writes a neutral run with the API's messages when auto-merge cannot be turned on", async () => {
+    const enable = {
+      errors: [
+        { message: "Auto merge is not allowed for this repository." },
+        { message: "Try later" },
+      ],
+    };
     const { report, steps } = await run({ files: [listed], enable }, true);
     expect(steps).toEqual([
-      "GET /repos/o/rome/pulls/7/files",
+      FILES,
       "read auto-merge",
+      LIST,
+      "create check run in_progress",
       "enable",
-      "GET /repos/o/rome/commits/head1/check-runs",
-      "check run neutral",
+      LIST,
+      "update check run neutral",
     ]);
     expect(report.title).toBe("qualifies, but auto-merge could not be turned on");
-    expect(report.summary.split("\n")[0]).toBe("**Merge gate: qualifies.**");
-    expect(report.summary).toContain(
-      "Auto-merge could not be turned on: Auto merge is not allowed for this repository.",
-    );
+    expect(report.summary.split("\n").slice(0, 6)).toEqual([
+      "**Merge gate: qualifies.**",
+      "",
+      "Every changed path is listed in the merge policy, so this PR merges itself.",
+      "",
+      "Auto-merge could not be turned on: Auto merge is not allowed for this repository.; Try later.",
+      "",
+    ]);
+    expect(report.summary.split("\n")[6]).toMatch(/^- `/);
   });
 
-  it("writes a neutral run when the enable call returns an HTTP error", async () => {
+  it("names the HTTP status when the enable call fails without GraphQL errors", async () => {
     const { report } = await run({ files: [listed], enable: 502 }, true);
     expect(report.conclusion).toBe("neutral");
-    expect(report.summary).toMatch(/Auto-merge could not be turned on: .*502/);
+    expect(report.summary).toContain("Auto-merge could not be turned on: HTTP 502.");
+  });
+
+  it("merge: counts a failed read of auto-merge as a failed enable, with no enable call", async () => {
+    const { report, steps } = await run({ files: [listed], stateStatus: 502 }, true);
+    expect(steps).toEqual([FILES, "read auto-merge", LIST, "create check run neutral"]);
+    expect(report.title).toBe("qualifies, but auto-merge could not be turned on");
+    expect(report.summary).toContain("Auto-merge could not be turned on: HTTP 502.");
   });
 
   it("writes a failure run when auto-merge cannot be turned off", async () => {
@@ -215,19 +280,33 @@ describe("judge, when auto-merge cannot be changed", () => {
       { files: [unlisted], autoMergeRequest: AUTO_MERGE_ON, disable },
       true,
     );
-    expect(steps.slice(-3)).toEqual([
-      "disable",
-      "GET /repos/o/rome/commits/head1/check-runs",
-      "check run failure",
-    ]);
+    expect(steps.slice(-3)).toEqual(["disable", LIST, "create check run failure"]);
     expect(report.title).toBe("needs you: auto-merge could not be turned off");
-    expect(report.summary).toContain("Auto-merge could not be turned off: Something went wrong.");
+    expect(report.summary.split("\n").slice(3, 6)).toEqual([
+      "",
+      "Auto-merge could not be turned off: Something went wrong.",
+      "",
+    ]);
   });
 
-  it("writes a failure run when whether auto-merge is on cannot be read", async () => {
+  it("needs you: counts a failed read of auto-merge as a failed disable", async () => {
     const { report, steps } = await run({ files: [unlisted], stateStatus: 502 }, true);
     expect(steps).not.toContain("disable");
     expect(report.conclusion).toBe("failure");
     expect(report.title).toBe("needs you: auto-merge could not be turned off");
+    expect(report.summary).toContain("Auto-merge could not be turned off: HTTP 502.");
+  });
+
+  it("makes no enable call when the in-progress check run cannot be written", async () => {
+    const f = fakeApi({ files: [listed] });
+    const failing = async (url: string, init?: RequestInit) =>
+      url.endsWith("/check-runs") && init?.method === "POST"
+        ? new Response("{}", { status: 500 })
+        : f.fetch(url, init);
+    const gh = restClient({ token: "t", apiUrl: "https://api.test", fetch: failing });
+    await expect(judge(gh, pr, policy(true))).rejects.toThrow("500");
+    expect(f.requests.some((r) => r.body?.query?.includes("enablePullRequestAutoMerge"))).toBe(
+      false,
+    );
   });
 });

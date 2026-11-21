@@ -179,9 +179,26 @@ describe("runGate", () => {
     expect(String((out as { error: Error }).error.message)).toContain("maxChangedLines");
   });
 
-  it("returns the error when the policy file does not parse", async () => {
+  it("returns the error when the policy file does not parse, with enabled unknown and so true", async () => {
     const { gh } = fakeGitHub([api("docs/a.md")]);
+    expect(await runGate(gh, pr, () => "{")).toMatchObject({ enabled: true });
     expect(await runGate(gh, pr, () => "{")).toHaveProperty("error");
+  });
+
+  it("treats a policy file that cannot be read as enabled", async () => {
+    const { gh } = fakeGitHub([api("docs/a.md")]);
+    const out = await runGate(gh, pr, () => {
+      throw new Error("ENOENT");
+    });
+    expect(out).toMatchObject({ enabled: true });
+  });
+
+  it("carries the policy's enabled through an error once the policy parses", async () => {
+    const { gh } = fakeGitHub([], {}, new Error("GitHub GET /files returned 502"));
+    expect(await runGate(gh, pr, () => policy())).toMatchObject({ enabled: false });
+    expect(await runGate(gh, pr, () => policy({ enabled: true }))).toMatchObject({
+      enabled: true,
+    });
   });
 
   it("returns the error when the API fails", async () => {
