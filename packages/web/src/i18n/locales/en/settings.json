@@ -682,7 +682,6 @@
       "needsReauth": "Needs re-login",
       "apiKeyActive": "API key active",
       "apiKeyNeedsUpdate": "API key needs update",
-      "comingSoon": "Coming soon",
       "signedInWith": "Signed in with <1>{{method}}</1>",
       "signedIn": "Signed in",
       "accountType": "Account type: <1>{{type}}</1>"
