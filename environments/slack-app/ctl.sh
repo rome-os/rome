@@ -38,7 +38,8 @@
 # stop the instance first for the mailbox check.
 # as-instance runs a Node file in the instance's network with its signer
 # socket, the instance running or not, with SLACKENV_CLOUD (Rome Cloud's
-# origin), SLACKENV_GATEWAY, SLACKENV_SLACK and SLACKENV_SIGNER_SOCKET set; it
+# origin), SLACKENV_GATEWAY, SLACKENV_SLACK, SLACKENV_SIGNER_SOCKET and
+# SLACKENV_CLOUD_COOKIES (the guardian's Rome Cloud session, a cookie map) set; it
 # prints what the file prints. Test only: a token the file takes from the
 # signer stays inside it. find-secret counts, read only, where the instance
 # stores any of the strings: database columns, grant credentials, files under
@@ -74,7 +75,7 @@ case "$action" in
     exit 2
   } ;;
   *)
-    sed -n '2,48p' "$0"
+    sed -n '2,49p' "$0"
     exit 2
     ;;
 esac
@@ -147,6 +148,12 @@ as_instance() {
   [ "${1:-}" = "--" ] && shift
   cloud="$(sed -n 's/^CLOUD_ORIGIN=//p' "$STATE_DIR/compose.env")"
   slack_port="$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
+  # The guardian's Rome Cloud session from up.sh's sign-in, as a cookie map,
+  # for steps a browser takes in production (Rome Cloud's Slack callback).
+  if [ -f "$STATE_DIR/$svc-cloud-cookies.json" ]; then
+    opts+=(-v "$STATE_DIR/$svc-cloud-cookies.json:/slackenv/cloud-cookies.json:ro"
+      -e SLACKENV_CLOUD_COOKIES=/slackenv/cloud-cookies.json)
+  fi
   compose run --rm --no-deps -T --entrypoint node "${opts[@]}" \
     -e SLACKENV_CLOUD="$cloud" -e SLACKENV_GATEWAY=https://slack.romeos.io \
     -e SLACKENV_SLACK="http://127.0.0.1:$slack_port" -e SLACKENV_SIGNER_SOCKET=/run/rome-signer/signer.sock \
@@ -356,12 +363,11 @@ case "$action" in
     read -r team user < <(node -e '
       const w = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).workspaces[process.argv[2] === "rome-a" ? 0 : 1];
       console.log(w.id, w.members.find((m) => m.is_owner).id);' "$ENV_DIR/config/workspaces.json" "$svc")
-    shared="$(sed -n 's/^GATEWAY_SHARED_SECRET=//p' "$STATE_DIR/secrets.env")"
     cloud="$(sed -n 's/^CLOUD_ORIGIN=//p' "$STATE_DIR/compose.env")"
     slack_port="$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
     probe=(--team "$team" --user "$user" --cloud "$cloud" --slack "http://127.0.0.1:$slack_port"
       --resolution "$(gateway_resolution)")
-    as_instance "$ENV_DIR/tools/gateway-probe.mjs" -e GATEWAY_SHARED_SECRET="$shared" -- "${probe[@]}"
+    as_instance "$ENV_DIR/tools/gateway-probe.mjs" -- "${probe[@]}"
     ;;
   as-instance)
     file="${3:-}"

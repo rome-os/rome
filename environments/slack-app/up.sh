@@ -327,7 +327,7 @@ for name in $([ "$CLOUD_ONLY" = 1 ] || echo a b); do
   port_var="ROME_$(echo "$name" | tr a-z A-Z)_PORT"
   log "enrolling $svc in Rome Cloud"
   NODE_EXTRA_CA_CERTS="$STATE_DIR/trust.pem" node "$ENV_DIR/tools/enroll.mjs" "$CLOUD" "http://127.0.0.1:${!port_var}" "guardian-$name@slackenv.test" \
-    "$STATE_DIR/$svc-cookies.json" >"$STATE_DIR/$svc-enroll.json"
+    "$STATE_DIR/$svc-cookies.json" "$STATE_DIR/$svc-cloud-cookies.json" >"$STATE_DIR/$svc-enroll.json"
 done
 
 if [ -n "$OLD_CONNECTIONS" ] && [ "$CLOUD_ONLY" = 0 ]; then

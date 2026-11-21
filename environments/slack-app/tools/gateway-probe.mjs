@@ -11,9 +11,12 @@
 //              and the fake Slack saw no auth.test call
 //   connect    POST /v1/connect with the instance's own relay mailbox (from
 //              Rome Cloud's POST /api/relay/mailboxes) answers a deposit key
-//   bind       the fake Slack's approve screen gives a code, and Rome Cloud's
-//              shared secret binds the workspace to the instance at
-//              /internal/bind
+//   bind       Rome Cloud's own path, as a guardian's browser takes it:
+//              POST /api/instance/slack/install-url as the instance, the fake
+//              Slack's approve screen as the member, then Rome Cloud's
+//              /api/slack/callback with the guardian's Rome Cloud session,
+//              which binds the workspace at the Worker; GET /v1/workspaces
+//              then lists it
 //   event      a direct message in the fake Slack is sent, signed, to the
 //              Worker, which answers 200
 //   mailbox    that event is in the instance's mailbox, with x-rome-slack: 1
@@ -29,10 +32,12 @@
 //          [--slack http://127.0.0.1:47200] [--socket /run/rome-signer/signer.sock]
 //          [--resolution '{"ok":…, …}']
 // --cloud is Rome Cloud's origin, the one its signers name as audience.
-// GATEWAY_SHARED_SECRET comes from the environment. Prints one JSON object;
+// SLACKENV_CLOUD_COOKIES names the guardian's Rome Cloud session (ctl.sh
+// as-instance sets it). Prints one JSON object;
 // exit 0 when every check passed.
 
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { request } from "node:http";
 
 const flags = {};
@@ -44,9 +49,18 @@ const slack = flags.slack ?? "http://127.0.0.1:47200";
 const socketPath = flags.socket ?? "/run/rome-signer/signer.sock";
 const { team, user } = flags;
 const text = flags.text ?? `gateway probe ${new Date().toISOString()}`;
-const shared = process.env.GATEWAY_SHARED_SECRET ?? "";
-if (!team || !user || !shared) {
-  console.log(JSON.stringify({ error: "usage: --team T --user U, GATEWAY_SHARED_SECRET set" }));
+let session = "";
+try {
+  session = Object.entries(
+    JSON.parse(readFileSync(process.env.SLACKENV_CLOUD_COOKIES ?? "", "utf8")),
+  )
+    .map(([k, v]) => `${k}=${v}`)
+    .join("; ");
+} catch {}
+if (!team || !user || !session) {
+  console.log(
+    JSON.stringify({ error: "usage: --team T --user U, SLACKENV_CLOUD_COOKIES naming a session" }),
+  );
   process.exit(2);
 }
 
@@ -174,36 +188,37 @@ checks.connect = {
 };
 if (!checks.connect.ok) finish();
 
-// bind: the approve screen as the member, then Rome Cloud's call to the Worker
+// bind: Rome Cloud's install link, the approve screen, Rome Cloud's callback
+const install = await call(`${cloud}/api/instance/slack/install-url`, await asInstance("POST", {}));
+if (typeof install.body?.url !== "string")
+  stop("bind", { step: "install-url", status: install.status, body: install.body });
+const link = new URL(install.body.url);
 await call(`${slack}/_control/sign-in`, json("POST", { team, user }));
-const state = await call(`${slack}/_control/state`);
 const form = new URLSearchParams({
-  client_id: state.body?.client_id ?? state.body?.app?.client_id ?? "",
-  scope:
-    "app_mentions:read,channels:history,channels:read,chat:write,groups:history,groups:read,im:history,im:read,im:write,users:read",
-  redirect_uri: `${cloud}/api/slack/callback`,
-  state: "gateway-probe",
+  ...Object.fromEntries(link.searchParams),
   team,
   user,
   decision: "allow",
 });
-const approved = await call(`${slack}/oauth/v2/authorize/approve`, {
+const approved = await call(new URL("/oauth/v2/authorize/approve", link).toString(), {
   method: "POST",
   headers: { "content-type": "application/x-www-form-urlencoded" },
   body: form.toString(),
 });
-const code = approved.headers?.get?.("location")
-  ? new URL(approved.headers.get("location")).searchParams.get("code")
-  : null;
-if (!code) stop("bind", { step: "approve", status: approved.status, body: approved.body });
-const bind = await call(
-  `${gateway}/internal/bind`,
-  json("POST", { code, accountId, instanceId }, { authorization: `Bearer ${shared}` }),
-);
+const back = approved.headers?.get?.("location");
+if (!back || !new URL(back).searchParams.get("code"))
+  stop("bind", { step: "approve", status: approved.status, body: approved.body });
+const callback = await call(back, { headers: { cookie: session } });
+const title = String(callback.body).match(/<title>([^<]*)<\/title>/)?.[1] ?? null;
+const listed = await call(`${gateway}/v1/workspaces`, {
+  headers: { authorization: `Bearer ${await instanceToken()}` },
+});
 checks.bind = {
-  ok: bind.status === 200 && bind.body?.teamId === team,
-  status: bind.status,
-  body: bind.body,
+  ok: callback.status === 200 && (listed.body?.workspaces ?? []).some((w) => w.teamId === team),
+  install_link: `${link.origin}${link.pathname}`,
+  callback_status: callback.status,
+  callback_title: title,
+  workspaces: (listed.body?.workspaces ?? []).map((w) => w.teamId),
 };
 if (!checks.bind.ok) finish();
 

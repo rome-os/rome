@@ -4,12 +4,13 @@
 // form, and the callback. The first sign-in creates the guardian seat and turns
 // the Concierge on.
 //
-// Usage: node enroll.mjs <rome-cloud-origin> <instance-origin> <email> <out-cookies.json>
+// Usage: node enroll.mjs <rome-cloud-origin> <instance-origin> <email> <out-cookies.json> [<out-cloud-cookies.json>]
+// The second file, when named, gets the guardian's Rome Cloud session too.
 // Prints {"instanceId": ..., "guardian": ...} as JSON.
 
 import { writeFileSync } from "node:fs";
 
-const [cloud, instance, email, cookieFile] = process.argv.slice(2);
+const [cloud, instance, email, cookieFile, cloudCookieFile] = process.argv.slice(2);
 if (!cookieFile) {
   console.error(
     "usage: enroll.mjs <rome-cloud-origin> <instance-origin> <email> <out-cookies.json>",
@@ -124,6 +125,10 @@ const me = await request(`${instance}/api/auth/me`);
 const identity = me.ok ? await me.json() : null;
 if (identity?.kind !== "guardian") fail("guardian session", { status: me.status, identity });
 writeFileSync(cookieFile, JSON.stringify(Object.fromEntries(jarFor(instance))), { mode: 0o600 });
+if (cloudCookieFile)
+  writeFileSync(cloudCookieFile, JSON.stringify(Object.fromEntries(jarFor(cloud))), {
+    mode: 0o600,
+  });
 console.log(JSON.stringify({ guardian: email, landed: landed.pathname, enroll, identity }));
 
 function decodeEntities(s) {
