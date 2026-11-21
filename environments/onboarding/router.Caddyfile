@@ -1,0 +1,13 @@
+# Sends <slug>.rome.localhost to the Rome container that Rome Cloud named rome-vm-<slug>.
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	@rome header_regexp rome Host ^([a-z0-9-]+)\.rome\.localhost(:[0-9]+)?$
+	handle @rome {
+		reverse_proxy rome-vm-{re.rome.1}:8080
+	}
+	respond "No Rome at this address" 404
+}
