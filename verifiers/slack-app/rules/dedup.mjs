@@ -49,6 +49,32 @@ export async function dedup(ctx) {
   };
   phase("dedup: second delivery, running");
   await again("while running");
+
+  // A repeat while the first delivery's turn is still running: a second
+  // message, repeated at once, before any reply to it. If its reply was
+  // already posted when the repeat went out, the fake could not time it.
+  phase("dedup: repeat during the turn");
+  {
+    const tag2 = code("RDUP", 2);
+    const before = await ctx.slack.seq();
+    const s2 = await ctx.slack.dm(ws.id, ws.guardian, ask(tag2));
+    const body2 = (await ctx.slack.events(before)).find((e) => e.eventId === s2.eventId)?.body?.event;
+    let r = await ctx.slack.redeliver(s2.eventId);
+    let how = "same event_id (Slack's retry)";
+    if (!r && body2) {
+      r = await ctx.slack.event(ws.id, body2);
+      how = "same message, new event_id";
+    }
+    const repliedBeforeRepeat = await repliesIn(ctx, ws, dm, before);
+    await replyAfter(ctx.slack, { team: ws.id, channel: dm, since: before, timeoutMs: ctx.env.timeouts.replySeconds * 1000 });
+    await sleep((ctx.env.timeouts.replySeconds + ctx.env.timeouts.settleSeconds) * 1000);
+    const replies = await repliesIn(ctx, ws, dm, before);
+    let recorded2 = null;
+    try {
+      recorded2 = (await ctx.a.recordedIn(dm, { connection: ctx.bound.a })).filter((m) => String(m).includes(tag2)).length;
+    } catch {}
+    evidence.duringTurn = { how: r ? how : "none", repliedBeforeRepeat, replies, recordedInChats: recorded2 };
+  }
   phase("dedup: restart");
   await ctx.a.stop();
   await ctx.a.start();
@@ -67,14 +93,26 @@ export async function dedup(ctx) {
     evidence.recordedError = err.message;
   }
   evidence.recordedInChats = recorded;
-  const total = await repliesIn(ctx, ws, dm, start);
+  // Replies to the first message only: those after it and before the second.
+  const total = evidence.first.replies + evidence.deliveries.reduce((n, d) => n + (d.newReplies ?? 0), 0);
   evidence.repliesInAll = total;
 
   const tried = evidence.deliveries.filter((d) => d.eventId);
-  const said = `${tried.length + 1} deliveries (${tried.map((d) => `${d.when}: ${d.how}`).join("; ") || "no repeat sent"}); ${total} repl${total === 1 ? "y" : "ies"} in the direct message; Chats holds the message ${recorded ?? "?"} time(s)`;
+  const dt = evidence.duringTurn;
+  const duringTurn =
+    !dt || dt.how === "none"
+      ? { result: "not checked", why: "the repeat could not be sent" }
+      : dt.repliedBeforeRepeat > 0
+        ? { result: "not checked", why: "the reply came before the repeat went out, so the fake could not time it during the turn" }
+        : dt.replies === 1 && (dt.recordedInChats === null || dt.recordedInChats === 1)
+          ? { result: "pass", why: `repeated during the turn (${dt.how}): 1 reply, Chats holds it ${dt.recordedInChats ?? "?"} time(s)` }
+          : { result: "fail", why: `repeated during the turn (${dt.how}): ${dt.replies} replies, Chats holds it ${dt.recordedInChats ?? "?"} time(s)` };
+  evidence.duringTurnVerdict = duringTurn;
+  const said = `during the turn: ${duringTurn.result} (${duringTurn.why}); ${tried.length + 1} deliveries (${tried.map((d) => `${d.when}: ${d.how}`).join("; ") || "no repeat sent"}); ${total} repl${total === 1 ? "y" : "ies"} in the direct message; Chats holds the message ${recorded ?? "?"} time(s)`;
   if (tried.length < 2) return { result: "not checked", reason: `${said}; not every repeat could be sent`, evidence };
   const problems = [];
   if (total !== 1) problems.push(`${total} replies, not 1`);
+  if (duringTurn.result === "fail") problems.push(`a repeat during the turn: ${duringTurn.why}`);
   if (recorded !== null && recorded !== 1) problems.push(`Chats holds it ${recorded} times, not once`);
   if (problems.length) return { result: "fail", reason: `${problems.join("; ")}. ${said}`, evidence };
   if (recorded === null) return { result: "not checked", reason: `${said}; Chats could not be read: ${evidence.recordedError}`, evidence };

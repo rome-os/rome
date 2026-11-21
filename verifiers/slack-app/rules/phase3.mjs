@@ -162,6 +162,39 @@ const SEARCHES = [
     outside: { text: "The choir tickets are with Ottilie Varnworth.", mark: "Varnworth" },
   },
 ];
+// The draft R9 search: within a named chat, and across chats.
+const NAMED_SEARCH_ASKS = [
+  (w, id) => `Search the #news channel (${id}) on Slack for the message that mentions "${w}" and tell me what it said.`,
+  (w, id) => `In #news (${id}), find the Slack message about the ${w} and tell me what it says.`,
+  (w, id) => `Look up "${w}" in the #news channel (${id}) and tell me what you find.`,
+];
+const NOT_OFFERED = /(not|n't)\s+(available|offered|supported|possible|able)|can(not|'t)\s+search|only search (with)?in|(which|name (a|the)|tell me (which|the)) (chat|channel|conversation)/i;
+
+/**
+ * Draft: one search naming no chat. Passes on a plain answer that searching
+ * across chats is not available and no value from outside what was said
+ * (#quiet's) or made up; a reply that states anything as found fails.
+ */
+async function acrossChats(ctx, q) {
+  const asked = await askConcierge(ctx, ctx.a, SEARCH_ASKS[0](q.word));
+  const reply = asked.reply ?? "";
+  const plain = NOT_OFFERED.test(reply);
+  const claims = /\bI found\b|\bis (at|in|on)\b|\bsaid\b/i.test(reply) && !plain;
+  const leaked = holds(reply, q.outside.mark);
+  return {
+    op: `search ${SEARCHES.indexOf(q) + 1} across chats`,
+    result: plain && !leaked && !claims ? "pass" : "fail",
+    why: leaked
+      ? `the reply showed #quiet's value ${q.outside.mark}`
+      : plain
+        ? holds(reply, q.found.mark)
+          ? "said it is not available, and also gave the #news value"
+          : "said searching across chats is not available"
+        : "the reply did not say searching across chats is not available",
+    tries: [{ asked: SEARCH_ASKS[0](q.word), reply: reply.slice(0, 300), waitedSeconds: asked.waitedSeconds }],
+  };
+}
+
 export const SEARCH_ASKS = [
   (w) => `Search Slack for the message that mentions "${w}" and tell me what it said.`,
   (w) => `Can you find the Slack message about the ${w} and tell me what it says?`,
@@ -426,7 +459,18 @@ export async function liveCheck(ctx) {
     const searchOpts = (q, asks) => ({ asks, methods: null, ids: [news, quiet, dm], judge: async (a) => holds(a.reply, q.found.mark) });
     for (const [i, q] of SEARCHES.entries()) {
       await seed(q);
-      ops.push({ op: `search ${i + 1}`, ...(await operate(ctx, ws, searchOpts(q, SEARCH_ASKS.map((f) => f(q.word))))) });
+      if (!ctx.drafts?.has("r9-search")) {
+        ops.push({ op: `search ${i + 1}`, ...(await operate(ctx, ws, searchOpts(q, SEARCH_ASKS.map((f) => f(q.word))))) });
+        continue;
+      }
+      // Draft (planner's proposed wording, not scored until Ouou agrees):
+      // search works within a named chat, and a search across chats gets a
+      // plain answer that it is not available, with nothing made up.
+      ops.push({
+        op: `search ${i + 1} in a named chat`,
+        ...(await operate(ctx, ws, searchOpts(q, NAMED_SEARCH_ASKS.map((f) => f(q.word, news))))),
+      });
+      ops.push(await acrossChats(ctx, q));
     }
     // A read and a search after a wipe of Rome's copy of the direct message.
     // A search naming #news after its wipe is R14's.

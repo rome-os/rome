@@ -57,8 +57,10 @@ const RULES = [
 // connector token file would turn R9's path to the old one, so it runs last.
 const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R5", "R12", "R13", "R9", "R14", "R6", "R8", "R2", "R10"];
 
-// Drafts run only when asked for (VERIFIER_DRAFTS=dedup) and are reported
-// apart from the rule set: "dedup" is the check proposed in place of R13.
+// Drafts run only when asked for (VERIFIER_DRAFTS, comma list) and are
+// reported apart from the rule set: "dedup" is the check proposed in place of
+// R13 (as R13-dedup, never failing the run); "r9-search" scores R9's
+// searches by the proposed wording (named chat only), and the report names it.
 const DRAFTS_IDS = new Set(["R13-dedup"]);
 const DRAFTS = new Set((process.env.VERIFIER_DRAFTS ?? "").split(",").filter(Boolean));
 if (DRAFTS.has("dedup")) {
@@ -90,6 +92,7 @@ const ctx = {
   homeTeam,
   bound: { a: null, b: null },
 };
+ctx.drafts = DRAFTS;
 
 // VERIFIER_ONLY (run.sh --only) scores a subset: rule ids, or phase1 to
 // phase3. R1 and the second binding still run, since every later rule needs
@@ -188,6 +191,7 @@ const report = {
   differences: env.differences ?? null,
   setup,
   only: only ? [...only] : null,
+  drafts: DRAFTS.size ? [...DRAFTS] : null,
   minFreeGB: minFreeMiB ? minFreeMiB / 1024 : null,
   rules: RULES.map((r) => ({
     id: r.id,
@@ -262,6 +266,7 @@ function markdown(r) {
     `- environment: \`${r.commits.environment}\``,
     `- verifier: \`${r.commits.verifier}\``,
     `- model: ${r.model}`,
+    r.drafts ? `- drafts on (not the agreed rules): ${r.drafts.join(", ")}` : "",
     `- run: ${r.startedAt} to ${r.finishedAt}`,
     r.differences ? `- differences from production: ${JSON.stringify(r.differences)}` : "",
     "",

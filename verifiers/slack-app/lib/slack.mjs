@@ -82,11 +82,13 @@ export function fakeSlack(base) {
     event: (team, event) => call("/event", { method: "POST", body: { team, event } }),
     /**
      * Sends event `eventId` again, the same envelope and event_id, as Slack
-     * retries one; null when the fake has no such call (environment ask).
+     * retries one (environment 51e940e94); null on an older fake without it.
      */
     redeliver: async (eventId) => {
       const res = await json(`${base}/redeliver`, { method: "POST", body: { event_id: eventId } });
-      if (res.status === 404) return null;
+      // Only a fake without the route reads as "cannot": 404 "no control
+      // route". An unknown event id is an error like any other.
+      if (res.status === 404 && /no control route/i.test(JSON.stringify(res.data))) return null;
       if (!res.ok) throw new Error(`fake Slack /redeliver: ${res.status} ${JSON.stringify(res.data)}`);
       return res.data;
     },

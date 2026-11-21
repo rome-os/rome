@@ -449,6 +449,11 @@ async function act(conn, text, dmChannel) {
     // A chat named by id or by #name is read from Slack; broken
     // R14-wipe-forgets reads only what it kept.
     const named = id ?? (text.match(/#(\w+)/) ? await byName(text.match(/#(\w+)/)[1]) : null);
+    // Under the proposed R9 wording (stand-in mode SEARCH-named-only) search
+    // works only within a named chat; SEARCH-invents makes up an answer.
+    if (!named && breaks.has("SEARCH-invents")) return `I found: the ${word} is at the Quarrendon hall.`;
+    if (!named && breaks.has("SEARCH-named-only"))
+      return "Searching across all chats isn't available. Tell me which chat to search and I'll look there.";
     if (named && breaks.has("R14-wipe-forgets"))
       await history(named).then(() => {});
     else if (named) {
@@ -700,10 +705,10 @@ async function drainOnce() {
     done.push(f.id);
     if (f.sig !== frameSignature(SECRET, f.body)) continue;
     const payload = JSON.parse(f.body);
-    if (db.seen.includes(payload.event_id)) continue;
-    db.seen.push(payload.event_id);
     // Like Chats, a message is recorded once, whatever event carries it.
-    // Broken DUP-answers-twice answers each event.
+    // Broken DUP-answers-twice dedups nothing and answers each delivery.
+    if (db.seen.includes(payload.event_id) && !breaks.has("DUP-answers-twice")) continue;
+    db.seen.push(payload.event_id);
     const msgKey = `${payload.team_id}/${payload.event?.channel}/${payload.event?.ts}`;
     db.seenMsg ??= [];
     if (payload.event?.ts && db.seenMsg.includes(msgKey) && !breaks.has("DUP-answers-twice")) continue;

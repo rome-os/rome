@@ -198,6 +198,10 @@ const CASES = [
   // Drafts, run with VERIFIER_DRAFTS=dedup VERIFIER_ONLY=R13-dedup.
   { name: "dedup-good", breaks: "", rule: "R13-dedup", result: "pass", env: { VERIFIER_DRAFTS: "dedup", VERIFIER_ONLY: "R13-dedup" }, what: "draft: a message delivered three times is answered and recorded once" },
   { name: "DUP-answers-twice", breaks: "DUP-answers-twice", rule: "R13-dedup", env: { VERIFIER_DRAFTS: "dedup", VERIFIER_ONLY: "R13-dedup" }, what: "draft: a repeat of the same message is answered again" },
+  // Draft R9 search wording, run with VERIFIER_DRAFTS=r9-search VERIFIER_ONLY=R9.
+  { name: "search-named-only", breaks: "SEARCH-named-only", rule: "R9", result: "pass", env: { VERIFIER_DRAFTS: "r9-search", VERIFIER_ONLY: "R9" }, what: "draft: search only within a named chat, and a plain 'not available' across chats" },
+  { name: "search-across", breaks: "", rule: "R9", env: { VERIFIER_DRAFTS: "r9-search", VERIFIER_ONLY: "R9" }, what: "draft: a search naming no chat still searches across chats" },
+  { name: "SEARCH-invents", breaks: "SEARCH-invents", rule: "R9", env: { VERIFIER_DRAFTS: "r9-search", VERIFIER_ONLY: "R9" }, what: "draft: a search naming no chat makes up an answer" },
   { name: "only-R14", breaks: "", rule: "R14", result: "pass", env: { VERIFIER_ONLY: "R14" }, what: "--only R14 scores R14 after R1 and the second binding; the rest are not checked" },
   { name: "memory-line", breaks: "", rule: "R14", result: "not checked", env: { VERIFIER_ONLY: "R14", VERIFIER_MIN_FREE_GB: "100000", VERIFIER_MEMORY_WAIT_SECONDS: "20" }, what: "under the free-memory line R14 waits, then is not checked" },
   { name: "R14-reread-old", breaks: "R14-reread-old", rule: "R14", what: "a later mention in a thread reads it again from its top" },
