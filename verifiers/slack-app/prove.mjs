@@ -195,6 +195,9 @@ const CASES = [
     result: "pass",
     what: "the instance comes back 15 s after the wipe returns; requests ride it out",
   },
+  // Drafts, run with VERIFIER_DRAFTS=dedup VERIFIER_ONLY=R13-dedup.
+  { name: "dedup-good", breaks: "", rule: "R13-dedup", result: "pass", env: { VERIFIER_DRAFTS: "dedup", VERIFIER_ONLY: "R13-dedup" }, what: "draft: a message delivered three times is answered and recorded once" },
+  { name: "DUP-answers-twice", breaks: "DUP-answers-twice", rule: "R13-dedup", env: { VERIFIER_DRAFTS: "dedup", VERIFIER_ONLY: "R13-dedup" }, what: "draft: a repeat of the same message is answered again" },
   { name: "only-R14", breaks: "", rule: "R14", result: "pass", env: { VERIFIER_ONLY: "R14" }, what: "--only R14 scores R14 after R1 and the second binding; the rest are not checked" },
   { name: "memory-line", breaks: "", rule: "R14", result: "not checked", env: { VERIFIER_ONLY: "R14", VERIFIER_MIN_FREE_GB: "100000", VERIFIER_MEMORY_WAIT_SECONDS: "20" }, what: "under the free-memory line R14 waits, then is not checked" },
   { name: "R14-reread-old", breaks: "R14-reread-old", rule: "R14", what: "a later mention in a thread reads it again from its top" },

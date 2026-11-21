@@ -76,6 +76,20 @@ export function fakeSlack(base) {
       return { ...(r.auth_test ?? r), tokenState: r.token_state ?? null };
     },
     /** Changes the fake's settings (`history_limit`, `distributed`, ...). */
+    /** Every event sent after `since`, each with its envelope as `body`. */
+    events: async (since) => (await call(`/events?${query({ since })}`)).events,
+    /** Sends `event` as a new signed event (a new event_id). */
+    event: (team, event) => call("/event", { method: "POST", body: { team, event } }),
+    /**
+     * Sends event `eventId` again, the same envelope and event_id, as Slack
+     * retries one; null when the fake has no such call (environment ask).
+     */
+    redeliver: async (eventId) => {
+      const res = await json(`${base}/redeliver`, { method: "POST", body: { event_id: eventId } });
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(`fake Slack /redeliver: ${res.status} ${JSON.stringify(res.data)}`);
+      return res.data;
+    },
     config: (body) => call("/config", { method: "POST", body }),
     /** Turns the app's public distribution on or off; off, only its home workspace can install it. */
     setDistributed: (on) => call("/config", { method: "POST", body: { distributed: on } }),

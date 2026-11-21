@@ -702,6 +702,12 @@ async function drainOnce() {
     const payload = JSON.parse(f.body);
     if (db.seen.includes(payload.event_id)) continue;
     db.seen.push(payload.event_id);
+    // Like Chats, a message is recorded once, whatever event carries it.
+    // Broken DUP-answers-twice answers each event.
+    const msgKey = `${payload.team_id}/${payload.event?.channel}/${payload.event?.ts}`;
+    db.seenMsg ??= [];
+    if (payload.event?.ts && db.seenMsg.includes(msgKey) && !breaks.has("DUP-answers-twice")) continue;
+    if (payload.event?.ts) db.seenMsg.push(msgKey);
     const ev = payload.event;
     const conn = db.connections.find((c) => c.team === payload.team_id);
     // Removal: the connection shows broken. Broken R8-never ignores it.

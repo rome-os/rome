@@ -13,6 +13,7 @@ import { r4, r6, r7 } from "./rules/chat.mjs";
 import { connectAs, r1, r2, r3 } from "./rules/connect.mjs";
 import { r5, r8, r12, r13 } from "./rules/phase2.mjs";
 import { r14 } from "./rules/groups.mjs";
+import { dedup } from "./rules/dedup.mjs";
 import { r9, r10 } from "./rules/phase3.mjs";
 import { r11 } from "./rules/structure.mjs";
 
@@ -55,6 +56,15 @@ const RULES = [
 // workspace. R10 seeds the old connections on the second instance, whose
 // connector token file would turn R9's path to the old one, so it runs last.
 const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R5", "R12", "R13", "R9", "R14", "R6", "R8", "R2", "R10"];
+
+// Drafts run only when asked for (VERIFIER_DRAFTS=dedup) and are reported
+// apart from the rule set: "dedup" is the check proposed in place of R13.
+const DRAFTS_IDS = new Set(["R13-dedup"]);
+const DRAFTS = new Set((process.env.VERIFIER_DRAFTS ?? "").split(",").filter(Boolean));
+if (DRAFTS.has("dedup")) {
+  RULES.push({ id: "R13-dedup", phase: 2, title: "Draft: no record of its own; a message delivered twice is recorded and answered once", check: dedup, draft: true });
+  ORDER.splice(ORDER.indexOf("R13") + 1, 0, "R13-dedup");
+}
 
 const [envPath, outDir, verifierCommit] = process.argv.slice(2);
 const env = loadEnv(envPath);
@@ -191,7 +201,7 @@ const report = {
 mkdirSync(outDir, { recursive: true });
 writeFileSync(join(outDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
 writeFileSync(join(outDir, "report.md"), markdown(report));
-const failed = report.rules.filter((r) => r.result === "fail").map((r) => r.id);
+const failed = report.rules.filter((r) => r.result === "fail" && !DRAFTS_IDS.has(r.id)).map((r) => r.id);
 log(`report: ${join(outDir, "report.md")}; failed: ${failed.join(", ") || "none"}`);
 process.exit(failed.length ? 1 : 0);
 
@@ -224,7 +234,8 @@ function selection(spec) {
   for (const part of spec.split(",").map((x) => x.trim()).filter(Boolean)) {
     const ph = part.match(/^phase:?([123])$/i);
     if (ph) for (const r of RULES.filter((x) => x.phase === Number(ph[1]))) ids.add(r.id);
-    else if (RULES.some((r) => r.id === part.toUpperCase())) ids.add(part.toUpperCase());
+    else if (RULES.some((r) => r.id.toUpperCase() === part.toUpperCase()))
+      ids.add(RULES.find((r) => r.id.toUpperCase() === part.toUpperCase()).id);
     else throw new Error(`--only: no rule or phase named ${part}`);
   }
   if (ids.has("R1")) ids.add("R3");
