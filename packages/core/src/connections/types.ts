@@ -354,10 +354,11 @@ export interface Talker extends TalkFeatures {
    * (docs/domains/connections.md#message).
    */
   start(deliver: (msg: Message) => void | Promise<void>, fault: (err: StreamFault) => void): void;
-  /** True when this Talker waits for each delivery to be accepted before it
-   *  tells its platform, as a mailbox whose platform delivers again what it
-   *  was not told it has. Only then does `deliver` return the acceptance
-   *  promise (`start`). Absent means it does not wait. */
+  /** Contract: a Talker that sets this tells its platform it has a message
+   *  only after that message's delivery has resolved, and never after one
+   *  that rejected, so the platform delivers it again. Only then does
+   *  `deliver` return the acceptance promise (`start`). Absent means it does
+   *  not wait. */
   readonly awaitsAcceptance?: boolean;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
