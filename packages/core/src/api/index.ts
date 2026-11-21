@@ -34,7 +34,6 @@ import { skillsRoutes } from "./routes/skills.js";
 import { discordCliRoutes } from "./routes/discord-cli.js";
 import { chatSettingsRoutes } from "./routes/chat-settings.js";
 import { connectionsRoutes } from "./routes/connections.js";
-import { connectedAccountsRoutes } from "./routes/connected-accounts.js";
 import { setupsRoutes } from "./routes/setups.js";
 import { approvalsRoutes } from "./routes/approvals.js";
 import { appApiDashboardRoutes, appApiPublicRoutes } from "./routes/app-api.js";
@@ -86,7 +85,7 @@ import { sessionsRoutes } from "./routes/sessions.js";
 import { appConnectionAccessRoutes } from "./routes/app-connection-access.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
-import { ConnectedAccountsRepository } from "../db/repositories/connected-accounts.js";
+import { agentOfKindIn } from "../concierge/on-connection.js";
 import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";
 import { byChannel, readAccountAgent } from "../chats/connected-accounts/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
@@ -179,7 +178,6 @@ export function buildApp(
   api.route("/", integrationsRoutes(deps));
   api.route("/", connectionsRoutes(deps));
   api.route("/", appConnectionAccessRoutes(deps));
-  api.route("/", connectedAccountsRoutes(deps));
   api.route("/", setupsRoutes(deps));
   api.route("/", desktopRoutes());
   api.route("/", publicAccessRoutes(deps));
@@ -226,8 +224,7 @@ export function buildApp(
   );
   const sessionAccountAgents = {
     kindOf: connectionKindOf(deps.connectionRegistry),
-    linkOf: accountLinkOf(deps.connectionRegistry),
-    accounts: new ConnectedAccountsRepository(deps.db),
+    agentOfKind: agentOfKindIn(deps.connectionRegistry),
   };
   const sessionQueries = new SessionQueryService({
     repository: new SessionQueryRepository(deps.db, "chats"),

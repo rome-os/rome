@@ -31,7 +31,7 @@ import type {
 } from "../../connections/types.js";
 import type { SetupManager } from "../../connections/setup/manager.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
-import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
+import { agentOfKindIn } from "../../concierge/on-connection.js";
 import { accountLinkOf } from "../../chats/connected-accounts/account-links.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
@@ -256,7 +256,6 @@ async function serializeConnection(
   conn: Connection,
   manager: SetupManager | null,
   channels: ChannelRecordsRepository,
-  accounts: ConnectedAccountsRepository,
 ): Promise<ConnectionView> {
   return buildConnectionView(
     registry,
@@ -264,7 +263,7 @@ async function serializeConnection(
     await loadGrant(registry, conn),
     manager,
     channels.byConnection(conn.id) ?? null,
-    accounts.agentOf(conn.id),
+    agentOfKindIn(registry)(conn.connectionKind),
   );
 }
 
@@ -349,13 +348,10 @@ export async function listConnectionViews(
   const registry = requireConnectionRegistry(deps as ApiDeps);
   const manager = deps.setupManager ?? null;
   const channels = new ChannelRecordsRepository(deps.db, accountLinkOf(deps.connectionRegistry));
-  const accounts = new ConnectedAccountsRepository(deps.db);
   const { platform, accountId } = filter;
   const connected = (
     await Promise.all(
-      registry
-        .all()
-        .map((conn) => serializeConnection(registry, conn, manager, channels, accounts)),
+      registry.all().map((conn) => serializeConnection(registry, conn, manager, channels)),
     )
   ).filter(
     (view) =>
@@ -380,7 +376,6 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
   const findConnection = (registry: ConnectionRegistry, id: string): Connection | undefined =>
     registry.all().find((c) => c.id === id);
   const channels = new ChannelRecordsRepository(deps.db, accountLinkOf(deps.connectionRegistry));
-  const accounts = new ConnectedAccountsRepository(deps.db);
 
   // `?platform=&accountId=` finds the connection that reaches an account, so
   // it lists no placeholders. An account id means nothing without its platform.
@@ -409,7 +404,7 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
           record,
           deps.setupManager ?? null,
           channels.byConnection(conn.id) ?? null,
-          accounts.agentOf(conn.id),
+          agentOfKindIn(registry)(conn.connectionKind),
         ),
         grantDetails: buildGrantDetails(conn, record),
       },
@@ -440,9 +435,12 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
       settled?.status === "done" && settled.grant.ended === conn.id
         ? settled.grant.connectionId
         : conn.id;
-    if (target && findConnection(registry, target)) await registry.disconnect(target);
+    const ended =
+      target && findConnection(registry, target) ? await registry.disconnect(target) : {};
     c.header("Cache-Control", "no-store");
-    return c.json({ ok: true, connection: null });
+    // The connection ended either way. The platform may still hold the access
+    // when taking it back failed, so the guardian is told.
+    return c.json({ ok: true, connection: null, ...accessKept(ended) });
   });
 
   app.delete("/connections/:id", async (c) => {
@@ -452,9 +450,25 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const registry = requireConnectionRegistry(deps);
     const conn = findConnection(registry, c.req.param("id"));
     if (!conn) return c.json({ error: "Unknown connection." }, 404);
+    // A kind that takes back its access at the platform ends as a disconnect
+    // does, so this route never leaves that access behind unannounced.
+    if (registry.getDescriptor(conn.connectionKind)?.onDisconnect) {
+      const ended = await registry.disconnect(conn.id);
+      return c.json({ ok: true, ...accessKept(ended) });
+    }
     await registry.remove(conn.id);
     return c.json({ ok: true });
   });
 
   return app;
+}
+
+/** The warning a disconnect answers with when the platform may still hold
+ *  Rome's access. */
+function accessKept(ended: { notTakenBack?: string }): { warning?: string } {
+  return ended.notTakenBack
+    ? {
+        warning: `Disconnected in Rome, but the service may still hold Rome's access: ${ended.notTakenBack}. Remove Rome there too.`,
+      }
+    : {};
 }

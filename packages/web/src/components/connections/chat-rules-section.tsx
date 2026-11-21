@@ -8,8 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link } from "react-router-dom";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { TFunction } from "i18next";
 import {
@@ -917,14 +916,7 @@ function ChatRow({
                 <div className="sm:max-w-xs">
                   <p className="text-ui text-foreground">{t("connections.accounts.noAgent")}</p>
                   <p className="mt-1 text-aux text-muted-foreground">
-                    {t("channels.conversationSettings.silentAccount")}{" "}
-                    <Trans
-                      t={t}
-                      i18nKey="channels.conversationSettings.silentAccountLink"
-                      components={{
-                        account: <Link to="/envoys" className="underline underline-offset-2" />,
-                      }}
-                    />
+                    {t("channels.conversationSettings.silentAccount")}
                     {agentOverridden &&
                       ` ${t("channels.conversationSettings.silentAccountOverride", {
                         agent: overriddenAgentLabel(snapshot.overrides.routing?.agentName),

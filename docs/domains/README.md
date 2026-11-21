@@ -56,7 +56,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - A newly connected account starts with no agent, and the guardian links one afterwards. Only a kind that declares it, today Rome's Slack app, starts a new own account with the Concierge.
 - An agent can be linked to any number of accounts, several on one platform included, and an account has one agent in storage.
 - Feishu and Lark are two platforms.
-- The dashboard and docs say account, agent, connect, disconnect, link, switch and unlink.
+- The dashboard and docs say account, agent, connect and disconnect.
 - An account has at most one link to a person, and Rome never makes one from what a sender says about itself.
 - Links, dismissals and who is this are keyed by platform, not by kind of connection.
 - Rome never asks a sender to pair. A sender with no link is admitted and is a stranger.
@@ -83,10 +83,9 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - Renewing or fixing replaces a connection's grant whole.
 - Connecting through a sign-in such as GitHub is one step, and a sign-in Rome rejects leaves no connection behind.
 - Disconnecting ends every connection, whatever its kind, and connecting again makes a new one.
-- Chats keeps a connected account by its account, the platform and the platform's own id, holding its agent. It is made when a connection first reaches the account, and it outlives the connection.
-- A disconnected account's record stays, as disconnected with its agent, and every chat keeps its whole history. Connecting the same account again finds its agent.
-- The own-account and delegate kinds of link follow from the kind of connection, which alone says whether an account takes an agent, and the dashboard shows them.
-- Linking, switching and unlinking can name the connected account by its account, and Envoys lists a disconnected account under its agent, as disconnected. A disconnected account can be unlinked, and takes a new agent once it is connected again.
+- Chats keeps a connected account by its account, the platform and the platform's own id. It is made when a connection first reaches the account, and it outlives the connection.
+- A disconnected account's record stays, as disconnected, and every chat keeps its whole history. Connecting the same account again finds it.
+- The kind of connection alone says whether an account takes an agent, which agent, and whether it speaks as its own account or as a delegate. The dashboard shows them.
 - The code says chat, act and watch for what a connection lets Rome do.
 
 Diffs still owed to the model, each a change of its own:
@@ -94,6 +93,7 @@ Diffs still owed to the model, each a change of its own:
 - A fix that reaches another account ends the connection and starts a new one to that account, in one step, and the dashboard says so. Today it is refused.
 - Chat replaces conversation in the dashboard, the docs and the code.
 - The per-chat agent override is removed, with a migration.
+- The connected account still stores an agent, written from its kind of connection and read by nothing that answers. It is dropped, with Rome's listening check that reads it.
 - One group is one chat across all of Rome's accounts in it.
 - A Feishu person is one account across all of Rome's Feishu accounts, by the tenant-wide id.
 - The participants of a chat are the platform's member list.

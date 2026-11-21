@@ -7,6 +7,7 @@ import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges
 import { ConnectionSlotCard } from "@/components/connection-slot-card";
 import { SetupRenderer } from "@/components/setup/setup-renderer";
 import { useSetup } from "@/components/setup/use-setup";
+import { warnIfAccessKept } from "@/components/connections/access-kept-warning";
 import { revokeConnectionGrant } from "@/lib/connections-api";
 import { isElectronShell } from "@/lib/electron-shell";
 import type { ConnectionCard, ConnectionSlot } from "@/lib/connection-cards";
@@ -140,6 +141,7 @@ export function OAuthConnectionSection({
       // fresh Connect instead of the previous "done"/"cancelled" view.
       setup.reset();
       onRefresh();
+      warnIfAccessKept(result);
     }
     setDisconnecting(false);
   }

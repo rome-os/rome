@@ -124,8 +124,9 @@ describe("GET /connections", () => {
       channel: null,
       platform: null,
       account: null,
-      // The fake bot declares itself a kind whose accounts take an agent.
-      agent: null,
+      // The fake bot declares itself a kind whose accounts take an agent,
+      // so main answers on it.
+      agent: "core:main",
       link: "own_account",
       severalAccounts: false,
       chatRules: ["session.reset"],
@@ -670,7 +671,7 @@ describe("GET /connections accounts", () => {
     });
   });
 
-  it("reports the agent linked to each account", async () => {
+  it("reports each account's agent, which its kind of connection decides", async () => {
     const { db, close } = createTestDb();
     openDbs.push(close);
     const records = new ChannelRecordsRepository(db, testAccountLinkOf);
@@ -682,31 +683,24 @@ describe("GET /connections accounts", () => {
       },
     });
     registry.register({ ...telegram.descriptor, connectionKind: "telegram" });
-    const conn = await registry.connect("telegram");
-    const channel = records.idOf(conn.id) as string;
-    // The account's agent is kept by the account, so the grant reaches one.
-    new DrizzleConnectionsRepository(db).save(db, {
-      id: conn.id,
-      connectionKind: "telegram",
-      label: "telegram",
-      createdAt: new Date(),
-      grant: grantReaching("telegram", "bot-1"),
+    registry.register({
+      ...telegram.descriptor,
+      connectionKind: "concierge_bot",
+      startsWithConcierge: true,
     });
-    const accounts = new ConnectedAccountsRepository(db);
-    accounts.link(conn.id, "sales:agent");
+    const conn = await registry.connect("telegram");
+    const concierge = await registry.connect("concierge_bot");
+    const channel = records.idOf(conn.id) as string;
 
     const { connections } = await (await makeApp(registry, { db }).request("/connections")).json();
 
     expect(connections.find((each: { id: string }) => each.id === conn.id)).toMatchObject({
       channel,
-      agent: "sales:agent",
+      agent: "core:main",
     });
-
-    accounts.link(conn.id, null);
-    const relisted = await (await makeApp(registry, { db }).request("/connections")).json();
-    expect(
-      relisted.connections.find((each: { id: string }) => each.id === conn.id).agent,
-    ).toBeNull();
+    expect(connections.find((each: { id: string }) => each.id === concierge.id)).toMatchObject({
+      agent: "core:concierge",
+    });
   });
 
   it("reports no agent for a service that takes no link", async () => {
@@ -835,6 +829,36 @@ describe("DELETE /connections/:id", () => {
     expect(await ledger.all()).toEqual([]);
     // The live talk epoch was torn down with the connection.
     expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(1);
+  });
+
+  it("takes back a kind's access at the platform, and warns when that failed", async () => {
+    const ledger = makeLedger();
+    const registry = new ConnectionRegistry({ repository: ledger });
+    const fixture = makePasteTalkWithProfile();
+    const taken: unknown[] = [];
+    registry.register({
+      ...fixture.descriptor,
+      onDisconnect: async ({ material }) => {
+        taken.push(material);
+        throw new Error("platform unreachable");
+      },
+    });
+    const conn = await registry.connect("fake-telegram", "Telegram");
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.validCredential());
+
+    const res = await makeApp(registry).request(`/connections/${conn.id}`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+
+    expect(res.status).toBe(200);
+    expect(taken).toHaveLength(1);
+    expect(await res.json()).toEqual({
+      ok: true,
+      warning:
+        "Disconnected in Rome, but the service may still hold Rome's access: platform unreachable. Remove Rome there too.",
+    });
+    expect(await ledger.all()).toEqual([]);
   });
 
   it("404s an unknown connection and rejects cross-site requests", async () => {
