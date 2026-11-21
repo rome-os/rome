@@ -16,9 +16,9 @@ describe("the Concierge on a connection", () => {
     expect(agentOfKind(null, true)).toBeNull();
   });
 
-  it("delivers its text and withholds every action that needs a Concierge chat, only on a connection", () => {
+  it("keeps its text private and withholds every action that needs a Concierge chat, only on a connection", () => {
+    // No finalText: the Concierge's own, private, holds here too.
     expect(conciergePlaceSetup("core:concierge", { channel: "telegram" })).toEqual({
-      finalText: "deliver",
       systemPromptPrefix: CONNECTION_PROMPT,
       handoffOnRenewal: false,
       withoutActions: CONCIERGE_CHAT_ACTIONS,
@@ -34,15 +34,18 @@ describe("the Concierge on a connection", () => {
     expect(conciergePlaceSetup("core:main", { channel: "telegram" })).toBeNull();
   });
 
-  it("answers in its own words with nothing to close the turn, and calls nothing the dashboard has", () => {
-    expect(CONNECTION_PROMPT).toContain('never add a closing word or line such as "done"');
+  it("speaks only through say, ends each turn with done, and calls nothing the dashboard has", () => {
+    expect(CONNECTION_PROMPT).toContain("`say` is the only way anyone here hears you");
+    expect(CONNECTION_PROMPT).toContain("Text you write outside `say` is private");
+    expect(CONNECTION_PROMPT).toContain("End every turn by writing only `done`");
     expect(CONNECTION_PROMPT).toContain("Never call a tool or action you were not given");
-    expect(CONNECTION_PROMPT).toContain("Never put a code, password, token or other secret");
+    expect(CONNECTION_PROMPT).toContain("`say` refuses `private`");
+    expect(CONNECTION_PROMPT).toContain("Never say a code, password, token or other secret");
     expect(CONNECTION_PROMPT).toContain(
       "never repeat it in a chat that someone other than the guardian can read",
     );
     // The dashboard's ways of speaking are never named, so nothing invites a call.
-    for (const name of ["`say`", "`defer`", "show_card", "card_forward"]) {
+    for (const name of ["`defer`", "show_card", "card_forward", "ask_question"]) {
       expect(CONNECTION_PROMPT).not.toContain(name);
     }
   });

@@ -528,6 +528,8 @@ function setup(
     startedAt?: string;
     /** A newer input cut the turn short and took its work on. */
     handedOn?: boolean;
+    /** Where the turn ran, when not the dashboard chat `chatId`. */
+    threadContext?: { channel: string; threadId: string };
   }) => {
     if (!isConciergeChatId(event.chatId) && !event.handedOn) runningTaskChats.delete(event.chatId);
     for (const listener of listeners) {
@@ -539,7 +541,7 @@ function setup(
           sessionId: "runtime-x",
           turnId: event.turnId,
           agentName: event.agentName,
-          threadContext: { channel: "webchat", threadId: event.chatId },
+          threadContext: event.threadContext ?? { channel: "webchat", threadId: event.chatId },
         },
         status: event.status ?? "completed",
         timing: { startedAt: event.startedAt ?? "", finishedAt: "", durationMs: 0 },
@@ -751,7 +753,7 @@ describe("Concierge tools", () => {
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
   });
 
-  it("register only the task tools for the Concierge in a chat on a connection, where it answers in plain text", async () => {
+  it("register say, react and the task tools for the Concierge in a chat on a connection", async () => {
     const on = setup();
     const telegram = {
       ...on.context(),
@@ -840,6 +842,108 @@ describe("Concierge tools", () => {
         true,
       );
       expect(reacted).toHaveLength(1);
+    });
+
+    it("says through the chat's account, past its send gate, never into a dashboard chat", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const said: unknown[] = [];
+      s.deps.sayInChat = async (chat, message) => {
+        said.push({ chat, message });
+        return { sent: "800000000000000009" };
+      };
+      s.deps.webchatRepo.getTurnChatMessages = (async () => [
+        {
+          id: "800000000000000001",
+          role: "user",
+          content: JSON.stringify([{ type: "text", content: "@Rome hi" }]),
+        },
+      ]) as never;
+      const result = await run(there(s, chatId, "guardian"), s, "say", { text: "Hey!" });
+      expect(result.isError).toBeFalsy();
+      expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+        messageId: "800000000000000009",
+      });
+      expect(said).toEqual([
+        {
+          chat: { id: chatId, channel: "discord_app", threadId: "900" },
+          message: {
+            text: "Hey!",
+            turnId: expect.any(String),
+            place: "group",
+            recipient: { bondLevel: "guardian", shownName: expect.any(String), said: "@Rome hi" },
+          },
+        },
+      ]);
+      // Nothing went into a dashboard chat.
+      expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+    });
+
+    it("lets anyone's turn say something, and tells the gate whom it answers", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const recipients: unknown[] = [];
+      s.deps.sayInChat = async (_chat, message) => {
+        recipients.push(message.recipient.bondLevel);
+        return { sent: "1" };
+      };
+      s.deps.webchatRepo.getTurnChatMessages = (async () => []) as never;
+      expect(
+        (await run(there(s, chatId, "acquaintance"), s, "say", { text: "Hi" })).isError,
+      ).toBeFalsy();
+      // A task's report, which no one sent, answers the guardian who started the task.
+      expect(
+        (await run(there(s, chatId, undefined), s, "say", { text: "Done" })).isError,
+      ).toBeFalsy();
+      expect(recipients).toEqual(["acquaintance", "guardian"]);
+    });
+
+    it("refuses private there, and tells the model what the send gate held back", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      s.deps.sayInChat = async () => ({
+        notSent: "This message waits for the guardian's approval.",
+      });
+      s.deps.webchatRepo.getTurnChatMessages = (async () => []) as never;
+      const secret = await run(there(s, chatId, "guardian"), s, "say", {
+        text: "1234",
+        private: true,
+      });
+      expect(secret.isError).toBe(true);
+      expect(secret.content[0]!.text).toContain("Nothing here is private");
+      const held = await run(there(s, chatId, "other"), s, "say", { text: "Hi" });
+      expect(held.isError).toBeFalsy();
+      expect(JSON.parse(held.content[0]!.text)).toEqual({
+        sent: false,
+        note: "This message waits for the guardian's approval.",
+      });
+    });
+
+    it("reminds a turn there that ended on text outside say, once, and not one that ended on done", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      // The turn's session stands in that chat.
+      s.deps.webchatRepo.chatOfSession = (async () => ({ id: chatId })) as never;
+      const where = { channel: "discord_app", threadId: "900" };
+      await s.finish({
+        turnId: "c-1",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId,
+        text: "不客气～",
+        threadContext: where,
+      });
+      expect(s.backendTurns.map((turn) => [turn.channel, turn.threadId])).toEqual([
+        ["discord_app", "900"],
+      ]);
+      expect(s.backendTurns[0]?.prompt).toContain(NUDGE_PROMPT);
+      await s.finish({
+        turnId: "c-2",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId,
+        text: "done",
+        threadContext: where,
+      });
+      expect(s.backendTurns).toHaveLength(1);
     });
 
     it("refuses the task tools to anyone but the guardian", async () => {

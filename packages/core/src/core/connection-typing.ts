@@ -1,13 +1,12 @@
-// A connected chat's typing indicator, shown by the same rule as the
-// dashboard's typing dots (core/message-writing.ts): while the agent writes
-// a message. On a connection the reply is the turn's text, so it shows while
-// that text streams. A platform drops its indicator after a few seconds, so
-// it is shown again every RENEW_MS while the writing lasts, and no more once
-// it ends. Where the provider cannot say when it writes (a simulated turn),
-// the dashboard only holds each message behind its dots for a moment once it
-// has arrived; a connection sends the message at once, so it shows nothing.
-// A turn no person started, such as a task's report, shows nothing, as a
-// quiet turn on the dashboard shows no dots before its first message.
+// A connected chat's typing indicator, shown by the dashboard's typing dots'
+// own rule and signal (core/message-writing.ts): while the agent writes a
+// `say` message. A platform drops its indicator after a few seconds, so it is
+// shown again every RENEW_MS while the writing lasts, and no more once it
+// ends. Where the provider cannot say when it writes (a simulated turn), the
+// dashboard only holds each message behind its dots for a moment once it has
+// arrived; a connection sends the message at once, so it shows nothing. A
+// turn no person started, such as a task's report, shows nothing, as a quiet
+// turn on the dashboard shows no dots before its first message.
 
 import { createLogger } from "../logger.js";
 import { MessageWriting, messageWritingModeOf } from "./message-writing.js";
@@ -63,9 +62,7 @@ export function connectionTyping(deps: {
     };
     return {
       event(msg) {
-        writing ??= new MessageWriting(messageWritingModeOf(turn.providerId()), {
-          textIsMessage: true,
-        });
+        writing ??= new MessageWriting(messageWritingModeOf(turn.providerId()));
         const changed = writing.on(msg);
         if (changed === true && !timer) {
           tick();

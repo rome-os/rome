@@ -44,6 +44,7 @@ import {
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
+import type { TurnTyping, TurnTypingFor } from "./connection-typing.js";
 import {
   findSessionChat,
   noteOpenerChat,
@@ -133,6 +134,13 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     }),
     /** Told when a turn starts in a connected account's chat. Absent, nobody is told. */
     private turnStartedInChat?: TurnStartedInChat,
+    /** A connected chat's typing indicator for each turn, by the dashboard's
+     *  typing-dots rule. Absent, no chat shows one. */
+    private turnTyping?: TurnTypingFor,
+    /** Whether an agent's text stays private on a channel, as the Concierge's
+     *  does: its words reach a chat only through `say`, so a turn's result
+     *  reaches the worker that asked for it without them. Absent, none is. */
+    private isTextPrivate?: (agentName: string, channel: string) => boolean,
   ) {}
 
   /**
@@ -385,6 +393,19 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         });
 
         const stream = ctx.openStream<StreamAgentEvent>(`agent.turn:${handle.id}`);
+        // A turn a person's message started shows the chat's typing indicator
+        // while it writes a message, as the dashboard shows its dots.
+        const typing =
+          this.turnTyping?.({
+            channel: thread?.channel,
+            threadId: thread?.threadId,
+            initiatedBy: req.platformMessageId ? "user" : "system",
+            // Read at the turn's first event, once the session has its provider.
+            providerId: () => session.providerId,
+          }) ?? null;
+        const textPrivate =
+          thread?.channel !== undefined &&
+          this.isTextPrivate?.(req.key.agentName, thread.channel) === true;
         // Drain the per-turn events into the IPC stream.
         void (async () => {
           let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;
@@ -392,6 +413,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           try {
             for await (const event of handle.events()) {
               const msg = withRomeSession(event, romeSession);
+              typing?.event(msg as Parameters<TurnTyping["event"]>[0]);
               // Recorded first, so a turn that opens its conversation has its
               // row before its stream can be asked for.
               if (recorder) {
@@ -425,7 +447,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                   });
                 }
               }
-              stream.send(msg);
+              // The trace keeps a private turn's text; the worker never gets it.
+              stream.send(textPrivate && msg.type === "result" ? { ...msg, content: "" } : msg);
             }
             stream.close();
           } catch (err) {
@@ -435,6 +458,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             });
             stream.close({ error: err instanceof Error ? err : new Error(String(err)) });
           } finally {
+            typing?.end();
             workerWatch.release();
             liveStream?.finish();
             endChatTurn?.();

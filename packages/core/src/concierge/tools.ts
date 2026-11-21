@@ -49,6 +49,8 @@ import { replyQuoteOf } from "../webchat/reply-quote.js";
 import { GUARDIAN_OWNER, ownerOf } from "../webchat/owner.js";
 import { getInstanceOrigin } from "../instance/rome-cloud-origin.js";
 import { CONNECTION_TOOLS, conciergePlaceSetup } from "./on-connection.js";
+import { partsText } from "../chats/storage/message.js";
+import type { BondLevel } from "@rome-os/app-runtime";
 import {
   parseTaskSchedule,
   SCHEDULE_REPORTS,
@@ -248,11 +250,6 @@ export async function buildConciergeTools(
     if (onConnection) {
       const chatId = thread?.romeSessionId ?? sessionChatId;
       if (!turnId || !chatId) throw new Error("This tool works only during a turn in this chat");
-      // Tasks act for the guardian. A message from anyone else may not start,
-      // read or change one; a report, which no one sent, may.
-      if (thread?.senderBondLevel !== undefined && thread.senderBondLevel !== "guardian") {
-        throw new Error("Only the guardian can start or change tasks here. Answer in text.");
-      }
       return { chatId, turnId };
     }
     if (!turnId || thread?.channel !== "webchat" || !thread.threadId) {
@@ -655,13 +652,57 @@ export async function buildConciergeTools(
     return guardian.length === 1 ? guardian[0] : undefined;
   };
 
+  // The turn's message on a connection, which a message said there answers:
+  // its sender as People knows them, and what they said. A task's report has
+  // no sender: it answers the guardian, who started the task.
+  const connectionRecipient = async (chatId: string, turnId: string) => {
+    const thread = context.getThreadContext();
+    const asked = (await webchatRepo.getTurnChatMessages(chatId, turnId))
+      .filter((row) => row.role === "user")
+      .at(-1);
+    let said = asked?.content ?? "";
+    try {
+      const parts: unknown = JSON.parse(said);
+      if (Array.isArray(parts)) said = partsText(parts);
+    } catch {
+      // Plain text already.
+    }
+    return {
+      bondLevel: (thread?.senderBondLevel ?? "guardian") as BondLevel,
+      shownName: thread?.channelUserId ?? "someone",
+      said,
+    };
+  };
+
+  // Says `text` in this chat on a connection, through the account's send
+  // gate to the platform. Answers the platform's key, or why it was not sent.
+  const sayOnConnection = async (text: string, replyTo: string | undefined) => {
+    const { chatId, turnId } = currentTurn();
+    const chat = await service.connectionChat(chatId);
+    if (!chat || !service.deps.sayInChat) throw new Error("Nothing can be said in this chat.");
+    return service.deps.sayInChat(chat, {
+      text,
+      ...(replyTo ? { replyTo } : {}),
+      turnId,
+      place: context.getThreadContext()?.threadType === "private" ? "direct" : "group",
+      recipient: await connectionRecipient(chatId, turnId),
+    });
+  };
+
   const say = async (
     text: string,
     format: "bubble" | "long",
     isPrivate: boolean,
     replyTo?: string,
-  ) => {
+  ): Promise<{ id: string } | { notSent: string }> => {
     const { chatId, turnId } = currentTurn();
+    // Others may read a chat on a connection, and no lock screen hides a
+    // message there: nothing said there is private.
+    if (onConnection && isPrivate) {
+      throw new Error(
+        "Nothing here is private: others may read this chat. Say it without the secret, or tell the guardian to ask you for it on the dashboard.",
+      );
+    }
     const target = replyTo ? await requireReplyTarget(replyTo) : undefined;
     const parts: Parameters<typeof webchatRepo.addBackendMessage>[2] = [
       { type: "text", content: text, ...(format === "long" ? { format } : {}) },
@@ -670,8 +711,17 @@ export async function buildConciergeTools(
     // message can ring the guardian's phone, so the repeat is the same message.
     const key = sayKey(JSON.stringify(parts), replyTo);
     const repeated = service.saidInTurn(turnId, key);
-    if (repeated) return repeated;
-    const id = await addMessage(parts, target);
+    if (repeated) return { id: repeated };
+    // Only where the message goes differs: the dashboard chat, or the
+    // platform the chat on a connection is on.
+    let id: string;
+    if (onConnection) {
+      const result = await sayOnConnection(text, target?.id);
+      if ("notSent" in result) return result;
+      id = result.sent;
+    } else {
+      id = await addMessage(parts, target);
+    }
     service.keepSaid(turnId, key, id);
     // A reply to a task's start message tells that task's result.
     const taskId = target ? await taskStartedAt(target.id) : undefined;
@@ -679,9 +729,10 @@ export async function buildConciergeTools(
       service.noteSaid(taskId);
       await writeStatus("settle", () => tasks.resultSaid(taskId));
     }
-    said(chatId, turnId, text, isPrivate);
+    // A chat on a connection rings no phone: the platform tells its readers.
+    if (!onConnection) said(chatId, turnId, text, isPrivate);
     await settleAnswered(target?.id, taskId);
-    return id;
+    return { id };
   };
 
   // A message answers the guardian message of this turn that it replies to,
@@ -870,10 +921,12 @@ export async function buildConciergeTools(
   const tools: RomeTool[] = [
     {
       name: "say",
-      description:
-        "Send the guardian one message. This is the only way the guardian hears you: text you write outside this tool is private. " +
-        "One call is one message. Use format bubble (default) for a short chat line, and long for one long message with content the guardian asked for. " +
-        "Every message can show on the guardian's phone lock screen: set private for one that holds a code, password, token or other secret, and the phone shows a fixed line instead.",
+      description: onConnection
+        ? "Send one message to this chat. This is the only way anyone here hears you: text you write outside this tool is private. " +
+          "One call is one message. Others may read this chat: nothing here is private, and private is refused."
+        : "Send the guardian one message. This is the only way the guardian hears you: text you write outside this tool is private. " +
+          "One call is one message. Use format bubble (default) for a short chat line, and long for one long message with content the guardian asked for. " +
+          "Every message can show on the guardian's phone lock screen: set private for one that holds a code, password, token or other secret, and the phone shows a fixed line instead.",
       inputSchema: {
         type: "object",
         required: ["text"],
@@ -894,15 +947,18 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runTool("say", input, async (args) => {
-          const messageId = await say(
+          const said = await say(
             requireString(args, "text"),
             args.format === "long" ? "long" : "bubble",
             args.private === true,
             optionalString(args, "replyTo"),
           );
+          if ("notSent" in said) return { sent: false, note: said.notSent };
           return {
-            sent: "The guardian sees it. Call say again only for a new message.",
-            messageId,
+            sent: onConnection
+              ? "Sent to this chat. Call say again only for a new message."
+              : "The guardian sees it. Call say again only for a new message.",
+            messageId: said.id,
           };
         }),
     },
@@ -1626,7 +1682,34 @@ export async function buildConciergeTools(
         }),
     },
   ];
-  return onConnection
-    ? tools.filter((tool) => (CONNECTION_TOOLS as readonly string[]).includes(tool.name))
-    : tools;
+  if (!onConnection) return tools;
+  // On a connection, a reaction and the task tools act for the guardian. A
+  // message from anyone else may not use them; a report, which no one sent,
+  // may. Anyone's turn may say something.
+  const othersRefused = () => {
+    const bond = context.getThreadContext()?.senderBondLevel;
+    return bond !== undefined && bond !== "guardian";
+  };
+  return tools
+    .filter((tool) => (CONNECTION_TOOLS as readonly string[]).includes(tool.name))
+    .map(
+      (tool): RomeTool =>
+        tool.name === "say"
+          ? tool
+          : {
+              ...tool,
+              handler: async (input, call) =>
+                othersRefused()
+                  ? {
+                      content: [
+                        {
+                          type: "text",
+                          text: "Only the guardian can react or start or change tasks here. Answer with say.",
+                        },
+                      ],
+                      isError: true,
+                    }
+                  : tool.handler(input, call),
+            },
+    );
 }

@@ -1,5 +1,6 @@
 import type { AgentPlan, SystemInputSource } from "@rome/api-types/trace-segments";
 import { automatedInputLabel } from "./automated-input.js";
+import type { ConnectionChat, ConnectionRecipient, ConnectionSaid } from "./connection-say.js";
 // Concierge: texting-style chats that hand work to task chats. One Concierge
 // talks in a main chat and in any topic chats its owner starts, all sharing one
 // memory, one list of follows and one task list (docs/domains/chats.md#concierge-chat,
@@ -265,6 +266,20 @@ export interface ConciergeDeps {
     messageId: string,
     emoji: string,
   ) => Promise<void>;
+  /** Says a message of turn `turnId` in a chat on a connection: past the
+   *  account's send gate, to the platform, recorded in the chat. Answers the
+   *  platform's key for it, or why it was not sent. Absent, nothing can be
+   *  said in a chat on a connection. */
+  sayInChat?: (
+    chat: ConnectionChat,
+    message: {
+      text: string;
+      replyTo?: string;
+      turnId: string;
+      place: "direct" | "group";
+      recipient: ConnectionRecipient;
+    },
+  ) => Promise<ConnectionSaid>;
   accounts: Pick<ModelAccounts, "read">;
   /** The default provider. Absent, none is set, and chats keep their models. */
   defaults?: Pick<DefaultProviders, "current">;

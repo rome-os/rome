@@ -6,26 +6,29 @@ import { WEBCHAT_CHANNEL } from "../webchat/dashboard-account.js";
 import { CONCIERGE_AGENT_ID, isConciergeAgent } from "../webchat/privacy.js";
 
 // The Concierge on one of Rome's connected accounts, such as Rome's Slack or
-// Discord app: it answers there in plain text. Of its tools it keeps only the
-// ones for tasks, and a task started there reports back to that chat
-// (docs/architecture/concierge.md).
+// Discord app. It is the same Concierge as on the dashboard: it speaks only
+// through `say`, its own text stays private, and it ends each turn with
+// `done`. Only where a message goes differs: `say` sends it to the platform.
+// Of its tools it keeps `say`, `react` and the ones for tasks, and a task
+// started there reports back to that chat (docs/architecture/concierge.md).
 
 /**
  * The Concierge's own instructions on a connection, in place of its dashboard
- * ones, which speak through `say`, close each turn with a private `done`,
- * show cards and run follows: none of that exists here, and a model told about
- * it calls it anyway. Tasks it runs here too, with the tools it keeps.
+ * ones, which show cards, run follows and set reminders: none of that exists
+ * here, and a model told about it calls it anyway. It speaks as on the
+ * dashboard, through `say`, and runs tasks with the tools it keeps.
  */
 export const CONNECTION_PROMPT = [
   "You are the guardian's agent. Your name and personality are in Identity below. Here you answer in a chat on one of Rome's connected accounts, such as Rome's Slack or Discord app, and whoever writes reaches you through that account. Talk like that person texting, not like an assistant writing a report.",
   "",
   "# How you answer",
-  '- The text you write is your reply, sent to the chat as it is, with nothing added. Write only what you would text them: never narrate what you are doing, and never add a closing word or line such as "done".',
+  "- `say` is the only way anyone here hears you: each call sends one message to this chat. Text you write outside `say` is private and goes nowhere. End every turn by writing only `done` outside `say`.",
+  "- Say only what you would text them: never narrate what you are doing.",
   "- Answer every message, in the language its writer used. In Chinese, use full-width punctuation: ，。？！：；",
-  "- Make an answer as short as the question allows: one to three sentences for a simple question, with no tip, aside or extra fact they did not ask for.",
-  "- You have no tool for sending, cards, follows or later reminders here; your tools are `react` and the ones for tasks (below). Never call a tool or action you were not given; your text is how you answer.",
-  "- When an emoji says all you would write, such as a thanks or an ok, react to the guardian's message with `react` and write nothing. Only the guardian's messages take one.",
-  "- Others may read this chat, and nothing here is private. Never put a code, password, token or other secret in a reply, even when the guardian asks: tell them to ask you for it on the dashboard.",
+  "- Make an answer as short as the question allows: one to three sentences for a simple question, with no tip, aside or extra fact they did not ask for. Most answers are one `say`.",
+  "- Your tools here are `say`, `react` and the ones for tasks (below). You have no cards, follows or later reminders here. Never call a tool or action you were not given.",
+  "- When an emoji says all you would say, such as a thanks or an ok, react to the guardian's message with `react`, say nothing, and end with `done`. Only the guardian's messages take one.",
+  "- Others may read this chat, and nothing here is private: `say` refuses `private`. Never say a code, password, token or other secret, even when the guardian asks: tell them to ask you for it on the dashboard.",
   "",
   "# Who writes",
   "Each message names who wrote it. Someone other than the guardian may write here: answer them as the guardian's agent, and never tell them what memory says about the guardian unless the guardian asked you to.",
@@ -41,17 +44,18 @@ export const CONNECTION_PROMPT = [
   "",
   "# Tasks",
   "- For work that needs more than a quick answer, such as research, files outside memory, code or a reminder, start a task with `chat_start`: another agent does it while you keep talking. Only the guardian may ask for one; tell anyone else that the guardian can.",
-  "- When it starts, reply in one line that it started, with the `link` chat_start returns. Do not start the same work twice: `chat_list` with here lists the tasks started from this chat.",
-  "- Each task's news reaches you here as a `<task_events>` turn, and your text is the reply to this chat. Tell the guardian its result in a few lines of your own, from its `conclusion:` line when it has one. When there is nothing new for them, write nothing.",
+  "- When it starts, say in one line that it started, with the `link` chat_start returns. Do not start the same work twice: `chat_list` with here lists the tasks started from this chat.",
+  "- Each task's news reaches you here as a `<task_events>` turn. Tell the guardian its result with `say`, in a few lines of your own, from its `conclusion:` line when it has one. When there is nothing new for them, say nothing and end with `done`.",
   "- Others may read this chat. Leave anything private out of a result, and send the guardian to the task's link for it.",
   "- A task waiting on a question (`question`, or a `card id=` line): ask it here in your own words, then pass the guardian's answer on with `chat_send`. One waiting for an approval: tell the guardian to approve it on the dashboard, with its link. Never approve anything yourself.",
   "- `chat_read` reads a task's chat, `chat_send` gives it more detail, and `chat_stop` stops it only when the guardian clearly calls it off.",
 ].join("\n");
 
-/** The Concierge's tools a chat on a connection keeps: a reaction, and the
- *  ones for tasks. Only a turn the guardian started, or a task's report, may
- *  use them. */
+/** The Concierge's tools a chat on a connection keeps: `say`, a reaction, and
+ *  the ones for tasks. Only a turn the guardian started, or a task's report,
+ *  may use the ones for tasks. */
 export const CONNECTION_TOOLS = [
+  "say",
   "react",
   "chat_start",
   "chat_send",
@@ -100,14 +104,14 @@ export const CONCIERGE_CHAT_ACTIONS = [
 ] as const;
 
 /**
- * The Concierge's setup on a connection: its own instructions, its text is the reply, no action
+ * The Concierge's setup on a connection: its own instructions, no action
  * needs a Concierge chat, and it schedules no later wake-up, since a reply a
  * wake-up sends skips the checks the message that asked for it passed. A
  * renewed session starts with no handoff, whose replay names every sender the
- * guardian, as it is in a Concierge chat.
+ * guardian, as it is in a Concierge chat. Its text stays private, as
+ * everywhere: what it says goes through `say`.
  */
 const ON_CONNECTION: PlaceSetup = {
-  finalText: "deliver",
   systemPromptPrefix: CONNECTION_PROMPT,
   handoffOnRenewal: false,
   withoutActions: CONCIERGE_CHAT_ACTIONS,
@@ -116,8 +120,7 @@ const ON_CONNECTION: PlaceSetup = {
 
 /**
  * How the place a session serves changes the Concierge there, the one answer
- * every part reads: its policy and actions, its own tools, its instructions and
- * whether a backend turn delivers its text. Null for any other agent, and for
+ * every part reads: its actions, its own tools and its instructions. Null for any other agent, and for
  * the Concierge on the dashboard or in a place nothing names.
  */
 export function conciergePlaceSetup(

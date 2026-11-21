@@ -41,7 +41,6 @@ import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
 const log = createLogger("agent-runner");
 
 import type { ModelSessionEvent } from "../agent/index.js";
-import type { TurnTyping, TurnTypingFor } from "./connection-typing.js";
 
 // The model provider port lives in the agent context; these re-exports keep
 // today's importers compiling until they import it from there.
@@ -190,9 +189,6 @@ export class AgentRunner {
     private openingFor: SessionOpeningFor = sessionOpeningFor({
       channelSurface: () => null,
     }),
-    /** A connected chat's typing indicator for each turn, shown by the
-     *  dashboard's typing-dots rule. Absent, no chat shows one. */
-    private turnTyping?: TurnTypingFor,
   ) {}
 
   /**
@@ -363,40 +359,26 @@ export class AgentRunner {
         : null;
 
     const romeSession = { _romeSessionId: romeSessionId, _type: romeSessionType };
-    const typing =
-      this.turnTyping?.({
-        channel: threadContext?.channel,
-        threadId: threadContext?.threadId,
-        initiatedBy: params.initiatedBy ?? "user",
-        // Read at the turn's first event, once the session has its provider,
-        // as the dashboard settles its dots' mode.
-        providerId: () => session.providerId,
-      }) ?? null;
-    try {
-      for await (const event of handle.events()) {
-        const msg = withRomeSession(event, romeSession);
-        typing?.event(msg as Parameters<TurnTyping["event"]>[0]);
-        if (recorder) {
-          await recordAgentTraceBestEffort(recorder, msg, log, {
-            turnId: handle.id,
-            source: "agent-runner",
-          });
-          // The turn's input, under the caller's label, right after it starts.
-          if (msg.type === "turn_start" && params.inputLabel) {
-            await recorder
-              .recordSystemInput(params.inputLabel, params.prompt, params.inputSource)
-              .catch((error: unknown) =>
-                log.warn("system input not recorded", {
-                  turnId: handle.id,
-                  error: error instanceof Error ? error.message : String(error),
-                }),
-              );
-          }
+    for await (const event of handle.events()) {
+      const msg = withRomeSession(event, romeSession);
+      if (recorder) {
+        await recordAgentTraceBestEffort(recorder, msg, log, {
+          turnId: handle.id,
+          source: "agent-runner",
+        });
+        // The turn's input, under the caller's label, right after it starts.
+        if (msg.type === "turn_start" && params.inputLabel) {
+          await recorder
+            .recordSystemInput(params.inputLabel, params.prompt, params.inputSource)
+            .catch((error: unknown) =>
+              log.warn("system input not recorded", {
+                turnId: handle.id,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
         }
-        yield msg;
       }
-    } finally {
-      typing?.end();
+      yield msg;
     }
 
     log.info("agent run completed", {

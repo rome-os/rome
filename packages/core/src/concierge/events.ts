@@ -282,6 +282,8 @@ export function startConciergeEvents(
 ): () => void {
   /** Per chat, the reminder turn that runs, and its end once it fires. */
   const remindersRunning = new Map<string, { finished?: EndedAgentTurn }>();
+  /** The chats on a connection, as channel:thread, where a reminder turn runs. */
+  const connectionReminders = new Set<string>();
   const recoveriesRunning = new Map<string, { finished?: EndedAgentTurn }>();
   const { tasks, webchatRepo, approvals } = service.deps;
 
@@ -850,11 +852,41 @@ export function startConciergeEvents(
   };
   service.attachFailedBeforeStart(onFailedBeforeStart);
 
+  // A Concierge turn in a chat on a connection ends as one on the dashboard
+  // does: on `done`. A turn whose last text is anything else may have meant
+  // it for the chat, which never saw it: one reminder turn asks it to `say`
+  // it, as on the dashboard.
+  const onConnectionTurn = async (event: EndedAgentTurn) => {
+    const thread = event.turn.threadContext;
+    if (!thread?.threadId) return;
+    // Read before any await: the reminder's own end fires while it still runs.
+    const place = `${thread.channel}:${thread.threadId}`;
+    const reminderRunning = connectionReminders.has(place);
+    if (!shouldNudge({ status: event.status, text: event.output.text, reminderRunning })) return;
+    const chatId = (await webchatRepo.chatOfSession(event.turn.sessionId))?.id;
+    if (!chatId || !(await service.connectionChat(chatId))) return;
+    connectionReminders.add(place);
+    try {
+      await service.runSystemTurn(chatId, NUDGE_PROMPT);
+    } finally {
+      connectionReminders.delete(place);
+    }
+  };
+
   const unsubscribers = [
     turns.listen({
       couldNotStart: onFailedBeforeStart,
       ended: (event) => {
         const thread = event.turn.threadContext;
+        if (
+          !event.turn.parent &&
+          thread?.channel !== undefined &&
+          thread.channel !== "webchat" &&
+          isConciergeAgent(event.turn.agentName)
+        ) {
+          void guard(`concierge connection turn (${event.turn.turnId})`, onConnectionTurn(event));
+          return;
+        }
         // A subagent's turn belongs to its parent's turn, which reports on its own.
         if (event.turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
         const chatId = thread.threadId;
