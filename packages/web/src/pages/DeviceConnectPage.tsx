@@ -65,15 +65,16 @@ export default function DeviceConnectPage() {
   }
 
   // Without the list the page cannot say what the capability is, so it says
-  // why rather than showing the capability's id as its name.
-  if (query.isError) {
+  // why rather than showing the capability's id as its name. A failed poll
+  // after a good one keeps the page it loaded.
+  if (!query.data) {
     return (
       <PageShell>
         <PageBody>
           <Alert variant="destructive">
             <AlertTitle>{t("connections.errorTitle")}</AlertTitle>
             <AlertDescription className="space-y-3">
-              <p>{query.error.message}</p>
+              <p>{query.error?.message}</p>
               <Button
                 type="button"
                 variant="outline"

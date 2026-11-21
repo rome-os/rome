@@ -84,6 +84,16 @@ describe("connect_account for a device kind", () => {
     expect(summaryOf("working", "off")).toBe("Reads this phone's battery.");
   });
 
+  it("takes a later device's summary when the first reported none, whatever their states", () => {
+    const summaryOf = (first: DeviceConnection["state"], second: DeviceConnection["state"]) =>
+      deviceKinds([
+        row("dev-1", "device", "Device", first),
+        { ...row("dev-2", "device", "Device", second), summary: "Reads this phone's battery." },
+      ])[0]?.summary;
+    expect(summaryOf("working", "off")).toBe("Reads this phone's battery.");
+    expect(summaryOf("off", "working")).toBe("Reads this phone's battery.");
+  });
+
   it("parses a reported device kind, and lists it among the kinds when refusing", () => {
     const devices = [{ kind: "apple_health", label: "Apple Health" }];
     expect(parseConnectAccountInput({ kind: "apple_health" }, devices)).toEqual({

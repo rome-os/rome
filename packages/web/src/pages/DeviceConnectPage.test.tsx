@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "@/i18n";
 import DeviceConnectPage from "./DeviceConnectPage";
@@ -27,10 +27,11 @@ const phoneDevice = {
   state: "off",
 };
 
-function renderAt(capability: string, response: Response) {
-  rs.spyOn(globalThis, "fetch").mockResolvedValue(response);
+function renderAt(capability: string, response: Response, ...later: Response[]) {
+  const fetch = rs.spyOn(globalThis, "fetch").mockResolvedValueOnce(response);
+  for (const next of later) fetch.mockResolvedValueOnce(next);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[`/connections/device/${capability}`]}>
         <Routes>
@@ -39,7 +40,14 @@ function renderAt(capability: string, response: Response) {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return client;
 }
+
+const refused = () =>
+  new Response(JSON.stringify({ error: "Guardian session required" }), {
+    status: 403,
+    headers: { "content-type": "application/json" },
+  });
 
 const listing = (connections: unknown[]) =>
   new Response(JSON.stringify({ connections }), {
@@ -76,15 +84,22 @@ describe("DeviceConnectPage", () => {
   });
 
   it("says the list could not load instead of naming the capability by its id", async () => {
-    renderAt(
-      "device",
-      new Response(JSON.stringify({ error: "Guardian session required" }), {
-        status: 403,
-        headers: { "content-type": "application/json" },
-      }),
-    );
+    renderAt("device", refused());
     expect(await screen.findByText("Connections couldn't be loaded")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Connect device" })).toBeNull();
+  });
+
+  it("keeps the loaded page when a later poll fails", async () => {
+    const client = renderAt("device", listing([phoneDevice]), refused());
+    expect(await screen.findByRole("heading", { name: "Connect Device" })).toBeTruthy();
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ["device-connections"] });
+      // React Query tells its observers on a timer, so let the page hear the failure.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(client.getQueryState(["device-connections"])?.status).toBe("error");
+    expect(screen.getByRole("heading", { name: "Connect Device" })).toBeTruthy();
+    expect(screen.queryByText("Connections couldn't be loaded")).toBeNull();
   });
 });
