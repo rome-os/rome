@@ -1826,7 +1826,7 @@ function answersLine(agent: string | null): string {
 }
 
 /** Breaks at newlines where possible. */
-function splitMessage(text: string, maxLength = 2000): string[] {
+export function splitMessage(text: string, maxLength = 2000): string[] {
   if (text.length <= maxLength) return [text];
 
   const chunks: string[] = [];

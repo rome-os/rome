@@ -14,6 +14,7 @@ import {
 import { useSetup } from "@/components/setup/use-setup";
 import type { ConnectionSlot } from "@/lib/connection-cards";
 import { revokeConnectionGrant } from "@/lib/connections-api";
+import { DiscordServersSection } from "@/components/connections/discord-servers-section";
 
 // Every Talk channel connects through the setup: the card
 // is a thin frame around `useSetup` (drives `/api/connections/:id/grants/:name/
@@ -76,6 +77,9 @@ export interface ChannelConnectConfig {
   /** Disconnect-failed fallback copy key; defaults to
    *  `channels.disconnectFailedFallback`. */
   disconnectFailedKey?: string;
+  /** What the card shows under a working connection, such as the servers
+   *  Rome's Discord bot was added to. */
+  connectedSection?: ComponentType;
 }
 
 /** The personal-account glyph — a muted user circle instead of the brand badge,
@@ -133,6 +137,11 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
   slack_app: {
     service: "slack_app",
     defaultGrant: "bot",
+  },
+  discord_app: {
+    service: "discord_app",
+    defaultGrant: "bot",
+    connectedSection: DiscordServersSection,
   },
   agents: {
     service: "agents",
@@ -292,6 +301,8 @@ export function ChannelConnectCard({
           <div>
             <p className="text-aux text-success-fg">{t(config.guardianLinkedKey)}</p>
           </div>
+        ) : config.connectedSection && !broken ? (
+          <config.connectedSection />
         ) : null
       ) : setup.state ? (
         <SetupRenderer
