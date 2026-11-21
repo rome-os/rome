@@ -59,6 +59,31 @@ describe("ChannelsServiceProxy", () => {
     ]);
   });
 
+  it("waits out a read that a platform holds for a minute", async () => {
+    rs.useFakeTimers();
+    process.send = undefined;
+    setWorkerRpcInProcessDispatcher(() => new Promise<never>(() => {}));
+
+    const promise = new ChannelsServiceProxy().query("slack", { limit: 15 });
+    let settled = false;
+    void promise.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+
+    await rs.advanceTimersByTimeAsync(75 * 1000);
+    expect(settled).toBe(false);
+
+    const rejection = expect(promise).rejects.toThrow("IpcRpc timeout: channels.query (90000ms)");
+    await rs.advanceTimersByTimeAsync(15 * 1000);
+    await rejection;
+    rs.useRealTimers();
+  });
+
   it("sends by channel name", async () => {
     process.send = undefined;
     const calls: unknown[] = [];
