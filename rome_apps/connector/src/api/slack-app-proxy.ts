@@ -26,7 +26,7 @@ export const SLACK_NO_SIGN_IN =
   'The Slack sign-in is not connected. Omit via, or pass via: "app", to go through Rome\'s Slack app.';
 
 const OFFERED =
-  "It offers chat.postMessage (send), conversations.history and conversations.replies (read), conversations.list (the channels the app is a member of) and search.messages (search over what Rome has kept of the app's direct messages and mentions). A channel can be named by its id or as #name.";
+  "It offers chat.postMessage (send), conversations.history and conversations.replies (read), conversations.list (the channels the app is a member of) and search.messages (a match over one named channel's newest page of up to 15 messages). A channel can be named by its id or as #name.";
 
 /** What a call that takes the Slack app says while the app's connection
  *  names no account yet, such as while it is locked. */

@@ -39,9 +39,9 @@ description: |
   `latest` until a page comes back empty, which is the only one with
   `has_more: false`. A thread answers oldest first, from its start: read on
   by passing `response_metadata.next_cursor` as `cursor` until a page comes
-  back empty. Search covers what Rome has kept of the app's direct
-  messages and mentions, reading a named `channel`'s newest messages first,
-  and its `coverage` field says what it covered.
+  back empty. Search matches `query` against the named `channel`'s newest
+  page of up to 15 messages, and refuses a search that names no channel.
+  Its `coverage` field says what it covered.
   Any other Slack method is refused. With only the older Slack sign-in
   connected, a call that names no `via` goes through the sign-in, and that is
   the expected route, not a fault. With both the Slack app and the sign-in
