@@ -132,6 +132,7 @@ services:
         corepack enable --install-directory /state/bin &&
         pnpm install --frozen-lockfile &&
         exec pnpm exec wrangler dev -c wrangler.slack.jsonc --ip 0.0.0.0 --port 8788
+        --local-upstream slack.romeos.io --upstream-protocol https
         --persist-to /state/slack-gateway-data --log-level info
     environment:
       <<: *node-env
