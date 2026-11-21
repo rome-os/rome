@@ -119,6 +119,8 @@ describe("a Slack app backlog, end to end", () => {
           postMessage: async () => ({ ts: "9.0" }),
           openDirectMessage: async () => "D_NEW",
           userName: async () => ({ displayName: "Member" }),
+          conversationHistory: async () => ({ messages: [], hasMore: false }),
+          revoke: async () => {},
         },
         cloud: {} as never,
         openMailbox: mailbox.open,

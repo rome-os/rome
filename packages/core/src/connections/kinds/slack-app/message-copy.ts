@@ -1,4 +1,5 @@
-// The Slack app connection's own copy of the direct messages it hears.
+// The Slack app connection's own copy of the messages it hears: direct
+// messages, and mentions of it in a group.
 //
 // The connection tells its mailbox a message was received only once the copy
 // holds it, so the mailbox keeps whatever a crash or a stop interrupted and
@@ -7,16 +8,16 @@
 // outside the connection can tell whether the copy exists.
 
 import type { ChannelMessage } from "@rome-os/app-runtime";
-import { and, asc, eq, gte, isNull, max, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, isNotNull, isNull, lt, max, or } from "drizzle-orm";
 import type { DrizzleDb } from "../../../db/index.js";
 import { slackAppMessages } from "../../../db/schema.js";
 
-/** One direct message as the connection keeps it. */
+/** One message as the connection keeps it. */
 export interface KeptSlackMessage {
   teamId: string;
   /** Slack's event id, which names the delivery. */
   eventId: string;
-  /** The direct message's conversation id. */
+  /** The conversation id: a direct message's, or a group's. */
   channelId: string;
   ts: string;
   threadTs?: string;
