@@ -411,15 +411,14 @@ struct AgentBubble: View {
     /// Held to the folded height until it is measured, so a long reply is
     /// folded from its first frame. Unfolded first, it shrank by hundreds of
     /// points after the list had placed its bottom.
-    private var capped: Bool { Self.capped(measured: fullHeight, expanded: expanded, selecting: selecting, size: dynamicTypeSize) }
+    private var capped: Bool { Self.capped(measured: fullHeight, expanded: expanded, size: dynamicTypeSize) }
 
     /// Whether the text is held to the folded height: until it is measured
-    /// (`measured` is 0), and while a long one is folded. Text being selected
-    /// is never folded: a selection's ends and handles must be in sight and
-    /// in reach, so select mode unfolds the message and leaving it folds it
-    /// again.
-    nonisolated static func capped(measured: CGFloat, expanded: Bool, selecting: Bool = false, size: DynamicTypeSize) -> Bool {
-        !selecting && !expanded && (measured == 0 || folds(height: measured, size: size))
+    /// (`measured` is 0), and while a long one is folded. Select mode leaves
+    /// the fold as it is: its first selection is the paragraph pressed, which
+    /// is in sight, and text inside the fold is selected once it is unfolded.
+    nonisolated static func capped(measured: CGFloat, expanded: Bool, size: DynamicTypeSize) -> Bool {
+        !expanded && (measured == 0 || folds(height: measured, size: size))
     }
 
     var body: some View {
@@ -433,10 +432,10 @@ struct AgentBubble: View {
                 .overlay(alignment: .bottom) {
                     // Folded, the chevron sits on the fade over the last
                     // lines, so the bubble does not grow for it.
-                    if folds && !expanded && !selecting { expandButton }
+                    if folds && !expanded { expandButton }
                 }
             // Open, it sits right under the last line.
-            if folds && expanded && !selecting { expandButton.padding(.top, -6) }
+            if folds && expanded { expandButton.padding(.top, -6) }
         }
         .quotedAbove(quote, tone: .received, onTap: onQuote)
         .padding(.horizontal, 14)
@@ -445,11 +444,6 @@ struct AgentBubble: View {
         .contentShape(.contextMenuPreview, shape)
         .bubbleMenu(text: text, menu: menu)
         .bubbleWidth()
-        // A folded reply unfolds downward in select mode and folds back
-        // upward after: its top, and every row above it, stay where they are.
-        .onChange(of: selecting) {
-            if folds, !expanded, let rowID { rowTopHold?.hold(rowID) }
-        }
     }
 
     /// A small grey chevron, centred. Folded, its backdrop is the fade into

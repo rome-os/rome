@@ -296,15 +296,6 @@ import UIKit
         selection.begin(row: "m1", text: "Hello", now: now.addingTimeInterval(TextSelection.touchLifetime + 1))
         #expect(selection.target?.point == nil)
     }
-
-    @Test func selectModeUnfoldsAFoldedReply() {
-        let long: CGFloat = 2000
-        #expect(AgentBubble.capped(measured: long, expanded: false, size: .large))
-        #expect(!AgentBubble.capped(measured: long, expanded: false, selecting: true, size: .large))
-        #expect(!AgentBubble.capped(measured: 0, expanded: false, selecting: true, size: .large))
-        // Leaving select mode folds it again.
-        #expect(AgentBubble.capped(measured: long, expanded: false, selecting: false, size: .large))
-    }
 }
 
 /// Which message is in select mode, and what ends it.
