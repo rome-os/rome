@@ -269,6 +269,7 @@ One thing a guardian can set on a chat, for each of Rome's accounts in it. There
 - A direct message offers only when its session starts afresh, and every message in it wakes the agent.
 - An official app offers no chat rule, so every one is at its default: the account's own agent answers, only when addressed.
 - The dashboard shows a connection's chat rules on that connection's page, and only the rules its kind offers.
+- Chat rules are not the link the guardian sets on a connected account ([Envoy](#envoy)). The link says which agent speaks through the account, in every chat it is in. A chat rule says how that account behaves in one chat. The code still offers which agent answers as a chat rule, the per-chat override [decided against](#decided-against) below, and it is to be removed ([Where the code stands](README.md#where-the-code-stands)).
 
 ## Reply rule
 

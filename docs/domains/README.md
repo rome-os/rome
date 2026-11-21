@@ -45,6 +45,7 @@ Each word has a heading, its meaning in one or two sentences, and the rules that
 - A new word enters its context file before it enters code, UI copy or a doc. If it fits no context, it is not one of these words and belongs in [`concepts/`](../concepts/index.md).
 - A change to a rule lands in the same PR as the code that follows it.
 - One meaning per word within a context. A word that needs two meanings is two words.
+- A new table, row kind or state says why it is needed, which guarantee it serves, and what it stores, before it is added. A record that repeats another context's record is not needed (Ouou, 2026-11-21).
 - The rules for writing here are in [`authoring/domains.md`](../authoring/domains.md).
 
 ## Where the code stands
@@ -107,5 +108,6 @@ Diffs still owed to the model, each a change of its own:
 - Code, docs and the dashboard say platform for where an account lives and kind of connection for how Rome got in. Neither says service.
 - People's labels and docs say platform where they say channel.
 - The channel record goes.
+- A connection tells the platform it has a message only after Chats has recorded it. Today a connection's deliver returns before the record, and the Slack connection acknowledges each envelope before handling it.
 - Email and WhatsApp accounts lose Rome's reach at disconnect like every other, and connecting again reaches the same connected account.
 - Messages, participants and apps name an account by platform and the platform's own id, never by a channel name.
