@@ -100,8 +100,8 @@ describe("registerBuiltinConnections", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  // Migration 0152 deletes stored Slack bot (`slack_bot`) connections, but one
-  // can still arrive after it, such as from a restored backup.
+  // Stored Slack bot (`slack_bot`) connections stay in the store after the
+  // kind is removed.
   it("boots past a stored Slack bot, skipping it, and still offers Rome's Slack app", async () => {
     const stored = {
       id: "conn-slack-bot",
