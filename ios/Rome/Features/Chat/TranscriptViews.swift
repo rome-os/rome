@@ -407,6 +407,14 @@ struct AgentBubble: View {
     /// How far a selection handle's knob reaches past the text.
     private static let handleRoom: CGFloat = 24
 
+    /// The text's top in the window, so select mode knows where the fold is.
+    @State private var textTop: CGFloat = 0
+    /// Where the fold hides the text, in the window: above the fade over the
+    /// last folded lines, where the text is still in sight.
+    private var foldBottom: CGFloat { textTop + Self.foldHeight(for: dynamicTypeSize) - Self.fadeHeight }
+    /// The fade over a folded reply's last lines (`expandButton`).
+    static let fadeHeight: CGFloat = 40
+
     private var folds: Bool { Self.folds(height: fullHeight, size: dynamicTypeSize) }
     /// Held to the folded height until it is measured, so a long reply is
     /// folded from its first frame. Unfolded first, it shrank by hundreds of
@@ -423,12 +431,16 @@ struct AgentBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            MarkdownText(source: text, selectable: selecting, selectFrom: selection?.target?.point)
+            MarkdownText(source: text, selectable: selecting, selectFrom: selection?.target?.point,
+                         foldBottom: selecting && capped ? foldBottom : nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
                 .frame(maxHeight: capped ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
-                // Unfolded, the clip leaves room for the selection's handles.
-                .clipShape(Rectangle().inset(by: selecting && !capped ? -Self.handleRoom : 0))
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { textTop = $0 }
+                // In select mode the clip leaves room for the selection's
+                // handles above and beside the text; folded, it still hides
+                // the text under the fold.
+                .clipShape(FoldClip(handleRoom: selecting ? Self.handleRoom : 0, folded: capped))
                 .overlay(alignment: .bottom) {
                     // Folded, the chevron sits on the fade over the last
                     // lines, so the bubble does not grow for it.
@@ -454,7 +466,7 @@ struct AgentBubble: View {
             Image(systemName: expanded ? "chevron.up" : "chevron.down")
                 .romeFont(13, .semibold)
                 .foregroundStyle(Palette.sub.opacity(0.6))
-                .frame(maxWidth: .infinity, minHeight: expanded ? 16 : 40, alignment: .bottom)
+                .frame(maxWidth: .infinity, minHeight: expanded ? 16 : Self.fadeHeight, alignment: .bottom)
                 .background {
                     if !expanded {
                         LinearGradient(colors: [Palette.bubble.opacity(0), Palette.bubble], startPoint: .top, endPoint: .bottom)
@@ -992,5 +1004,19 @@ struct CameraPicker: UIViewControllerRepresentable {
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             parent.dismiss()
         }
+    }
+}
+
+/// The clip of a reply's text: `handleRoom` past its top and sides for a
+/// selection's handles, and past its bottom too unless the reply is folded,
+/// whose text below the fold stays hidden.
+struct FoldClip: Shape {
+    let handleRoom: CGFloat
+    let folded: Bool
+
+    func path(in rect: CGRect) -> Path {
+        Path(CGRect(x: rect.minX - handleRoom, y: rect.minY - handleRoom,
+                    width: rect.width + handleRoom * 2,
+                    height: rect.height + handleRoom + (folded ? 0 : handleRoom)))
     }
 }

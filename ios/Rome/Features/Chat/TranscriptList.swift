@@ -66,6 +66,9 @@ struct TranscriptList<Row: View>: View {
         }
         // The composer taking focus, or share mode, ends select mode.
         .onChange(of: composerFocused) { if composerFocused { store.textSelection.end() } }
+        // Leaving the chat ends it: back, the drawer, another chat. The store
+        // outlives the screen, and a press point is no place to come back to.
+        .onDisappear { store.textSelection.end() }
         .onChange(of: store.share.isSelecting) { if store.share.isSelecting { store.textSelection.end() } }
         .onChange(of: rows.last?.id) {
             if let until = catchUpUntil, Date.now < until { scroll.toBottom() }
@@ -776,6 +779,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
+        selection?.end()
         revealing = nil
         // Already on top, the tap moves nothing and nothing reports back.
         scrollingToTop = scrollView.contentOffset.y + scrollView.adjustedContentInset.top > 1
@@ -807,6 +811,8 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func scrollToBottom() {
+        // A move the list makes itself ends select mode, as a drag does.
+        selection?.end()
         guard let view else { return }
         revealing = nil
         // A fling still gliding would win over the jump: stop it first.
@@ -820,6 +826,8 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func reveal(_ rowId: String, atTop: Bool) {
+        // A move the list makes itself ends select mode, as a drag does.
+        selection?.end()
         guard let view, let offset = offset(revealing: rowId, atTop: atTop) else { return }
         if view.isDecelerating { view.setContentOffset(view.contentOffset, animated: false) }
         revealing = (rowId, atTop)
@@ -827,6 +835,8 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func keep(_ rowId: String) {
+        // A move the list makes itself ends select mode, as a drag does.
+        selection?.end()
         guard let view else { return }
         // Long enough for the keyboard to come up.
         keeping = (rowId, CACurrentMediaTime() + 1)

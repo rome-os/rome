@@ -694,6 +694,8 @@ struct MarkdownText: View {
     /// In select mode, where the long press that opened it was, in the
     /// window: the paragraph under it opens selected.
     var selectFrom: CGPoint? = nil
+    /// In select mode, where a fold hides the text, in the window.
+    var foldBottom: CGFloat? = nil
 
     private var blocks: [MarkdownBlock] {
         let parsed = MarkdownParser.parse(source)
@@ -779,17 +781,18 @@ struct MarkdownText: View {
         let style = SelectableTextStyle(fontSize: fontSize, lineSpacing: lineSpacing, color: UIColor(color), dynamicTypeSize: dynamicTypeSize, displayScale: displayScale)
         let segments = SelectableText.segments(blocks, style: style, tasks: textOnly ? nil : taskLinks)
         let first = segments.firstIndex { if case .block = $0 { false } else { true } }
+        let last = segments.lastIndex { if case .block = $0 { false } else { true } }
         ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
             switch segment {
             case .text(let run):
                 // Its quote bars and list markers are the text's own, below.
-                SelectableTextView(text: SelectableText.invisible(run.text), start: SelectionStart(point: selectFrom, first: index == first))
+                SelectableTextView(text: SelectableText.invisible(run.text), start: SelectionStart(point: selectFrom, first: index == first, last: index == last, foldBottom: foldBottom))
                     .padding(.top, SelectableText.topSpace(run.text))
             case .code(let text):
                 // Drawn over the code block, which it covers: its own lines
                 // scroll sideways as the selection moves.
                 ScrollView(.horizontal, showsIndicators: false) {
-                    SelectableTextView(text: text, wraps: false, start: SelectionStart(point: selectFrom, first: index == first))
+                    SelectableTextView(text: text, wraps: false, start: SelectionStart(point: selectFrom, first: index == first, last: index == last, foldBottom: foldBottom))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 14)
                 }

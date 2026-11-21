@@ -298,6 +298,57 @@ import UIKit
     }
 }
 
+/// Review round: a press that misses the text, the fold, task chips.
+@MainActor
+@Suite(.serialized) struct SelectModeEdgeTests {
+    @Test func aPressThatMissesTheTextStillOpensASelection() {
+        // Above the first text (a quote, the padding) and below the last.
+        #expect(SelectionStart.claims(-30, top: 0, bottom: 100, first: true, last: true))
+        #expect(SelectionStart.claims(140, top: 0, bottom: 100, first: true, last: true))
+        // Between two texts, each takes its half of the gap.
+        #expect(SelectionStart.claims(104, top: 0, bottom: 100, first: true, last: false))
+        #expect(!SelectionStart.claims(106, top: 0, bottom: 100, first: true, last: false))
+        #expect(SelectionStart.claims(-4, top: 0, bottom: 100, first: false, last: true))
+        #expect(!SelectionStart.claims(-6, top: 0, bottom: 100, first: false, last: true))
+    }
+
+    @Test func aSelectionStopsAtTheFold() async throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 600)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        // No start yet as it joins the window, so it opens no selection itself.
+        let view = SelectingTextView(wraps: true)
+        let text = (1...12).map { "Line \($0) of a reply that is folded." }.joined(separator: "\n\n")
+        view.attributedText = SelectableText.attributed(MarkdownParser.parse(text), style: SelectableTextStyle(color: .black)).text
+        let size = view.fittingSize(width: 300, scale: 2)
+        view.frame = CGRect(origin: .zero, size: size)
+        window.addSubview(view)
+        view.start = SelectionStart(point: nil, first: true, foldBottom: 120)
+        view.layoutIfNeeded()
+        view.selectedRange = NSRange(location: 0, length: view.textStorage.length)
+        view.selectionDidChange()
+        let selected = try #require(view.selectedTextRange)
+        let end = view.caretRect(for: selected.end)
+        #expect(view.selectedRange.length > 0)
+        #expect(view.selectedRange.length < view.textStorage.length)
+        #expect(end.minY < 120)
+    }
+
+    @Test func aTaskChipKeepsItsMarkAndCopiesWithoutIt() throws {
+        let info = TaskLinkInfo(id: "c", name: "Fix login", status: "ended", endReason: "done")
+        let mark = SelectableText.chipMark(info, size: 13)
+        #expect(mark.bounds.width > 8)
+        #expect(SelectableText.copied("See \u{00A0}\u{FFFC}\u{00A0}Fix login\u{00A0}") == "See \u{00A0}\u{00A0}Fix login\u{00A0}")
+        // Drawn clear in select mode, in the same place.
+        let text = NSMutableAttributedString(string: "\u{FFFC}")
+        text.addAttribute(.attachment, value: mark, range: NSRange(location: 0, length: 1))
+        let clear = try #require(SelectableText.invisible(text).attribute(.attachment, at: 0, effectiveRange: nil) as? NSTextAttachment)
+        #expect(clear.bounds == mark.bounds)
+    }
+}
+
 /// Which message is in select mode, and what ends it.
 @MainActor
 @Suite struct TextSelectionTests {

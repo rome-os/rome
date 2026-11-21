@@ -246,11 +246,20 @@ enum SelectableText {
                 if chips, let tasks, let id = TaskLink.chatId(of: url) {
                     let written = text.trimmingCharacters(in: .whitespacesAndNewlines)
                     if let info = tasks.info[id] {
+                        // As `MarkdownParser.chip` draws it: a space after
+                        // text, then (from iOS 18) a no-break space, the
+                        // status mark, and the name between no-break spaces.
                         let spaced = TaskLink.spacesChip(after: out.string.last)
-                        text = (spaced ? " " : "") + "\u{00A0}\(info.name.isEmpty ? written : info.name)\u{00A0}"
                         attributes[.foregroundColor] = UIColor(Palette.fg)
                         attributes[.backgroundColor] = UIColor(Palette.taskChip)
                         attributes[.link] = url
+                        var lead = spaced ? " " : ""
+                        if #available(iOS 18.0, *) { lead += "\u{00A0}" }
+                        if !lead.isEmpty { out.append(NSAttributedString(string: lead, attributes: attributes)) }
+                        var mark = attributes
+                        mark[.attachment] = chipMark(info, size: (size * 0.8).rounded())
+                        out.append(NSAttributedString(string: "\u{FFFC}", attributes: mark))
+                        text = "\u{00A0}\(info.name.isEmpty ? written : info.name)\u{00A0}"
                     } else {
                         // Not read yet, or none of this chat's: the link's own text.
                         text = written.isEmpty ? String(localized: "Task") : written
@@ -263,6 +272,22 @@ enum SelectableText {
             out.append(NSAttributedString(string: lineBreaks(text), attributes: attributes))
         }
         return out
+    }
+
+    /// A chip's status mark as an attachment: the SF symbol, or the running
+    /// ring, at the size and on the baseline `TaskMarkStyle.mark` draws it,
+    /// so the chip takes the same width in the text view as on screen.
+    static func chipMark(_ info: TaskLinkInfo, size: CGFloat) -> NSTextAttachment {
+        let attachment = NSTextAttachment()
+        if info.tone == .running {
+            let image = TaskMarkRing.image(size: size, frame: 0)
+            attachment.image = image
+            attachment.bounds = CGRect(x: 0, y: -size * 0.09, width: image.size.width, height: image.size.height)
+        } else if let image = UIImage(systemName: info.symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: size)) {
+            attachment.image = image
+            attachment.bounds = CGRect(x: 0, y: -(image.baselineOffsetFromBottom ?? 0), width: image.size.width, height: image.size.height)
+        }
+        return attachment
     }
 
     /// The paragraph around the character at `index` (UTF-16), without its
@@ -312,13 +337,22 @@ enum SelectableText {
         out.removeAttribute(.backgroundColor, range: all)
         out.removeAttribute(.strikethroughStyle, range: all)
         out.removeAttribute(.underlineStyle, range: all)
+        // A chip's mark keeps its place, drawn clear.
+        out.enumerateAttribute(.attachment, in: all) { value, range, _ in
+            guard let mark = value as? NSTextAttachment else { return }
+            let clear = NSTextAttachment()
+            clear.bounds = mark.bounds
+            clear.image = UIGraphicsImageRenderer(size: mark.bounds.size).image { _ in }
+            out.addAttribute(.attachment, value: clear, range: range)
+        }
         return out
     }
 
     /// What Copy writes for `text` taken from these strings: its line
     /// breaks as newlines.
     nonisolated static func copied(_ text: String) -> String {
-        text.replacingOccurrences(of: "\u{2028}", with: "\n")
+        // A task chip's mark is an attachment, which copies as nothing.
+        text.replacingOccurrences(of: "\u{2028}", with: "\n").replacingOccurrences(of: "\u{FFFC}", with: "")
     }
 
     /// A line break inside a block breaks the line, not the paragraph, so it
@@ -449,8 +483,24 @@ struct SelectionStart: Equatable {
     /// The long press, in the window; nil with none (VoiceOver, a keyboard).
     var point: CGPoint?
     /// This text is the message's first: with no point, it opens on its
-    /// first paragraph.
+    /// first paragraph, and it takes a press above it (on a quote or the
+    /// bubble's padding).
     var first: Bool
+    /// This text is the message's last: it takes a press below it.
+    var last: Bool = true
+    /// Where the bubble's fold hides the text, in the window; nil where it
+    /// shows all of it. A selection never reaches past it.
+    var foldBottom: CGFloat? = nil
+
+    /// Whether a press `y` points down from this text's top, `top` to
+    /// `bottom` in the same space, belongs to this text: within half the
+    /// space between blocks of it, or anywhere above the first and below
+    /// the last, so a press that misses the text still opens a selection.
+    @MainActor
+    static func claims(_ y: CGFloat, top: CGFloat, bottom: CGFloat, first: Bool, last: Bool) -> Bool {
+        let slack = SelectableText.blockSpacing / 2
+        return (first || y >= top - slack) && (last || y <= bottom + slack)
+    }
 }
 
 /// Line spacing as SwiftUI's `Text` lays it: between the lines of a
@@ -635,11 +685,13 @@ final class SelectingTextView: UITextView {
         guard let point = start.point else {
             return start.first ? SelectableText.paragraph(in: textStorage.string, at: 0) : nil
         }
-        // Half the space between blocks on either side: a press there
-        // takes the nearer text.
         let local = convert(point, from: nil)
-        guard bounds.insetBy(dx: -SelectableText.blockSpacing, dy: -SelectableText.blockSpacing / 2).contains(local),
-              let position = closestPosition(to: local) else { return nil }
+        guard SelectionStart.claims(local.y, top: 0, bottom: bounds.height, first: start.first, last: start.last) else { return nil }
+        // A press beside the text, on a quote or the padding, takes the
+        // nearest paragraph; a press under the fold, the last one in sight.
+        let lowest = min(bounds.height, visibleBottom ?? bounds.height) - 1
+        let clamped = CGPoint(x: min(max(local.x, 0), bounds.width), y: min(max(local.y, 0), max(0, lowest)))
+        guard let position = closestPosition(to: clamped) else { return nil }
         return SelectableText.paragraph(in: textStorage.string, at: offset(from: beginningOfDocument, to: position))
     }
 
@@ -654,6 +706,7 @@ final class SelectingTextView: UITextView {
                 return
             }
             self.selectedRange = range
+            self.clampToFold()
             self.startAutoscroll()
             // After the bubble's menu has closed: one shown while it closes
             // is closed with it.
@@ -685,7 +738,24 @@ final class SelectingTextView: UITextView {
     private var movingStart = false
     private var autoscroll: CADisplayLink?
 
+    /// Where the fold hides this text, down from its top; nil where none does.
+    var visibleBottom: CGFloat? {
+        guard let bottom = start?.foldBottom, window != nil else { return nil }
+        return convert(CGPoint(x: 0, y: bottom), from: nil).y
+    }
+
+    /// Keeps the selection's end above the fold: text the fold hides can be
+    /// neither seen nor dragged to, so it is not selected.
+    private func clampToFold() {
+        guard let limit = visibleBottom, let range = selectedTextRange, limit < bounds.height else { return }
+        let last = closestPosition(to: CGPoint(x: bounds.width, y: max(0, limit - 4))) ?? range.end
+        guard compare(range.end, to: last) == .orderedDescending else { return }
+        let end = compare(last, to: range.start) == .orderedAscending ? range.start : last
+        if let clamped = textRange(from: range.start, to: end) { selectedTextRange = clamped }
+    }
+
     func selectionDidChange() {
+        clampToFold()
         let range = selectedRange
         if range != lastRange {
             // The end that moved is the one the finger holds.
@@ -771,6 +841,7 @@ final class SelectingTextView: UITextView {
 
 /// Drives `SelectingTextView`'s edge auto-scroll from a display link, which
 /// holds its target strongly; this holds the view weakly.
+@MainActor
 private final class AutoscrollTarget: NSObject {
     weak var view: SelectingTextView?
 
@@ -779,7 +850,12 @@ private final class AutoscrollTarget: NSObject {
     }
 
     @objc func tick(_ link: CADisplayLink) {
-        guard let view else { return link.invalidate() }
+        guard let view else {
+            // Gone mid-drag (its cell reused, select mode ended): a scroll
+            // must end select mode again.
+            SelectingTextView.dragging = false
+            return link.invalidate()
+        }
         view.autoscrollTick()
     }
 }
