@@ -36,6 +36,11 @@ const CODEX_TOOLS_WITHOUT_BUILTINS = new Set([
   "wait",
   "apply_patch",
   "update_plan",
+  // Code-mode-only models advertise these even without configured MCP servers.
+  // They reach only explicitly configured servers, not the filesystem or shell.
+  "list_mcp_resources",
+  "list_mcp_resource_templates",
+  "read_mcp_resource",
   "request_user_input",
   "request_user_input_async",
   "create_goal",
@@ -56,7 +61,7 @@ const CODEX_TOOLS_WITHOUT_BUILTINS = new Set([
 interface ResponsesRequest {
   model: string;
   tools?: unknown;
-  input?: Array<{ type?: string }>;
+  input?: Array<{ type?: string; tools?: unknown }>;
 }
 
 /** Output items the mock gateway returns, or undefined for a plain "ok". */
@@ -68,13 +73,14 @@ const hasToolOutput = (body: ResponsesRequest) =>
 /**
  * Names of the tools a Responses request offers. Codex has moved tools between
  * the top-level `tools` field and nested `additional_tools` input items, and
- * Codex 0.160 declares most of them inside the `exec` tool's description as
- * `declare const tools: { name(`. Prose that mentions a tool doesn't count.
+ * Code mode declares most tools inside the `exec` tool's description as
+ * `declare const tools: { name(`. Codex 0.171 retains old complete catalogs in
+ * history; only the latest declaration applies. Prose mentions do not count.
  */
 function toolNames(body: ResponsesRequest): string[] {
   const part = [
     body.tools ?? [],
-    (body.input ?? []).filter((item) => item.type === "additional_tools"),
+    (body.input ?? []).filter((item) => item.type === "additional_tools").slice(-1),
   ];
   const names = new Set<string>();
   const walk = (value: unknown): void => {
@@ -92,13 +98,32 @@ function toolNames(body: ResponsesRequest): string[] {
   return [...names];
 }
 
+describe("Responses tool catalog", () => {
+  it("uses the current complete catalog, not a union of historical catalogs", () => {
+    const body: ResponsesRequest = {
+      model: "test",
+      tools: [{ name: "exec" }],
+      input: [
+        { type: "additional_tools", tools: [{ name: "exec_command" }] },
+        { type: "additional_tools", tools: [{ name: "update_plan" }] },
+      ],
+    };
+    expect(toolNames(body).sort()).toEqual(["exec", "update_plan"]);
+  });
+});
+
 /**
  * Smoke the bundled Codex binary through Rome's own provider. A Codex upgrade
  * can drop a tool without any error (#629 lost update_plan this way). Each
  * turn's request to the mock gateway carries the model's tool list.
  */
 describe("bundled Codex app-server", () => {
-  const requests: Array<{ model: string; tools: string[]; input: string }> = [];
+  const requests: Array<{
+    model: string;
+    tools: string[];
+    input: string;
+    outputs: unknown[];
+  }> = [];
   let script: Script | undefined;
   let home: string;
   let gateway: ReturnType<typeof createServer>;
@@ -123,6 +148,7 @@ describe("bundled Codex app-server", () => {
           model: body.model,
           tools: toolNames(body),
           input: JSON.stringify(body.input ?? []),
+          outputs: (body.input ?? []).filter((item) => item.type?.endsWith("_output")),
         });
         const items = script?.(body) ?? [
           {
@@ -216,6 +242,28 @@ describe("bundled Codex app-server", () => {
     return request!.tools;
   }
 
+  async function expectShellRejected(session: ModelSession, label: string) {
+    script = (body) =>
+      hasToolOutput(body)
+        ? undefined
+        : [
+            {
+              type: "custom_tool_call",
+              call_id: "call-forbidden-shell",
+              name: "exec",
+              input: 'text(await tools.exec_command({cmd: "printf ROME_SHELL_LEAK"}));',
+            },
+          ];
+    try {
+      await runTurn(session, label);
+      const outputs = JSON.stringify(requests.at(-1)?.outputs);
+      expect(outputs).not.toContain("ROME_SHELL_LEAK");
+      expect(outputs).toMatch(/not (?:a function|defined)|unknown tool|not found|not available/i);
+    } finally {
+      script = undefined;
+    }
+  }
+
   const fullBuiltins = () => [...provider.builtinTools];
 
   it.each(codexModels)("gives %s the tools Rome relies on", async (model) => {
@@ -253,6 +301,36 @@ describe("bundled Codex app-server", () => {
     expect(missing, `Codex dropped Rome tools for ${model}`).toEqual([]);
   }, 30_000);
 
+  it("does not gain MCP resources without explicitly configured servers", async () => {
+    script = (body) =>
+      hasToolOutput(body)
+        ? undefined
+        : [
+            {
+              type: "custom_tool_call",
+              call_id: "call-mcp-resources",
+              name: "exec",
+              input: [
+                "text(await tools.list_mcp_resources({}));",
+                "text(await tools.list_mcp_resource_templates({}));",
+                'text(await tools.read_mcp_resource({server: "rome_missing", uri: "rome-test://missing"}));',
+              ].join("\n"),
+            },
+          ];
+    const session = await provider.openSession(sessionParams(codexModels[0]!, []));
+    try {
+      await runTurn(session, "Check the unconfigured MCP resource boundary.");
+      const outputs = JSON.stringify(requests.at(-1)?.outputs);
+      expect(outputs).toContain("resources");
+      expect(outputs).toContain("resourceTemplates");
+      expect(outputs).toContain("[]");
+      expect(outputs).toMatch(/unknown.*server|server.*not found|not configured/i);
+    } finally {
+      script = undefined;
+      await session.close();
+    }
+  }, 30_000);
+
   it("takes the shell away when a thread that had it resumes with no builtins", async () => {
     const model = codexModels[0]!;
     const first = await provider.openSession(sessionParams(model, fullBuiltins()));
@@ -272,6 +350,7 @@ describe("bundled Codex app-server", () => {
       const tools = await runTurn(resumed, "Reply with ok. (after resume)");
       expect(resumed.modelThreadId).toBe(threadId);
       expect(tools.filter((tool) => CODEX_SHELL_TOOLS.includes(tool))).toEqual([]);
+      await expectShellRejected(resumed, "Attempt a restricted resumed shell call.");
     } finally {
       await resumed.close();
     }
@@ -291,6 +370,7 @@ describe("bundled Codex app-server", () => {
         const tools = await runTurn(child, "Reply with ok. (isolated fork)");
         expect(child.modelThreadId).not.toBe(source.modelThreadId);
         expect(tools.filter((tool) => CODEX_SHELL_TOOLS.includes(tool))).toEqual([]);
+        await expectShellRejected(child, "Attempt an isolated fork shell call.");
       } finally {
         await child.close();
       }
