@@ -23,6 +23,7 @@ import type {
 } from "discord.js";
 import { isCoreMainAgentId } from "../../../apps/artifact-id.js";
 import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
+import { KeyedMutex } from "../../../lib/keyed-mutex.js";
 import {
   filterConnectionApiResponseHeaders,
   isProtectedConnectionApiRequestHeader,
@@ -36,7 +37,6 @@ import type {
   ChatSettingsControl,
   ChatSettingsSnapshot,
   ChatStopHandler,
-  MessageAddressing,
   MessageReceipt,
   PersonRecord,
 } from "@rome-os/app-runtime";
@@ -50,7 +50,7 @@ import {
 } from "../../outbound/send-refusals.js";
 import { saveUrlAttachments } from "../../inbound/attachment-files.js";
 import { createReadStream } from "node:fs";
-import { basename, extname } from "node:path";
+import { basename } from "node:path";
 import {
   DISCORD_API_VERSION,
   DISCORD_BROKER_RESPONSE_LIMIT_BYTES,
@@ -61,25 +61,16 @@ import {
   describeAnsweringAgent,
   storedAgentChoice,
 } from "../../../chats/connected-accounts/account-agents.js";
-import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
 import { isLinkCodeMessage } from "../../../people/link-code/index.js";
-import { archivedDiscordThreads, type DiscordGet } from "./discord-threads.js";
+import { archivedDiscordThreads } from "./discord-threads.js";
+import type { TalkHistoryRead } from "../../types.js";
+import { type DiscordGet, readDiscordHistory, type WireChannel } from "./discord-history.js";
+import { botReadsHistory } from "./discord-permissions.js";
+import { discordAttachment } from "./discord-attachment.js";
+import type * as connections from "../../message.js";
 
 // discord.js loads when a Discord connection first needs it, not with every boot.
 const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
-
-/**
- * The human-readable attachment name as the uploader saw it. Discord sanitizes
- * filenames that contain non-ASCII characters (e.g. "腾讯会议录制转写文件.txt"
- * becomes "580f8fdeeb994c86.txt") and preserves the original — minus extension —
- * in the `title` field. Reconstruct the display name from `title` + the cleaned
- * extension; fall back to `filename` when no title is present.
- */
-function discordAttachmentName(filename: string, title?: string | null): string {
-  if (!title) return filename;
-  const ext = extname(filename);
-  return ext && !title.toLowerCase().endsWith(ext.toLowerCase()) ? `${title}${ext}` : title;
-}
 
 const log = createLogger("discord");
 
@@ -248,19 +239,34 @@ export function normalizeDiscordMessageText(content: string, botId?: string): st
   return content.replace(new RegExp(`<@!?${botId}>`, "g"), "").trim();
 }
 
+const USER_MENTION = /<@!?([^\s>&]+)>/g;
+
 /**
- * Builds the agent-facing text for an inbound message: the bot mention is
- * stripped from prose, and a message that was only the mention keeps it as
- * `@<bot name>`. Only a typed `<@id>` token counts; a reply that merely pings
- * the bot puts it in `message.mentions` without any token, and stays as-is.
+ * The text of an inbound message as a person sees it: each user mention
+ * shows as `@name`, Rome's own accounts included, so the text is the same
+ * whichever of Rome's accounts heard it. A mention whose name the message
+ * does not carry stays as typed. A command after mentions alone, `/stop` or
+ * a link code, reads as the bare command, so its rule matches it; whom it
+ * addresses is Participation's to work out from the mentions.
  */
 export function discordInboundText(
   content: string,
-  bot?: { id: string; displayName?: string },
+  nameOf: (userId: string) => string | undefined,
 ): string {
-  const text = normalizeDiscordMessageText(content, bot?.id);
-  const typedMention = bot ? new RegExp(`<@!?${bot.id}>`).test(content) : false;
-  return preserveMentionOnlyText(text, typedMention, bot?.displayName);
+  const command = withoutMentions(content);
+  if (isStopCommand(command)) return "/stop";
+  if (isLinkCodeMessage(command)) return command;
+  return content
+    .replace(USER_MENTION, (token, id: string) => {
+      const name = nameOf(id)?.trim();
+      return name ? `@${name}` : token;
+    })
+    .trim();
+}
+
+/** The message with its user mentions removed, as a command reads it. */
+function withoutMentions(content: string): string {
+  return content.replace(USER_MENTION, "").trim();
 }
 
 /** A guild channel as surfaced to callers resolving a "#name" → snowflake. */
@@ -325,13 +331,15 @@ function projectDiscordBody(
 }
 
 /**
- * The Discord bot transport. Inbound gateway messages arrive as the channel's
- * own record, a `ChannelMessage` whose `raw` is the discord.js `Message`, so
- * the Connection integration delivers them as they are.
+ * The Discord bot transport. Inbound gateway messages arrive as a Connections
+ * message whose `raw` is the discord.js `Message`, so the Connection
+ * integration delivers them as they are.
  */
 export class DiscordAdapter {
   private client: Client;
-  private handler?: (msg: ChannelMessage) => Promise<void>;
+  private handler?: (msg: connections.Message) => Promise<void>;
+  /** Holds each chat's messages in arrival order until they are delivered. */
+  private readonly hearing = new KeyedMutex();
   private chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
   };
@@ -346,7 +354,6 @@ export class DiscordAdapter {
    */
   private listAgents?: () => string[];
   private accountAgent?: () => string | null | undefined;
-  private unsafeTestOnlyHearEveryMessage?: () => boolean;
   private hasAgent?: (name: string) => boolean;
   private resolveDiscordPerson?: (
     channelUserId: string,
@@ -366,6 +373,8 @@ export class DiscordAdapter {
   private readonly rest: REST;
   /** Broker requests that must not survive this credential-owning epoch. */
   private readonly activeApiRequestControllers = new Set<AbortController>();
+  /** Set by `stop`: this epoch's credential sends no further reads. */
+  private stopped = false;
 
   constructor(config: {
     botToken: string;
@@ -377,11 +386,6 @@ export class DiscordAdapter {
     /** The agent linked to this adapter's channel, as `accountAgentResolver`
      *  answers it. Absent, the channel reads as one that takes no link. */
     accountAgent?: () => string | null | undefined;
-    /** A test-only back door: true while the account's agent keeps the Inbox
-     *  app off it, and its app hears every message. Then no chat setting
-     *  drops a message: not a chat switched off, the reply rule, a mention of
-     *  someone else, or another bot's message. */
-    unsafeTestOnlyHearEveryMessage?: () => boolean;
     /** Whether an agent is loaded, aliases included. Absent, every agent
      *  counts as loaded. */
     hasAgent?: (name: string) => boolean;
@@ -398,7 +402,6 @@ export class DiscordAdapter {
     this.chatSettings = config.chatSettings;
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
-    this.unsafeTestOnlyHearEveryMessage = config.unsafeTestOnlyHearEveryMessage;
     this.hasAgent = config.hasAgent;
     this.resolveDiscordPerson = config.resolveDiscordPerson;
     this.chatStop = config.chatStop;
@@ -844,117 +847,68 @@ export class DiscordAdapter {
       )._add({ id: channelId, type: discordJs().ChannelType.DM, recipients: [data.author] });
     });
 
-    this.client.on("messageCreate", async (message: Message) => {
-      if (!this.handler) return;
+    // The gateway calls this for each message without waiting on the last,
+    // and hearing one can wait on Discord (a reply's author, a webhook's
+    // person). Messages of one chat are heard one after another, so a slow
+    // lookup never lets a later message overtake an earlier one.
+    this.client.on("messageCreate", (message: Message) =>
+      this.hearing
+        .runExclusive(message.channelId, () => this.hear(message))
+        .catch((err: unknown) => {
+          log.error("could not hear a message", { chatId: message.channelId, error: String(err) });
+        }),
+    );
 
-      // ── Layer 1: Hard filter ──────────────────────────────────────────────
-      if (!message.author) return;
-      if (message.system) return;
-      // Self-messages: check after we know the client is ready
-      if (this.client.user && message.author.id === this.client.user.id) return;
+    await this.client.login(this._botToken);
+    log.info("bot logged in", { username: this.client.user?.tag });
+  }
 
-      const isDm =
-        message.channel.type === discordJs().ChannelType.DM ||
-        message.channel.type === discordJs().ChannelType.GroupDM;
+  /** Hears one message from the gateway: filters it, then hands it over. */
+  private async hear(message: Message): Promise<void> {
+    if (!this.handler) return;
 
-      const isThread = isThreadType(message.channel.type);
+    // ── Layer 1: Hard filter ──────────────────────────────────────────────
+    if (!message.author) return;
+    if (message.system) return;
+    // Self-messages: check after we know the client is ready
+    if (this.client.user && message.author.id === this.client.user.id) return;
 
-      // A link code said in a guild channel must void the code, so it skips
-      // the filters below. Admission voids it and keeps it from every agent.
-      if (!isDm && isLinkCodeMessage(message.content)) {
-        await this.dispatchMessage(message, isDm, isThread, "ambient");
-        return;
-      }
+    const isDm =
+      message.channel.type === discordJs().ChannelType.DM ||
+      message.channel.type === discordJs().ChannelType.GroupDM;
 
-      // A test-only back door: the account's app hears every message, so no
-      // chat setting drops one. Another bot's message is heard but never
-      // addresses Rome, so two bots cannot answer each other forever. A
-      // webhook linked to a person speaks for that person: the chief of
-      // staff's test team posts through webhooks, and a webhook cannot read
-      // a reply, so it cannot keep that exchange going.
-      if (this.unsafeTestOnlyHearEveryMessage?.()) {
-        const addressing: MessageAddressing = isDm
-          ? "direct"
-          : message.author.bot && !(await this.isPersonsWebhook(message))
-            ? "ambient"
-            : await this.addressingOf(message);
-        await this.dispatchMessage(message, isDm, isThread, addressing);
-        return;
-      }
+    const isThread = isThreadType(message.channel.type);
 
-      const cfg = this.legacyConfig(await this.settingsForMessage(message));
-      const botId = this.client.user?.id;
+    // A link code said in a guild channel must void the code, so it skips
+    // the filters below. Admission voids it and keeps it from every agent.
+    if (!isDm && isLinkCodeMessage(withoutMentions(message.content))) {
+      await this.dispatchMessage(message, isDm, isThread);
+      return;
+    }
 
-      // ── Layer 2: Bot filter ───────────────────────────────────────────────
-      if (message.author.bot) {
-        const allowBots = cfg.allowBots ?? "none";
-        if (allowBots === "none") {
-          log.debug("ignoring bot message (allowBots=none)", { from: message.author.id });
-          return;
-        }
-        if (allowBots === "mentions") {
-          const botId = this.client.user?.id;
-          if (!botId || !message.mentions.users.has(botId)) {
-            log.debug("ignoring bot message not mentioning us (allowBots=mentions)", {
-              from: message.author.id,
-            });
-            return;
-          }
-        }
-        // allowBots === "all" → fall through
-      }
+    const cfg = this.legacyConfig(await this.settingsForMessage(message));
 
-      // ── Layer 3: Intent recognition ───────────────────────────────────────
-      const ignoreNoMention = cfg.ignoreNoMention ?? true;
-      if (!isDm && ignoreNoMention && message.mentions.users.size > 0) {
-        const botId = this.client.user?.id;
-        if (!botId || !message.mentions.users.has(botId)) {
-          log.debug("ignoring message that @mentions others but not bot", {
-            from: message.author.id,
-            channelId: message.channelId,
-          });
-          return;
-        }
-      }
+    if (isDm) {
+      await this.dispatchMessage(message, isDm, isThread);
+      return;
+    }
 
-      // ── DM shortcut: always respond ───────────────────────────────────────
-      if (isDm) {
-        await this.dispatchMessage(message, isDm, isThread, "direct");
-        return;
-      }
-
-      const addressing = await this.addressingOf(message);
-      const directedStop =
-        addressing !== "ambient" &&
-        isStopCommand(normalizeDiscordMessageText(message.content, botId));
-
-      // ── Layer 4: Channel permission ───────────────────────────────────────
-      if (cfg.mode === "ignore" && !directedStop) {
+    // A chat switched off is not heard, as an account with no agent is not:
+    // nothing of it is recorded. A stop said to Rome still reaches it.
+    // Whom a message addresses is otherwise Participation's to work out.
+    if (cfg.mode === "ignore") {
+      const stop = isStopCommand(withoutMentions(message.content));
+      if (!stop || !(await this.saidToBot(message))) {
         log.debug("ignoring message in channel with mode=ignore", {
           channelId: message.channelId,
         });
         return;
       }
+    }
 
-      // ── Layer 5: Mention check ────────────────────────────────────────────
-      // Threads the bot itself started (e.g. auto-thread replies) are treated
-      // as ongoing conversations and skip the mention requirement. Threads
-      // created by other users still need an @mention or a reply-to-bot.
-      const requireMention = cfg.requireMention ?? true;
-      if (requireMention && addressing === "ambient") {
-        log.debug("ignoring guild message not directed at bot", {
-          from: message.author.id,
-          channelId: message.channelId,
-          isThread,
-        });
-        return;
-      }
-
-      await this.dispatchMessage(message, isDm, isThread, addressing);
-    });
-
-    await this.client.login(this._botToken);
-    log.info("bot logged in", { username: this.client.user?.tag });
+    // Every other message is handed over. Whether it wakes the agent (the
+    // reply rule, bots, mentions of others) is the wake gate's call.
+    await this.dispatchMessage(message, isDm, isThread);
   }
 
   /** Whether the message came through a webhook that is linked to a person. */
@@ -967,45 +921,46 @@ export class DiscordAdapter {
     }
   }
 
-  /** How a guild message addresses Rome's bot: a mention, a reply to it, a
-   *  message in a thread the bot started, or none of them. */
-  private async addressingOf(message: Message): Promise<MessageAddressing> {
+  /** Whether a guild message is said to Rome's bot: it mentions the bot,
+   *  replies to the bot's message, or sits in a thread the bot started. Only
+   *  a stop in a chat switched off asks, since that chat is not heard. */
+  private async saidToBot(message: Message): Promise<boolean> {
     const botId = this.client.user?.id;
-    if (botId && message.mentions.users.has(botId)) return "mention";
-    if (botId && message.reference?.messageId) {
-      try {
-        const refMsg = await message.channel.messages.fetch(message.reference.messageId);
-        if (refMsg.author.id === botId) return "reply";
-      } catch {
-        // A missing reference cannot prove that this message addresses Rome.
-      }
-    }
-    const isOwnThread =
-      isThreadType(message.channel.type) &&
-      !!botId &&
-      "ownerId" in message.channel &&
-      (message.channel as ThreadChannel).ownerId === botId;
-    return isOwnThread ? "bot_thread" : "ambient";
+    if (!botId) return false;
+    if (message.mentions.users.has(botId)) return true;
+    if ((await this.repliedToAuthor(message)) === botId) return true;
+    return this.threadStarter(message) === botId;
   }
 
-  private async dispatchMessage(
-    message: Message,
-    isDm: boolean,
-    isThread: boolean,
-    addressing: MessageAddressing,
-  ): Promise<void> {
-    if (!this.handler) return;
+  /** Who said the message `message` replies to, when Discord can fetch it.
+   *  A missing message leaves it unknown. */
+  private async repliedToAuthor(message: Message): Promise<string | undefined> {
+    const reference = resolveDiscordReplyToMessageId(message);
+    if (!reference) return undefined;
+    try {
+      return (await message.channel.messages.fetch(reference)).author.id;
+    } catch {
+      return undefined;
+    }
+  }
 
-    // Strip the bot @mention from message text so the agent sees clean input
-    const botUser = this.client.user;
+  /** Who started the thread `message` was said in, when it was said in one. */
+  private threadStarter(message: Message): string | undefined {
+    if (!isThreadType(message.channel.type) || !("ownerId" in message.channel)) return undefined;
+    return (message.channel as ThreadChannel).ownerId ?? undefined;
+  }
+
+  private async dispatchMessage(message: Message, isDm: boolean, isThread: boolean): Promise<void> {
+    if (!this.handler) return;
+    const botId = this.client.user?.id;
+    if (!botId) return;
+
     const text = discordInboundText(
       message.content,
-      botUser
-        ? {
-            id: botUser.id,
-            displayName: message.guild?.members.me?.displayName ?? botUser.displayName,
-          }
-        : undefined,
+      (id) =>
+        // The account's own name, not a server nickname, so it reads the
+        // same in every server and matches the name the agent is told.
+        message.mentions.users.get(id)?.displayName ?? message.mentions.users.get(id)?.username,
     );
 
     let threadName: string | undefined;
@@ -1016,34 +971,55 @@ export class DiscordAdapter {
     const parentId =
       isThread && message.channel.isThread() ? (message.channel.parentId ?? null) : null;
     const replyToMessageId = resolveDiscordReplyToMessageId(message);
+    // Who said the quoted message is a platform fact Discord gives only by
+    // fetching it, and a direct message needs none.
+    const repliedTo = !isDm && replyToMessageId ? await this.repliedToAuthor(message) : undefined;
+    const startedBy = parentId ? this.threadStarter(message) : undefined;
+    // A webhook linked to a person speaks for that person, so only another
+    // bot's own message counts as a bot's.
+    const isBot = message.author.bot && !(await this.isPersonsWebhook(message));
 
-    const msg: ChannelMessage = {
-      channel: "discord",
-      direction: "inbound",
-      messageId: message.id,
-      chatId: message.channelId as ChatId,
-      ...(parentId ? { parentChatId: parentId as ChatId } : {}),
-      senderId: message.author.id,
-      senderDisplayName:
-        message.member?.displayName ?? message.author.displayName ?? message.author.username,
-      ...(message.author.username ? { senderUsername: message.author.username } : {}),
-      text,
-      attachments: this.extractAttachments(message),
-      timestamp: message.createdAt,
-      ...(replyToMessageId ? { replyTo: { messageId: replyToMessageId } } : {}),
-      addressing,
-      // A native thread is a topic under the channel it was opened in.
-      thread: {
-        kind: isDm ? "dm" : parentId ? "topic" : "group",
+    const msg: connections.Message = {
+      id: message.id,
+      where: {
+        chatId: message.channelId as ChatId,
+        kind: isDm ? "direct" : "group",
         ...(threadName ? { name: threadName } : {}),
+        // A native thread is a chat of its own, opened under a channel.
+        ...(parentId
+          ? {
+              thread: {
+                parentChatId: parentId as ChatId,
+                ...(startedBy ? { startedBy } : {}),
+              },
+            }
+          : {}),
       },
+      sender: {
+        accountId: message.author.id,
+        name: message.member?.displayName ?? message.author.displayName ?? message.author.username,
+        ...(message.author.username ? { handle: message.author.username } : {}),
+        ...(isBot ? { isBot: true } : {}),
+      },
+      content: { text, attachments: this.extractAttachments(message) },
+      receivedBy: botId,
+      // Users only: @everyone, @here and roles mention no one account.
+      mentions: [...message.mentions.users.keys()],
+      ...(replyToMessageId
+        ? {
+            replyTo: {
+              messageId: replyToMessageId,
+              ...(repliedTo ? { senderAccountId: repliedTo } : {}),
+            },
+          }
+        : {}),
+      saidAt: message.createdAt,
       raw: message,
     };
 
     log.info("message received", {
-      from: msg.senderId,
-      chatId: msg.chatId,
-      threadKind: msg.thread?.kind,
+      from: msg.sender.accountId,
+      chatId: msg.where.chatId,
       isDm,
       isThread,
     });
@@ -1052,7 +1028,7 @@ export class DiscordAdapter {
       await this.handler!(msg);
     } catch (err) {
       log.error("message handler error", {
-        messageId: msg.messageId,
+        messageId: msg.id,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -1130,7 +1106,7 @@ export class DiscordAdapter {
           content:
             entries.length === 0
               ? "**Rome Bot Status**\n\nAll conversations use defaults."
-              : `**Rome Bot Status**\n\n${entries.length} conversation(s) have explicit overrides. Manage them in Settings → Channels.`,
+              : `**Rome Bot Status**\n\n${entries.length} conversation(s) have explicit overrides. Manage them on the Discord connection's page in Settings → Connections.`,
         });
         return;
       }
@@ -1522,6 +1498,7 @@ Use \`/channel agent clear\` to undo.`,
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
     // Epoch teardown must synchronously invalidate work still queued behind a
     // rate-limit bucket; otherwise it could later dispatch with this manager's
     // retained, now-stale credential.
@@ -1539,6 +1516,98 @@ Use \`/channel agent clear\` to undo.`,
     const channel = await this.client.channels.fetch(address).catch(() => null);
     if (channel) return address;
     return this.directConversationFor(address);
+  }
+
+  /** `chatId`'s history as Discord keeps it, read live through REST
+   *  (discord-history.ts). A DM is read by its own chat id, the one its
+   *  messages carry. */
+  async readHistory(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]> {
+    // A read must not outlive this credential's epoch: `stop` aborts it, and
+    // no request is sent once it has.
+    if (this.stopped) throw new Error("Discord connection has stopped");
+    const controller = new AbortController();
+    this.activeApiRequestControllers.add(controller);
+    const aborted = new Promise<never>((_resolve, reject) => {
+      controller.signal.addEventListener(
+        "abort",
+        () => reject(new Error("Discord connection stopped during the read")),
+        { once: true },
+      );
+    });
+    void aborted.catch(() => undefined);
+    const get: DiscordGet = async (route, query) => {
+      if (controller.signal.aborted) return aborted;
+      const request = this.rest
+        .get(route, { ...(query ? { query } : {}), signal: controller.signal })
+        .catch((err: unknown) => {
+          this.reportRejectedCredential(err);
+          throw err;
+        });
+      // discord.js does not observe the signal while it waits on a bucket.
+      void request.catch(() => undefined);
+      return Promise.race([request, aborted]);
+    };
+    try {
+      return await this.readHistoryWith(get, chatId, read, controller.signal);
+    } finally {
+      // Whatever ended the read, nothing it started sends on.
+      controller.abort();
+      this.activeApiRequestControllers.delete(controller);
+    }
+  }
+
+  private async readHistoryWith(
+    get: DiscordGet,
+    chatId: ChatId,
+    read: TalkHistoryRead,
+    signal: AbortSignal,
+  ): Promise<ChannelMessage[]> {
+    const botUser = this.client.user;
+    const botId = botUser?.id ?? ((await get(discordJs().Routes.user())) as { id: string }).id;
+    return readDiscordHistory(
+      {
+        get,
+        botId,
+        textOf: discordInboundText,
+        readsHistoryIn: (chat) => this.readsHistoryIn(get, chat, botId, signal),
+        nicknameOf: (guildId, userId) =>
+          this.client.guilds.cache.get(guildId)?.members.cache.get(userId)?.nickname ?? undefined,
+      },
+      chatId,
+      read,
+    );
+  }
+
+  /** Whether the bot holds Read Message History in a guild chat or thread,
+   *  read from Discord now through the read's own `get`, so the read's
+   *  cancellation covers it (discord-permissions.ts). Discord refusing the
+   *  chat answers no; a failure that says nothing about access answers null. */
+  private async readsHistoryIn(
+    get: DiscordGet,
+    chat: WireChannel,
+    botId: string,
+    signal: AbortSignal,
+  ): Promise<boolean | null> {
+    try {
+      return await botReadsHistory(get, chat, botId);
+    } catch (err) {
+      const status = (err as { status?: unknown } | null)?.status;
+      // A stopped read, and a 401 (already reported by `get`), end the read.
+      if (signal.aborted || status === 401) throw err;
+      if (status === 403 || status === 404) return false;
+      return null;
+    }
+  }
+
+  /** Reports a 401 from Discord as a rejected credential, as the broker does,
+   *  and says whether it was one. */
+  private reportRejectedCredential(err: unknown): boolean {
+    if ((err as { status?: unknown } | null)?.status !== 401) return false;
+    this.onGatewayFault?.({
+      kind: "credential",
+      cause: new Error("Discord REST API rejected the bot credential"),
+    });
+    return true;
   }
 
   async directConversationFor(channelUserId: string): Promise<string> {
@@ -1670,7 +1739,7 @@ Use \`/channel agent clear\` to undo.`,
     return thread;
   }
 
-  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+  onInbound(handler: (msg: connections.Message) => Promise<void>): void {
     this.handler = handler;
   }
 
@@ -1692,28 +1761,7 @@ Use \`/channel agent clear\` to undo.`,
   }
 
   private extractAttachments(message: Message): Attachment[] {
-    const attachments: Attachment[] = [];
-    for (const att of message.attachments.values()) {
-      const mimeType = att.contentType ?? undefined;
-      const fileName = att.name
-        ? discordAttachmentName(att.name, att.title)
-        : (att.title ?? undefined);
-      if (mimeType?.startsWith("image/")) {
-        attachments.push({ type: "image", url: att.url, fileName });
-      } else if (mimeType?.startsWith("video/")) {
-        attachments.push({ type: "video", url: att.url, mimeType, fileName });
-      } else if (mimeType?.startsWith("audio/")) {
-        attachments.push({ type: "audio", url: att.url, mimeType, fileName });
-      } else {
-        attachments.push({
-          type: "document",
-          url: att.url,
-          mimeType,
-          fileName,
-        });
-      }
-    }
-    return attachments;
+    return [...message.attachments.values()].map(discordAttachment);
   }
 
   private async sendAttachment(

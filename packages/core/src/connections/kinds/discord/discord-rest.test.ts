@@ -337,4 +337,64 @@ describe("DiscordAdapter REST broker capability", () => {
       ["2", "forum"],
     ]);
   });
+
+  it("stops a history read, and sends it no further requests, when the credential epoch stops", async () => {
+    rs.spyOn(Client.prototype, "destroy").mockResolvedValue();
+    const routes: string[] = [];
+    let signal: AbortSignal | undefined;
+    rs.spyOn(REST.prototype, "queueRequest").mockImplementation(
+      async (request: InternalRequest) => {
+        routes.push(request.fullRoute);
+        signal = request.signal;
+        return new Promise<ResponseLike>(() => undefined);
+      },
+    );
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+
+    const read = adapter.readHistory("100000000000000003" as never, { limit: 5 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await adapter.stop();
+
+    await expect(read).rejects.toThrow("Discord connection stopped during the read");
+    expect(signal?.aborted).toBe(true);
+    await expect(adapter.readHistory("100000000000000003" as never, { limit: 5 })).rejects.toThrow(
+      "Discord connection has stopped",
+    );
+    expect(routes).toHaveLength(1);
+  });
+
+  it("ends a history read when the epoch stops during its permission check", async () => {
+    rs.spyOn(Client.prototype, "destroy").mockResolvedValue();
+    const routes: string[] = [];
+    rs.spyOn(REST.prototype, "get").mockImplementation((async (route: string) => {
+      routes.push(route);
+      // The chat answers once; the permission check's requests then hang.
+      if (routes.length === 1) return { id: "3", type: 0, guild_id: "9" };
+      return new Promise(() => undefined);
+    }) as never);
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    const client = (adapter as unknown as { client: { user: unknown } }).client;
+    Object.defineProperty(client, "user", { value: { id: "1" }, configurable: true });
+
+    const read = adapter.readHistory("3" as never, { limit: 5 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const sent = routes.length;
+    await adapter.stop();
+
+    await expect(read).rejects.toThrow("Discord connection stopped during the read");
+    // The chat, then the guild and the bot's member side by side.
+    expect(sent).toBe(3);
+    expect(routes).toHaveLength(sent);
+  });
+
+  it("reports a 401 on a history read as a rejected credential", async () => {
+    rs.spyOn(REST.prototype, "get").mockRejectedValue(
+      Object.assign(new Error("401: Unauthorized"), { status: 401 }),
+    );
+    const onGatewayFault = rs.fn();
+    const adapter = new DiscordAdapter({ botToken: "not-exposed", onGatewayFault });
+
+    await expect(adapter.readHistory("3" as never, { limit: 5 })).rejects.toThrow();
+    expect(onGatewayFault).toHaveBeenCalledWith(expect.objectContaining({ kind: "credential" }));
+  });
 });

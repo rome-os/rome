@@ -27,8 +27,6 @@ struct ChatScreen: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Under an open thread, VoiceOver reads the thread, not what it covers.
-        .accessibilityHidden(store.thread != nil)
         // The transcript scrolls under the bar's glass items.
         .floatingTopBar {
             VStack(spacing: 0) {
@@ -38,27 +36,22 @@ struct ChatScreen: View {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     shell.toggleNavigation.run(())
-                }, onAgent: { [shell] in shell.openAgent.run(()) })
+                }, onAgent: { [shell] tab in shell.openAgent.run(tab) })
                 ChatBanners(workspace: workspace, store: store)
             }
             // Rows fade out under the status bar and the header. The list is
             // a UICollectionView, which no SwiftUI scroll edge effect reaches.
             .modifier(ChatHeaderFade(workspace: workspace, store: store))
-            .accessibilityHidden(store.thread != nil)
         }
-        // Over the header and the transcript; the composer below stays in place.
-        .overlay {
-            if let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.taskChats, name: workspace.agentDisplayName, activity: { workspace.mainChatActivity }, onClose: { store.closeThread() })
-            }
-        }
-        // Reply brings the keyboard up; a label opens the thread for reading.
+        // Reply brings the keyboard up.
         .onChange(of: store.replies) { composerFocused = true }
         .pageBackground()
+        // The task links in its messages draw the task chats' live status.
+        .environment(\.taskLinks, workspace.taskLinks(forChat: store.sessionId))
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
         .background { ChatLeaveWatch(store: store) }
-        .composerDraft(workspace.drafts, chat: workspace.concierge.sessionId, text: $draft, attachments: attachments, transcript: workspace.concierge, onThread: { store.reopenThread($0) }, prefill: Binding(
+        .composerDraft(workspace.drafts, chat: workspace.concierge.sessionId, text: $draft, attachments: attachments, transcript: workspace.concierge, onReply: { store.restoreReply($0) }, prefill: Binding(
             get: { workspace.composerPrefills[conciergeChatID] },
             set: { workspace.composerPrefills[conciergeChatID] = $0 }
         )) { composerFocused = true }
@@ -73,23 +66,20 @@ struct ChatScreen: View {
                 VStack(spacing: 10) {
                     // Inside the composer's inset, so the last message rests above it too.
                     UpdatedNotice(agentName: workspace.agentName, visible: visible)
-                    // One pill for each thread with replies the guardian has not seen.
-                    ThreadPills(store: store)
                     if store.showsQuoteBar {
-                        QuoteBar(message: store.quotedMessage, threadTitle: store.threadReplyTitle) { store.cancelQuote() }
+                        QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                     if ConciergeStarters.visible(loaded: store.readOnce, empty: store.rowsEmpty) {
                         ConciergeStarters { store.send($0.text) }
                     }
-                    // While a chat thread is open, the composer sends into it.
-                    Composer(text: $draft, placeholder: store.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: workspace.concierge.sessionId, voiceField: store.composerThread == nil ? .chat : .thread, onScreen: visible && !store.share.isSelecting) {
+                    Composer(text: $draft, placeholder: String(localized: "Message"), focused: $composerFocused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: workspace.concierge.sessionId, voiceField: .chat, onScreen: visible && !store.share.isSelecting) {
                         // A photo still being made small would land in the next message.
                         guard !attachments.isPreparing else { return }
-                        if store.send(draft, images: attachments.images, fromComposer: true, thread: store.composerThread) {
+                        if store.send(draft, images: attachments.images, fromComposer: true, reply: store.composerReply) {
                             draft = ""
                             _ = attachments.take()
-                            store.composerSent()
+                            store.cancelQuote()
                         }
                     }
                 }
@@ -163,7 +153,7 @@ struct ChatScreen: View {
                 .onTapGesture { composerFocused = false }
             } else {
                 TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
-                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted, stackTinted: store.tintedStack != nil && row.ownMessageId == store.tintedStack)
+                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                         .equatable()
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
@@ -203,59 +193,33 @@ private struct ChatHeaderBar: View {
     let workspace: Workspace
     let store: TranscriptStore
     let onMenu: () -> Void
-    let onAgent: () -> Void
+    let onAgent: (AgentTab?) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        ChatHeader(name: workspace.agentDisplayName, activity: workspace.mainChatActivity, announces: model.visibleChat == conciergeChatID, onMenu: onMenu, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID), showsMenu: false)
+        // The main Chat is only shared: no Rename, Archive or Delete.
+        ChatHeader(name: workspace.agentDisplayName, activity: workspace.mainChatActivity, announces: model.visibleChat == conciergeChatID, onMenu: onMenu, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID), tasks: workspace.taskList(forChat: conciergeChatID))
             .shareModeHeader(store.share)
     }
 }
 
-/// Behind the main Chat's header: rows show through it blurred under the
-/// status bar, lightly blurred at the header's buttons, and sharp below
-/// them, so the clock and the buttons stay legible over any row. It
+/// The header blur behind the main Chat's header (`ChatHeaderBlur`). It
 /// reaches past the status capsule while one hangs below the header row,
 /// and over the banners while they show. It reads the status itself, so a
 /// status change never redraws the transcript.
-///
-/// The list is a UICollectionView, and neither SwiftUI's scroll edge effect
-/// nor UIKit's `topEdgeEffect` with a `UIScrollEdgeElementContainerInteraction`
-/// band draws on it inside this hosting view.
 private struct ChatHeaderFade: ViewModifier {
     let workspace: Workspace
     let store: TranscriptStore
     @Environment(AppModel.self) private var model
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.pageBackground) private var page
-    @Environment(\.colorScheme) private var colorScheme
 
-    /// How far below the header's frame the fade turns clear: negative ends
-    /// it at the buttons' lower edge, above the name tag.
     private var reach: CGFloat {
         if ChatBanners.shows(workspace: workspace, store: store, model: model) { return 0 }
-        // The row is 4 pt of padding, the identity's resting height with the
-        // 44 pt buttons centred on it, and 4 pt more.
-        let belowButtons = ChatIdentity.restingHeight(for: dynamicTypeSize) / 2 - 18
-        return ChatBanners.statusOverhang(workspace, dynamicTypeSize) - belowButtons
+        return ChatHeaderBlur.reach(statusShows: ChatBanners.statusOverhang(workspace, dynamicTypeSize) > 0, dynamicTypeSize)
     }
 
     func body(content: Content) -> some View {
-        content.background(alignment: .top) {
-            ZStack {
-                HeaderBlur()
-                // A faint tint under the clock only, so it reads over any row.
-                // Dark has none: the black page would sink the blurred rows.
-                LinearGradient(stops: [
-                    .init(color: page.opacity(colorScheme == .dark ? 0 : 0.3), location: 0),
-                    .init(color: page.opacity(0), location: 0.4),
-                ], startPoint: .top, endPoint: .bottom)
-            }
-            .padding(.bottom, -reach)
-            .ignoresSafeArea(edges: .top)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        }
+        content.background(alignment: .top) { ChatHeaderBlur(reach: reach) }
     }
 }
 
@@ -322,67 +286,40 @@ struct ConciergeRow: View, Equatable {
     let info: RowInfo
     let store: TranscriptStore
     let tasks: TaskChatsStore
-    /// Drawn in an open thread view: no thread labels, no share mode, and a
-    /// tap on a message never closes the view.
-    var inThread = false
     /// The row's message is the tinted one: its bubble or card draws the
     /// tint behind its own shape, never behind the whole row.
     var tinted = false
-    /// The row's stack is the one a pill just brought into view: it takes a tint for a moment.
-    var stackTinted = false
 
     nonisolated static func == (lhs: ConciergeRow, rhs: ConciergeRow) -> Bool {
-        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.inThread == rhs.inThread && lhs.tinted == rhs.tinted && lhs.stackTinted == rhs.stackTinted
+        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.tinted == rhs.tinted
     }
 
     @Environment(\.openTaskChat) private var openTaskChat
 
-    /// From a row in a thread view, the thread closes first, or the chat
-    /// would be pushed under it.
     private func openChat(_ chatId: String, _ title: String) {
-        if inThread { store.closeThread() }
         openTaskChat?.run((chatId: chatId, title: title))
     }
 
-    /// Only the Agent's text can be replied to: never a card of any kind
-    /// (task, question, approval, open or folded), nor the guardian's own.
-    static func offersReply(_ row: TranscriptRow) -> Bool {
-        if case .agentText = row { return true }
-        return false
+    /// The tap of the quote a reply carries: it goes to the original.
+    private func quoteAction() -> (() -> Void)? {
+        let actions = store.actions
+        return info.quote.map { quote in { actions.quote(original: quote.messageId) } }
     }
 
-    /// The tap of the quote a reply carries: its thread view, or the original it
-    /// answers. Nil in a thread view, or when the quote leads nowhere.
-    private func quoteAction(replyId: String) -> (() -> Void)? {
+    /// The message's time, and Reply where the message takes one
+    /// (`RowInfo.canReply`): the reply bar.
+    private var menu: BubbleMenu {
         let actions = store.actions
-        return inThread || !info.quoteLeads ? nil : info.quote.map { quote in { actions.quote(reply: replyId, original: quote.messageId) } }
-    }
-
-    /// The message's time, and Reply on the Agent's messages: the reply bar,
-    /// with an open thread view kept open.
-    private func menu(reply: Bool) -> BubbleMenu {
-        let actions = store.actions
-        let onReply: (() -> Void)? = reply
-            ? row.messageId.map { id in { actions.reply(to: id) } }
+        let onReply: (() -> Void)? = info.canReply
+            ? row.messageId.map { [rowId = row.id] id in { actions.reply(to: id, row: rowId) } }
             : nil
         // Share opens share mode on the message's turn; a pending send has none.
-        let onShare: (() -> Void)? = inThread || !info.canShare ? nil : { [rowId = row.id] in actions.share(fromRow: rowId) }
-        return BubbleMenu(date: info.date, onReply: onReply, onShare: onShare, inThread: inThread)
+        let onShare: (() -> Void)? = !info.canShare ? nil : { [rowId = row.id] in actions.share(fromRow: rowId) }
+        return BubbleMenu(date: info.date, onReply: onReply, onShare: onShare)
     }
 
     var body: some View {
-        content
-            .environment(\.rowTinted, tinted)
-            .environment(\.rowStackTinted, stackTinted)
-            // A link to a chat thread in a message's text: a chip that opens
-            // it, except in a thread view, where it opens nothing.
-            .environment(\.threadLinks, inThread ? store.threadLinksInThread : store.threadLinks)
-    }
-
-    /// Opens the thread under this row's stack.
-    private func openStack() {
-        guard let root = info.stack?.root else { return }
-        store.actions.openThread(root)
+        content.environment(\.rowTinted, tinted)
     }
 
     @ViewBuilder
@@ -393,48 +330,40 @@ struct ConciergeRow: View, Equatable {
         case .separator(_, let date):
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
-            let onQuote = quoteAction(replyId: row.messageId ?? "")
-            UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu(reply: Self.offersReply(row)),
+            UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu,
                        mark: info.mark,
-                       quote: info.quote, onQuote: onQuote, stack: info.stack, onOpenStack: openStack)
+                       quote: info.quote, onQuote: quoteAction())
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            let onQuote = quoteAction(replyId: row.messageId ?? "")
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: { openChat($0, $1) }, menu: menu(reply: Self.offersReply(row)),
-                        quote: info.quote, onQuote: onQuote, stack: info.stack, onOpenStack: openStack)
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: { openChat($0, $1) }, menu: menu,
+                        quote: info.quote, onQuote: quoteAction())
         case .sourceLabel(_, let text):
-            if !inThread { SourceLabelLine(text: text) }
+            SourceLabelLine(text: text)
         case .taskCard(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
             // Archived or deleted from this app.
             EmptyView()
         case .taskCard(_, let chatId, let title, let latest, let ask):
             let name = tasks.title(forChat: chatId, fallback: title)
-            let onQuote = quoteAction(replyId: row.ownMessageId ?? "")
             VStack(alignment: .leading, spacing: 8) {
-                TaskCard(title: name, state: tasks.cardState(forChat: chatId), stack: info.stack, onOpenStack: openStack) {
+                TaskCard(title: name, state: tasks.cardState(forChat: chatId)) {
                     openChat(chatId, name)
                 }
                 // The newest card from before `show`, while it waits on the
                 // guardian and its chat is not running, shows what it asks,
                 // answered right here.
-                if latest, !inThread, let ask, ask.waits, !tasks.isRunning(chat: chatId) {
+                if latest, let ask, ask.waits, !tasks.isRunning(chat: chatId) {
                     TaskAskView(chatId: chatId, card: ask, latest: true, store: store) { openChat(chatId, name) }
                 }
             }
-            .replyMark(quote: info.quote, onTap: onQuote)
         case .taskAsk(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
             EmptyView()
         case .taskAsk(_, let chatId, let title, let card, let latest):
             TaskAskView(chatId: chatId, card: card, latest: latest, store: store) {
                 openChat(chatId, tasks.title(forChat: chatId, fallback: title))
             }
-            .replyMark(quote: info.quote, onTap: quoteAction(replyId: row.ownMessageId ?? ""))
-            .keepsTaps(inThread)
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
         case .approval, .question, .webOnly, .routineDraft, .tools, .connect, .widgetUI:
-            // In a thread a tap on a card stays on it, never closing the thread.
             InteractionRow(row: row, store: store)
-                .keepsTaps(inThread)
         case .error(_, let error):
             ErrorLine(error: error)
         case .notice(_, let text):
@@ -447,16 +376,8 @@ struct ConciergeRow: View, Equatable {
     }
 }
 
-private extension View {
-    /// Takes the taps on its own content, so they never reach a view behind.
-    @ViewBuilder
-    func keepsTaps(_ on: Bool) -> some View {
-        if on { self.onTapGesture {} } else { self }
-    }
-}
-
-/// The floating header: the drawer button, the Agent's identity and, in a
-/// topic chat, the "…" menu.
+/// The floating header: the drawer button, the Agent's identity, and one
+/// glass capsule holding Tasks and "…" (`ChatHeaderButtons`).
 struct ChatHeader: View {
     /// The Concierge's name, in the main chat and in topic chats alike.
     let name: String
@@ -467,15 +388,20 @@ struct ChatHeader: View {
     /// The chat is the one on screen: its status changes are read out.
     var announces = false
     let onMenu: () -> Void
-    /// The mascot was tapped: the Agent page.
-    let onAgent: () -> Void
+    /// The Agent page: on a tab from Tasks or the "…" menu, or as it was
+    /// last from the mascot (nil).
+    let onAgent: (AgentTab?) -> Void
     /// The avatar the Agent page zooms out of.
     var zoomSource: String? = nil
-    /// The "…" menu; the main Chat has none, its right slot stays clear so
-    /// the identity keeps the middle.
-    var showsMenu = true
-    /// A topic chat's options in the "…" menu.
+    /// The chat's task list, for the dot on Tasks while a task needs the
+    /// guardian; nil for a blank topic chat, which has none yet.
+    var tasks: TaskListStore? = nil
+    /// A topic chat's options in the "…" menu; the main Chat has none.
     var onRename: (() -> Void)? = nil
+    /// Whether the topic chat is pinned, for Pin or Unpin.
+    var pinned = false
+    /// Pin (true) or unpin (false) a topic chat.
+    var onPin: ((Bool) -> Void)? = nil
     var onArchive: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
@@ -487,12 +413,10 @@ struct ChatHeader: View {
             GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
                 MenuGlyph()
             }
-            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces, zoomSource: zoomSource, onTap: onAgent) }
-            if showsMenu {
-                ChatMoreMenu(title: menuTitle ?? "", onRename: onRename, onArchive: onArchive, onDelete: onDelete)
-            } else {
-                Color.clear.frame(width: 44, height: 44)
-            }
+            // As wide as the capsule on the right, so the identity stays in the middle.
+            .frame(width: ChatHeaderButtons.width, alignment: .leading)
+            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces, zoomSource: zoomSource, onTap: { onAgent(nil) }) }
+            ChatHeaderButtons(title: menuTitle ?? "", tasks: tasks, onAgent: onAgent, onRename: onRename, pinned: pinned, onPin: onPin, onArchive: onArchive, onDelete: onDelete)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -508,10 +432,7 @@ struct ChatIdentity: View {
     let name: String
     /// Nil or idle: the name alone, and the pill shrinks back.
     var activity: ConciergeActivity? = nil
-    /// A copy laid over the header (a chat thread): no reactions to a tap.
-    var still = false
-    /// Read status changes out: only for the chat on screen, and only once
-    /// (the header below a thread does it, not the copy over it).
+    /// Read status changes out: only for the chat on screen.
     var announces = false
 
     /// The avatar the Agent page zooms out of.
@@ -584,17 +505,16 @@ struct ChatIdentity: View {
                     .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
                     .shadow(color: Palette.avatarShadow, radius: 4, x: 0, y: 1)
                     // The Agent page grows out of the avatar.
-                    .agentZoomSource(still ? nil : zoomSource, in: agentZoom)
+                    .agentZoomSource(zoomSource, in: agentZoom)
                     // The avatar: a soft tap, a reaction, then the Agent page.
                     .contentShape(Circle())
                     .onTapGesture {
-                        guard !still else { return }
                         haptic.impactOccurred()
                         haptic.prepare()
                         pokes += 1
                         onTap?()
                     }
-                    .onAppear { if !still { haptic.prepare() } }
+                    .onAppear { haptic.prepare() }
                 // The name tag, over the avatar's lower edge; wider than the
                 // avatar for a long name, cut at the end past about eight CJK
                 // characters.
@@ -627,8 +547,8 @@ struct ChatIdentity: View {
         .animation(nil, value: name)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: status.map { "\(name), \($0)" } ?? name))
-        .accessibilityAddTraits(still || onTap == nil ? .isHeader : [.isHeader, .isButton])
-        .accessibilityAction { if !still { onTap?() } }
+        .accessibilityAddTraits(onTap == nil ? .isHeader : [.isHeader, .isButton])
+        .accessibilityAction { onTap?() }
         .onChange(of: status) { _, line in
             // Read out politely, as the web's live region is.
             guard let line = Self.announcement(line, announces: announces) else { return }
@@ -732,42 +652,88 @@ enum MenuTitle {
     }
 }
 
-/// A topic chat's "…" button: its title in small grey text on top, then
-/// the chat's own options and Shared links. The main Chat has no "…"
-/// button; tasks are on the Agent page, from the mascot.
-struct ChatMoreMenu: View {
+/// The right of a chat's header: one glass capsule holding Tasks and "…".
+/// Tasks opens the Agent page on its Tasks tab, with a dot while a task needs
+/// the guardian; a chat with no task list yet (a blank topic chat) has "…"
+/// alone, as the web does. "…" holds what else the Agent page shows (Outputs),
+/// then what is done to the chat: a topic chat's Rename and Pin
+/// or Unpin, then Share and Shared links, then Archive and Delete. The main Chat is only
+/// shared. Each button keeps a 44 pt target; the targets overlap so the
+/// icons sit as close as iOS's own paired toolbar buttons.
+struct ChatHeaderButtons: View {
+    /// Two 44 pt targets overlapping by 10.
+    static let width: CGFloat = 78
+    /// A topic chat's title, atop the menu.
     let title: String
+    let tasks: TaskListStore?
+    let onAgent: (AgentTab?) -> Void
     var onRename: (() -> Void)? = nil
+    var pinned = false
+    var onPin: ((Bool) -> Void)? = nil
     var onArchive: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     @Environment(\.chatShare) private var share
 
     var body: some View {
-        Menu {
-            Section {
-                if let onRename {
-                    Button(action: onRename) { Label("Rename", systemImage: "pencil") }
+        let needsYou = tasks?.needsYou ?? false
+        HStack(spacing: -10) {
+            if tasks != nil {
+                Button { onAgent(.tasks) } label: {
+                    ChecklistGlyph()
+                        .overlay(alignment: .topTrailing) {
+                            if needsYou {
+                                Circle().fill(Palette.primary).frame(width: 7, height: 7).offset(x: 2, y: -1)
+                            }
+                        }
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
-                if let onArchive {
-                    // Not red: an archived chat can come back.
-                    Button(action: onArchive) { Label("Archive", systemImage: "archivebox") }
-                }
-                if let onDelete {
-                    Button(role: .destructive, action: onDelete) { Label("Delete", systemImage: "trash") }
-                }
-                ChatShareMenuItems(share: share)
-            } header: {
-                // A system menu wraps its title whatever the line limit: it is cut here.
-                if !title.isEmpty { Text(verbatim: MenuTitle.oneLine(title)) }
+                .buttonStyle(PressScaleStyle(scale: 0.9))
+                .accessibilityLabel("Tasks")
+                .accessibilityValue(needsYou ? Text("Needs you") : Text(verbatim: ""))
             }
-        } label: {
-            Image(systemName: "ellipsis")
-                .romeFont(17, .semibold)
-                .foregroundStyle(Palette.fg)
-                .frame(width: 44, height: 44)
-                .glassSurface(Circle(), interactive: true)
+            Menu {
+                Section {
+                    Button { onAgent(.outputs) } label: { Label("Outputs", systemImage: "doc.on.doc") }
+                } header: {
+                    // A system menu wraps its title whatever the line limit: it is cut here.
+                    if !title.isEmpty { Text(verbatim: MenuTitle.oneLine(title)) }
+                }
+                Section {
+                    if let onRename {
+                        Button(action: onRename) { Label("Rename", systemImage: "pencil") }
+                    }
+                    if let onPin {
+                        TopicPinButton(pinned: pinned) { onPin(!pinned) }
+                    }
+                    if let share {
+                        // Share mode with nothing picked yet, as the web's Share chat.
+                        Button { share.begin(turn: nil) } label: { Label("Share", systemImage: "square.and.arrow.up") }
+                    }
+                    ChatShareMenuItems(share: onRename == nil ? nil : share)
+                    if let onArchive {
+                        // Not red: an archived chat can come back.
+                        Button(action: onArchive) { Label("Archive", systemImage: "archivebox") }
+                    }
+                    if let onDelete {
+                        Button(role: .destructive, action: onDelete) { Label("Delete", systemImage: "trash") }
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .romeFont(17, .semibold)
+                    .foregroundStyle(Palette.fg)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("More")
         }
-        .accessibilityLabel("More")
+        .glassSurface(Capsule(), interactive: true)
+        // The dot reads the chat's task list, which is listened to while the
+        // header shows.
+        .holdsTaskList(tasks)
+        // As wide with "…" alone, so the identity stays in the middle.
+        .frame(width: Self.width, alignment: .trailing)
     }
 }
 

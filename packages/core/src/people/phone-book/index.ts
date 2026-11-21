@@ -1,18 +1,28 @@
 // The phone book: the guardian's edits to people and accounts, and the
-// directory of accounts. Nothing but its routes and the wiring imports it, so
-// leaving it out leaves who-is-this and the message path working.
-// Vocabulary: docs/domains/people.md.
+// directory of accounts. It serves the dashboard and apps through http/ and
+// agents through actions/, both over the same use cases. Nothing but the wiring
+// imports it, so leaving it out leaves who-is-this and the message path
+// working. Vocabulary: docs/domains/people.md.
 
-export {
-  type AccountDecision,
-  type AccountDecisionDeps,
-  type AccountRef,
-  dismissAccount,
-  restoreAccount,
-} from "./account-decisions.js";
-export { readAccountDirectory } from "./account-directory.js";
-export { createPerson } from "./create.js";
-export { deletePerson } from "./delete.js";
-export { mergePeople } from "./merge.js";
-export { findPerson, readPeople, readPerson } from "./resource.js";
-export { updatePerson } from "./update.js";
+import type { Action } from "@rome-os/app-runtime";
+import type { OwnerOfChat } from "../actions/guardian-only.js";
+import { listPeopleAction } from "./actions/list-people.js";
+import type { PhoneBookDeps } from "./deps.js";
+import { phoneBookRoutes } from "./http/index.js";
+
+export type { PhoneBookDeps } from "./deps.js";
+export { readAccountDirectory } from "./application/account-directory.js";
+/** The routes alone, for a test that mounts them beside another feature's. */
+export { phoneBookRoutes } from "./http/index.js";
+
+/** The phone book's two interfaces. Leaving the phone book out is not building this. */
+export interface PhoneBook {
+  /** Routes for the dashboard and apps, mounted under /api. */
+  routes: ReturnType<typeof phoneBookRoutes>;
+  /** Actions for agents. */
+  actions: Action[];
+}
+
+export function phoneBook(deps: PhoneBookDeps & { ownerOfChat: OwnerOfChat }): PhoneBook {
+  return { routes: phoneBookRoutes(deps), actions: [listPeopleAction(deps)] };
+}

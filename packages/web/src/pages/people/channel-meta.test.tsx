@@ -11,7 +11,6 @@ const t = ((key: string) => key.split(".").at(-1)) as unknown as TFunction<"peop
 
 describe("channelLabel", () => {
   it("names the network, not the credential Rome reads it through", () => {
-    expect(channelLabel(t, "wechat_user")).toBe(channelLabel(t, "wechat"));
     expect(channelLabel(t, "telegram_user")).toBe(channelLabel(t, "telegram"));
   });
 

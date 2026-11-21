@@ -13,16 +13,6 @@ enum APIError: Error, Equatable, LocalizedError {
     /// A file past the app's limit, such as an image of more than 20 MB.
     case tooLarge
 
-    /// The `code` of a 400 for `type=concierge` on a chat that is not a Concierge chat,
-    /// which the error then carries as its message.
-    static let notConciergeMessage = "not_concierge"
-
-    /// The chat is not a Concierge chat: it pages by turns.
-    var isNotConcierge: Bool {
-        if case .server(400, let message) = self { return message == Self.notConciergeMessage }
-        return false
-    }
-
     var errorDescription: String? {
         switch self {
         case .unauthorized: return String(localized: "Session expired")
@@ -383,11 +373,6 @@ final class APIClient: Sendable {
             let message = Self.errorMessage(data)
             throw message == "Concierge is off" ? APIError.conciergeOff : APIError.notFound
         default:
-            // A chat that is no Concierge chat refuses `type=concierge` by this code;
-            // the caller reads it by the code, whatever the words.
-            if http.statusCode == 400, Self.errorCode(data) == APIError.notConciergeMessage {
-                throw APIError.server(status: 400, message: APIError.notConciergeMessage)
-            }
             throw APIError.server(status: http.statusCode, message: Self.errorMessage(data))
         }
     }
@@ -398,10 +383,6 @@ final class APIClient: Sendable {
         } catch {
             throw APIError.decoding
         }
-    }
-
-    private static func errorCode(_ data: Data) -> String? {
-        (try? JSONDecoder().decode(JSONValue.self, from: data))?["code"]?.string
     }
 
     private static func errorMessage(_ data: Data) -> String? {

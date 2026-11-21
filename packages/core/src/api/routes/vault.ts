@@ -18,7 +18,7 @@ const PIN_FAILED = "The vault could not set the PIN.";
 const STALE_REQUEST = "This request changed or was already answered.";
 /** The `vault` level that `GET /v1/health` reports once the signer checks the PIN. */
 const SIGNER_VAULT_VERSION = 2;
-/** The length `vault_apply` grants when the request names none. */
+/** The length `system:vault_apply` grants when the request names none. */
 const DEFAULT_GRANT_MINUTES = 15;
 // Signer answers about the PIN or the request. Any other failure becomes a
 // 503, because Cloudflare replaces an origin 502 with a page of its own.

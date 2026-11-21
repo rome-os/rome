@@ -14,12 +14,11 @@ import { sql } from "drizzle-orm";
  * message it quotes (`reply_to`), when (`said_at`, unix seconds), and `seq`,
  * the order Chats recorded it in, `root_message_id`, the id of the first
  * message of the reply chain it is in (null: it is its own root),
- * `reaction`, the emoji it was reacted to with, and `read_at`, when the
- * chat's owner saw it (null: not yet).
+ * and `reaction`, the emoji it was reacted to with.
  */
 export const CHAT_MESSAGES = sql.raw(`(SELECT id, key, chat_id, thread_id, sender_account_id,
   sender_name, sender_agent, text, parts, reply_to_message_id AS reply_to, said_at,
-  id AS seq, root_message_id, reaction, read_at FROM chat_messages)`);
+  id AS seq, root_message_id, reaction FROM chat_messages)`);
 
 /** Every chat: its `id`, `platform`, its adapter's `key`, `kind` and `name`. */
 export const CHATS = sql.raw(`(SELECT id, platform, key, kind, name FROM chats)`);

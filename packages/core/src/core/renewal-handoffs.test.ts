@@ -154,7 +154,7 @@ describe("every message since a time", () => {
       timeoutMs: 30_000,
       fallbackTimeoutMs: 30_000,
       modelResolver: unusedResolver,
-      page: async (_chatId, _turns, before) => {
+      page: async (_chatId, _limit, before) => {
         const index = (before as number | undefined) ?? 0;
         reads += 1;
         return { rows: pages[index]!, next: index + 1 < pages.length ? index + 1 : null };
@@ -167,6 +167,26 @@ describe("every message since a time", () => {
     const near = await handoffs.context("chat-1", "t-now", new Date(25_000));
     expect(near.recent.map((m) => m.text)).toEqual(["Newest"]);
     expect(reads).toBe(5);
+  });
+
+  it("does not stop at a trace older than the time, which comes with its turn's messages", async () => {
+    const pages: ChatRow[][] = [
+      [at("trace", "[]", "t3", 5), at("user", "Newest", "t3", 30)],
+      [at("user", "Middle", "t2", 20)],
+      [at("user", "Oldest", "t1", 10)],
+    ];
+    const handoffs = createRenewalHandoffs({
+      timeoutMs: 30_000,
+      fallbackTimeoutMs: 30_000,
+      modelResolver: unusedResolver,
+      page: async (_chatId, _limit, before) => {
+        const index = (before as number | undefined) ?? 0;
+        return { rows: pages[index]!, next: index + 1 < pages.length ? index + 1 : null };
+      },
+      openTasks: async () => null,
+    });
+    const context = await handoffs.context("chat-1", "t-now", new Date(15_000));
+    expect(context.recent.map((m) => m.text)).toEqual(["Middle", "Newest"]);
   });
 });
 

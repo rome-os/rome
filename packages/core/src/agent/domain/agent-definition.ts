@@ -28,8 +28,10 @@ export interface AgentDefinition {
   outputSchema?: Record<string, unknown>;
   /** Its turns come from a turn middleware, never a model, so its session opens no provider query. */
   codeBacked?: boolean;
-  /** A test-only back door, honoured only for the apps in `INBOX_BYPASS_APPS`: the Inbox app answers no message on an account linked to this agent. */
-  unsafeTestOnlyBypassInbox?: boolean;
+  /** @deprecated The agent's own app runs its turns, so the Inbox app answers
+   *  no message on an account linked to it. Honoured only for the apps in
+   *  `DEPRECATED_RUNS_OWN_TURNS_APPS`. Slated for removal (ZHA-231): Rome is not keeping a way for an app to run its agent's turns past the Inbox app, so the chief of staff will get its turns another way. */
+  deprecatedRunsOwnTurns?: boolean;
   policy?: Partial<AgentPolicy>;
   /**
    * On a cold resume, the model a chat saved replaces the model the session is

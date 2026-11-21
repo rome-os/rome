@@ -38,7 +38,7 @@ describe("toolActivityOf", () => {
     expect(toolActivityOf("chat_start")).toBe("startingTask");
     expect(toolActivityOf("core:chat_start")).toBe("startingTask");
     expect(toolActivityOf("mcp__rome__chat_start")).toBe("startingTask");
-    expect(toolActivityOf("mcp__rome-core__core:task_upsert")).toBe("updatingTasks");
+    expect(toolActivityOf("mcp__rome-core__core:chat_update")).toBe("updatingTasks");
     expect(toolActivityOf("WebSearch")).toBe("searchingWeb");
   });
 
@@ -197,7 +197,6 @@ function world() {
               reportPending: pending.includes(row.id),
               laterAt: null,
               lastOutcome: null,
-              started: true,
             },
             now,
           );

@@ -7,6 +7,7 @@ import type {
 } from "@whiskeysockets/baileys";
 
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
+import type * as connections from "../../message.js";
 import type { Attachment, OutgoingMessage } from "../../../types.js";
 import type {
   WhatsAppSyncSink,
@@ -73,12 +74,12 @@ export type WhatsAppSocketFactory = typeof import("@whiskeysockets/baileys").def
 
 /**
  * The WhatsApp transport over a Baileys linked-device socket. Inbound messages
- * arrive as the channel's own record, a `ChannelMessage` whose `raw` is the
- * Baileys `WAMessage`, so the Connection integration delivers them as they are.
+ * arrive as a Connections message whose `raw` is the Baileys `WAMessage`, so
+ * the Connection integration delivers them as they are.
  */
 export class WhatsAppAdapter {
   private sock: WASocket | null = null;
-  private handler?: (msg: ChannelMessage) => Promise<void>;
+  private handler?: (msg: connections.Message) => Promise<void>;
   private connectedCallback?: (userId: string) => void;
   private faultCallback?: (fault: { kind: "loggedOut" | "terminal"; cause?: unknown }) => void;
   private qrCallback?: (qr: string) => void;
@@ -247,22 +248,22 @@ export class WhatsAppAdapter {
         // it is mirrored into the store above, but the agent should not answer it.
         if (waMsg.message.reactionMessage) continue;
 
-        const msg = this.toChannelMessage(waMsg);
+        const msg = this.toMessage(waMsg);
         // Protocol/system frames (sender-key distribution, app-state sync,
         // history-sync notifications) carry no text or attachments — they are
         // mirrored above for completeness but are not an inbound turn.
-        if (!msg.text && msg.attachments.length === 0) continue;
+        if (!msg.content.text && msg.content.attachments.length === 0) continue;
         log.info("message received", {
-          from: msg.senderId,
-          chatId: msg.chatId,
-          threadKind: msg.thread?.kind,
+          from: msg.sender.accountId,
+          chatId: msg.where.chatId,
+          kind: msg.where.kind,
         });
 
         try {
           await this.handler!(msg);
         } catch (err) {
           log.error("message handler error", {
-            messageId: msg.messageId,
+            messageId: msg.id,
             error: err instanceof Error ? err.message : String(err),
           });
         }
@@ -484,7 +485,7 @@ export class WhatsAppAdapter {
     }
   }
 
-  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+  onInbound(handler: (msg: connections.Message) => Promise<void>): void {
     this.handler = handler;
   }
 
@@ -557,23 +558,22 @@ export class WhatsAppAdapter {
     this.syncSink = sink;
   }
 
-  private toChannelMessage(waMsg: WAMessage): ChannelMessage {
+  private toMessage(waMsg: WAMessage): connections.Message {
     const remoteJid = waMsg.key.remoteJid!;
     const isGroup = remoteJid.endsWith("@g.us");
     const chatId = this.canonicalJid(remoteJid);
     const content = describeContent(waMsg.message);
 
     return {
-      channel: "whatsapp",
-      direction: "inbound",
-      messageId: waMsg.key.id!,
-      chatId: chatId as ChatId,
-      senderId: isGroup ? this.canonicalJid(waMsg.key.participant ?? remoteJid) : chatId,
-      senderDisplayName: waMsg.pushName ?? "Unknown",
-      text: content.text ?? "",
-      attachments: this.extractAttachments(waMsg),
-      timestamp: new Date((waMsg.messageTimestamp as number) * 1000),
-      thread: { kind: isGroup ? "group" : "dm" },
+      id: waMsg.key.id!,
+      where: { chatId: chatId as ChatId, kind: isGroup ? "group" : "direct" },
+      sender: {
+        accountId: isGroup ? this.canonicalJid(waMsg.key.participant ?? remoteJid) : chatId,
+        name: waMsg.pushName ?? "Unknown",
+      },
+      content: { text: content.text ?? "", attachments: this.extractAttachments(waMsg) },
+      receivedBy: this.selfPnJid() ?? "",
+      saidAt: new Date((waMsg.messageTimestamp as number) * 1000),
       raw: waMsg,
     };
   }

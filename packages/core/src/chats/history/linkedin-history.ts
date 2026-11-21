@@ -5,7 +5,7 @@ import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   linkedInMemberIdFromProfileUrl,
   type LinkedInHistoryMessage,
-} from "../../connections/kinds/linkedin/linkedin-sync.js";
+} from "../../connections/kinds/linkedin/index.js";
 
 /**
  * The `links.account_id` a LinkedIn message resolves through.

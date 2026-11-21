@@ -10,7 +10,7 @@ import {
 type RoutineStub = Pick<Routine, "id" | "name" | "actionName" | "enabled">;
 
 function routine(name: string, enabled = true): RoutineStub {
-  return { id: `${name}-id`, name, actionName: "dream", enabled };
+  return { id: `${name}-id`, name, actionName: "dream:dream", enabled };
 }
 
 function appContext(routines: RoutineStub[], results: Partial<Record<string, ActionResult>> = {}) {
@@ -27,7 +27,7 @@ describe("ensureDreamRoutine", () => {
     await expect(ensureDreamRoutine(ctx as never)).resolves.toBe("created");
 
     expect(ctx.runAction).toHaveBeenCalledTimes(1);
-    expect(ctx.runAction).toHaveBeenCalledWith("create_routine", {
+    expect(ctx.runAction).toHaveBeenCalledWith("system:create_routine", {
       name: DREAM_ROUTINE_NAME,
       trigger: {
         type: "schedule",
@@ -36,7 +36,7 @@ describe("ensureDreamRoutine", () => {
         localTime: "03:00",
         rrule: "FREQ=DAILY;INTERVAL=3",
       },
-      actionName: "dream",
+      actionName: "dream:dream",
       args: {},
     });
   });
@@ -61,10 +61,10 @@ describe("ensureDreamRoutine", () => {
     await expect(ensureDreamRoutine(ctx as never)).resolves.toBe("replaced");
 
     expect(ctx.runAction.mock.calls.map(([name]) => name)).toEqual([
-      "create_routine",
-      "delete_routine",
+      "system:create_routine",
+      "system:delete_routine",
     ]);
-    expect(ctx.runAction).toHaveBeenLastCalledWith("delete_routine", {
+    expect(ctx.runAction).toHaveBeenLastCalledWith("system:delete_routine", {
       routineId: `${LEGACY_DREAM_ROUTINE_NAME}-id`,
     });
   });
@@ -83,22 +83,24 @@ describe("ensureDreamRoutine", () => {
     await expect(ensureDreamRoutine(ctx as never)).resolves.toBe("replaced");
 
     expect(ctx.runAction).toHaveBeenCalledTimes(1);
-    expect(ctx.runAction).toHaveBeenCalledWith("delete_routine", {
+    expect(ctx.runAction).toHaveBeenCalledWith("system:delete_routine", {
       routineId: `${LEGACY_DREAM_ROUTINE_NAME}-id`,
     });
   });
 
   it("throws when the daily routine cannot be deleted yet", async () => {
     const ctx = appContext([routine(LEGACY_DREAM_ROUTINE_NAME)], {
-      delete_routine: { status: "error", error: "has 1 active run(s)" },
+      "system:delete_routine": { status: "error", error: "has 1 active run(s)" },
     });
 
     await expect(ensureDreamRoutine(ctx as never)).rejects.toThrow("has 1 active run(s)");
-    expect(ctx.runAction).toHaveBeenCalledWith("create_routine", expect.anything());
+    expect(ctx.runAction).toHaveBeenCalledWith("system:create_routine", expect.anything());
   });
 
   it("throws when create_routine rejects the routine", async () => {
-    const ctx = appContext([], { create_routine: { status: "error", error: "bad trigger" } });
+    const ctx = appContext([], {
+      "system:create_routine": { status: "error", error: "bad trigger" },
+    });
 
     await expect(ensureDreamRoutine(ctx as never)).rejects.toThrow(
       "create_routine failed: bad trigger",

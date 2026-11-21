@@ -257,6 +257,33 @@ describe("createChannelsService", () => {
     );
   });
 
+  it("reads by message id and until a time only from a store read live", async () => {
+    const copy = rs.fn(async () => [line("m", 1_000)]);
+    const live = rs.fn(async () => [line("m", 1_000)]);
+    const { channelsService } = service([
+      { name: "whatsapp", messages: { query: copy, byAccount: null } },
+      { name: "discord", messages: { query: live, byAccount: null, live: true } },
+    ]);
+    const chatId = "c1" as ChatId;
+
+    await expect(channelsService.query("whatsapp", { chatId, olderThan: "m" })).rejects.toThrow(
+      'Channel "whatsapp" reads no messages by message id or until a time',
+    );
+    await expect(channelsService.query("whatsapp", { until: new Date(5) })).rejects.toThrow(
+      "by message id or until a time",
+    );
+    expect(copy).not.toHaveBeenCalled();
+
+    await channelsService.query("discord", { chatId, newerThan: "9", until: new Date(5) });
+    expect(live).toHaveBeenCalledWith({ chatId, newerThan: "9", until: new Date(5) });
+    await expect(channelsService.query("discord", { olderThan: "9" })).rejects.toThrow(
+      "A query by message id names a chat",
+    );
+    await expect(
+      channelsService.query("discord", { chatId, olderThan: "9", newerThan: "1" }),
+    ).rejects.toThrow("not both");
+  });
+
   it("puts a cursor on each message and resumes after one", async () => {
     const query = rs.fn(async () => [line("m2", 2_000), line("m1", 1_000)]);
     const { channelsService } = service([

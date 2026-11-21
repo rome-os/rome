@@ -33,7 +33,9 @@ export function createSystemPrompts(options: { sources: PromptSources }): System
   const { sources } = options;
   const prefixes = new Map<string, string>();
   sources.onChanged(() => prefixes.clear());
-  const keyOf = (agent: PromptAgent) => `${agent.owner}:${agent.name}`;
+  // A place can give an agent other instructions, so they are part of the key.
+  const keyOf = (agent: PromptAgent) =>
+    `${agent.owner}:${agent.name}\u0000${agent.systemPromptPrefix}`;
 
   return {
     build(agent, { contextSuffix, widgets }) {

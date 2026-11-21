@@ -19,10 +19,10 @@ export type ProcessResult =
   | { kind: "emitted"; event: SubscriptionEvent; topic: string }
   | { kind: "deduped"; event: SubscriptionEvent; topic: string };
 
-/** The system `publish_event` action — the producer surface that drops an
+/** The system `system:publish_event` action — the producer surface that drops an
  * event onto Rome's central in-memory bus. Routines with a matching
  * `event-bus` trigger fire from there. */
-const PUBLISH_EVENT_ACTION = "publish_event";
+const PUBLISH_EVENT_ACTION = "system:publish_event";
 
 /** Bus-event `source`, matched against a routine's optional `sourcePattern`. */
 const EVENT_SOURCE = "connector";
@@ -57,7 +57,7 @@ export const MAX_EVENT_AGE_MS = 24 * 60 * 60_000;
 /**
  * Drains the outbox: publishes each stored event that is owed a publish and
  * due for an attempt onto Rome's central bus through the system
- * `publish_event` action, oldest first, so routines with a matching
+ * `system:publish_event` action, oldest first, so routines with a matching
  * `event-bus` trigger fire. The bus event's `name` is the event's topic, the
  * same string `POST /feeds` returned to the feed creator.
  *

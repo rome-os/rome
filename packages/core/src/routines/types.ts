@@ -16,14 +16,14 @@ export interface Routine {
   id: string;
   name: string;
   /** Optional caller-assigned unique identity, distinct from the human-readable
-   * `name`. Used for dedup/idempotency — a caller (e.g. the briefing app) keys
+   * `name`. Used for dedup/idempotency — a caller (e.g. an app) keys
    * its managed routines so it can recreate them without name collisions.
    * Unset on routines that don't opt in. */
   key?: string;
   /** The app that owns and manages this routine (its appId). Set when an app
-   * creates a routine it maintains (e.g. briefing). A managed routine can't be
-   * deleted by a user — only by the managing app itself. Unset for routines a
-   * guardian or agent created directly. */
+   * creates a routine it maintains (e.g. dream). A managed routine can't be
+   * deleted by a user — only by the managing app itself. Uninstalling that app
+   * deletes it. Unset for routines a guardian or agent created directly. */
   managedBy?: string;
   enabled: boolean;
 

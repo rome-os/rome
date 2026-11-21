@@ -103,7 +103,7 @@ describe("inbound webhook credential failures", () => {
     await expect(recovered.json()).resolves.toEqual({ ok: true, deduped: false });
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(await events.listEvents({ limit: 10 })).toHaveLength(1);
-    expect(runAction).toHaveBeenCalledExactlyOnceWith("publish_event", {
+    expect(runAction).toHaveBeenCalledExactlyOnceWith("system:publish_event", {
       name: "provider:event:gmail.gmail_new_gmail_message",
       source: "connector",
       payload: { subject: "Fixture message", _deliveryId: "evt_webhook_auth_test" },

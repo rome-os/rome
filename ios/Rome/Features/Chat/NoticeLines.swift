@@ -86,7 +86,7 @@ struct UnreadPillButton: View {
     let store: TranscriptStore
 
     var body: some View {
-        let shown = store.unreadPill.phase == .shown && store.thread == nil
+        let shown = store.unreadPill.phase == .shown
         Group {
             if shown, let unread = store.unread {
                 Button {

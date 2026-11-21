@@ -40,6 +40,7 @@ The scenarios live in [`scenarios.ts`](../scripts/concierge-eval/scenarios.ts). 
 | Scenario | The owner |
 |---|---|
 | `ask-one` | starts a task whose only job is one question, and answers it. |
+| `ask-two` | starts two such tasks in one message, and answers each forwarded card in the Concierge chat. |
 | `approve` | starts a task that asks for an approval, and approves. |
 | `reject` | starts the same kind of task, and rejects. |
 | `quick` | asks for the weather, which the Concierge answers itself. |

@@ -15,15 +15,15 @@ import { preserveMentionOnlyText } from "../../../participation/mention-only.js"
 import { isLinkCodeMessage } from "../../../people/link-code/index.js";
 import type { OutgoingMessage } from "../../../types.js";
 import { createLogger } from "../../../logger.js";
+import { KeyedMutex } from "../../../lib/keyed-mutex.js";
+import type * as connections from "../../message.js";
 import { refuseAttachments, replyToShaped, textToSend } from "../../outbound/send-refusals.js";
 import type { PeopleRepository } from "../../../people/model/people-repository.js";
 import type {
-  ChannelMessage,
   ChatDescriptor,
   ChatId,
   ChatSettingsControl,
   ChatSettingsSnapshot,
-  MessageAddressing,
   MessageReceipt,
 } from "@rome-os/app-runtime";
 import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
@@ -31,6 +31,9 @@ import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
 // The Lark SDK loads when a Feishu connection first needs it, not with every boot.
 const larkSdk =
   requireOnFirstUse<typeof import("@larksuiteoapi/node-sdk")>("@larksuiteoapi/node-sdk");
+
+/** The bot's id in a message, while the SDK does not know the bot's own. */
+const UNKNOWN_BOT = "feishu:bot";
 
 const log = createLogger("feishu");
 const PROCESSING_REACTION_EMOJI = "Typing";
@@ -121,6 +124,31 @@ interface FeishuChannelConfig {
  */
 export type CreateLarkChannel = (config: FeishuConfig) => LarkChannel;
 
+/** What the Lark SDK hears in a group: every message, mentioned or not, and a
+ *  mention of everyone. Rome records them all and the wake gate decides. The
+ *  SDK's own default drops a group message that does not mention the bot. */
+export const HEAR_EVERY_GROUP_MESSAGE = {
+  requireMention: false,
+  respondToMentionAll: true,
+} as const;
+
+/** The Lark SDK channel for app `config`. */
+export function createLarkChannel(config: FeishuConfig): LarkChannel {
+  return larkSdk().createLarkChannel({
+    appId: config.appId,
+    appSecret: config.appSecret,
+    domain: config.domain === "lark" ? larkSdk().Domain.Lark : larkSdk().Domain.Feishu,
+    transport: "websocket",
+    outbound: { markdownConverter: "builtin" },
+    // Populate `raw` on normalized events so the inbound message's `raw`
+    // carries the real wire-level payload (e.g. for media not surfaced in
+    // the normal shape).
+    includeRawEvent: true,
+    loggerLevel: larkSdk().LoggerLevel.warn,
+    policy: HEAR_EVERY_GROUP_MESSAGE,
+  });
+}
+
 /**
  * Feishu / Lark channel adapter.
  *
@@ -130,9 +158,9 @@ export type CreateLarkChannel = (config: FeishuConfig) => LarkChannel;
  * otherwise hand-roll:
  *
  * - inbound `on("message")` events arrive already normalized (sender name,
- *   resolved chat type, structured mentions). The adapter maps each onto the
- *   channel's own record, a `ChannelMessage` whose `raw` is the SDK's wire
- *   event, so the Connection integration delivers it as it is;
+ *   resolved chat type, structured mentions). The adapter maps each onto a
+ *   Connections message whose `raw` is the SDK's wire event, so the
+ *   Connection integration delivers it as it is;
  * - outbound `send(..., { markdown })` runs the SDK's builtin converter, which
  *   renders the text as a Feishu rich-text post so bold/lists/code/headings
  *   display correctly. Agent output is Markdown by design, so every reply takes
@@ -142,7 +170,9 @@ export type CreateLarkChannel = (config: FeishuConfig) => LarkChannel;
  */
 export class FeishuAdapter {
   private channel: LarkChannel;
-  private handler?: (msg: ChannelMessage) => Promise<void>;
+  private handler?: (msg: connections.Message) => Promise<void>;
+  /** Holds each chat's messages in arrival order until they are delivered. */
+  private readonly hearing = new KeyedMutex();
   private readonly connectionId?: string;
   private readonly chatSettings?: ChatSettingsControl & {
     observe?(descriptor: ChatDescriptor): void;
@@ -166,22 +196,7 @@ export class FeishuAdapter {
    *  Feishu otherwise. */
   private readonly platform: string;
 
-  constructor(
-    config: FeishuConfig,
-    createChannel: CreateLarkChannel = (c) =>
-      larkSdk().createLarkChannel({
-        appId: c.appId,
-        appSecret: c.appSecret,
-        domain: c.domain === "lark" ? larkSdk().Domain.Lark : larkSdk().Domain.Feishu,
-        transport: "websocket",
-        outbound: { markdownConverter: "builtin" },
-        // Populate `raw` on normalized events so the inbound message's `raw`
-        // carries the real wire-level payload (e.g. for media not surfaced in
-        // the normal shape).
-        includeRawEvent: true,
-        loggerLevel: larkSdk().LoggerLevel.warn,
-      }),
-  ) {
+  constructor(config: FeishuConfig, createChannel: CreateLarkChannel = createLarkChannel) {
     this.channel = createChannel(config);
     this.platform = platformOf("feishu", config.domain);
     this.connectionId = config.connectionId;
@@ -195,9 +210,12 @@ export class FeishuAdapter {
 
   async start(): Promise<void> {
     this.unsubscribes.push(
-      this.channel.on("message", async (msg) => {
-        await this.handleMessage(msg);
-      }),
+      // Handling a message waits on its chat's settings and name, so each
+      // chat's messages are handled one after another and delivered in the
+      // order they arrived (the Talker order contract, connections/types.ts).
+      this.channel.on("message", (msg) =>
+        this.hearing.runExclusive(msg.chatId, () => this.handleMessage(msg)),
+      ),
       this.channel.on("cardAction", async (evt) => {
         await this.handleCardAction(evt);
       }),
@@ -258,7 +276,7 @@ export class FeishuAdapter {
     return (await this.getChannelConfig(chatId)).autoThread ?? true;
   }
 
-  onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+  onInbound(handler: (msg: connections.Message) => Promise<void>): void {
     this.handler = handler;
   }
 
@@ -293,9 +311,8 @@ export class FeishuAdapter {
           );
     if (!text) return;
     const threadType = m.chatType === "p2p" ? "private" : "group";
-    const addressing: MessageAddressing =
-      threadType === "private" ? "direct" : m.mentionedBot ? "mention" : "ambient";
-    const directedStop = addressing !== "ambient" && isStopCommand(text);
+    // A stop said to the bot still reaches a group switched off below.
+    const directedStop = (threadType === "private" || m.mentionedBot) && isStopCommand(text);
     // Only a delivered message waits on the name; a dropped one starts the lookup.
     const chatName = threadType === "group" ? this.observeGroup(m.chatId) : undefined;
 
@@ -316,48 +333,45 @@ export class FeishuAdapter {
         });
         return;
       }
-      if ((cfg.requireMention ?? true) && !m.mentionedBot) {
-        log.debug("ignoring Feishu group message not mentioning bot", {
-          from: m.senderId,
-          threadId: m.chatId,
-        });
-        return;
-      }
+      // A group message that does not mention the bot is recorded too.
+      // Whether it wakes the agent under the reply rule is the wake gate's
+      // call.
     }
 
     const name = await chatName;
     // The group's agent is not stamped on the message. The inbox reads it
     // from the conversation settings.
-    const msg: ChannelMessage = {
-      channel: "feishu",
-      direction: "inbound",
-      messageId: m.messageId,
-      chatId: m.chatId as ChatId,
-      senderId: m.senderId,
-      ...(m.senderName ? { senderDisplayName: m.senderName } : {}),
-      text,
-      attachments: [],
-      timestamp: new Date(m.createTime),
-      ...(m.replyToMessageId ? { replyTo: { messageId: m.replyToMessageId } } : {}),
-      thread: {
-        kind: threadType === "private" ? "dm" : "group",
+    // The bot's own id, which its mentions name. Before the SDK knows it, a
+    // mention of the bot still names the bot, by this stand-in.
+    const me = this.channel.botIdentity?.openId ?? UNKNOWN_BOT;
+    const mentions = new Set(
+      m.mentions.map((each) => each.openId).filter((id): id is string => Boolean(id)),
+    );
+    if (m.mentionedBot) mentions.add(me);
+    const msg: connections.Message = {
+      id: m.messageId,
+      where: {
+        chatId: m.chatId as ChatId,
+        kind: threadType === "private" ? "direct" : "group",
         ...(name ? { name } : {}),
       },
-      addressing,
+      sender: { accountId: m.senderId, ...(m.senderName ? { name: m.senderName } : {}) },
+      content: { text, attachments: [] },
+      receivedBy: me,
+      // @all is not an individual account, so it is not among them.
+      mentions: [...mentions],
+      ...(m.replyToMessageId ? { replyTo: { messageId: m.replyToMessageId } } : {}),
+      saidAt: new Date(m.createTime),
       raw: m.raw ?? m,
     };
 
-    log.info("message received", {
-      from: msg.senderId,
-      chatId: msg.chatId,
-      threadKind: msg.thread?.kind,
-    });
+    log.info("message received", { from: msg.sender.accountId, chatId: msg.where.chatId });
 
     try {
       await this.handler(msg);
     } catch (err) {
       log.error("message handler error", {
-        messageId: msg.messageId,
+        messageId: msg.id,
         error: err instanceof Error ? err.message : String(err),
       });
     }

@@ -1,5 +1,4 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
-import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { User } from "lucide-react";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
@@ -76,8 +75,6 @@ export interface ChannelConnectConfig {
   /** Disconnect-failed fallback copy key; defaults to
    *  `channels.disconnectFailedFallback`. */
   disconnectFailedKey?: string;
-  /** Whether this service exposes the shared chat settings surface. */
-  conversationSettings?: boolean;
 }
 
 /** The personal-account glyph — a muted user circle instead of the brand badge,
@@ -117,31 +114,24 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
   discord: {
     service: "discord",
     defaultGrant: "bot",
-    conversationSettings: true,
   },
   wechat: {
     service: "wechat",
     defaultGrant: "account",
     guardianLinkedKey: "channels.wechat.guardianLinked",
-    conversationSettings: true,
-  },
-  wechat_user: {
-    service: "wechat_user",
-    copyService: "wechat",
-    defaultGrant: "session",
-    icon: <PersonalAccountIcon />,
-    identityFallbackKey: "channels.wechatUser.fallbackName",
-    disconnectFailedKey: "channels.wechatUser.disconnectFailedFallback",
   },
   feishu: {
     service: "feishu",
     defaultGrant: "app",
     renderPresenting: FeishuPresenting,
-    conversationSettings: true,
   },
   email: {
     service: "email",
     defaultGrant: "inbox",
+  },
+  slack_app: {
+    service: "slack_app",
+    defaultGrant: "bot",
   },
   slack_bot: {
     service: "slack_bot",
@@ -262,15 +252,6 @@ export function ChannelConnectCard({
       disconnectButton
     );
 
-  const configureAction =
-    connected && slot.connectionId && config.conversationSettings ? (
-      <Button variant="outline" size="sm" asChild>
-        <Link to={`/settings/channels?connectionId=${encodeURIComponent(slot.connectionId)}`}>
-          {t("channels.conversationSettings.configure")}
-        </Link>
-      </Button>
-    ) : null;
-
   const identityTitle = connected
     ? (slot.identity ?? (config.identityFallbackKey ? t(config.identityFallbackKey) : null))
     : null;
@@ -283,16 +264,7 @@ export function ChannelConnectCard({
       role={role}
       icon={config.icon ?? <ConnectionBrandBadge connection={config.service} />}
       identityTitle={identityTitle}
-      action={
-        configureAction ? (
-          <div className="flex items-center gap-2">
-            {configureAction}
-            {disconnectAction}
-          </div>
-        ) : (
-          disconnectAction
-        )
-      }
+      action={disconnectAction}
     >
       {error && <p className="text-aux text-destructive-fg">{error}</p>}
       <RomeConfirmDialog

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import type { PersonResource, TimelinePage } from "@rome/api-types/people";
-import { createLinkedInDescriptor } from "../../../connections/integrations/linkedin.js";
+import { createLinkedInDescriptor } from "../../../connections/kinds/linkedin/descriptor.js";
 import type { Credential, RuntimeKit } from "../../../connections/types.js";
 import type { OpencliResult } from "../../../connections/kinds/linkedin/linkedin-cli.js";
 import {
@@ -15,8 +15,8 @@ import {
   type TestDeps,
 } from "../../../test/helpers.js";
 import { seedBaseline } from "../../../test/seeds.js";
-import { peopleRoutes } from "./phone-book/people.js";
-import { personHistoryRoutes } from "./person-history.js";
+import { phoneBookRoutes } from "../../../people/phone-book/index.js";
+import { personHistoryRoutes } from "../../../people/person-history/index.js";
 
 const MEMBER = "ACoAARecipient";
 const SELF = "ACoAAOwner";
@@ -74,7 +74,7 @@ describe("LinkedIn replies through People", () => {
       bondLevel: "acquaintance",
       links: [{ platform: "linkedin", id: MEMBER }],
     });
-    app = new Hono().route("/", peopleRoutes(deps)).route("/", personHistoryRoutes(deps));
+    app = new Hono().route("/", phoneBookRoutes(deps)).route("/", personHistoryRoutes(deps));
   });
 
   afterEach(() => db.close());

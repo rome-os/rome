@@ -54,6 +54,7 @@ import type { ActionExecutionsRepository } from "../apps/repositories/action-exe
 import type { SessionRepository } from "../agent/index.js";
 import type { Sessions } from "../agent/index.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
+import type { Action } from "@rome-os/app-runtime";
 import type { Hono } from "hono";
 import type { ClaudeLogins, CodexLogins, ModelAccount, ModelAccounts } from "../agent/index.js";
 import type { Permissions } from "../access/permissions.js";
@@ -69,7 +70,9 @@ import type { SystemUpgradeService } from "../instance/system-upgrade/service.js
 import type {
   AppRuntimeRepositories,
   ChatSettingsControl,
+  ChatSettingsPage,
   ChannelsService,
+  ListChatSettingsInput,
 } from "@rome-os/app-runtime";
 import type { FavorService } from "../favors/index.js";
 import type { ConnectionRegistry } from "../connections/index.js";
@@ -78,7 +81,7 @@ import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
 import type { ComputerUseService } from "../desktops/computer-use.js";
-import type { WechatApp } from "../connections/kinds/wechat-user/wechat-app.js";
+import type { KindMount } from "../connections/kind-mount.js";
 import type { AppConnectionsContextFactory } from "../apps/app-connections-port.js";
 
 export interface ApiConfig {
@@ -104,14 +107,14 @@ export interface ApiDeps {
   concierge?: ConciergeService;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
-  chatSettings: ChatSettingsControl;
+  chatSettings: DashboardChatSettings;
   actionEngine: ActionEngine;
-  actionLoader: Pick<ActionLoader, "get" | "getRegistryLoadFailures">;
+  actionLoader: Pick<ActionLoader, "get" | "getAllRecords" | "getRegistryLoadFailures">;
   db: DrizzleDb;
   /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
   appConnectionAccessRepo: AppConnectionAccessRepository;
   peopleRepo: PeopleRepository;
-  /** The guardian's link code, shown in People (people/link-code/guardian-link-code.ts). */
+  /** The guardian's link code, shown in People (people/link-code/application/guardian-link-code.ts). */
   guardianLinkCodes: GuardianLinkCodes;
   /** Every channel Rome reads, each carrying its address book and what was said
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route
@@ -176,6 +179,9 @@ export interface ApiDeps {
   /** Rome App Store read surface used by the dashboard and agent-facing actions. */
   appStore: AppStoreReader;
   actionRegistry: ActionRegistryImpl;
+  /** Each feature's routes and actions, built once by the wiring. A feature
+   *  left out of the list is left out of Rome. */
+  features?: readonly Feature[];
   agentLoader: AgentCatalog & Pick<AgentLoader, "getRegistryLoadFailures">;
   /** Told of each write to an account's agent, so the account's inbound port
    *  starts or stops listening. */
@@ -201,8 +207,9 @@ export interface ApiDeps {
    *  Never rejects. */
   autoConnectEmail?: () => Promise<void>;
   computerUse: Pick<ComputerUseService, "getStatus">;
-  /** The WeChat app on WeChat's own desktop. Null while WeChat is disabled. */
-  wechatApp: Pick<WechatApp, "status" | "install" | "start"> | null;
+  /** The kinds of connection the wiring mounts. A kind left out of the list
+   *  is left out of Rome. */
+  connectionKinds: readonly KindMount[];
   appKeysRepo: AppKeysRepository;
   appKeyInjector: AppKeyInjector;
   /** Makes an app-keys environment change reach already-running app code:
@@ -290,4 +297,16 @@ export interface ApiDeps {
 export interface ApiHandle {
   port: number;
   close(): Promise<void>;
+}
+
+/** A feature's two interfaces: routes for the dashboard and apps, actions for agents. */
+export interface Feature {
+  routes: Hono;
+  actions: readonly Action[];
+}
+
+/** The chat settings as the dashboard reads them: an app's, and a list that
+ *  can keep only the chats a guardian set a value on. */
+export interface DashboardChatSettings extends Omit<ChatSettingsControl, "list"> {
+  list(input: ListChatSettingsInput & { changed?: boolean }): Promise<ChatSettingsPage>;
 }

@@ -130,10 +130,10 @@ export const CHANNEL_META: Record<string, ChannelMeta> = {
   webchat: { labelKey: "channels.webchat", Glyph: WebchatGlyph },
   linkedin: { labelKey: "channels.linkedin", Glyph: LinkedInGlyph },
   wechat: { labelKey: "channels.wechat", Glyph: WeChatIcon },
-  wechat_user: { labelKey: "channels.wechat", Glyph: WeChatIcon },
   email: { labelKey: "channels.email", Glyph: EmailGlyph },
   feishu: { labelKey: "channels.feishu" },
   slack_bot: { labelKey: "channels.slack" },
+  slack_app: { labelKey: "channels.slack" },
   agents: { labelKey: "channels.agents", Glyph: AgentsGlyph },
 };
 

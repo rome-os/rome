@@ -19,7 +19,7 @@ Use this skill when a task requires browser automation, web interaction, page in
 
 OpenCLI uses its browser extension by default. Run `opencli profile list` to discover connected browsers before choosing a target.
 Pass `opencli --profile <name-or-id> ...` on every command for a task so concurrent work does not change its browser.
-The `chatgpt_chat` and `chatgpt_image` actions take the same name or id as their `profile` input.
+The `browser-automation:chatgpt_chat` and `browser-automation:chatgpt_image` actions take the same name or id as their `profile` input.
 If the requested browser is disconnected, report that it is unavailable. Do not substitute another browser or assume its login session is equivalent.
 Settings > Advanced > Computer Use shows observed browser connections and their last seen times.
 Use `--cdp-endpoint` only when the task explicitly requires a direct CDP connection.

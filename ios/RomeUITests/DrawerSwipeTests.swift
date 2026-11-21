@@ -1,0 +1,159 @@
+import XCTest
+
+/// The drawer's topic chat rows: swipe right to pin, swipe left for Archive
+/// and Delete, press and hold for all three, on the demo data. The drawer
+/// still closes from the page beside it. Each check keeps a screenshot.
+final class DrawerSwipeTests: XCTestCase {
+    /// A demo topic chat with no unread replies, so its pin shows.
+    private let topic = "读书笔记"
+
+    override func setUp() {
+        continueAfterFailure = false
+    }
+
+    @MainActor
+    private func launch() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchEnvironment["ROME_DEMO"] = "1"
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        return app
+    }
+
+    /// Opens the drawer from the header on a phone; a wide window has it
+    /// beside the page already. The hidden pages keep their own header
+    /// buttons in the tree, so only a visible one is pressed.
+    @MainActor
+    private func openDrawer(_ app: XCUIApplication) {
+        let row = self.row(app, topic)
+        if row.waitForExistence(timeout: 3), row.isHittable { return }
+        let button = app.buttons.matching(identifier: "Open navigation").allElementsBoundByIndex
+            .first { $0.isHittable && $0.frame.width <= 60 }
+            ?? app.buttons["Open navigation"].firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 15))
+        button.tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        let open = NSPredicate(format: "isHittable == true")
+        expectation(for: open, evaluatedWith: row)
+        waitForExpectations(timeout: 5)
+    }
+
+    @MainActor
+    private func row(_ app: XCUIApplication, _ label: String) -> XCUIElement {
+        app.buttons.matching(identifier: "topic-chat").matching(NSPredicate(format: "label == %@", label)).firstMatch
+    }
+
+    @MainActor
+    private func firstRow(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(identifier: "topic-chat").element(boundBy: 0)
+    }
+
+    @MainActor
+    private func keep(_ name: String) {
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
+    /// The element is drawn inside the window, not slid away with the drawer.
+    @MainActor
+    private func onScreen(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
+        element.exists && app.windows.firstMatch.frame.contains(CGPoint(x: element.frame.midX, y: element.frame.midY))
+    }
+
+    @MainActor
+    private func waitFor(_ format: String, _ element: XCUIElement, timeout: TimeInterval = 5) {
+        expectation(for: NSPredicate(format: format), evaluatedWith: element)
+        waitForExpectations(timeout: timeout)
+    }
+
+    @MainActor
+    func testSwipeRightPinsAndUnpins() {
+        let app = launch()
+        openDrawer(app)
+        let row = row(app, topic)
+        // A short swipe stops at Pin.
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.5)))
+        let pin = app.buttons["Pin"].firstMatch
+        XCTAssertTrue(pin.waitForExistence(timeout: 3))
+        keep("swipe-right-pin")
+        pin.tap()
+        expectation(for: NSPredicate(format: "label == %@ AND value CONTAINS %@", topic, "Pinned"), evaluatedWith: firstRow(app))
+        waitForExpectations(timeout: 5)
+        keep("pinned-on-top")
+        // The drawer stayed open.
+        XCTAssertTrue(row.isHittable)
+
+        // A full swipe takes the action at once.
+        row.swipeRight()
+        let unpin = app.buttons["Unpin"].firstMatch
+        if unpin.waitForExistence(timeout: 2) { unpin.tap() }
+        expectation(for: NSPredicate(format: "NOT (value CONTAINS %@)", "Pinned"), evaluatedWith: self.row(app, topic))
+        waitForExpectations(timeout: 5)
+    }
+
+    @MainActor
+    func testSwipeLeftOffersArchiveAndDeleteAndDeleteAsks() {
+        let app = launch()
+        openDrawer(app)
+        let row = row(app, topic)
+        // A short swipe, so it stops at the buttons rather than archiving.
+        let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5)))
+        let archive = app.buttons["Archive"].firstMatch
+        let delete = app.buttons["Delete"].firstMatch
+        XCTAssertTrue(archive.waitForExistence(timeout: 3))
+        XCTAssertTrue(delete.exists)
+        keep("swipe-left-archive-delete")
+        // The swipe left the drawer open: the other rows stay where they were.
+        XCTAssertTrue(onScreen(app, self.row(app, "出错的情况")))
+
+        delete.tap()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(alert.label.contains(topic))
+        keep("delete-asks")
+        alert.buttons["Cancel"].tap()
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
+
+        // Archive goes ahead at once for a chat with nothing to move.
+        start.press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5)))
+        XCTAssertTrue(archive.waitForExistence(timeout: 3))
+        archive.tap()
+        waitFor("exists == false", row)
+    }
+
+    @MainActor
+    func testPressAndHoldOffersPinArchiveAndDelete() {
+        let app = launch()
+        openDrawer(app)
+        let row = row(app, topic)
+        row.press(forDuration: 1.2)
+        let pin = app.buttons["Pin"].firstMatch
+        XCTAssertTrue(pin.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Archive"].exists)
+        XCTAssertTrue(app.buttons["Delete"].exists)
+        keep("press-and-hold-menu")
+        pin.tap()
+        expectation(for: NSPredicate(format: "label == %@ AND value CONTAINS %@", topic, "Pinned"), evaluatedWith: firstRow(app))
+        waitForExpectations(timeout: 5)
+    }
+
+    /// A phone's drawer closes with a swipe to the left on the page beside it, as before.
+    @MainActor
+    func testTheDrawerStillClosesFromThePage() throws {
+        let app = launch()
+        let row = row(app, topic)
+        if row.waitForExistence(timeout: 3), row.isHittable {
+            throw XCTSkip("A wide window keeps the drawer beside the page.")
+        }
+        openDrawer(app)
+        let window = app.windows.firstMatch
+        let page = window.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5))
+        page.press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)))
+        waitFor("isHittable == false", row)
+    }
+}
