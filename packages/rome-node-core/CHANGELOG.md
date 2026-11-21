@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.9](https://github.com/rome-os/rome/compare/node-core-v0.1.8...node-core-v0.1.9) (2026-11-21)
+
+
+### Features
+
+* **node:** add Audit log view to Rome Node Web UI ([#2542](https://github.com/rome-os/rome/issues/2542)) ([2511b5d](https://github.com/rome-os/rome/commit/2511b5d2579a7e5f8ab9c43edc6c0feb309600bb))
+* **node:** deploy Rome Node with Docker from device settings ([#2396](https://github.com/rome-os/rome/issues/2396)) ([c3c24c9](https://github.com/rome-os/rome/commit/c3c24c9c20245687f0e726e0fbf15a1b31aca2b8))
+
 ## [0.1.8](https://github.com/rome-os/rome/compare/node-core-v0.1.7...node-core-v0.1.8) (2026-11-11)
 
 
