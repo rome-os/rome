@@ -13,6 +13,9 @@
 #   environments/slack-app/ctl.sh old-rows rome-a|rome-b  (whether old-connections' rows are still stored)
 #   environments/slack-app/ctl.sh logs <service> [--since <RFC 3339 time>] [--tail <lines>]
 #   environments/slack-app/ctl.sh gateway-probe rome-a|rome-b  (the slack-gateway Worker, as that instance)
+#   environments/slack-app/ctl.sh as-instance rome-a|rome-b <file.mjs> [args]...  (a test script as that instance)
+#   environments/slack-app/ctl.sh mailbox rome-a|rome-b  (the instance's relay mailbox: {depositUrl})
+#   environments/slack-app/ctl.sh find-secret rome-a|rome-b '["<string>", ...]'  (counts per place, never content)
 #
 # A stopped instance's address refuses connections; Rome Cloud, the relay and
 # the fake Slack keep running, so events for it wait in its mailbox.
@@ -33,6 +36,13 @@
 # instance's signer, in its guardian's workspace (tools/gateway-probe.mjs): it
 # binds that workspace to the instance and drains the instance's mailbox, so
 # stop the instance first for the mailbox check.
+# as-instance runs a Node file in the instance's network with its signer
+# socket, the instance running or not, with SLACKENV_CLOUD (Rome Cloud's
+# origin), SLACKENV_GATEWAY, SLACKENV_SLACK and SLACKENV_SIGNER_SOCKET set; it
+# prints what the file prints. Test only: a token the file takes from the
+# signer stays inside it. find-secret counts, read only, where the instance
+# stores any of the strings: database columns, grant credentials, files under
+# the homes and /run, and its logs.
 # product-tests runs test files of the rome commit under test, unchanged, in
 # an image of that commit with its dependencies (test-runner/Dockerfile). Like
 # every command here it needs a bring-up first: it reads .state/rome-src.
@@ -48,7 +58,7 @@ compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/comp
 action="${1:-}"
 svc="${2:-}"
 case "$action" in
-  stop | start | status | wipe-chat | record | port | token-file | old-connections | old-rows | gateway-probe) case "$svc" in rome-a | rome-b) ;; *)
+  stop | start | status | wipe-chat | record | port | token-file | old-connections | old-rows | gateway-probe | as-instance | mailbox | find-secret) case "$svc" in rome-a | rome-b) ;; *)
     echo "instance must be rome-a or rome-b" >&2
     exit 2
     ;;
@@ -64,7 +74,7 @@ case "$action" in
     exit 2
   } ;;
   *)
-    sed -n '2,39p' "$0"
+    sed -n '2,48p' "$0"
     exit 2
     ;;
 esac
@@ -122,6 +132,25 @@ gateway_resolution() {
       for (const a of list) if (!inside.includes(a) && !(net === "host" && a === "127.0.0.1")) ok = false;
     }
     console.log(JSON.stringify({ ok, gateway_tls: inside, containers }));' "$tls" "${out[@]}"
+}
+
+# Runs a Node file as the instance: in its network, with its signer socket,
+# in a one-off container of its image, so it works with Rome stopped.
+#   as_instance <absolute file> [docker run options]... -- [file args]...
+as_instance() {
+  local file="$1" opts=() cloud slack_port
+  shift
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do
+    opts+=("$1")
+    shift
+  done
+  [ "${1:-}" = "--" ] && shift
+  cloud="$(sed -n 's/^CLOUD_ORIGIN=//p' "$STATE_DIR/compose.env")"
+  slack_port="$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
+  compose run --rm --no-deps -T --entrypoint node "${opts[@]}" \
+    -e SLACKENV_CLOUD="$cloud" -e SLACKENV_GATEWAY=https://slack.romeos.io \
+    -e SLACKENV_SLACK="http://127.0.0.1:$slack_port" -e SLACKENV_SIGNER_SOCKET=/run/rome-signer/signer.sock \
+    -v "$file:/slackenv/run/$(basename "$file"):ro" "$svc" "/slackenv/run/$(basename "$file")" "$@"
 }
 
 # The member whose direct message the conversation is, from the fake Slack,
@@ -332,12 +361,37 @@ case "$action" in
     slack_port="$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
     probe=(--team "$team" --user "$user" --cloud "$cloud" --slack "http://127.0.0.1:$slack_port"
       --resolution "$(gateway_resolution)")
-    if [ -n "$(compose ps -q --status running "$svc")" ]; then
-      compose exec -T -e GATEWAY_SHARED_SECRET="$shared" "$svc" node --input-type=module - "${probe[@]}" <"$ENV_DIR/tools/gateway-probe.mjs"
-    else
-      compose run --rm --no-deps -T -e GATEWAY_SHARED_SECRET="$shared" --entrypoint node \
-        -v "$ENV_DIR/tools/gateway-probe.mjs:/slackenv/gateway-probe.mjs:ro" "$svc" /slackenv/gateway-probe.mjs "${probe[@]}"
-    fi
+    as_instance "$ENV_DIR/tools/gateway-probe.mjs" -e GATEWAY_SHARED_SECRET="$shared" -- "${probe[@]}"
+    ;;
+  as-instance)
+    file="${3:-}"
+    [ -f "$file" ] || {
+      echo "usage: ctl.sh as-instance rome-a|rome-b <file.mjs> [args]..." >&2
+      exit 2
+    }
+    as_instance "$(cd "$(dirname "$file")" && pwd)/$(basename "$file")" -- "${@:4}"
+    ;;
+  mailbox)
+    as_instance "$ENV_DIR/tools/mailbox.mjs" --
+    ;;
+  find-secret)
+    strings="${3:-}"
+    node -e 'const s = JSON.parse(process.argv[1]); if (!Array.isArray(s) || !s.length || !s.every((x) => typeof x === "string" && x)) process.exit(1)' "$strings" 2>/dev/null || {
+      echo "usage: ctl.sh find-secret rome-a|rome-b '[\"<string>\", ...]'" >&2
+      exit 2
+    }
+    inside="$(read_only find-secret.mjs --strings "$strings")"
+    # The logs are counted here, on the host, from what docker keeps.
+    compose logs --no-color --no-log-prefix "$svc" 2>&1 | node -e '
+      const strings = JSON.parse(process.argv[1]);
+      const inside = JSON.parse(process.argv[2]);
+      let logs = "";
+      process.stdin.on("data", (c) => { logs += c; }).on("end", () => {
+        const counts = strings.map((s) => logs.split(s).length - 1);
+        if (counts.some((n) => n > 0)) inside.places.logs = counts;
+        const total = strings.map((_, i) => Object.values(inside.places).reduce((n, c) => n + c[i], 0));
+        console.log(JSON.stringify({ ...inside, total }));
+      });' "$strings" "$inside"
     ;;
   distribution)
     # Off, only the app's home workspace can approve it, as on Slack.

@@ -203,6 +203,21 @@ test("sign-in, Web API, signed events, uninstall", async () => {
   assert.notEqual(third.access_token, again.access_token);
   assert.equal((await api("auth.test", {}, third.access_token)).ok, true);
 
+  // control/tokens lists every token issued, with whether it still works.
+  const tokens = (await ctl("/tokens")).tokens;
+  const byValue = Object.fromEntries(tokens.map((t) => [t.value, t]));
+  assert.equal(byValue[a.access_token].revoked, true);
+  assert.equal(byValue[again.access_token].revoked, true);
+  assert.deepEqual(byValue[third.access_token], {
+    value: third.access_token,
+    team: "TA0000AAAA",
+    kind: "bot",
+    app: byValue[third.access_token].app,
+    user: byValue[third.access_token].user,
+    revoked: false,
+  });
+  assert.match(byValue[third.access_token].app, /^A/);
+
   // The official app replies with markdown_text and no text, as a JSON body.
   const md = await (
     await fetch(`${base}/api/chat.postMessage`, {

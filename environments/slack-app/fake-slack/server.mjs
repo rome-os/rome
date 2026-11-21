@@ -1811,6 +1811,20 @@ async function control(slack, method, url, body) {
       return { ok: true, seq: slack.state.seq, sockets: slack.since(slack.state.sockets, q) };
     case "POST /socket-event":
       return { ok: true, ...(await slack.sendSocketEvent(body.app_id, body.event)) };
+    case "GET /tokens":
+      // Test only: every token this fake issued, values included, so a check
+      // can look for them elsewhere. They are this environment's own values.
+      return {
+        ok: true,
+        tokens: Object.entries(slack.state.tokens).map(([value, t]) => ({
+          value,
+          team: t.teamId,
+          kind: t.kind,
+          app: t.appId ?? slack.config.appId,
+          user: t.userId ?? null,
+          revoked: t.revoked === true,
+        })),
+      };
     case "GET /approvals":
       return { ok: true, seq: slack.state.seq, approvals: slack.since(slack.state.approvals, q) };
     case "GET /events":
