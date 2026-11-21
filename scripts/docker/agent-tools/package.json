@@ -1,0 +1,9 @@
+{
+  "name": "rome-image-agent-tools",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Standalone agent CLIs shipped in the Rome image.",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.293"
+  }
+}
