@@ -66,8 +66,8 @@
     ]
   },
   {
-    "id": "own-message-actions-ink-on-bubble-edge",
-    "why": "UserMessage pulls its action row right by --control-action-offset-sm so the last action icon's ink, not its hit area, ends on the bubble's right edge.",
+    "id": "own-message-action-icon-on-bubble-edge",
+    "why": "UserMessage pulls its action row right by --control-action-offset-sm, the icon's inset in its button, so the last action icon, not its hit area, ends on the bubble's right edge.",
     "scope": {
       "component": "UserMessage"
     },
@@ -85,10 +85,13 @@
       },
       {
         "locator": {
-          "component": "IconButton",
-          "nth": -1
+          "css": "svg",
+          "within": {
+            "component": "IconButton",
+            "nth": -1
+          }
         },
-        "level": "ink",
+        "level": "box",
         "edge": "right",
         "all": true
       }
