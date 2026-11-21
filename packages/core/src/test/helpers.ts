@@ -842,7 +842,6 @@ export async function buildTestDeps(
     actionRegistry,
     agentLoader,
     agentsByName: () => agentsByLegacyName(agentLoader.list(), artifactIdentity.legacyBindings),
-    accountListening: { changed: () => {} },
     skillCatalog,
     appsRoot: join(appDomainRoot, "apps"),
     agentSessionManager,

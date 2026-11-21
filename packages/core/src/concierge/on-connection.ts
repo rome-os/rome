@@ -1,6 +1,7 @@
-import type { AccountLink } from "@rome/api-types/account-agents";
+import { type AccountLink, MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import type { ThreadContext } from "@rome-os/app-runtime";
 import type { PlaceSetup } from "../agent/index.js";
+import type { ConnectionRegistry } from "../connections/registry.js";
 import { WEBCHAT_CHANNEL } from "../webchat/dashboard-account.js";
 import { CONCIERGE_AGENT_ID, isConciergeAgent } from "../webchat/privacy.js";
 
@@ -38,17 +39,24 @@ export const CONNECTION_PROMPT = [
 ].join("\n");
 
 /**
- * The agent a newly connected account starts with: the Concierge for one of
- * Rome's own accounts of a kind that asks for it, such as Rome's Slack app.
- * Any other kind's account starts with none and waits for the guardian to
- * link one, and so does a delegate, such as the guardian's signed-in
- * Telegram, which speaks as the guardian.
+ * The agent that answers on an account of a kind of connection that takes
+ * one: the Concierge, the guardian's, for one of Rome's own accounts of a kind
+ * that asks for it, such as Rome's Slack app, and main for every other. Null
+ * for a kind that takes no agent. The kind decides, and nobody picks.
  */
-export function agentOnConnect(
-  link: AccountLink | null,
-  startsWithConcierge: boolean,
-): string | null {
-  return startsWithConcierge && link === "own_account" ? CONCIERGE_AGENT_ID : null;
+export function agentOfKind(link: AccountLink | null, startsWithConcierge: boolean): string | null {
+  if (link === null) return null;
+  return startsWithConcierge && link === "own_account" ? CONCIERGE_AGENT_ID : MAIN_AGENT_ID;
+}
+
+/** {@link agentOfKind} for each kind `registry` declares, read on each call. */
+export function agentOfKindIn(
+  registry: Pick<ConnectionRegistry, "getDescriptor"> | undefined,
+): (kind: string) => string | null {
+  return (kind) => {
+    const descriptor = registry?.getDescriptor(kind);
+    return agentOfKind(descriptor?.link ?? null, descriptor?.startsWithConcierge === true);
+  };
 }
 
 /**
