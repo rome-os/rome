@@ -399,13 +399,20 @@ import { createOgImageStore } from "./apps/og/store.js";
 import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./app-host/api.js";
-import { DELIVERY_ATTEMPTS, RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
+import {
+  DELIVERY_ATTEMPTS,
+  RelayDrainer,
+  buildRelayReplayRequest,
+  type RelayDrain,
+} from "./relay/drainer.js";
 import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
 import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
-import { SLACK_APP_KIND } from "./connections/integrations/slack-app.js";
+import { isSlackFrame } from "./connections/kinds/slack-app/deposit.js";
+import { deliverSlackFrame } from "./connections/kinds/slack-app/drain.js";
 import {
   RELAY_SETTING_KEY,
   deriveDepositUrl,
+  isCompleteRelaySetting,
   resolveRelayDrains,
   relayDrainsEqual,
   sanitizeDrainUrl,
@@ -1810,7 +1817,25 @@ async function main() {
       depositUrl: deriveDepositUrl(config.relay.drainUrl),
     } satisfies RelayDrainSetting);
   }
-  const relayDrains = await resolveRelayDrains(settingsRepo, appCatalog);
+  // Rome's Slack app deposits into this mailbox too, so it is drained even when
+  // no installed app takes its webhooks. A webhook drained with no app to take
+  // it is dropped (connections/kinds/slack-app/drain.ts).
+  const resolveDrains = async (): Promise<RelayDrain[]> => {
+    const drains = await resolveRelayDrains(settingsRepo, appCatalog);
+    if (drains.length > 0) return drains;
+    const setting = await settingsRepo.get<unknown>(RELAY_SETTING_KEY);
+    return isCompleteRelaySetting(setting)
+      ? [
+          {
+            connectUrl: setting.drainUrl,
+            drainKey: setting.drainKey,
+            targetAppId: "",
+            targetPath: [],
+          },
+        ]
+      : [];
+  };
+  const relayDrains = await resolveDrains();
   const relayDispatcher = new AppApiDispatcher(appCatalog, {
     db,
     actionEngine,
@@ -1820,6 +1845,13 @@ async function main() {
     appConnections,
   });
   const relayDrainer = new RelayDrainer(relayDrains, async (drain, event) => {
+    if (isSlackFrame(event.headers)) {
+      return deliverSlackFrame(connectionRegistry, { headers: event.headers, body: event.body });
+    }
+    if (!drain.targetAppId) {
+      log.warn("relay webhook dropped: no installed app takes it");
+      return { status: 404 };
+    }
     const res = await relayDispatcher.dispatch(
       drain.targetAppId,
       buildRelayReplayRequest(drain, event),
@@ -1949,28 +1981,18 @@ async function main() {
   const { RomeCloudMailProvider } = await import("./connections/kinds/email/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
-    // Rome's own Slack app: Slack's Web API at the configured origin, Rome
-    // Cloud for sign-in and the workspace binding, and a relay drain per
-    // workspace for its events.
+    // Rome's own Slack app: the Slack gateway Worker holds the app and its
+    // tokens, Rome Cloud signs the link that adds it, and its events arrive
+    // in this instance's own relay mailbox (drained below).
     slackApp: {
-      api: createSlackAppWebApi(config.slackApiBaseUrl),
-      cloud: romeCloudSlackApp(),
-      listens: (connectionId) => accountListening.listens(connectionId),
-      openMailbox: (mailbox, onFrame) => {
-        const drainer = new RelayDrainer(
-          [
-            {
-              connectUrl: mailbox.connectUrl,
-              drainKey: mailbox.drainKey,
-              targetAppId: SLACK_APP_KIND,
-              targetPath: [],
-            },
-          ],
-          (_drain, event) => onFrame({ headers: event.headers, body: event.body }),
-        );
-        drainer.start();
-        return { stop: () => drainer.stop(), attempts: DELIVERY_ATTEMPTS };
+      api: createSlackAppWebApi(config.slackGatewayUrl),
+      cloud: romeCloudSlackApp(config.slackGatewayUrl),
+      depositUrl: async () => {
+        const relay = await settingsRepo.get<Partial<RelayDrainSetting>>(RELAY_SETTING_KEY);
+        return typeof relay?.depositUrl === "string" && relay.depositUrl ? relay.depositUrl : null;
       },
+      deliveryAttempts: DELIVERY_ATTEMPTS,
+      listens: (connectionId) => accountListening.listens(connectionId),
     },
     settingsRepo,
     chatSettings,
@@ -2272,7 +2294,7 @@ async function main() {
   // target (or loop on 5xx after the consumer disappears) until a manual save.
   let activeRelayDrains = relayDrains;
   appCatalog.subscribe(async function relayDrainSubscriber() {
-    const next = await resolveRelayDrains(settingsRepo, appCatalog);
+    const next = await resolveDrains();
     if (relayDrainsEqual(activeRelayDrains, next)) return;
     activeRelayDrains = next;
     await relayDrainer.reload(next);
