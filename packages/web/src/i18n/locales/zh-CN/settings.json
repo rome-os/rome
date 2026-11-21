@@ -258,6 +258,15 @@
           "privacyNote": "你在 Google 上授权访问，随时可以在这里断开。"
         }
       },
+      "microsoft": {
+        "user": {
+          "title": "你的 Microsoft 账号",
+          "bullets": {
+            "work": "读取你的 Outlook 邮件，每封邮件经你批准后才发送"
+          },
+          "privacyNote": "你在 Microsoft 上授权访问，随时可以在这里断开。"
+        }
+      },
       "shopify": {
         "user": {
           "title": "你的 Shopify 店铺",

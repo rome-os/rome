@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { RomeLogo } from "@/components/logo";
 import { GithubIcon } from "@/components/brand-icons/github-icon";
 import { GoogleIcon } from "@/components/brand-icons/google-icon";
+import { MicrosoftIcon } from "@/components/brand-icons/microsoft-icon";
 import { ShopifyIcon } from "@/components/brand-icons/shopify-icon";
 import { SlackIcon } from "@/components/brand-icons/slack-icon";
 
@@ -129,6 +130,8 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
   feishu: { Icon: FeishuIcon, badge: "border border-border bg-white" },
   slack: { Icon: SlackIcon, badge: "border border-border bg-white" },
   google: { Icon: GoogleIcon, badge: "border border-border bg-white" },
+  // The four squares read on any surface, so this needs no off-system white.
+  microsoft: { Icon: MicrosoftIcon, badge: "border border-border bg-background" },
   github: { Icon: GithubIcon, badge: "bg-foreground text-background" },
   shopify: { Icon: ShopifyIcon, badge: "bg-foreground text-background" },
   webchat: {

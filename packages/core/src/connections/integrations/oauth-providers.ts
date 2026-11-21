@@ -3,19 +3,21 @@
 // Each provider is brokered by Rome Cloud OAuth: the guardian delegates access by
 // clicking Connect, Rome Cloud runs the provider authorization, and the instance
 // redeems a handoff for an OAuthTokenBundle. Grant is route-driven
-// (`romeCloudOAuth` — see schemes.ts). Google and Shopify renew through Cloud.
+// (`romeCloudOAuth` — see schemes.ts). Google, Shopify and Microsoft renew
+// through Cloud.
 //
-// Google keeps Gmail credentials in its Core-only Actor so shell tools and apps
-// cannot bypass send approval with a raw token. Other providers keep their
+// Google and Microsoft keep mail credentials in Core-only Actors (Gmail,
+// Outlook) so shell tools and apps cannot bypass send approval with a raw token. Other providers keep their
 // token-file consumers. All providers share the registry's grant lifecycle.
 //
 // Grant names follow the grant table: grants are about grants, not
-// token count. GitHub and Google each mint one user credential → one `user`
+// token count. GitHub, Google and Microsoft each mint one user credential → one `user`
 // grant. Shopify mints one offline token for a store, not a person → one
 // `store` grant.
 
 import { z } from "zod";
 import { createGmailActor } from "../gmail/api.js";
+import { createOutlookActor } from "../outlook/api.js";
 import {
   clearGithubShellIntegrationForProvider,
   syncGithubShellIntegrationForProvider,
@@ -29,6 +31,7 @@ import { clearProviderTokenFile, syncProviderTokenFile } from "../oauth/provider
 import { romeCloudOAuth } from "../schemes.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
+  Actor,
   ConnectionDescriptor,
   Credential,
   GrantCustody,
@@ -96,10 +99,24 @@ export const shopifyGrantProfileSchema = z
   .strict();
 export type ShopifyGrantProfile = z.infer<typeof shopifyGrantProfileSchema>;
 
+/** Microsoft's grant profile: OIDC identity from the ID token. Like Google,
+ *  no handle; Microsoft serves no avatar URL. */
+export const microsoftGrantProfileSchema = z
+  .object({
+    /** OIDC `sub`, pairwise to Rome's Microsoft app. */
+    subject: identityField,
+    displayName: identityField,
+    email: identityField,
+    scopes: scopesField,
+  })
+  .strict();
+export type MicrosoftGrantProfile = z.infer<typeof microsoftGrantProfileSchema>;
+
 export const OAUTH_PROVIDER_PROFILE_SCHEMAS = {
   github: githubGrantProfileSchema,
   google: googleGrantProfileSchema,
   shopify: shopifyGrantProfileSchema,
+  microsoft: microsoftGrantProfileSchema,
 } as const;
 
 /** Any kind-specific OAuth grant profile, for OAuth-layer code that fans out
@@ -107,7 +124,8 @@ export const OAUTH_PROVIDER_PROFILE_SCHEMAS = {
 export type OAuthProviderGrantProfile =
   | GithubGrantProfile
   | GoogleGrantProfile
-  | ShopifyGrantProfile;
+  | ShopifyGrantProfile
+  | MicrosoftGrantProfile;
 
 /** Validate a record against `provider`'s own schema. Fail-closed: a value that
  *  doesn't match throws (ZodError) — callers never see a partial profile. */
@@ -123,6 +141,7 @@ export const OAUTH_PROVIDER_GRANTS: Record<OAuthProvider, GrantName> = {
   github: "user",
   google: "user",
   shopify: "store",
+  microsoft: "user",
 };
 
 // Pure display mappings: parsed profile (plain data) in, frozen display
@@ -161,6 +180,15 @@ export function toShopifyDisplay(profile: ShopifyGrantProfile): ProfileDisplay {
   });
 }
 
+export function toMicrosoftDisplay(profile: MicrosoftGrantProfile): ProfileDisplay {
+  return Object.freeze({
+    displayName: profile.displayName,
+    handle: undefined,
+    email: profile.email,
+    avatarUrl: undefined,
+  });
+}
+
 /** Each connection kind revives a stored record by re-running its OWN parse, then
  *  mapping the parsed plain data through its pure display function. A record
  *  that no longer matches the schema throws instead of displaying sparsely. */
@@ -168,6 +196,7 @@ const OAUTH_PROVIDER_REVIVERS: Record<OAuthProvider, (record: ProfileRecord) => 
   github: (record) => toGithubDisplay(githubGrantProfileSchema.parse(record)),
   google: (record) => toGoogleDisplay(googleGrantProfileSchema.parse(record)),
   shopify: (record) => toShopifyDisplay(shopifyGrantProfileSchema.parse(record)),
+  microsoft: (record) => toMicrosoftDisplay(microsoftGrantProfileSchema.parse(record)),
 };
 
 /**
@@ -191,11 +220,18 @@ function makeOAuthProviderCustody(provider: OAuthProvider): GrantCustody {
   };
 }
 
+/** Providers whose grant only a Core-only mail Actor may use. */
+const MAIL_ACTORS: Partial<Record<OAuthProvider, (credential: Credential) => Actor>> = {
+  google: createGmailActor,
+  microsoft: createOutlookActor,
+};
+
 /** Human-facing provider labels for the setup's success view. */
 const OAUTH_PROVIDER_LABELS: Record<OAuthProvider, string> = {
   github: "GitHub",
   google: "Google",
   shopify: "Shopify",
+  microsoft: "Microsoft",
 };
 
 /**
@@ -315,8 +351,8 @@ export function makeOAuthProviderSetup(
 }
 
 /**
- * Build one Rome Cloud-OAuth grant. Google uses a Core-only Gmail Actor;
- * the other providers keep grant-state-driven token-file and shell custody.
+ * Build one Rome Cloud-OAuth grant. Google and Microsoft use Core-only mail
+ * Actors; the other providers keep grant-state-driven token-file and shell custody.
  *
  * `setupDeps` attaches the setup (the redirect cutover) to the
  * grant's scheme. Omitted in tests that exercise connection state only;
@@ -338,6 +374,6 @@ export function makeOAuthProviderDescriptor(
     // Shopify the store.
     accountIdOf: (record) => (typeof record.subject === "string" && record.subject) || null,
     custody: makeOAuthProviderCustody(provider),
-    capabilities: provider === "google" ? { actor: { build: createGmailActor } } : {},
+    capabilities: MAIL_ACTORS[provider] ? { actor: { build: MAIL_ACTORS[provider] } } : {},
   };
 }

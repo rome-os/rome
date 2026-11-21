@@ -1,12 +1,8 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import type { ConnectionRegistry } from "../registry.js";
-import {
-  GMAIL_READ_ACTION,
-  GMAIL_SEND_ACTION,
-  registerGmailActions,
-  withGmailApprovalId,
-} from "./actions.js";
+import { GMAIL_READ_ACTION, GMAIL_SEND_ACTION, registerGmailActions } from "./actions.js";
+import { withForwardedApprovalId } from "../approved-send.js";
 
 const message = {
   connectionId: "google-1",
@@ -49,7 +45,9 @@ describe("Gmail actions", () => {
     });
     expect(invoke).not.toHaveBeenCalled();
     expect(await send.execute(message)).toMatchObject({ status: "error" });
-    expect(await withGmailApprovalId("test-approved", () => send.execute(message))).toMatchObject({
+    expect(
+      await withForwardedApprovalId("test-approved", () => send.execute(message)),
+    ).toMatchObject({
       status: "ok",
     });
     expect(invoke).toHaveBeenCalledWith({ operation: "send", input: message });
@@ -118,7 +116,7 @@ describe("Gmail actions", () => {
     const { actions, invoke } = harness();
     invoke.mockRejectedValue(new Error("timeout"));
     expect(
-      await withGmailApprovalId("test-approved", () =>
+      await withForwardedApprovalId("test-approved", () =>
         actions.get(GMAIL_SEND_ACTION)!.execute(message),
       ),
     ).toMatchObject({

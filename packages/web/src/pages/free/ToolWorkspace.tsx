@@ -5,6 +5,7 @@ import {
   LayoutGrid,
   ListChecks,
   ListTree,
+  MessageSquare,
   PanelRightClose,
   Plus,
   X,
@@ -44,8 +45,9 @@ import { TaskList } from "@/components/concierge/TaskList";
 import { type LeaveGuard, leaveEditor } from "@/components/chat/outputs/OutputEditor";
 import { OutputsPanel } from "@/components/chat/outputs/OutputsPanel";
 import { type OutputsTabOptions, ToolOutputsContext, type ToolOutputsHost } from "./tool-outputs";
-import { ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
+import { TaskChatInPaneContext, ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
+import { useSessionNames } from "./use-session-names";
 import {
   COMPACT_WIDTH,
   type ToolView,
@@ -78,9 +80,11 @@ const SEPARATOR_WIDTH = 1;
 const TRACE_TAB_ID = "__trace__";
 // Tab value of the Tasks tab, likewise.
 const TASKS_TAB_ID = "__tasks__";
+// Tab value of the Chat tab, the task chat opened beside the Tasks tab, likewise.
+const CHAT_TAB_ID = "__task_chat__";
 // Tab value of the Outputs tab, likewise.
 const OUTPUTS_TAB_ID = "__outputs__";
-type BuiltinTab = "trace" | "tasks" | "outputs";
+type BuiltinTab = "trace" | "tasks" | "chat" | "outputs";
 
 function readRatio() {
   const value = Number(readStored(WIDTH_KEY));
@@ -168,6 +172,11 @@ interface ToolWorkspaceProps {
   onOpenIntent?: (widget: WidgetPlacement) => void;
   /** The store's count of explicit app activations; a change leaves the Trace tab. */
   activations?: number;
+  /**
+   * Draws task chat `chatId` in the Tasks tab; `onGone` closes it when the
+   * chat is not found. Without it a task chat opens as its own page.
+   */
+  taskChat?: (chatId: string, onGone: () => void) => ReactNode;
   children: ReactNode;
 }
 
@@ -184,6 +193,7 @@ export function ToolWorkspace({
   fullHref,
   onOpenIntent,
   activations,
+  taskChat,
   children,
 }: ToolWorkspaceProps) {
   const { t } = useTranslation("common");
@@ -216,8 +226,8 @@ export function ToolWorkspace({
   //   the store, because the user has moved on to the pane. The flag is then
   //   redundant and clears, so the app stays visible after the trace closes.
   //
-  // The Tasks tab is the same kind of tab: view state, never saved, at most
-  // one. At most one built-in tab is selected, and a built-in tab opened over a
+  // The Tasks tab, and the Chat tab beside it, are the same kind of tab: view
+  // state, never saved, at most one each. At most one built-in tab is selected, and a built-in tab opened over a
   // collapsed pane holds it open with the same flag, until the last of them
   // closes.
   const [trace, setTrace] = useState<{ owner: string; streaming: boolean } | null>(null);
@@ -225,6 +235,19 @@ export function ToolWorkspace({
   // The Concierge chat whose task list the tab shows; null while it is not open.
   const [tasksChatId, setTasksChatId] = useState<string | null>(null);
   const tasksOpen = tasksChatId !== null;
+  // The task chat the Chat tab shows, the one opened last; null while there
+  // is none, and then the tab is not there. View state, like the Tasks tab.
+  const [taskChatId, setTaskChatId] = useState<string | null>(null);
+  // The name the task chat had where it was opened, for the tab until its own is read.
+  const [openedName, setOpenedName] = useState("");
+  const chatOpen = taskChatId !== null;
+  // The tab is named for its task chat, and follows a rename. Until the name
+  // is read it takes the one it was opened with, and with neither it says Chat.
+  const taskChatNames = useSessionNames(taskChatId ? [taskChatId] : []);
+  const taskChatLabel =
+    (taskChatId ? taskChatNames.get(taskChatId) : undefined) ||
+    openedName.trim() ||
+    t("chat.taskChatTab");
   // The chat whose outputs the tab shows, and the output it was opened on.
   const [outputsTarget, setOutputsTarget] = useState<{
     chatId: string;
@@ -289,7 +312,7 @@ export function ToolWorkspace({
     if (!view.collapsed) setHoldsOpen(false);
   }, [view.collapsed]);
 
-  const builtinOpen = trace !== null || tasksOpen || outputsOpen;
+  const builtinOpen = trace !== null || tasksOpen || chatOpen || outputsOpen;
   // The hold ends with the last built-in tab: the pane falls back to the
   // session's stored state.
   useEffect(() => {
@@ -303,8 +326,9 @@ export function ToolWorkspace({
 
   const traceActive = trace !== null && selected === "trace";
   const tasksActive = tasksOpen && selected === "tasks";
+  const chatActive = chatOpen && selected === "chat";
   const outputsActive = outputsOpen && selected === "outputs";
-  const builtinActive = traceActive || tasksActive || outputsActive;
+  const builtinActive = traceActive || tasksActive || chatActive || outputsActive;
   const traceHost = useMemo<ToolTraceHost>(
     () => ({ outlet, paneOpen: open, setPaneCollapsed, reveal, set: setTraceTab }),
     [outlet, open, setPaneCollapsed, reveal, setTraceTab],
@@ -317,18 +341,45 @@ export function ToolWorkspace({
     setTasksChatId(chatId);
     setSelected("tasks");
   }, []);
-  const hideTasks = useCallback(() => {
+  // The Tasks tab's own close leaves the Chat tab beside it.
+  const closeTasksTab = useCallback(() => {
     setTasksChatId(null);
     setSelected((current) => (current === "tasks" ? null : current));
   }, []);
+  const closeTaskChat = useCallback(() => {
+    setTaskChatId(null);
+    setSelected((current) => (current === "chat" ? null : current));
+  }, []);
+  // The Concierge chat going takes both tabs with it.
+  const hideTasks = useCallback(() => {
+    closeTasksTab();
+    closeTaskChat();
+  }, [closeTasksTab, closeTaskChat]);
+  // A task chat opens in the Chat tab beside the Tasks tab, in place of the
+  // one it showed: the tab holds the task chat opened last.
+  const openTask = useCallback((chatId: string, id: string, name = "") => {
+    if (latest.current.view.collapsed) setHoldsOpen(true);
+    setTasksChatId(chatId);
+    setTaskChatId(id);
+    setOpenedName(name);
+    setSelected("chat");
+  }, []);
+  const taskChatInPane = useMemo(
+    () => ({ active: chatActive && open, onClose: closeTaskChat }),
+    [chatActive, open, closeTaskChat],
+  );
+  // A pane that takes the whole width covers the chat, so there a task chat
+  // opens as its own page, however the list was opened.
+  const canOpenTask = taskChat !== undefined && !compact;
   const tasksHost = useMemo<ToolTasksHost>(
     () => ({
       active: tasksActive && open,
       compact,
       show: showTasks,
       hide: hideTasks,
+      openTask: canOpenTask ? openTask : undefined,
     }),
-    [tasksActive, open, compact, showTasks, hideTasks],
+    [tasksActive, open, compact, showTasks, hideTasks, canOpenTask, openTask],
   );
   const showOutputs = useCallback(
     (chatId: string, outputId?: string, options?: OutputsTabOptions) => {
@@ -425,6 +476,7 @@ export function ToolWorkspace({
   const tabIds = [
     ...(trace ? [TRACE_TAB_ID] : []),
     ...(tasksOpen ? [TASKS_TAB_ID] : []),
+    ...(chatOpen ? [CHAT_TAB_ID] : []),
     ...(outputsOpen ? [OUTPUTS_TAB_ID] : []),
     ...sorted.map((widget) => widget.id),
   ];
@@ -432,9 +484,11 @@ export function ToolWorkspace({
     ? TRACE_TAB_ID
     : tasksActive
       ? TASKS_TAB_ID
-      : outputsActive
-        ? OUTPUTS_TAB_ID
-        : null;
+      : chatActive
+        ? CHAT_TAB_ID
+        : outputsActive
+          ? OUTPUTS_TAB_ID
+          : null;
   const activeTabId = builtinTabId ?? view.activeId ?? null;
   // Each tab's name, which the measuring row below draws for every tab, the
   // ones in the menu too, so the strip knows each tab's own width.
@@ -447,6 +501,7 @@ export function ToolWorkspace({
   const tabLabels: Record<string, string> = {
     ...(trace ? { [TRACE_TAB_ID]: tActivity("trace.drawer.title") } : {}),
     ...(tasksOpen ? { [TASKS_TAB_ID]: t("chat.tasksTab") } : {}),
+    ...(chatOpen ? { [CHAT_TAB_ID]: taskChatLabel } : {}),
     ...(outputsOpen ? { [OUTPUTS_TAB_ID]: tChat("outputs.title") } : {}),
     ...Object.fromEntries(sorted.map((widget) => [widget.id, label(widget)])),
   };
@@ -482,7 +537,15 @@ export function ToolWorkspace({
               id={TASKS_TAB_ID}
               label={t("chat.tasksTab")}
               active={tasksActive}
-              onClose={hideTasks}
+              onClose={closeTasksTab}
+            />
+          )}
+          {chatOpen && shownIds.has(CHAT_TAB_ID) && (
+            <ToolTab
+              id={CHAT_TAB_ID}
+              label={taskChatLabel}
+              active={chatActive}
+              onClose={closeTaskChat}
             />
           )}
           {outputsOpen && shownIds.has(OUTPUTS_TAB_ID) && (
@@ -559,6 +622,12 @@ export function ToolWorkspace({
                 {t("chat.tasksTab")}
               </DropdownMenuItem>
             )}
+            {chatOpen && (
+              <DropdownMenuItem onSelect={() => pickTab(CHAT_TAB_ID)}>
+                <MessageSquare className="size-3.5" />
+                {taskChatLabel}
+              </DropdownMenuItem>
+            )}
             {outputsOpen && (
               <DropdownMenuItem onSelect={() => pickTab(OUTPUTS_TAB_ID)}>
                 <FileOutput className="size-3.5" />
@@ -598,6 +667,7 @@ export function ToolWorkspace({
   function pickTab(id: string) {
     if (id === TRACE_TAB_ID) return setSelected("trace");
     if (id === TASKS_TAB_ID) return setSelected("tasks");
+    if (id === CHAT_TAB_ID) return setSelected("chat");
     if (id === OUTPUTS_TAB_ID) return setSelected("outputs");
     setSelected(null);
     selectTool(id);
@@ -767,9 +837,38 @@ export function ToolWorkspace({
               >
                 {tasksChatId ? (
                   <div className="h-full overflow-y-auto pb-safe">
-                    <TaskList chatId={tasksChatId} />
+                    <TaskList
+                      chatId={tasksChatId}
+                      onOpenTask={
+                        canOpenTask ? (id, name) => openTask(tasksChatId, id, name) : undefined
+                      }
+                    />
                   </div>
                 ) : null}
+              </TabsContent>
+            )}
+            {taskChatId !== null && taskChat && (
+              <TabsContent
+                value={CHAT_TAB_ID}
+                forceMount
+                inert={!chatActive}
+                aria-hidden={!chatActive}
+                // Kept mounted while another tab shows, so its scroll, draft and
+                // live stream survive. Hidden with `visibility`, which keeps its
+                // size and scroll, as the Trace tab is, and zero opacity, which
+                // no descendant that turns `visibility` back on can undo.
+                style={chatActive ? undefined : { visibility: "hidden", opacity: 0 }}
+                className="absolute inset-0 overflow-hidden"
+              >
+                <div
+                  key={taskChatId}
+                  data-task-chat-pane={taskChatId}
+                  className="flex h-full min-h-0 flex-col"
+                >
+                  <TaskChatInPaneContext.Provider value={taskChatInPane}>
+                    {taskChat(taskChatId, closeTaskChat)}
+                  </TaskChatInPaneContext.Provider>
+                </div>
               </TabsContent>
             )}
             {outputsTarget && (
@@ -788,6 +887,11 @@ export function ToolWorkspace({
                   selectionSeq={outputsTarget.seq}
                   leaveGuard={outputsLeaveGuard}
                   taskChats={outputsTarget.taskChats}
+                  onOpenTaskChat={
+                    outputsTarget.taskChats && canOpenTask
+                      ? (id, name) => openTask(outputsTarget.chatId, id, name)
+                      : undefined
+                  }
                 />
               </TabsContent>
             )}

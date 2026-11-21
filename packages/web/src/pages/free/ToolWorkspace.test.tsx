@@ -10,26 +10,74 @@ import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { ToolWorkspace } from "./ToolWorkspace";
 import { MIN_TAB_WIDTH, TAB_GAP } from "./tool-tab-fit";
 import { useToolOutputs } from "./tool-outputs";
-import { useToolTasks } from "./tool-tasks";
+import { useTaskChatInPane, useToolTasks } from "./tool-tasks";
 import { useToolTrace } from "./tool-trace";
 import * as store from "./use-free-cells";
 import type { ToolView, WidgetPlacement } from "./use-free-cells";
 
 rs.mock("@/hooks/use-apps", () => ({ useAppsList: () => ({ apps: [] }) }));
+// The task chats' own names, as the server answers them; none read by default.
+const sessionNames = new Map<string, string>();
+rs.mock("./use-session-names", () => ({
+  useSessionNames: (ids: readonly string[]) =>
+    new Map(ids.flatMap((id) => (sessionNames.has(id) ? [[id, sessionNames.get(id)!]] : []))),
+}));
 // The panel is tested on its own; here it only has to be the tab's body.
+const listMounts = rs.fn();
 rs.mock("@/components/concierge/TaskList", () => ({
-  TaskList: ({ chatId }: { chatId: string }) => <p>Task panel body {chatId}</p>,
+  TaskList: ({
+    chatId,
+    onOpenTask,
+  }: {
+    chatId: string;
+    onOpenTask?: (id: string, name: string) => void;
+  }) => {
+    useEffect(() => listMounts(), []);
+    return (
+      <>
+        <p>Task panel body {chatId}</p>
+        {onOpenTask ? (
+          <button type="button" onClick={() => onOpenTask("task-7", "Review PRs")}>
+            Open task row
+          </button>
+        ) : null}
+      </>
+    );
+  },
 }));
 
 rs.mock("@/components/chat/outputs/OutputsPanel", () => ({
-  OutputsPanel: ({ chatId, selectedId }: { chatId: string; selectedId?: string | null }) => (
-    <p>
-      Outputs body {chatId} {selectedId ?? "none"}
-    </p>
+  OutputsPanel: ({
+    chatId,
+    selectedId,
+    onOpenTaskChat,
+  }: {
+    chatId: string;
+    selectedId?: string | null;
+    onOpenTaskChat?: (id: string, name: string) => void;
+  }) => (
+    <>
+      <p>
+        Outputs body {chatId} {selectedId ?? "none"}
+      </p>
+      {onOpenTaskChat ? (
+        <button type="button" onClick={() => onOpenTaskChat("task-8", "Q3 report")}>
+          Open source task
+        </button>
+      ) : null}
+    </>
   ),
 }));
 
 let viewportWidth = 1200;
+// What the workspace's size observer reports to, so a test can resize it.
+let workspaceObservers: Array<() => void> = [];
+function resizeWorkspace(width: number) {
+  viewportWidth = width;
+  act(() => {
+    for (const notify of workspaceObservers) notify();
+  });
+}
 let stripWidth: number | null = null;
 const mounted = rs.fn();
 function ToolContent({ id }: { id: string }) {
@@ -45,6 +93,8 @@ beforeAll(async () => {
 
 beforeEach(() => {
   mounted.mockClear();
+  workspaceObservers = [];
+  sessionNames.clear();
   localStorage.clear();
   viewportWidth = 1200;
   stripWidth = null;
@@ -63,6 +113,14 @@ beforeEach(() => {
           this.callback(
             [{ target, contentRect: { width } } as ResizeObserverEntry],
             this as unknown as ResizeObserver,
+          );
+        }
+        if (target.getAttribute("data-testid") === "tool-workspace") {
+          workspaceObservers.push(() =>
+            this.callback(
+              [{ target, contentRect: { width: viewportWidth } } as ResizeObserverEntry],
+              this as unknown as ResizeObserver,
+            ),
           );
         }
       }
@@ -395,7 +453,12 @@ function TraceHarness({
   );
 }
 
-const tabNames = () => screen.getAllByRole("tab").map((tab) => tab.textContent);
+// The pane's own tabs, without the task chats' row inside the Tasks tab.
+const tabNames = () =>
+  screen
+    .getAllByRole("tab")
+    .filter((tab) => !tab.closest("[data-task-chat-tabs]"))
+    .map((tab) => tab.textContent);
 
 describe("ToolWorkspace Trace tab", () => {
   it("puts the Trace tab before the app tabs and selects it", async () => {
@@ -816,8 +879,18 @@ function TasksOwner() {
       <button type="button" onClick={() => pane?.hide()}>
         Hide tasks
       </button>
+      <button type="button" onClick={() => pane?.openTask?.("chat-1", "task-9", "Book flights")}>
+        Open task link
+      </button>
+      <button type="button" onClick={() => pane?.openTask?.("chat-1", "task-5")}>
+        Open nameless task
+      </button>
       <output data-testid="tasks-host">
-        {JSON.stringify({ active: pane?.active, compact: pane?.compact })}
+        {JSON.stringify({
+          active: pane?.active,
+          compact: pane?.compact,
+          ...(pane?.openTask ? { opensTasks: true } : {}),
+        })}
       </output>
     </>
   );
@@ -830,6 +903,7 @@ function TasksHarness({
   addWidget = rs.fn(),
   removeWidget = rs.fn(),
   withTrace = false,
+  withTaskChat = false,
 }: {
   initial?: ToolView;
   selectTool?: (id: string) => void;
@@ -837,6 +911,7 @@ function TasksHarness({
   addWidget?: () => void;
   removeWidget?: (id: string) => void;
   withTrace?: boolean;
+  withTaskChat?: boolean;
 }) {
   const [view, setView] = useState(initial);
   return (
@@ -857,6 +932,7 @@ function TasksHarness({
       icon={() => null}
       content={(widget) => <ToolContent id={widget.id} />}
       fullHref={() => null}
+      taskChat={withTaskChat ? taskChat : undefined}
     >
       <input aria-label="Chat draft" />
       <TasksOwner />
@@ -864,6 +940,44 @@ function TasksHarness({
     </ToolWorkspace>
   );
 }
+
+const selected = (name: string) =>
+  screen.getByRole("tab", { name }).getAttribute("aria-selected") === "true";
+// Whether the text is on screen: mounted, and under nothing hidden.
+const shows = (text: string) => {
+  const el = screen.queryByText(text);
+  return (
+    el !== null &&
+    !el.closest('[style*="display: none"]') &&
+    !el.closest('[style*="visibility: hidden"]')
+  );
+};
+
+// Stands in for the task chat the pane draws: whether it is on screen, its
+// delete, and its name.
+const chatMounts = rs.fn();
+function TaskChatStandIn({ id, onGone }: { id: string; onGone: () => void }) {
+  const inPane = useTaskChatInPane();
+  useEffect(() => chatMounts(id), [id]);
+  return (
+    <>
+      {inPane ? (
+        <>
+          <output data-testid={`active ${id}`}>{String(inPane.active)}</output>
+          <button type="button" onClick={inPane.onClose}>
+            Delete chat {id}
+          </button>
+        </>
+      ) : null}
+      <p>Task chat {id}</p>
+      <input aria-label={`Draft ${id}`} defaultValue="" />
+      <button type="button" onClick={onGone}>
+        Lose the chat
+      </button>
+    </>
+  );
+}
+const taskChat = (id: string, onGone: () => void) => <TaskChatStandIn id={id} onGone={onGone} />;
 
 describe("ToolWorkspace Tasks tab", () => {
   it("keeps the narrow chat visible until Tasks is requested and returns to it on close", async () => {
@@ -989,6 +1103,188 @@ describe("ToolWorkspace Tasks tab", () => {
     expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("true");
   });
 
+  it("opens a task chat in a Chat tab beside Tasks, and Tasks and Chat switch between them", async () => {
+    const user = userEvent.setup();
+    listMounts.mockClear();
+    render(<TasksHarness withTaskChat />);
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    // No Chat tab until a task chat is opened.
+    expect(tabNames()).toEqual(["Tasks", "desktop", "projects"]);
+    await user.click(screen.getByRole("button", { name: "Open task row" }));
+
+    expect(tabNames()).toEqual(["Tasks", "Review PRs", "desktop", "projects"]);
+    expect(selected("Review PRs")).toBe(true);
+    expect(shows("Task chat task-7")).toBe(true);
+    expect(shows("Task panel body chat-1")).toBe(false);
+    // The Concierge chat beside it stays.
+    expect(screen.getByRole("textbox", { name: "Chat draft" })).toBeTruthy();
+
+    await user.click(screen.getByRole("tab", { name: "Tasks" }));
+    expect(shows("Task panel body chat-1")).toBe(true);
+    expect(shows("Task chat task-7")).toBe(false);
+    await user.click(screen.getByRole("tab", { name: "Review PRs" }));
+    expect(shows("Task chat task-7")).toBe(true);
+    expect(listMounts).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows only the task chat opened last: another replaces it in the same tab", async () => {
+    const user = userEvent.setup();
+    chatMounts.mockClear();
+    render(<TasksHarness withTaskChat />);
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    await user.click(screen.getByRole("button", { name: "Open task row" }));
+    await user.click(screen.getByRole("tab", { name: "Tasks" }));
+    await user.click(screen.getByRole("button", { name: "Open task link" }));
+    expect(tabNames()).toEqual(["Tasks", "Book flights", "desktop", "projects"]);
+    expect(shows("Task chat task-9")).toBe(true);
+    expect(screen.queryByText("Task chat task-7")).toBeNull();
+    expect(chatMounts.mock.calls).toEqual([["task-7"], ["task-9"]]);
+  });
+
+  it("opens a linked task chat over a collapsed pane, with the Tasks tab beside it", async () => {
+    const user = userEvent.setup();
+    const setCollapsed = rs.fn();
+    render(
+      <TasksHarness
+        withTaskChat
+        initial={{ activeId: "a", collapsed: true, unreadIds: [] }}
+        setCollapsed={setCollapsed}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Open task link" }));
+    expect(tabNames()).toEqual(["Tasks", "Book flights", "desktop", "projects"]);
+    expect(shows("Task chat task-9")).toBe(true);
+    expect(setCollapsed).not.toHaveBeenCalled();
+
+    // The header's Tasks button shows the list; the Chat tab stays.
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    expect(selected("Tasks")).toBe(true);
+    expect(tabNames()).toEqual(["Tasks", "Book flights", "desktop", "projects"]);
+  });
+
+  it("closes the Chat tab on its own, and when the chat is not found or deleted", async () => {
+    const user = userEvent.setup();
+    render(<TasksHarness withTaskChat />);
+    await user.click(screen.getByRole("button", { name: "Open task link" }));
+    await user.click(screen.getByRole("button", { name: "Close Book flights" }));
+    expect(tabNames()).toEqual(["Tasks", "desktop", "projects"]);
+
+    await user.click(screen.getByRole("button", { name: "Open task link" }));
+    await user.click(screen.getByRole("button", { name: "Lose the chat" }));
+    expect(tabNames()).toEqual(["Tasks", "desktop", "projects"]);
+
+    await user.click(screen.getByRole("button", { name: "Open task link" }));
+    await user.click(screen.getByRole("button", { name: "Delete chat task-9" }));
+    expect(tabNames()).toEqual(["Tasks", "desktop", "projects"]);
+    expect(screen.getByRole("textbox", { name: "Chat draft" })).toBeTruthy();
+  });
+
+  it("keeps the Chat tab when the Tasks tab closes, and closes both when the chat goes", async () => {
+    const user = userEvent.setup();
+    render(<TasksHarness withTaskChat />);
+    await user.click(screen.getByRole("button", { name: "Open task link" }));
+    await user.click(screen.getByRole("button", { name: "Close Tasks" }));
+    expect(tabNames()).toEqual(["Book flights", "desktop", "projects"]);
+    // The Concierge chat going asks the pane to hide its tabs.
+    await user.click(screen.getByRole("button", { name: "Open task link" }));
+    await user.click(screen.getByRole("button", { name: "Hide tasks" }));
+    expect(tabNames()).toEqual(["desktop", "projects"]);
+  });
+
+  it("keeps the task chat and its draft mounted while another tab shows", async () => {
+    const user = userEvent.setup();
+    chatMounts.mockClear();
+    render(<TasksHarness withTaskChat />);
+    await user.click(screen.getByRole("button", { name: "Open task link" }));
+    await user.type(screen.getByRole("textbox", { name: "Draft task-9" }), "half a reply");
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    expect(shows("Task chat task-9")).toBe(false);
+    await user.click(screen.getByRole("tab", { name: "desktop" }));
+    await user.click(screen.getByRole("tab", { name: "Book flights" }));
+    expect(shows("Task chat task-9")).toBe(true);
+    expect((screen.getByRole("textbox", { name: "Draft task-9" }) as HTMLInputElement).value).toBe(
+      "half a reply",
+    );
+    expect(chatMounts).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the Chat tab with visibility and zero opacity, not display, so it keeps its scroll", async () => {
+    const user = userEvent.setup();
+    render(<TasksHarness withTaskChat />);
+    await user.click(screen.getByRole("button", { name: "Open task link" }));
+    await user.click(screen.getByRole("tab", { name: "Tasks" }));
+    const tab = document
+      .querySelector<HTMLElement>('[data-task-chat-pane="task-9"]')!
+      .closest<HTMLElement>('[role="tabpanel"]')!;
+    expect(tab.style.visibility).toBe("hidden");
+    // A descendant can turn `visibility` back on, but not opacity.
+    expect(tab.style.opacity).toBe("0");
+    expect(tab.style.display).toBe("");
+    expect(tab.hasAttribute("inert")).toBe(true);
+  });
+
+  it("tells the task chat whether it is on screen, so a hidden one stops listening", async () => {
+    const user = userEvent.setup();
+    render(<TasksHarness withTaskChat />);
+    await user.click(screen.getByRole("button", { name: "Open task link" }));
+    const active = () => screen.getByTestId("active task-9").textContent;
+    expect(active()).toBe("true");
+    await user.click(screen.getByRole("tab", { name: "Tasks" }));
+    expect(active()).toBe("false");
+    await user.click(screen.getByRole("tab", { name: "Book flights" }));
+    expect(active()).toBe("true");
+    await user.click(screen.getByRole("tab", { name: "desktop" }));
+    expect(active()).toBe("false");
+  });
+
+  it("names the Chat tab for its task chat, and follows its own name once read", async () => {
+    const user = userEvent.setup();
+    const view = render(<TasksHarness withTaskChat />);
+    await user.click(screen.getByRole("button", { name: "Open task link" }));
+    // At once, the name it was opened with.
+    expect(tabNames()).toEqual(["Tasks", "Book flights", "desktop", "projects"]);
+    // The chat's own name wins once read, as after a rename.
+    sessionNames.set("task-9", "Book direct flights to Lisbon");
+    view.rerender(<TasksHarness withTaskChat />);
+    expect(tabNames()).toEqual(["Tasks", "Book direct flights to Lisbon", "desktop", "projects"]);
+    // A long name is cut by the tab, and its full text is the tab's title.
+    expect(screen.getByRole("tab", { name: "Book direct flights to Lisbon" }).className).toContain(
+      "max-w-48",
+    );
+    // Opening another task chat renames the one tab.
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    await user.click(screen.getByRole("button", { name: "Open task row" }));
+    expect(tabNames()).toEqual(["Tasks", "Review PRs", "desktop", "projects"]);
+  });
+
+  it("calls the Chat tab Chat while its task chat has no name", async () => {
+    const user = userEvent.setup();
+    render(<TasksHarness withTaskChat />);
+    await user.click(screen.getByRole("button", { name: "Open nameless task" }));
+    expect(tabNames()).toEqual(["Tasks", "Chat", "desktop", "projects"]);
+  });
+
+  it("opens task chats as pages once the pane takes the whole width", async () => {
+    const user = userEvent.setup();
+    render(<TasksHarness withTaskChat />);
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    expect(screen.getByRole("button", { name: "Open task row" })).toBeTruthy();
+    resizeWorkspace(500);
+    // The row keeps its link to the page, and the pill opens none in place.
+    expect(screen.queryByRole("button", { name: "Open task row" })).toBeNull();
+    expect(JSON.parse(screen.getByTestId("tasks-host").textContent!).opensTasks).toBeUndefined();
+    resizeWorkspace(1200);
+    expect(screen.getByRole("button", { name: "Open task row" })).toBeTruthy();
+  });
+
+  it("offers no in-place task chat where the pane cannot draw one", async () => {
+    const user = userEvent.setup();
+    render(<TasksHarness />);
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    expect(screen.queryByRole("button", { name: "Open task row" })).toBeNull();
+    expect(JSON.parse(screen.getByTestId("tasks-host").textContent!).opensTasks).toBeUndefined();
+  });
+
   it("tells the pill when the pane would take the whole width", async () => {
     viewportWidth = 500;
     render(<TasksHarness />);
@@ -1011,12 +1307,21 @@ function OutputsOwner() {
       <button type="button" onClick={() => pane?.show("chat-1", "out-2")}>
         Open output
       </button>
+      <button type="button" onClick={() => pane?.show("chat-1", undefined, { taskChats: true })}>
+        Show Concierge outputs
+      </button>
       <output data-testid="outputs-host">{JSON.stringify({ active: pane?.active })}</output>
     </>
   );
 }
 
-function OutputsHarness({ withTasks = false }: { withTasks?: boolean }) {
+function OutputsHarness({
+  withTasks = false,
+  withTaskChat = false,
+}: {
+  withTasks?: boolean;
+  withTaskChat?: boolean;
+}) {
   const [view, setView] = useState<ToolView>({ activeId: "a", collapsed: false, unreadIds: [] });
   return (
     <ToolWorkspace
@@ -1030,6 +1335,7 @@ function OutputsHarness({ withTasks = false }: { withTasks?: boolean }) {
       icon={() => null}
       content={(widget) => <ToolContent id={widget.id} />}
       fullHref={() => null}
+      taskChat={withTaskChat ? taskChat : undefined}
     >
       <OutputsOwner />
       {withTasks && <TasksOwner />}
@@ -1048,6 +1354,20 @@ describe("ToolWorkspace Outputs tab", () => {
     expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("false");
     expect(screen.getByText("Outputs body chat-1 none")).toBeTruthy();
     expect(JSON.parse(screen.getByTestId("outputs-host").textContent!)).toEqual({ active: true });
+  });
+
+  it("opens the task chat an output came from in the Chat tab", async () => {
+    const user = userEvent.setup();
+    render(<OutputsHarness withTaskChat />);
+    // Only a Concierge chat's outputs come from task chats.
+    await user.click(screen.getByRole("button", { name: "Show outputs" }));
+    expect(screen.queryByRole("button", { name: "Open source task" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Show Concierge outputs" }));
+    await user.click(screen.getByRole("button", { name: "Open source task" }));
+    expect(tabNames()).toEqual(["Tasks", "Q3 report", "Outputs", "desktop", "projects"]);
+    expect(selected("Q3 report")).toBe(true);
+    expect(shows("Task chat task-8")).toBe(true);
   });
 
   it("opens on the output a link names, and goes with its close button", async () => {

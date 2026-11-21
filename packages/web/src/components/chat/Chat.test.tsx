@@ -21,7 +21,11 @@ import {
   CONCIERGE_LEADING_SLOT,
   CONCIERGE_TITLEBAR_SLOT,
 } from "@/components/concierge/ConciergeHeaderStatus";
-import { ToolTasksContext, type ToolTasksHost } from "@/pages/free/tool-tasks";
+import {
+  TaskChatInPaneContext,
+  ToolTasksContext,
+  type ToolTasksHost,
+} from "@/pages/free/tool-tasks";
 import { Chat } from "./Chat";
 import enChat from "@/i18n/locales/en/chat.json";
 import zhChat from "@/i18n/locales/zh-CN/chat.json";
@@ -3300,6 +3304,26 @@ describe("Chat Concierge empty state", () => {
 
     // On a narrow screen the pane shows in place of the chat.
     view.rerender(at(true, true));
+    await waitFor(() => expect(conciergeStopVoiceInput).toHaveBeenCalledOnce());
+  });
+
+  it("stops listening when its tab in the side pane's Tasks tab is hidden", async () => {
+    const at = (active: boolean) => (
+      <MemoryRouter>
+        {pane(
+          <TaskChatInPaneContext.Provider value={{ active, onClose: rs.fn() }}>
+            <Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />
+          </TaskChatInPaneContext.Provider>,
+        )}
+      </MemoryRouter>
+    );
+    twoTurns();
+    const view = render(at(true), { wrapper: withQueries() });
+    await screen.findAllByTestId("user-row");
+    conciergeStopVoiceInput.mockClear();
+    view.rerender(at(true));
+    expect(conciergeStopVoiceInput).not.toHaveBeenCalled();
+    view.rerender(at(false));
     await waitFor(() => expect(conciergeStopVoiceInput).toHaveBeenCalledOnce());
   });
 
