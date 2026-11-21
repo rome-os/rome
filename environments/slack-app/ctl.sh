@@ -10,7 +10,8 @@
 #   environments/slack-app/ctl.sh token-file rome-a|rome-b  (the connector's Slack token file)
 #   environments/slack-app/ctl.sh old-connections rome-a|rome-b  (R10's slack_bot and slack)
 #   environments/slack-app/ctl.sh product-tests <repo-relative test file>...  (R9)
-#   environments/slack-app/ctl.sh logs <service>
+#   environments/slack-app/ctl.sh old-rows rome-a|rome-b  (whether old-connections' rows are still stored)
+#   environments/slack-app/ctl.sh logs <service> [--since <RFC 3339 time>] [--tail <lines>]
 #
 # A stopped instance's address refuses connections; Rome Cloud, the relay and
 # the fake Slack keep running, so events for it wait in its mailbox.
@@ -24,7 +25,9 @@
 # cloud-query runs
 # one query on Rome Cloud's database as a role that can only read.
 # old-connections writes the two older Slack connections an upgrade leaves
-# (tools/old-connections.mjs) into the stopped instance and starts it again.
+# (tools/old-connections.mjs) into the stopped instance and starts it again;
+# old-rows says, read-only, whether those rows are still in the database.
+# logs prints the last 500 lines, or what --since and --tail ask for.
 # product-tests runs test files of the rome commit under test, unchanged, in
 # an image of that commit with its dependencies (test-runner/Dockerfile). Like
 # every command here it needs a bring-up first: it reads .state/rome-src.
@@ -40,7 +43,7 @@ compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/comp
 action="${1:-}"
 svc="${2:-}"
 case "$action" in
-  stop | start | status | wipe-chat | record | port | token-file | old-connections) case "$svc" in rome-a | rome-b) ;; *)
+  stop | start | status | wipe-chat | record | port | token-file | old-connections | old-rows) case "$svc" in rome-a | rome-b) ;; *)
     echo "instance must be rome-a or rome-b" >&2
     exit 2
     ;;
@@ -52,11 +55,11 @@ case "$action" in
     ;;
   esac ;;
   logs) [ -n "$svc" ] || {
-    echo "usage: ctl.sh logs <service>" >&2
+    echo "usage: ctl.sh logs <service> [--since <RFC 3339 time>] [--tail <lines>]" >&2
     exit 2
   } ;;
   *)
-    sed -n '2,30p' "$0"
+    sed -n '2,34p' "$0"
     exit 2
     ;;
 esac
@@ -67,6 +70,19 @@ wait_healthy() {
     sleep 1
   done
   healthy
+}
+
+# Runs a read-only tool on the instance's database: beside the running
+# instance, the script coming in on stdin, or in its image when it is stopped.
+read_only() {
+  local tool="$1"
+  shift
+  if [ -n "$(compose ps -q --status running "$svc")" ]; then
+    compose exec -T "$svc" node --input-type=module - "$@" <"$ENV_DIR/tools/$tool"
+  else
+    compose run --rm --no-deps -T --entrypoint node \
+      -v "$ENV_DIR/tools/$tool:/slackenv/$tool:ro" "$svc" "/slackenv/$tool" "$@"
+  fi
 }
 
 # The member whose direct message the conversation is, from the fake Slack,
@@ -119,7 +135,29 @@ case "$action" in
     echo "{\"instance\":\"$svc\",\"state\":\"$state\"}"
     ;;
   logs)
-    compose logs --no-color --tail 500 "$svc"
+    since="" tail=""
+    shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --since) since="${2:-}" ;;
+        --tail) tail="${2:-}" ;;
+        *)
+          echo "logs takes only --since <RFC 3339 time> and --tail <lines>" >&2
+          exit 2
+          ;;
+      esac
+      shift 2 || {
+        echo "$1 needs a value" >&2
+        exit 2
+      }
+    done
+    [ -z "$tail" ] || [[ "$tail" =~ ^([0-9]+|all)$ ]] || {
+      echo "--tail takes a number of lines or all" >&2
+      exit 2
+    }
+    # With --since alone, everything since then; with neither, the last 500.
+    [ -n "$tail" ] || { [ -n "$since" ] && tail=all; } || tail=500
+    compose logs --no-color --tail "$tail" ${since:+--since "$since"} "$svc"
     ;;
   token-file)
     token_file
@@ -226,15 +264,20 @@ case "$action" in
       exit 2
     }
     member="$(member_of "${chat%%:*}")"
-    tool_args=(--chat "$chat" ${member:+--member "$member"})
-    if [ -n "$(compose ps -q --status running "$svc")" ]; then
-      # Read only, so it runs beside the instance: the script comes in on stdin.
-      compose exec -T "$svc" node --input-type=module - "${tool_args[@]}" <"$ENV_DIR/tools/chat-record.mjs"
-    else
-      compose run --rm --no-deps -T --entrypoint node \
-        -v "$ENV_DIR/tools/chat-record.mjs:/slackenv/chat-record.mjs:ro" \
-        "$svc" /slackenv/chat-record.mjs "${tool_args[@]}"
-    fi
+    read_only chat-record.mjs --chat "$chat" ${member:+--member "$member"}
+    ;;
+  old-rows)
+    # The connection ids old-connections wrote, from what it saved.
+    ids="$(node -e '
+      try {
+        const w = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+        console.log(JSON.stringify({ slack_bot: w.slack_bot?.connection_id ?? null, slack: w.slack?.connection_id ?? null }));
+      } catch {}' "$STATE_DIR/$svc-old-connections.json")"
+    [ -n "$ids" ] || {
+      echo "{\"error\":\"no .state/$svc-old-connections.json: run ctl.sh old-connections $svc first\"}"
+      exit 1
+    }
+    read_only old-rows.mjs --ids "$ids"
     ;;
   distribution)
     # Off, only the app's home workspace can approve it, as on Slack.

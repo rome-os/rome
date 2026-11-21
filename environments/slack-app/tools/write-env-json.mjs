@@ -50,10 +50,15 @@ const instance = (name, port, guardian) => ({
     // 6 characters of the bot and user tokens it holds.
     token_file: [ctl, "token-file", name],
     // R10: writes the older slack_bot and slack connections into the stopped
-    // instance, starts it again, links the bot to the Concierge and checks
-    // both came back. Prints old_connections below; exit 0 when every check
-    // holds. up.sh --old-connections <name> runs it before this file.
+    // instance and starts it again. Prints old_connections below, whose checks
+    // report what the instance made of the rows without judging them; exit 0
+    // once the rows are written and the instance is healthy.
+    // up.sh --old-connections <name> runs it before this file.
     old_connections: [ctl, "old-connections", name],
+    // R10, read only: whether the rows old_connections wrote are still stored,
+    // {slack_bot: {connection_id, stored}, slack: {connection_id, stored}};
+    // stored when both the connections row and its connection_grants row are.
+    old_rows: [ctl, "old-rows", name],
   },
   old_connections_file: join(stateDir, `${name}-old-connections.json`),
   // What old_connections printed last, or null before it ran: per kind its

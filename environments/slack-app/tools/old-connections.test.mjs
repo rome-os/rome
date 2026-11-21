@@ -3,7 +3,7 @@
 // whose migrations and connection kinds to use; without it, this checkout's.
 // Run: node --test environments/slack-app/tools/old-connections.test.mjs
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -206,6 +206,28 @@ test("write reads each old app the way rome did, and leaves the rows an upgrade 
   assert.equal(again.slack_bot.written, false);
   assert.equal(again.slack_bot.connection_id, first.slack_bot.connection_id);
   assert.equal(new DatabaseSync(dbPath).prepare("SELECT count(*) n FROM connections").get().n, 2);
+
+  // old-rows: each kind's connection and grant rows, still stored, and no content.
+  const ids = JSON.stringify({
+    slack_bot: first.slack_bot.connection_id,
+    slack: first.slack.connection_id,
+  });
+  const rows = () =>
+    JSON.parse(
+      execFileSync(process.execPath, [join(here, "old-rows.mjs"), "--db", dbPath, "--ids", ids], {
+        encoding: "utf8",
+      }),
+    );
+  assert.deepEqual(rows(), {
+    slack_bot: { connection_id: first.slack_bot.connection_id, stored: true },
+    slack: { connection_id: first.slack.connection_id, stored: true },
+  });
+  // A connection without its grant is not stored.
+  const edit = new DatabaseSync(dbPath);
+  edit.prepare("DELETE FROM connection_grants WHERE custody = ?").run(first.slack.connection_id);
+  edit.close();
+  assert.equal(rows().slack.stored, false);
+  assert.equal(rows().slack_bot.stored, true);
 });
 
 test("check counts only a Socket Mode connection open now, not one that said hello and closed", async () => {
