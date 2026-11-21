@@ -7,7 +7,7 @@ Every PR title is a Conventional Commit — `<type>[(<scope>)][!]: <subject>`, w
 > Prefer: `feat(app-runtime): add IpcRpcTimeoutError`
 > Over: `Add IpcRpcTimeoutError to the app runtime`
 
-The subject says what a teammate would notice, in words they already use: the feature, and what is different now. A fix names the problem it ends. One change only: if the subject needs "and" or ";", name the bigger change. Keep it under about 60 characters. The terms in [`docs/domains/`](../domains/README.md) count as words a teammate uses. Code-only names do not, except in a refactor whose subject is that code.
+The subject says what a teammate would notice, in words they already use: the feature, and what is different now. A fix names the problem it ends. One change only: if the subject needs "and" or a semicolon, name the bigger change. Keep it under about 60 characters. The terms in [`docs/domains/`](../domains/README.md) count as words a teammate uses. Code-only names do not, except in a refactor whose subject is that code.
 
 > Prefer: `refactor(web): replace Radix and Feather icons with lucide`
 > Over: `refactor(web): draw every glyph from lucide`
