@@ -616,6 +616,29 @@ export class FakeSlack {
     return { event_id: envelope.event_id, event: envelope.event, delivery: first };
   }
 
+  /**
+   * Slack's own retry of an event it already sent: the stored envelope
+   * unchanged, under the same event_id, with the next retry number and a
+   * fresh signature over a current timestamp.
+   */
+  async redeliver(eventId, reason = "http_error") {
+    const sent = this.state.events.findLast((e) => e.eventId === eventId);
+    if (!sent) throw httpError(404, `no event ${eventId}`);
+    if (!this.config.eventsUrl) throw httpError(409, "no events address configured");
+    const attempts = this.state.deliveries
+      .filter((d) => d.eventId === eventId)
+      .map((d) => d.attempt);
+    const attempt = Math.max(0, ...attempts) + 1;
+    const delivery = await this.deliver(
+      eventId,
+      JSON.stringify(sent.body),
+      "valid",
+      attempt,
+      reason,
+    );
+    return { event_id: eventId, event: sent.body.event, delivery };
+  }
+
   scheduleRetry(eventId, body, attempt) {
     const delay = this.config.retryDelaysMs[attempt - 1];
     if (delay === undefined) return;
@@ -625,7 +648,7 @@ export class FakeSlack {
     }, delay).unref();
   }
 
-  async deliver(eventId, body, signature, attempt) {
+  async deliver(eventId, body, signature, attempt, reason = "http_error") {
     const realTs = Math.floor(Date.now() / 1000);
     const headers = {
       "content-type": "application/json",
@@ -642,10 +665,11 @@ export class FakeSlack {
     }
     if (attempt > 0) {
       headers["x-slack-retry-num"] = String(attempt);
-      headers["x-slack-retry-reason"] = "http_error";
+      headers["x-slack-retry-reason"] = reason;
     }
     const started = Date.now();
     const record = { seq: 0, at: new Date().toISOString(), eventId, attempt, signature };
+    if (attempt > 0) record.retryReason = reason;
     try {
       const response = await fetch(this.config.eventsUrl, {
         method: "POST",
@@ -1721,6 +1745,10 @@ async function control(slack, method, url, body) {
       slack.save();
       return { ok: true, team: body.team, scopes };
     }
+    case "POST /redeliver":
+      // Slack's retry of a sent event: same envelope and event_id, signed now.
+      if (typeof body.event_id !== "string") throw httpError(400, "event_id is required");
+      return { ok: true, ...(await slack.redeliver(body.event_id, body.reason ?? "http_error")) };
     case "POST /auth-test":
       return { ok: true, ...slack.authTestFor(body.team) };
     case "POST /forged": {

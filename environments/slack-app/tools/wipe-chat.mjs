@@ -5,7 +5,8 @@
 // stopped (ctl.sh wipe-chat does both), and it uses only Node's built-in SQLite.
 //
 // What goes:
-// - the connection's copy: slack_app_messages of the conversation
+// - the connection's copy, on a Rome whose connection still keeps one:
+//   slack_app_messages of the conversation (a missing table is skipped)
 // - the chat's record of what was said: chat_messages (and agent_turn_messages)
 //   of the chats the conversation is, by key or by address
 // - the chat's conversations with Rome's agents: every rome_sessions row whose

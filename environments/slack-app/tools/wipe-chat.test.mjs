@@ -463,3 +463,50 @@ test("--text removes what Rome distilled: rows and memory lines that hold the te
   assert.equal(after.prepare("SELECT name FROM chats WHERE key = 'titled'").get().name, null);
   after.close();
 });
+
+test("wipes whether or not the Slack app connection keeps its own tables", () => {
+  for (const keeps of [false, true]) {
+    const dir = mkdtempSync(join(tmpdir(), "wipe-chat-tables-"));
+    const home = join(dir, "home");
+    mkdirSync(join(home, ".rome/default"), { recursive: true });
+    const dbPath = join(home, ".rome/default/rome.db");
+    const db = migrate(dbPath);
+    // A Rome whose connection keeps no record, and one that still keeps both tables.
+    db.exec("DROP TABLE IF EXISTS slack_app_messages; DROP TABLE IF EXISTS slack_app_timeline");
+    if (keeps) {
+      db.exec(`CREATE TABLE slack_app_messages (team_id TEXT NOT NULL, event_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL, ts TEXT NOT NULL, user_id TEXT, text TEXT, said_at INTEGER,
+        message TEXT, received_at INTEGER);
+        CREATE TABLE slack_app_timeline (team_id TEXT NOT NULL, channel_id TEXT NOT NULL,
+        ts TEXT NOT NULL, said_at INTEGER, message TEXT)`);
+    }
+    const words = "Bob's bike lock is 9921";
+    seedChat(db, {
+      conversation: DM,
+      member: "UA0000BOB01",
+      words,
+      session: `channel:slack_app:${DM}`,
+      thread: "77777777-aaaa",
+    });
+    if (keeps)
+      insert(db, "slack_app_timeline", {
+        team_id: "TA0000AAAA",
+        channel_id: DM,
+        ts: "1.000002",
+        said_at: 1,
+        message: { text: words },
+      });
+    db.close();
+    const out = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [join(here, "wipe-chat.mjs"), "--conversation", DM, "--homes", home],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+      ),
+    );
+    assert.equal(out.ok, true, JSON.stringify(out.remaining));
+    assert.equal(out.deleted.chat_messages, 1);
+    assert.equal(out.deleted.slack_app_messages, keeps ? 1 : undefined);
+    assert.equal(out.deleted.slack_app_timeline, keeps ? 1 : undefined);
+  }
+});

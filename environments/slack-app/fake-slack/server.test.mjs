@@ -234,3 +234,44 @@ test("a failed delivery is retried with Slack's retry headers", async () => {
   assert.equal(attempts.length, 3);
   assert.equal(attempts[2].headers["x-slack-retry-num"], "2");
 });
+
+test("redeliver resends a sent event as Slack's retry, freshly signed", async () => {
+  await install("TB0000BBBB", "UB0000GUARD");
+  receiverStatus = 200;
+  const before = received.length;
+  const dm = await ctl("/dm", { team: "TB0000BBBB", user: "UB0000ERIN1", text: "say it twice" });
+  assert.equal(dm.delivery.status, 200);
+  // A second apart, so the retry's timestamp differs from the first's.
+  await new Promise((r) => setTimeout(r, 1100));
+  const again = await ctl("/redeliver", { event_id: dm.event_id, reason: "http_timeout" });
+  assert.equal(again.ok, true);
+  assert.equal(again.delivery.attempt, 1);
+  const third = await ctl("/redeliver", { event_id: dm.event_id });
+  assert.equal(third.delivery.attempt, 2);
+
+  const [first, retry, last] = received
+    .slice(before)
+    .filter((r) => JSON.parse(r.body).event_id === dm.event_id);
+  // The envelope is the one sent, byte for byte.
+  assert.equal(retry.body, first.body);
+  assert.equal(first.headers["x-slack-retry-num"], undefined);
+  assert.equal(retry.headers["x-slack-retry-num"], "1");
+  assert.equal(retry.headers["x-slack-retry-reason"], "http_timeout");
+  assert.equal(last.headers["x-slack-retry-num"], "2");
+  assert.equal(last.headers["x-slack-retry-reason"], "http_error");
+  // Signed now, over the same body, so a signature check passes.
+  const ts = retry.headers["x-slack-request-timestamp"];
+  assert.ok(Number(ts) > Number(first.headers["x-slack-request-timestamp"]));
+  assert.ok(Math.abs(Date.now() / 1000 - Number(ts)) < 60);
+  assert.equal(
+    retry.headers["x-slack-signature"],
+    slackSignature(SIGNING_SECRET, Number(ts), retry.body),
+  );
+
+  const unknown = await fetch(`${base}/_control/redeliver`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ event_id: "EvNOSUCHEVENT" }),
+  });
+  assert.equal(unknown.status, 404);
+});
