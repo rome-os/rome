@@ -29,6 +29,15 @@ type FakeConfig = {
   } | null>;
   onGatewayFault?: (f: { kind: "credential" | "transport"; cause: unknown }) => void;
 };
+type FakeChat = {
+  id: string;
+  name: string;
+  guildId: string;
+  guildName: string;
+  type: "text" | "news" | "thread" | "forum";
+  parentId?: string;
+  archived?: boolean;
+};
 const fakeState: {
   lastConfig?: FakeConfig;
   startError: unknown;
@@ -38,14 +47,11 @@ const fakeState: {
   apiRequests: ConnectionApiRequest[];
   apiResult: ConnectionApiResult;
   stopCalls: number;
-  channels: Array<{
-    id: string;
-    name: string;
-    guildId: string;
-    guildName: string;
-    type: "text" | "news" | "thread" | "forum";
-    parentId?: string;
-  }>;
+  channels: FakeChat[];
+  archivedThreads: FakeChat[];
+  archiveReads: number;
+  ready: boolean;
+  hidden: string[];
 } = {
   startError: null,
   sent: [],
@@ -53,6 +59,10 @@ const fakeState: {
   apiResult: { response: { status: 200, headers: {}, body: { ok: true } } },
   stopCalls: 0,
   channels: [],
+  archivedThreads: [],
+  archiveReads: 0,
+  ready: true,
+  hidden: [],
 };
 
 rs.mock("../kinds/discord/discord.js", () => ({
@@ -82,8 +92,18 @@ rs.mock("../kinds/discord/discord.js", () => ({
     async notifyTyping(threadId: string): Promise<void> {
       fakeState.typedThread = threadId;
     }
+    isReady() {
+      return fakeState.ready;
+    }
+    sees(chat: { id: string }) {
+      return !fakeState.hidden.includes(chat.id);
+    }
     listGuildChannels() {
       return fakeState.channels;
+    }
+    async listArchivedThreads() {
+      fakeState.archiveReads++;
+      return fakeState.archivedThreads;
     }
     async executeApiRequest(request: ConnectionApiRequest) {
       fakeState.apiRequests.push(request);
@@ -150,6 +170,10 @@ beforeEach(() => {
   fakeState.apiResult = { response: { status: 200, headers: {}, body: { ok: true } } };
   fakeState.stopCalls = 0;
   fakeState.channels = [];
+  fakeState.archivedThreads = [];
+  fakeState.archiveReads = 0;
+  fakeState.ready = true;
+  fakeState.hidden = [];
 });
 
 describe("isDiscordAuthError", () => {
@@ -328,6 +352,91 @@ describe("discord descriptor shape", () => {
         parent: { connectionId: "discord-test", chatId: "text-1" },
       }),
     );
+  });
+
+  it("lists archived threads once each, flagged archived, and refuses before the gateway is ready", async () => {
+    const chat = { name: "general", guildId: "guild-1", guildName: "Rome" };
+    fakeState.channels = [
+      { ...chat, id: "text-1", type: "text" },
+      { ...chat, id: "thread-1", name: "open", type: "thread", parentId: "text-1" },
+      // Archived while the bot was online: the gateway still names it.
+      { ...chat, id: "thread-2", name: "seen", type: "thread", parentId: "text-1", archived: true },
+    ];
+    fakeState.archivedThreads = [
+      { ...chat, id: "thread-2", name: "seen", type: "thread", parentId: "text-1", archived: true },
+      { ...chat, id: "thread-3", name: "old", type: "thread", parentId: "text-1", archived: true },
+    ];
+    const directory = buildTalker().talker.directory;
+
+    const listed = await directory?.listConversations({ limit: 10, includeArchived: true });
+
+    expect(
+      listed?.conversations.map(({ ref, archived }) => [ref.chatId, archived ?? false]),
+    ).toEqual([
+      ["text-1", false],
+      ["thread-3", true],
+      ["thread-1", false],
+      ["thread-2", true],
+    ]);
+
+    const withoutArchived = await directory?.listConversations({ limit: 10, includeTopics: true });
+    expect(withoutArchived?.conversations.map(({ ref }) => ref.chatId)).toEqual([
+      "text-1",
+      "thread-1",
+    ]);
+
+    // A chat the bot may not see is not listed.
+    fakeState.hidden = ["thread-1"];
+    const seen = await directory?.listConversations({ limit: 10, includeTopics: true });
+    expect(seen?.conversations.map(({ ref }) => ref.chatId)).toEqual(["text-1"]);
+
+    fakeState.ready = false;
+    await expect(directory?.listConversations({ limit: 10 })).rejects.toThrow(
+      "Discord is not connected yet",
+    );
+  });
+
+  it("pages a listing of archived threads from one read of the archives", async () => {
+    const chat = { name: "general", guildId: "guild-1", guildName: "Rome" };
+    fakeState.channels = [{ ...chat, id: "text-1", type: "text" }];
+    const old = (id: string, name: string) => ({
+      ...chat,
+      id,
+      name,
+      type: "thread" as const,
+      parentId: "text-1",
+      archived: true,
+    });
+    fakeState.archivedThreads = [old("thread-1", "a"), old("thread-2", "b")];
+    const directory = buildTalker().talker.directory;
+
+    const first = await directory?.listConversations({ limit: 2, includeArchived: true });
+    // A rename between pages would shift a fresh read's offsets.
+    fakeState.archivedThreads = [old("thread-1", "a"), old("thread-2", "z")];
+    const second = await directory?.listConversations({
+      limit: 2,
+      includeArchived: true,
+      cursor: first?.nextCursor,
+    });
+
+    expect(
+      [...(first?.conversations ?? []), ...(second?.conversations ?? [])].map(
+        ({ ref }) => ref.chatId,
+      ),
+    ).toEqual(["thread-1", "thread-2", "text-1"]);
+    expect(second?.nextCursor).toBeUndefined();
+    expect(fakeState.archiveReads).toBe(1);
+    // Another listing running alongside keeps its own snapshot.
+    const other = await directory?.listConversations({ limit: 2, includeArchived: true });
+    const again = await directory?.listConversations({ limit: 2, includeArchived: true });
+    await expect(
+      directory?.listConversations({ limit: 2, includeArchived: true, cursor: other?.nextCursor }),
+    ).resolves.toBeDefined();
+    expect(again?.nextCursor).toBeDefined();
+    // The snapshot ends with its last page.
+    await expect(
+      directory?.listConversations({ limit: 2, includeArchived: true, cursor: first?.nextCursor }),
+    ).rejects.toThrow("This Discord listing has expired");
   });
 
   it("exposes Discord REST through Act", async () => {

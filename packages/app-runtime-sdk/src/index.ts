@@ -1775,6 +1775,9 @@ export interface ChatDescriptor {
   displayName: string;
   parent?: ChatRef;
   containerName?: string;
+  /** True for a thread the platform has archived: it is still read by its
+   *  id, and a message said in it may bring it back. Absent otherwise. */
+  archived?: boolean;
 }
 
 /**
@@ -1871,6 +1874,15 @@ export interface ChannelMessageQuery {
   limit?: number;
 }
 
+/** What {@link ChannelsService.chats} lists. */
+export interface ChatListQuery {
+  /** Also list the threads inside each chat. Defaults to false. */
+  includeThreads?: boolean;
+  /** Also list the threads the platform has archived, where it lets the
+   *  account see them. Implies `includeThreads`. Defaults to false. */
+  includeArchivedThreads?: boolean;
+}
+
 /** A channel as {@link ChannelsService.list} names it. */
 export interface ChannelSummary {
   /** The channel's name, as every stored row and link spells it. */
@@ -1925,6 +1937,19 @@ export interface ChannelsService {
    * chat.
    */
   query(account: Account | string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
+  /**
+   * The chats one of Rome's accounts can see, and with `includeThreads` the
+   * threads in them, each named by the `chatId` that {@link query} and
+   * {@link send} take. A thread names its chat as `parent`. On Discord these
+   * are the chats of every server the account is in, read from Discord, all
+   * of them. Another platform lists the chats its directory holds, which can
+   * be fewer than the account has.
+   *
+   * Rejects with an error that says why when the account cannot list its
+   * chats, such as before its connection has connected; an empty list means
+   * it sees none. Absent from a host that predates it.
+   */
+  chats?(account: Account | string, query?: ChatListQuery): Promise<ChatDescriptor[]>;
 }
 
 /** Exact provider-neutral chat command recognized before an agent turn. */

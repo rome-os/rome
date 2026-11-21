@@ -192,6 +192,71 @@ describe("createChannelsService", () => {
     );
   });
 
+  it("lists the chats a Connection sees, every page, and says when it lists none", async () => {
+    const listConversations = rs.fn(
+      async (input: { cursor?: string; includeArchived?: boolean }) =>
+        input.cursor
+          ? { conversations: [{ displayName: "b" }] }
+          : { conversations: [{ displayName: "a" }], nextCursor: "next" },
+    );
+    const directory = { listConversations };
+    const all = [
+      {
+        id: "discord-1",
+        connectionKind: "discord",
+        withTalker: (call: (live: object) => unknown) => call({ directory }),
+        status: () => ({ chat: { state: "unlocked" } }),
+      },
+      {
+        id: "tg-a",
+        connectionKind: "telegram_user",
+        withTalker: (call: (live: object) => unknown) => call({}),
+        status: () => ({ chat: { state: "unlocked" } }),
+      },
+    ] as unknown as Connection[];
+    const channelsService = createChannelsService({
+      channels: () => [] as unknown as Channels,
+      registry: { all: () => all },
+      channelOf: kindChannelOf,
+    });
+
+    const chats = await channelsService.chats!("discord", { includeArchivedThreads: true });
+
+    expect(chats.map((chat) => chat.displayName)).toEqual(["a", "b"]);
+    expect(listConversations).toHaveBeenLastCalledWith({
+      limit: 10_000,
+      cursor: "next",
+      includeTopics: true,
+      includeArchived: true,
+    });
+    await expect(channelsService.chats!("telegram_user")).rejects.toThrow(
+      '"telegram_user" lists no chats',
+    );
+  });
+
+  it("stops a listing whose directory hands back a cursor it already gave", async () => {
+    const directory = {
+      listConversations: async () => ({ conversations: [], nextCursor: "same" }),
+    };
+    const all = [
+      {
+        id: "discord-1",
+        connectionKind: "discord",
+        withTalker: (call: (live: object) => unknown) => call({ directory }),
+        status: () => ({ chat: { state: "unlocked" } }),
+      },
+    ] as unknown as Connection[];
+    const channelsService = createChannelsService({
+      channels: () => [] as unknown as Channels,
+      registry: { all: () => all },
+      channelOf: kindChannelOf,
+    });
+
+    await expect(channelsService.chats!("discord")).rejects.toThrow(
+      '"discord" listing did not advance',
+    );
+  });
+
   it("reads by message id and until a time only from a store read live", async () => {
     const copy = rs.fn(async () => [line("m", 1_000)]);
     const live = rs.fn(async () => [line("m", 1_000)]);

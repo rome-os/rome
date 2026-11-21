@@ -2,7 +2,9 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
+  ChannelType,
   Client,
+  PermissionFlagsBits,
   REST,
   RESTEvents,
   type APIRequest,
@@ -216,6 +218,151 @@ describe("DiscordAdapter REST broker capability", () => {
         message: "Discord connection changed before the request completed.",
       },
     });
+  });
+
+  it("stops an archive scan, and sends it no further requests, when the credential epoch stops", async () => {
+    rs.spyOn(Client.prototype, "destroy").mockResolvedValue();
+    const routes: string[] = [];
+    let signal: AbortSignal | undefined;
+    rs.spyOn(REST.prototype, "queueRequest").mockImplementation(
+      async (request: InternalRequest) => {
+        routes.push(request.fullRoute);
+        signal = request.signal;
+        return new Promise<ResponseLike>(() => undefined);
+      },
+    );
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    const chat = { name: "general", guildId: "9", guildName: "Rome", type: "text" as const };
+    rs.spyOn(adapter, "listGuildChannels").mockReturnValue([
+      { ...chat, id: "1" },
+      { ...chat, id: "2" },
+      { ...chat, id: "3" },
+      { ...chat, id: "4" },
+      { ...chat, id: "5" },
+    ]);
+
+    const scan = adapter.listArchivedThreads();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await adapter.stop();
+
+    await expect(scan).rejects.toThrow("Discord connection stopped during the listing");
+    expect(signal?.aborted).toBe(true);
+    // One request from each of the four readers, and none after the stop.
+    expect(routes).toHaveLength(4);
+  });
+
+  it("stops the other readers of an archive scan when one chat's read fails", async () => {
+    const signals: AbortSignal[] = [];
+    rs.spyOn(REST.prototype, "queueRequest").mockImplementation(
+      async (request: InternalRequest) => {
+        if (request.signal) signals.push(request.signal);
+        if (request.fullRoute.startsWith("/channels/1/")) {
+          throw Object.assign(new Error("Internal Server Error"), { status: 500 });
+        }
+        return new Promise<ResponseLike>(() => undefined);
+      },
+    );
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    const chat = { name: "general", guildId: "9", guildName: "Rome", type: "text" as const };
+    rs.spyOn(adapter, "listGuildChannels").mockReturnValue([
+      { ...chat, id: "1" },
+      { ...chat, id: "2" },
+    ]);
+
+    await expect(adapter.listArchivedThreads()).rejects.toThrow("Discord chat 1");
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
+  it("refuses an archive scan once the credential epoch has stopped, sending nothing", async () => {
+    rs.spyOn(Client.prototype, "destroy").mockResolvedValue();
+    const queued = rs.spyOn(REST.prototype, "queueRequest");
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    rs.spyOn(adapter, "listGuildChannels").mockReturnValue([
+      { id: "1", name: "general", guildId: "9", guildName: "Rome", type: "text" },
+    ]);
+    await adapter.stop();
+
+    await expect(adapter.listArchivedThreads()).rejects.toThrow("Discord connection has stopped");
+    expect(queued).not.toHaveBeenCalled();
+  });
+
+  it("reports a 401 during an archive scan as a rejected credential", async () => {
+    rs.spyOn(REST.prototype, "get").mockRejectedValue(
+      Object.assign(new Error("401: Unauthorized"), { status: 401 }),
+    );
+    const onGatewayFault = rs.fn();
+    const adapter = new DiscordAdapter({ botToken: "not-exposed", onGatewayFault });
+    rs.spyOn(adapter, "listGuildChannels").mockReturnValue([
+      { id: "1", name: "general", guildId: "9", guildName: "Rome", type: "text" },
+    ]);
+
+    await expect(adapter.listArchivedThreads()).rejects.toThrow();
+    expect(onGatewayFault).toHaveBeenCalledWith(expect.objectContaining({ kind: "credential" }));
+  });
+
+  it("sees a private thread only as a member of it, or as one who manages threads", () => {
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    const granted = (manages: boolean) => ({
+      has: (permission: bigint | bigint[]) =>
+        permission === PermissionFlagsBits.ManageThreads ? manages : true,
+    });
+    let manages = false;
+    const threads = new Map([
+      ["1", { type: ChannelType.PrivateThread, joined: true }],
+      ["2", { type: ChannelType.PrivateThread, joined: false }],
+      ["3", { type: ChannelType.PublicThread, joined: false }],
+    ]);
+    const guild = {
+      channels: { cache: threads },
+      members: { me: { permissionsIn: () => granted(manages) } },
+    };
+    (adapter as unknown as { client: { guilds: { cache: Map<string, unknown> } } }).client = {
+      guilds: { cache: new Map([["9", guild]]) },
+    };
+    const thread = (id: string) => ({
+      id,
+      name: `thread ${id}`,
+      guildId: "9",
+      guildName: "Rome",
+      type: "thread" as const,
+      parentId: "4",
+    });
+
+    expect(["1", "2", "3"].map((id) => adapter.sees(thread(id)))).toEqual([true, false, true]);
+    manages = true;
+    expect(adapter.sees(thread("2"))).toBe(true);
+  });
+
+  it("lists a media chat as a forum, so a listing reads its archived posts", () => {
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    const chat = (id: string, type: ChannelType) => ({
+      id,
+      name: `chat ${id}`,
+      type,
+      parentId: null,
+      isThread: () => false,
+    });
+    const guild = {
+      id: "9",
+      name: "Rome",
+      channels: {
+        cache: new Map([
+          ["1", chat("1", ChannelType.GuildForum)],
+          ["2", chat("2", ChannelType.GuildMedia)],
+          ["3", chat("3", ChannelType.GuildVoice)],
+        ]),
+      },
+    };
+    (adapter as unknown as { client: unknown }).client = {
+      isReady: () => true,
+      guilds: { cache: new Map([["9", guild]]) },
+    };
+
+    expect(adapter.listGuildChannels().map((each) => [each.id, each.type])).toEqual([
+      ["1", "forum"],
+      ["2", "forum"],
+    ]);
   });
 
   it("stops a history read, and sends it no further requests, when the credential epoch stops", async () => {

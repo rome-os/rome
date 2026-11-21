@@ -16,7 +16,9 @@ import type {
   ChannelMessageQuery,
   ChannelSummary,
   ChannelsService,
+  ChatDescriptor,
   ChatId,
+  ChatListQuery,
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
@@ -102,6 +104,11 @@ export class AccountNotHeld extends Error {
   }
 }
 
+/** How many chats one page of a listing asks a Connection for: as many as
+ *  a directory answers at once, so a listing that reads a platform's archive
+ *  reads it once, not once per page. */
+const CHAT_PAGE = 10_000;
+
 export function createChannelsService(deps: ChannelsServiceDeps): ChannelsService {
   const find = (name: string) => deps.channels()?.find((channel) => channel.name === name);
   const accountOf = (connection: Connection) => deps.accounts?.accountOf(connection.id) ?? null;
@@ -160,6 +167,47 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     }));
   }
 
+  /** The chats the Connection behind `target` can see, paged to the end of
+   *  what its directory lists. Rejects when it has no directory, or while its
+   *  talk is locked. */
+  async function chats(
+    target: Account | string,
+    read: ChatListQuery = {},
+  ): Promise<ChatDescriptor[]> {
+    const connection = isAccount(target)
+      ? holding(target)
+      : backingConnection(deps.registry, target, deps.channelOf);
+    const name = isAccount(target) ? accountLabel(target) : target;
+    if (!connection) throw new Error(`No connection reaches "${name}"`);
+    const listed: ChatDescriptor[] = [];
+    const seen = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      // A directory whose cursor stops advancing would list forever.
+      if (cursor !== undefined) {
+        if (seen.has(cursor)) throw new Error(`"${name}" listing did not advance`);
+        seen.add(cursor);
+      }
+      const page = connection.withTalker((talker) =>
+        talker.directory
+          ? talker.directory.listConversations({
+              limit: CHAT_PAGE,
+              ...(cursor ? { cursor } : {}),
+              includeTopics: read.includeThreads === true || read.includeArchivedThreads === true,
+              ...(read.includeArchivedThreads ? { includeArchived: true } : {}),
+            })
+          : null,
+      );
+      if (page === undefined)
+        throw new Error(`"${name}" lists no chats while its connection is locked`);
+      if (page === null) throw new Error(`"${name}" lists no chats`);
+      const { conversations, nextCursor } = await page;
+      listed.push(...conversations);
+      cursor = nextCursor;
+    } while (cursor);
+    return listed;
+  }
+
   return withRemovedMembers<ChannelsService>(
     {
       async list(): Promise<ChannelSummary[]> {
@@ -207,6 +255,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       },
 
       query,
+      chats,
     },
     REMOVED_SERVICE_MEMBERS,
   );

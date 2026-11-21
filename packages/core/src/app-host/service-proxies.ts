@@ -71,6 +71,8 @@ import type {
   ChannelMessageQuery,
   ChannelSummary,
   ChannelsService,
+  ChatDescriptor,
+  ChatListQuery,
   MessageReceipt,
   OutgoingMessage,
   ListChatSettingsInput,
@@ -373,6 +375,16 @@ export class ChannelsServiceProxy implements ChannelsService {
         },
         { timeoutMs: CHANNEL_QUERY_RPC_TIMEOUT_MS },
       ),
+    );
+  }
+
+  chats(channel: Account | string, query: ChatListQuery = {}): Promise<ChatDescriptor[]> {
+    // Listing archived threads reads a platform chat by chat, which can
+    // take longer than a short call allows.
+    return callMain<ChatDescriptor[]>(
+      "channels.chats",
+      { channel, ...query },
+      { timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS },
     );
   }
 }

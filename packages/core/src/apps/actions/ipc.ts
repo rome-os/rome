@@ -258,6 +258,7 @@ export class IpcRpc {
       if (
         method.startsWith("connections.app.") ||
         method === "channels.query" ||
+        method === "channels.chats" ||
         method === "channels.send" ||
         method === "notify.send" ||
         method === "session.continue" ||

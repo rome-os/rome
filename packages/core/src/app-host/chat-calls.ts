@@ -50,6 +50,14 @@ const QueryParams = z
   })
   .strict();
 
+const ChatsParams = z
+  .object({
+    channel: AccountOrChannel,
+    includeThreads: z.boolean().optional(),
+    includeArchivedThreads: z.boolean().optional(),
+  })
+  .strict();
+
 const AgentNamesResolveParams = z.object({ name: z.string().min(1) }).strict();
 
 const ChatRefParams = z.object({
@@ -181,6 +189,15 @@ export function chatWorkerCalls(
           ...(limit ? { limit } : {}),
         }),
       );
+    },
+    "channels.chats": async (params, caller) => {
+      const { channel, ...query } = parseWorkerCallParams("channels.chats", ChatsParams, params);
+      // A turn others read reads only its own chat, so it lists none.
+      if (!readsAnyChat(caller?.callerActionContext)) {
+        throw new Error("A turn others read lists no chats");
+      }
+      if (!channelsService.chats) throw new Error("This host lists no chats");
+      return channelsService.chats(channel, query);
     },
     "agentNames.resolve": async (params) => {
       const { name } = parseWorkerCallParams("agentNames.resolve", AgentNamesResolveParams, params);

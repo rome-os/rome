@@ -367,3 +367,32 @@ describe("channels.query from a turn that is not the guardian's", () => {
     expect(query).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("channels.chats from a turn others read", () => {
+  it("lists no chats, and lists them for the guardian's private turn", async () => {
+    const chats = rs.fn(async () => []);
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(), send: rs.fn(), query: rs.fn(), chats } as never,
+    });
+    const place = {
+      channel: "discord",
+      threadId: "chat-a",
+      threadType: "private" as const,
+      senderBondLevel: "other",
+    };
+
+    await expect(
+      calls["channels.chats"](
+        { channel: "discord" },
+        { callerActionContext: { audience: "shared", channelContext: place } },
+      ),
+    ).rejects.toThrow("A turn others read lists no chats");
+    expect(chats).not.toHaveBeenCalled();
+
+    await calls["channels.chats"](
+      { channel: "discord" },
+      { callerActionContext: { audience: "private", channelContext: place } },
+    );
+    expect(chats).toHaveBeenCalledWith("discord", {});
+  });
+});
