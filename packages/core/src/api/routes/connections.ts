@@ -435,9 +435,12 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
       settled?.status === "done" && settled.grant.ended === conn.id
         ? settled.grant.connectionId
         : conn.id;
-    if (target && findConnection(registry, target)) await registry.disconnect(target);
+    const ended =
+      target && findConnection(registry, target) ? await registry.disconnect(target) : {};
     c.header("Cache-Control", "no-store");
-    return c.json({ ok: true, connection: null });
+    // The connection ended either way. The platform may still hold the access
+    // when taking it back failed, so the guardian is told.
+    return c.json({ ok: true, connection: null, ...accessKept(ended) });
   });
 
   app.delete("/connections/:id", async (c) => {
@@ -447,9 +450,25 @@ export function connectionsRoutes(deps: ApiDeps): Hono {
     const registry = requireConnectionRegistry(deps);
     const conn = findConnection(registry, c.req.param("id"));
     if (!conn) return c.json({ error: "Unknown connection." }, 404);
+    // A kind that takes back its access at the platform ends as a disconnect
+    // does, so this route never leaves that access behind unannounced.
+    if (registry.getDescriptor(conn.connectionKind)?.onDisconnect) {
+      const ended = await registry.disconnect(conn.id);
+      return c.json({ ok: true, ...accessKept(ended) });
+    }
     await registry.remove(conn.id);
     return c.json({ ok: true });
   });
 
   return app;
+}
+
+/** The warning a disconnect answers with when the platform may still hold
+ *  Rome's access. */
+function accessKept(ended: { notTakenBack?: string }): { warning?: string } {
+  return ended.notTakenBack
+    ? {
+        warning: `Disconnected in Rome, but the service may still hold Rome's access: ${ended.notTakenBack}. Remove Rome there too.`,
+      }
+    : {};
 }

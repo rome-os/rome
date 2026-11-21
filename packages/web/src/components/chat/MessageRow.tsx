@@ -46,7 +46,7 @@ export function MessageRow({
         {/* A fixed height keeps the row on whole pixels: the aux line height alone
             is fractional, and the transcript would carry the fraction into the
             pinned composer. */}
-        <div className="flex h-5 min-w-0 items-center gap-2 [grid-area:header] @min-[40rem]/message:pl-3">
+        <div className="flex h-5 min-w-0 items-center gap-2 [grid-area:header]">
           <span className="min-w-0 truncate text-aux text-muted-foreground">{name}</span>
           {subtitle ? <div className="shrink-0">{subtitle}</div> : null}
           {headerAccessory ? (
