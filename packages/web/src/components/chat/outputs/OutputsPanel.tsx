@@ -11,7 +11,14 @@ import {
   Pencil,
   Sheet,
 } from "lucide-react";
-import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  type MouseEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import Markdown from "@/components/markdown";
@@ -25,6 +32,7 @@ import {
 import { FilterChipGroup } from "@/components/ui/filter-chip-group";
 import { IconButton } from "@/components/ui/icon-button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { isPlainClick } from "@/lib/plain-click";
 import { cn } from "@/lib/utils";
 import { type ChatOutput, useChatOutputs, useTaskChatOutputs } from "./chat-outputs";
 import {
@@ -132,6 +140,8 @@ interface OutputsPanelProps {
   selectionSeq?: number;
   /** Leaves the panel, as opening a task chat does from a sheet. */
   onNavigate?: () => void;
+  /** Opens a task chat beside the chat instead of as its page, as the side pane does. */
+  onOpenTaskChat?: (taskChatId: string, name: string) => void;
   /** Whether the panel names itself, where nothing around it does. */
   heading?: boolean;
   /** A Concierge chat: read again when one of its task chats changes, as its turn ends. */
@@ -153,12 +163,23 @@ export function OutputsPanel({
   selectedId = null,
   selectionSeq = 0,
   onNavigate,
+  onOpenTaskChat,
   heading = true,
   taskChats = false,
   leaveGuard,
 }: OutputsPanelProps) {
   const { t, i18n } = useTranslation("chat");
   const outputs = useChatOutputs(chatId);
+  // A plain press on a task chat's link opens it beside the chat where the
+  // host can; any other keeps the link's own meaning, such as a new tab.
+  const follow: FollowTaskChat = (event, taskChatId, name) => {
+    if (onOpenTaskChat && isPlainClick(event)) {
+      event.preventDefault();
+      onOpenTaskChat(taskChatId, name);
+      return;
+    }
+    onNavigate?.();
+  };
   useTaskChatOutputs(chatId, taskChats);
   const [chosen, setChosen] = useState<string | null>(selectedId);
   const [filter, setFilter] = useState<Filter>("all");
@@ -215,7 +236,7 @@ export function OutputsPanel({
         onEdit={(path) => setEditing({ path, output })}
         onDone={() => leaveEditing((latest) => latest && setChosen(latest.id))}
         onBack={() => leaveEditing(() => setChosen(null))}
-        onNavigate={onNavigate}
+        onNavigate={follow}
       />
     </div>
   );
@@ -265,7 +286,7 @@ export function OutputsPanel({
               output={output}
               when={whenLabel(new Date(output.at), now, i18n.language)}
               onOpen={() => setChosen(output.id)}
-              onNavigate={onNavigate}
+              onNavigate={follow}
             />
           ))}
         </ul>
@@ -305,6 +326,13 @@ export function OutputsPanel({
   );
 }
 
+/** Follows an output's link to the task chat it came from. */
+type FollowTaskChat = (
+  event: MouseEvent<HTMLAnchorElement>,
+  taskChatId: string,
+  name: string,
+) => void;
+
 /** Where an output came from, a task chat's link or how this chat's agent made it. */
 function SourceText({
   output,
@@ -312,16 +340,17 @@ function SourceText({
   className,
 }: {
   output: ChatOutput;
-  onNavigate?: () => void;
+  onNavigate?: FollowTaskChat;
   className?: string;
 }) {
   const { t } = useTranslation("chat");
   if (output.missing) return <span className={className}>{t("outputs.missing")}</span>;
   if (!output.from) return <span className={className}>{t(`outputs.${output.kind}`)}</span>;
+  const taskChatId = output.from.chatId;
   return (
     <Link
-      to={`/chat/${encodeURIComponent(output.from.chatId)}`}
-      onClick={onNavigate}
+      to={`/chat/${encodeURIComponent(taskChatId)}`}
+      onClick={(event) => onNavigate?.(event, taskChatId, output.from?.name ?? "")}
       className={cn(
         "relative z-10 min-w-0 truncate hover:text-foreground hover:underline",
         className,
@@ -341,7 +370,7 @@ function OutputRow({
   output: ChatOutput;
   when: string;
   onOpen: () => void;
-  onNavigate?: () => void;
+  onNavigate?: FollowTaskChat;
 }) {
   const { t } = useTranslation("chat");
   const type = outputTypeOf(output);
@@ -410,7 +439,7 @@ function OutputPreview({
   onEdit: (path: string) => void;
   onDone: () => void;
   onBack: () => void;
-  onNavigate?: () => void;
+  onNavigate?: FollowTaskChat;
 }) {
   const { t } = useTranslation("chat");
   const kind = previewOf(output);
