@@ -8,12 +8,11 @@ import {
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { ChatTaskList } from "../../concierge/task-list.js";
-import { toRoutine } from "../../db/repositories/routines.js";
 import type { ConciergeService } from "../../concierge/service.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import type { ApiDeps } from "../deps.js";
 import { conciergeCallerOwner, streamEvents } from "./concierge.js";
-import { datedOneOffState } from "./routines.js";
+import { updateRoutine } from "../../routines/update.js";
 
 type TaskListApiDeps = Pick<
   ApiDeps,
@@ -246,18 +245,15 @@ export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
     app.post(`/chats/:chatId/tasks/routines/:routineId/${path}`, async (c) => {
       const row = await routineOf(c);
       if (row instanceof Response) return row;
-      const routine = toRoutine(row);
-      // A one-off whose time passed while paused has nothing left to fire.
-      if (
-        enabled &&
-        routine.trigger.type === "schedule" &&
-        datedOneOffState(routine.trigger) !== null
-      ) {
-        return c.json({ error: "This one-off's time has passed and it can no longer run." }, 400);
+      const result = await updateRoutine(
+        { routines: deps.routinesRepo, engine: deps.routineEngine },
+        row.id,
+        { enabled },
+      );
+      if (result.status === "not-found") {
+        return c.json({ error: "No such routine in this chat" }, 404);
       }
-      await deps.routinesRepo.update(routine.id, { enabled });
-      await deps.routineEngine.deactivate(routine.id);
-      if (enabled) await deps.routineEngine.activate({ ...routine, enabled });
+      if (result.status === "refused") return c.json({ error: result.error }, 400);
       return c.json({ ok: true });
     });
   }

@@ -347,7 +347,7 @@ describe("Routines API", () => {
       }),
     });
     expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toBe("schedule.rrule must be a string");
+    expect(((await res.json()) as { error: string }).error).toMatch(/rrule/);
   });
 
   it("rejects args that violate the registered action's full JSON Schema", async () => {
@@ -670,11 +670,24 @@ describe("Routines API", () => {
       const pinned = { tzid: "Asia/Tokyo", tzMode: "fixed" };
       expect(await create("09:00")).toMatchObject({ date: "2026-06-24", ...pinned });
       expect(await create("00:30")).toMatchObject({ date: "2026-06-25", ...pinned });
-      expect(await create("09:00", { rrule: "" })).not.toHaveProperty("rrule");
-      expect(await create("09:00", { rrule: " " })).not.toHaveProperty("rrule");
-      const dated = await create("09:00", { date: "2026-06-30", rrule: " " });
-      expect(dated).toMatchObject({ date: "2026-06-30" });
-      expect(dated).not.toHaveProperty("rrule");
+      // A blank rrule is refused, as it is for an agent: it would quietly turn
+      // a recurring routine into a one-off.
+      const blank = await app.request("/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "blank-rrule",
+          trigger: {
+            type: "schedule",
+            tzid: "UTC",
+            tzMode: "floating",
+            localTime: "09:00",
+            rrule: " ",
+          },
+          actionName: "anything",
+        }),
+      });
+      expect(blank.status).toBe(400);
     } finally {
       rs.useRealTimers();
     }

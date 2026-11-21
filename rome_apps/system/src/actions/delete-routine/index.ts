@@ -71,7 +71,8 @@ export async function deleteRoutine(
         error:
           `Routine "${input.routineId}" has ${result.activeRuns} active run(s) ` +
           "(running or awaiting approval) and was not deleted. Wait for them to " +
-          "finish, or cancel them, then try again.",
+          "finish, or stop a running one with system:stop_routine, then try again. " +
+          "A run awaiting approval ends only when the guardian approves or rejects it.",
       };
     case "deleted":
       // Only tear down the live trigger once the row is actually gone, so a

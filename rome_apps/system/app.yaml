@@ -41,6 +41,12 @@ actions:
   - actions/publish-event
   - actions/search-event-catalog
   - actions/search-routine
+  - actions/list-routine-runs
+  - actions/read-routine-run
+  - actions/pause-routine
+  - actions/resume-routine
+  - actions/run-routine
+  - actions/stop-routine
   - actions/request-approval-demo
   - actions/resume-session
   - actions/send-message
