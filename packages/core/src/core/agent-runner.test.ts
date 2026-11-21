@@ -5126,12 +5126,12 @@ describe("AgentRunner", () => {
       it("opens a renewed session on the model the tier maps to now, not the retired session's pin", async () => {
         const provider = new MockModelProvider(replies(3));
         const tier = { model: "tier-model-1" };
-        // Exact requests (a pin) get their model; a tier request gets the
-        // model the tier maps to at that moment.
+        // An exact request gets its model, and a tier request keeps its pin
+        // on this one provider, else gets the model the tier maps to now.
         const modelResolver = {
-          resolve: async (request: { kind: string; model?: string }) => ({
+          resolve: async (request: { kind: string; model?: string; pin?: { model: string } }) => ({
             modelProvider: provider,
-            model: request.kind === "exact" ? request.model! : tier.model,
+            model: request.kind === "exact" ? request.model! : (request.pin?.model ?? tier.model),
           }),
         } as unknown as ModelResolver;
         const runner = renewingRunner(provider, undefined, { modelResolver });

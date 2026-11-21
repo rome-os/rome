@@ -778,26 +778,31 @@ describe("AI Tools Rome credits", () => {
     expect(screen.getByText("of $10.00")).toBeTruthy();
   });
 
-  it("puts credits on standby while ChatGPT is connected", async () => {
+  it("hides credits while ChatGPT is logged in", async () => {
     mockPanel(true, credits);
     render(<AiToolsPanel showRomeCredits />);
 
-    expect(await screen.findByText("Standby")).toBeTruthy();
+    expect(await screen.findByText("ChatGPT")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("Rome credits")).toBeNull();
   });
 
-  it("puts credits on standby while the ChatGPT login is still unknown", async () => {
+  it("hides credits while the ChatGPT login is still unknown", async () => {
     mockPanel(undefined, credits);
     render(<AiToolsPanel showRomeCredits />);
 
-    expect(await screen.findByText("Standby")).toBeTruthy();
+    expect(await screen.findByText("ChatGPT")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("Rome credits")).toBeNull();
   });
 
-  it("marks credits ready rather than in use while Claude handles chats", async () => {
+  it("hides credits while Claude is logged in", async () => {
     mockPanel(false, credits, true);
     render(<AiToolsPanel showRomeCredits />);
 
-    expect(await screen.findByText("Ready")).toBeTruthy();
-    expect(screen.queryByText("In use")).toBeNull();
+    expect(await screen.findByText("ChatGPT")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("Rome credits")).toBeNull();
   });
 
   it("shows credits the caller already read without reading them again", async () => {
@@ -824,29 +829,11 @@ describe("AI Tools Rome credits", () => {
     expect(screen.getByText("$0.00")).toBeTruthy();
   });
 
-  it("puts used-up credits on standby once ChatGPT is connected", async () => {
-    mockPanel(true, { ...credits, balanceMicros: "-12000", availableMicros: "-12000" });
+  it("marks paused credits", async () => {
+    mockPanel(false, { ...credits, enabled: false });
     render(<AiToolsPanel showRomeCredits />);
 
-    expect(await screen.findByText("Standby")).toBeTruthy();
-    expect(screen.queryByText("Used up")).toBeNull();
-  });
-
-  it("puts paused credits on standby while ChatGPT pays", async () => {
-    mockPanel(true, { ...credits, enabled: false });
-    render(<AiToolsPanel showRomeCredits />);
-
-    expect(await screen.findByText("Standby")).toBeTruthy();
-    expect(screen.queryByText("Paused")).toBeNull();
-  });
-
-  it("keeps used-up credits calm while Claude handles chats", async () => {
-    mockPanel(false, { ...credits, balanceMicros: "0", availableMicros: "0" }, true);
-    render(<AiToolsPanel showRomeCredits />);
-
-    const status = await screen.findByText("Used up");
-    expect(status.className).toContain("text-muted-foreground");
-    expect(screen.getByText("$0.00").className).not.toContain("text-destructive-fg");
+    expect(await screen.findByText("Paused")).toBeTruthy();
   });
 
   it("waits for a status read that succeeds before showing the row", async () => {

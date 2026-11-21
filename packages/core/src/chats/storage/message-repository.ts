@@ -318,6 +318,21 @@ export class MessageRepository {
     );
   }
 
+  /**
+   * Rewrites the parts of the message keyed `key` in `chat`, as a card that
+   * settles in place does. Answers whether Rome holds the message.
+   */
+  setParts(chat: ChatRef, key: string, parts: string): boolean {
+    return (
+      this.db
+        .update(chatMessages)
+        .set({ parts })
+        .where(and(sql`${chatMessages.chatId} = ${chatIdOf(chat)}`, eq(chatMessages.key, key)))
+        .returning({ id: chatMessages.id })
+        .all().length > 0
+    );
+  }
+
   /** The chat on `platform` that holds a message its adapter keys `key`, the
    *  oldest such message's, or null when Rome holds none. For platforms whose
    *  keys are unique across chats, as an email's message id is. */

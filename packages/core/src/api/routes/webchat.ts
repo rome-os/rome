@@ -1388,6 +1388,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
       });
     });
+    // A message rewritten in place, as a provider failure card that settled:
+    // the client replaces the one it holds with the same id.
+    const unsubscribeUpdates = deps.webchatRepo.onMessageUpdated((message) => {
+      if (message.sessionId !== sessionId) return;
+      inserting = inserting.then(() => emit("message_insert", message));
+    });
     // A card a task card shows settled: the client patches it in place.
     const unsubscribeCards = deps.concierge?.onCardSettled((event) => {
       if (event.sessionId === sessionId) emit("chat_card_settled", event);
@@ -1408,6 +1414,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       runningListeners.delete(runningListener);
       writingListeners.delete(writingListener);
       unsubscribeMessages();
+      unsubscribeUpdates();
       unsubscribeSessionName();
       unsubscribeReaction();
       unsubscribeStatus?.();
@@ -2866,7 +2873,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           running,
           // A new turn's trace is written a moment after it starts, so until
           // then the newest trace is the previous turn's. Running wins.
-          lastTurnFailed: session.lastTurnFailed && !running,
+          // A provider card in the chat says why and what to do: no red mark beside it.
+          lastTurnFailed:
+            session.lastTurnFailed && !running && !deps.providerFailures?.carded(session.id),
           awaitingGuardian: session.awaitingGuardian && !running,
         };
       }),
@@ -4545,8 +4554,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const contextSuffix = buildWebchatContextSuffix();
     let largeModelSelection = session.largeModelSelection;
-    if (isConciergeChat(session)) {
-      await deps.concierge?.switchIfExhausted(sessionId);
+    if (isConciergeChat(session) || session.largeModelSelectionBy === "auto") {
+      // A model Rome chose follows the default provider.
+      await deps.concierge?.followDefault(sessionId);
       // A background turn may also have moved the chat since this send read it.
       largeModelSelection =
         (await deps.webchatRepo.getSession(sessionId))?.largeModelSelection ?? null;
@@ -4730,13 +4740,36 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         if (autoTitle) {
           void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
         }
+        // The chat shows why, and what the guardian can do, beside the error,
+        // which older clients read.
+        const messageId = randomUUID();
+        const errorPart = { type: "error", ...modelError };
+        const card = await deps.providerFailures
+          ?.cardFor(
+            {
+              chatId: sessionId,
+              agentName,
+              turnId,
+              failure: { kind: "resolution", payload: modelError },
+            },
+            messageId,
+            [errorPart],
+          )
+          .catch((error: unknown) => {
+            log.warn("provider failure card failed", { sessionId, error: String(error) });
+            return null;
+          });
         await deps.webchatRepo.addMessage(
-          randomUUID(),
+          messageId,
           sessionId,
           "assistant",
-          JSON.stringify([{ type: "error", ...modelError }]),
+          JSON.stringify([errorPart, ...(card ? [card] : [])]),
           turnId,
         );
+        // A card that settled while this message was being written takes its settled form.
+        if (card) {
+          await deps.providerFailures?.written(messageId).catch(() => undefined);
+        }
         // Keep this as a real failed turn on the standard trace wire. The
         // stream remains replayable for 30 seconds after completion and the
         // persisted trace renders on reload even if navigation finishes later.
@@ -5539,7 +5572,30 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     await runOnStream(stream, "backend webchat task", async () => {
-      await task({ emit, stopRequested: () => stream.stopRequested === true });
+      try {
+        await task({ emit, stopRequested: () => stream.stopRequested === true });
+      } catch (err) {
+        // A turn Rome ran by itself, such as a card's resumed turn, that the
+        // resolver refused shows its card, as a refused send does.
+        const modelError = toModelResolutionErrorPayload(err);
+        if (modelError && deps.providerFailures) {
+          const agentName = (await deps.webchatRepo.getSession(sessionId))?.agentName ?? "main";
+          await deps.providerFailures
+            .failed(
+              {
+                chatId: sessionId,
+                agentName,
+                turnId: stream.turnId,
+                failure: { kind: "resolution", payload: modelError },
+              },
+              { final: true },
+            )
+            .catch((error: unknown) =>
+              log.warn("provider failure card failed", { sessionId, error: String(error) }),
+            );
+        }
+        throw err;
+      }
       await recordedCardWrites;
       // Persist cards before the final narration so transcript order matches the
       // foreground path ("choose above"). `addBackendMessage` also pushes a

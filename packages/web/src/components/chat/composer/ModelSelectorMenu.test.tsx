@@ -35,7 +35,9 @@ describe("ModelSelectorMenu", () => {
     const names = optionNames();
     // Curated set: auto + latest-generation flagship per family (GPT-6 Astra is
     // the newest OpenAI generation in the catalog).
-    expect(names).toEqual(expect.arrayContaining(["Auto", "Opus 5.5", "GPT-6 Astra"]));
+    expect(names).toEqual(
+      expect.arrayContaining(["Auto (default provider)", "Opus 5.5", "GPT-6 Astra"]),
+    );
     // The long tail is folded away until the guardian expands or searches.
     expect(names).not.toContain("Sonnet");
     expect(names).not.toContain("Haiku");
@@ -75,7 +77,7 @@ describe("ModelSelectorMenu", () => {
     await waitFor(() => {
       const names = optionNames();
       expect(names).toContain("Sonnet");
-      expect(names).not.toContain("Auto");
+      expect(names).not.toContain("Auto (default provider)");
     });
   });
 
@@ -140,10 +142,38 @@ describe("ModelSelectorMenu", () => {
 
     // Back to the curated rows + show-all — not the stale "sonnet" filter.
     const names = optionNames();
-    expect(names).toEqual(expect.arrayContaining(["Auto", "Opus 5.5", "GPT-6 Astra"]));
+    expect(names).toEqual(
+      expect.arrayContaining(["Auto (default provider)", "Opus 5.5", "GPT-6 Astra"]),
+    );
     expect(names).not.toContain("Sonnet");
     expect(screen.getByText(SHOW_ALL)).toBeTruthy();
     // The search field is cleared too.
     expect((screen.getByPlaceholderText("Search models…") as HTMLInputElement).value).toBe("");
+  });
+});
+
+describe("ModelSelectorMenu sign-ins", () => {
+  it("offers only models of signed-in providers and labels Auto as following the default", () => {
+    render(
+      <ModelSelectorMenu
+        {...baseProps()}
+        signedIn={{ anthropic: true, openai: false, rome_credits: false }}
+      />,
+    );
+    const names = optionNames();
+    expect(names).toContain("Auto (default provider)");
+    expect(names).toContain("Opus 5.5");
+    expect(names).not.toContain("GPT-6 Astra");
+  });
+
+  it("keeps a selected model whose provider signed out", () => {
+    render(
+      <ModelSelectorMenu
+        {...baseProps()}
+        value="gpt-6-luna"
+        signedIn={{ anthropic: true, openai: false, rome_credits: false }}
+      />,
+    );
+    expect(optionNames()).toContain("GPT-6 Luna");
   });
 });

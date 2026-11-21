@@ -19,7 +19,11 @@ import {
 import { storeForkParent } from "../domain/session-parent.js";
 import { turnStatus, type TurnEnding } from "../domain/turn-end.js";
 import { createTurn, type Turn, type TurnWriter } from "../domain/turn.js";
-import { endedTurn, type TurnLifecycle } from "../domain/turn-lifecycle.js";
+import {
+  endedTurn,
+  type AgentTurnFailedBeforeStart,
+  type TurnLifecycle,
+} from "../domain/turn-lifecycle.js";
 import type { TurnMiddleware } from "../domain/turn-middleware.js";
 import { shapedResult, type AnswerShape, type ReadAnswerShape } from "../domain/answer-shape.js";
 import { type TurnAttribution, type TurnUsageReporting } from "../domain/turn-usage-reporting.js";
@@ -92,6 +96,7 @@ import { type AgentAction, type AgentActions } from "../domain/agent-action.js";
 import { type WakeUp } from "../domain/defer.js";
 import { subagentToolName, type Subagent, type Subagents } from "../domain/subagent.js";
 import { type ModelTier } from "../domain/model-tier.js";
+import type { AccountedProviderId } from "../domain/model-account-report.js";
 import { modelResolutionRequest } from "../domain/model-resolution.js";
 import {
   toModelResolutionErrorPayload,
@@ -438,6 +443,11 @@ interface ManagerDeps {
    * turn shows beside it. Absent, no renewal writes a handoff.
    */
   handoffs?: RenewalHandoffs;
+  /**
+   * Whether every chat runs on Rome credits now, an instance-wide choice.
+   * Read at open and before each turn. Absent, none does.
+   */
+  onRomeCredits?: () => boolean;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
   /** Stamps the session id on the spans a session starts and binds it for logs. */
@@ -1574,6 +1584,7 @@ async function openSession(
       ? await deps.sessionSettings?.savedModelSelection(sessionId)
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
+  const credits = deps.onRomeCredits?.() === true;
   // A cold resume runs at the effort its web chat saved when the open names
   // none, as a message to that chat does; a turn that names one still wins.
   const savedEffort =
@@ -2022,7 +2033,7 @@ async function openSession(
     });
   } else {
     initialResolution = await deps.modelResolver.resolve(
-      modelResolutionRequest(selectionId, sessionPin, config),
+      modelResolutionRequest(selectionId, sessionPin, config, credits),
     );
     modelSession = await openModelSession(initialResolution, resumed?.provider, modelThreadId);
     threadResumed =
@@ -2120,6 +2131,11 @@ async function openSession(
   });
 
   impl.startModelSessionEvents();
+  // The session reopened on another provider than its recorded thread: the
+  // new thread's first turn carries the chat.
+  if (!threadResumed && resumed?.modelThreadId && !continuesChat) {
+    await impl.carryChatAcrossProviders();
+  }
 
   log.info("agent session opened", {
     agentName: key.agentName,
@@ -2468,6 +2484,11 @@ class AgentSessionImpl implements AgentSession {
   private handoff?: string;
   /** The continuation notice carries the chat's open tasks and messages until a turn succeeds. */
   private carriesMessages?: "held" | "recent";
+  /**
+   * The thread moved off a provider that cannot run any more: its first turn
+   * also carries what the latest turns did, so the new model does not redo it.
+   */
+  private carriesActions = false;
   /** The header blocks the current thread has read, by name (`stickyHeaders`). */
   private sentHeaders: SentHeaders = new Map();
   /** The context the last turn that reported one left the thread at. */
@@ -2777,7 +2798,12 @@ class AgentSessionImpl implements AgentSession {
   private async ensureModelSessionForTurn(): Promise<void> {
     if (this.config.codeBacked) return;
     const resolution = await this.deps.modelResolver.resolve(
-      modelResolutionRequest(this.selectionId, this.sessionPin, this.config),
+      modelResolutionRequest(
+        this.selectionId,
+        this.sessionPin,
+        this.config,
+        this.deps.onRomeCredits?.() === true,
+      ),
     );
     if (
       this.modelSessionAvailable &&
@@ -2813,6 +2839,7 @@ class AgentSessionImpl implements AgentSession {
         if (previous.modelThreadId !== undefined) {
           this.continuationPending = true;
           this.previousModel = previous.model;
+          await this.carryChatAcrossProviders();
         }
       }
       this.toolCount =
@@ -2978,6 +3005,7 @@ class AgentSessionImpl implements AgentSession {
             if (sink.carriesHandoff) {
               this.handoff = undefined;
               this.carriesMessages = undefined;
+              this.carriesActions = false;
             }
             if (sink.sentHeaders) this.sentHeaders = sink.sentHeaders;
             const used = outbound.accounting?.context?.usedTokens;
@@ -3096,8 +3124,61 @@ class AgentSessionImpl implements AgentSession {
         return handoffSections(held.handoff, context, { all: true });
       }
     }
-    const context = await handoffs.context(sink.romeSessionId, sink.turnId).catch(failed);
-    return handoffSections(this.handoff ?? null, context);
+    const [context, executedActions] = await Promise.all([
+      handoffs.context(sink.romeSessionId, sink.turnId).catch(failed),
+      this.carriesActions && handoffs.executedActions
+        ? handoffs.executedActions(sink.romeSessionId).catch(() => null)
+        : null,
+    ]);
+    return handoffSections(this.handoff ?? null, context, { executedActions });
+  }
+
+  /**
+   * The thread moved to another provider, which has seen none of the chat.
+   * Its first turn carries the chat's recent text messages (the guardian's
+   * whole, long agent replies cut), its open tasks and the continuation
+   * notice, for every agent. When the old provider can still run, the old
+   * model first writes a handoff note on its own thread, while the chat says
+   * it is tidying up. When it cannot, the first turn carries the tools the
+   * latest turns called instead, so the new model does not redo them. Tool
+   * results are not carried. docs/concepts/sessions.md#continuation
+   */
+  async carryChatAcrossProviders(): Promise<void> {
+    const chatId = this.threadContext?.romeSessionId;
+    if (this.isSubagent || this.config.codeBacked || !this.deps.handoffs || !chatId) return;
+    this.carriesMessages = "recent";
+    const old = this.session;
+    const oldRuns =
+      old.provider && old.model && old.modelThreadId
+        ? await this.deps.modelResolver
+            .resolve({ kind: "exact", providerId: old.provider as ProviderId, model: old.model })
+            .then(
+              (resolution) => resolution.modelProvider.id === old.provider,
+              () => false,
+            )
+        : false;
+    if (!oldRuns) {
+      this.carriesActions = true;
+      return;
+    }
+    const note = await writeRenewalHandoff(
+      {
+        retired: old,
+        agentName: this.key.agentName,
+        chatId,
+        systemPrompt: this.systemPrompt,
+        workingDir: this.workingDir ?? "",
+        env: {},
+      },
+      {
+        handoffs: this.deps.handoffs,
+        modelResolver: this.deps.modelResolver,
+        turnUsage: this.deps.turnUsage,
+        log: this.log,
+      },
+    ).catch(() => null);
+    if (note) this.handoff = note;
+    else this.carriesActions = true;
   }
 
   /**
@@ -3498,6 +3579,7 @@ class AgentSessionImpl implements AgentSession {
             parent: sink.lifecycleParent,
           }),
           error: terminal.error,
+          failure: failureFieldsOf(terminal),
         });
       }
       return;
@@ -4584,6 +4666,20 @@ function subagentsOf(agents: AgentCatalog, config: AgentDefinition): Subagent[] 
     name,
     description: requireAgent(agents, name).definition.description,
   }));
+}
+
+/** The classification an error event carries, such as a refused model resolution's. */
+function failureFieldsOf(terminal: StreamAgentEvent): AgentTurnFailedBeforeStart["failure"] {
+  const fields = terminal as unknown as Record<string, unknown>;
+  const text = (key: string) =>
+    typeof fields[key] === "string" ? (fields[key] as string) : undefined;
+  const failure = {
+    ...(text("code") ? { code: text("code") } : {}),
+    ...(text("provider") ? { provider: text("provider") } : {}),
+    ...(text("reason") ? { reason: text("reason") } : {}),
+    ...(text("usageLimitUntil") ? { usageLimitUntil: text("usageLimitUntil") } : {}),
+  };
+  return Object.keys(failure).length > 0 ? failure : undefined;
 }
 
 /** When the first of the messages a turn catches up on or answers was said. */

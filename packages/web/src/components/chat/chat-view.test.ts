@@ -240,7 +240,89 @@ describe("buildRows model switch notice", () => {
       "user",
       "agent",
     ]);
-    expect(rows[4]).toMatchObject({ kind: "model_switch", model: "gpt-6-luna", turnId: "t3" });
+    expect(rows[4]).toMatchObject({
+      kind: "model_switch",
+      model: "gpt-6-luna",
+      fromModel: "claude-sonnet-5-5",
+      turnId: "t3",
+    });
+  });
+
+  it("says why Rome moved the chat to another model, with no row of its own", () => {
+    const quota = {
+      type: "quota_switch" as const,
+      reason: "model_limit" as const,
+      from: "openai" as const,
+      to: "openai" as const,
+      fromModel: "gpt-6.1-sol",
+      model: "gpt-6-luna",
+    };
+    const rows = rowsOf([
+      ...turn(MAIN, "t1", "gpt-6.1-sol"),
+      mk(MAIN, "assistant", "q1", [quota]),
+      ...turn(MAIN, "t2", "gpt-6-luna"),
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "agent", "model_switch", "user", "agent"]);
+    expect(rows[2]).toMatchObject({ kind: "model_switch", model: "gpt-6-luna", quota });
+    // The resumed turn ran on the new model: no second notice for the same move.
+    expect(rows.filter((r) => r.kind === "model_switch")).toHaveLength(1);
+    // Nor when the quiet turn that hit the limit stands between them.
+    const failed = [
+      mk(MAIN, "user", "t1b", [{ type: "text", content: "again" }]),
+      mk(MAIN, "trace", "t1b", [], {
+        traceSummary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
+      }),
+      mk(MAIN, "assistant", "t1b", [
+        {
+          type: "provider_failure",
+          provider: "openai",
+          reason: "capacity",
+          card: "wait",
+          followsDefault: true,
+          alternatives: [],
+          chatId: MAIN,
+          retrying: true,
+        },
+      ]),
+    ];
+    const withQuiet = rowsOf([
+      ...turn(MAIN, "t1", "gpt-6.1-sol"),
+      mk(MAIN, "assistant", "q1", [quota]),
+      ...failed,
+      ...turn(MAIN, "t2", "gpt-6-luna"),
+    ]);
+    expect(withQuiet.filter((r) => r.kind === "model_switch")).toHaveLength(1);
+    // The quiet turn draws no row of its own: the note, then the reply.
+    expect(withQuiet.map((r) => r.kind)).toEqual([
+      "user",
+      "agent",
+      "model_switch",
+      "user",
+      "user",
+      "agent",
+    ]);
+  });
+
+  it("shows a send a provider card explains as delivered, not failed", () => {
+    const user = {
+      ...mk(MAIN, "user", "t1", [{ type: "text", content: "hi" }]),
+      inputState: "failed" as const,
+    };
+    const card = mk(MAIN, "assistant", "t1", [
+      {
+        type: "provider_failure",
+        provider: "openai",
+        reason: "quota",
+        card: "wait",
+        followsDefault: true,
+        alternatives: [],
+        chatId: MAIN,
+      },
+    ]);
+    const [row] = rowsOf([user, card]);
+    expect(row).toMatchObject({ kind: "user", message: { inputState: "consumed" } });
+    const [plain] = rowsOf([user]);
+    expect(plain).toMatchObject({ kind: "user", message: { inputState: "failed" } });
   });
 
   it("skips turns with no known model and compares within one session", () => {

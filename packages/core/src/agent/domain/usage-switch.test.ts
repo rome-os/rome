@@ -1,6 +1,6 @@
 import { expect, it } from "@rstest/core";
 import type { ModelAccountReports, ModelAccountReport } from "./model-account-report.js";
-import { sameProviderTarget, soleProviderAtUsageLimit, usageSwitchTarget } from "./usage-switch.js";
+import { sameProviderTarget } from "./usage-switch.js";
 
 const FRONTIER_DENIED = ["gpt-6.1-sol", "gpt-6-luna"];
 
@@ -16,69 +16,9 @@ function atLimit(account: ModelAccountReport["account"] = { loggedIn: true }) {
   } as const satisfies ModelAccountReport;
 }
 
-const state = (): ModelAccountReports => ({
-  anthropic: atLimit(),
-  openai: available(),
-});
-
-it("moves the Concierge to the other provider's strongest model: Sol, else Terra, or Opus", () => {
-  const raw = state();
-  expect(soleProviderAtUsageLimit(raw)).toBe("anthropic");
-  expect(usageSwitchTarget(raw, "anthropic")?.selectionId).toBe("gpt-6-1-sol");
-  raw.openai = available({ loggedIn: true, modelsDenied: FRONTIER_DENIED });
-  expect(usageSwitchTarget(raw, "anthropic")?.selectionId).toBe("gpt-5-6-terra");
-  raw.openai = atLimit();
-  expect(soleProviderAtUsageLimit(raw)).toBeNull();
-  expect(usageSwitchTarget(raw, "anthropic")).toBeNull();
-  raw.anthropic = available();
-  expect(soleProviderAtUsageLimit(raw)).toBe("openai");
-  expect(usageSwitchTarget(raw, "openai")?.selectionId).toBe("claude-opus-5-5");
-  raw.openai = available();
-  expect(soleProviderAtUsageLimit(raw)).toBeNull();
-  expect(usageSwitchTarget(raw, "openai")).toBeNull();
-});
-
-it.each([
-  "openai",
-  "anthropic",
-] as const)("requires an available subscription opposite %s", (from) => {
-  const other = from === "openai" ? "anthropic" : "openai";
-  for (const target of [
-    { state: "unauthorized", account: { loggedIn: false } },
-    undefined,
-    { state: "expired", account: { loggedIn: false, needsReauth: true } },
-    atLimit(),
-    available({ loggedIn: true, usageLimited: false }),
-  ] satisfies Array<ModelAccountReport | undefined>) {
-    const changed: ModelAccountReports = { [from]: atLimit(), [other]: target };
-    expect(usageSwitchTarget(changed, from)).toBeNull();
-  }
-});
-
-it("excludes Rome credits by reading raw unauthorized Codex, not resolver availability", () => {
-  const raw = state();
-  raw.openai = { state: "unauthorized", account: { loggedIn: false } };
-  expect(usageSwitchTarget(raw, "anthropic")).toBeNull();
-});
-
-it("does not automatically switch providers or models onto ChatGPT credits", () => {
-  const raw: ModelAccountReports = {
-    anthropic: atLimit(),
-    openai: { ...available(), requiresChatgptCredits: true },
-  };
-  expect(usageSwitchTarget(raw, "anthropic")).toBeNull();
-  expect(usageSwitchTarget(raw, "anthropic", true)).toBeNull();
+it("does not move a model onto ChatGPT credits", () => {
+  const raw: ModelAccountReports = { openai: { ...available(), requiresChatgptCredits: true } };
   expect(sameProviderTarget(raw, "openai", "gpt-6.1-sol")).toBeNull();
-  raw.anthropic = available();
-  expect(usageSwitchTarget(raw, "openai", true)?.provider).toBe("anthropic");
-});
-
-it("switches on a failed turn before the limit is read, from a subscription only", () => {
-  const raw: ModelAccountReports = { anthropic: available(), openai: available() };
-  expect(usageSwitchTarget(raw, "anthropic")).toBeNull();
-  expect(usageSwitchTarget(raw, "anthropic", true)?.provider).toBe("openai");
-  raw.anthropic = available({ loggedIn: true, usageLimited: false });
-  expect(usageSwitchTarget(raw, "anthropic", true)).toBeNull();
 });
 
 it.each([
@@ -111,10 +51,4 @@ it("requires same-provider availability and model access", () => {
       sameProviderTarget({ ...raw, anthropic: claude }, "anthropic", "claude-sonnet"),
     ).toBeNull();
   }
-});
-
-it("switches away from a provider Rome has not read when its turn just failed for usage", () => {
-  const raw: ModelAccountReports = { openai: available() };
-  expect(usageSwitchTarget(raw, "anthropic", true)?.provider).toBe("openai");
-  expect(usageSwitchTarget(raw, "anthropic")).toBeNull();
 });

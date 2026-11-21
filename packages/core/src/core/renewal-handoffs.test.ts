@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import {
+  executedActionsOf,
+  keyArguments,
   createRenewalHandoffs,
   recentMessagesOf,
   rowsSince,
@@ -198,5 +200,216 @@ describe("recentMessagesOf cut eligibility", () => {
       row("notification", "c", "t2"),
     ];
     expect(recentMessagesOf(rows).map((m) => m.agent === true)).toEqual([false, true, false]);
+  });
+});
+
+describe("the executed-actions list", () => {
+  const trace = (turnId: string, blocks: unknown[]) => ({
+    role: "trace",
+    content: JSON.stringify(blocks),
+    turnId,
+    createdAt: new Date("2026-11-19T10:00:00Z"),
+  });
+
+  it("lists the tools the latest turns called, with key arguments and no results", () => {
+    const list = executedActionsOf([
+      { role: "user", content: "[]", turnId: "t1", createdAt: new Date() },
+      trace("t1", [
+        {
+          type: "tool_use",
+          tool: "send_email",
+          id: "a",
+          input: { to: "a@b.c", body: "x".repeat(200) },
+        },
+        { type: "tool_result", tool: "send_email", toolUseId: "a", output: "sent: secret id 42" },
+        { type: "tool_use", tool: "create_event", id: "b", input: { title: "Dentist" } },
+        { type: "tool_result", tool: "create_event", toolUseId: "b", output: "no", isError: true },
+      ]),
+    ]);
+    expect(list).toContain("- send_email(to: a@b.c, body: xxxx");
+    expect(list).toContain("…)");
+    expect(list).toContain("- create_event(title: Dentist) (failed)");
+    expect(list).not.toContain("secret id 42");
+  });
+
+  it("carries no credentials nested in arguments, nor what is typed into a password field", () => {
+    const list =
+      executedActionsOf([
+        trace("t1", [
+          {
+            type: "tool_use",
+            tool: "http_request",
+            id: "a",
+            input: {
+              url: "https://example.com/login",
+              body: { user: "ada", login: { password: "hunter2", otpSecret: "JBSWY3DP" } },
+              steps: [{ field: "#email", value: "ada@example.com" }],
+            },
+          },
+          {
+            type: "tool_use",
+            tool: "browser_type",
+            id: "b",
+            input: { element: "Password input", ref: "e12", text: "correct horse battery" },
+          },
+          {
+            type: "tool_use",
+            tool: "browser_fill",
+            id: "c",
+            input: { fields: [{ selector: "input[type=password]", value: "s3cret-pw" }] },
+          },
+          {
+            type: "tool_use",
+            tool: "enter_one_time_code",
+            id: "d",
+            input: { text: "482913" },
+          },
+        ]),
+      ]) ?? "";
+    for (const leaked of ["hunter2", "JBSWY3DP", "correct horse battery", "s3cret-pw", "482913"]) {
+      expect(list).not.toContain(leaked);
+    }
+    // What is not a secret still says what was done.
+    expect(list).toContain("ada@example.com");
+    expect(list).toContain("Password input");
+  });
+
+  it("carries no credentials: secret-named arguments are left out, credential-like values masked", () => {
+    const list =
+      executedActionsOf([
+        trace("t1", [
+          {
+            type: "tool_use",
+            tool: "http_request",
+            id: "a",
+            input: {
+              url: "https://api.example.com/v1/items",
+              apiKey: "abc",
+              password: "hunter2",
+              access_token: "tok",
+              Cookie: "sid=1",
+              headers: { Authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.e30.sig" },
+              note: "use sk-proj-ABCDEFGHIJKLMNOP1234 here",
+              digest: "0123456789abcdef0123456789abcdef01234567",
+              blob: "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVoxMjM0NTY3ODkw",
+            },
+          },
+        ]),
+      ]) ?? "";
+    expect(list).toContain("url: https://api.example.com/v1/items");
+    for (const leaked of [
+      "abc",
+      "hunter2",
+      "tok",
+      "sid=1",
+      "eyJhbGciOiJIUzI1NiJ9",
+      "sk-proj-ABCDEFGHIJKLMNOP1234",
+      "0123456789abcdef0123456789abcdef01234567",
+      "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVoxMjM0NTY3ODkw",
+    ]) {
+      expect(list).not.toContain(leaked);
+    }
+    expect(list).toContain("[redacted]");
+  });
+
+  it("reads only the last five turns, and nothing when no tool ran", () => {
+    const rows = ["t1", "t2", "t3", "t4", "t5", "t6"].map((turnId) =>
+      trace(turnId, [{ type: "tool_use", tool: `tool_${turnId}`, input: {} }]),
+    );
+    const list = executedActionsOf(rows) ?? "";
+    expect(list).not.toContain("tool_t1");
+    expect(list).toContain("tool_t6");
+    expect(executedActionsOf([trace("t1", [{ type: "text", content: "hi" }])])).toBeNull();
+  });
+});
+
+describe("credentials inside a command or a URL", () => {
+  const shown = (command: string) => keyArguments({ command }, "Bash");
+
+  it.each([
+    [
+      "a URL's user and password",
+      "git clone https://alice:hunter2@example.com/repo.git",
+      "hunter2",
+      "https://[redacted]@example.com",
+    ],
+    [
+      "a URL's token as its user",
+      "curl https://ghp_token@github.com/x",
+      "ghp_token",
+      "https://[redacted]@github.com",
+    ],
+    [
+      "-u user:password",
+      "curl -u alice:hunter2 https://api.example.com",
+      "hunter2",
+      "-u [redacted]",
+    ],
+    [
+      "--user=user:password",
+      "curl --user=alice:hunter2 https://api.example.com",
+      "hunter2",
+      "--user=[redacted]",
+    ],
+    [
+      "a secret-named environment assignment",
+      "PGPASSWORD=short-secret psql -h db",
+      "short-secret",
+      "PGPASSWORD=[redacted]",
+    ],
+    [
+      "an API key exported",
+      "export OPENAI_API_KEY='abc 123' && run",
+      "abc 123",
+      "OPENAI_API_KEY=[redacted]",
+    ],
+    [
+      "an Authorization header",
+      `curl -H "Authorization: Basic YWxpY2U6aHVudGVyMg" https://x`,
+      "YWxpY2U6aHVudGVyMg",
+      "Authorization: [redacted]",
+    ],
+    [
+      "a bearer token",
+      "curl -H 'X-Trace: 1' -H 'authorization: Bearer abc.def' https://x",
+      "abc.def",
+      "authorization: [redacted]",
+    ],
+    ["--password", "mysql --password hunter2 db", "hunter2", "--password [redacted]"],
+    ["--token=", "gh auth --token=gho_short db", "gho_short", "--token=[redacted]"],
+    ["a password glued to -p", "mysql -uroot -phunter2 db", "hunter2", "-p[redacted]"],
+    ["sshpass -p", "sshpass -p 'hunter 2' ssh host", "hunter 2", "sshpass -p [redacted]"],
+  ])("masks %s", (_label, command, secret, kept) => {
+    const text = shown(command);
+    expect(text).not.toContain(secret);
+    expect(text).toContain(kept);
+  });
+
+  it("leaves a command with no credential readable", () => {
+    expect(shown("mkdir -p build && sort -u names.txt && ssh -p 2222 host")).toBe(
+      "command: mkdir -p build && sort -u names.txt && ssh -p 2222 host",
+    );
+  });
+
+  it("keeps them out of the executed-actions list a chat carries to another provider", () => {
+    const list =
+      executedActionsOf([
+        {
+          role: "trace",
+          turnId: "t1",
+          createdAt: new Date(0),
+          content: JSON.stringify([
+            {
+              type: "tool_use",
+              tool: "Bash",
+              id: "a",
+              input: { command: "curl -u alice:hunter2 https://bob:pw@x.example" },
+            },
+          ]),
+        },
+      ]) ?? "";
+    expect(list).toContain("Bash(");
+    expect(list).not.toContain("hunter2");
+    expect(list).not.toContain("bob:pw");
   });
 });

@@ -24,11 +24,33 @@ import {
 } from "./model-selection.js";
 import type { ModelTier } from "./model-tier.js";
 import { providerAvailability } from "./provider-availability.js";
+import { providerOfDefault, signedInProviders, type DefaultProvider } from "./default-provider.js";
+import { followingSelection } from "./model-strength.js";
 
-/** What a run asks for. `providerId` on a tier restricts it to that provider's guardian account. */
-export type ModelResolutionRequest =
-  | { kind: "tier"; tier: ModelTier; providerId?: ProviderId }
-  | { kind: "exact"; providerId: ProviderId; model: string };
+/**
+ * What a run asks for. `providerId` on a tier restricts it to that provider's
+ * guardian account. A tier without one follows the default provider: `pin` is
+ * the model the session last ran, kept while it is on that provider, and
+ * `override` runs this one ask on another provider (the guardian's "run them
+ * on {other} now").
+ */
+export type ModelResolutionRequest = (
+  | {
+      kind: "tier";
+      tier: ModelTier;
+      providerId?: ProviderId;
+      pin?: { providerId: ProviderId; model: string };
+      override?: AccountedProviderId;
+    }
+  | { kind: "exact"; providerId: ProviderId; model: string }
+) & {
+  /**
+   * The ask runs on Codex through Rome credits, as every chat does while they
+   * are the instance's default. Without it, only a default of Rome credits
+   * spends them.
+   */
+  credits?: true;
+};
 
 /** The guardian's choice of model for each tier and provider. */
 export type TierModels = Partial<Record<AccountedProviderId, Partial<Record<ModelTier, string>>>>;
@@ -48,6 +70,11 @@ export interface ModelResolutionFacts {
   logins: { openai?: CodexLogin };
   /** Read only for a tier ask. */
   tierModels?: TierModels;
+  /**
+   * The provider a tier that follows the default runs on. Null when none is
+   * set. Undefined keeps the order Rome used before the default existed.
+   */
+  defaultProvider?: DefaultProvider | null;
 }
 
 /** Why no provider can serve the ask, as facts. The resolver words them. */
@@ -57,6 +84,8 @@ export type ModelResolutionFailure =
       provider: AccountedProviderId;
       availability: Exclude<ProviderAvailabilityState, "available">;
       usageLimitUntil?: string;
+      /** The ask followed the default provider rather than naming a model. */
+      followsDefault?: boolean;
     }
   | { kind: "model_not_allowed"; provider: "openai"; model: string }
   | { kind: "none_usable"; allAtUsageLimit: boolean };
@@ -141,18 +170,31 @@ function answer(
 }
 
 /**
- * An exact ask resolves to exactly that model or fails. A tier resolves on the
- * first usable provider in order: Codex subscription capacity, Claude,
- * Codex on ChatGPT credits, Codex on Rome credits, then the mock. When that
- * provider's login does not allow the tier's model, the ask fails rather than
- * trying the next provider.
+ * An exact ask resolves to exactly that model or fails. A tier restricted to a
+ * provider runs there. Any other tier runs on the default provider, or the
+ * provider its override names, and fails when that provider cannot run: no
+ * other provider stands in. Without a default setting, a tier resolves on the
+ * first usable provider in the order Rome used before: Codex subscription
+ * capacity, Claude, Codex on ChatGPT credits, Codex on Rome credits, then the
+ * mock. When the chosen provider's login does not allow the tier's model, the
+ * ask fails rather than trying another provider.
  */
 export function resolveModel(
   request: ModelResolutionRequest,
   facts: ModelResolutionFacts,
 ): ModelResolutionOutcome {
   const { reports } = facts;
-  const login = facts.logins.openai;
+  // A Rome credits login serves Codex only while credits are the default, or,
+  // with no default set, while no AI account is logged in. Any other ask reads
+  // the guardian's own ChatGPT account, which shows its card.
+  const spendsCredits =
+    request.credits === true ||
+    facts.defaultProvider === "rome_credits" ||
+    (!facts.defaultProvider && signedInProviders(reports, true).rome_credits);
+  const login =
+    facts.logins.openai?.kind === "rome_credits" && !spendsCredits
+      ? undefined
+      : facts.logins.openai;
   const credits = login?.kind === "rome_credits";
   const served =
     login?.kind === "rome_credits" && login.modelsServed ? new Set(login.modelsServed) : null;
@@ -161,6 +203,19 @@ export function resolveModel(
 
   if (request.kind === "exact") {
     const { providerId, model } = request;
+    // On Rome credits a chat runs what the gateway serves: a model it does not
+    // serve gives way to the served model of the same strength.
+    if (
+      request.credits === true &&
+      providerId === "openai" &&
+      credits &&
+      served &&
+      !codexAllows(codex, model)
+    ) {
+      const tier: ModelTier = /luna|terra|mini/i.test(model) ? "small" : "large";
+      const fallback = codexTierModel(tier, codex);
+      return answer("openai", fallback, notAllowed("openai", fallback, codex));
+    }
     return answer(
       providerId,
       model,
@@ -182,6 +237,21 @@ export function resolveModel(
     return onTier(request.providerId, { report: reports.openai, credits: false, served: null });
   }
 
+  const following =
+    request.override ??
+    (facts.defaultProvider ? providerOfDefault(facts.defaultProvider) : facts.defaultProvider);
+  if (following !== undefined) return onDefault(following);
+
+  // Before the default existed: the pin decides, else the first usable
+  // provider in a fixed order.
+  if (request.pin) {
+    const { providerId, model } = request.pin;
+    return answer(
+      providerId,
+      model,
+      unusable(providerId, reports, login) ?? notAllowed(providerId, model, codex),
+    );
+  }
   const codexAccountUsable = runs("openai") && providerUsable(reports.openai);
   if (codexAccountUsable && !reports.openai?.requiresChatgptCredits) return onTier("openai");
   if (runs("anthropic") && providerUsable(reports.anthropic)) return onTier("anthropic");
@@ -196,49 +266,100 @@ export function resolveModel(
   if (runs("openai") && credits && creditsServeTier) return onTier("openai");
   if (runs("mock")) return onTier("mock");
 
-  // On Rome credits Codex counts as connected and not at its limit.
-  const connected: ProviderAvailabilityState[] = [];
-  if (runs("openai")) {
-    if (credits) connected.push("available");
-    else if (reports.openai && providerAuthorized(reports.openai))
-      connected.push(reports.openai.state);
+  return noneUsable();
+
+  // The default provider runs the ask, or nothing does: no other provider
+  // stands in. Within it the session keeps the model it last ran.
+  function onDefault(provider: AccountedProviderId | null): ModelResolutionOutcome {
+    if (provider === null || !runs(provider)) return runs("mock") ? onTier("mock") : noneUsable();
+    const failure = unusable(provider, reports, login);
+    if (failure) {
+      return {
+        ok: false,
+        failure:
+          failure.kind === "provider_unavailable" ? { ...failure, followsDefault: true } : failure,
+      };
+    }
+    const pin = request.kind === "tier" ? request.pin : undefined;
+    if (pin && pin.providerId === provider && !notAllowed(provider, pin.model, codex)) {
+      return { ok: true, providerId: provider, model: pin.model };
+    }
+    return onTier(provider);
   }
-  if (runs("anthropic") && reports.anthropic && providerAuthorized(reports.anthropic)) {
-    connected.push(reports.anthropic.state);
+
+  function noneUsable(): ModelResolutionOutcome {
+    // On Rome credits Codex counts as connected and not at its limit.
+    const connected: ProviderAvailabilityState[] = [];
+    if (runs("openai")) {
+      if (credits) connected.push("available");
+      else if (reports.openai && providerAuthorized(reports.openai))
+        connected.push(reports.openai.state);
+    }
+    if (runs("anthropic") && reports.anthropic && providerAuthorized(reports.anthropic)) {
+      connected.push(reports.anthropic.state);
+    }
+    return {
+      ok: false,
+      failure: {
+        kind: "none_usable",
+        allAtUsageLimit:
+          connected.length > 0 && connected.every((state) => state === "usage_limit_reached"),
+      },
+    };
   }
-  return {
-    ok: false,
-    failure: {
-      kind: "none_usable",
-      allAtUsageLimit:
-        connected.length > 0 && connected.every((state) => state === "usage_limit_reached"),
-    },
-  };
 }
 
 /**
- * The ask is the most specific of the chat's selection, the session's pin, the
- * agent's model, the agent's tier. Throws on an agent with neither a tier nor
- * a provider and model, or with a model beside a tier.
+ * The ask: the chat's exact selection, else the agent's exact model, else its
+ * tier. A tier that names no provider follows the default provider and keeps
+ * the session's pin while the pin is on that provider. `credits` runs it on
+ * Codex through Rome credits, at the strength the chat's model has. Throws
+ * on an agent with neither a tier nor a provider and model, or with a model
+ * beside a tier.
  */
 export function modelResolutionRequest(
   selectionId: ModelSelectionId | undefined,
   pin: { providerId: ProviderId; model: string } | undefined,
   agent: { tier?: ModelTier; providerId?: ProviderId; modelId?: string },
+  credits = false,
+): ModelResolutionRequest {
+  if (!credits) return modelAsk(selectionId, pin, agent);
+  // Rome credits run Codex: the chat's model, whoever chose it, runs at its
+  // strength there.
+  return { ...modelAsk(selectionId, pin, agent, "openai"), credits: true };
+}
+
+function modelAsk(
+  selectionId: ModelSelectionId | undefined,
+  pin: { providerId: ProviderId; model: string } | undefined,
+  agent: { tier?: ModelTier; providerId?: ProviderId; modelId?: string },
+  override?: AccountedProviderId,
 ): ModelResolutionRequest {
   if (selectionId) {
-    const { providerId, model } = MODEL_SELECTIONS[selectionId];
+    // A one-off override runs the selection's strength on that provider.
+    const id = override ? followingSelection(selectionId, override) : selectionId;
+    const { providerId, model } = MODEL_SELECTIONS[id];
     return { kind: "exact", providerId, model };
   }
-  if (pin) return { kind: "exact", ...pin };
   if (agent.modelId !== undefined) {
     if (!agent.providerId || !agent.modelId || agent.tier !== undefined) {
       throw new Error("An agent modelId requires a provider and cannot be combined with tier");
     }
+    if (pin && pin.providerId === agent.providerId) return { kind: "exact", ...pin };
     return { kind: "exact", providerId: agent.providerId, model: agent.modelId };
   }
   if (!agent.tier) {
     throw new Error("Agent config requires a tier or a provider with modelId");
   }
-  return { kind: "tier", tier: agent.tier, providerId: agent.providerId };
+  if (agent.providerId) {
+    // Restricted to one provider: the pin still holds the model it last ran there.
+    if (pin && pin.providerId === agent.providerId) return { kind: "exact", ...pin };
+    return { kind: "tier", tier: agent.tier, providerId: agent.providerId };
+  }
+  return {
+    kind: "tier",
+    tier: agent.tier,
+    ...(pin ? { pin } : {}),
+    ...(override ? { override } : {}),
+  };
 }
