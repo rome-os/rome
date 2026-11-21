@@ -255,7 +255,7 @@ import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
-import { agentOnConnect, conciergePlaceSetup } from "./concierge/on-connection.js";
+import { agentOfKindIn, conciergePlaceSetup } from "./concierge/on-connection.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -462,22 +462,15 @@ async function main() {
   );
   const connectedAccounts = new ConnectedAccountsRepository(db);
   // Read on each call, so the registry built below answers it.
+  // The kind of connection decides each account's agent: the Concierge for a
+  // kind that asks for it, such as Rome's Slack app, and main for every other
+  // (docs/architecture/channels.md#an-accounts-agent).
   const accountAgents = {
     kindOf: (connectionId: string) => connectionKindOf(connectionRegistry)(connectionId),
-    linkOf: (kind: string) => accountLinkOf(connectionRegistry)(kind),
-    accounts: connectedAccounts,
+    agentOfKind: (kind: string) => agentOfKindIn(connectionRegistry)(kind),
   };
-  // A newly connected own account of a kind that asks for it starts with the
-  // Concierge, the guardian's, so it answers from its first message. One Rome
-  // already has keeps its agent (docs/architecture/channels.md#an-accounts-agent).
-  const agentOnConnectOf = (kind: string) =>
-    agentOnConnect(
-      accountAgents.linkOf(kind),
-      connectionRegistry.getDescriptor(kind)?.startsWithConcierge === true,
-    );
-  // Rome listens to an account of a linkable connection kind only while it has an
-  // agent: each inbound port reads this by connection, and a link tells it.
-  const accountListening = new AccountListening(accountAgents);
+  // Rome listens to every account, since each one has its kind's agent.
+  const accountListening = new AccountListening();
   // The connection kind a channel name belongs to. Whatever is keyed by connection kind, such
   // as a descriptor or a channel policy, reads it.
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
@@ -674,7 +667,7 @@ async function main() {
           if (!talks(record.connectionKind)) return;
           const claimed = { ...record, domain: domainOf(event.profile), account: event.account };
           channelRecords.claim(tx, claimed, record.createdAt);
-          connectedAccounts.add(tx, record.id, agentOnConnectOf(record.connectionKind));
+          connectedAccounts.add(tx, record.id, accountAgents.agentOfKind(record.connectionKind));
           rememberOwnAccountProfile(
             accountProfilesRepo,
             tx,
@@ -690,7 +683,11 @@ async function main() {
         case "fixed":
           if (!talks(connection.connectionKind) || !event.account) return;
           channelRecords.ensureAccount(tx, connection, event.account, new Date());
-          connectedAccounts.add(tx, connection.id, agentOnConnectOf(connection.connectionKind));
+          connectedAccounts.add(
+            tx,
+            connection.id,
+            accountAgents.agentOfKind(connection.connectionKind),
+          );
           rememberOwnAccountProfile(
             accountProfilesRepo,
             tx,
@@ -2439,7 +2436,6 @@ async function main() {
       appStore,
       actionRegistry,
       agentLoader,
-      accountListening,
       skillCatalog,
       ogImageStore,
       db,

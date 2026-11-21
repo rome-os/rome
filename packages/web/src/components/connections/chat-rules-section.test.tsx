@@ -315,9 +315,6 @@ describe("ChatRulesSection", () => {
     const silent = await findCard();
     expect(within(silent).queryByLabelText(/Agent/)).toBeNull();
     expect(within(silent).getByText("None. Rome does not listen to this account.")).toBeTruthy();
-    expect(
-      within(silent).getByRole("link", { name: "Link one in Envoys" }).getAttribute("href"),
-    ).toBe("/envoys");
     // The panel says the stored choice applies once an agent is linked.
     expect(within(silent).getByText(/This chat's choice, build · coding, applies/)).toBeTruthy();
   });
