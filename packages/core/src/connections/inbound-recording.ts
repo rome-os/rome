@@ -14,7 +14,7 @@ import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn } from "../chats/storage/place.js";
 import { createLogger } from "../logger.js";
 import type { ChannelChatAdapter, ChatAdapters, Inbound } from "./chat-adapter.js";
-import { DELIVERY_ACCEPT_TIMEOUT_MS } from "./types.js";
+import { DELIVERY_ACCEPT_TIMEOUT_MS, RecordingStopped } from "./types.js";
 
 const log = createLogger("inbound-recording");
 
@@ -173,7 +173,7 @@ export function inboundRecording(
     // is for any hook swap: nobody is there to hear it, even once a new
     // hook listens again.
     if (recording.get(via.channel) !== subscription) {
-      settleInbound(message, new Error("dropped before it was recorded: recording stopped"));
+      settleInbound(message, new RecordingStopped());
       return null;
     }
     // What reaches an account Rome does not listen to never forms a chat.
@@ -275,7 +275,7 @@ export function inboundRecording(
         for (const { adapter } of recording.values()) void adapter.stop();
         recording.clear();
         for (const key of [...waiting.keys()]) {
-          settle(key, new Error("dropped before it was recorded: recording stopped"));
+          settle(key, new RecordingStopped());
         }
       };
     },

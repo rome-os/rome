@@ -298,6 +298,17 @@ export interface RuntimeKit {
  *  messages one at a time, so a message waits behind its chat's earlier ones. */
 export const DELIVERY_ACCEPT_TIMEOUT_MS = 2 * 60_000;
 
+/** A delivery's rejection when recording stopped before the message was on
+ *  record, as while an app swaps its hook. Recording starts again moments
+ *  later, so a connection can let its platform deliver the message again
+ *  without treating the refusal as a fault. */
+export class RecordingStopped extends Error {
+  constructor() {
+    super("dropped before it was recorded: recording stopped");
+    this.name = "RecordingStopped";
+  }
+}
+
 /** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
 export interface Talker extends TalkFeatures {
   /**

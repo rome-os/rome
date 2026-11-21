@@ -14,6 +14,7 @@ import { type InboundRecording, inboundRecording } from "../connections/inbound-
 import type * as connections from "../connections/message.js";
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
+import { RecordingStopped } from "../connections/types.js";
 import { legacyMessage, makePasteTalk } from "../connections/test-fixtures.js";
 import { createTestDb, type TestDb } from "./db.js";
 
@@ -145,7 +146,7 @@ describe("a delivery settles once Chats has the message on record", () => {
     const waiting = deliver(said("m2", "second"));
     await settle();
     stop();
-    await expect(waiting).rejects.toThrow(/recording stopped/);
+    await expect(waiting).rejects.toBeInstanceOf(RecordingStopped);
     release();
   });
 });
