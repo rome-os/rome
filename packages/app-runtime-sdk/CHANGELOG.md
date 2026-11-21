@@ -1,5 +1,15 @@
 # @rome-os/app-runtime
 
+## [0.11.7](https://github.com/rome-os/rome/compare/app-runtime-v0.11.6...app-runtime-v0.11.7) (2026-11-21)
+
+
+### Features
+
+* **agent:** open a session in a connection's chat with its latest messages ([#2445](https://github.com/rome-os/rome/issues/2445)) ([5798d32](https://github.com/rome-os/rome/commit/5798d329bb75b54369ed467b1d5bb9a7fb601868))
+* **app-runtime:** read a Discord chat's history from Discord itself ([#2407](https://github.com/rome-os/rome/issues/2407)) ([390f6f9](https://github.com/rome-os/rome/commit/390f6f96e393cdc84a0fdfecea474f01460d6829))
+* **connections:** add Rome's own Slack app connection ([#2507](https://github.com/rome-os/rome/issues/2507)) ([93954ec](https://github.com/rome-os/rome/commit/93954ecd641e54c89aae58fc9dc74d0148b3cbab))
+* **participation:** record every Discord and Feishu message, and decide the reply, bot and mention rules in the wake gate ([#2481](https://github.com/rome-os/rome/issues/2481)) ([2be0695](https://github.com/rome-os/rome/commit/2be0695231cd667c1c9fc908cbf77e5b8beaf0fa))
+
 ## [0.11.6](https://github.com/rome-os/rome/compare/app-runtime-v0.11.5...app-runtime-v0.11.6) (2026-11-19)
 
 

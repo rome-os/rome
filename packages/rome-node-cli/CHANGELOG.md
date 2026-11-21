@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.12](https://github.com/rome-os/rome/compare/node-v0.1.11...node-v0.1.12) (2026-11-21)
+
+
+### Features
+
+* **node:** add Audit log view to Rome Node Web UI ([#2542](https://github.com/rome-os/rome/issues/2542)) ([2511b5d](https://github.com/rome-os/rome/commit/2511b5d2579a7e5f8ab9c43edc6c0feb309600bb))
+* **node:** add lightweight Web UI and Docker image for Rome Node ([#2519](https://github.com/rome-os/rome/issues/2519)) ([044b43a](https://github.com/rome-os/rome/commit/044b43a60f3b17fcdd4c9b9ec6c2bb4ce00e2939))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/node-core bumped to 0.1.9
+
 ## [0.1.11](https://github.com/rome-os/rome/compare/node-v0.1.10...node-v0.1.11) (2026-11-15)
 
 
