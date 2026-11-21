@@ -2,7 +2,9 @@ name: Rome Node package
 
 # The unit suites of the packages run in ci.yml. This workflow checks the
 # standalone npm archives, the Web UI bundle budget, and the Docker image.
-# A manual run can publish the image.
+# release.yml calls it via workflow_call whenever @rome-os/node releases to
+# publish the multi-platform image (version, latest, and commit SHA). A manual
+# run on main can also publish on demand.
 on:
   pull_request:
     paths:
@@ -41,6 +43,18 @@ on:
     inputs:
       publish_image:
         description: Publish the Docker image to GitHub Container Registry
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      publish_image:
+        description: Publish the Docker image to GitHub Container Registry
+        required: false
+        type: boolean
+        default: false
+      tag_release:
+        description: Also tag the image as the immutable semver version from packages/rome-node-cli/package.json and latest (for stable releases)
+        required: false
         type: boolean
         default: false
 
@@ -188,12 +202,15 @@ jobs:
 
   publish-image:
     if: >-
-      github.repository == 'rome-os/rome' && github.ref == 'refs/heads/main' &&
-      github.event_name == 'workflow_dispatch' && inputs.publish_image
+      github.repository == 'rome-os/rome' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.publish_image
     needs: image
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    concurrency: rome-node-image-publish
+    concurrency:
+      group: rome-node-image-publish
+      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
@@ -206,14 +223,67 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish the multi-platform image
+        env:
+          TAG_RELEASE: ${{ inputs.tag_release || false }}
         run: |
-          image="ghcr.io/rome-os/rome-node:$GITHUB_SHA"
-          docker buildx build \
-            --platform linux/amd64,linux/arm64 \
-            --file infra/rome-node/Dockerfile \
-            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
-            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-            --metadata-file "$RUNNER_TEMP/rome-node-build.json" \
-            --tag "$image" --push .
+          set -euo pipefail
+          repo="ghcr.io/rome-os/rome-node"
+          tags=("${repo}:${GITHUB_SHA}")
+          labels=(
+            "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+            "org.opencontainers.image.revision=${GITHUB_SHA}"
+          )
+
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$'
+          stable_semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+
+          if [[ "$TAG_RELEASE" == "true" ]]; then
+            version=$(jq -er '.version' packages/rome-node-cli/package.json)
+            if [[ ! "$version" =~ $semver ]]; then
+              echo "::error::Version '${version}' in packages/rome-node-cli/package.json is not strict semver; refusing to publish."
+              exit 1
+            fi
+
+            # Enforce semver tag immutability: refuse to overwrite an already-published
+            # version tag (e.g. a manual release.yml dispatch after newer commits landed
+            # on main). "Not found" is the only proceed path; fail closed on registry errors.
+            ref="${repo}:${version}"
+            if out=$(docker buildx imagetools inspect "$ref" 2>&1); then
+              echo "::error::${ref} already exists; semver tags are immutable — cut a new version."
+              exit 1
+            elif ! grep -qiE 'not found|manifest unknown|no such manifest|name unknown' <<< "$out"; then
+              echo "::error::Could not verify ${ref} is unpublished: ${out}"
+              exit 1
+            fi
+
+            tags+=("$ref")
+            labels+=("org.opencontainers.image.version=${version}")
+            if [[ "$version" =~ $stable_semver ]]; then
+              tags+=("${repo}:latest")
+            else
+              echo "Skipping :latest tag for prerelease version '${version}'."
+            fi
+          fi
+
+          build_args=(
+            --platform linux/amd64,linux/arm64
+            --file infra/rome-node/Dockerfile
+            --metadata-file "$RUNNER_TEMP/rome-node-build.json"
+          )
+          for label in "${labels[@]}"; do
+            build_args+=(--label "$label")
+          done
+          for tag in "${tags[@]}"; do
+            build_args+=(--tag "$tag")
+          done
+
+          docker buildx build "${build_args[@]}" --push .
+
           digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[a-f0-9]{64}$"))' "$RUNNER_TEMP/rome-node-build.json")
-          printf 'Published `%s@%s`. Verify anonymous pulls on amd64 and arm64 after setting the package public.\n' "${image%:*}" "$digest" >> "$GITHUB_STEP_SUMMARY"
+          {
+            printf 'Published `%s@%s`\n\n' "$repo" "$digest"
+            printf 'Tags:\n'
+            for tag in "${tags[@]}"; do
+              printf -- '- `%s`\n' "$tag"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
