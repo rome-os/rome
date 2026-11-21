@@ -215,7 +215,7 @@ export function createComputerUseHost(options: ComputerUseHostOptions = {}): Com
       version: 1,
       platform: platform === "darwin" && supported ? "macos" : platform,
       configured,
-      actions: supported ? advertisedActions : [],
+      actions: configured ? advertisedActions : [],
     };
   };
   async function stop(sessionId: string, session: Session, cause: string): Promise<void> {
@@ -257,7 +257,7 @@ export function createComputerUseHost(options: ComputerUseHostOptions = {}): Com
       }
       await Promise.allSettled([
         ...expired.map(async ([id, session]) => {
-          await stop(id, session, "expired");
+          await stop(id, session, "expired").catch(() => {});
           await native.call("cancel", { sessionId: id, reason: "cancelled" }).catch(() => {});
           if (sessions.get(id) === session && !session.busy) sessions.delete(id);
         }),
@@ -560,13 +560,23 @@ export function createComputerUseHost(options: ComputerUseHostOptions = {}): Com
       opening++;
       try {
         const sessionId = randomBytes(24).toString("base64url");
-        const binding = await native.call(preempting ? "preempt" : "bind", {
-          windowRef: args.windowRef,
-          sessionId,
-          ...(foregroundNavigationFallback ? { foregroundNavigationFallback: true } : {}),
-          ...(leased ? { lease: true } : {}),
-          ...(preempting ? { preemptToken: args.preemptToken } : {}),
-        });
+        let binding: unknown;
+        try {
+          binding = await native.call(preempting ? "preempt" : "bind", {
+            windowRef: args.windowRef,
+            sessionId,
+            ...(foregroundNavigationFallback ? { foregroundNavigationFallback: true } : {}),
+            ...(leased ? { lease: true } : {}),
+            ...(preempting ? { preemptToken: args.preemptToken } : {}),
+          });
+        } catch (error) {
+          if (
+            !(error instanceof ComputerUseError && error.details.effectStatus === "not_dispatched")
+          ) {
+            await native.call("cancel", { sessionId, reason: "host_stopped" }).catch(() => {});
+          }
+          throw error;
+        }
         let capabilities: ReturnType<typeof bindingCapabilities>;
         let bindingSupportsEnd: boolean;
         let leaseDeadline: number | undefined;

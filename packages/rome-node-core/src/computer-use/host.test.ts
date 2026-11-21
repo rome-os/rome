@@ -1871,4 +1871,73 @@ describe("shared computer-use host", () => {
       value(await other.run("computer.observe", { sessionId: elsewhere }, "owner")),
     ).toHaveProperty("observationId");
   });
+
+  it("cancels a generated session ID when a native bind reply is lost, but not on not_dispatched errors", async () => {
+    const f = await fixture();
+    const original = f.native.call.bind(f.native);
+    let mode: "lost" | "not_dispatched" = "lost";
+    let attemptedId: string | undefined;
+    f.native.call = async (method, params) => {
+      if (method === "bind") {
+        attemptedId = String(params.sessionId);
+        if (mode === "lost") {
+          throw new ComputerUseError("helper_timeout", "Lost bind reply", {
+            effectStatus: "unknown",
+          });
+        }
+        throw new ComputerUseError("window_not_found", "Window absent", {
+          effectStatus: "not_dispatched",
+        });
+      }
+      return original(method, params);
+    };
+    const lost = await f.host.run("computer.bind", { windowRef: "window-token" }, "owner");
+    expect(lost).toMatchObject({ ok: false, error: { code: "helper_timeout" } });
+    expect(attemptedId).toBeTruthy();
+    expect(f.calls.filter((call) => call.method === "cancel")).toEqual([
+      { method: "cancel", params: { sessionId: attemptedId, reason: "host_stopped" } },
+    ]);
+
+    mode = "not_dispatched";
+    const refused = await f.host.run("computer.bind", { windowRef: "window-token" }, "owner");
+    expect(refused).toMatchObject({ ok: false, error: { code: "window_not_found" } });
+    expect(f.calls.filter((call) => call.method === "cancel")).toHaveLength(1);
+  });
+
+  it("advertises no computer actions when the native app bundle is not configured", async () => {
+    const stateDir = await mkdtemp("/tmp/rome-cua-unconfigured-");
+    temporary.push(stateDir);
+    const host = createComputerUseHost({
+      stateDir,
+      platform: "darwin",
+      appPath: join(stateDir, "missing.app"),
+    });
+    expect(await host.describe()).toMatchObject({
+      prefix: "computer",
+      configured: false,
+      actions: [],
+    });
+  });
+
+  it("still cancels expired sessions during reclaim when recording the ledger stop fails", async () => {
+    const f = await fixture();
+    const ids: string[] = [];
+    for (let i = 0; i < 128; i++) ids.push(await f.bound());
+    // Expire all 128 sessions and make stateDir unwritable so ledger.terminal() fails.
+    f.advance(16 * 60 * 1000);
+    await chmod(f.stateDir, 0o500);
+    try {
+      const replacement = await f.host.run("computer.bind", { windowRef: "window-token" }, "owner");
+      expect(replacement.ok).toBe(true);
+    } finally {
+      await chmod(f.stateDir, 0o700);
+    }
+    const cancelled = new Set(
+      f.calls
+        .filter((call) => call.method === "cancel")
+        .map((call) => String(call.params.sessionId)),
+    );
+    expect(cancelled.size).toBe(128);
+    expect(cancelled.has(ids[0]!)).toBe(true);
+  });
 });

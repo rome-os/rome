@@ -39,7 +39,6 @@ interface ProgramOutput {
   signal: NodeJS.Signals | null;
   stdout: Buffer;
   stderr: Buffer;
-  truncated: { stdout: boolean; stderr: boolean };
 }
 
 function execInput(input: unknown): ExecInput | null {
@@ -320,7 +319,6 @@ export function createExecutor(
         child.stdin.end(stdin);
       }
       const output: Record<"stdout" | "stderr", Buffer[]> = { stdout: [], stderr: [] };
-      const truncated = { stdout: false, stderr: false };
       for (const stream of ["stdout", "stderr"] as const) {
         child[stream]?.on("data", (chunk: Buffer) => {
           output[stream].push(chunk);
@@ -342,7 +340,6 @@ export function createExecutor(
           signal,
           stdout: Buffer.concat(output.stdout),
           stderr: Buffer.concat(output.stderr),
-          truncated,
         };
         notes.fields.exitCode = exitCode;
         notes.fields.signal = signal;
@@ -371,7 +368,7 @@ export function createExecutor(
           signal: output.signal,
           stdout: redactText(output.stdout),
           stderr: redactText(output.stderr),
-          truncated: output.truncated,
+          truncated: { stdout: false, stderr: false },
         },
       };
     },
@@ -402,7 +399,7 @@ export function createExecutor(
             exitCode: output.exitCode,
             signal: output.signal,
             stderr: redactText(output.stderr),
-            truncated: output.truncated,
+            truncated: { stdout: false, stderr: false },
           },
         },
         body: redactBytes(output.stdout, secrets),

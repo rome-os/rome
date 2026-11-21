@@ -367,9 +367,11 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
       if (closing) throw new RpcError(-32000, "The caller daemon is stopping.");
       const params = Object.hasOwn(value, "params") ? value.params : {};
       if (!isRecord(params)) throw new RpcError(-32602, "Invalid params");
-      const binary = value.method === "devices.runBinary";
-      if (binary !== Boolean(input))
-        throw new RpcError(-32600, "This method requires the matching message encoding.");
+      if ((value.method === "devices.runBinary") !== Boolean(input))
+        throw new RpcError(
+          -32600,
+          "Only devices.runBinary uses binary messages, and it requires one.",
+        );
       let result: unknown;
       let body: Uint8Array | undefined;
       if (value.method === "daemon.hello") {

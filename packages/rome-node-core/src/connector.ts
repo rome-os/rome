@@ -3,6 +3,7 @@ import {
   actionError,
   isRecord,
   parseResponse,
+  type ActionRequest,
   type ActionResponse,
   type BinaryActionResult,
 } from "./actions.js";
@@ -215,11 +216,7 @@ export class DeviceConnector {
    * Requests and channels share one cap. Callers check it synchronously right before
    * registering, because any await between the check and the registration lets a burst pass it.
    */
-  private requestSlot(id: string): ActionResponse | null {
-    if (this.pending.has(id) || this.channels.has(id))
-      return actionError("duplicate_request_id", "This request ID is already in use.", {
-        effectStatus: "not_dispatched",
-      });
+  private full(): ActionResponse | null {
     return this.pending.size + this.channels.size >= MAX_PENDING
       ? actionError("busy", "Too many device requests are pending.")
       : null;
@@ -239,14 +236,14 @@ export class DeviceConnector {
     const envelope = {
       id,
       to: target,
-      payload: { type: "request", action, args },
+      payload: { type: "request", action, args } satisfies ActionRequest,
     };
     try {
       JSON.stringify(envelope);
     } catch {
       return actionError("invalid_request", "Action arguments must be JSON.");
     }
-    const busy = this.requestSlot(id);
+    const busy = this.full();
     if (busy) return busy;
     return new Promise((resolve) => {
       const finish = (response: ActionResponse) => {
@@ -291,7 +288,7 @@ export class DeviceConnector {
       };
     let meta: Uint8Array;
     try {
-      meta = encodeMeta({ type: "request", action, args });
+      meta = encodeMeta({ type: "request", action, args } satisfies ActionRequest);
     } catch {
       return {
         response: actionError("invalid_request", "Action arguments must be JSON."),
@@ -308,9 +305,9 @@ export class DeviceConnector {
       };
     const refused = await this.admit();
     if (refused) return { response: refused, body: empty };
-    const id = randomUUID();
-    const busy = this.requestSlot(id);
+    const busy = this.full();
     if (busy) return { response: busy, body: empty };
+    const id = randomUUID();
     const peer = target.toLowerCase();
     return new Promise((resolve) => {
       const finish = (response: ActionResponse, output: Uint8Array = empty) => {
@@ -351,9 +348,9 @@ export class DeviceConnector {
     if (!isUuid(target)) return actionError("invalid_request", "A device UUID is required.");
     const refused = await this.admit();
     if (refused) return refused;
-    const id = randomUUID();
-    const busy = this.requestSlot(id);
+    const busy = this.full();
     if (busy) return busy;
+    const id = randomUUID();
     const peer = target.toLowerCase();
     this.channels.set(id, { target: peer, events });
     return {

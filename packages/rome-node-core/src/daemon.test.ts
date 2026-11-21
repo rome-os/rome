@@ -174,15 +174,7 @@ async function fixture(prepare?: (directory: string) => Promise<void>) {
   if (!state) throw new Error("Daemon did not start");
   const client = createNodeClient(config);
   cleanup.push(async () => client.disconnect());
-  return {
-    config,
-    client,
-    received,
-    gate,
-    directory,
-    token: state.token,
-    disconnectCaller: () => callerSocket?.terminate(),
-  };
+  return { config, client, received, gate, directory, token: state.token };
 }
 
 /**

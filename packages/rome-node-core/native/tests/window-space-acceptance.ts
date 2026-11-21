@@ -160,7 +160,8 @@ async function main() {
         const args = {
           sessionId,
           screenshot,
-          ...(previous ? { sinceObservationId: previous.observationId } : {}),
+          ...(opts.full ? { full: true } : {}),
+          ...(previous ? { baseVersion: previous.stateVersion } : {}),
         };
         const { response, body } = screenshot
           ? await host.runBinary("computer.observe", args, new Uint8Array(), peer)

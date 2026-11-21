@@ -19,7 +19,7 @@ function result(response: unknown): Record<string, unknown> {
   return response.result;
 }
 
-async function fixture() {
+async function fixture(scope?: { kind: "window_only"; peer: string }) {
   const stateDir = await mkdtemp("/tmp/rome-cua-executor-");
   cleanup.push(() => rm(stateDir, { recursive: true, force: true }));
   const nativeCalls: Array<{ method: string; params: Record<string, unknown> }> = [];
@@ -98,7 +98,7 @@ async function fixture() {
       ends.push({ outcome, fields, content });
     },
     host: () => {},
-    status: async () => ({ state: "ok" as const }),
+    status: async () => ({ state: "ok" as const, path: "/private/audit.db" }),
   };
   const replies: OutboundEnvelope[] = [];
   const frames: Frame[] = [];
@@ -115,6 +115,7 @@ async function fixture() {
       return true;
     },
     host,
+    scope,
   );
   cleanup.push(async () => {
     executor.disconnect();
@@ -124,6 +125,18 @@ async function fixture() {
     const before = replies.length;
     await executor.receive({ id: requestId, from, payload: { type: "request", action, args } });
     return replies[before]?.payload;
+  }
+  async function runFrame(action: string, args: unknown = {}, peer = owner) {
+    const before = frames.length;
+    await executor.receiveFrame({
+      type: FRAME_TYPE.request,
+      id: requestId,
+      peer,
+      meta: encodeMeta({ type: "request", action, args }),
+      body: new Uint8Array(),
+    });
+    const frame = frames[before];
+    return { frame, payload: frame ? decodeMeta(frame.meta) : undefined };
   }
   async function bound() {
     return String(result(await run("computer.bind", { windowRef: "opaque-window" })).sessionId);
@@ -137,6 +150,7 @@ async function fixture() {
     starts,
     ends,
     run,
+    runFrame,
     bound,
     dispatch: (fn: typeof dispatch) => {
       dispatch = fn;
@@ -217,5 +231,58 @@ describe("computer use through the shared executor", () => {
     expect(f.ends.at(-1)?.content).toEqual({});
     expect(JSON.stringify([f.starts, f.ends])).not.toContain("iVBOR");
     expect(JSON.stringify([f.starts, f.ends])).not.toContain("PRIVATE AX CONTENT");
+  });
+
+  it("enforces the window_only authorization scope across JSON and binary transports", async () => {
+    const otherPeer = "11111111-1111-4111-8111-111111111111";
+    const f = await fixture({ kind: "window_only", peer: owner });
+
+    // Wrong peer is refused for system.info and computer.* on both transports.
+    for (const action of ["system.info", "computer.windows", "computer.bind"]) {
+      expect(await f.run(action, {}, otherPeer)).toMatchObject({
+        ok: false,
+        error: { code: "computer_use_denied", details: { effectStatus: "not_dispatched" } },
+      });
+      expect((await f.runFrame(action, {}, otherPeer)).payload).toMatchObject({
+        ok: false,
+        error: { code: "computer_use_denied", details: { effectStatus: "not_dispatched" } },
+      });
+    }
+    expect(f.nativeCalls).toHaveLength(0);
+    expect(f.starts).toHaveLength(0);
+
+    // Authorized peer sees only filtered actions, no transferVersion, and trimmed audit status.
+    const info = result(await f.run("system.info", {}, owner));
+    expect(info.actions).toContain("system.info");
+    expect(info.actions).toContain("computer.bind");
+    expect(info.actions).not.toContain("exec");
+    expect(info.actions).not.toContain("fs.list");
+    expect(info.actions).not.toContain("computer.preempt");
+    expect(info).not.toHaveProperty("transferVersion");
+    expect(info.audit).toEqual({ state: "ok" });
+    expect(info.usage).toMatchObject({
+      "computer.bind": expect.any(String),
+      "computer.observe": expect.any(String),
+    });
+
+    // Authorized peer is refused for exec, fs.list, transfer.open, and computer.preempt.
+    for (const action of ["exec", "fs.list", "transfer.open", "computer.preempt"]) {
+      expect(await f.run(action, {}, owner)).toMatchObject({
+        ok: false,
+        error: { code: "unsupported_action", details: { effectStatus: "not_dispatched" } },
+      });
+      expect((await f.runFrame(action, {}, owner)).payload).toMatchObject({
+        ok: false,
+        error: { code: "unsupported_action", details: { effectStatus: "not_dispatched" } },
+      });
+    }
+    expect(f.nativeCalls).toHaveLength(0);
+
+    // Authorized peer can still run ordinary computer.* actions on both transports.
+    const sessionId = await f.bound();
+    const observed = await f.runFrame("computer.observe", { sessionId, screenshot: true }, owner);
+    expect(result(observed.payload)).toMatchObject({
+      screenshot: { mimeType: "image/png", byteLength: 68 },
+    });
   });
 });
