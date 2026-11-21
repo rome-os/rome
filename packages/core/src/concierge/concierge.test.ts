@@ -55,6 +55,7 @@ import {
 import { ConciergeTasks } from "./tasks.js";
 import { WORKING_GRACE_MS } from "./message-status.js";
 import { buildConciergeTools } from "./tools.js";
+import { CONNECTION_TOOLS } from "./on-connection.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import {
   reportOf,
@@ -750,13 +751,162 @@ describe("Concierge tools", () => {
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
   });
 
-  it("register none for the Concierge in a chat on a connection, where it answers in plain text", async () => {
+  it("register only the task tools for the Concierge in a chat on a connection, where it answers in plain text", async () => {
     const on = setup();
     const telegram = {
       ...on.context(),
       getThreadContext: () => ({ channel: "telegram", threadId: "123", channelUserId: "456" }),
     };
-    expect(await buildConciergeTools(on.service, telegram)).toEqual([]);
+    expect((await buildConciergeTools(on.service, telegram)).map((t) => t.name)).toEqual([
+      ...CONNECTION_TOOLS,
+    ]);
+  });
+
+  describe("in a chat on a connection", () => {
+    /** A Discord channel where the Concierge answers, as Chats keeps it. */
+    const connectionChat = async (s: ReturnType<typeof setup>) => {
+      const { id } = await s.storedChats.ensureChannelChat({
+        channel: "discord_app",
+        threadId: "900",
+        threadType: "group",
+        agentName: CONCIERGE_AGENT_ID,
+      });
+      const stored = await s.storedChats.getSession(id);
+      if (stored) s.sessions.set(id, stored);
+      return id;
+    };
+    const there = (
+      s: ReturnType<typeof setup>,
+      chatId: string,
+      senderBondLevel: string | undefined,
+    ): SessionToolContext => ({
+      ...s.context(),
+      channelThreadKey: "discord_app:900",
+      getThreadContext: () => ({
+        channel: "discord_app",
+        threadId: "900",
+        romeSessionId: chatId,
+        threadType: "group",
+        ...(senderBondLevel ? { senderBondLevel } : {}),
+      }),
+    });
+    const run = async (
+      context: SessionToolContext,
+      s: ReturnType<typeof setup>,
+      name: string,
+      input: Record<string, unknown>,
+    ) => {
+      const found = (await buildConciergeTools(s.service, context)).find((t) => t.name === name);
+      if (!found) throw new Error(`no tool ${name}`);
+      return found.handler(input);
+    };
+
+    it("starts a task that reports to that chat, and links it by the dashboard's address", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const result = await run(there(s, chatId, "guardian"), s, "chat_start", {
+        title: "Flights",
+        brief: "Find flights to Tokyo",
+      });
+      expect(result.isError).toBeFalsy();
+      const started = JSON.parse(result.content[0]!.text) as { chatId: string; link: string };
+      expect(started.link).toMatch(
+        new RegExp(`^\\[Flights\\]\\(https?://[^)]+/chat/${started.chatId}\\)$`),
+      );
+      const found = await s.taskRepo.getWithChat(started.chatId);
+      expect(found?.conciergeChat).toMatchObject({ id: chatId, main: false, onConnection: true });
+      // Its news goes to that chat while it is live, not to the main chat.
+      expect(await s.service.deliveryChat(chatId, "guardian")).toBe(chatId);
+    });
+
+    it("reacts to the guardian's message of the turn through the chat's account", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const reacted: unknown[] = [];
+      s.deps.reactInChat = async (chat, messageId, emoji) => {
+        reacted.push([chat.channel, chat.threadId, messageId, emoji]);
+      };
+      s.deps.webchatRepo.getTurnChatMessages = (async () => [
+        { id: "800000000000000001", role: "user" },
+      ]) as never;
+      const result = await run(there(s, chatId, "guardian"), s, "react", { emoji: "👍" });
+      expect(result.isError).toBeFalsy();
+      expect(reacted).toEqual([["discord_app", "900", "800000000000000001", "👍"]]);
+      // Anyone else's turn gets no reaction, and one cannot be taken back here.
+      expect((await run(there(s, chatId, "other"), s, "react", { emoji: "👍" })).isError).toBe(
+        true,
+      );
+      expect((await run(there(s, chatId, "guardian"), s, "react", { emoji: null })).isError).toBe(
+        true,
+      );
+      expect(reacted).toHaveLength(1);
+    });
+
+    it("refuses the task tools to anyone but the guardian", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const result = await run(there(s, chatId, "other"), s, "chat_start", {
+        title: "Flights",
+        brief: "Find flights",
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain("Only the guardian");
+    });
+
+    it("lets a task's report, which no one sent, read the chat's tasks", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const result = await run(there(s, chatId, undefined), s, "chat_list", { here: true });
+      expect(result.isError).toBeFalsy();
+    });
+
+    it("never takes a dashboard chat, also a channel row, for a chat on a connection", async () => {
+      const s = setup();
+      await s.storedChats.createSession(
+        "topic-x",
+        "Trips",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        CONCIERGE_AGENT_ID,
+      );
+      const topic = await s.storedChats.getSession("topic-x");
+      if (topic) s.sessions.set("topic-x", topic);
+      expect(await s.service.connectionChat("topic-x")).toBeNull();
+      expect(await s.service.connectionChat(await connectionChat(s))).not.toBeNull();
+    });
+
+    it("reports to a chat the recorder opened, which stores no agent, when the Concierge answers its account", async () => {
+      const s = setup();
+      // Recording opens an inbound chat as main's, which is stored as no agent.
+      const { id } = await s.storedChats.ensureChannelChat({
+        channel: "discord_app",
+        threadId: "901",
+        threadType: "group",
+        agentName: "main",
+      });
+      const stored = await s.storedChats.getSession(id);
+      if (stored) s.sessions.set(id, stored);
+      expect(stored?.agentName ?? null).toBeNull();
+      // The account's agent decides, as the inbox routes the chat's messages.
+      let answering: string | null = CONCIERGE_AGENT_ID;
+      s.deps.channelAgentOf = (channel) => (channel === "discord_app" ? answering : null);
+      expect(await s.service.connectionChat(id)).toMatchObject({
+        channel: "discord_app",
+        threadId: "901",
+      });
+      expect(await s.service.deliveryChat(id, "guardian")).toBe(id);
+      // An account main answers is no Concierge chat: its tasks report to the main chat.
+      answering = "core:main";
+      expect(await s.service.connectionChat(id)).toBeNull();
+      expect(await s.service.deliveryChat(id, "guardian")).not.toBe(id);
+    });
+
+    it("sends a task's report to the main chat once that chat is gone", async () => {
+      const s = setup();
+      expect(await s.service.deliveryChat("gone-chat", "guardian")).not.toBe("gone-chat");
+    });
   });
 
   it("say posts one message under the running turn", async () => {

@@ -204,6 +204,7 @@ import { ActionWorkerCoordinator } from "./apps/actions/action-subprocess.js";
 import { endInterruptedRuns } from "./apps/actions/restart-recovery.js";
 import { WorkerRpcServer } from "./apps/actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./apps/actions/worker-rpc-client.js";
+import { connectionTyping } from "./core/connection-typing.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import type { ChatResetPolicy } from "./core/chat-reset-policy.js";
 import {
@@ -398,6 +399,12 @@ import type { KindMount } from "./connections/kind-mount.js";
 import { guardianOnly } from "./access/guardian-only.js";
 import { feishu } from "./connections/kinds/feishu/index.js";
 import { linkedin } from "./connections/kinds/linkedin/index.js";
+import {
+  deliverDiscordFrame,
+  discordApp,
+  isDiscordFrame,
+  romeCloudDiscordApp,
+} from "./connections/kinds/discord-app/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
@@ -1343,9 +1350,26 @@ async function main() {
     ownerOf: async (taskId) => (await conciergeTasksRepo.getWithChat(taskId))?.owner ?? null,
   });
   const conciergeTasksRepo = new ConciergeTasksRepository(db);
+  // The connection behind a channel, for what its talker offers that no
+  // channel port carries: typing by the dashboard's rule, and reactions.
+  const connectionOfChannel = (channel: string) => {
+    const id = channelRecords.byId(channel)?.connectionId;
+    return id ? connectionRegistry.all().find((connection) => connection.id === id) : undefined;
+  };
   const concierge: ConciergeService = new ConciergeService({
     skillCatalog,
     settingsRepo,
+    reactInChat: async (chat, messageId, emoji) => {
+      const added = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.add(chat.threadId as ChatId, messageId, emoji),
+      );
+      if (!added) throw new Error("This chat's account takes no reaction.");
+      await added;
+    },
+    // Who answers a chat on a connection, as the inbox routes it: the
+    // account's agent (a task started there reports there when it is the
+    // Concierge).
+    channelAgentOf: byChannel(channelRecords, accountAgentResolver(accountAgents, agentLoader)),
     owners: createConciergeOwners({
       settingsRepo,
       visitorProfiles: new VisitorProfilesRepository(db),
@@ -1533,6 +1557,15 @@ async function main() {
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
     chatResetPolicy,
     openingFor,
+    connectionTyping({
+      typingOf: (channel) => {
+        const connection = connectionOfChannel(channel);
+        if (!connection?.withTalker((talker) => talker.typing !== undefined)) return null;
+        return (chatId) =>
+          connection.withTalker((talker) => talker.typing?.show(chatId as ChatId)) ??
+          Promise.resolve();
+      },
+    }),
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 
@@ -2022,7 +2055,11 @@ async function main() {
     favorService,
     appConnections,
   });
+  // Rome's Discord bot deposits into the instance's own mailbox, marked by its
+  // header: those frames go to its connection, never to the app the mailbox
+  // otherwise serves (connections/kinds/discord-app/drain.ts).
   const relayDrainer = new RelayDrainer(relayDrains, async (drain, event) => {
+    if (isDiscordFrame(event.headers)) return deliverDiscordFrame(connectionRegistry, event);
     const res = await relayDispatcher.dispatch(
       drain.targetAppId,
       buildRelayReplayRequest(drain, event),
@@ -2214,6 +2251,22 @@ async function main() {
       listAgents: () => agentLoader.list().map((agent) => agent.name),
       accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
       hasAgent: (name) => agentLoader.find(name) !== undefined,
+    }),
+    discordApp({
+      cloud: romeCloudDiscordApp(),
+      depositUrl: async () => {
+        const relay = await settingsRepo.get<Partial<RelayDrainSetting>>(RELAY_SETTING_KEY);
+        return typeof relay?.depositUrl === "string" && relay.depositUrl ? relay.depositUrl : null;
+      },
+      // People decides who an account is; each one the Worker forwards the
+      // guardian bound while signed in to this Rome's Rome Cloud account.
+      linkGuardian: async (userId) => {
+        // One more of the guardian's accounts: never re-points another, such
+        // as a second bound account or the guardian's own bot's link.
+        await linkGuardianToAccount(peopleRepo, "discord", userId, { addOnly: true });
+      },
+      nameOf: async (userId) =>
+        (await peopleRepo.byAccount({ platform: "discord", id: userId }))?.displayName,
     }),
     linkedin({
       syncSink: refreshingAfter(
