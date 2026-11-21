@@ -140,13 +140,23 @@ describe("a Slack app backlog, end to end", () => {
       channelsOn: () => [SLACK_APP_KIND],
     });
     const events = new ChatEvents();
+    const recording = inboundRecording(
+      {
+        chats: wiring.chats,
+        messages: wiring.messages,
+        events,
+        adapters: wiring.adapters,
+        hold: (messageId) => {
+          wiring.links.wakeUndecided(messageId);
+          return () => wiring.links.wakeDecided(messageId);
+        },
+      },
+      [channel],
+    );
     const said = messagesSaid({
       chats: wiring.chats,
       sessions: new ChatsWebChatRepository(testDb.db),
-      recording: inboundRecording(
-        { chats: wiring.chats, messages: wiring.messages, events, adapters: wiring.adapters },
-        [channel],
-      ),
+      recording,
       events,
       wakes: wiring.links,
     });
@@ -163,7 +173,8 @@ describe("a Slack app backlog, end to end", () => {
         },
         expiresAt: "never",
       });
-    return { said, grant, settled: () => wiring.adapters.of(channel).settled() };
+    // Recorded, and every queued MessageSaid raised.
+    return { said, grant, settled: () => recording.settled() };
   }
 
   it("keeps each of 250 direct messages, hands none over twice, and holds up no other direct message", async () => {

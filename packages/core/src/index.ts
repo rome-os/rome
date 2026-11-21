@@ -2094,6 +2094,13 @@ async function main() {
       events: chatsEvents,
       adapters: chatsWired.adapters,
       listens: (connectionId) => accountListening.listens(connectionId),
+      // Recorded before its MessageSaid is raised, so held out of catch-up
+      // from its record until Agents, MessageSaid's first listener, has
+      // taken its own hold, which it does synchronously.
+      hold: (messageId) => {
+        chatsWired.links.wakeUndecided(messageId);
+        return () => chatsWired.links.wakeDecided(messageId);
+      },
     },
     hookChannels,
   );

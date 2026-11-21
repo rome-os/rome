@@ -22,6 +22,11 @@ const log = createLogger("inbound-recording");
  *  chat to hear it. */
 const HEARD_FOR_MS = 10 * 60_000;
 
+/** Raises waiting in one place at which it is reported as backing up, as
+ *  many messages as a channel port holds per address. The place's next
+ *  message is still recorded at once, and its raise still queued. */
+export const RAISES_BACKING_UP = 100;
+
 export interface InboundRecordingDeps {
   /** Starts the chat a message is said in, or finds it. */
   chats: Pick<ChatRepository, "start">;
@@ -37,6 +42,15 @@ export interface InboundRecordingDeps {
   /** How long a message may wait to be recorded before its acceptance
    *  rejects. Defaults to {@link DELIVERY_ACCEPT_TIMEOUT_MS}. */
   acceptTimeoutMs?: number;
+  /** Holds recorded message `messageId` out of every read a turn makes from
+   *  its record until its MessageSaid's first listener, Agents, has taken its
+   *  own hold, answering the release. That rests on Agents listening first
+   *  and taking its hold synchronously.
+   *  A listener that decides its wake holds it on its own for longer
+   *  (docs/domains/participation.md#wake). Required: a message is on record
+   *  before its raise, so without it a turn could read one whose wake is not
+   *  decided yet. */
+  hold: (messageId: number) => () => void;
 }
 
 export interface InboundRecording {
@@ -47,10 +61,13 @@ export interface InboundRecording {
    */
   listen(): () => void;
   /** The platform's event recorded message `id` arrived in on channel
-   *  `channel`, while it is being heard. */
+   *  `channel`, from its record until its MessageSaid's listeners were called. */
   heard(channel: string, id: number): InboundEvent | undefined;
   /** Record `channels` too, such as a second bot whose Talk first unlocked. */
   addChannels(channels: readonly Channel[]): void;
+  /** Resolves once every message the channels have handed over so far is
+   *  recorded and its MessageSaid heard. */
+  settled(): Promise<void>;
   /**
    * Settles once message `messageId`, said in `chatId` on `channel` through
    * Connection `connectionId`, is on record in its chat, whether recorded now
@@ -70,10 +87,12 @@ export interface InboundRecording {
 
 /**
  * Records what arrives on `channels` and on any channel added later. Each
- * channel's adapter is started once, so a chat's messages are recorded one at
- * a time in arrival order, and each one's MessageSaid is heard by every
- * listener before the chat's next one is recorded. A listener that is slow
- * therefore holds up its chat's later messages.
+ * channel's adapter is started once. A message is recorded as soon as its
+ * channel hands it over, in the order handed, and its delivery settles then.
+ * Only its MessageSaid waits, behind the raises of the place's earlier
+ * messages, since a message's wake depends on the wakes before it. A listener
+ * that is slow holds up the raises of its place's later messages, never their
+ * record.
  */
 export function inboundRecording(
   deps: InboundRecordingDeps,
@@ -121,16 +140,19 @@ export function inboundRecording(
     );
   };
 
-  /** The adapter's keys of each message being heard, by channel and recorded
-   *  id. */
-  const hearing = new Map<string, { chat: string; key: string }>();
+  /** The platform's event of each message being heard, by channel and
+   *  recorded id, from its record until its raise is heard. The adapter lets
+   *  go of the event once the message is recorded. */
+  const hearing = new Map<string, InboundEvent | undefined>();
 
-  /** The last recording queued in each place, by platform, chat and thread.
-   *  Each of Rome's accounts in a place delivers its messages through its own
-   *  channel, and a recording still running when recording stops outlives
-   *  it, so the place's next message, from any account or subscription,
-   *  waits for it here. */
-  const tails = new Map<string, Promise<number | null>>();
+  /** The raises queued in each place, oldest first, by platform, chat and
+   *  thread. Each of Rome's accounts in a place delivers its messages through
+   *  its own channel, and a raise still queued when recording stops outlives
+   *  it, so the place's next raise, from any account or subscription, waits
+   *  behind them here. */
+  const raising = new Map<string, Promise<void>[]>();
+  const placeOf = (message: Inbound): string =>
+    `${message.chat.platform}\0${message.chat.externalId}\0${message.thread?.id ?? ""}`;
 
   /** The messages recorded lately, by chat and key, with the accounts that
    *  have heard each one, by platform and id, so a reconnected account that
@@ -149,33 +171,80 @@ export function inboundRecording(
     }
   };
 
-  /** Raise MessageSaid for `recorded` as heard on `via`, holding the platform's
-   *  event for the listeners while they hear it. */
-  const raise = async (recorded: RecordedMessage, message: Inbound): Promise<void> => {
-    const { via } = message;
-    const hearingAs = `${via.channel}\0${recorded.id}`;
-    hearing.set(hearingAs, { chat: message.chat.externalId, key: message.key });
-    try {
-      await deps.events.publish({
-        type: "MessageSaid",
-        message: recorded,
-        via: { channel: via.channel, account: via.account },
-      });
-    } finally {
-      hearing.delete(hearingAs);
-    }
-  };
-
-  const recordOne = async (
+  /** Queue MessageSaid for `recorded` as heard on `via`, behind the raises of
+   *  its place's earlier messages, holding the platform's event for the
+   *  listeners until they were called. */
+  const raise = (
+    recorded: RecordedMessage,
     message: Inbound,
     subscription: { readonly adapter: ChannelChatAdapter },
-  ): Promise<number | null> => {
+  ): void => {
     const { via } = message;
-    // A message still queued when the last listener left is dropped, as it
-    // is for any hook swap: nobody is there to hear it, even once a new
-    // hook listens again. Its delivery was refused when recording stopped;
-    // a waiter now is a redelivery under the new subscription, which records
-    // it.
+    // Held from its record until its MessageSaid is raised, let go once.
+    let letGo: (() => void) | undefined = deps.hold(recorded.id);
+    const release = (): void => {
+      letGo?.();
+      letGo = undefined;
+    };
+    const hearingAs = `${via.channel}\0${recorded.id}`;
+    hearing.set(hearingAs, subscription.adapter.heard(message.chat.externalId, message.key));
+    const place = placeOf(message);
+    const queued = raising.get(place) ?? [];
+    if (queued.length === RAISES_BACKING_UP) {
+      log.warn("inbound raises backing up", {
+        channel: via.channel,
+        chat: message.chat.externalId,
+        thread: message.thread?.id ?? null,
+        waiting: queued.length,
+      });
+    }
+    const raised = (queued.at(-1) ?? Promise.resolve())
+      .then(async () => {
+        // The message is on record and its delivery settled, so the platform
+        // will not deliver it again: a hook that listens again by the time
+        // its turn comes hears it. Only with nobody recording the channel at
+        // all is the raise dropped. The message stays on record.
+        if (!recording.has(via.channel)) return;
+        const heard = deps.events.publish({
+          type: "MessageSaid",
+          message: recorded,
+          via: { channel: via.channel, account: via.account },
+        });
+        // Publishing calls the first listener at once, and Agents, listening
+        // first, holds the message from there until its wake is decided.
+        release();
+        await heard;
+      })
+      .catch((error: unknown) => {
+        // On record already, and its delivery settled: a failed raise holds
+        // up nothing after it in the place.
+        log.error("failed to raise a recorded message", {
+          channel: via.channel,
+          messageId: recorded.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        hearing.delete(hearingAs);
+        // A raise that never started lets go here.
+        release();
+        // Raises finish in the order queued, so this one is the oldest.
+        const waiting = raising.get(place);
+        waiting?.shift();
+        if (waiting?.length === 0) raising.delete(place);
+      });
+    queued.push(raised);
+    raising.set(place, queued);
+  };
+
+  const recordOne = (
+    message: Inbound,
+    subscription: { readonly adapter: ChannelChatAdapter },
+  ): number | null => {
+    const { via } = message;
+    // A message handed over after the last listener left is not recorded.
+    // Its delivery was refused when recording stopped; a waiter now can only
+    // be a redelivery under the new subscription, which records it.
     if (recording.get(via.channel) !== subscription) return null;
     // What reaches an account Rome does not listen to never forms a chat.
     if (deps.listens?.(via.connectionId) === false) {
@@ -183,10 +252,10 @@ export function inboundRecording(
       return null;
     }
     const chat = deps.chats.start(message.chat, message.chatKind, message.chatName);
-    // Recorded and raised in one step, with nothing run in between, so
-    // MessageSaid's first listener acts before anything reads the message. A
-    // message already on record raises nothing: a redelivery, even after a
-    // restart, and a group message a second of Rome's accounts hears.
+    // Inserted at once, and held until decided: its MessageSaid is queued
+    // behind its place's earlier ones. A message already on record raises
+    // nothing: a redelivery, even after a restart, and a group message a
+    // second of Rome's accounts hears.
     const said = messageToRome({
       key: message.key,
       place: placeIn(chat.ref, message.thread?.id),
@@ -214,34 +283,26 @@ export function inboundRecording(
       earlier.accounts.add(hearer);
       // Who said it, as this account knows them: a platform can name the
       // same person by a different id to each app, as Feishu does.
-      await raise({ ...earlier.message, saidBy: said.saidBy }, message);
+      raise({ ...earlier.message, saidBy: said.saidBy }, message, subscription);
       return earlier.message.id;
     }
     lately.set(latelyKey, { message: recorded, accounts: new Set([hearer]), at: now });
-    await raise(recorded, message);
+    raise(recorded, message, subscription);
     return recorded.id;
   };
 
-  const deliver = (
+  const deliver = async (
     message: Inbound,
     subscription: { readonly adapter: ChannelChatAdapter },
   ): Promise<number | null> => {
-    const key = `${message.chat.platform}\0${message.chat.externalId}\0${message.thread?.id ?? ""}`;
-    const recorded = (tails.get(key) ?? Promise.resolve(null))
-      .then(() => recordOne(message, subscription))
-      .catch((error: unknown) => {
-        // Settles nothing a successful record settled already.
-        settleInbound(message, error instanceof Error ? error : new Error(String(error)));
-        throw error;
-      });
-    // A failed recording is the adapter's to report, and does not hold up the
-    // place's next message.
-    const tail = recorded.catch(() => null);
-    tails.set(key, tail);
-    void tail.then(() => {
-      if (tails.get(key) === tail) tails.delete(key);
-    });
-    return recorded;
+    try {
+      return recordOne(message, subscription);
+    } catch (error) {
+      // A failed record is the adapter's to report. Settles nothing a
+      // successful record settled already.
+      settleInbound(message, error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
   };
 
   const subscribe = (channel: Channel): void => {
@@ -281,8 +342,15 @@ export function inboundRecording(
       };
     },
     heard(channel, id) {
-      const keys = hearing.get(`${channel}\0${id}`);
-      return keys && recording.get(channel)?.adapter.heard(keys.chat, keys.key);
+      return hearing.get(`${channel}\0${id}`);
+    },
+    async settled() {
+      for (;;) {
+        await Promise.all([...recording.values()].map(({ adapter }) => adapter.settled()));
+        const queued = [...raising.values()].map((raises) => raises.at(-1));
+        if (queued.length === 0) return;
+        await Promise.all(queued);
+      }
     },
     addChannels(added) {
       known.push(...added);
