@@ -822,4 +822,208 @@ describe("Rome Node Web UI", () => {
     );
     expect(seenTextParams.every((q) => q.length <= 256)).toBe(true);
   });
+
+  it("bridges bursts, revalidates unfinished retained rows, avoids gaps during first Load older, and resets cleanly when a burst exceeds the bridge limit", async () => {
+    window.history.replaceState(null, "", "/log");
+    const now = Date.now();
+    const snapshot = makeSnapshot({
+      phase: "online",
+      configured: true,
+      deviceId: "dev-refresh-bridge",
+      deviceName: "Bridge Node",
+      audit: { status: { state: "ok" }, bytes: 4096, requests: 5 },
+    });
+
+    const makeExecItem = (seq: number, label: string, finished = true) => ({
+      seq,
+      at: now - (5000 - seq) * 1000,
+      kind: "start" as const,
+      action: "exec",
+      startSeq: null,
+      outcome: null,
+      record: {
+        requestId: `req-${label}`,
+        from: "caller-1",
+        args: { command: "echo", args: [label], cwd: "/tmp" },
+      },
+      end: finished
+        ? {
+            seq: seq + 1,
+            at: now - (5000 - seq) * 1000 + 200,
+            kind: "end" as const,
+            action: "exec",
+            startSeq: seq,
+            outcome: "ok" as const,
+            record: {
+              durationMs: 200,
+              exitCode: 0,
+              content: { stdout: { size: 10, sha256: `sha-${seq}`, storedBytes: 10 } },
+            },
+          }
+        : null,
+    });
+
+    const row300 = makeExecItem(300, "row-300");
+    const row290 = makeExecItem(290, "row-290");
+    const row200Unfinished = makeExecItem(200, "row-200-running", false);
+    const row200Completed = makeExecItem(200, "row-200-running", true);
+    const row310 = makeExecItem(310, "row-310");
+    const row500 = makeExecItem(500, "row-500-burst-top");
+    const row400 = makeExecItem(400, "row-400-bridge-mid");
+    const row300Bridge = row300;
+    const hugeBurstPages = [
+      makeExecItem(2000, "row-2000-huge-top"),
+      makeExecItem(1800, "row-1800-huge-p2"),
+      makeExecItem(1600, "row-1600-huge-p3"),
+      makeExecItem(1400, "row-1400-huge-p4"),
+      makeExecItem(1200, "row-1200-huge-p5"),
+    ];
+
+    let phase: "initial" | "inflight_load_more" | "bridge_burst" | "huge_burst" = "initial";
+    let resolveFirstLoadMore: ((res: Response) => void) | null = null;
+    let revalidatedSeq200 = false;
+
+    globalThis.fetch = rstest.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/auth/session") {
+        return jsonResponse({ authRequired: false, authenticated: true, passwordSource: "none" });
+      }
+      if (url === "/api/status") {
+        return jsonResponse(snapshot);
+      }
+      if (url === "/api/audit/summary") {
+        return jsonResponse({
+          status: { state: "ok" },
+          bytes: 4096,
+          records: 10,
+          requests: 5,
+          oldestAt: now - 300_000,
+          newestAt: now - 1_000,
+          retention: { maxAgeDays: 30, maxBytes: 1024 * 1024 * 1024 },
+          counts: { all: 5, succeeded: 4, failed: 0, no_result: 1 },
+        });
+      }
+      if (url.startsWith("/api/audit/stats")) {
+        return jsonResponse({ since: now - 86_400_000, until: now, bucketMs: 600_000, groups: [] });
+      }
+      if (url.startsWith("/api/audit/items?")) {
+        const parsed = new URL(url, "http://localhost");
+        const beforeSeq = parsed.searchParams.get("beforeSeq");
+
+        if (phase === "initial") {
+          if (!beforeSeq) {
+            return jsonResponse({ items: [row300, row290], hasMore: true });
+          }
+          return new Promise<Response>((resolve) => {
+            resolveFirstLoadMore = resolve;
+          });
+        }
+
+        if (phase === "inflight_load_more" && !beforeSeq) {
+          // One new item arrived, pushing row-290 off page 1 while the first Load older is in flight.
+          return jsonResponse({ items: [row310, row300], hasMore: true });
+        }
+
+        if (phase === "bridge_burst") {
+          if (!beforeSeq) {
+            // Burst > 1 page: top page stops at 500, above current newest 310.
+            return jsonResponse({ items: [row500], hasMore: true });
+          }
+          if (beforeSeq === "500") {
+            // Bridging page includes intermediate row-400 and overlaps existing row-300.
+            return jsonResponse({ items: [row400, row300Bridge], hasMore: true });
+          }
+        }
+
+        if (phase === "huge_burst") {
+          if (!beforeSeq) {
+            return jsonResponse({ items: [hugeBurstPages[0]], hasMore: true });
+          }
+          const map: Record<string, (typeof hugeBurstPages)[number]> = {
+            "2000": hugeBurstPages[1]!,
+            "1800": hugeBurstPages[2]!,
+            "1600": hugeBurstPages[3]!,
+            "1400": hugeBurstPages[4]!,
+          };
+          const nextPage = map[beforeSeq];
+          if (nextPage) {
+            return jsonResponse({ items: [nextPage], hasMore: true });
+          }
+        }
+
+        return jsonResponse({ items: [], hasMore: false });
+      }
+      if (url === "/api/audit/items/200") {
+        revalidatedSeq200 = true;
+        return jsonResponse({ item: row200Completed });
+      }
+      if (url === "/api/audit/items/200/content/stdout") {
+        return jsonResponse({
+          seq: 200,
+          name: "stdout",
+          available: true,
+          size: 10,
+          storedBytes: 10,
+          sha256: "sha-200",
+          previewBytes: 10,
+          truncated: false,
+          isBinary: false,
+          text: "revalidated\n",
+        });
+      }
+      return jsonResponse({ error: "not_found" }, 404);
+    }) as typeof fetch;
+
+    render(<App />);
+    expect(await screen.findByRole("button", { name: /row-300/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /row-290/ })).toBeTruthy();
+
+    // 1. Start the very first Load older (stays in flight), then a background refresh arrives
+    // with row-310 pushing row-290 off page 1. row-290 must be preserved so no gap forms.
+    fireEvent.click(screen.getByRole("button", { name: /Load older/i }));
+    await waitFor(() => {
+      expect(resolveFirstLoadMore).not.toBeNull();
+    });
+
+    phase = "inflight_load_more";
+    window.dispatchEvent(new Event("focus"));
+    expect(await screen.findByRole("button", { name: /row-310/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /row-290/ })).toBeTruthy();
+
+    // Now finish the first Load older with an unfinished row-200.
+    const finishFirstLoadMore = resolveFirstLoadMore as unknown as (res: Response) => void;
+    finishFirstLoadMore(jsonResponse({ items: [row200Unfinished], hasMore: false }));
+    expect(await screen.findByRole("button", { name: /row-200-running/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /row-290/ })).toBeTruthy();
+
+    // Select unfinished older row-200 so we verify both selection retention and revalidation.
+    fireEvent.click(screen.getByRole("button", { name: /row-200-running/ }));
+    expect(await screen.findByText("req-row-200-running")).toBeTruthy();
+
+    // 2. A >1-page burst arrives (row-500 -> bridge page row-400 + row-300) while row-200 finishes.
+    // Refresh must bridge row-400 without a gap, revalidate row-200, and display its stdout.
+    phase = "bridge_burst";
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => {
+      expect(revalidatedSeq200).toBe(true);
+    });
+    expect(await screen.findByText(/revalidated/)).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByText("req-row-200-running")).toBeNull();
+    });
+    expect(screen.getByRole("button", { name: /row-500-burst-top/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /row-400-bridge-mid/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /row-200-running/ })).toBeTruthy();
+
+    // 3. A burst exceeding the 5-page bridge bound (no overlap with row-500) must fall back cleanly
+    // to the fresh first page instead of stitching across a silent gap.
+    phase = "huge_burst";
+    window.dispatchEvent(new Event("focus"));
+    expect(await screen.findByRole("button", { name: /row-2000-huge-top/ })).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /row-200-running/ })).toBeNull();
+    });
+  });
 });

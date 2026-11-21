@@ -24,7 +24,7 @@ const MAX_ARGS_ITEMS = 256;
 const MAX_ENV_KEYS = 512;
 
 const AUDIT_RATE_WINDOW_MS = 60_000;
-const AUDIT_RATE_MAX_REQUESTS = 120;
+export const AUDIT_RATE_MAX_REQUESTS = 600;
 const AUDIT_RATE_MAX_KEYS = 1024;
 
 const VALID_RESULTS = new Set<AuditResult>(["succeeded", "failed", "no_result"]);

@@ -1251,7 +1251,7 @@ describe("rome-node web server", () => {
     expect((await fetch(`${web.url}/api/audit/summary`)).status).toBe(401);
     expect((await fetch(`${web.url}/api/audit/items`)).status).toBe(401);
 
-    // Log in to obtain session cookie.
+    // Log in to get a session cookie.
     const loginRes = await fetch(`${web.url}/api/auth/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1559,10 +1559,15 @@ describe("rome-node web server", () => {
     const detailRes = await fetch(`${web.url}/api/audit/items/1`);
     expect(detailRes.status).toBe(503);
 
-    // Rate limit: 4 requests already consumed above; 116 more succeed, 121st gets 429 with Retry-After.
-    for (let i = 0; i < 116; i += 1) {
-      const res = await fetch(`${web.url}/api/audit/summary`);
-      expect(res.status).toBe(200);
+    // Rate limit: 4 requests already consumed above; 596 more succeed, 601st gets 429 with Retry-After.
+    for (let sent = 0; sent < 596; sent += 50) {
+      const batch = Math.min(50, 596 - sent);
+      const responses = await Promise.all(
+        Array.from({ length: batch }, () => fetch(`${web.url}/api/audit/summary`)),
+      );
+      for (const res of responses) {
+        expect(res.status).toBe(200);
+      }
     }
     const limitedRes = await fetch(`${web.url}/api/audit/summary`);
     expect(limitedRes.status).toBe(429);
