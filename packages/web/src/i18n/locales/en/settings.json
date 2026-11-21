@@ -634,10 +634,7 @@
       "name": "Rome credits",
       "status": {
         "inUse": "In use",
-        "ready": "Ready",
-        "standby": "Standby",
         "usedUp": "Used up",
-        "usedUpWithClaude": "Used up",
         "paused": "Paused"
       },
       "ofGranted": "of {{amount}}",
@@ -663,7 +660,6 @@
       "needsReauth": "Needs re-login",
       "apiKeyActive": "API key active",
       "apiKeyNeedsUpdate": "API key needs update",
-      "comingSoon": "Coming soon",
       "signedInWith": "Signed in with <1>{{method}}</1>",
       "signedIn": "Signed in",
       "accountType": "Account type: <1>{{type}}</1>"
@@ -743,6 +739,23 @@
           "emptyEnv": "Add at least one environment variable."
         }
       }
+    },
+    "defaultProvider": {
+      "badge": "Default",
+      "setAsDefault": "Set as default",
+      "confirmTitle": "Make {{provider}} the default?",
+      "confirmBody": "Ongoing chats switch to {{provider}} on their next reply.",
+      "confirmBodyStay": "New chats use {{provider}}. Ongoing chats stay on the provider they run on.",
+      "moveExisting": "Move existing chats too",
+      "confirm": "Make default",
+      "saveFailed": "Failed to change the default provider",
+      "removedNote": "{{to}} is now the default, because you logged out of {{from}}.",
+      "dismissNote": "Dismiss"
+    },
+    "logoutOutcome": {
+      "otherBecomesDefault": "{{provider}} becomes the default. Chats move to it on their next reply.",
+      "pause": "Chats pause until you log in again.",
+      "pauseOrCredits": "Chats pause until you log in again, or until you switch every chat to Rome credits."
     }
   },
   "sentinelLog": {

@@ -4489,6 +4489,16 @@
         }
       }
     },
+    "Select text" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择文本"
+          }
+        }
+      }
+    },
     "Select turn" : {
       "localizations" : {
         "zh-Hans" : {

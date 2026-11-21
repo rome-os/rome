@@ -234,7 +234,7 @@ describe("ConciergeComposer", () => {
     // Short list first: the common models plus the chat's own pick.
     const names = async () =>
       (await screen.findAllByRole("menuitemradio")).map((item) => item.textContent);
-    expect(await names()).toEqual(["Auto", "Opus 5.5", "Sonnet", "GPT-6 Astra"]);
+    expect(await names()).toEqual(["Auto (default provider)", "Opus 5.5", "Sonnet", "GPT-6 Astra"]);
     expect(screen.queryByRole("menuitemradio", { name: "GPT-6 Luna" })).toBeNull();
     // "Show all" expands the list in place and keeps the menu open.
     await userEvent.click(screen.getByRole("menuitem", { name: /Show all \d+ models/ }));

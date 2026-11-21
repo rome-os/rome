@@ -136,6 +136,162 @@ export function recentMessagesOf(
   });
 }
 
+/** How many of a chat's latest turns the executed-actions list reads. */
+const ACTION_TURNS = 5;
+/** The most lines the executed-actions list holds, and the longest one. */
+const ACTION_LINES = 40;
+const ACTION_LINE_CHARS = 240;
+
+/** Argument names whose values are credentials: left out of the list. */
+const SECRET_KEY = /pass|secret|token|key|auth|cookie|credential/i;
+/**
+ * Values that read as credentials wherever they appear: a bearer token, an API
+ * key, a long hex run, or a long run of letters and digits as base64 is.
+ */
+const SECRET_VALUE =
+  /\bBearer\s+[\w.~+/=-]+|\b(?:sk|pk|rk|ghp|gho|ghs|xox[abpors])[-_][\w-]{8,}|\b[0-9a-f]{32,}\b|(?=[\w+/-]*\d)(?=[\w+/-]*[A-Za-z])[\w+/-]{40,}={0,2}/gi;
+
+/** One shell word: quoted, or up to the next space. */
+const WORD = String.raw`(?:"[^"]*"|'[^']*'|[^\s"']+)`;
+/**
+ * Credentials inside a command or a URL, whatever the argument is named: each
+ * keeps its prefix and loses its value. An `Authorization` or similar header,
+ * a URL's user and password, `-u`/`--user` with a password, an environment
+ * assignment whose name reads as secret, a `--password`-style flag, a password
+ * glued to `-p` (`mysql -psecret`), and `sshpass -p`.
+ */
+const SECRET_IN_COMMAND: Array<[RegExp, string]> = [
+  [/\b((?:proxy-)?authorization|x-api-key|api-key|cookie)\s*:\s*[^"'\n]+/gi, "$1: [redacted]"],
+  [/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[redacted]@"],
+  [
+    new RegExp(
+      String.raw`((?:^|\s)(?:-u|--user)(?:\s+|=))(?:"[^"]*:[^"]*"|'[^']*:[^']*'|[^\s"':]*:[^\s"']*)`,
+      "g",
+    ),
+    "$1[redacted]",
+  ],
+  [
+    new RegExp(
+      String.raw`\b(\w*(?:pass|pwd|token|secret|key|auth|credential|cookie)\w*)=${WORD}`,
+      "gi",
+    ),
+    "$1=[redacted]",
+  ],
+  [
+    new RegExp(
+      String.raw`((?:^|\s)--?(?:password|passwd|pass|token|secret|api-?key|auth-?token)(?:\s+|=))${WORD}`,
+      "gi",
+    ),
+    "$1[redacted]",
+  ],
+  [/((?:^|\s)-p)(?=[^\s\d-])[^\s"']+/g, "$1[redacted]"],
+  [new RegExp(String.raw`(\bsshpass\s+-p\s*)${WORD}`, "g"), "$1[redacted]"],
+];
+
+/** A value as it may be shown: whatever reads as a credential is masked. */
+function masked(text: string): string {
+  let out = text;
+  for (const [pattern, replacement] of SECRET_IN_COMMAND) out = out.replace(pattern, replacement);
+  return out.replace(SECRET_VALUE, "[redacted]");
+}
+
+/** Argument names that hold what a tool types or fills in. */
+const TYPED_KEY = /^(?:text|value|values|keys|input|typed|fill)$/i;
+/**
+ * A field that takes a secret, as a tool names its target: a password input,
+ * a one-time code, a card number.
+ */
+const SECRET_TARGET =
+  /pass(?:word|code|phrase)?|secret|token|api.?key|\bpin\b|otp|one.?time|2fa|mfa|cvv|cvc|card.?number|credential/i;
+
+/** Whether a call's own words name a secret field as what it types into. */
+function typesSecret(input: Record<string, unknown>, tool?: string): boolean {
+  if (tool && SECRET_TARGET.test(tool)) return true;
+  return Object.entries(input).some(
+    ([key, value]) =>
+      !TYPED_KEY.test(key) && typeof value === "string" && SECRET_TARGET.test(value),
+  );
+}
+
+/**
+ * The value with every credential taken out, however deep: secret-named
+ * entries dropped, and what is typed into a secret field redacted.
+ */
+function withoutSecrets(value: unknown, tool?: string, depth = 0): unknown {
+  if (depth > 8) return "[…]";
+  if (Array.isArray(value)) return value.map((item) => withoutSecrets(item, undefined, depth + 1));
+  if (typeof value !== "object" || value === null) return value;
+  const input = value as Record<string, unknown>;
+  const secretTarget = typesSecret(input, tool);
+  const kept: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(input)) {
+    if (SECRET_KEY.test(key)) continue;
+    kept[key] =
+      secretTarget && TYPED_KEY.test(key)
+        ? "[redacted]"
+        : withoutSecrets(entry, undefined, depth + 1);
+  }
+  return kept;
+}
+
+/**
+ * The arguments a tool call is known by: short values whole, long ones cut.
+ * A list carried to another provider holds no credentials, nested ones and
+ * text typed into a password field included.
+ */
+export function keyArguments(input: unknown, tool?: string): string {
+  if (input === undefined || input === null) return "";
+  if (typeof input !== "object") return masked(String(input));
+  const parts: string[] = [];
+  const clean = withoutSecrets(input, tool) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(clean)) {
+    if (value === undefined || value === null || value === "") continue;
+    const text = masked(typeof value === "string" ? value : JSON.stringify(value));
+    parts.push(`${key}: ${text.length > 80 ? `${text.slice(0, 80)}…` : text}`);
+  }
+  return parts.join(", ");
+}
+
+/**
+ * The tools chat rows' latest {@link ACTION_TURNS} turns called, oldest first,
+ * one line each with its key arguments, and "(failed)" where its result was an
+ * error. Only what was done: no results. Null when none were called.
+ */
+export function executedActionsOf(rows: readonly ChatRow[]): string | null {
+  const traces = rows.filter((row) => row.role === "trace" && row.turnId);
+  const turns = [...new Set(traces.map((row) => row.turnId as string))].slice(-ACTION_TURNS);
+  const lines: string[] = [];
+  for (const row of traces) {
+    if (!turns.includes(row.turnId as string)) continue;
+    let blocks: unknown;
+    try {
+      blocks = JSON.parse(row.content);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(blocks)) continue;
+    const failed = new Set(
+      blocks
+        .filter((block) => block?.type === "tool_result" && block.isError === true)
+        .map((block) => block.toolUseId as string | undefined)
+        .filter(Boolean),
+    );
+    for (const block of blocks) {
+      if (block?.type !== "tool_use" || typeof block.tool !== "string") continue;
+      const line = `- ${block.tool}(${keyArguments(block.input, block.tool)})${block.id && failed.has(block.id) ? " (failed)" : ""}`;
+      lines.push(line.length > ACTION_LINE_CHARS ? `${line.slice(0, ACTION_LINE_CHARS)}…` : line);
+    }
+  }
+  if (lines.length === 0) return null;
+  const kept = lines.slice(-ACTION_LINES);
+  return [
+    ...(lines.length > kept.length
+      ? [`[${lines.length - kept.length} earlier calls omitted]`]
+      : []),
+    ...kept,
+  ].join("\n");
+}
+
 export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHandoffs {
   /** Pages back from the newest message until a page reaches before `since`. */
   const rowsFrom = async (chatId: string, since: Date): Promise<ChatRow[]> => {
@@ -189,6 +345,10 @@ export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHa
         agentName,
         sources.fallbackTimeoutMs,
       );
+    },
+    async executedActions(chatId) {
+      const page = await sources.page(chatId, RECENT_MESSAGES);
+      return executedActionsOf(page.rows);
     },
     async context(chatId, turnId, since) {
       const [messages, openTasks] = await Promise.all([

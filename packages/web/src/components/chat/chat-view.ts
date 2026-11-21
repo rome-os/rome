@@ -1,3 +1,4 @@
+import type { QuotaSwitchPart } from "@rome/api-types/chat";
 import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
@@ -218,7 +219,16 @@ export type ChatRow =
     })
   // The chat moved to another model: the turn after it ran on `model`, the
   // session's turn before it on another one.
-  | (RowBase & { kind: "model_switch"; model: string; turnId: string; sessionId: string })
+  // `fromModel` is the model of that earlier turn.
+  | (RowBase & {
+      kind: "model_switch";
+      model: string;
+      fromModel: string;
+      turnId: string;
+      sessionId: string;
+      /** Rome moved the chat because a model hit its own limit: the note says why. */
+      quota?: QuotaSwitchPart;
+    })
   // The turn after it ran on what a routine, an app or another agent sent
   // into the chat, which shows as a faint line naming the source.
   | (RowBase & { kind: "automated_input"; source: SystemInputSource; turnId: string });
@@ -239,9 +249,15 @@ function sameIdentity(a: AgentIdentity, b: AgentIdentity): boolean {
 
 function sameRow(a: ChatRow, b: ChatRow): boolean {
   if (a.kind !== b.kind || a.key !== b.key) return false;
-  if (a.kind === "user") return true;
+  if (a.kind === "user") return b.kind === "user" && a.message.inputState === b.message.inputState;
   if (a.kind === "model_switch") {
-    return b.kind === "model_switch" && a.model === b.model && a.turnId === b.turnId;
+    return (
+      b.kind === "model_switch" &&
+      a.model === b.model &&
+      a.fromModel === b.fromModel &&
+      a.turnId === b.turnId &&
+      a.quota === b.quota
+    );
   }
   if (a.kind === "automated_input") {
     return (
@@ -281,7 +297,11 @@ export function buildRows(
 
   const tracesByTurn = new Map<string, ChatMessage>();
   const turnsWithAssistant = new Set<string>();
+  // Turns a provider card explains: their send did not fail, it waits on the card.
+  const cardedTurns = new Set<string>();
   for (const m of messages) {
+    if (m.role === "assistant" && m.turnId && m.content.includes('"provider_failure"'))
+      cardedTurns.add(m.turnId);
     if (m.role === "trace" && m.turnId && (m.traceSummary || m.traceArchived))
       tracesByTurn.set(m.turnId, m);
     if (m.role === "assistant" && m.turnId) turnsWithAssistant.add(m.turnId);
@@ -293,8 +313,31 @@ export function buildRows(
   const renderedTraceTurns = new Set<string>();
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
+    // Rome's note that it moved the chat to another model is the switch
+    // notice itself, saying why; the next turn's own notice is then left out.
+    if (msg.role === "assistant") {
+      const quota = quotaSwitchOf(msg);
+      if (quota) {
+        rows.push(
+          reuseRow(msg, {
+            kind: "model_switch",
+            key: msg.id,
+            model: quota.model,
+            fromModel: quota.fromModel ?? "",
+            turnId: msg.turnId ?? msg.id,
+            sessionId: msg.sessionId,
+            quota,
+          }),
+        );
+        continue;
+      }
+    }
     if (msg.role === "user") {
-      rows.push(reuseRow(msg, { kind: "user", key: msg.id, message: msg }));
+      const calm =
+        msg.inputState === "failed" && msg.turnId && cardedTurns.has(msg.turnId)
+          ? { ...msg, inputState: "consumed" as const }
+          : msg;
+      rows.push(reuseRow(msg, { kind: "user", key: msg.id, message: calm }));
       continue;
     }
     if (msg.role === "trace") {
@@ -332,6 +375,13 @@ export function buildRows(
       j++;
     }
     i = j - 1;
+    // A turn that only failed quietly (a silent retry, a model move, or a card
+    // a later turn carries now) has nothing to show: the note or the next turn
+    // says what happened.
+    if (group.every(isQuietFailure)) {
+      if (msg.turnId) renderedTraceTurns.add(msg.turnId);
+      continue;
+    }
     const turnTrace = msg.turnId ? tracesByTurn.get(msg.turnId) : undefined;
     const showTrace =
       !!turnTrace && !renderedTraceTurns.has(msg.turnId!) && !isRunningTurn(msg.turnId);
@@ -347,6 +397,21 @@ export function buildRows(
     );
   }
   return withModelSwitches(rows, tracesByTurn);
+}
+
+/** The model-switch note a message is, when that is all it holds. */
+function quotaSwitchOf(message: ChatMessage): QuotaSwitchPart | null {
+  if (!message.content.includes('"quota_switch"')) return null;
+  try {
+    const parts = JSON.parse(message.content) as unknown;
+    if (!Array.isArray(parts) || parts.length !== 1) return null;
+    const [part] = parts as Array<Partial<QuotaSwitchPart>>;
+    return part?.type === "quota_switch" && typeof part.model === "string"
+      ? (part as QuotaSwitchPart)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The turn and session a row belongs to, or null for a row with no turn. */
@@ -393,11 +458,27 @@ function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessag
             kind: "model_switch",
             key: `model-switch:${turn.turnId}`,
             model,
+            fromModel: previous,
             turnId: turn.turnId,
             sessionId: turn.sessionId,
           };
+          // Rome's own note about this move already stands just before.
+          // Rome's own note about this move stands before it, perhaps above the
+          // quiet turn that hit the limit.
+          let noted = false;
+          for (let i = out.length - 1; i >= 0; i--) {
+            const earlier = out[i];
+            if (earlier.kind === "model_switch") {
+              noted = earlier.quota?.model === model;
+              break;
+            }
+            const earlierTurn = rowTurn(earlier);
+            if (earlierTurn && tracesByTurn.get(earlierTurn.turnId)?.traceSummary?.model) break;
+          }
           const built = builtSwitches.get(row);
-          if (built && sameRow(built, notice)) out.push(built);
+          if (noted) {
+            // No second notice for the same move.
+          } else if (built && sameRow(built, notice)) out.push(built);
           else {
             builtSwitches.set(row, notice);
             out.push(notice);
@@ -409,4 +490,24 @@ function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessag
     out.push(row);
   }
   return out;
+}
+
+/** A message that holds only a provider card drawn as nothing, beside its error. */
+function isQuietFailure(message: ChatMessage): boolean {
+  if (!message.content.includes('"provider_failure"')) return false;
+  try {
+    const parts = JSON.parse(message.content) as Array<Record<string, unknown>>;
+    if (!Array.isArray(parts)) return false;
+    let quiet = false;
+    for (const part of parts) {
+      if (part.type === "error") continue;
+      if (part.type !== "provider_failure") return false;
+      const resolved = part.resolved as { by?: string } | undefined;
+      if (part.retrying !== true && resolved?.by !== "moved") return false;
+      quiet = true;
+    }
+    return quiet;
+  } catch {
+    return false;
+  }
 }
