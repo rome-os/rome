@@ -90,11 +90,19 @@ function fromEnvironment(raw) {
     },
     // R10's browser: a Playwright server, and the client folder to load.
     browser: raw.browser,
-    romeCloud: { query: raw.rome_cloud?.query },
+    // v5: Rome Cloud's address, and its dev sign-in (a URL the guardian's
+    // email is appended to), so Connect runs Rome Cloud's callback as the
+    // guardian's browser would.
+    romeCloud: {
+      query: raw.rome_cloud?.query,
+      url: raw.rome_cloud?.url,
+      devSignIn: raw.rome_cloud?.dev_sign_in,
+    },
     instances: (raw.instances ?? []).map((i) => ({
       name: i.name,
       api: i.url ? `${i.url}/api` : undefined,
       headers: cookie(i.guardian_cookies_file),
+      guardianEmail: i.guardian_email,
       control: {
         stop: i.stop,
         start: i.start,
@@ -104,6 +112,10 @@ function fromEnvironment(raw) {
         asInstance:
           i.control?.as_instance ??
           (raw.slack_gateway && Array.isArray(i.stop) && i.stop[1] === "stop" ? [i.stop[0], "as-instance", i.stop[2]] : undefined),
+        // v5, R7: the instance's own relay mailbox address, {depositUrl}.
+        mailbox:
+          i.control?.mailbox ??
+          (raw.slack_gateway && Array.isArray(i.stop) && i.stop[1] === "stop" ? [i.stop[0], "mailbox", i.stop[2]] : undefined),
         findSecret:
           i.control?.find_secret ??
           (raw.slack_gateway && Array.isArray(i.stop) && i.stop[1] === "stop" ? [i.stop[0], "find-secret", i.stop[2]] : undefined),

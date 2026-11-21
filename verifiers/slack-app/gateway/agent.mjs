@@ -12,6 +12,7 @@
 //   call        {team?, method, args}    POST /v1/slack/<method> (x-slack-team: team)
 //   bind        {team, user}             the approve screen as the member, then
 //                                        Rome Cloud's bind (GATEWAY_SHARED_SECRET)
+//   deposit     {url, body, signature?}  POST a delivery into a mailbox
 //   drain       {mailbox, depositKey, ms?, until?, ack?}
 //                                        reads the mailbox for `ms`, or until
 //                                        `until` event ids are seen; each frame
@@ -147,6 +148,15 @@ switch (op) {
     });
     const r = await call(`${gateway}/internal/bind`, jsonInit("POST", { code, accountId, instanceId }, { authorization: `Bearer ${shared}` }));
     done({ ...r, instanceId, via: "the Worker's /internal/bind" });
+    break;
+  }
+  case "deposit": {
+    // R7: a delivery into a mailbox, as anyone holding its address could
+    // send one: Slack's body with x-rome-slack, and the signature given (none
+    // when absent).
+    const headers = { "content-type": "application/json", "x-rome-slack": "1" };
+    if (args.signature !== undefined) headers["x-rome-slack-signature"] = args.signature;
+    done(await call(args.url, { method: "POST", headers, body: args.body }));
     break;
   }
   case "drain":

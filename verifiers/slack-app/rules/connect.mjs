@@ -101,8 +101,11 @@ async function signInCheck(ctx, inst, ws, rule) {
 
   // Live: the newest sign-in attempt in Rome Cloud no longer holds its
   // outcome once the instance redeemed it.
+  // v5: Rome Cloud keeps no sign-in attempt; the Worker binds at the
+  // callback and holds the token, which R15 checks.
   const q = ctx.env.romeCloud?.query;
-  if (Array.isArray(q)) {
+  if (ctx.env.gateway) evidence.signInAttempt = "v5: Rome Cloud keeps no sign-in attempt to clear (R15 covers the token)";
+  else if (Array.isArray(q)) {
     try {
       const [row] = await query(q, ATTEMPT_SQL);
       evidence.signInAttempt = row ?? null;

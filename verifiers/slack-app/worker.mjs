@@ -5,7 +5,6 @@
 // Usage: node worker.mjs <env.json> <out dir> <verifier commit>. run.sh
 // --worker is the entry point.
 
-import { execFile } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadEnv } from "./lib/env.mjs";
@@ -45,23 +44,7 @@ const workspaces = fakeState.workspaces.map((w) => ({
 }));
 
 /** A stand-in instance with the environment's find_secret control on it. */
-function standIn(conf) {
-  const inst = gatewayInstance(conf.name, conf.control.asInstance);
-  inst.findSecret = conf.control.findSecret ?? null;
-  inst.findSecretCounts = (values) =>
-    new Promise((resolve, reject) => {
-      const t = inst.findSecret;
-      const args = [JSON.stringify(values)];
-      const cb = (err, stdout) => {
-        const line = String(stdout ?? "").trim().split("\n").reverse().find((l) => l.startsWith("{"));
-        if (!line) return reject(new Error(`find_secret printed no JSON${err ? ` (exit ${err.code})` : ""}`));
-        resolve(JSON.parse(line));
-      };
-      if (Array.isArray(t)) execFile(t[0], [...t.slice(1), ...args], { maxBuffer: 16 << 20 }, cb);
-      else execFile("sh", ["-c", `${t} "$@"`, "find-secret", ...args], { maxBuffer: 16 << 20 }, cb);
-    });
-  return inst;
-}
+const standIn = (conf) => gatewayInstance(conf.name, conf.control.asInstance, { findSecret: conf.control.findSecret ?? null });
 
 const ctx = {
   env,

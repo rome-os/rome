@@ -52,6 +52,8 @@ Rule set v5 (`rules.md`, approved 2026-11-21) moves Rome Cloud's Slack side into
 | R15 | No token the fake issued (its `GET /_control/tokens`) appears in any answer or delivery either instance got, in the Worker's log, or on the instance (`find_secret`). 10 calls from the instance bound to B in workspace A: 0 reach Slack. |
 | R11 | As v4, and the Worker's tables (gateway/) are judged too: the binding, its delivery and the workspace's token pass; message content and member data fail. |
 
+With Rome's side in place, `run.sh <env.json>` scores v5 in full when env.json names the Worker (`slack_gateway`): every v4 check above through the Worker, plus R15 (`rules/token.mjs`: Rome's app's tokens searched on both instances with `find_secret` and in the Worker's log; 10 calls in A from rome-b's agent, 0 at Slack), R7's 10 deliveries into rome-a's own mailbox (`ctl.sh mailbox`) with no signature or a wrong one, none on record, R8's disconnect freeing A for rome-b (connected through rome-b's Connect, then let go, B checked again), and R11's v5 judgement. R1 no longer reads a Rome Cloud sign-in attempt, since v5 keeps none.
+
 `prove-worker.mjs` proves it against a stand-in Worker (`standin/gateway.mjs`, with stand-in Rome Cloud, relay and signer) and a worktree of the real rome-cloud for R11. `BREAK` switches one promise off: `W-R3-takeover`, `W-R4-drop`, `W-R5-thread`, `W-R6-expire`, `W-R7-signature`, `W-R7-route`, `W-R8-uninstall`, `W-R8-keep-token`, `W-R8-held`, `W-R9-any`, `W-R15-token`, `W-R15-deposit`, `W-R15-log`, `W-R15-cross`, `W-R11-message`, `W-R11-relay`; each must fail its rule, and the good Worker must pass all nine.
 
 ## Stand-in

@@ -32,10 +32,14 @@ function lastJson(stdout) {
  * One instance as the Worker sees it. `name` is the instance's name, and
  * `target` the environment's as_instance control for it.
  */
-export function gatewayInstance(name, target) {
+export function gatewayInstance(name, target, { findSecret = null } = {}) {
   const answers = [];
   const inst = {
     name,
+    /** The environment's find_secret control for this instance, or null. */
+    findSecret,
+    /** Where on the instance any of `values` is found: the control's JSON. */
+    findSecretCounts: (values) => findSecretCounts(findSecret, values),
     /** Every answer the Worker, Rome Cloud or the mailbox gave this instance, in order. */
     answers,
     mailbox: null,
@@ -74,4 +78,20 @@ export function gatewayInstance(name, target) {
     },
   };
   return inst;
+}
+
+/**
+ * Runs a find_secret control (argv or shell command) with `values` as one
+ * JSON argument and returns the JSON it printed: {places: {place: [count per
+ * value]}, total}. Throws when it printed none.
+ */
+export async function findSecretCounts(target, values) {
+  if (!target) throw new Error("no find_secret control");
+  const args = [JSON.stringify(values)];
+  const r = Array.isArray(target)
+    ? await run(target[0], [...target.slice(1), ...args], { timeout: 600_000 })
+    : await run("sh", ["-c", `${target} "$@"`, "find-secret", ...args], { timeout: 600_000 });
+  const out = lastJson(r.stdout);
+  if (!out) throw new Error(`find_secret printed no JSON (exit ${r.code}): ${(r.stdout + r.stderr).slice(-300)}`);
+  return out;
 }

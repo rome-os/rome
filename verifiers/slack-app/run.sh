@@ -52,4 +52,9 @@ if [ -n "$(git -C "$here" status --porcelain -- .)" ]; then
 fi
 commit="$(git -C "$here" rev-parse HEAD)"
 
+# v5: Rome Cloud answers https under the environment's own CA, which Node
+# reads only at start.
+trust="$(node -e 'try{const e=require(process.argv[1]);const t=e.rome_cloud?.trust_pem;if(t)process.stdout.write(require("path").resolve(require("path").dirname(process.argv[1]),t))}catch{}' "$(realpath "$env_json")")"
+if [ -n "$trust" ] && [ -f "$trust" ]; then export NODE_EXTRA_CA_CERTS="$trust"; fi
+
 exec node "$here/${entry:-verify.mjs}" "$env_json" "$out" "$commit"

@@ -1,4 +1,4 @@
-// Scores the official Slack app against rule set v4 in one environment.
+// Scores the official Slack app against rule set v4, or v5 when env.json names the slack-gateway Worker.
 // Each rule is a promise the Slack connection keeps, checked at its two
 // edges: the fake Slack, and what Rome has on record. No rule asks the
 // Concierge or judges its replies. Usage: node verify.mjs <env.json> <out
@@ -7,7 +7,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { lastRequests, resetTrail, setReachSeconds, Unreachable } from "./lib/http.mjs";
+import { aliasOrigin, lastRequests, resetTrail, setReachSeconds, Unreachable } from "./lib/http.mjs";
 import { loadEnv } from "./lib/env.mjs";
 import { hostMemory, shortOnMemory, warnedDuring } from "./lib/memory.mjs";
 import { instance } from "./lib/instance.mjs";
@@ -21,6 +21,8 @@ import { r10 } from "./rules/old.mjs";
 import { r14 } from "./rules/groups.mjs";
 import { smoke } from "./rules/smoke.mjs";
 import { r11 } from "./rules/structure.mjs";
+import { r15 } from "./rules/token.mjs";
+import { gatewayInstance } from "./lib/gateway.mjs";
 
 const RULES = [
   { id: "R1", group: "Access", title: "One sign-in", check: r1 },
@@ -33,8 +35,9 @@ const RULES = [
   { id: "R6", group: "Hear", title: "While Rome is down", check: r6 },
   { id: "R7", group: "Hear", title: "Forged and misrouted", check: r7 },
   { id: "R9", group: "Speak and act", title: "Send and read, nothing else", check: r9 },
+  { id: "R15", group: "Speak and act", title: "The token stays in Rome Cloud", check: r15 },
   { id: "R14", group: "Speak and act", title: "Groups", check: r14 },
-  { id: "R11", group: "Structure", title: "Layers", check: r11 },
+  { id: "R11", group: "Structure", title: "Layers", check: (ctx) => r11(ctx, { v5: Boolean(ctx.env.gateway) }) },
   { id: "smoke", group: "Outside the score", title: "A direct message gets a reply", check: smoke, unscored: true },
 ];
 const UNSCORED = new Set(RULES.filter((r) => r.unscored).map((r) => r.id));
@@ -45,12 +48,15 @@ const UNSCORED = new Set(RULES.filter((r) => r.unscored).map((r) => r.id));
 // the instance; R8 removes the app and disconnects, so it runs after the
 // rest; R2 then signs the first instance in to a third workspace. R10 seeds
 // the old connections on the second instance, so it runs last.
-const ORDER = ["R11", "R1", "R3", "bindB", "smoke", "R4", "R7", "R5", "R9", "R14", "R6", "R8", "R2", "R10"];
+const ORDER = ["R11", "R1", "R3", "bindB", "smoke", "R4", "R7", "R5", "R9", "R14", "R15", "R6", "R8", "R2", "R10"];
 
 const [envPath, outDir, verifierCommit] = process.argv.slice(2);
 const env = loadEnv(envPath);
 setReachSeconds(env.timeouts.reachSeconds);
 const slack = fakeSlack(env.slack.control.replace(/\/$/, ""));
+// v5: Rome Cloud's install link points at https://slack.com, which the
+// stack's own DNS sends to the fake; the verifier reaches it at its control's host.
+if (env.gateway) aliasOrigin("https://slack.com", env.slack.control);
 // Workspace A binds to the first instance and B to the second. Each
 // workspace's guardian is its owner.
 // R2's workspace is any other one that is not the app's home workspace.
@@ -63,8 +69,8 @@ const homeTeam = fakeState.distribution?.home_team ?? null;
 const ctx = {
   env,
   slack,
-  a: instance(env.instances[0], slack.origin, env.timeouts),
-  b: instance(env.instances[1], slack.origin, env.timeouts),
+  a: instance(env.instances[0], slack.origin, { ...env.timeouts, cloudSignIn: env.romeCloud.devSignIn }),
+  b: instance(env.instances[1], slack.origin, { ...env.timeouts, cloudSignIn: env.romeCloud.devSignIn }),
   wsA: workspaces[0],
   wsB: workspaces[1],
   wsC: workspaces.slice(2).find((w) => homeTeam && w.id !== homeTeam) ?? null,
@@ -73,6 +79,13 @@ const ctx = {
   // Where the run starts in the fake's log, for R9's audit of every call.
   runSince: await slack.seq(),
 };
+// v5: the verifier's agent run as each instance (ctl.sh as-instance), for
+// R7's deliveries into the mailbox and R15's calls from the other instance.
+for (const [key, conf] of [["agentA", env.instances[0]], ["agentB", env.instances[1]]])
+  if (env.gateway && conf.control.asInstance)
+    ctx[key] = gatewayInstance(conf.name, conf.control.asInstance, { findSecret: conf.control.findSecret ?? null });
+// R15 is rule set v5's; without the Worker it is not checked.
+const RULE_SET = env.gateway ? "v5" : "v4";
 
 // VERIFIER_ONLY (run.sh --only) scores a subset: rule ids, or a group's
 // name (access, hear, speak, structure). R1 and the second binding still
@@ -161,7 +174,7 @@ for (const step of ORDER) {
 }
 
 const report = {
-  ruleSet: "v4",
+  ruleSet: RULE_SET,
   startedAt,
   finishedAt: new Date().toISOString(),
   commits: {

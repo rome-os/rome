@@ -158,6 +158,47 @@ function remember(entry) {
  * not a redirect, or at the first URL `stopAt` accepts. Returns every URL
  * visited, so a caller can show the path the sign-in took.
  */
+// The browser's side of a sign-in: cookies per origin, as a browser keeps
+// them (v5: Rome Cloud's callback needs the guardian's Rome Cloud session),
+// and origins a browser inside the stack reaches under another name (v5:
+// https://slack.com is the fake Slack there).
+const jar = new Map();
+const aliases = new Map();
+
+/** Makes `from` (an origin) reach `to` in `follow`, as the stack's own DNS does. */
+export function aliasOrigin(from, to) {
+  aliases.set(new URL(from).origin, new URL(to).origin);
+}
+
+function aliased(url) {
+  const u = new URL(url);
+  const to = aliases.get(u.origin);
+  return to ? `${to}${u.pathname}${u.search}` : url;
+}
+
+function cookieFor(url) {
+  const held = jar.get(new URL(url).origin);
+  return held?.size ? [...held].map(([k, v]) => `${k}=${v}`).join("; ") : null;
+}
+
+function keepCookies(url, res) {
+  const set = res.headers.getSetCookie?.() ?? [];
+  if (!set.length) return;
+  const origin = new URL(url).origin;
+  const held = jar.get(origin) ?? new Map();
+  for (const line of set) {
+    const [pair] = line.split(";");
+    const eq = pair.indexOf("=");
+    if (eq > 0) held.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+  }
+  jar.set(origin, held);
+}
+
+/** Visits `url` as the browser would (keeping its cookies), for a dev sign-in. */
+export async function browserVisit(url) {
+  return follow(url, {});
+}
+
 export async function follow(url, { method = "GET", form, stopAt = () => false, max = 15 } = {}) {
   const visited = [];
   let next = url;
@@ -174,12 +215,18 @@ export async function follow(url, { method = "GET", form, stopAt = () => false, 
   for (let i = 0; i < max; i++) {
     visited.push(next);
     if (stopAt(new URL(next))) return { stoppedAt: new URL(next), visited };
-    const res = await request(next, {
+    const target = aliased(next);
+    const cookie = cookieFor(next);
+    const res = await request(target, {
       method: nextMethod,
       redirect: "manual",
-      headers: nextBody ? { "content-type": "application/x-www-form-urlencoded" } : {},
+      headers: {
+        ...(nextBody ? { "content-type": "application/x-www-form-urlencoded" } : {}),
+        ...(cookie ? { cookie } : {}),
+      },
       body: nextBody,
     });
+    keepCookies(next, res);
     const location = res.headers.get("location");
     if (res.status >= 300 && res.status < 400 && location) {
       next = new URL(location, next).toString();

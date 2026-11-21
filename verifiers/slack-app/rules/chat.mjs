@@ -238,6 +238,16 @@ export async function r7(ctx) {
       );
   }
 
+  // v5: 10 deliveries into the instance's own mailbox not signed with its
+  // key (5 with no signature, 5 with a wrong one) are refused: none is on
+  // record, while a good message after them is.
+  if (ctx.env.gateway) {
+    const part = await unsignedDeliveries(ctx, ws);
+    evidence.mailbox = part.evidence;
+    if (part.problem) problems.push(part.problem);
+    if (part.unchecked) partial ??= part.unchecked;
+  }
+
   evidence.readErrors = readErrors;
   if (problems.length)
     return {
@@ -250,9 +260,53 @@ export async function r7(ctx) {
   return {
     result: "pass",
     reason:
-      "10 of 10 forged events dropped: none on record, nothing posted; the good message after them is on record. 0 of 20 events from workspace A reached the instance bound to B.",
+      "10 of 10 forged events dropped: none on record, nothing posted; the good message after them is on record. 0 of 20 events from workspace A reached the instance bound to B." +
+      (evidence.mailbox?.sent ? ` ${evidence.mailbox.acceptedByMailbox} deliveries into the instance's mailbox not signed with its key: none on record.` : ""),
     evidence,
   };
+}
+
+/**
+ * R7's v5 part: deliveries put straight into the first instance's relay
+ * mailbox, through the verifier's agent run as that instance, carrying
+ * Slack's own body shape with x-rome-slack but no signature or a wrong one.
+ */
+async function unsignedDeliveries(ctx, ws) {
+  if (!ctx.agentA) return { evidence: "not checked: no as_instance control", unchecked: "the mailbox part had no as_instance control" };
+  let box;
+  try {
+    box = await ctx.a.mailbox();
+  } catch (err) {
+    return { evidence: `not checked: ${err.message}`, unchecked: `the mailbox part could not read the instance's mailbox address (${err.message.slice(0, 120)})` };
+  }
+  if (!box?.depositUrl) return { evidence: "not checked: no mailbox control", unchecked: "the environment gives no mailbox control" };
+  const w = (await ctx.slack.state()).workspaces.find((x) => x.id === ws.id);
+  const dm = w?.members?.find((m) => m.id === ws.guardian)?.im_channel;
+  const sent = [];
+  for (let i = 1; i <= 10; i++) {
+    const tag = code("R7M", i);
+    const ts = `${Math.floor(Date.now() / 1000)}.${String(900000 + i)}`;
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: ws.id,
+      api_app_id: (await ctx.slack.state()).app?.app_id,
+      event_id: `Ev${tag.replace(/[^A-Za-z0-9]/g, "")}`,
+      event_time: Math.floor(Date.now() / 1000),
+      event: { type: "message", channel_type: "im", channel: dm, user: ws.guardian, text: ask(tag), ts },
+    });
+    const signature = i <= 5 ? undefined : "0".repeat(64);
+    const r = await ctx.agentA.op("deposit", { url: box.depositUrl, body, ...(signature ? { signature } : {}) });
+    sent.push({ tag, signature: signature ? "wrong" : "none", mailboxAnswered: r.status });
+  }
+  const accepted = sent.filter((x) => x.mailboxAnswered >= 200 && x.mailboxAnswered < 300).length;
+  const control = await dmOnRecord(ctx, ctx.a, ws, ctx.bound.a, "R7N");
+  const recorded = control.ok ? await ctx.a.recordedIn(dm, { connection: ctx.bound.a }) : null;
+  const onRecord = recorded ? sent.filter((x) => recorded.some((t) => t.includes(x.tag))).map((x) => x.tag) : null;
+  const evidence = { sent, acceptedByMailbox: accepted, goodMessageAfter: { tag: control.tag, onRecord: control.ok }, unsignedOnRecord: onRecord };
+  if (!accepted) return { evidence, unchecked: "the mailbox took none of the 10 deliveries, so the instance never saw them" };
+  if (!control.ok) return { evidence, unchecked: "the good message after the deliveries was not on record, so their absence shows nothing" };
+  if (onRecord.length) return { evidence, problem: `${onRecord.length} of ${accepted} deliveries not signed with the instance's key were on record` };
+  return { evidence };
 }
 
 export async function r6(ctx) {

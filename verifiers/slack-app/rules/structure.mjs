@@ -37,7 +37,7 @@ const KINDS = [
     allowed: true,
     // `generation` counts a workspace's claims, so a late release cannot end
     // a newer one: part of the binding (planner's ruling, rome-cloud 0070).
-    test: /^(id|team_?(id|name)|workspace_?id|enterprise_?id|(account_?)?instance_?id|app_?id|bot_?user_?id|status|(claim_?)?generation|(created|updated|bound|unbound|deleted)_?at)$/i,
+    test: /^(id|team_?(id|name)|workspace_?id|enterprise_?id|(account_?)?instance_?id|app_?id|bot_?user_?id|installer_?user_?id|status|(claim_?)?generation|(created|updated|bound|unbound|deleted)_?at)$/i,
   },
   {
     kind: "delivery",

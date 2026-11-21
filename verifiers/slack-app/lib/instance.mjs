@@ -3,7 +3,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { follow, forms, json, sleep } from "./http.mjs";
+import { browserVisit, follow, forms, json, sleep } from "./http.mjs";
 
 const run = promisify(execFile);
 
@@ -11,7 +11,7 @@ const run = promisify(execFile);
 const SLACK_KIND = "slack_app";
 
 /** Wraps instance `inst` from env.json. */
-export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
+export function instance(inst, slackOrigin, { restartSeconds = 300, cloudSignIn = null } = {}) {
     const api = inst.api.replace(/\/$/, "");
   const origin = new URL(api).origin;
   // Rome refuses a mutation that does not come from its own origin, as the
@@ -199,7 +199,10 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
       }
       const cid = started.data.cid;
       let state = started.data.state;
-      for (let step = 0; step < 40; step++) {
+      // v5: the browser lands on Rome Cloud's callback page, not back on this
+      // instance; Rome then finds the workspace bound and ends the setup.
+      let landed = false;
+      for (let step = 0; step < 60; step++) {
         if (state.status === "awaiting-input") {
           walk.setupFields.push(...state.form.fields.map((f) => f.label ?? f.name));
           return {
@@ -208,10 +211,19 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
             reason: `setup asked for ${state.form.fields.length} field(s)`,
           };
         }
-        if (state.status === "awaiting-redirect") {
+        if (state.status === "awaiting-redirect" && !landed) {
           walk.signIns++;
+          // The guardian's Rome Cloud session, as the dashboard's browser holds it.
+          if (cloudSignIn && inst.guardianEmail) await browserVisit(`${cloudSignIn}${encodeURIComponent(inst.guardianEmail)}`);
           const back = await this.browse(state.url, walk);
           if (back.error) return { ...walk, outcome: "stuck", reason: back.error };
+          if (back.landed) {
+            walk.landedAt = back.landed;
+            if (back.landed.status !== 200)
+              return { ...walk, outcome: "refused", reason: `${back.landed.at} answered ${back.landed.status}: ${back.landed.words}` };
+            landed = true;
+            continue;
+          }
           const ret = await call("/setups/return", { method: "POST", body: back.params });
           state = ret.data?.state ?? { status: "failed", reason: JSON.stringify(ret.data) };
           continue;
@@ -227,7 +239,7 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
         const polled = await call(`/setups/${cid}`);
         state = polled.data?.state ?? { status: "failed", reason: `poll: ${polled.status}` };
       }
-      return { ...walk, outcome: "stuck", reason: "setup did not end in 40 steps" };
+      return { ...walk, outcome: "stuck", reason: `setup did not end (last ${state.status})` };
     },
 
     /**
@@ -247,13 +259,20 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
           return { params };
         }
         const found = forms(leg.html, leg.url);
+        // v5: a page off this instance and off Slack with nothing to press is
+        // Rome Cloud's callback answer: the sign-in ends there.
+        const onSlack = leg.url.origin === slackOrigin || leg.url.origin === "https://slack.com";
+        if (found.length === 0 && leg.url.origin !== origin && !onSlack) {
+          const words = String(leg.html ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+          return { landed: { at: leg.url.origin + leg.url.pathname, status: leg.status, words } };
+        }
         if (leg.status !== 200 || found.length === 0) {
           return { error: `sign-in stopped at ${leg.url.pathname} (${leg.status}) with no form` };
         }
         const form = found[0];
         walk.approveScreens.push({
           at: leg.url.origin + leg.url.pathname,
-          bySlack: leg.url.origin === slackOrigin,
+          bySlack: leg.url.origin === slackOrigin || leg.url.origin === "https://slack.com",
           fields: form.fields.map((f) => f.name),
         });
         const press =
@@ -351,6 +370,12 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
     /** The text of each message {@link recorded} finds. */
     async recordedIn(chat, opts) {
       return (await this.recorded(chat, opts)).map((m) => m.text);
+    },
+
+    /** v5: the instance's relay mailbox address, {depositUrl}; null without the control. */
+    async mailbox() {
+      if (!inst.control.mailbox) return null;
+      return jsonControl(inst.control.mailbox, [], { name: "mailbox" });
     },
 
     /** Whether the environment gives a port control (R9, R14). */

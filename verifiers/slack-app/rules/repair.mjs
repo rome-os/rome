@@ -92,10 +92,32 @@ export async function r8(ctx) {
     ctx.bound.a = null;
   }
   evidence.disconnect = revoked ?? "not tried: the repair made no connection";
+
+  // v5: the disconnect frees the workspace, so another instance can connect
+  // it. The second instance connects A through its own Connect, then lets it
+  // go; if that cost it workspace B, B is connected again for the rules after.
+  let freed = null;
+  if (ctx.env.gateway && revoked && ctx.bound.b) {
+    const other = await connectAs(ctx, ctx.b, ws).catch((e) => ({ outcome: "stuck", reason: e.message }));
+    freed = { outcome: other.outcome, reason: other.reason ?? null, connection: other.connectionId ?? null };
+    if (other.outcome === "connected" && typeof other.connectionId === "string") {
+      await ctx.b.disconnect(other.connectionId).catch((e) => (freed.cleanup = e.message));
+      const stillB = await dmOnRecord(ctx, ctx.b, ctx.wsB, ctx.bound.b, "R8B");
+      freed.secondStillHearsB = stillB.ok;
+      if (!stillB.ok) {
+        const again = await connectAs(ctx, ctx.b, ctx.wsB).catch((e) => ({ outcome: "stuck", reason: e.message }));
+        freed.reconnectedB = again.outcome;
+        if (typeof again.connectionId === "string") ctx.bound.b = again.connectionId;
+      }
+    }
+    if (other.outcome !== "connected") problems.push(`after the disconnect, the second instance could not connect workspace A: ${other.reason ?? other.outcome}`);
+  }
+  if (freed) evidence.freedForAnother = freed;
   evidence.parts = {
     brokenWithin60s: yn(brokenAfter !== null && brokenAfter <= 60),
     sameAccount: yn(sameAccount),
     repairedHears: yn(Boolean(heard?.ok)),
+    ...(freed ? { freedForAnotherInstance: yn(freed.outcome === "connected") } : {}),
     tokenRevoked: revoked?.afterDisconnect?.notChecked
       ? "not checked"
       : yn(revoked?.afterDisconnect?.ok === false),
@@ -112,7 +134,7 @@ export async function r8(ctx) {
     };
   return {
     result: "pass",
-    reason: `Broken ${brokenAfter} s after the removal; the repair kept the connected account and a direct message is on record again; auth.test refuses the token after the disconnect.`,
+    reason: `Broken ${brokenAfter} s after the removal; the repair kept the connected account and a direct message is on record again; auth.test refuses the token after the disconnect${freed ? ", and the second instance could then connect the workspace" : ""}.`,
     evidence,
   };
 }

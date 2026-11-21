@@ -223,21 +223,21 @@ export async function r6(ctx) {
 }
 
 /** Every Slack token the fake issued, from its control API; null when it gives none. */
-async function issuedTokens(ctx) {
+export async function issuedTokens(ctx) {
   const url = ctx.env.gateway?.tokens ?? `${ctx.env.slack.control.replace(/\/$/, "")}/tokens`;
   try {
     const r = await fetch(url);
     if (!r.ok) return null;
     const data = await r.json();
     const list = Array.isArray(data) ? data : (data.tokens ?? []);
-    return list.map((t) => (typeof t === "string" ? { value: t } : { value: t.value ?? t.token, team: t.team ?? t.teamId, kind: t.kind })).filter((t) => t.value);
+    return list.map((t) => (typeof t === "string" ? { value: t } : { value: t.value ?? t.token, team: t.team ?? t.teamId, kind: t.kind, app: t.app ?? null })).filter((t) => t.value);
   } catch {
     return null;
   }
 }
 
 /** Lines of a log control (argv or shell command); null without one. */
-async function logLines(target) {
+export async function logLines(target) {
   if (!target) return null;
   const { execFile } = await import("node:child_process");
   return new Promise((resolve) => {
@@ -254,7 +254,9 @@ export async function r15(ctx) {
   const romeSide = [];
   const tokens = await issuedTokens(ctx);
   if (!tokens?.length) return { result: "not checked", reason: "the fake Slack lists no tokens it issued (GET /_control/tokens)" };
-  const ofApp = tokens.filter((t) => !t.kind || t.kind === "bot" || t.kind === "user");
+  // Rome's app's tokens: the older apps R10 seeds keep theirs on the instance by design.
+  const romeApp = (await ctx.slack.state()).app?.app_id;
+  const ofApp = tokens.filter((t) => !t.app || !romeApp || t.app === romeApp);
   evidence.tokens = { issued: tokens.length, searched: ofApp.length };
   const holds = (text) => ofApp.filter((t) => String(text).includes(t.value));
   // Sent to the instance: every answer the Worker, Cloud or the mailbox gave
