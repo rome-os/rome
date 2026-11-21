@@ -3,6 +3,7 @@ import { readdir, realpath, stat } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, resolve } from "node:path";
 import { actionError, isRecord, type ActionResponse } from "./actions.js";
+import { scrollUsage } from "./computer-use/protocol.js";
 import { AUDIT_PUSH_BYTES, type AuditOutcome, type AuditStore } from "./audit.js";
 import {
   decodeMeta,
@@ -14,6 +15,19 @@ import {
 } from "./frame.js";
 import type { InboundEnvelope, OutboundEnvelope } from "./protocol.js";
 import { parseTransferMessage, TRANSFER_VERSION, TransferHost } from "./transfer.js";
+import {
+  computerUseAction,
+  sanitizeComputerUseArgs,
+  type ComputerUseHost,
+} from "./computer-use.js";
+
+const windowBindingAuthority = { allowPreemption: true, leaseIfAvailable: true } as const;
+
+function isDeviceActionRequest(
+  value: unknown,
+): value is { type: "request"; action: string; args?: unknown } {
+  return isRecord(value) && value.type === "request" && typeof value.action === "string";
+}
 
 interface ExecInput {
   command: string;
@@ -25,6 +39,7 @@ interface ProgramOutput {
   signal: NodeJS.Signals | null;
   stdout: Buffer;
   stderr: Buffer;
+  truncated: { stdout: boolean; stderr: boolean };
 }
 
 function execInput(input: unknown): ExecInput | null {
@@ -153,25 +168,86 @@ export function createExecutor(
   send: (message: OutboundEnvelope) => boolean,
   secrets: string[] = [],
   sendFrame: (frame: Frame) => boolean = () => false,
+  nativeHost?: ComputerUseHost,
+  scope?: { kind: "window_only"; peer: string },
 ) {
+  const computerUse = nativeHost;
   const children = new Set<ChildProcess>();
-  const transfers = new TransferHost({ keepBytes: AUDIT_PUSH_BYTES });
+  const transfers = scope ? undefined : new TransferHost({ keepBytes: AUDIT_PUSH_BYTES });
   let generation = 0;
-  const info = async (): Promise<ActionResponse> => ({
-    type: "response",
-    ok: true,
-    result: {
-      name,
-      platform: platform() === "darwin" ? "macos" : platform() === "win32" ? "windows" : platform(),
-      // Lists caller-facing actions only. transfer.open is an internal frame protocol for
-      // rome-node cp, so it is omitted on purpose. Callers detect it through transferVersion.
-      actions: ["system.info", "exec", "fs.list"],
-      frameVersion: 1,
-      transferVersion: TRANSFER_VERSION,
-      // Unavailable means every other action is refused until the owner fixes the log.
-      audit: await audit.status(),
-    },
-  });
+  const info = async (): Promise<ActionResponse> => {
+    const native = await computerUse?.describe();
+    const advertised = Array.isArray(native?.actions) ? native.actions : [];
+    const offered = scope
+      ? advertised.filter((action) => typeof action === "string" && computerUseAction(action))
+      : advertised;
+    const actions = scope ? offered.filter((action) => action !== "computer.preempt") : offered;
+    const capability =
+      native && scope
+        ? {
+            prefix: "computer",
+            personal: true,
+            ...(Number.isSafeInteger(native.version) ? { version: native.version } : {}),
+            ...(typeof native.configured === "boolean" ? { configured: native.configured } : {}),
+            actions,
+          }
+        : native;
+    const readiness = await audit.status();
+    return {
+      type: "response",
+      ok: true,
+      result: {
+        name,
+        platform:
+          platform() === "darwin" ? "macos" : platform() === "win32" ? "windows" : platform(),
+        // Lists caller-facing actions only. transfer.open is an internal frame protocol for
+        // rome-node cp, so it is omitted on purpose. Callers detect it through transferVersion.
+        actions: ["system.info", ...(scope ? [] : ["exec", "fs.list"]), ...actions],
+        ...(capability ? { capabilities: [capability] } : {}),
+        ...(scope && actions.includes("computer.observe")
+          ? {
+              usage: {
+                "computer.bind":
+                  'Pass {"windowRef":"<windowRef from computer.windows>"} promptly. Refresh the window list if the reference expires. For ordinary tasks add "foregroundNavigationFallback":true only if the window advertises it. Omit it if the target must stay in the background.',
+                ...(actions.includes("computer.act")
+                  ? {
+                      "computer.act":
+                        '{"sessionId":"<bound session>","actionId":"<new unique id>","observationId":"<latest observation>","stateVersion":1,"ref":"<element ref>","action":{"type":"click"}}\nCopy observationId, numeric stateVersion and ref from the latest observation. For a repeatable navigation click that removes its source, add top-level "navigation":true if foregroundNavigationFallback is bound. Prefer a named return link in a detail pane. When controls overlap, match the intended toolbar by its parent and nearby labels before using its advertised press. A matching pixel alone cannot identify which control to press. Observe again to verify the destination.' +
+                        " " +
+                        scrollUsage,
+                    }
+                  : {}),
+                "computer.observe":
+                  'Pass {"sessionId":"<bound session>"} for a full first observation. For a region use {"sessionId":"<bound session>","full":true,"region":{"x":0,"y":0,"width":240,"height":100}} in window image pixels when the binding advertises observationRegion. If a floating pane is missing from an incomplete region, set region.fromEnd to true. For changes to the same region, pass its last stateVersion as baseVersion.',
+              },
+            }
+          : {}),
+        frameVersion: 1,
+        ...(transfers ? { transferVersion: TRANSFER_VERSION } : {}),
+        // Unavailable means every other action is refused until the owner fixes the log.
+        audit: scope ? { state: readiness.state } : readiness,
+      },
+    };
+  };
+  function refuseWindowOnlyRequest(peer: string, action: string): ActionResponse | undefined {
+    if (!scope) return;
+    if (peer !== scope.peer)
+      return actionError("computer_use_denied", "This computer-use request was not authorized.", {
+        effectStatus: "not_dispatched",
+      });
+    if (
+      action === "system.info" ||
+      (computerUse && computerUseAction(action) && action !== "computer.preempt")
+    )
+      return;
+    return actionError(
+      "unsupported_action",
+      "This connection offers background-window actions only.",
+      {
+        effectStatus: "not_dispatched",
+      },
+    );
+  }
   // A request the log could not record never runs, so its outcome is known: nothing happened.
   const refused = () =>
     actionError(
@@ -184,7 +260,7 @@ export function createExecutor(
     actionError("connection_replaced", "The connection was replaced before the request ran.");
   const startRecord = (action: string, args: unknown, extra: Record<string, unknown>) => ({
     ...extra,
-    args,
+    args: action.startsWith("computer.") ? sanitizeComputerUseArgs(action, args) : args,
     ...(action === "exec" ? { envKeys: Object.keys(childEnvironment()).sort() } : {}),
   });
   function endRecord(
@@ -244,6 +320,7 @@ export function createExecutor(
         child.stdin.end(stdin);
       }
       const output: Record<"stdout" | "stderr", Buffer[]> = { stdout: [], stderr: [] };
+      const truncated = { stdout: false, stderr: false };
       for (const stream of ["stdout", "stderr"] as const) {
         child[stream]?.on("data", (chunk: Buffer) => {
           output[stream].push(chunk);
@@ -265,6 +342,7 @@ export function createExecutor(
           signal,
           stdout: Buffer.concat(output.stdout),
           stderr: Buffer.concat(output.stderr),
+          truncated,
         };
         notes.fields.exitCode = exitCode;
         notes.fields.signal = signal;
@@ -293,7 +371,7 @@ export function createExecutor(
           signal: output.signal,
           stdout: redactText(output.stdout),
           stderr: redactText(output.stderr),
-          truncated: { stdout: false, stderr: false },
+          truncated: output.truncated,
         },
       };
     },
@@ -324,7 +402,7 @@ export function createExecutor(
             exitCode: output.exitCode,
             signal: output.signal,
             stderr: redactText(output.stderr),
-            truncated: { stdout: false, stderr: false },
+            truncated: output.truncated,
           },
         },
         body: redactBytes(output.stdout, secrets),
@@ -347,16 +425,22 @@ export function createExecutor(
     /** Handles request frames and replies with a response frame to the sender. Ignores other types. */
     receiveFrame: (frame: Frame) => track(() => receiveFrame(frame)),
     /** Resolves once every request that has started is recorded as ended. */
-    idle: () =>
-      running ? new Promise<void>((resolve) => drained.push(resolve)) : Promise.resolve(),
+    idle: async () => {
+      if (running) await new Promise<void>((resolve) => drained.push(resolve));
+      await computerUse?.idle();
+    },
     disconnect,
   };
   async function receive(message: InboundEnvelope) {
     const request = message.payload;
-    if (!isRecord(request) || request.type !== "request" || typeof request.action !== "string")
-      return;
+    if (!isDeviceActionRequest(request)) return;
     const current = generation;
     const action = request.action;
+    const refusal = refuseWindowOnlyRequest(message.from, action);
+    if (refusal) {
+      send({ id: message.id, to: message.from, payload: refusal });
+      return;
+    }
     const handler = Object.hasOwn(handlers, action) ? handlers[action] : undefined;
     const notes: Notes = { fields: {}, content: {} };
     // system.info changes nothing and is probed on every dashboard refresh, so it is not
@@ -381,11 +465,27 @@ export function createExecutor(
         ? refused()
         : current !== generation
           ? replaced()
-          : handler
-            ? await handler(request.args, notes).catch(() =>
-                actionError("exec_failed", "The action failed."),
-              )
-            : actionError("unsupported_action", "The computer does not support this action.");
+          : computerUse && action.startsWith("computer.")
+            ? await computerUse
+                .run(
+                  action,
+                  request.args,
+                  message.from,
+                  ...(!scope && (action === "computer.bind" || action === "computer.preempt")
+                    ? [windowBindingAuthority]
+                    : []),
+                )
+                .catch(() =>
+                  actionError(
+                    "unknown_outcome",
+                    "The computer-use response was lost. Do not replay input.",
+                  ),
+                )
+            : handler
+              ? await handler(request.args, notes).catch(() =>
+                  actionError("exec_failed", "The action failed."),
+                )
+              : actionError("unsupported_action", "The computer does not support this action.");
     const reply = { id: message.id, to: message.from, payload };
     // A process from an earlier connection must never reply on its replacement.
     const interrupted = current !== generation;
@@ -404,13 +504,14 @@ export function createExecutor(
   async function receiveFrame(frame: Frame) {
     if (frame.type !== FRAME_TYPE.request) return;
     const request = decodeMeta(frame.meta);
-    const transfer = parseTransferMessage(request);
-    if (transfer) {
-      transfers.receive(frame.id, frame.peer, transfer, frame.body);
-      return;
+    if (transfers) {
+      const transfer = parseTransferMessage(request);
+      if (transfer) {
+        transfers.receive(frame.id, frame.peer, transfer, frame.body);
+        return;
+      }
     }
-    if (!isRecord(request) || request.type !== "request" || typeof request.action !== "string")
-      return;
+    if (!isDeviceActionRequest(request)) return;
     const current = generation;
     const action = request.action;
     const respond = (response: ActionResponse) =>
@@ -422,6 +523,11 @@ export function createExecutor(
         meta: encodeMeta(response),
         body: empty,
       });
+    const refusal = refuseWindowOnlyRequest(frame.peer, action);
+    if (refusal) {
+      respond(refusal);
+      return;
+    }
     const started = Date.now();
     const seq =
       action === "system.info"
@@ -434,7 +540,7 @@ export function createExecutor(
               transport: "binary",
               generation: current,
             }),
-            { stdin: frame.body },
+            action.startsWith("computer.") ? {} : { stdin: frame.body },
             secrets,
           );
     if (seq === null) {
@@ -446,7 +552,7 @@ export function createExecutor(
       endRecord(action, seq, started, replaced(), true, { fields: {}, content: {} }, 0);
       return;
     }
-    if (action === "transfer.open") {
+    if (transfers && action === "transfer.open") {
       // The transfer outlives this frame. Later frames for it arrive through transfers.receive.
       const transfer = transfers.open(frame.id, frame.peer, request.args, (meta, body = empty) => {
         // A transfer from an earlier connection must never send on its replacement.
@@ -479,15 +585,37 @@ export function createExecutor(
     }
     const handler = Object.hasOwn(frameHandlers, action) ? frameHandlers[action] : undefined;
     const notes: Notes = { fields: {}, content: {} };
-    const result = handler
-      ? await handler(request.args, frame.body, notes).catch(() => ({
-          response: actionError("exec_failed", "The action failed."),
-          body: empty,
-        }))
-      : {
-          response: actionError("unsupported_action", "The computer does not support this action."),
-          body: empty,
-        };
+    const result =
+      computerUse && action.startsWith("computer.")
+        ? await computerUse
+            .runBinary(
+              action,
+              request.args,
+              frame.body,
+              frame.peer,
+              ...(!scope && (action === "computer.bind" || action === "computer.preempt")
+                ? [windowBindingAuthority]
+                : []),
+            )
+            .catch(() => ({
+              response: actionError(
+                "unknown_outcome",
+                "The computer-use response was lost. Do not replay input.",
+              ),
+              body: empty,
+            }))
+        : handler
+          ? await handler(request.args, frame.body, notes).catch(() => ({
+              response: actionError("exec_failed", "The action failed."),
+              body: empty,
+            }))
+          : {
+              response: actionError(
+                "unsupported_action",
+                "The computer does not support this action.",
+              ),
+              body: empty,
+            };
     // A process from an earlier connection must never reply on its replacement.
     const interrupted = current !== generation;
     let response = result.response;
@@ -517,7 +645,8 @@ export function createExecutor(
   }
   function disconnect() {
     generation++;
-    transfers.abortAll();
+    computerUse?.disconnect();
+    transfers?.abortAll();
     for (const child of children) {
       child.kill("SIGTERM");
       const timer = setTimeout(() => {

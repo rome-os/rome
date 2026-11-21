@@ -114,7 +114,7 @@ client.disconnect();
 
 `updateConnection` and `clearConnection` are application callbacks. Subscription
 starts the daemon if needed and delivers a snapshot before resolving. It does
-not open a Gateway connection. Events describe the daemon's caller connection;
+not open a Gateway connection. Events describe the daemon's caller connection.
 they do not report remote device presence. A local connection loss delivers
 `{ transport: "disconnected", daemon: null, reason: "connection_lost" }`.
 
@@ -122,7 +122,7 @@ While subscribed, the client reconnects with backoff and restores subscriptions
 with a fresh snapshot. It does not restart a stopped daemon or replay missed
 events. Incompatible protocols deliver reason `incompatible` and stop reconnection.
 Listener exceptions can be handled with `createNodeClient(config, { onListenerError })`.
-Unsubscribe removes one listener; other listeners and clients remain subscribed.
+Unsubscribe removes one listener. other listeners and clients remain subscribed.
 Close the client with `disconnect()` when its owning application shuts down.
 
 Use `createNodeConfig({ directory, port? })` for an explicit location. Pass the
@@ -219,3 +219,94 @@ A local caller timeout does not cancel remote execution.
 
 See [the architecture and operating guide](../../docs/rome-node.md) for protocol,
 credential, and failure semantics.
+
+
+## Shared macOS computer use
+
+Import the shared local host from `/computer-use`.
+Desktop and the Node CLI use this implementation. The signed native app is included
+under `dist/native/Rome Computer Use.app`. On first use, the default host verifies
+and copies those bundled bytes into the owner-only application state directory.
+It restores the Mach-O executable bits that npm normalizes, then verifies the
+signature again. No compiler, installer download, or postinstall script is needed.
+The implementation targets Apple Silicon macOS 14 or later and explicitly selected
+background windows. It uses its own virtual cursor and window-directed input.
+It has no application allowlist and never falls back to global mouse or keyboard input.
+Application and OS qualification remain separate from advertised capabilities.
+
+The local `createComputerUseHost({ bundledAppPath?, appPath?, stateDir? })` exposes `run`,
+`runBinary`, `describe`, `requestPermissions`, `disconnect`, and `idle`.
+`describe()` reads configuration without launching the helper. Only the local
+`requestPermissions()` opens its panel. `disconnect()` stops this host's sessions,
+and `idle()` waits for stop records. The helper stays available to another host.
+A later connection can bind a new session, while the old refs remain invalid.
+
+`bind(windowRef)` requires a discovered window. Omitting it returns
+`window_selection_required`. Full input requires the target application to own
+neither the system frontmost application nor the system key focus. A different
+non-key window in that foreground application can use a restricted
+`inputIsolation: "window_semantics"` binding: AX-only `click`, `press`,
+`setValue` and `selectText`, each requiring a fresh ref. Click is a single left
+AX press without coordinates. Text edits use complete `setValue` assignments; type, raw keys,
+pointer events, drag/scroll and raw AX actions are unavailable. The mode stays
+fixed until cancellation or a new binding. Input and focus changes in other
+applications do not stop the background session.
+
+Bindings advertise `realPointer: false`, `coordinateSpace: "window_image_pixels"`
+and their action list. The implementation provides `move`, `click`, `drag`, `scroll`,
+`key`, `type`, `press`, `setValue`, `selectText` and `performAction`.
+Elements advertise their available actions. `press`, `setValue`, `selectText` and
+`performAction` require a fresh ref. `click` and `scroll` can use a ref without coordinates.
+Legacy bindings without window capabilities retain `setValue` only and its 180-unit limit.
+
+`observe` returns materialized `observation` state, the original wire `changes`,
+and optional `image` bytes. The client sends its cached baseline version.
+Pass `{ full: true }` as the third argument to request a full reset.
+The host retains the baseline after an action consumes its observation authority.
+Stopping a session or changing the helper instance invalidates the cache and refs.
+
+Act receipts remain unverified until an independent postcondition or readback succeeds.
+Generic input without a checkable postcondition remains `unverifiable`.
+Images use raw binary output, with their byte count and hash bound to the observation.
+Sessions belong to the authenticated transport caller. Unknown outcomes must never be replayed.
+
+The local permission panel requests persistent Screen Recording and Accessibility.
+It requires no Input Monitoring grant. **Check window access** captures only the
+helper's own permission panel. Ordinary status and bind calls do not request grants.
+Stable signing identity and path support grant continuity, while macOS retains
+control over revocation, upgrade consent and launch disclosures.
+
+Complete development-Mac tasks cover AppKit, Electron pages and Chrome pages,
+including selection, Unicode, shortcuts, buttons, checkboxes and scroll. AppKit
+also covers drag/release. Actual Core/Gateway tasks use Node and the Electron
+DeviceHost class with shared-helper identity checks. Native menus and popup
+controls are excluded because tracking can acquire system key focus. Production
+Cloud, outer Desktop account/settings, other systems and distribution permission
+continuity require separate qualification.
+
+For a development archive, build on an arm64 Mac with a real signing identity:
+
+```sh
+pnpm --filter @rome-os/node-core build
+pnpm --filter @rome-os/node-core build:native --identity "Apple Development: Your Name (TEAMID)"
+pnpm --filter @rome-os/node-core pack --pack-destination /tmp
+```
+
+The default running app has a stable path under
+`~/Library/Application Support/Rome/ComputerUse/`. Desktop supplies `bundledAppPath`
+as the source of its packaged helper. This source is installed at the same stable
+path as the Node package. Explicit `appPath` and
+`ROME_COMPUTER_USE_APP` development paths are used directly. The native installer
+takes the service process lock, preserves an old app, and refuses to replace a
+running helper. A different running implementation returns `helper_update_required`
+without killing work. Desktop and Node compare the signed source fingerprint,
+protocol, and architecture, so independent signatures of the same source can share
+one helper. The native build keeps `com.rome.computer-use` as its bundle identifier. Keep its
+path and signing identity stable to retain privacy grants across builds. Explicit
+`--unsigned` builds are CI-only: their helper refuses input and permission requests.
+The package gate checks that the executable is arm64 and included in the archive.
+Publication also requires Developer ID signing and a stapled notarization
+on an arm64 Mac. The release workflow fails when those credentials are missing.
+
+See [native computer use](../../docs/rome-node.md#native-computer-use-on-macos)
+for action arguments, permissions, supported boundaries, audit content, and failures.

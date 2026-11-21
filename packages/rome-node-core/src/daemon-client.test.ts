@@ -13,7 +13,8 @@ import {
   stopDaemon,
 } from "./daemon-client.js";
 import { writePrivateJson } from "./storage.js";
-import { DAEMON_PROTOCOL_VERSION } from "./daemon-protocol.js";
+import { DAEMON_PROTOCOL_VERSION, parseBinaryMessage } from "./daemon-protocol.js";
+import { RpcError } from "./daemon-rpc.js";
 import { encodeMeta, FRAME_HEADER_BYTES, MAX_FRAME_BYTES } from "./frame.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
@@ -48,7 +49,12 @@ async function fixture(handle: (req: IncomingMessage, res: ServerResponse) => vo
 }
 
 async function rpcFixture(
-  handle?: (method: string, params: { args?: { order?: number } }, socket: WebSocket) => unknown,
+  handle?: (
+    method: string,
+    params: { args?: { order?: number } },
+    socket: WebSocket,
+    binary: boolean,
+  ) => unknown,
 ) {
   const f = await fixture((_req, res) => res.writeHead(426).end());
   const sockets = new WebSocketServer({ server: f.server });
@@ -70,9 +76,13 @@ async function rpcFixture(
   };
   let subscriptions = 0;
   sockets.on("connection", (socket) =>
-    socket.on("message", async (data) => {
-      const request = JSON.parse(data.toString());
-      let result = handle ? await handle(request.method, request.params, socket) : undefined;
+    socket.on("message", async (data, binary) => {
+      const request = (
+        binary ? parseBinaryMessage(data as Buffer)?.message : JSON.parse(data.toString())
+      ) as { method: string; params: { args?: { order?: number } }; id: string };
+      let result = handle
+        ? await handle(request.method, request.params, socket, binary)
+        : undefined;
       if (request.method === "events.subscribe") {
         subscriptions++;
         socket.send(
@@ -80,8 +90,13 @@ async function rpcFixture(
         );
         result = { subscribed: true };
       }
-      if (socket.readyState === 1)
-        socket.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, result: result ?? status }));
+      if (socket.readyState === 1) {
+        const reply =
+          result instanceof RpcError
+            ? { error: { code: result.code, message: result.message } }
+            : { result: result ?? status };
+        socket.send(JSON.stringify({ jsonrpc: "2.0", id: request.id, ...reply }));
+      }
     }),
   );
   const client = createNodeClient(f.config);
