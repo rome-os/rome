@@ -397,7 +397,7 @@ import { createOgImageStore } from "./apps/og/store.js";
 import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./app-host/api.js";
-import { RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
+import { DELIVERY_ATTEMPTS, RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
 import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
 import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
 import { SLACK_APP_KIND } from "./connections/integrations/slack-app.js";
@@ -1955,7 +1955,7 @@ async function main() {
           (_drain, event) => onFrame({ headers: event.headers, body: event.body }),
         );
         drainer.start();
-        return { stop: () => drainer.stop() };
+        return { stop: () => drainer.stop(), attempts: DELIVERY_ATTEMPTS };
       },
     },
     settingsRepo,

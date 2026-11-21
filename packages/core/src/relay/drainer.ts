@@ -12,6 +12,8 @@ const log = createLogger("relay-drainer");
 const PING_INTERVAL_MS = 30_000;
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 const DELIVERY_RETRY_DELAYS_MS = [1_000, 5_000, 30_000] as const;
+/** How many times a drain delivers one event before it holds it until resumed. */
+export const DELIVERY_ATTEMPTS = 1 + DELIVERY_RETRY_DELAYS_MS.length;
 // Node clamps larger setTimeout values to 1ms. Keep status and the scheduled
 // timer aligned instead of turning a large Retry-After into an immediate retry.
 const MAX_TIMER_DELAY_MS = 2_147_483_647;

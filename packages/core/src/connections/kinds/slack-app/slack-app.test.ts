@@ -111,6 +111,7 @@ function fakeMailbox() {
       stop: () => {
         onFrame = null;
       },
+      attempts: 4,
     };
   };
   return {
@@ -301,6 +302,35 @@ describe("Slack app acknowledging its mailbox", () => {
     expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
   });
 
+  it("reports the connection down when recording stays stopped past the drain's retries", async () => {
+    const mailbox = fakeMailbox();
+    const chats = fakeChats();
+    const { adapter: a, delivered, faults } = adapter(mailbox, fakeApi(), { chats });
+    let swapping = true;
+    a.onInbound(async (message) => {
+      if (swapping) throw new RecordingStopped();
+      await chats.accept(message);
+    });
+    await a.start();
+
+    await mailbox.deposit(frame(dmEvent(1)));
+    await mailbox.deposit();
+    await mailbox.deposit();
+    expect(faults).toEqual([]);
+    // The drain's fourth and last delivery before it would hold the frame.
+    await mailbox.deposit();
+    expect(mailbox.statuses).toEqual([500, 500, 500, 500]);
+    expect(faults).toEqual(["transport"]);
+
+    // The runtime starts the connection again, with a fresh drain.
+    await a.stop();
+    swapping = false;
+    await a.start();
+    await mailbox.settle();
+    expect(mailbox.statuses).toEqual([500, 500, 500, 500, 200]);
+    expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
+  });
+
   it("answers the mailbox only after the delivery settles", async () => {
     const mailbox = fakeMailbox();
     let settle = () => {};
@@ -427,7 +457,7 @@ describe("Slack app mailbox key", () => {
     const refreshed: string[] = [];
     const open: OpenMailbox = (mailbox) => {
       opened.push(mailbox.drainKey);
-      return { stop: () => void stopped.push(mailbox.drainKey) };
+      return { stop: () => void stopped.push(mailbox.drainKey), attempts: 4 };
     };
     const a = new SlackAppAdapter({
       channel: "slack_app",
@@ -518,6 +548,7 @@ describe("Slack app mailbox key", () => {
             await inFlight;
             order.push(`stopped ${mailbox.drainKey.split(".")[1]}`);
           },
+          attempts: 4,
         };
       };
       let answer = first;

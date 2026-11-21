@@ -41,7 +41,7 @@ function registerEveryKind(registry: ConnectionRegistry): void {
     slackApp: {
       api: {},
       cloud: {},
-      openMailbox: () => ({ stop() {} }),
+      openMailbox: () => ({ stop() {}, attempts: 4 }),
       copy: {},
       listens: () => true,
     },
