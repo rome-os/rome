@@ -24,7 +24,6 @@ export function applyThemePreference(preference: ThemePreference): void {
     typeof window.matchMedia === "function" &&
     window.matchMedia("(prefers-color-scheme: dark)").matches;
   const resolved = preference === "system" ? (prefersDark ? "dark" : "light") : preference;
-  document.documentElement.setAttribute("data-theme", "ember");
   document.documentElement.classList.toggle("dark", resolved === "dark");
   document.documentElement.style.colorScheme = resolved;
 }

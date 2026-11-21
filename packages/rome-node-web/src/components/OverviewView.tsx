@@ -212,8 +212,9 @@ export function OverviewView({
   const remainingMs = pending ? pending.expiresAt - now : 0;
   const isConnectedOrActive =
     snapshot.phase === "online" || snapshot.phase === "connecting" || snapshot.phase === "retrying";
-  const auditOk = snapshot.audit.summary.status.state === "ok";
+  const auditOk = snapshot.audit.status.state === "ok";
   const showAuthorizeForm = !snapshot.configured || snapshot.phase === "revoked";
+  const cloudDashboardUrl = `${snapshot.cloudUrl.replace(/\/+$/, "")}/dashboard`;
 
   return (
     <div className="space-y-6">
@@ -244,11 +245,11 @@ export function OverviewView({
       {!auditOk ? (
         <Alert variant="destructive">
           <AlertTriangle />
-          <AlertTitle>{t.audit.unavailableTitle}</AlertTitle>
+          <AlertTitle>{t.overview.auditUnavailableTitle}</AlertTitle>
           <AlertDescription>
-            {snapshot.audit.summary.status.state === "unavailable"
-              ? `${snapshot.audit.summary.status.message} — ${t.audit.unavailableHint}`
-              : t.audit.unavailableHint}
+            {snapshot.audit.status.state === "unavailable"
+              ? `${snapshot.audit.status.message} — ${t.overview.auditUnavailableHint}`
+              : t.overview.auditUnavailableHint}
           </AlertDescription>
         </Alert>
       ) : null}
@@ -312,12 +313,23 @@ export function OverviewView({
                     {auditOk ? t.overview.auditOk : t.overview.auditUnavailable}
                   </Badge>
                   <span className="text-aux tabular-nums text-muted-foreground">
-                    {formatBytes(snapshot.audit.summary.bytes)} · {snapshot.audit.summary.requests}
+                    {formatBytes(snapshot.audit.bytes)} · {snapshot.audit.requests}
                   </span>
                 </div>
               </ListRow>
             </List>
           </CardContent>
+          {snapshot.configured ? (
+            <CardFooter className="flex-wrap justify-between gap-2 border-t border-border-subtle">
+              <span className="text-aux text-muted-foreground">{t.overview.auditCloudHint}</span>
+              <Button asChild variant="outline" size="sm">
+                <a href={cloudDashboardUrl} target="_blank" rel="noreferrer noopener">
+                  <ExternalLink data-icon="inline-start" />
+                  {t.overview.openCloud}
+                </a>
+              </Button>
+            </CardFooter>
+          ) : null}
         </Card>
 
         {pending ? (

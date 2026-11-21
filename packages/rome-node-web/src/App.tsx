@@ -11,14 +11,11 @@ import {
   PageDescription,
   PageHeader,
   PageHeading,
-  PageNav,
-  PageNavLink,
   PageTitle,
 } from "@rome-os/ui/page";
 import { Spinner } from "@rome-os/ui/spinner";
 import { UiScaleProvider } from "@rome-os/ui/ui-scale";
 import { ApiError, api, subscribeEvents } from "./api";
-import { AuditView } from "./components/AuditView";
 import { LoginView } from "./components/LoginView";
 import { OverviewView, phaseBadgeVariant } from "./components/OverviewView";
 import { RomeLogo } from "./components/RomeLogo";
@@ -31,15 +28,6 @@ import {
 } from "./theme";
 import type { AuthSession, HostSnapshot } from "./types";
 
-type ActiveTab = "overview" | "audit";
-
-function initialTab(): ActiveTab {
-  if (typeof window !== "undefined" && window.location.hash === "#audit") {
-    return "audit";
-  }
-  return "overview";
-}
-
 function ThemeIcon({ pref }: { pref: ThemePreference }) {
   if (pref === "light") return <Sun />;
   if (pref === "dark") return <Moon />;
@@ -49,11 +37,9 @@ function ThemeIcon({ pref }: { pref: ThemePreference }) {
 export function App() {
   const [locale, setLocale] = useState<Locale>(() => initialLocale());
   const [theme, setTheme] = useState<ThemePreference>(() => readThemePreference());
-  const [tab, setTab] = useState<ActiveTab>(() => initialTab());
   const [session, setSession] = useState<AuthSession | null>(null);
   const [snapshot, setSnapshot] = useState<HostSnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [auditRevision, setAuditRevision] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
   const t = messages[locale];
@@ -73,7 +59,6 @@ export function App() {
     try {
       const next = await api.status();
       setSnapshot(next);
-      setAuditRevision((r) => r + 1);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setSession((prev) => ({
@@ -113,18 +98,8 @@ export function App() {
       onStatus: (next) => {
         setSnapshot(next);
       },
-      onAudit: () => {
-        setAuditRevision((r) => r + 1);
-      },
     });
   }, [session?.authenticated]);
-
-  function handleSelectTab(next: ActiveTab) {
-    setTab(next);
-    if (typeof window !== "undefined") {
-      window.history.replaceState(null, "", next === "audit" ? "#audit" : "#overview");
-    }
-  }
 
   function handleToggleLocale() {
     const next: Locale = locale === "en" ? "zh-CN" : "en";
@@ -214,29 +189,6 @@ export function App() {
                 </PageActions>
               </PageHeader>
 
-              <PageNav aria-label={t.nav.ariaLabel}>
-                <PageNavLink
-                  href="#overview"
-                  active={tab === "overview"}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleSelectTab("overview");
-                  }}
-                >
-                  {t.nav.overview}
-                </PageNavLink>
-                <PageNavLink
-                  href="#audit"
-                  active={tab === "audit"}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleSelectTab("audit");
-                  }}
-                >
-                  {t.nav.audit}
-                </PageNavLink>
-              </PageNav>
-
               {loadError ? (
                 <Alert variant="destructive">
                   <AlertDescription>{loadError}</AlertDescription>
@@ -248,23 +200,15 @@ export function App() {
                   <EmptyStateIcon>
                     <Spinner />
                   </EmptyStateIcon>
-                  <EmptyStateTitle>{t.audit.loading}</EmptyStateTitle>
+                  <EmptyStateTitle>{t.loading}</EmptyStateTitle>
                 </EmptyState>
-              ) : tab === "overview" ? (
+              ) : (
                 <OverviewView
                   t={t}
                   snapshot={snapshot}
                   onSnapshot={setSnapshot}
                   passwordSource={session?.passwordSource ?? "none"}
                   onSessionChange={setSession}
-                />
-              ) : (
-                <AuditView
-                  t={t}
-                  locale={locale}
-                  summary={snapshot.audit.summary}
-                  counts={snapshot.audit.counts}
-                  revision={auditRevision}
                 />
               )}
             </Page>

@@ -6,6 +6,5 @@
       stored === "light" || stored === "dark" ? stored : prefersDark ? "dark" : "light";
     if (resolved === "dark") document.documentElement.classList.add("dark");
     document.documentElement.style.colorScheme = resolved;
-    document.documentElement.setAttribute("data-theme", "ember");
   } catch (_err) {}
 })();

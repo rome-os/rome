@@ -2,7 +2,7 @@
   "name": "@rome-os/node-web",
   "version": "0.0.0",
   "private": true,
-  "description": "Lightweight Web UI for controlling a Rome Node container host and inspecting its local audit log",
+  "description": "Lightweight Web UI for controlling a Rome Node container host",
   "license": "MIT",
   "type": "module",
   "files": [

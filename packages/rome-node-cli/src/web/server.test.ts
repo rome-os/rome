@@ -382,59 +382,19 @@ describe("rome-node web server", () => {
     };
     expect(savedCred.deviceId).toBe(mock.deviceId);
 
-    // Run a remote exec and verify audit API returns record + truncated stdout preview.
+    // Run a remote exec and verify /api/status reflects healthy audit recording.
     const execReply = await mock.sendRpc("exec", {
       command: process.execPath,
-      args: ["-e", "process.stdout.write('A'.repeat(300 * 1024))"],
+      args: ["-e", "process.stdout.write('hello-rome')"],
     });
     expect(execReply.ok).toBe(true);
 
-    const itemsRes = await fetch(`${running.url}/api/audit/items?limit=10`);
-    expect(itemsRes.status).toBe(200);
-    const { items } = (await itemsRes.json()) as {
-      items: {
-        seq: number;
-        action: string;
-        end?: {
-          record?: {
-            content?: { stdout?: { size: number; storedBytes: number; sha256: string } };
-          };
-        };
-      }[];
+    const statusAfterExec = (await (await fetch(`${running.url}/api/status`)).json()) as {
+      audit: { status: { state: string }; requests: number; bytes: number };
     };
-    expect(items.length).toBeGreaterThanOrEqual(1);
-    const execItem = items.find((item) => item.action === "exec");
-    expect(execItem).toBeTruthy();
-    expect(execItem?.end?.record?.content?.stdout?.size).toBe(300 * 1024);
-    expect(execItem?.end?.record?.content?.stdout?.storedBytes).toBe(300 * 1024);
-    expect(typeof execItem?.end?.record?.content?.stdout?.sha256).toBe("string");
-
-    const now = Date.now();
-    const bucketMs = 600_000;
-    const untilTs = (Math.floor(now / bucketMs) + 1) * bucketMs;
-    const sinceTs = untilTs - 24 * 60 * 60 * 1000;
-    const statsRes = await fetch(
-      `${running.url}/api/audit/stats?since=${sinceTs}&until=${untilTs}&bucketMs=${bucketMs}`,
-    );
-    expect(statsRes.status).toBe(200);
-    const statsBody = (await statsRes.json()) as {
-      since: number;
-      until: number;
-      bucketMs: number;
-      groups: { bucket: number; result: string; count: number }[];
-    };
-    expect(statsBody.groups.length).toBeGreaterThanOrEqual(1);
-    expect(statsBody.groups[0]!.bucket).toBeGreaterThanOrEqual(0);
-    expect(statsBody.groups[0]!.bucket).toBeLessThan(144);
-
-    const contentRes = await fetch(
-      `${running.url}/api/audit/items/${execItem!.seq}/content/stdout`,
-    );
-    expect(contentRes.status).toBe(200);
-    expect(contentRes.headers.get("x-content-truncated")).toBe("true");
-    expect(Number(contentRes.headers.get("x-content-total-bytes"))).toBe(300 * 1024);
-    const previewBytes = new Uint8Array(await contentRes.arrayBuffer());
-    expect(previewBytes.byteLength).toBe(256 * 1024);
+    expect(statusAfterExec.audit.status.state).toBe("ok");
+    expect(statusAfterExec.audit.requests).toBeGreaterThanOrEqual(1);
+    expect(statusAfterExec.audit.bytes).toBeGreaterThan(0);
 
     // Simulate config persistence failure while toggling execution OFF:
     // executionEnabled must remain true and a retry after recovery must succeed.

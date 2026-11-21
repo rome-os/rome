@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AuditQuery, AuditResult, ContentName } from "@rome-os/node-core/host";
 import { createStaticHandler, resolveWebAssetsDir } from "./assets.js";
 import {
   createWebAuth,
@@ -15,11 +14,8 @@ import {
 } from "./host-controller.js";
 
 const MAX_JSON_BYTES = 16 * 1024;
-const MAX_CONTENT_PREVIEW_BYTES = 256 * 1024;
 const MAX_SSE_CLIENTS = 16;
 const SSE_HEARTBEAT_MS = 20_000;
-const VALID_RESULTS = new Set<AuditResult>(["succeeded", "failed", "no_result"]);
-const VALID_CONTENT_NAMES = new Set<ContentName>(["stdin", "stdout", "stderr", "file"]);
 
 const UNTRUSTED_HOST_HTML = `<!doctype html>
 <html lang="en">
@@ -125,15 +121,6 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
   return parsed as Record<string, unknown>;
 }
 
-function parseOptionalInt(value: string | null, name: string): number | undefined {
-  if (value === null || value === "") return undefined;
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) {
-    throw new ControllerInputError(`${name} must be an integer.`);
-  }
-  return parsed;
-}
-
 export async function startWebServer(options: WebServerOptions): Promise<RunningWebServer> {
   const assetsDir = resolveWebAssetsDir(options.assetsDir);
   const serveStatic = createStaticHandler(assetsDir);
@@ -202,7 +189,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     setSecurityHeaders(res);
     const method = req.method ?? "GET";
     const parsedUrl = new URL(req.url ?? "/", "http://localhost");
-    const { pathname, searchParams } = parsedUrl;
+    const { pathname } = parsedUrl;
 
     if (pathname === "/healthz" && (method === "GET" || method === "HEAD")) {
       if (method === "HEAD") {
@@ -450,120 +437,6 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
 
       if (pathname === "/api/host/credentials/clear" && method === "POST") {
         sendJson(res, 200, await controller.clearCredentials());
-        return;
-      }
-
-      if (pathname === "/api/audit/status" && method === "GET") {
-        const summary = controller.audit.summary();
-        const counts = summary.status.state === "ok" ? controller.audit.resultCounts() : null;
-        sendJson(res, 200, { summary, counts });
-        return;
-      }
-
-      if (pathname === "/api/audit/stats" && method === "GET") {
-        const summary = controller.audit.summary();
-        if (summary.status.state !== "ok") {
-          sendJson(res, 503, { error: summary.status.message, status: summary.status });
-          return;
-        }
-        const now = options.deps?.now ? options.deps.now() : Date.now();
-        const bucketMs = Math.max(
-          1000,
-          parseOptionalInt(searchParams.get("bucketMs"), "bucketMs") ?? 600_000,
-        );
-        const until = parseOptionalInt(searchParams.get("until"), "until") ?? now;
-        const since =
-          parseOptionalInt(searchParams.get("since"), "since") ?? until - 24 * 60 * 60 * 1000;
-        if (since >= until) {
-          throw new ControllerInputError("since must be earlier than until.");
-        }
-        if (Math.ceil((until - since) / bucketMs) > 1000) {
-          throw new ControllerInputError("Stats range cannot exceed 1000 buckets.");
-        }
-        sendJson(res, 200, controller.audit.stats(since, until, bucketMs));
-        return;
-      }
-
-      if (pathname === "/api/audit/items" && method === "GET") {
-        const summary = controller.audit.summary();
-        if (summary.status.state !== "ok") {
-          sendJson(res, 503, { error: summary.status.message, status: summary.status });
-          return;
-        }
-        const limitRaw = parseOptionalInt(searchParams.get("limit"), "limit") ?? 50;
-        const limit = Math.max(1, Math.min(200, limitRaw));
-        const resultParam = searchParams.get("result");
-        if (resultParam && !VALID_RESULTS.has(resultParam as AuditResult)) {
-          throw new ControllerInputError("Invalid result filter.");
-        }
-        const actionParam = searchParams.get("action") || undefined;
-        const textParam = searchParams.get("text")?.trim() || undefined;
-        const query: AuditQuery = {
-          requestsOnly: searchParams.get("requestsOnly") !== "false",
-          limit: limit + 1,
-          beforeSeq: parseOptionalInt(searchParams.get("beforeSeq"), "beforeSeq"),
-          since: parseOptionalInt(searchParams.get("since"), "since"),
-          until: parseOptionalInt(searchParams.get("until"), "until"),
-          action: actionParam,
-          result: resultParam ? (resultParam as AuditResult) : undefined,
-          text: textParam,
-        };
-        const rows = controller.audit.list(query);
-        const hasMore = rows.length > limit;
-        sendJson(res, 200, { items: hasMore ? rows.slice(0, limit) : rows, hasMore });
-        return;
-      }
-
-      const contentMatch = pathname.match(/^\/api\/audit\/items\/(\d+)\/content\/([a-z]+)$/);
-      if (contentMatch && method === "GET") {
-        const summary = controller.audit.summary();
-        if (summary.status.state !== "ok") {
-          sendJson(res, 503, { error: summary.status.message, status: summary.status });
-          return;
-        }
-        const seq = Number(contentMatch[1]);
-        const name = contentMatch[2] as ContentName;
-        if (!Number.isSafeInteger(seq) || !VALID_CONTENT_NAMES.has(name)) {
-          throw new ControllerInputError("Invalid audit content request.");
-        }
-        const item = controller.audit.get(seq);
-        if (!item) {
-          sendJson(res, 404, { error: `Record ${seq} not found.` });
-          return;
-        }
-        const ownerSeq = name === "stdin" ? item.seq : (item.end?.seq ?? item.seq);
-        const data = controller.audit.content(ownerSeq, name);
-        if (!data) {
-          sendJson(res, 404, { error: "Content is unavailable or was pruned." });
-          return;
-        }
-        const truncated = data.byteLength > MAX_CONTENT_PREVIEW_BYTES;
-        const preview = truncated ? data.subarray(0, MAX_CONTENT_PREVIEW_BYTES) : data;
-        res.writeHead(200, {
-          "content-type": "application/octet-stream",
-          "content-length": String(preview.byteLength),
-          "cache-control": "no-store",
-          "x-content-total-bytes": String(data.byteLength),
-          "x-content-truncated": truncated ? "true" : "false",
-        });
-        res.end(preview);
-        return;
-      }
-
-      const itemMatch = pathname.match(/^\/api\/audit\/items\/(\d+)$/);
-      if (itemMatch && method === "GET") {
-        const summary = controller.audit.summary();
-        if (summary.status.state !== "ok") {
-          sendJson(res, 503, { error: summary.status.message, status: summary.status });
-          return;
-        }
-        const seq = Number(itemMatch[1]);
-        const item = controller.audit.get(seq);
-        if (!item) {
-          sendJson(res, 404, { error: `Record ${seq} not found.` });
-          return;
-        }
-        sendJson(res, 200, item);
         return;
       }
 

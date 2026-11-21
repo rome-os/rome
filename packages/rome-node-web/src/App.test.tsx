@@ -1,10 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rstest } from "@rstest/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App } from "./App";
-import type { AuditItem, HostSnapshot } from "./types";
-
-const BUCKET_MS = 600_000;
-const WINDOW_MS = 24 * 60 * 60 * 1000;
+import type { HostSnapshot } from "./types";
 
 function makeSnapshot(overrides: Partial<HostSnapshot> = {}): HostSnapshot {
   return {
@@ -21,57 +18,13 @@ function makeSnapshot(overrides: Partial<HostSnapshot> = {}): HostSnapshot {
     pendingAuth: null,
     lastError: null,
     audit: {
-      summary: {
-        path: "/home/node/.rome-node/audit.db",
-        status: { state: "ok" },
-        bytes: 4096,
-        records: 2,
-        requests: 1,
-        oldestAt: Date.now() - 10_000,
-        newestAt: Date.now() - 1_000,
-        lastPrune: null,
-        retention: { maxAgeDays: 30, maxBytes: 1024 * 1024 * 1024 },
-      },
-      counts: { all: 1, succeeded: 1, failed: 0, no_result: 0 },
+      status: { state: "ok" },
+      bytes: 4096,
+      requests: 1,
     },
     ...overrides,
   };
 }
-
-// Mirrors the exact record shape persisted by AuditStore in @rome-os/node-core.
-const sampleAuditItem: AuditItem = {
-  seq: 1,
-  at: Date.now() - 2_000,
-  kind: "start",
-  action: "exec",
-  startSeq: null,
-  outcome: null,
-  record: {
-    requestId: "req-1",
-    from: "instance-1",
-    args: { command: "echo", args: ["hello-rome"], cwd: "/workspace" },
-    envKeys: ["PATH", "HOME"],
-  },
-  end: {
-    seq: 2,
-    at: Date.now() - 1_900,
-    kind: "end",
-    action: "exec",
-    startSeq: 1,
-    outcome: "ok",
-    record: {
-      exitCode: 0,
-      durationMs: 100,
-      content: {
-        stdout: {
-          size: 11,
-          storedBytes: 11,
-          sha256: "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
-        },
-      },
-    },
-  },
-};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -85,7 +38,6 @@ describe("Rome Node Web UI", () => {
 
   beforeEach(() => {
     localStorage.setItem("rome-node-locale", "en");
-    window.location.hash = "";
   });
 
   afterEach(() => {
@@ -205,18 +157,13 @@ describe("Rome Node Web UI", () => {
     expect(link.getAttribute("href")).toBe("https://rome.ai/device?user_code=ABCD-EFGH");
   });
 
-  it("toggles execution, renders real AuditStore bucket indices, and loads record.content stdout preview", async () => {
+  it("toggles execution and links configured nodes to Rome Cloud for full activity logs", async () => {
     let snapshot = makeSnapshot({
       phase: "online",
       configured: true,
       deviceId: "dev_999",
       executionEnabled: true,
     });
-    const alignedUntil = (Math.floor(Date.now() / BUCKET_MS) + 1) * BUCKET_MS;
-    const alignedSince = alignedUntil - WINDOW_MS;
-    const activeBucketIndex = 140;
-    const expectedBucketStart = alignedSince + activeBucketIndex * BUCKET_MS;
-    const auditItemUrls: string[] = [];
 
     globalThis.fetch = rstest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -231,28 +178,6 @@ describe("Rome Node Web UI", () => {
         snapshot = { ...snapshot, executionEnabled: body.enabled };
         return jsonResponse(snapshot);
       }
-      if (url.startsWith("/api/audit/stats")) {
-        return jsonResponse({
-          since: alignedSince,
-          until: alignedUntil,
-          bucketMs: BUCKET_MS,
-          groups: [{ peer: null, bucket: activeBucketIndex, result: "succeeded", count: 3 }],
-        });
-      }
-      if (url.startsWith("/api/audit/items?")) {
-        auditItemUrls.push(url);
-        return jsonResponse({ items: [sampleAuditItem], hasMore: false });
-      }
-      if (url === "/api/audit/items/1/content/stdout") {
-        return new Response("hello-rome\n", {
-          status: 200,
-          headers: {
-            "content-type": "application/octet-stream",
-            "x-content-total-bytes": "11",
-            "x-content-truncated": "false",
-          },
-        });
-      }
       return jsonResponse({ error: "not_found" }, 404);
     }) as typeof fetch;
 
@@ -266,31 +191,8 @@ describe("Rome Node Web UI", () => {
       expect(toggle.getAttribute("aria-checked")).toBe("false");
     });
 
-    fireEvent.click(screen.getByRole("link", { name: "Audit log" }));
-
-    const rowBtn = await screen.findByRole("button", { name: /echo hello-rome/i });
-
-    // Click the populated histogram bar and verify it filters by computed bucket timestamp (not epoch 0).
-    const svg = screen.getByRole("img", { name: "24-hour audit request activity" });
-    const clickableBar = svg.querySelector("g.cursor-pointer");
-    expect(clickableBar).toBeTruthy();
-    fireEvent.click(clickableBar!);
-
-    await waitFor(() => {
-      expect(
-        auditItemUrls.some(
-          (u) =>
-            u.includes(`since=${expectedBucketStart}`) &&
-            u.includes(`until=${expectedBucketStart + BUCKET_MS}`),
-        ),
-      ).toBe(true);
-    });
-
-    fireEvent.click(rowBtn);
-
-    expect(await screen.findByText("hello-rome")).toBeTruthy();
-    expect(
-      screen.getByText("SHA-256 b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"),
-    ).toBeTruthy();
+    expect(screen.getByText("Healthy")).toBeTruthy();
+    const cloudLink = screen.getByRole("link", { name: "Open Rome Cloud" });
+    expect(cloudLink.getAttribute("href")).toBe("https://rome.ai/dashboard");
   });
 });

@@ -9,7 +9,6 @@ import {
   createFileCredentialStore,
   defaultDeviceName,
   loginDeviceCode,
-  type AuditResult,
   type AuditSummary,
   type CredentialStore,
   type DeviceAuthorizationPrompt,
@@ -21,7 +20,6 @@ import { readPrivateJson, writePrivateJson } from "@rome-os/node-core/storage";
 import { CLI_AUDIT_HINT, cliAuditPath } from "../audit.js";
 
 const DEVICE_TOKEN_PATTERN = /^(?:romedev|romemob)_[A-Za-z0-9_-]{43}$/;
-const AUDIT_POLL_MS = 1500;
 
 export type HostPhase =
   | "unconfigured"
@@ -62,14 +60,13 @@ export interface HostSnapshot {
   pendingAuth: PendingAuthorization | null;
   lastError: string | null;
   audit: {
-    summary: AuditSummary;
-    counts: Record<AuditResult | "all", number> | null;
+    status: AuditSummary["status"];
+    bytes: number;
+    requests: number;
   };
 }
 
-export type HostControllerEvent =
-  | { type: "status"; snapshot: HostSnapshot }
-  | { type: "audit"; records: number };
+export type HostControllerEvent = { type: "status"; snapshot: HostSnapshot };
 
 export interface HostControllerDeps {
   connectHost?: typeof connectHost;
@@ -190,10 +187,6 @@ export class HostController {
   private authAbort: AbortController | null = null;
   private authRun: Promise<void> | null = null;
   private mutationQueue: Promise<void> = Promise.resolve();
-  private auditTimer: ReturnType<typeof setInterval> | null = null;
-  private lastAuditRecords = -1;
-  private lastAuditState = "";
-  private disposed = false;
 
   constructor(private readonly options: HostControllerOptions) {
     this.now = options.deps?.now ?? (() => Date.now());
@@ -223,7 +216,7 @@ export class HostController {
     };
   }
 
-  get audit(): AuditStore {
+  private get audit(): AuditStore {
     if (!this.auditStore) throw new Error("HostController has not been started.");
     return this.auditStore;
   }
@@ -269,27 +262,13 @@ export class HostController {
   }
 
   snapshot(): HostSnapshot {
-    const summary: AuditSummary = this.auditStore
+    const summary: Pick<AuditSummary, "status" | "bytes" | "requests"> = this.auditStore
       ? this.auditStore.summary()
       : {
-          path: cliAuditPath(this.options.configDirectory),
           status: { state: "unavailable", code: "io", message: "Audit log is not open." },
           bytes: 0,
-          records: 0,
           requests: 0,
-          oldestAt: null,
-          newestAt: null,
-          lastPrune: null,
-          retention: { maxAgeDays: 30, maxBytes: 1024 * 1024 * 1024 },
         };
-    let counts: Record<AuditResult | "all", number> | null = null;
-    if (this.auditStore && summary.status.state === "ok") {
-      try {
-        counts = this.auditStore.resultCounts();
-      } catch {
-        counts = null;
-      }
-    }
     return {
       phase: this.phase,
       since: this.since,
@@ -303,7 +282,11 @@ export class HostController {
       version: this.version,
       pendingAuth: this.pendingAuth ? { ...this.pendingAuth } : null,
       lastError: this.lastError,
-      audit: { summary, counts },
+      audit: {
+        status: summary.status,
+        bytes: summary.bytes,
+        requests: summary.requests,
+      },
     };
   }
 
@@ -336,25 +319,6 @@ export class HostController {
       this.deviceId = null;
       this.setPhase("unconfigured", null);
     }
-
-    const initialSummary = this.auditStore.summary();
-    this.lastAuditRecords = initialSummary.records;
-    this.lastAuditState = initialSummary.status.state;
-    this.auditTimer = setInterval(() => {
-      if (this.disposed || this.listeners.size === 0 || !this.auditStore) return;
-      try {
-        const next = this.auditStore.summary();
-        if (next.records !== this.lastAuditRecords || next.status.state !== this.lastAuditState) {
-          this.lastAuditRecords = next.records;
-          this.lastAuditState = next.status.state;
-          this.emit({ type: "audit", records: next.records });
-          this.emit({ type: "status", snapshot: this.snapshot() });
-        }
-      } catch {
-        // Observing audit log changes must never disrupt the host.
-      }
-    }, AUDIT_POLL_MS);
-    this.auditTimer.unref();
   }
 
   private async stopActiveConnection(): Promise<void> {
@@ -610,11 +574,6 @@ export class HostController {
   }
 
   async dispose(): Promise<void> {
-    this.disposed = true;
-    if (this.auditTimer) {
-      clearInterval(this.auditTimer);
-      this.auditTimer = null;
-    }
     await Promise.race([
       Promise.all([this.stopActiveAuthorization(), this.stopActiveConnection()]),
       delay(3500, undefined, { ref: false }),

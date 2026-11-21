@@ -8,19 +8,19 @@ import { buildThemeCss, DEFAULT_THEME_NAME, getThemeDefinitions } from "../web/s
 
 const packageDir = dirname(fileURLToPath(import.meta.url));
 const distDir = resolve(packageDir, "dist/web");
-const generatedThemePath = resolve(packageDir, "src/generated-ember-theme.css");
+const generatedThemePath = resolve(packageDir, "src/generated-theme.css");
 const COMPRESSIBLE = new Set([".html", ".js", ".mjs", ".css", ".svg", ".json"]);
 // Guardrail so accidental heavy dependencies (charts, markdown, icon packs) fail CI immediately.
-const MAX_TOTAL_GZIP_BYTES = 160 * 1024;
+const MAX_TOTAL_GZIP_BYTES = 130 * 1024;
 
-function generateEmberThemeCss(): void {
-  const ember = getThemeDefinitions().find((theme) => theme.id === DEFAULT_THEME_NAME);
-  if (!ember) {
+function generateDefaultThemeCss(): void {
+  const defaultTheme = getThemeDefinitions().find((theme) => theme.id === DEFAULT_THEME_NAME);
+  if (!defaultTheme) {
     throw new Error(
       `Default theme "${DEFAULT_THEME_NAME}" not found in packages/web/src/lib/themes.ts`,
     );
   }
-  const css = `/* Generated from packages/web/src/lib/themes.ts (${ember.id}). Do not edit by hand. */\n${buildThemeCss([ember])}\n`;
+  const css = `/* Generated from packages/web/src/lib/themes.ts (${defaultTheme.id}). Do not edit by hand. */\n${buildThemeCss([defaultTheme])}\n`;
   let previous = "";
   try {
     previous = readFileSync(generatedThemePath, "utf8");
@@ -42,15 +42,15 @@ function walkFiles(dir: string): string[] {
   return results.sort();
 }
 
-function pluginEmberTheme(): RsbuildPlugin {
+function pluginDefaultTheme(): RsbuildPlugin {
   return {
-    name: "rome-node-web:ember-theme",
+    name: "rome-node-web:default-theme",
     setup(api) {
       api.onBeforeStartDevServer(() => {
-        generateEmberThemeCss();
+        generateDefaultThemeCss();
       });
       api.onBeforeBuild(() => {
-        generateEmberThemeCss();
+        generateDefaultThemeCss();
       });
     },
   };
@@ -100,7 +100,7 @@ function pluginPrecompressAndBudget(): RsbuildPlugin {
 }
 
 export default defineConfig({
-  plugins: [pluginReact(), pluginEmberTheme(), pluginPrecompressAndBudget()],
+  plugins: [pluginReact(), pluginDefaultTheme(), pluginPrecompressAndBudget()],
   source: {
     entry: {
       index: "./src/main.tsx",
@@ -108,6 +108,9 @@ export default defineConfig({
   },
   html: {
     template: "./index.html",
+    templateParameters: {
+      defaultTheme: DEFAULT_THEME_NAME,
+    },
     scriptLoading: "module",
   },
   output: {

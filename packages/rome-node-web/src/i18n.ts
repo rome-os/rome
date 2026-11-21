@@ -1,4 +1,4 @@
-import type { AuditItem, AuditResult, HostPhase } from "./types";
+import type { HostPhase } from "./types";
 
 export type Locale = "en" | "zh-CN";
 
@@ -28,12 +28,8 @@ export function saveLocale(locale: Locale): void {
 export const messages = {
   en: {
     appTitle: "Rome Node",
-    appSubtitle: "Container host control & local audit log",
-    nav: {
-      overview: "Connection",
-      audit: "Audit log",
-      ariaLabel: "Rome Node views",
-    },
+    appSubtitle: "Container host control",
+    loading: "Loading…",
     header: {
       themeLight: "Switch to light mode",
       themeDark: "Switch to dark mode",
@@ -98,8 +94,7 @@ export const messages = {
     },
     overview: {
       statusTitle: "Host status",
-      statusDescription: "Live Gateway link and local audit storage on this container.",
-      connection: "Status",
+      statusDescription: "Live Gateway link and local audit health on this container.",
       uptime: "In current state",
       deviceName: "Device name",
       deviceId: "Device ID",
@@ -108,8 +103,11 @@ export const messages = {
       auditState: "Audit log",
       auditOk: "Healthy",
       auditUnavailable: "Unavailable",
-      auditStorage: "Log storage",
-      requestsTotal: "Total requests",
+      auditCloudHint: "Full activity & logs in Rome → Settings → Devices",
+      openCloud: "Open Rome Cloud",
+      auditUnavailableTitle: "Audit log unavailable — remote requests are refused",
+      auditUnavailableHint:
+        "Check container volume permissions and free disk space, or inspect the database with rome-node audit status.",
       notLinked: "Not linked yet",
 
       authorizeTitle: "Device authorization",
@@ -157,66 +155,11 @@ export const messages = {
       supersededNotice:
         "Another process connected with the same device credential and replaced this session.",
     },
-    audit: {
-      title: "Audit log",
-      description: "Append-only local record of remote requests handled by this host.",
-      unavailableTitle: "Audit log unavailable — remote requests are refused",
-      unavailableHint:
-        "Check container volume permissions and free disk space, or inspect the database with rome-node audit status.",
-      filterLabel: "Filter by result",
-      actionFilterLabel: "Filter by action",
-      all: "All",
-      succeeded: "Succeeded",
-      failed: "Failed",
-      no_result: "No result",
-      searchPlaceholder: "Search command, path, or request ID…",
-      clearBucket: "Clear time filter",
-      chartTitle: "Last 24 hours",
-      chartLegend: "10-minute buckets · click a bar to filter",
-      emptyTitle: "No audit records yet",
-      emptyDescription: "Remote exec, folder listing, and file copy requests will appear here.",
-      noMatchesTitle: "No matching requests",
-      noMatchesDescription: "Try clearing the search query or switching result filters.",
-      loadMore: "Load older records",
-      loading: "Loading…",
-      selectPrompt: "Select a request to inspect its details and stored output.",
-      detailTitle: "Request details",
-      closeDetail: "Close details",
-      copyCommand: "Copy command",
-      started: "Started",
-      duration: "Duration",
-      exitCode: "Exit code",
-      signal: "Signal",
-      errorCode: "Error code",
-      cwd: "Working dir",
-      pid: "Process PID",
-      requestId: "Request ID",
-      from: "Sender",
-      unverified: "Unverified",
-      unverifiedTitle: "Reported by Gateway. Recorded for information only.",
-      envVars: "Environment",
-      envCount: (n: number) => `${n} names (values omitted)`,
-      transferDir: "Direction",
-      transferPath: "Path",
-      transferSize: "Size",
-      entries: "Entries",
-      noEnd: "No end record: the host stopped while this request ran, or it is still running.",
-      interrupted: "Interrupted: the connection closed before a reply was sent.",
-      pruned: "Removed by retention policy.",
-      truncatedPayload: (kept: string) => `Truncated · kept ${kept}`,
-      previewLimit: "… showing first 256 KiB",
-      retention: (days: number, gib: string) =>
-        `Retention: ${days} days or ${gib} GiB (local only, never uploaded).`,
-    },
   },
   "zh-CN": {
     appTitle: "Rome Node",
-    appSubtitle: "容器节点控制面与本地审计日志",
-    nav: {
-      overview: "连接与控制",
-      audit: "审计日志",
-      ariaLabel: "Rome Node 视图切换",
-    },
+    appSubtitle: "容器节点控制面",
+    loading: "加载中…",
     header: {
       themeLight: "切换到浅色模式",
       themeDark: "切换到深色模式",
@@ -278,8 +221,7 @@ export const messages = {
     },
     overview: {
       statusTitle: "节点状态",
-      statusDescription: "当前容器的 Gateway 连接状态与本地审计存储信息。",
-      connection: "连接状态",
+      statusDescription: "当前容器的 Gateway 连接与本地审计健康状态。",
       uptime: "当前状态持续",
       deviceName: "设备名称",
       deviceId: "设备 ID",
@@ -288,8 +230,11 @@ export const messages = {
       auditState: "审计日志",
       auditOk: "正常",
       auditUnavailable: "不可用",
-      auditStorage: "日志占用",
-      requestsTotal: "累计请求",
+      auditCloudHint: "完整活动与日志请在 Rome「设置 → 设备」中查看",
+      openCloud: "打开 Rome Cloud",
+      auditUnavailableTitle: "审计日志不可用 — 所有远程请求将被拒绝",
+      auditUnavailableHint:
+        "请检查容器挂载卷权限与磁盘空间，或在容器内运行 rome-node audit status 查看详情。",
       notLinked: "尚未绑定",
 
       authorizeTitle: "设备授权",
@@ -332,57 +277,6 @@ export const messages = {
       revokedNotice: "设备授权已被 Rome Cloud 撤销或失效，请重新发起设备授权以恢复接入。",
       supersededNotice: "另一进程使用了相同设备凭证上线，当前连接已被替换。",
     },
-    audit: {
-      title: "审计日志",
-      description: "本地只追加记录当前容器处理的所有远程请求，数据永不上传。",
-      unavailableTitle: "审计日志不可用 — 所有远程请求将被拒绝",
-      unavailableHint:
-        "请检查容器挂载卷权限与磁盘空间，或在容器内运行 rome-node audit status 查看详情。",
-      filterLabel: "按结果筛选",
-      actionFilterLabel: "按动作筛选",
-      all: "全部",
-      succeeded: "成功",
-      failed: "失败",
-      no_result: "无结果",
-      searchPlaceholder: "搜索命令、路径或 Request ID…",
-      clearBucket: "清除时段筛选",
-      chartTitle: "最近 24 小时",
-      chartLegend: "每 10 分钟一桶 · 点击柱条可按时段筛选",
-      emptyTitle: "暂无审计记录",
-      emptyDescription: "远程命令执行、目录浏览与文件复制记录会实时显示在这里。",
-      noMatchesTitle: "没有匹配的记录",
-      noMatchesDescription: "尝试清空搜索词或切换结果筛选条件。",
-      loadMore: "加载更早记录",
-      loading: "加载中…",
-      selectPrompt: "选择一条请求记录以查看完整参数与存储的输出内容。",
-      detailTitle: "请求详情",
-      closeDetail: "关闭详情",
-      copyCommand: "复制命令",
-      started: "开始时间",
-      duration: "耗时",
-      exitCode: "退出码",
-      signal: "信号",
-      errorCode: "错误码",
-      cwd: "工作目录",
-      pid: "进程 PID",
-      requestId: "请求 ID",
-      from: "调用方",
-      unverified: "未校验",
-      unverifiedTitle: "由 Gateway 上报，仅作信息记录。",
-      envVars: "环境变量",
-      envCount: (n: number) => `${n} 个变量名（不含值）`,
-      transferDir: "方向",
-      transferPath: "路径",
-      transferSize: "大小",
-      entries: "条目数",
-      noEnd: "缺少结束记录：请求执行期间宿主停止，或仍在运行中。",
-      interrupted: "已中断：响应发出前连接断开。",
-      pruned: "已按保留策略清理。",
-      truncatedPayload: (kept: string) => `已截断 · 保留 ${kept}`,
-      previewLimit: "… 仅预览前 256 KiB",
-      retention: (days: number, gib: string) =>
-        `保留策略：${days} 天或 ${gib} GiB（先到为准，仅存本地）。`,
-    },
   },
 } as const;
 
@@ -404,50 +298,4 @@ export function formatDuration(ms: number): string {
   if (mins < 60) return `${mins}m ${secs}s`;
   const hours = Math.floor(mins / 60);
   return `${hours}h ${mins % 60}m`;
-}
-
-export function formatClock(at: number, locale: Locale): string {
-  return new Date(at).toLocaleTimeString(locale, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-}
-
-export function formatDateTime(at: number, locale: Locale): string {
-  return new Date(at).toLocaleString(locale, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-}
-
-export function auditItemResult(item: AuditItem): AuditResult {
-  if (!item.end || item.end.outcome === "interrupted") return "no_result";
-  return item.end.outcome === "ok" ? "succeeded" : "failed";
-}
-
-export function describeAuditItem(item: AuditItem): string {
-  const args = (item.record.args ?? {}) as Record<string, unknown>;
-  if (item.action === "exec") {
-    const command = typeof args.command === "string" ? args.command : "exec";
-    const list = Array.isArray(args.args) ? args.args : [];
-    return [command, ...list]
-      .map((part) => {
-        const text = String(part);
-        return /^[\w@%+=:,./-]+$/.test(text) ? text : JSON.stringify(text);
-      })
-      .join(" ");
-  }
-  if (item.action === "fs.list") {
-    return `fs.list ${typeof args.path === "string" ? args.path : "~"}`;
-  }
-  if (item.action === "transfer.open") {
-    return `${String(args.direction ?? "copy")} ${String(args.path ?? "")}`.trim();
-  }
-  return item.action ?? item.kind;
 }

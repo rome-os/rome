@@ -126,8 +126,8 @@ After approval, the container connects to the account Gateway and appears on
 - Connect or disconnect without removing the stored credential.
 - Toggle **Allow remote execution** (`Computer Use`), switching the host
   between full execution and limited mode (`computer_use_off`).
-- Inspect the local SQLite audit log (24-hour chart, filters, search, and
-  `stdin`/`stdout`/`stderr`/`file` previews up to 256 KiB).
+- Check local audit log health and jump to Rome **Settings → Devices** for full
+  device activity and audit history (or run `rome-node audit` inside the container).
 - Optionally set, change, or remove a custom Web UI password (stored as an
   `scrypt` hash in `/var/lib/rome-node/web-auth.json`).
 - Clear the local credential to re-authorize under another identity.
