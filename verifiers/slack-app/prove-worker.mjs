@@ -40,6 +40,7 @@ const CASES = [
   { name: "W-R15-token", breaks: "W-R15-token", rule: "R15", what: "the workspace list sent to the instance carries the bot token" },
   { name: "W-R15-deposit", breaks: "W-R15-deposit", rule: "R15", what: "each delivery carries the bot token in a header" },
   { name: "W-R15-log", breaks: "W-R15-log", rule: "R15", what: "the Worker logs the bot token" },
+  { name: "W-R15-stored", breaks: "W-R15-stored", rule: "R15", what: "instance a's database holds the bot tokens, found by find_secret" },
   { name: "W-R15-cross", breaks: "W-R15-cross", rule: "R15", what: "another instance's calls in a bound workspace reach Slack" },
   { name: "W-R11-message", breaks: "W-R11-message", rule: "R11", what: "the Worker's workspaces table keeps a message's text" },
   { name: "W-R11-relay", breaks: "W-R11-relay", rule: "R11", what: "the relay gains Slack code" },

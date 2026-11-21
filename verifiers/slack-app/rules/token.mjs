@@ -6,6 +6,7 @@
 // counted at the fake.
 
 import { code } from "../lib/codes.mjs";
+import { secretTotal } from "../lib/gateway.mjs";
 import { issuedTokens, logLines } from "./worker.mjs";
 
 export async function r15(ctx) {
@@ -32,8 +33,9 @@ export async function r15(ctx) {
     try {
       const found = await agent.findSecretCounts(values);
       evidence[`onInstance_${agent.name}`] = found;
-      const places = Object.keys(found.places ?? {});
-      if (found.total) problems.push(`a Slack token is on ${agent.name} ${found.total} time(s): ${places.join(", ")}`);
+      const read = secretTotal(found);
+      if (!read) unchecked.push(`${agent.name}: find_secret answered no count`);
+      else if (read.total) problems.push(`a Slack token is on ${agent.name} ${read.total} time(s), in ${read.places.join(", ") || "places it does not name"}`);
     } catch (err) {
       unchecked.push(`${agent.name}: find_secret failed (${err.message.slice(0, 200)})`);
     }

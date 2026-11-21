@@ -85,6 +85,20 @@ const agentEnv = (name) => {
   writeFileSync(session, JSON.stringify({ session: `guardian-${name}` }));
   return `GATEWAY=${gateway.url} CLOUD=${gateway.url} SLACK=${slackUrl} ROME_INSTANCE_TOKEN_URL=${gateway.url}/token/${name} CLOUD_COOKIES=${session} ${process.execPath}`;
 };
+// Each instance's own folder, as find_secret searches it on a real one: a
+// database, a home folder and a log. Broken W-R15-stored writes every bot
+// token the fake issued into instance a's database, as a column would.
+const instanceDir = (name) => join(workDir, `instance-${name}`);
+for (const name of ["a", "b"]) {
+  write(instanceDir(name), "data/rome.db", "connections: slack_app team bot_user_id deposit_key\n");
+  write(instanceDir(name), "home/rome/.config/rome/settings.json", "{}\n");
+  write(instanceDir(name), "logs/rome.log", "Rome started\n");
+}
+if (breaks.has("W-R15-stored"))
+  setInterval(() => {
+    const bots = Object.entries(slack.state.tokens).filter(([, t]) => t.kind !== "user").map(([v, t]) => `${t.teamId} ${v}`);
+    writeFileSync(join(instanceDir("a"), "data/rome.db"), `connections: slack_app\n${bots.join("\n")}\n`);
+  }, 300).unref();
 const env = {
   commits: { rome: git(rome, "rev-parse", "HEAD"), romeCloud: git(romeCloud, "rev-parse", "HEAD"), environment: "stand-in" },
   model: "stand-in (no model)",
@@ -101,6 +115,7 @@ const env = {
       stop: "true",
       start: "true",
       asInstance: agentEnv(name),
+      findSecret: `${process.execPath} ${join(here, "find-secret.mjs")} ${instanceDir(name)}`,
     },
   })),
 };

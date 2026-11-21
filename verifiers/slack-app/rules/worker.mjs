@@ -5,6 +5,7 @@
 // itself (recording, "broken", refusing a badly signed delivery, a port) are
 // named in the result as needing the Rome side.
 
+import { secretTotal } from "../lib/gateway.mjs";
 import { code } from "../lib/codes.mjs";
 import { sleep } from "../lib/http.mjs";
 import { ALLOWED, OTHERS } from "./port.mjs";
@@ -286,11 +287,9 @@ export async function r15(ctx) {
     }
     const found = await inst.findSecretCounts(ofApp.map((t) => t.value)).catch((e) => ({ error: e.message }));
     evidence[`found_${inst.name}`] = found;
-    // {places: {place: [count per string]}, total}, or {counts: {place: n}}.
-    const sum = (v) => (Array.isArray(v) ? v.reduce((n, x) => n + (Number(x) || 0), 0) : Number(v) || 0);
-    const total = found?.error ? null : typeof found?.total === "number" ? found.total : Object.values(found?.places ?? found?.counts ?? {}).reduce((n, v) => n + sum(v), 0);
-    if (total === null) romeSide.push(`a token stored or logged on ${inst.name} (find_secret failed: ${found.error})`);
-    else if (total) problems.push(`a Slack token is stored or logged on ${inst.name}: ${total} time(s), in ${Object.keys(found.places ?? found.counts ?? {}).join(", ")}`);
+    const read = found?.error ? null : secretTotal(found);
+    if (!read) romeSide.push(`a token stored or logged on ${inst.name} (find_secret ${found?.error ? `failed: ${found.error}` : "answered no count"})`);
+    else if (read.total) problems.push(`a Slack token is stored or logged on ${inst.name}: ${read.total} time(s), in ${read.places.join(", ") || "places it does not name"}`);
   }
   // 10 calls from the instance bound to B, in workspace A: none reaches Slack.
   const since = await ctx.slack.seq();

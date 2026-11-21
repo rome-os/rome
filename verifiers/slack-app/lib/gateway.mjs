@@ -95,3 +95,19 @@ export async function findSecretCounts(target, values) {
   if (!out) throw new Error(`find_secret printed no JSON (exit ${r.code}): ${(r.stdout + r.stderr).slice(-300)}`);
   return out;
 }
+
+/**
+ * Reads a find_secret answer: `total` as a number or one count per value
+ * searched, `places` (or `counts`) as {place: count or [count per value]}.
+ * Returns {total, places}, the places being those where a value was found,
+ * or null when the answer holds no count.
+ */
+export function secretTotal(found) {
+  const sum = (v) => (Array.isArray(v) ? v.reduce((n, x) => n + (Number(x) || 0), 0) : Number(v) || 0);
+  if (!found || found.error) return null;
+  const byPlace = found.places ?? found.counts ?? {};
+  const places = Object.entries(byPlace).filter(([, v]) => sum(v) > 0).map(([k]) => k);
+  if (found.total !== undefined && found.total !== null) return { total: sum(found.total), places };
+  if (found.places || found.counts) return { total: Object.values(byPlace).reduce((n, v) => n + sum(v), 0), places };
+  return null;
+}
