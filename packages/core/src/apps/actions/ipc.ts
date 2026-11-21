@@ -261,6 +261,7 @@ export class IpcRpc {
         method === "channels.send" ||
         method === "notify.send" ||
         method === "session.continue" ||
+        method === "routines.create" ||
         method === "routines.control" ||
         method === "agent.session.runTurn"
       ) {

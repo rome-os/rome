@@ -229,6 +229,7 @@ import { personHistory } from "./people/person-history/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
 import { registerReadPersonAction } from "./people/actions/read-person.js";
 import { routineControlService, routineOperations } from "./routines/control.js";
+import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
 import { registerPersonalDataActions } from "./personal-data/actions.js";
@@ -1636,8 +1637,18 @@ async function main() {
         actionExecutionContext.getStore()?.agentName,
       )) ?? channelsService.send(target, chatId, message),
   });
+  const routineCreation = routineCreationService({
+    routinesRepo,
+    routineEngine,
+    actionRegistry,
+    agentRunner,
+    resolveOneOffDate: (trigger: Trigger) =>
+      resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
+    hasTriggerType: (type) => routineEngine.hasProvider(type),
+  });
   const appActionDeps = {
     agentRunner,
+    routineCreation,
     resolveOneOffDate: (trigger: Trigger) =>
       resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
     resolveArtifactReference,
@@ -2250,7 +2261,12 @@ async function main() {
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
     {
-      ...routineWorkerCalls({ routinesRepo, routineEngine, routineOperations: routineOps }),
+      ...routineWorkerCalls({
+        routinesRepo,
+        routineEngine,
+        routineCreation,
+        routineOperations: routineOps,
+      }),
       ...gmailWorkerCalls(actionRegistry),
       ...connectionWorkerCalls({
         appConnections,

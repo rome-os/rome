@@ -69,6 +69,47 @@ describe("routines.schedule", () => {
   });
 });
 
+describe("routines.create", () => {
+  const input = { name: "nudge", trigger: { type: "manual" }, actionName: "do_thing", args: {} };
+
+  function createCalls() {
+    const create = rs.fn(async () => ({ status: "ok", data: { routineId: "r-1" } }));
+    const calls = routineWorkerCalls({
+      routineCreation: { create },
+    } as unknown as RoutineWorkerCallsDeps);
+    return { calls, create };
+  }
+
+  it("creates for the person and chat of the worker's action, as the IPC boundary captured them", async () => {
+    const { calls, create } = createCalls();
+    const visitor = { kind: "visitor" as const, accountId: "v", email: "v@example.test" };
+    const context = {
+      callerActionContext: {
+        actor: visitor,
+        channelContext: { channel: "webchat", threadId: "chat-1" },
+      },
+    } as IpcCallContext;
+
+    await calls["routines.create"]({ input, caller: { agentName: "core:main" } }, context);
+
+    expect(create).toHaveBeenCalledWith(input, {
+      kind: "action",
+      agentName: "core:main",
+      origin: { actor: visitor, chatId: "chat-1" },
+    });
+  });
+
+  it("creates for no one when the worker's action acts for no one", async () => {
+    const { calls, create } = createCalls();
+
+    await calls["routines.create"]({ input, caller: {} }, {
+      callerActionContext: {},
+    } as IpcCallContext);
+
+    expect(create).toHaveBeenCalledWith(input, { kind: "action", origin: { actor: null } });
+  });
+});
+
 describe("routines.control", () => {
   function controlCalls() {
     const listRuns = rs.fn(async () => ({ status: "ok" as const, data: null }));
