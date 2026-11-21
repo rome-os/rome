@@ -69,6 +69,21 @@ describe("connect_account for a device kind", () => {
     ]);
   });
 
+  it("keeps a kind's summary when the devices that report it change state", () => {
+    const summarized = (
+      deviceId: string,
+      summary: string,
+      state: DeviceConnection["state"],
+    ): DeviceConnection => ({ ...row(deviceId, "device", "Device", state), summary });
+    const summaryOf = (first: DeviceConnection["state"], second: DeviceConnection["state"]) =>
+      deviceKinds([
+        summarized("dev-1", "Reads this phone's battery.", first),
+        summarized("dev-2", "Reads this phone's battery and network.", second),
+      ])[0]?.summary;
+    expect(summaryOf("off", "working")).toBe("Reads this phone's battery.");
+    expect(summaryOf("working", "off")).toBe("Reads this phone's battery.");
+  });
+
   it("parses a reported device kind, and lists it among the kinds when refusing", () => {
     const devices = [{ kind: "apple_health", label: "Apple Health" }];
     expect(parseConnectAccountInput({ kind: "apple_health" }, devices)).toEqual({

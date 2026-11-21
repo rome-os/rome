@@ -21,11 +21,17 @@ interface DeviceConnection {
   state: "working" | "off" | "broken";
 }
 
-/** The capability's name and what it lets Rome do, in the guardian's language where the device has it. */
+/**
+ * The capability's name and what it lets Rome do, by the same rule as the
+ * chat's connect card: the guardian's language when the device has it, whole,
+ * so the page never pairs a translated name with an English summary.
+ */
 function wordsOf(connection: DeviceConnection, language: string): DeviceLabel {
-  const label = connection.labels?.[language] ?? connection.labels?.en;
-  const summary = label?.summary ?? connection.summary ?? undefined;
-  return { title: label?.title ?? connection.title, ...(summary ? { summary } : {}) };
+  const local = connection.labels?.[language];
+  if (local) return local;
+  const english = connection.labels?.en;
+  const summary = english?.summary ?? connection.summary ?? undefined;
+  return { title: english?.title ?? connection.title, ...(summary ? { summary } : {}) };
 }
 
 /**

@@ -171,10 +171,14 @@ export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKin
     if (isOAuthProvider(connection.capability)) continue;
     const known = kinds.get(connection.capability);
     if (known?.state && rank[known.state] <= rank[connection.state]) continue;
+    // The summary comes from the same connection as the label, the first by
+    // device id, so `connect_account`'s description does not change when the
+    // devices' states do.
+    const summary = known ? known.summary : (connection.summary ?? undefined);
     kinds.set(connection.capability, {
       kind: connection.capability,
       label: known?.label ?? connection.title,
-      ...(connection.summary ? { summary: connection.summary } : {}),
+      ...(summary ? { summary } : {}),
       ...(connection.icon ? { icon: connection.icon } : {}),
       ...(connection.labels && Object.keys(connection.labels).length > 0
         ? { labels: connection.labels }

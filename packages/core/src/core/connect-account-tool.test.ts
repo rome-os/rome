@@ -91,6 +91,7 @@ describe("connect_account", () => {
     const kind = (tool!.inputSchema as { properties: { kind: { description: string } } }).properties
       .kind.description;
     expect(kind).toBe("The kind of connection to connect.");
+    expect(tool!.description).not.toContain("device kind");
   });
 
   it("answers that a device kind already works, read when called, with no card", async () => {

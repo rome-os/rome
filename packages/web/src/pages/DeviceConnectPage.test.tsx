@@ -68,6 +68,13 @@ describe("DeviceConnectPage", () => {
     expect(screen.getByText("你的 Rome 读取这部手机的电量和网络。")).toBeTruthy();
   });
 
+  it("never pairs a translated name with an English summary", async () => {
+    await i18n.changeLanguage("zh-CN");
+    renderAt("device", listing([{ ...phoneDevice, labels: { "zh-CN": { title: "设备状态" } } }]));
+    expect(await screen.findByRole("heading", { name: "连接 设备状态" })).toBeTruthy();
+    expect(screen.queryByText("Your Rome reads this phone's battery and network.")).toBeNull();
+  });
+
   it("says the list could not load instead of naming the capability by its id", async () => {
     renderAt(
       "device",
