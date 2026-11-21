@@ -1,6 +1,7 @@
 // What agents and apps do with a routine through the system app's routine
-// actions, beyond creating, finding and deleting it: read what its runs did.
-// The Routines page reads the same records (runs.ts). The main process runs
+// actions, beyond creating, finding and deleting it: read what its runs did,
+// and pause or resume it. The Routines page reads the same records (runs.ts)
+// and makes the same change (update.ts). The main process runs
 // these operations; an action worker reaches them over the `routines.control`
 // worker call (app-host/routine-calls.ts).
 
@@ -10,8 +11,10 @@ import type { ActionExecutionsRepository } from "../apps/repositories/action-exe
 import type { ThreadContext } from "../core/types.js";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
+import type { RoutineEngine } from "./engine.js";
 import { type ActionTraceNode, listRoutineRuns, readRoutineRun } from "./runs.js";
-import { type OwnerOfChat, turnWorksForGuardian } from "./turn-access.js";
+import { changeRefusal, type OwnerOfChat, turnWorksForGuardian } from "./turn-access.js";
+import { updateRoutine } from "./update.js";
 
 /** The turn an operation runs for: who it acts for, who can read it, and where. */
 export interface RoutineTurn {
@@ -24,7 +27,7 @@ export type RoutineControlResult =
   | { status: "ok"; data: unknown }
   | { status: "error"; error: string };
 
-export const ROUTINE_CONTROL_OPS = ["listRuns", "readRun"] as const;
+export const ROUTINE_CONTROL_OPS = ["listRuns", "readRun", "pause", "resume"] as const;
 export type RoutineControlOp = (typeof ROUTINE_CONTROL_OPS)[number];
 
 /** Each operation, for the turn that asks for it. */
@@ -55,7 +58,8 @@ export function routineControlService(operations: RoutineOperations): RoutineCon
 }
 
 export interface RoutineOperationDeps {
-  routines: Pick<RoutinesRepository, "findById">;
+  routines: Pick<RoutinesRepository, "findById" | "update">;
+  engine: Pick<RoutineEngine, "activate" | "deactivate">;
   routineRuns: Pick<RoutineRunsRepository, "findByRoutineId" | "findById">;
   actionExecutions: Pick<ActionExecutionsRepository, "findByRootExecutionIds">;
   ownerOfChat: OwnerOfChat;
@@ -71,9 +75,36 @@ const READ_REFUSED = {
   error: "Only the guardian's agents can read routines.",
 };
 
-/** The routine operations, over the repositories. */
+/** The routine operations, over the repositories and the engine. */
 export function routineOperations(deps: RoutineOperationDeps): RoutineOperations {
+  /** Turns the routine off or back on, by the Routines page's rule. */
+  const setEnabled = async (
+    input: unknown,
+    turn: RoutineTurn,
+    enabled: boolean,
+  ): Promise<RoutineControlResult> => {
+    const refusal = changeRefusal(turn);
+    if (refusal) return { status: "error", error: refusal };
+    const routineId = text(fieldsOf(input).routineId);
+    if (!routineId) return notFound(routineId);
+    const result = await updateRoutine(
+      { routines: deps.routines, engine: deps.engine },
+      routineId,
+      { enabled },
+    );
+    if (result.status === "not-found") return notFound(routineId);
+    if (result.status === "refused") return { status: "error", error: result.error };
+    const { routine } = result;
+    return {
+      status: "ok",
+      data: { routineId: routine.id, name: routine.name, enabled: routine.enabled },
+    };
+  };
+
   return {
+    pause: (input, turn) => setEnabled(input, turn, false),
+    resume: (input, turn) => setEnabled(input, turn, true),
+
     listRuns: async (input, turn) => {
       if (!(await turnWorksForGuardian(deps.ownerOfChat, turn))) return READ_REFUSED;
       const args = fieldsOf(input);

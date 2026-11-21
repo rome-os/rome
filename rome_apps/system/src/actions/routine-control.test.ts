@@ -1,34 +1,39 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { ActionConfig } from "@rome-os/app-runtime";
+import type { Action, ActionConfig, AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { createAction as listRoutineRuns } from "./list-routine-runs/index.js";
+import { createAction as pauseRoutine } from "./pause-routine/index.js";
 import { createAction as readRoutineRun } from "./read-routine-run/index.js";
+import { createAction as resumeRoutine } from "./resume-routine/index.js";
+import type { RoutineControlDeps } from "./routine-control.js";
+
+type Factory = (config: ActionConfig, deps: AppActionRuntimeDeps<RoutineControlDeps>) => Action;
+
+// Each action, the core operation it hands its input to, and an input it takes.
+const ACTIONS: Array<[string, Factory, string, Record<string, unknown>]> = [
+  ["list_routine_runs", listRoutineRuns, "listRuns", { routineId: "r-1", limit: 3 }],
+  ["read_routine_run", readRoutineRun, "readRun", { routineId: "r-1", runId: "x" }],
+  ["pause_routine", pauseRoutine, "pause", { routineId: "r-1" }],
+  ["resume_routine", resumeRoutine, "resume", { routineId: "r-1" }],
+];
 
 const config = (name: string) =>
-  ({ name, type: "system", description: "", sideEffects: "read-only" }) as unknown as ActionConfig;
+  ({ name, type: "system", description: "", sideEffects: "write" }) as unknown as ActionConfig;
 
 describe("the routine actions core runs", () => {
-  it("hands each action's input to its core operation", async () => {
-    const call = rs.fn(async () => ({ status: "ok" as const, data: { ok: true } }));
-    const deps = { routineControl: { call } };
+  for (const [name, factory, op, input] of ACTIONS) {
+    it(`${name} hands its input to core's ${op}`, async () => {
+      const call = rs.fn(async () => ({ status: "ok" as const, data: { ok: true } }));
 
-    await listRoutineRuns(config("list_routine_runs"), deps).execute({
-      routineId: "r-1",
-      limit: 3,
-    });
-    await readRoutineRun(config("read_routine_run"), deps).execute({
-      routineId: "r-1",
-      runId: "x",
+      const result = await factory(config(name), { routineControl: { call } }).execute(input);
+
+      expect(call).toHaveBeenCalledWith(op, input);
+      expect(result).toEqual({ status: "ok", data: { ok: true } });
     });
 
-    expect(call.mock.calls).toEqual([
-      ["listRuns", { routineId: "r-1", limit: 3 }],
-      ["readRun", { routineId: "r-1", runId: "x" }],
-    ]);
-  });
-
-  it("fails to load without core's routine operations", () => {
-    expect(() => listRoutineRuns(config("list_routine_runs"), {} as never)).toThrow(
-      "list_routine_runs requires a routineControl dep",
-    );
-  });
+    it(`${name} fails to load without core's routine operations`, () => {
+      expect(() => factory(config(name), {} as never)).toThrow(
+        `${name} requires a routineControl dep`,
+      );
+    });
+  }
 });

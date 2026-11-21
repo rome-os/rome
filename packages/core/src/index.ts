@@ -1531,6 +1531,7 @@ async function main() {
   // delete: in this process directly, from a worker over `routines.control`.
   const routineOps = routineOperations({
     routines: routinesRepo,
+    engine: routineEngine,
     routineRuns: routineRunsRepo,
     actionExecutions: actionExecutionsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),

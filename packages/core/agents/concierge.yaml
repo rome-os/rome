@@ -32,6 +32,9 @@ actions:
   # Checks whether a routine ran, failed or is due, and what a run did.
   - system:list_routine_runs
   - system:read_routine_run
+  # Pauses and resumes a routine when the guardian asks.
+  - system:pause_routine
+  - system:resume_routine
   # Follows things for the guardian and tells them about events (see Connectors and following).
   - core:concierge_follow
   - core:concierge_unfollow

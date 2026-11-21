@@ -25,6 +25,7 @@ beforeEach(async () => {
   actionExecutions = new ActionExecutionsRepository(testDb.db);
   ops = routineOperations({
     routines,
+    engine: { activate: async () => {}, deactivate: async () => {} },
     routineRuns,
     actionExecutions,
     ownerOfChat: async (chatId) =>

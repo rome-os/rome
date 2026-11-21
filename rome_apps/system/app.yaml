@@ -43,6 +43,8 @@ actions:
   - actions/search-routine
   - actions/list-routine-runs
   - actions/read-routine-run
+  - actions/pause-routine
+  - actions/resume-routine
   - actions/request-approval-demo
   - actions/resume-session
   - actions/send-message

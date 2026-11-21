@@ -1,5 +1,6 @@
-// Who may read routines through an agent. On the dashboard only the guardian
-// reads them, so an agent reads them only for the guardian.
+// Who may read and change routines through an agent. On the dashboard only the
+// guardian reads and changes them, so an agent does only what the guardian
+// asked for.
 
 import type { RoutineTurn } from "./control.js";
 
@@ -24,4 +25,19 @@ export async function turnWorksForGuardian(
     if (owner !== "guardian") return false;
   }
   return true;
+}
+
+/** Why the turn may not change a routine, or null when it may. A change is the
+ * guardian's to ask for, in their own private chat: never a routine, a followed
+ * event or another agent acting on what it read. The same rule as a write
+ * through `core:device_run`. */
+export function changeRefusal(turn: RoutineTurn): string | null {
+  if (turn.audience !== "private") {
+    return "routine_private_only: This chat is not private with the guardian, so routines cannot be changed from it. Say so, and that they can ask in their own chat.";
+  }
+  const actor = turn.actor;
+  if (actor?.kind !== "guardian" || actor.via !== "cookie") {
+    return "routine_needs_guardian: Only the guardian's own message can change a routine, and this turn did not start from one. Change nothing; tell them what you would change, so they can ask for it themselves.";
+  }
+  return null;
 }
