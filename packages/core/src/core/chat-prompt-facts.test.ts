@@ -75,3 +75,90 @@ describe("chatPromptFacts", () => {
     expect(seen).toHaveBeenCalledWith([7], "chat-telegram", "turn-1");
   });
 });
+
+describe("chatPromptFacts earlier messages", () => {
+  const message = (minute: number, text = `message ${minute}`) => ({
+    channel: "slack_app",
+    chatId: "D1",
+    messageId: `m${minute}`,
+    direction: "inbound",
+    senderId: "T_A/U_SAM",
+    senderDisplayName: "Sam",
+    text,
+    attachments: [],
+    timestamp: new Date(Date.UTC(2026, 7, 3, 8, minute)),
+    account: { platform: "slack", id: "T_A/U_ROME" },
+  });
+  const earlierFacts = (page: unknown[], promptContext = true) => {
+    const read = rs.fn(async (lines: readonly { senderName: string | null; account: unknown }[]) =>
+      lines.map((line) => ({ ...line, sender: line.senderName, who: "labelled" })),
+    );
+    const latest = rs.fn(async () => page as never);
+    const promptFacts = chatPromptFacts({
+      facts: { unseen: () => [], seen: () => undefined },
+      messages: { byIds: () => [] },
+      labels: { read: read as never, readUnseen: async () => [] },
+      channelOfChat: () => null,
+      channelSurface: () => ({ interactiveCards: false, promptContext }),
+      latest,
+    });
+    return { promptFacts, latest, read };
+  };
+  const place = { channel: "slack_app", threadId: "D1", threadType: "private" as const };
+
+  it("reads nothing in a group, where the platform holds what was said before Rome joined", async () => {
+    const { promptFacts, latest } = earlierFacts([message(1)]);
+    expect(
+      await promptFacts.earlier?.({ ...place, threadId: "C1", threadType: "group" }, new Date()),
+    ).toBeNull();
+    expect(latest).not.toHaveBeenCalled();
+  });
+
+  it("reads nothing where the channel hands the agent every message", async () => {
+    const { promptFacts, latest } = earlierFacts([message(1)], false);
+    expect(await promptFacts.earlier?.(place, new Date())).toBeNull();
+    expect(latest).not.toHaveBeenCalled();
+  });
+
+  it("keeps the latest 15 said before the turn, oldest first, each clipped", async () => {
+    const page = Array.from({ length: 20 }, (_, i) => message(20 - i));
+    page[1] = message(19, "x".repeat(900));
+    const { promptFacts, read } = earlierFacts(page);
+    // Message 20 is the one the turn answers.
+    const earlier = await promptFacts.earlier?.(place, new Date(Date.UTC(2026, 7, 3, 8, 20)));
+    expect(earlier?.map((m) => m.text.slice(0, 10))).toEqual([
+      ...Array.from({ length: 14 }, (_, i) => `message ${i + 5}`),
+      "x".repeat(10),
+    ]);
+    expect(earlier?.at(-1)?.text.length).toBe(501);
+    // Its sender is the platform's account, for People to name.
+    expect(read.mock.calls[0][0][0]).toMatchObject({
+      senderName: "Sam",
+      account: { platform: "slack", id: "T_A/U_SAM" },
+    });
+    expect(earlier?.every((m) => m.id < 0)).toBe(true);
+  });
+
+  it("names an outbound message as the platform names its sender, and Rome only where it names none", async () => {
+    const outbound = (minute: number, senderDisplayName?: string) => ({
+      ...message(minute),
+      direction: "outbound",
+      senderId: "T_A/U_ROME",
+      senderDisplayName,
+    });
+    // On a personal account the guardian writes from Rome's account too.
+    const { promptFacts, read } = earlierFacts([outbound(2, "Ouou"), outbound(1)]);
+    await promptFacts.earlier?.(place, new Date(Date.UTC(2026, 7, 3, 8, 20)));
+    expect(read.mock.calls[0][0].map((line) => [line.senderName, line.account])).toEqual([
+      ["Rome", null],
+      ["Ouou", null],
+    ]);
+  });
+
+  it("asks for what was said up to the turn, so a backlog said since takes no room on the page", async () => {
+    const { promptFacts, latest } = earlierFacts([message(1)]);
+    const before = new Date(Date.UTC(2026, 7, 3, 8, 20));
+    await promptFacts.earlier?.(place, before);
+    expect(latest).toHaveBeenCalledWith(place, { limit: 16, until: before });
+  });
+});

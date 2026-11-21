@@ -1406,6 +1406,11 @@ async function main() {
         labels: chatsWired.labels,
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface,
+        // No `latest`: a new session reads the chat's latest messages only
+        // from a platform that answers them live, bounded at `until`, and no
+        // channel here does yet. A store a personal account syncs, such as
+        // WhatsApp's, also holds what the guardian said before Rome was
+        // connected.
       }),
       subagentCalls,
       subagentSessions: (manager, parentLink, inherited) =>

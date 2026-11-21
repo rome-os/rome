@@ -4,7 +4,7 @@ import { currentMessageSection, replyContextLine, replyContextSection } from "./
 
 /** How many of the messages the agent has not seen a turn's prompt carries.
  *  The rest are counted, not shown. */
-const CATCH_UP_LIMIT = 20;
+export const CATCH_UP_LIMIT = 20;
 
 /** One message of the context a turn's prompt opens with. */
 interface ContextMessage {
