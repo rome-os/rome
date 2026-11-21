@@ -2,6 +2,11 @@
 // instance's token, to the Discord gateway Worker that holds the bot, and to
 // Rome Cloud for the link that adds the bot to a server. Contract: rome-cloud
 // docs/discord-gateway.md.
+//
+// Posting, reacting and typing are Discord's own REST calls, made through the
+// Worker's proxy (`/v1/discord/*`), which makes them as the bot in the servers
+// and direct messages bound to this Rome only. What a call does is decided
+// here, so a new Discord feature needs no change at the Worker.
 
 import { getRomeCloudOrigin } from "../../../instance/rome-cloud-origin.js";
 import { romeCloudRequest } from "../../../instance/rome-cloud-request.js";
@@ -23,12 +28,20 @@ export class DiscordAppRefused extends Error {
   }
 }
 
-/** Whether a refusal says this instance's token is no good there. */
+/** Whether a refusal says this instance's token is no good there. A 401 that
+ *  Discord itself gave, through the proxy, is about the bot, not this Rome. */
 export function isDiscordAppCredentialError(error: unknown): boolean {
   return (
-    error instanceof DiscordAppRefused && (error.status === 401 || error.code === "not_enrolled")
+    error instanceof DiscordAppRefused &&
+    ((error.status === 401 && error.code !== "http_401") || error.code === "not_enrolled")
   );
 }
+
+const SNOWFLAKE = /^\d{1,20}$/;
+
+/** Who a reply may mention: the people it names, never everyone or a role,
+ *  and not the author of the message it answers by the reply alone. */
+const REPLY_MENTIONS = { parse: ["users"], replied_user: false } as const;
 
 interface DiscordAppConnected {
   botId: string;
@@ -76,11 +89,15 @@ function wordsFor(code: string, status: number): string {
     case "channel_unavailable":
       return "Rome can't see that Discord channel any more.";
     case "rate_limited":
+    case "http_429":
       return "Discord asked Rome to slow down. Try again in a minute.";
-    case "discord_rejected":
-      return "Discord did not take the message.";
-    case "message_unavailable":
-      return "That Discord message is gone.";
+    case "route_denied":
+      return "Rome's Discord bot can't do that.";
+    // Discord's own answers, passed on by the proxy.
+    case "http_403":
+      return "Rome's Discord bot isn't allowed to do that there. A server admin can give it the permission.";
+    case "http_404":
+      return "That Discord message or channel is gone.";
     default:
       return status === 401
         ? "Rome Cloud did not accept this Rome. Link it again in Settings."
@@ -95,10 +112,16 @@ function isString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+/** A Discord id, before it goes into a path. */
+function snowflake(id: string): string {
+  if (!SNOWFLAKE.test(id)) throw new Error(`"${id}" is not a Discord id`);
+  return id;
+}
+
 export function romeCloudDiscordApp(fetchImpl: typeof fetch = globalThis.fetch): DiscordAppCloud {
   const worker = (
     path: string,
-    method: "GET" | "POST" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     body?: unknown,
     signal?: AbortSignal,
   ) =>
@@ -165,13 +188,20 @@ export function romeCloudDiscordApp(fetchImpl: typeof fetch = globalThis.fetch):
       return { removed: data?.removed === true, left: data?.left === true };
     },
     async typing(channelId) {
-      await worker("/v1/messages", "POST", { channelId, typing: true });
+      await worker(`/v1/discord/channels/${snowflake(channelId)}/typing`, "POST");
     },
-    async react(input) {
-      await worker("/v1/reactions", "POST", input);
+    async react({ channelId, messageId, emoji }) {
+      const path = `/v1/discord/channels/${snowflake(channelId)}/messages/${snowflake(messageId)}/reactions/${encodeURIComponent(emoji)}/@me`;
+      await worker(path, "PUT");
     },
-    async send(input) {
-      const data = (await worker("/v1/messages", "POST", input)) as { id?: unknown } | null;
+    async send({ channelId, content, replyTo }) {
+      const data = (await worker(`/v1/discord/channels/${snowflake(channelId)}/messages`, "POST", {
+        content,
+        allowed_mentions: REPLY_MENTIONS,
+        ...(replyTo
+          ? { message_reference: { message_id: snowflake(replyTo), fail_if_not_exists: false } }
+          : {}),
+      })) as { id?: unknown } | null;
       if (!isString(data?.id)) throw refuse("invalid_response", undefined, 200);
       return { id: data.id };
     },

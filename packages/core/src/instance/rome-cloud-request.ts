@@ -9,7 +9,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 
 export interface RomeCloudRequest {
   url: URL;
-  method?: "GET" | "POST" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   /** JSON body; absent sends none. */
   body?: unknown;
   signal?: AbortSignal;
@@ -22,7 +22,7 @@ export type Refusal = (code: string, message: string | undefined, status: number
 
 /**
  * Sends `request` with the instance's bearer and answers the parsed JSON body
- * of a 2xx. Without a bearer, or for a non-2xx, it throws what `refuse` makes:
+ * of a 2xx (null when it has none). Without a bearer, or for a non-2xx, it throws what `refuse` makes:
  * code `not_enrolled`, or the body's `error` (else `http_<status>`) with its
  * `error_description`.
  */
