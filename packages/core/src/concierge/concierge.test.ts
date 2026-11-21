@@ -854,6 +854,32 @@ describe("Concierge tools", () => {
       expect(await s.service.connectionChat(await connectionChat(s))).not.toBeNull();
     });
 
+    it("reports to a chat the recorder opened, which stores no agent, when the Concierge answers its account", async () => {
+      const s = setup();
+      // Recording opens an inbound chat as main's, which is stored as no agent.
+      const { id } = await s.storedChats.ensureChannelChat({
+        channel: "discord_app",
+        threadId: "901",
+        threadType: "group",
+        agentName: "main",
+      });
+      const stored = await s.storedChats.getSession(id);
+      if (stored) s.sessions.set(id, stored);
+      expect(stored?.agentName ?? null).toBeNull();
+      // The account's agent decides, as the inbox routes the chat's messages.
+      let answering: string | null = CONCIERGE_AGENT_ID;
+      s.deps.channelAgentOf = (channel) => (channel === "discord_app" ? answering : null);
+      expect(await s.service.connectionChat(id)).toMatchObject({
+        channel: "discord_app",
+        threadId: "901",
+      });
+      expect(await s.service.deliveryChat(id, "guardian")).toBe(id);
+      // An account main answers is no Concierge chat: its tasks report to the main chat.
+      answering = "core:main";
+      expect(await s.service.connectionChat(id)).toBeNull();
+      expect(await s.service.deliveryChat(id, "guardian")).not.toBe(id);
+    });
+
     it("sends a task's report to the main chat once that chat is gone", async () => {
       const s = setup();
       expect(await s.service.deliveryChat("gone-chat", "guardian")).not.toBe("gone-chat");
