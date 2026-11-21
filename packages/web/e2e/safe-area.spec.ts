@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js";
+import { expect, test } from "@playwright/test";
 
 const TOP_INSET = 47;
 const BOTTOM_INSET = 34;

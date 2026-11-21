@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js";
+import { expect, test } from "@playwright/test";
 import { collectButtonViolations, collectRowHeightViolations } from "./layout-invariants.js";
 
 /**

@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "./fixtures.js";
+import { expect, type Page, test } from "@playwright/test";
 import { installIosVisualViewport, setIosKeyboardTop } from "./ios-visual-viewport";
 
 /**

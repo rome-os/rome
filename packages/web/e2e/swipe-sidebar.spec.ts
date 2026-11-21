@@ -1,4 +1,4 @@
-import { type CDPSession, expect, type Page, test } from "./fixtures.js";
+import { type CDPSession, expect, type Page, test } from "@playwright/test";
 
 /**
  * On a phone a swipe right on the page drags the sidebar out and pushes it

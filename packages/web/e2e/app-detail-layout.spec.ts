@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js";
+import { expect, test } from "@playwright/test";
 import type { AppListResponse, InstalledAppCard } from "@rome/api-types/apps";
 
 // A Store app with its source bundled, so the header offers all three actions:

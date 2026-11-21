@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js";
+import { expect, test } from "@playwright/test";
 
 /**
  * The chat composer's empty height is one `text-composer` line box, and the box's

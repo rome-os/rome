@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js";
+import { expect, test } from "@playwright/test";
 
 /**
  * A provider row puts its name and status beside its sign-in buttons. On a

@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Locator, type Page } from "./fixtures.js";
+import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import type {
   ProjectDashboardChat,
   ProjectDashboardProviderUsage,

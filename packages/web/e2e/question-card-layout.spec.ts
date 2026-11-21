@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js";
+import { expect, test } from "@playwright/test";
 import { expectQuestionCardContained } from "./question-card-layout";
 
 test.beforeEach(async ({ page }) => {

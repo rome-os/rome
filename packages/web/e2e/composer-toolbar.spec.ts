@@ -1,4 +1,4 @@
-import { expect, type Page, test } from "./fixtures.js";
+import { expect, type Page, test } from "@playwright/test";
 
 /**
  * The composer picks its row layout from its own width. A wide composer keeps

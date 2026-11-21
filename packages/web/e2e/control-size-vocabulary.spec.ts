@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js";
+import { expect, test } from "@playwright/test";
 
 /**
  * The Control role's central promise, measured: two members given the same size

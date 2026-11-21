@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js";
+import { expect, test } from "@playwright/test";
 
 const tabs = ["appearance", "connections", "channels", "ai-tools", "favors", "advanced"];
 

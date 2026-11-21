@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures.js";
+import { expect, test } from "@playwright/test";
 
 /**
  * A chat under a project folder hangs on the folder's guide line. The open
