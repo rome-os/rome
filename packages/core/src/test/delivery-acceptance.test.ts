@@ -74,7 +74,8 @@ describe("a delivery settles once Chats has the message on record", () => {
         messages: {
           record: (message: ChatsMessage) => {
             const answer = wiring.messages.record(message);
-            recorded.push(message.body.text);
+            // Only what is new on record: a redelivery records nothing.
+            if (answer !== null) recorded.push(message.body.text);
             return answer;
           },
         },
@@ -104,7 +105,7 @@ describe("a delivery settles once Chats has the message on record", () => {
     await expect(delivery).resolves.toBe(1);
 
     await expect(deliver(said("m1", "hello"))).resolves.toBeUndefined();
-    expect(recorded).toEqual(["hello", "hello"]);
+    expect(recorded).toEqual(["hello"]);
   });
 
   it("resolves at once for a message with nothing to answer, which Chats never records", async () => {
@@ -113,7 +114,7 @@ describe("a delivery settles once Chats has the message on record", () => {
     expect(recorded).toEqual([]);
   });
 
-  it("rejects a message not recorded in time, so the platform can deliver it again", async () => {
+  it("rejects a message not recorded in time, and its delivery again is recorded once", async () => {
     const { deliver, events, recorded } = await connect({ acceptTimeoutMs: 50 });
     // The chat's first message is heard by a listener that never finishes,
     // so its next one waits behind it.
@@ -127,6 +128,9 @@ describe("a delivery settles once Chats has the message on record", () => {
     await expect(deliver(said("m2", "second"))).rejects.toThrow(/not recorded within 50ms/);
     release();
     await settle();
+    // A connection that was refused does not tell its platform, which
+    // delivers the message again: Chats has it once.
+    await expect(deliver(said("m2", "second"))).resolves.toBeUndefined();
     expect(recorded).toEqual(["first", "second"]);
   });
 
