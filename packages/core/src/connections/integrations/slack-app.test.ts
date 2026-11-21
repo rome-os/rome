@@ -256,6 +256,25 @@ describe("the Slack app talker", () => {
     expect(k.ingress()).toBeNull();
   });
 
+  it("has the instance's mailbox drained while it runs", async () => {
+    let claims = 0;
+    const talker = descriptor({
+      claimMailbox: () => {
+        claims++;
+        return () => {
+          claims--;
+        };
+      },
+    }).capabilities.talker?.build({ material: MATERIAL, expiresAt: "never" }, kit().kit);
+    talker?.start(
+      () => {},
+      () => {},
+    );
+    expect(claims).toBe(1);
+    await talker?.stop();
+    expect(claims).toBe(0);
+  });
+
   it("keeps a new deposit key the Worker gives, and checks deposits with it", async () => {
     const c = cloud({
       connect: rs.fn(async () => ({ depositKey: "key-2", workspaces: [WORKSPACE] })),

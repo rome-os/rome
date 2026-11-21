@@ -257,6 +257,9 @@ export interface SlackAppDescriptorDeps {
   depositUrl: () => Promise<string | null>;
   /** How many times the mailbox's drain delivers one frame before it holds it. */
   deliveryAttempts: number;
+  /** Has the instance's mailbox drained while the connection runs; the
+   *  returned function lets go. */
+  claimMailbox?: () => () => void;
   /** Whether Rome listens to the account behind a connection. */
   listens: (connectionId: string) => boolean;
   approval?: { pollMs: number; limitMs: number };
@@ -346,6 +349,7 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
             listened: () => deps.listens(kit.connectionId),
           });
           let unregister: (() => void) | null = null;
+          let releaseMailbox: (() => void) | null = null;
 
           // Each start tells the Worker where this instance's mailbox is now,
           // and checks it still holds the workspace for this instance. The
@@ -394,6 +398,7 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
               faultSink = fault;
               adapter.onInbound(deliver);
               adapter.start();
+              releaseMailbox = deps.claimMailbox?.() ?? null;
               unregister = kit.registerIngress(async (input) => {
                 const frame = input as Partial<MailboxFrame> | null;
                 return adapter.handleFrame({
@@ -406,6 +411,8 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
             stop() {
               unregister?.();
               unregister = null;
+              releaseMailbox?.();
+              releaseMailbox = null;
               adapter.stop();
             },
             async send(chatId, message) {

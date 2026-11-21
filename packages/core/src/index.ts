@@ -409,10 +409,10 @@ import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
 import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
 import { isSlackFrame } from "./connections/kinds/slack-app/deposit.js";
 import { deliverSlackFrame } from "./connections/kinds/slack-app/drain.js";
+import { drainsWithClaims, MailboxClaims } from "./relay/mailbox-claims.js";
 import {
   RELAY_SETTING_KEY,
   deriveDepositUrl,
-  isCompleteRelaySetting,
   resolveRelayDrains,
   relayDrainsEqual,
   sanitizeDrainUrl,
@@ -1817,24 +1817,19 @@ async function main() {
       depositUrl: deriveDepositUrl(config.relay.drainUrl),
     } satisfies RelayDrainSetting);
   }
-  // Rome's Slack app deposits into this mailbox too, so it is drained even when
-  // no installed app takes its webhooks. A webhook drained with no app to take
-  // it is dropped (connections/kinds/slack-app/drain.ts).
-  const resolveDrains = async (): Promise<RelayDrain[]> => {
-    const drains = await resolveRelayDrains(settingsRepo, appCatalog);
-    if (drains.length > 0) return drains;
-    const setting = await settingsRepo.get<unknown>(RELAY_SETTING_KEY);
-    return isCompleteRelaySetting(setting)
-      ? [
-          {
-            connectUrl: setting.drainUrl,
-            drainKey: setting.drainKey,
-            targetAppId: "",
-            targetPath: [],
-          },
-        ]
-      : [];
-  };
+  // Rome's Slack app deposits into this mailbox too, so while it runs the
+  // mailbox is drained even when no installed app takes its webhooks; a
+  // webhook drained with no app to take it is then dropped
+  // (relay/mailbox-claims.ts). Claims come once talkers start, which is after
+  // the drainer exists, so the reload is bound below.
+  let refreshRelayDrains: () => void = () => {};
+  const mailboxClaims = new MailboxClaims(() => refreshRelayDrains());
+  const resolveDrains = async (): Promise<RelayDrain[]> =>
+    drainsWithClaims({
+      resolved: await resolveRelayDrains(settingsRepo, appCatalog),
+      setting: await settingsRepo.get<unknown>(RELAY_SETTING_KEY),
+      claimed: mailboxClaims.any,
+    });
   const relayDrains = await resolveDrains();
   const relayDispatcher = new AppApiDispatcher(appCatalog, {
     db,
@@ -1992,6 +1987,7 @@ async function main() {
         return typeof relay?.depositUrl === "string" && relay.depositUrl ? relay.depositUrl : null;
       },
       deliveryAttempts: DELIVERY_ATTEMPTS,
+      claimMailbox: () => mailboxClaims.claim(),
       listens: (connectionId) => accountListening.listens(connectionId),
     },
     settingsRepo,
@@ -2292,16 +2288,28 @@ async function main() {
   // upgrading the app that declares api.relayWebhook changes which app/path the
   // drain resolves to. Without this the drainer would keep replaying to the old
   // target (or loop on 5xx after the consumer disappears) until a manual save.
+  // A connection claiming or releasing the mailbox changes it the same way.
   let activeRelayDrains = relayDrains;
+  let relayReload: Promise<void> = Promise.resolve();
+  const reloadRelayDrains = (cause: string) => {
+    relayReload = relayReload
+      .then(async () => {
+        const next = await resolveDrains();
+        if (relayDrainsEqual(activeRelayDrains, next)) return;
+        activeRelayDrains = next;
+        await relayDrainer.reload(next);
+        log.info(`relay drains reloaded after ${cause}`, {
+          targets: next.map((d) => `${d.targetAppId}/${d.targetPath.join("/")}`),
+        });
+      })
+      .catch((err) => log.error("relay drains not reloaded", { error: String(err) }));
+    return relayReload;
+  };
   appCatalog.subscribe(async function relayDrainSubscriber() {
-    const next = await resolveDrains();
-    if (relayDrainsEqual(activeRelayDrains, next)) return;
-    activeRelayDrains = next;
-    await relayDrainer.reload(next);
-    log.info("relay drains reloaded after catalog change", {
-      targets: next.map((d) => `${d.targetAppId}/${d.targetPath.join("/")}`),
-    });
+    await reloadRelayDrains("catalog change");
   });
+  refreshRelayDrains = () => void reloadRelayDrains("a mailbox claim changed");
+  if (mailboxClaims.any) refreshRelayDrains();
 
   const workerRpcServer = new WorkerRpcServer(
     {
