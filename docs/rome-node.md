@@ -99,7 +99,7 @@ volume keeps the device credential, Web UI preferences, and the
 ```yaml
 services:
   rome-node:
-    image: ghcr.io/rome-os/rome-node@sha256:<manifest-digest>
+    image: ghcr.io/rome-os/rome-node:latest
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     ports:
@@ -113,7 +113,7 @@ volumes:
   rome-node:
 ```
 
-1. Start the container with `docker compose up -d`.
+1. Start the container with `docker compose up -d` (or pin a release tag such as `ghcr.io/rome-os/rome-node:0.1.12` or an immutable `@sha256:<manifest-digest>`).
 2. Open `http://127.0.0.1:4310` in a browser. Because the container listens on
    `0.0.0.0`, if you did not set `ROME_NODE_UI_PASSWORD`, run
    `docker compose logs rome-node` to copy the one-time setup token and choose a
@@ -172,12 +172,24 @@ To run the local build with Compose, set `image: rome-node:local` and pass
 
 ### Release the image
 
-Run the [Rome Node package workflow](../.github/workflows/rome-node.yml) on
-`main` with **Publish the Docker image to GitHub Container Registry** selected.
-The workflow checks amd64 and arm64 before publishing both under the source
-commit SHA and writes the multi-platform image digest to the workflow summary.
-A package admin sets the package to public and verifies anonymous pulls on both
-architectures.
+Whenever `@rome-os/node` (`packages/rome-node-cli`) releases via the
+[Release workflow](../.github/workflows/release.yml) (automatically when a
+`release-please` PR merges on `main`, or manually via `workflow_dispatch` with
+`package: packages/rome-node-cli` or `all`), the workflow invokes the
+[Rome Node package workflow](../.github/workflows/rome-node.yml) to verify
+`linux/amd64` and `linux/arm64` and publish the multi-platform image to
+`ghcr.io/rome-os/rome-node` with:
+
+- `<version>` matching `packages/rome-node-cli/package.json`
+- `latest` (for stable semver releases without a prerelease suffix)
+- `<commit-sha>`
+
+For an ad-hoc build outside a release, run the
+[Rome Node package workflow](../.github/workflows/rome-node.yml) on `main` with
+**Publish the Docker image to GitHub Container Registry** (and optionally
+**Also move the latest tag on GitHub Container Registry**) selected. A package
+admin sets the GHCR package visibility to public once and verifies anonymous
+pulls on both architectures.
 
 ## Chat device folders
 

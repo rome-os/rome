@@ -1,14 +1,17 @@
 name: Release
 
-# Drives releases for Rome's public npm packages via release-please.
+# Drives releases for Rome's public npm packages (and the Rome Node Docker
+# image) via release-please.
 #
 # Flow:
 #   1. PRs land on main with Conventional Commits messages (feat:, fix:, etc.).
 #   2. The release-please job opens (or updates) a release PR that bumps
 #      version + appends to CHANGELOG.md based on the unreleased commits.
 #   3. Merging that release PR makes release-please cut a GitHub release and
-#      tag for each package whose version moved. The publish job then builds
-#      and pushes the matching tarball(s) to npm.
+#      tag for each package whose version moved. The publish jobs then build
+#      and push the matching tarball(s) to npm and, when @rome-os/node
+#      (packages/rome-node-cli) releases, publish the multi-platform
+#      ghcr.io/rome-os/rome-node image (version, latest, and commit SHA).
 #
 # Bump rules: configured in release-please-config.json. Pre-1.0 we keep
 # breaking → minor and feat/fix → patch (bump-minor-pre-major +
@@ -82,6 +85,23 @@ jobs:
       paths: ${{ needs.release-please.outputs.paths_released }}
       dry_run: false
 
+  publish-rome-node-image:
+    name: Publish Rome Node image
+    needs: release-please
+    if: >-
+      github.event_name == 'push' &&
+      needs.release-please.outputs.releases_created == 'true' &&
+      contains(fromJSON(needs.release-please.outputs.paths_released || '[]'), 'packages/rome-node-cli')
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/rome-node.yml
+    with:
+      publish_image: true
+      publish_latest: true
+      tag_version: true
+      skip_package_checks: true
+
   publish-manual:
     name: Publish manual package
     if: github.event_name == 'workflow_dispatch'
@@ -89,3 +109,18 @@ jobs:
     with:
       package: ${{ inputs.package }}
       dry_run: ${{ inputs.dry_run }}
+
+  publish-rome-node-image-manual:
+    name: Publish manual Rome Node image
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.package == 'all' || inputs.package == 'packages/rome-node-cli')
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/rome-node.yml
+    with:
+      publish_image: ${{ !inputs.dry_run }}
+      publish_latest: ${{ !inputs.dry_run }}
+      tag_version: ${{ !inputs.dry_run }}
+      skip_package_checks: true
