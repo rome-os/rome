@@ -40,10 +40,6 @@ let tempCounter = 0;
  * same `ROME_GITHUB_TOKEN_FILE` override).
  */
 export function getProviderTokenFilePath(provider: OAuthProvider): string {
-  return tokenFilePath(provider);
-}
-
-function tokenFilePath(provider: string): string {
   const override = process.env[`ROME_${provider.toUpperCase()}_TOKEN_FILE`]?.trim();
   return override || `${DEFAULT_TOKEN_DIR}/${provider}-oauth-token`;
 }
@@ -133,30 +129,6 @@ export async function syncProviderTokenFile(
 /** Remove a provider's on-disk token file (disconnect). Missing file is fine. */
 export async function clearProviderTokenFile(provider: OAuthProvider): Promise<void> {
   await unlinkIfPresent(getProviderTokenFilePath(provider));
-}
-
-/** Providers Rome no longer connects whose token file an older build may
- *  have left behind: `slack`, the Slack sign-in, removed for Rome's Slack app. */
-const RETIRED_PROVIDERS = ["slack"] as const;
-
-/**
- * Remove the token files of providers Rome no longer connects, once at boot.
- * No grant drives them any more, so nothing else ever clears them, and a token
- * left on `/run/rome` stays readable to the shell and the connector. Honors the
- * same `ROME_<PROVIDER>_TOKEN_FILE` override. A missing file is fine; a file
- * that cannot be removed is logged, and boot goes on.
- */
-export async function removeRetiredTokenFiles(): Promise<void> {
-  for (const provider of RETIRED_PROVIDERS) {
-    try {
-      await unlinkIfPresent(tokenFilePath(provider));
-    } catch (error) {
-      log.warn("could not remove a retired provider's token file", {
-        provider,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
 }
 
 /**

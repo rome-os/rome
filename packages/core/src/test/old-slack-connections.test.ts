@@ -27,15 +27,21 @@ import { removeUnconnectedAccounts } from "../connections/unconnected-accounts.j
 import type { Logger } from "../logger.js";
 import { createTestDbFile, type TestDb } from "./db.js";
 
-/** The old Slack kinds, each with the account its stored grant reached. */
-const OLD = [{ id: "conn-old-slack-bot", kind: "slack_bot", account: "U_OLD_BOT" }];
+/** The old Slack kinds, each with the account its stored grant reached. The
+ *  Slack bot was a chat connection, with a channel and a connected account;
+ *  the Slack sign-in acted for the guardian and had neither. */
+const OLD = [
+  { id: "conn-old-slack-bot", kind: "slack_bot", account: "U_OLD_BOT", chats: true },
+  { id: "conn-old-slack-sign-in", kind: "slack", account: "U_GUARDIAN", chats: false },
+];
 
 const NOW = Math.floor(Date.now() / 1000);
 
 /** A stored Connection of `kind`, as Rome left it while it offered the kind:
- *  its live grant holding a token, its channel record and its connected
- *  account. */
-function storeOld(sqlite: Database.Database, id: string, kind: string, accountId: string): void {
+ *  its live grant holding a token and, for a chat connection, its channel
+ *  record and its connected account. */
+function storeOld(sqlite: Database.Database, old: (typeof OLD)[number]): void {
+  const { id, kind, account: accountId } = old;
   sqlite
     .prepare("INSERT INTO connections (id, connection_kind, label, created_at) VALUES (?, ?, ?, ?)")
     .run(id, kind, kind, NOW);
@@ -44,7 +50,8 @@ function storeOld(sqlite: Database.Database, id: string, kind: string, accountId
       `INSERT INTO connection_grants (custody, state, credential, platform, account_id)
        VALUES (?, 'authorized', ?, 'slack', ?)`,
     )
-    .run(id, JSON.stringify({ token: `xoxb-of-${id}` }), accountId);
+    .run(id, JSON.stringify({ token: `xox-of-${id}` }), accountId);
+  if (!old.chats) return;
   sqlite
     .prepare(
       `INSERT INTO channels (id, connection_kind, platform, connection_id, platform_account_id, created_at)
@@ -78,7 +85,7 @@ async function bootOverOldRows() {
     store.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  for (const old of OLD) storeOld(store.sqlite, old.id, old.kind, old.account);
+  for (const old of OLD) storeOld(store.sqlite, old);
 
   const logger = { warn: rs.fn(), error: rs.fn(), info() {}, debug() {} };
   const repository = new DrizzleConnectionsRepository(store.db);
@@ -113,8 +120,11 @@ describe("a stored Connection of an old Slack kind", () => {
     }
     expect(logger.error).not.toHaveBeenCalled();
     expect(registry.all()).toEqual([]);
-    for (const table of ["connections", "connection_grants", "channels", "connected_accounts"]) {
+    for (const table of ["connections", "connection_grants"]) {
       expect(count(store.sqlite, table)).toBe(OLD.length);
+    }
+    for (const table of ["channels", "connected_accounts"]) {
+      expect(count(store.sqlite, table)).toBe(OLD.filter((old) => old.chats).length);
     }
   });
 
