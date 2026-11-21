@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { ActionConfig, AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
+import { SLACK_APP_CONNECT_HINT } from "../api/slack-app-proxy.js";
 import { createAction as createConnectorConnect } from "./connector-connect/index.js";
 import { createAction as createConnectorEventSchema } from "./connector-event-schema/index.js";
 import { createAction as createConnectorEventSearch } from "./connector-event-search/index.js";
@@ -80,7 +81,6 @@ describe("connector actions when not logged in to Composio", () => {
 
   it.each([
     "github",
-    "slack",
     "shopify",
   ])("connector_connect sends the agent to core's connect_account for %s, never a Composio connect", async (toolkit) => {
     // Rome connects these itself; a Composio connect here would create a
@@ -93,6 +93,12 @@ describe("connector actions when not logged in to Composio", () => {
     expect(result.error).toContain(`connect_account tool with {"kind":"${toolkit}"}`);
     expect(result.error).toContain("Settings → Connections");
     expect(result.error).not.toMatch(/connector_login/);
+  });
+
+  it("connector_connect sends the agent to Rome's Slack app for slack, never a Composio connect", async () => {
+    const action = createConnectorConnect(config("connector_connect"), deps);
+    const result = await action.execute({ toolkit: "slack" });
+    expect(result).toMatchObject({ status: "error", error: SLACK_APP_CONNECT_HINT });
   });
 
   it("connector_connect refuses an unsupported toolkit and never renders a connect card", async () => {
