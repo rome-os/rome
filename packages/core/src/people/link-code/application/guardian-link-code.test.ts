@@ -159,8 +159,8 @@ describe("guardian link admission", () => {
 
   it("keeps a wrong code out of the chat and links no one", async () => {
     codes.issue();
-    expect(await admit("bot", "slack_bot", message("ROME-AAAAAAAA"))).toBe(false);
-    expect(await repo.byAccount({ platform: "slack_bot", id: "123" })).toBeNull();
+    expect(await admit("bot", "slack_app", message("ROME-AAAAAAAA"))).toBe(false);
+    expect(await repo.byAccount({ platform: "slack_app", id: "123" })).toBeNull();
     await rs.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
   });
 });

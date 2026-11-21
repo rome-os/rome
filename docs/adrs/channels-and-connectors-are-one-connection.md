@@ -184,3 +184,7 @@ Nobody picks an account's agent, and the dashboard has no page for it. An accoun
 
 - **Keep the stored link, start every bot on main, and only remove the page.** Rejected because it keeps a choice nobody can make, and an account Rome left silent stays silent with nothing to fix it.
 - **The Concierge on every account.** Rejected by the guardian: return to what Rome did before accounts took agents.
+
+## Amendment (2026-11-21): the Slack bot connection is removed
+
+Rome's Slack app is Slack's only chat connection. Rome does not offer `slack_bot`, a Slack app the guardian made from a manifest link and connected by pasting its bot token and app-level token. Channel records stored for `slack_bot` stay and still map to the `slack` platform. Rome skips their Connections at boot, as it skips any Connection whose kind is not registered. Their grants still hold the pasted tokens, unread, until an operator deletes them.

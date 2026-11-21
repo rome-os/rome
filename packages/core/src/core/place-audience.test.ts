@@ -52,7 +52,7 @@ describe("placeAudience", () => {
   it("reads the sender's bond from People, not from the thread context", async () => {
     // The inbox hook's chat details carry no bond level.
     const fromHook = {
-      channel: "slack_bot",
+      channel: "slack_app",
       threadId: "D1",
       threadType: "private" as const,
       channelUserId: "U1",

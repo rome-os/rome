@@ -102,7 +102,6 @@ const SERVICE_ORDER = [
   "email",
   "feishu",
   "slack_app",
-  "slack_bot",
   "agents",
   "github",
   "google",
@@ -125,7 +124,6 @@ const LABELS: Record<string, string> = {
   google: "Google",
   slack: "Slack",
   slack_app: "Slack",
-  slack_bot: "Slack bot",
   shopify: "Shopify",
   composio: "Composio",
 };
@@ -144,7 +142,6 @@ const SLOT_KEY_BY_GRANT: Record<string, Record<string, SlotKey>> = {
   email: { inbox: "bot" },
   feishu: { app: "bot" },
   slack_app: { bot: "bot" },
-  slack_bot: { bot: "bot" },
   agents: { cloud: "bot" },
   github: { user: "user" },
   google: { user: "user" },
