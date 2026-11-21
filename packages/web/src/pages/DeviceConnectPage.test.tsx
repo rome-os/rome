@@ -1,0 +1,83 @@
+// @rstest-environment jsdom
+import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import i18n from "@/i18n";
+import DeviceConnectPage from "./DeviceConnectPage";
+
+beforeAll(async () => {
+  await i18n.changeLanguage("en");
+});
+
+afterEach(async () => {
+  cleanup();
+  rs.restoreAllMocks();
+  await i18n.changeLanguage("en");
+});
+
+const phoneDevice = {
+  capability: "device",
+  title: "Device",
+  summary: "Your Rome reads this phone's battery and network.",
+  labels: {
+    "zh-CN": { title: "设备状态", summary: "你的 Rome 读取这部手机的电量和网络。" },
+  },
+  device: { name: "iPhone" },
+  state: "off",
+};
+
+function renderAt(capability: string, response: Response) {
+  rs.spyOn(globalThis, "fetch").mockResolvedValue(response);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/connections/device/${capability}`]}>
+        <Routes>
+          <Route path="/connections/device/:capability" element={<DeviceConnectPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+const listing = (connections: unknown[]) =>
+  new Response(JSON.stringify({ connections }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+
+describe("DeviceConnectPage", () => {
+  it("says what the capability does, where to turn it on, and that it is not for a computer", async () => {
+    renderAt("device", listing([phoneDevice]));
+    expect(await screen.findByRole("heading", { name: "Connect Device" })).toBeTruthy();
+    expect(screen.getByText("Your Rome reads this phone's battery and network.")).toBeTruthy();
+    expect(screen.getByText(/Connect Device on iPhone: open the Rome app there/)).toBeTruthy();
+    expect(screen.getByText(/It doesn't add a computer/)).toBeTruthy();
+    expect(
+      screen
+        .getByRole("link", { name: "Manage computers in Settings › Devices" })
+        .getAttribute("href"),
+    ).toBe("/settings/devices");
+  });
+
+  it("uses the device's words in the guardian's language", async () => {
+    await i18n.changeLanguage("zh-CN");
+    renderAt("device", listing([phoneDevice]));
+    expect(await screen.findByRole("heading", { name: "连接 设备状态" })).toBeTruthy();
+    expect(screen.getByText("你的 Rome 读取这部手机的电量和网络。")).toBeTruthy();
+  });
+
+  it("says the list could not load instead of naming the capability by its id", async () => {
+    renderAt(
+      "device",
+      new Response(JSON.stringify({ error: "Guardian session required" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    expect(await screen.findByText("Connections couldn't be loaded")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Connect device" })).toBeNull();
+  });
+});

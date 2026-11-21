@@ -55,6 +55,44 @@ describe("connect_account", () => {
     });
   });
 
+  it("says what each device kind is, and that no card brings a device online", async () => {
+    for (const devicesOnly of [false, true]) {
+      const [tool] = connectAccountTools({
+        widgets: "card",
+        hasSpeaker: true,
+        devicesOnly,
+        devices: [
+          {
+            kind: "device",
+            label: "Device",
+            summary: "Your Rome reads this phone's battery and network.",
+            state: "off",
+            device: "iPhone",
+          },
+          { kind: "computer_use", label: "Studio Mac" },
+        ],
+      });
+      const kind = (tool!.inputSchema as { properties: { kind: { description: string } } })
+        .properties.kind.description;
+      expect(kind).toContain(
+        `"device" is Device (Your Rome reads this phone's battery and network)`,
+      );
+      expect(kind).toContain(`"computer_use" is Studio Mac`);
+      // State and device names change during a session; its tools do not.
+      expect(kind).not.toContain("off");
+      expect(kind).not.toContain("iPhone");
+      expect(tool!.description).toContain("never adds, pairs or wakes a device");
+      expect(tool!.description).toContain("`target_unavailable`, show no card");
+    }
+  });
+
+  it("keeps the plain kind description where no device reported a kind", async () => {
+    const [tool] = connectAccountTools({ widgets: "card", hasSpeaker: true });
+    const kind = (tool!.inputSchema as { properties: { kind: { description: string } } }).properties
+      .kind.description;
+    expect(kind).toBe("The kind of connection to connect.");
+  });
+
   it("answers that a device kind already works, read when called, with no card", async () => {
     let state: "working" | "off" = "off";
     const [tool] = connectAccountTools({
