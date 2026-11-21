@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreText
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 // A message's text in select mode (`TextSelection`): the same blocks as
 // `MarkdownText` draws, as attributed strings a read-only `UITextView` can
@@ -12,8 +13,9 @@ enum SelectableSegment {
     /// A run of text blocks (paragraphs, headings, lists, quotes) in one text
     /// view, so a selection can cross them.
     case text(SelectableRun)
-    /// A fenced code block: its own text view, unwrapped, which scrolls sideways.
-    case code(NSAttributedString)
+    /// A fenced code block: its own text view, unwrapped, laid in the code
+    /// block's sideways scroll. `position` is its place in the message.
+    case code(position: Int, NSAttributedString)
     /// A block that is not text (a table, an image, a picture set, a rule),
     /// drawn as outside select mode. `position` is its place in the message.
     case block(position: Int, MarkdownBlock)
@@ -80,7 +82,7 @@ enum SelectableText {
                 run.append(block)
             case .code(_, let text):
                 flush()
-                segments.append(.code(code(text, style: style)))
+                segments.append(.code(position: position, code(text, style: style)))
             case .rule, .image, .table, .pictures:
                 flush()
                 segments.append(.block(position: position, block))
@@ -102,14 +104,16 @@ enum SelectableText {
                 let size = level <= 1 ? style.fontSize + 4 : (level == 2 ? style.fontSize + 2 : style.fontSize)
                 let paragraph = paragraphStyle(lineSpacing: 3)
                 paragraph.paragraphSpacingBefore = 2
-                pieces.append(Piece(text: inline(text, size: style.scaled(size), weight: .semibold, color: style.color, tasks: tasks), style: paragraph))
+                // No chips: `MarkdownText` draws a heading's task link as a link.
+                pieces.append(Piece(text: inline(text, size: style.scaled(size), weight: .semibold, color: style.color), style: paragraph))
             case .list(let ordered, let start, let items):
                 list(ordered: ordered, start: start, items: items, indent: 0, style: style, tasks: tasks, into: &pieces)
             case .quote(let text):
                 let paragraph = paragraphStyle(lineSpacing: style.lineSpacing)
                 paragraph.firstLineHeadIndent = quoteIndent
                 paragraph.headIndent = quoteIndent
-                pieces.append(Piece(text: inline(text, size: style.scaled(style.fontSize), weight: .regular, color: UIColor(Palette.sub), tasks: tasks),
+                // No chips, as in a heading.
+                pieces.append(Piece(text: inline(text, size: style.scaled(style.fontSize), weight: .regular, color: UIColor(Palette.sub)),
                                     style: paragraph))
             case .code, .rule, .image, .table, .pictures:
                 continue
@@ -324,6 +328,25 @@ enum SelectableText {
         return out
     }
 
+    /// Whether two strings built for a text view read and look the same. A
+    /// chip's mark is compared by its place, not its identity: each build
+    /// makes a new attachment, which `isEqual` never takes as the same.
+    static func same(_ a: NSAttributedString?, _ b: NSAttributedString) -> Bool {
+        guard let a, a.string == b.string else { return false }
+        func marks(_ text: NSAttributedString) -> (NSAttributedString, [CGRect]) {
+            let out = NSMutableAttributedString(attributedString: text)
+            var bounds: [CGRect] = []
+            let all = NSRange(location: 0, length: out.length)
+            out.enumerateAttribute(.attachment, in: all) { value, _, _ in
+                if let mark = value as? NSTextAttachment { bounds.append(mark.bounds) }
+            }
+            out.removeAttribute(.attachment, range: all)
+            return (out, bounds)
+        }
+        let (left, leftMarks) = marks(a), (right, rightMarks) = marks(b)
+        return leftMarks == rightMarks && left.isEqual(to: right)
+    }
+
     /// What Copy writes for `text` taken from these strings: its line
     /// breaks as newlines.
     nonisolated static func copied(_ text: String) -> String {
@@ -420,7 +443,12 @@ struct SelectableTextView: UIViewRepresentable {
     func updateUIView(_ view: SelectingTextView, context: Context) {
         context.coordinator.environment = context.environment
         view.tintColor = tint
-        if !(view.attributedText?.isEqual(to: text) ?? false) {
+        // The fold's place in this text arrives once the text is laid out.
+        view.start = start
+        // Not `isEqual`: a chip's mark is a new attachment each time the
+        // string is built, so the text would be set again, which drops the
+        // selection.
+        if !SelectableText.same(view.attributedText, text) {
             view.attributedText = text
             view.invalidateIntrinsicContentSize()
         }
@@ -449,6 +477,26 @@ struct SelectableTextView: UIViewRepresentable {
     }
 }
 
+/// A text view in select mode that knows where the bubble's fold is in it:
+/// the fold's place in the message (`MarkdownText`), less this text's top in
+/// it. Read from the layout, so it holds while the transcript scrolls.
+struct SelectableBlockView: View {
+    let text: NSAttributedString
+    var wraps = true
+    /// `foldBottom` down from the message's top.
+    let start: SelectionStart
+    @State private var top: CGFloat = 0
+
+    /// The coordinate space of the message's text, named by `MarkdownText`.
+    static let space = "selectable-message"
+
+    var body: some View {
+        SelectableTextView(text: text, wraps: wraps, start: SelectionStart(
+            point: start.point, first: start.first, last: start.last, foldBottom: start.foldBottom.map { $0 - top }))
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).minY } action: { top = $0 }
+    }
+}
+
 /// Where select mode opens its selection: the paragraph the long press that
 /// opened the menu was on.
 struct SelectionStart: Equatable {
@@ -460,8 +508,8 @@ struct SelectionStart: Equatable {
     var first: Bool
     /// This text is the message's last: it takes a press below it.
     var last: Bool = true
-    /// Where the bubble's fold hides the text, in the window; nil where it
-    /// shows all of it. A selection never reaches past it.
+    /// Where the bubble's fold hides the text, down from this text's top;
+    /// nil where it shows all of it. A selection never reaches past it.
     var foldBottom: CGFloat? = nil
 
     /// Whether a press `y` points down from this text's top, `top` to
@@ -539,6 +587,11 @@ final class SelectingTextView: UITextView {
         linkTextAttributes = [:]
         adjustsFontForContentSizeCategory = false
         setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // A finger on the text or a handle starts the edge auto-scroll.
+        addGestureRecognizer(TouchWatcher { [weak self] touching in
+            self?.touching = touching
+            if touching { self?.startAutoscroll() }
+        })
     }
 
     @available(*, unavailable)
@@ -613,7 +666,6 @@ final class SelectingTextView: UITextView {
             }
             self.selectedRange = range
             self.clampToFold()
-            self.startAutoscroll()
             // After the bubble's menu has closed: one shown while it closes
             // is closed with it.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.presentEditMenu() }
@@ -645,10 +697,7 @@ final class SelectingTextView: UITextView {
     private var autoscroll: CADisplayLink?
 
     /// Where the fold hides this text, down from its top; nil where none does.
-    var visibleBottom: CGFloat? {
-        guard let bottom = start?.foldBottom, window != nil else { return nil }
-        return convert(CGPoint(x: 0, y: bottom), from: nil).y
-    }
+    var visibleBottom: CGFloat? { start?.foldBottom }
 
     /// Keeps the selection's end above the fold: text the fold hides can be
     /// neither seen nor dragged to, so it is not selected.
@@ -668,7 +717,8 @@ final class SelectingTextView: UITextView {
             movingStart = range.location != lastRange.location && NSMaxRange(range) == NSMaxRange(lastRange)
             lastRange = range
         }
-        if selectedRange.length > 0 { startAutoscroll() }
+        // A long press that makes a selection starts with none.
+        if touching { startAutoscroll() }
     }
 
     /// The gesture under way on the view or its handles, if any: one that
@@ -683,14 +733,19 @@ final class SelectingTextView: UITextView {
         (view.gestureRecognizers ?? []) + view.subviews.flatMap { recognizers(in: $0) }
     }
 
+    /// A finger is down on the text or one of its handles.
+    private var touching = false
+    /// Tests only: whether the edge auto-scroll runs.
+    var autoscrolls: Bool { autoscroll != nil }
+
     /// While a finger drags a selection past the top or bottom of what the
     /// transcript shows, it scrolls, and the held end follows the finger
     /// into the text that comes into view. UIKit scrolls a text view that
     /// scrolls itself, not the scroll view around one that does not. It
-    /// watches for a drag for as long as the text holds a selection: a
+    /// runs from a finger coming down until no gesture holds the text: a
     /// handle's drag reports no change of selection until it ends.
     private func startAutoscroll() {
-        guard autoscroll == nil, Self.enclosingScrollView(of: self) != nil else { return }
+        guard autoscroll == nil, selectedRange.length > 0, Self.enclosingScrollView(of: self) != nil else { return }
         let link = CADisplayLink(target: AutoscrollTarget(view: self), selector: #selector(AutoscrollTarget.tick(_:)))
         link.add(to: .main, forMode: .common)
         autoscroll = link
@@ -708,7 +763,15 @@ final class SelectingTextView: UITextView {
         }
         let finger = Self.tracking(self)
         Self.dragging = finger != nil
-        guard let finger, let scroll = Self.enclosingScrollView(of: self) else { return }
+        guard let finger else {
+            // The finger is up and its gesture over: nothing to follow.
+            if !touching {
+                autoscroll?.invalidate()
+                autoscroll = nil
+            }
+            return
+        }
+        guard let scroll = Self.enclosingScrollView(of: self) else { return }
         let y = finger.location(in: window).y
         let visible = scroll.convert(scroll.bounds, to: window)
         let top = max(visible.minY, window.safeAreaInsets.top) + Self.edge
@@ -743,6 +806,44 @@ final class SelectingTextView: UITextView {
         }
         return nil
     }
+}
+
+/// Reports a finger coming down on its view (a handle included) and going
+/// up, and recognizes nothing: it never takes a touch from, or is stopped
+/// by, the text view's own gestures.
+private final class TouchWatcher: UIGestureRecognizer {
+    private let onChange: (Bool) -> Void
+
+    init(onChange: @escaping (Bool) -> Void) {
+        self.onChange = onChange
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        onChange(true)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        finish(event)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        finish(event)
+    }
+
+    /// Up once the last finger on the view lifts.
+    private func finish(_ event: UIEvent) {
+        let down = event.touches(for: self)?.contains { $0.phase != .ended && $0.phase != .cancelled } ?? false
+        guard !down else { return }
+        onChange(false)
+        state = .failed
+    }
+
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool { false }
+    override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool { false }
 }
 
 /// Drives `SelectingTextView`'s edge auto-scroll from a display link, which

@@ -446,6 +446,9 @@ final class TranscriptStore {
     /// its replies count as read only while it shows, and once it shows again.
     var onScreen = false {
         didSet {
+            // The main Chat stays mounted under other pages, so its list
+            // never disappears: going off screen ends select mode instead.
+            if !onScreen { textSelection.end() }
             if onScreen, !oldValue {
                 beginOpen()
                 markRead()

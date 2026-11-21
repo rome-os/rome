@@ -113,7 +113,7 @@ import UIKit
         let kinds = segments.map { segment -> String in
             switch segment {
             case .text(let run): return "text:\(run.text.string)"
-            case .code(let text): return "code:\(SelectableText.copied(text.string))"
+            case .code(_, let text): return "code:\(SelectableText.copied(text.string))"
             case .block(_, let block):
                 if case .table = block { return "table" }
                 if case .image = block { return "image" }
@@ -135,7 +135,7 @@ import UIKit
 
     @Test func aCodeBlockKeepsItsLinesInOneParagraph() {
         let segments = SelectableText.segments(MarkdownParser.parse("```\na\nb\n```"), style: style)
-        guard case .code(let text) = segments.first else { Issue.record("no code"); return }
+        guard case .code(_, let text) = segments.first else { Issue.record("no code"); return }
         #expect(text.string == "a\u{2028}b")
     }
 
@@ -326,7 +326,9 @@ import UIKit
         let text = (1...12).map { "Line \($0) of a reply that is folded." }.joined(separator: "\n\n")
         view.attributedText = SelectableText.attributed(MarkdownParser.parse(text), style: SelectableTextStyle(color: .black)).text
         let size = view.fittingSize(width: 300, scale: 2)
-        view.frame = CGRect(origin: .zero, size: size)
+        // Well down the window: the fold is read from the text's own top,
+        // not from the window's.
+        view.frame = CGRect(origin: CGPoint(x: 0, y: 200), size: size)
         window.addSubview(view)
         view.start = SelectionStart(point: nil, first: true, foldBottom: 120)
         view.layoutIfNeeded()
@@ -337,6 +339,82 @@ import UIKit
         #expect(view.selectedRange.length > 0)
         #expect(view.selectedRange.length < view.textStorage.length)
         #expect(end.minY < 120)
+        #expect(end.maxY > 60)
+    }
+
+    /// A selection with no finger on the text runs no display link: the
+    /// edge auto-scroll waits for a touch.
+    @Test func noFingerNoAutoscroll() throws {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 600)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let scroll = UIScrollView(frame: window.bounds)
+        scroll.contentSize = CGSize(width: 320, height: 2_000)
+        window.addSubview(scroll)
+        let view = SelectingTextView(wraps: true)
+        view.attributedText = SelectableText.attributed(MarkdownParser.parse("One paragraph.\n\nAnother one."), style: SelectableTextStyle(color: .black)).text
+        view.frame = CGRect(origin: .zero, size: view.fittingSize(width: 300, scale: 2))
+        scroll.addSubview(view)
+        #expect(view.becomeFirstResponder())
+        defer { view.resignFirstResponder() }
+        view.selectedRange = NSRange(location: 0, length: 5)
+        view.selectionDidChange()
+        #expect(!view.autoscrolls)
+    }
+
+    /// Each redraw builds a chip's mark anew. The text view takes the two
+    /// strings as the same, so it keeps its selection.
+    @Test func aRebuiltChipIsTheSameText() {
+        let info = TaskLinkInfo(id: "c", name: "Fix login", status: "ended", endReason: "done")
+        func built() -> NSAttributedString {
+            let text = NSMutableAttributedString(string: "See \u{FFFC} Fix login")
+            text.addAttribute(.attachment, value: SelectableText.chipMark(info, size: 13), range: NSRange(location: 4, length: 1))
+            return SelectableText.invisible(text)
+        }
+        let a = built(), b = built()
+        #expect(!a.isEqual(to: b))
+        #expect(SelectableText.same(a, b))
+        #expect(!SelectableText.same(a, SelectableText.invisible(NSAttributedString(string: "See \u{FFFC} Fix logic"))))
+        #expect(!SelectableText.same(nil, b))
+    }
+
+    /// `MarkdownText` draws a task link in a heading or quote as a link, so
+    /// select mode does too; in a paragraph it is a chip.
+    @Test func headingsAndQuotesHaveNoChips() {
+        let tasks = TaskLinkStore(chatId: "chat", backend: FakeBackend())
+        let link = "[Fix login](\(TaskLink.prefix)c1)"
+        for source in ["# See \(link)", "> See \(link)"] {
+            let text = SelectableText.attributed(MarkdownParser.parse(source), style: SelectableTextStyle(color: .black), tasks: tasks).text
+            let at = (text.string as NSString).range(of: "Fix login").location
+            #expect(at != NSNotFound)
+            #expect(text.attribute(.link, at: at, effectiveRange: nil) != nil, "\(source)")
+        }
+        // A paragraph's link to a task not read yet reads as its text, with no link.
+        let paragraph = SelectableText.attributed(MarkdownParser.parse("See \(link)"), style: SelectableTextStyle(color: .black), tasks: tasks).text
+        let at = (paragraph.string as NSString).range(of: "Fix login").location
+        #expect(paragraph.attribute(.link, at: at, effectiveRange: nil) == nil)
+    }
+
+    @Test func selectTextNeedsTextToSelect() {
+        #expect(MarkdownText.hasSelectableText("Hello"))
+        #expect(MarkdownText.hasSelectableText("```\nlet x = 1\n```"))
+        #expect(MarkdownText.hasSelectableText("- item"))
+        #expect(!MarkdownText.hasSelectableText("![chart](https://example.com/a.png)"))
+        #expect(!MarkdownText.hasSelectableText("---"))
+        #expect(!MarkdownText.hasSelectableText("| a |\n|---|\n| b |"))
+        #expect(!MarkdownText.hasSelectableText(""))
+    }
+
+    /// The main Chat stays mounted under other pages: going off screen ends
+    /// select mode, which its list's disappearing never does.
+    @Test func goingOffScreenEndsSelectMode() {
+        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: FakeBackend())
+        store.onScreen = true
+        store.textSelection.begin(row: "m1", text: "Hello")
+        store.onScreen = false
+        #expect(!store.textSelection.isActive)
     }
 
     @Test func aTaskChipKeepsItsMarkAndCopiesWithoutIt() throws {
@@ -516,6 +594,37 @@ import UIKit
                 #expect(found.maxX <= line.maxX + 1 && found.maxX >= line.maxX - 17, "text ends at \(found.maxX), the line at \(line.maxX), at \(width)")
             }
         }
+    }
+
+    /// A code block scrolled sideways stays where it was as select mode
+    /// starts: its text view lies in the same scroll.
+    @Test func aScrolledCodeBlockKeepsItsPlace() async throws {
+        SelectingTextView.opensSelection = false
+        defer { SelectingTextView.opensSelection = true }
+        let source = "Before.\n\n```\nlet aVeryLongLine = [\"one\", \"two\", \"three\", \"four\", \"five\", \"six\", \"seven\"]\n```"
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let mode = SelectModeSwitch()
+        let host = UIHostingController(rootView: SelectModeHost(source: source, mode: mode)
+            .frame(width: 260, height: 400, alignment: .topLeading).background(Color.white))
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 260, height: 400)
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true }
+        try await Task.sleep(for: .milliseconds(400))
+        func scrolls(in view: UIView) -> [UIScrollView] {
+            ((view as? UIScrollView).map { [$0] } ?? []) + view.subviews.flatMap { scrolls(in: $0) }
+        }
+        let code = try #require(scrolls(in: window).first { !($0 is UITextView) && $0.contentSize.width > $0.bounds.width + 1 })
+        code.contentOffset.x = 80
+        mode.on = true
+        try await Task.sleep(for: .milliseconds(200))
+        let text = try #require(scrolls(in: window).compactMap { $0 as? SelectingTextView }.first { $0.textStorage.string.contains("aVeryLongLine") })
+        // In the code block's scroll, which is still where it was.
+        var around = text.superview
+        while let current = around, !(current is UIScrollView) { around = current.superview }
+        #expect(around === code)
+        #expect(code.contentOffset.x == 80)
     }
 
     @MainActor @Observable final class SelectModeSwitch {

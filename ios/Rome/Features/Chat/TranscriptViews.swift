@@ -80,8 +80,9 @@ private extension View {
     /// The bubble lifts under the finger with the system's menu. Reply is
     /// also a swipe to the right (`SwipeToReply`), and an action of its own
     /// for VoiceOver.
-    func bubbleMenu(text: String, menu: BubbleMenu) -> some View {
-        modifier(BubbleMenuModifier(text: text, menu: menu))
+    /// `selects` says whether the text has anything Select text can select.
+    func bubbleMenu(text: String, menu: BubbleMenu, selects: Bool) -> some View {
+        modifier(BubbleMenuModifier(text: text, menu: menu, selects: selects))
     }
 }
 
@@ -90,13 +91,15 @@ private extension View {
 private struct BubbleMenuModifier: ViewModifier {
     let text: String
     let menu: BubbleMenu
+    /// The text has something to select: not only pictures or a table.
+    let selects: Bool
     @Environment(\.textSelection) private var selection
     @Environment(\.transcriptRowID) private var rowID
 
     func body(content: Content) -> some View {
         let selecting = selection?.isSelecting(row: rowID, text: text) ?? false
         let onSelect: (() -> Void)? = {
-            guard let selection, let rowID, !text.isEmpty else { return nil }
+            guard let selection, let rowID, selects else { return nil }
             return { [text] in selection.begin(row: rowID, text: text) }
         }()
         content
@@ -189,7 +192,7 @@ struct UserBubble: View {
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                            .bubbleMenu(text: text, menu: bubbleMenu)
+                            .bubbleMenu(text: text, menu: bubbleMenu, selects: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .markBadge(mark)
                     }
                 }
@@ -407,11 +410,9 @@ struct AgentBubble: View {
     /// How far a selection handle's knob reaches past the text.
     private static let handleRoom: CGFloat = 24
 
-    /// The text's top in the window, so select mode knows where the fold is.
-    @State private var textTop: CGFloat = 0
-    /// Where the fold hides the text, in the window: above the fade over the
-    /// last folded lines, where the text is still in sight.
-    private var foldBottom: CGFloat { textTop + Self.foldHeight(for: dynamicTypeSize) - Self.fadeHeight }
+    /// Where the fold hides the text, down from its top: above the fade over
+    /// the last folded lines, where the text is still in sight.
+    private var foldBottom: CGFloat { Self.foldHeight(for: dynamicTypeSize) - Self.fadeHeight }
     /// The fade over a folded reply's last lines (`expandButton`).
     static let fadeHeight: CGFloat = 40
 
@@ -436,7 +437,6 @@ struct AgentBubble: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
                 .frame(maxHeight: capped ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
-                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { textTop = $0 }
                 // In select mode the clip leaves room for the selection's
                 // handles above and beside the text; folded, it still hides
                 // the text under the fold.
@@ -454,7 +454,7 @@ struct AgentBubble: View {
         .padding(.vertical, 10)
         .background(Palette.bubble, in: shape)
         .contentShape(.contextMenuPreview, shape)
-        .bubbleMenu(text: text, menu: menu)
+        .bubbleMenu(text: text, menu: menu, selects: MarkdownText.hasSelectableText(text))
         .bubbleWidth()
     }
 
@@ -514,7 +514,7 @@ struct ConciergeBubble: View {
                     .padding(.vertical, 10)
                     .background(Palette.bubble, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                     .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                    .bubbleMenu(text: text, menu: menu)
+                    .bubbleMenu(text: text, menu: menu, selects: MarkdownText.hasSelectableText(text))
             }
             Mascot()
                 .frame(height: 16)

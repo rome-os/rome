@@ -694,20 +694,54 @@ struct MarkdownText: View {
     /// In select mode, where the long press that opened it was, in the
     /// window: the paragraph under it opens selected.
     var selectFrom: CGPoint? = nil
-    /// In select mode, where a fold hides the text, in the window.
+    /// In select mode, where a fold hides the text, down from its top.
     var foldBottom: CGFloat? = nil
 
     private var blocks: [MarkdownBlock] {
         let parsed = MarkdownParser.parse(source)
         return textOnly ? MarkdownParser.withoutImages(parsed) : parsed
     }
-    /// The blocks select mode lays a text view over; the rest keep their
-    /// place in it by their drawn height.
+    /// The blocks select mode lays one text view over, a run at a time; the
+    /// rest, code included, keep their place in it by their drawn height.
     static func isText(_ block: MarkdownBlock) -> Bool {
         switch block {
-        case .paragraph, .heading, .list, .quote, .code: true
-        case .rule, .image, .table, .pictures: false
+        case .paragraph, .heading, .list, .quote: true
+        case .code, .rule, .image, .table, .pictures: false
         }
+    }
+
+    /// Whether select mode has text to select in `block`: words, or code.
+    static func selects(_ block: MarkdownBlock) -> Bool {
+        func words(_ text: String) -> Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        switch block {
+        case .paragraph(let text), .heading(_, let text), .quote(let text), .code(_, let text): return words(text)
+        case .list(_, _, let items): return items.contains { words($0.text) || $0.children.contains(where: selects) }
+        case .rule, .image, .table, .pictures: return false
+        }
+    }
+
+    /// Whether Markdown `source` has text select mode can select: a message
+    /// of only pictures, a table or a rule has none.
+    static func hasSelectableText(_ source: String) -> Bool {
+        MarkdownParser.parse(source).contains(where: selects)
+    }
+
+    /// Where select mode opens in the block at `position`: whether it is the
+    /// message's first or last selectable text, and the fold.
+    private func selectionStart(at position: Int) -> SelectionStart {
+        // The text views select mode lays out: text, and code.
+        let selectable = blocks.map { block -> Bool in
+            if case .code = block { return true }
+            return Self.isText(block)
+        }
+        return SelectionStart(point: selectFrom,
+                              first: !selectable[..<position].contains(true),
+                              last: !selectable[(position + 1)...].contains(true),
+                              foldBottom: foldBottom)
+    }
+
+    private var selectableStyle: SelectableTextStyle {
+        SelectableTextStyle(fontSize: fontSize, lineSpacing: lineSpacing, color: UIColor(color), dynamicTypeSize: dynamicTypeSize, displayScale: displayScale)
     }
 
     /// The drawn height of each block select mode does not select, by place.
@@ -751,8 +785,8 @@ struct MarkdownText: View {
                 if Self.isText(block) {
                     view(for: block, at: position)
                 } else {
-                    // A block select mode does not select: its height, as
-                    // drawn, holds its place in the overlay.
+                    // A block outside the overlay's runs of text (code, a
+                    // picture): its height, as drawn, holds its place there.
                     view(for: block, at: position)
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { blockHeights[position] = $0 }
                 }
@@ -768,6 +802,8 @@ struct MarkdownText: View {
                 }
             }
         }
+        // Each text view finds the fold in it from its place in here.
+        .coordinateSpace(.named(SelectableBlockView.space))
         .foregroundStyle(color)
         .tint(Palette.primaryText)
         // Links in the text: the shell's opener, else the system's.
@@ -792,30 +828,20 @@ struct MarkdownText: View {
     }
 
     /// The blocks in select mode, laid over the text: each run of text one
-    /// text view whose glyphs are clear, a code block one that draws its own,
-    /// and the rest their place.
+    /// text view whose glyphs are clear, and the rest their place. A code
+    /// block's text view is in its own scroll (`view(for:at:)`).
     @ViewBuilder
     private var selectableBlocks: some View {
-        let style = SelectableTextStyle(fontSize: fontSize, lineSpacing: lineSpacing, color: UIColor(color), dynamicTypeSize: dynamicTypeSize, displayScale: displayScale)
-        let segments = SelectableText.segments(blocks, style: style, tasks: textOnly ? nil : taskLinks)
+        let segments = SelectableText.segments(blocks, style: selectableStyle, tasks: textOnly ? nil : taskLinks)
         let first = segments.firstIndex { if case .block = $0 { false } else { true } }
         let last = segments.lastIndex { if case .block = $0 { false } else { true } }
         ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
             switch segment {
             case .text(let run):
                 // Its quote bars and list markers are SwiftUI's, below.
-                SelectableTextView(text: SelectableText.invisible(run.text), start: SelectionStart(point: selectFrom, first: index == first, last: index == last, foldBottom: foldBottom))
+                SelectableBlockView(text: SelectableText.invisible(run.text), start: SelectionStart(point: selectFrom, first: index == first, last: index == last, foldBottom: foldBottom))
                     .padding(.top, SelectableText.topSpace(run.text))
-            case .code(let text):
-                // Drawn over the code block, which it covers: its own lines
-                // scroll sideways as the selection moves.
-                ScrollView(.horizontal, showsIndicators: false) {
-                    SelectableTextView(text: text, wraps: false, start: SelectionStart(point: selectFrom, first: index == first, last: index == last, foldBottom: foldBottom))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
-                }
-                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            case .block(let position, _):
+            case .code(let position, _), .block(let position, _):
                 // Its place only, as tall as the block drawn below, which
                 // keeps its own state (a picture loading or failed): a new
                 // copy of it here could take another height.
@@ -852,6 +878,14 @@ struct MarkdownText: View {
                     .romeFont(13, design: .monospaced)
                     .lineSpacing(4)
                     .textSelection(.enabled)
+                    // Select mode's text view lies over the code inside its
+                    // scroll, so the code stays where it was scrolled to.
+                    .overlay(alignment: .topLeading) {
+                        if selectable {
+                            SelectableBlockView(text: SelectableText.invisible(SelectableText.code(text, style: selectableStyle)),
+                                                wraps: false, start: selectionStart(at: position))
+                        }
+                    }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 14)
             }
