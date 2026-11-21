@@ -109,18 +109,18 @@ struct SettingsRow<Trailing: View>: View {
     }
 }
 
-/// Board 3: account, AI tool usage, Connections, the app's
+/// Board 3: account, the AI model, Connections, the app's
 /// own settings and links, sign out. Groups carry no titles.
 struct SettingsScreen: View {
     let workspace: Workspace
     let onInstances: () -> Void
     let onConnections: () -> Void
+    var onAIModel: () -> Void = {}
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     @Environment(\.openInstancePage) private var openInstancePage
-    @State private var usage: AIToolsStatus?
     @State private var confirmSignOut = false
     @State private var showFeedback = false
     @State private var notificationsOn = false
@@ -131,11 +131,10 @@ struct SettingsScreen: View {
                 accountCard
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
-                // The guardian's own subscriptions: not a visitor's to see.
+                // The guardian's own model and accounts: not a visitor's to see.
                 if !workspace.isVisitor {
                     SettingsGroup {
-                        UsageRow(name: "Claude", provider: usage?.claude, last: false)
-                        UsageRow(name: "Codex", provider: usage?.codex, last: true)
+                        AIModelRow(summary: workspace.aiModel.summary, action: onAIModel)
                     }
                     .padding(.horizontal, 16)
                 }
@@ -281,7 +280,7 @@ struct SettingsScreen: View {
         .floatingTopBar { PageHeader(title: "Settings", onClose: onClose, inSheet: true) }
         .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .task { if !workspace.isVisitor { usage = try? await workspace.backend.aiTools() } }
+        .task { if !workspace.isVisitor { await workspace.aiModel.refresh() } }
         .task { await workspace.voiceInput.refresh(now: true) }
         .task {
             await model.push.refresh()
@@ -386,73 +385,6 @@ private struct SystemSettingsNote: View {
         .padding(.leading, 56)
         .padding(.trailing, 14)
         .padding(.bottom, 12)
-    }
-}
-
-/// One AI subscription: how much of its tightest window is used, and when it resets.
-struct UsageRow: View {
-    let name: String
-    let provider: AIToolsStatus.Provider?
-    let last: Bool
-
-    private var window: AIToolsStatus.Window? {
-        let windows = [provider?.usage?.fiveHour, provider?.usage?.sevenDay].compactMap { $0 }
-        return windows.max { ($0.usedPercent ?? 0) < ($1.usedPercent ?? 0) }
-    }
-
-    private var percent: Double { min(100, max(0, window?.usedPercent ?? 0)) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(name).romeFont(17, .medium)
-                Spacer()
-                if provider?.loggedIn == true, window != nil {
-                    Text(verbatim: "\(Int(percent.rounded()))%")
-                        .romeFont(15, .semibold, monospacedDigits: true)
-                        .contentTransition(.numericText())
-                }
-            }
-            if provider?.loggedIn == true {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Palette.secondaryFill)
-                        Capsule()
-                            .fill(percent >= 100 || provider?.quotaExhausted == true ? Palette.destructive : Palette.fg)
-                            .frame(width: geometry.size.width * percent / 100)
-                    }
-                }
-                .frame(height: 6)
-                .accessibilityElement()
-                .accessibilityLabel("\(name) usage")
-                .accessibilityValue(Text(verbatim: "\(Int(percent))%"))
-                Text(resetText)
-                    .romeFont(13)
-                    .foregroundStyle(Palette.sub)
-            } else {
-                Text(provider == nil ? "Loading…" : "Not signed in")
-                    .romeFont(13)
-                    .foregroundStyle(Palette.sub)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 15)
-        .overlay(alignment: .bottom) {
-            if !last { Rectangle().fill(Palette.hair).frame(height: 0.5) }
-        }
-        .animation(.spring(response: 0.5, dampingFraction: 0.85), value: percent)
-    }
-
-    private var resetText: String {
-        guard let date = RomeDate.parse(window?.resetsAt) else {
-            return window == nil ? String(localized: "No usage data yet") : String(localized: "Usage resets automatically")
-        }
-        let seconds = date.timeIntervalSinceNow
-        if seconds <= 0 { return String(localized: "Resets soon") }
-        if seconds < 3600 { return String(localized: "Resets in \(max(1, Int(seconds / 60))) minutes") }
-        if seconds < 86_400 { return String(localized: "Resets in \(Int(seconds / 3600)) hours") }
-        return String(localized: "Resets in \(Int(seconds / 86_400)) days")
     }
 }
 

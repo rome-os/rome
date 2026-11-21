@@ -1248,6 +1248,23 @@ final class TranscriptStore {
         return try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
     }
 
+    /// Cards whose answer is on its way, by tool-use id: each is sent once.
+    private(set) var answeringCards: Set<String> = []
+
+    /// Answers a card the turn waits on, such as Chat's connect-AI card once
+    /// an account is logged in; the chat is read again so the answer shows.
+    func answerCard(toolUseId: String, sessionId: String, output: JSONValue) async {
+        guard !answeringCards.contains(toolUseId) else { return }
+        answeringCards.insert(toolUseId)
+        defer { resync() }
+        do {
+            try await backend.answerInteraction(sessionId: sessionId, toolUseId: toolUseId, output: output)
+        } catch {
+            // Sent again the next time the card shows.
+            answeringCards.remove(toolUseId)
+        }
+    }
+
     /// A widget's read of its own app, with this chat's backend.
     func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply {
         try await backend.appCall(appId: appId, method: method, path: path, body: body)

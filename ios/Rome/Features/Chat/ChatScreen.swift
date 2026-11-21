@@ -362,7 +362,7 @@ struct ConciergeRow: View, Equatable {
             }
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
-        case .approval, .question, .webOnly, .routineDraft, .tools, .connect, .widgetUI:
+        case .approval, .question, .webOnly, .aiTools, .routineDraft, .tools, .connect, .widgetUI:
             InteractionRow(row: row, store: store)
         case .error(_, let error):
             ErrorLine(error: error)

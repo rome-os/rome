@@ -28,6 +28,8 @@ enum DebugCommand: Equatable {
     case app(InstalledApp?)
     /// A card's connect sheet for a capability, in a stand-in frame; nil closes it.
     case connectSheet(String?)
+    /// An AI account's login sheet at its code step, in a stand-in frame; nil closes it.
+    case aiLoginSheet(AIAccount?)
 }
 
 /// Health sync's demo: a few syncs of today and yesterday.
@@ -135,7 +137,9 @@ enum SnapshotRunner {
 
         // Settings shows "Not set"; the Chat offer waits for its own screen.
         model.push.debugSet(permission: .notSet, dismissedAt: .now)
-        let styles: [(String, UIUserInterfaceStyle)] = [("light", .light), ("dark", .dark)]
+        // `ROME_SNAPSHOT_STYLE=light` (or `dark`) captures one style only.
+        let style = ProcessInfo.processInfo.environment["ROME_SNAPSHOT_STYLE"]
+        let styles: [(String, UIUserInterfaceStyle)] = [("light", .light), ("dark", .dark)].filter { style == nil || $0.0 == style }
         for (styleName, style) in styles {
             window?.overrideUserInterfaceStyle = style
             await capture("01-login", style: styleName, in: directory) { model.debugSetPhase(.signedOut) }
@@ -293,6 +297,34 @@ enum SnapshotRunner {
                 Task { await model.workspace?.openMainChatLinks() }
             }
             model.workspace?.showsMainChatLinks = false
+            try? await Task.sleep(for: .seconds(0.6))
+            // The AI model row in each state, then its page and the two logins.
+            for (name, preview) in [("11c-settings-ai-ready", DemoBackend.AIModelPreview.ready), ("11d-settings-ai-paused", .paused), ("11e-settings-ai-login", .needsLogin), ("11f-settings-ai-not-set-up", .notSetUp), ("11g-settings-ai-credits", .credits)] {
+                await capture(name, style: styleName, in: directory, wait: 1.2) {
+                    DemoBackend.aiModelPreview = preview
+                    model.debugCommand = .settings(nil)
+                    Task {
+                        try? await Task.sleep(for: .seconds(0.4))
+                        model.debugCommand = .settings([])
+                    }
+                }
+            }
+            DemoBackend.aiModelPreview = .ready
+            await capture("11h-ai-model", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.aiModel(login: nil)]) }
+            await capture("11i-ai-model-login", style: styleName, in: directory, wait: 1.5) {
+                DemoBackend.aiModelPreview = .needsLogin
+                model.debugCommand = .settings(nil)
+                Task {
+                    try? await Task.sleep(for: .seconds(0.4))
+                    model.debugCommand = .settings([.aiModel(login: nil)])
+                }
+            }
+            DemoBackend.aiModelPreview = .ready
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("11j-login-chatgpt", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .aiLoginSheet(.chatgpt) }
+            await capture("11k-login-claude", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .aiLoginSheet(.claude) }
+            model.debugCommand = .aiLoginSheet(nil)
             try? await Task.sleep(for: .seconds(0.6))
             await capture("27-settings-notifications-on", style: styleName, in: directory, wait: 1.2) {
                 model.push.debugSet(permission: .on, dismissedAt: .now)
@@ -473,6 +505,10 @@ enum SnapshotRunner {
             await capture("57-agent-itinerary", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-itinerary")) }
             // Task links in each status: running, needs you, done, failed, stopped, no response, later.
             await capture("65-task-links", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-task-links")) }
+            // Chat's connect-AI card with no account logged in: Connect opens the AI model page.
+            DemoBackend.aiModelPreview = .notSetUp
+            await capture("66-ai-tools-card", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-ai")) }
+            DemoBackend.aiModelPreview = .ready
             // Share-location cards: shared, not shared, and one still open.
             await capture("57-location-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-location")) }
             // The drawer over a topic chat: its row selected.

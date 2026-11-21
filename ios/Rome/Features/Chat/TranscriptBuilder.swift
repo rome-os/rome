@@ -60,6 +60,9 @@ enum TranscriptRow: Identifiable, Hashable {
     case question(id: String, part: MessagePart.QuestionPart, sessionId: String, answered: JSONValue?)
     /// `done`: an interactive card the guardian already answered.
     case webOnly(id: String, kind: MessagePart.WebOnlyKind, done: Bool = false)
+    /// Chat's card to connect Claude or ChatGPT (`ai-tools-card`), which the
+    /// turn waits on. `done`: answered already.
+    case aiTools(id: String, toolUseId: String, sessionId: String, done: Bool)
     case routineDraft(id: String, part: MessagePart.RoutineDraftPart)
     case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
     /// `answered`: what answered the card, when the agent waits on it and it was.
@@ -94,7 +97,7 @@ enum TranscriptRow: Identifiable, Hashable {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _, _, _), .taskAsk(let id, _, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
-             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _, _, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
+             .webOnly(let id, _, _), .aiTools(let id, _, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _, _, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
              .sourceLabel(let id, _), .sessionRenewal(let id, _, _):
             return id
         case .unreadDivider:
@@ -289,6 +292,8 @@ enum TranscriptBuilder {
                     var question = question
                     question.ui?.widgetId = message.id
                     rows.append(.question(id: id, part: question, sessionId: message.sessionId, answered: answers[message.id]))
+                case .webOnly(.aiTools, let toolUseId?) where !message.isUser:
+                    rows.append(.aiTools(id: id, toolUseId: toolUseId, sessionId: message.sessionId, done: answers[message.id] != nil))
                 case .webOnly(let kind, let toolUseId):
                     rows.append(.webOnly(id: id, kind: kind, done: toolUseId != nil && answers[message.id] != nil))
                 case .routineDraft(let draft):

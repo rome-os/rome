@@ -195,6 +195,8 @@ final class Workspace {
     let transcripts: TranscriptCache
     /// Voice input in this instance's message fields.
     let voiceInput: VoiceInputService
+    /// The guardian's AI accounts and default model.
+    let aiModel: AIModelStore
 
     init(backend: RomeBackend, instanceName: String, host: String, accountLabel: String, drafts: DraftStore? = nil) {
         self.backend = backend
@@ -204,6 +206,7 @@ final class Workspace {
         // Kept on this phone only while the connection's account is signed in.
         self.drafts = drafts ?? DraftStore(instance: host, account: backend.account)
         voiceInput = VoiceInputService(backend: backend, instance: self.drafts.instance)
+        aiModel = AIModelStore(backend: backend)
         // Beside the drafts: a test's drafts in a temporary folder bring their transcripts along.
         transcripts = TranscriptCache(root: self.drafts.root.deletingLastPathComponent().appending(path: "Transcripts", directoryHint: .isDirectory), instance: self.drafts.instance, account: backend.account)
         taskChats = TaskChatsStore(backend: backend)
@@ -1559,6 +1562,11 @@ final class AppModel {
     /// Settings, at Apple Health's Sync history.
     func openHealthHistory() {
         settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.connections, .connection(HealthCapability.id), .syncHistory(HealthSettings.sourceId)])
+    }
+
+    /// Settings, at the AI model page; with `login`, that account's login sheet over it.
+    func openAIModel(login: AIAccount? = nil) {
+        settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.aiModel(login: login)])
     }
 
     /// The pages to open, once: the shell takes them when it shows.

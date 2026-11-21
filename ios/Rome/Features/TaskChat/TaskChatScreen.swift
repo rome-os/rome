@@ -230,7 +230,7 @@ private struct TaskChatRow: View, Equatable {
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, menu: menu)
-        case .tools, .approval, .question, .webOnly, .routineDraft, .connect, .widgetUI:
+        case .tools, .approval, .question, .webOnly, .aiTools, .routineDraft, .connect, .widgetUI:
             InteractionRow(row: row, store: store)
         case .error(_, let error):
             ErrorLine(error: error)

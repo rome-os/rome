@@ -617,13 +617,76 @@ final class DemoBackend: RomeBackend {
         ]
     }
 
+    /// The state the demo's AI model shows, for Settings in each state.
+    enum AIModelPreview { case ready, paused, needsLogin, notSetUp, credits }
+    static var aiModelPreview: AIModelPreview = .ready
+    /// Accounts the demo logged out of, and when a device login started.
+    private var loggedOut: Set<AIAccount> = []
+    private var deviceLoginStarted: Date?
+
     func aiTools() async throws -> AIToolsStatus {
         let now = Date.now
+        var claude = AIToolsStatus.Provider(loggedIn: true, usage: .init(fiveHour: .init(usedPercent: 62, resetsAt: RomeDate.string(now.addingTimeInterval(3 * 3600))), sevenDay: nil), quotaExhausted: false)
+        var codex = AIToolsStatus.Provider(loggedIn: true, usage: .init(fiveHour: .init(usedPercent: 12, resetsAt: nil), sevenDay: .init(usedPercent: 8, resetsAt: RomeDate.string(now.addingTimeInterval(5 * 86_400)))), quotaExhausted: false)
+        var provider: DefaultModelProvider? = .openai
+        switch Self.aiModelPreview {
+        case .ready: break
+        case .paused:
+            codex.quotaExhausted = true
+            // 14:20 today, or tomorrow once that has passed.
+            var until = Calendar.current.date(bySettingHour: 14, minute: 20, second: 0, of: now) ?? now
+            if until <= now { until = until.addingTimeInterval(86_400) }
+            codex.quotaExhaustedUntil = RomeDate.string(until)
+        case .needsLogin:
+            codex.loggedIn = false
+            codex.needsReauth = true
+            codex.usage = nil
+        case .notSetUp, .credits:
+            claude = .init(loggedIn: false, quotaExhausted: false)
+            codex = .init(loggedIn: false, quotaExhausted: false)
+            provider = Self.aiModelPreview == .credits ? .romeCredits : nil
+        }
+        if loggedOut.contains(.claude) { claude = .init(loggedIn: false, quotaExhausted: false) }
+        if loggedOut.contains(.chatgpt) {
+            // A device login started here comes in after a few seconds.
+            if let started = deviceLoginStarted, now.timeIntervalSince(started) > 5 {
+                loggedOut.remove(.chatgpt)
+                deviceLoginStarted = nil
+            } else {
+                codex = .init(loggedIn: false, quotaExhausted: false)
+            }
+        }
+        if provider == .openai, codex.loggedIn == false, claude.loggedIn == true, Self.aiModelPreview == .ready { provider = .anthropic }
+        let code = deviceLoginStarted.map { _ in AIToolsStatus.DeviceLogin(running: true, userCode: "K7QF-2M9D", verificationUrl: "https://auth.openai.com/codex/device") }
         return AIToolsStatus(
-            claude: .init(loggedIn: true, usage: .init(fiveHour: .init(usedPercent: 62, resetsAt: RomeDate.string(now.addingTimeInterval(3 * 3600))), sevenDay: nil)),
-            codex: .init(loggedIn: true, usage: .init(fiveHour: .init(usedPercent: 12, resetsAt: nil), sevenDay: .init(usedPercent: 30, resetsAt: RomeDate.string(now.addingTimeInterval(5 * 86_400)))))
+            claude: claude,
+            codex: codex,
+            codexDeviceLogin: code,
+            defaultProvider: .init(provider: provider, signedIn: .init(anthropic: claude.loggedIn, openai: codex.loggedIn), romeCreditsUsable: Self.aiModelPreview == .credits)
         )
     }
+
+    func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus { try await aiTools() }
+
+    func startChatGPTDeviceLogin() async throws -> DeviceLoginCode {
+        try await pause(0.6)
+        loggedOut.insert(.chatgpt)
+        deviceLoginStarted = .now
+        return DeviceLoginCode(userCode: "K7QF-2M9D", verificationUrl: "https://auth.openai.com/codex/device")
+    }
+
+    func cancelChatGPTDeviceLogin() async { deviceLoginStarted = nil }
+
+    func logOut(_ account: AIAccount) async throws {
+        try await pause(0.5)
+        loggedOut.insert(account)
+    }
+
+    func romeCredits() async throws -> RomeCreditsResponse.Credits? {
+        .init(availableMicros: "2000000", balanceMicros: "2000000", grantedMicros: "5000000", enabled: true)
+    }
+
+    func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws {}
 
     func setConciergeEnabled(_ enabled: Bool) async throws {}
 
@@ -1084,10 +1147,11 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-cards", name: "周末安排", main: false, unread: 0),
             ConciergeChat(id: "topic-itinerary", name: "东京一日", main: false, unread: 0),
             ConciergeChat(id: "topic-task-links", name: "任务进度", main: false, unread: 0),
+            ConciergeChat(id: "topic-ai", name: "连接 AI", main: false, unread: 0),
         ]
         // Latest first in the drawer: the trip, then the errors, and so on.
         // The cafés come eighth, past the first five, for the drawer over it.
-        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900]
+        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900, "topic-ai": 1000]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
@@ -1359,6 +1423,12 @@ final class DemoBackend: RomeBackend {
             TaskLinkInfo(id: "chat-blur", name: "iOS 退出 task chat 后头部模糊变实心", status: "active"),
             TaskLinkInfo(id: "chat-reload", name: "iOS 长气泡展开和折叠时图片重新加载，先在 Mac mini 上复现", status: "needs_you"),
         ].map { ($0.id, $0) })
+        // Chat asks to connect an AI account; the card waits on it.
+        messages["topic-ai"] = [
+            user("ai1", "帮我整理一下这周的日程。", at: at(9, 40), session: "topic-ai"),
+            agent("先连接一个 AI 账号，我就能开始。", at: at(9, 41), session: "topic-ai"),
+            parts([.object(["type": .string("pending_interaction"), "toolUseId": .string("ai-connect"), "appId": .string("rome"), "render": .object(["componentId": .string("ai-tools-card"), "builtin": .bool(true)])])], at: at(9, 41), session: "topic-ai"),
+        ]
         messages["topic-task-links"] = [
             user("tl1", "我的任务都怎么样了？", at: at(9, 30), session: "topic-task-links"),
             agent("[官网首页双语文案](#rome-task=chat-site) 还在逐段翻译，好了告诉你。其余的：\n\n- [价格追踪：发提醒邮件](#rome-task=chat-price) 等你批准\n- [修复登录页样式](#rome-task=chat-login) 改好了\n- [导出季度报表](#rome-task=chat-export) 没导出来，表格权限不够\n- [抓取供应商报价](#rome-task=chat-quotes) 你停掉了\n- [竞品定价调研](#rome-task=chat-research) 没等到你的回答\n- [每周一整理周报](#rome-task=chat-weekly) 下周一开始", at: at(9, 31), session: "topic-task-links"),
