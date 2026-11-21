@@ -133,6 +133,7 @@ export const CHANNEL_META: Record<string, ChannelMeta> = {
   email: { labelKey: "channels.email", Glyph: EmailGlyph },
   feishu: { labelKey: "channels.feishu" },
   slack_bot: { labelKey: "channels.slack" },
+  slack_app: { labelKey: "channels.slack" },
   agents: { labelKey: "channels.agents", Glyph: AgentsGlyph },
 };
 

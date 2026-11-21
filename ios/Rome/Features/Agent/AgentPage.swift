@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// The Agent page's tabs; it opens on Tasks.
-enum AgentTab: Hashable { case tasks, routines, outputs }
+enum AgentTab: Hashable { case tasks, outputs }
 
 /// The Agent page as opened from one chat's header: which chat's tasks and
 /// outputs it lists, and the avatar it grows out of.
@@ -19,7 +19,7 @@ struct AgentRoute: Identifiable, Equatable {
 }
 
 /// Opened from the mascot in a chat's header: the Agent, big, with its name;
-/// then what it is doing in this chat (Tasks), what runs on its own (Routines) and the files it made (Outputs).
+/// then what runs for this chat (Tasks) and the files it made (Outputs).
 struct AgentPage: View {
     let workspace: Workspace
     let route: AgentRoute
@@ -48,7 +48,6 @@ struct AgentPage: View {
             header
             Picker(selection: $tab) {
                 Text("Tasks").tag(AgentTab.tasks)
-                Text("Routines").tag(AgentTab.routines)
                 Text("Outputs").tag(AgentTab.outputs)
             } label: {
                 EmptyView()
@@ -62,9 +61,7 @@ struct AgentPage: View {
             case .outputs:
                 AgentOutputsView(store: outputs, backend: workspace.backend, onOpenChat: onOpenTask)
             case .tasks:
-                TaskListView(store: taskList, mode: .tasks, onOpenChat: onOpenTask)
-            case .routines:
-                TaskListView(store: taskList, mode: .routines, onOpenChat: onOpenTask)
+                TaskListView(store: taskList, onOpenChat: onOpenTask)
             }
         }
         // The list as it was last read shows at once, and is read again.

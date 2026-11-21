@@ -18,9 +18,11 @@ import { ChatAddresses } from "../connections/chat-addresses.js";
 import { ChatSettingsRepository } from "./repository.js";
 import { ChatSettingsService } from "./service.js";
 import { type KindChatRules, WAKES_ON_EVERY_MESSAGE } from "./rules.js";
-import { DISCORD_CHAT_RULES } from "../connections/integrations/discord.js";
-import { WECHAT_CHAT_RULES } from "../connections/integrations/wechat.js";
-import { FEISHU_CHAT_RULES } from "../connections/kinds/feishu/descriptor.js";
+import {
+  DISCORD_CHAT_RULES,
+  FEISHU_CHAT_RULES,
+  WECHAT_CHAT_RULES,
+} from "@rome/api-types/chat-rules";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 /** The rules each kind declares, as its descriptor does. */
@@ -87,7 +89,7 @@ function channelsOver(registry: ConnectionRegistry): () => Channels {
       if (!built.has(name))
         built.set(name, connectionPorts({ registry, channelOf: kindChannelOf }, name));
       const ports = built.get(name);
-      return ports ? [{ name, accounts: null, messages: null, ...ports }] : [];
+      return ports ? [{ name, accounts: null, ...ports }] : [];
     });
 }
 
@@ -623,6 +625,12 @@ describe("ChatSettingsService", () => {
         (item) => item.snapshot.conversation.ref.chatId === "parent",
       )?.source,
     ).toBe("configured");
+    // Asked for changed chats, a connection lists only those a value was set on.
+    expect(
+      (await service.list({ connectionId: discord.id, changed: true })).items.map(
+        (item) => item.snapshot.conversation.ref.chatId,
+      ),
+    ).toEqual(["parent"]);
 
     await registry.stopAll();
     expect(discord.isUnlocked("chat")).toBe(false);
@@ -637,6 +645,26 @@ describe("ChatSettingsService", () => {
     expect((await service.list({ connectionId: discord.id })).items[0]?.availability).toBe(
       "offline",
     );
+  });
+
+  it("lists as changed only a chat that still holds a value", async () => {
+    const { service, discord, parent } = await setup();
+    const changed = async () =>
+      (await service.list({ connectionId: discord.id, changed: true })).items.map(
+        (item) => item.snapshot.conversation.ref.chatId,
+      );
+
+    await service.update({
+      ref: parent,
+      set: { enabled: false },
+      clear: [],
+      actor: { kind: "guardian" },
+    });
+    expect(await changed()).toEqual(["parent"]);
+
+    // Clearing the last value leaves the row's settings empty, not gone.
+    await service.update({ ref: parent, set: {}, clear: ["enabled"], actor: { kind: "guardian" } });
+    expect(await changed()).toEqual([]);
   });
 
   it("hides persisted settings after their connection is removed", async () => {

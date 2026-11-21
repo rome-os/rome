@@ -1825,6 +1825,11 @@ export interface ChannelMessage {
    *  Absent where the connection does not tell. */
   mentionsOthers?: boolean;
   raw?: unknown;
+  /** The platform thread opened from this message, by the platform's own id
+   *  for it, which a read takes as `chatId` to read the thread. Set by an
+   *  account read live from its platform, such as Discord, where the message
+   *  opened a thread or says that one was opened. */
+  openedThread?: ChatId;
   /** Where this message sits in a channel read, as an opaque token. Set on
    *  what {@link ChannelsService.query} answers: pass it as
    *  {@link ChannelMessageQuery.after} to read the messages older than it. */
@@ -1837,18 +1842,31 @@ export interface ChannelMessage {
 
 /** What {@link ChannelsService.query} asks for. Every field narrows it, and
  *  none is required: a query naming nothing asks for the channel's newest
- *  messages. A channel read live through its Connection reaches back a bounded
- *  default (the last day) when no `since` is named. */
+ *  messages, as far back as `limit` reaches. */
 export interface ChannelMessageQuery {
   /** One chat, by the platform's own id for it. Absent for every chat the
    *  channel can read. */
   chatId?: ChatId;
   /** Only messages said at or after this instant. */
   since?: Date;
+  /** Only messages said at or before this instant. Read only from an
+   *  account read live from its platform, such as Discord; any other refuses
+   *  it. */
+  until?: Date;
   /** Only messages older than the one whose {@link ChannelMessage.cursor}
    *  this is: the next page back. Paging this way neither repeats nor skips a
    *  message, also among several said in one second. Needs `chatId`. */
   after?: string;
+  /** Only messages said before the one with this {@link ChannelMessage.messageId}
+   *  in the chat: the page right behind it. Needs `chatId`, and only an account
+   *  read live from its platform, such as Discord, takes it. */
+  olderThan?: string;
+  /** Only messages said after the one with this {@link ChannelMessage.messageId}
+   *  in the chat. The page is the `limit` messages right after it, still newest
+   *  first, so the first message of the page is where the next page forward
+   *  starts. Needs `chatId`, and only an account read live from its platform,
+   *  such as Discord, takes it. Not with `olderThan` or `after`. */
+  newerThan?: string;
   /** At most this many, newest first. Defaults to 100, capped at 1,000. */
   limit?: number;
 }
@@ -1901,9 +1919,10 @@ export interface ChannelsService {
    * What was said on one of Rome's accounts: its newest messages, newest
    * first. A channel's name in place of the account reads that channel.
    *
-   * An account read live through its Connection shares one read for 30
-   * seconds among the queries over the same window, so a message just sent
-   * through `send` may not appear until that read expires.
+   * A Discord account is read from Discord itself, one chat or thread at a
+   * time, so it answers messages Rome never heard. It needs `chatId`, and
+   * rejects with an error that says so when the account may not read that
+   * chat.
    */
   query(account: Account | string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
 }
@@ -2278,6 +2297,12 @@ export interface ActionRunContext {
   parentExecutionId?: string;
   parentActionName?: string;
   actionName?: string;
+  /** What a root run does when every action worker is busy. `"fail"` (the
+   *  default) fails at once. `"queue"` waits in turn for a worker, and fails
+   *  only if none frees up within the host's deadline. Queue only from a
+   *  caller that holds no action worker, such as a hook. Nested runs always
+   *  fail at once. */
+  whenWorkersBusy?: "fail" | "queue";
 }
 
 export interface CurrentActionContext {

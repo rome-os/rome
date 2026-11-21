@@ -70,11 +70,12 @@ import type { SystemUpgradeService } from "../instance/system-upgrade/service.js
 import type {
   AppRuntimeRepositories,
   ChatSettingsControl,
+  ChatSettingsPage,
   ChannelsService,
+  ListChatSettingsInput,
 } from "@rome-os/app-runtime";
 import type { FavorService } from "../favors/index.js";
 import type { ConnectionRegistry } from "../connections/index.js";
-import type { AccountListening } from "../chats/connected-accounts/account-agents.js";
 import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
@@ -105,7 +106,7 @@ export interface ApiDeps {
   concierge?: ConciergeService;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
-  chatSettings: ChatSettingsControl;
+  chatSettings: DashboardChatSettings;
   actionEngine: ActionEngine;
   actionLoader: Pick<ActionLoader, "get" | "getAllRecords" | "getRegistryLoadFailures">;
   db: DrizzleDb;
@@ -181,9 +182,6 @@ export interface ApiDeps {
    *  left out of the list is left out of Rome. */
   features?: readonly Feature[];
   agentLoader: AgentCatalog & Pick<AgentLoader, "getRegistryLoadFailures">;
-  /** Told of each write to an account's agent, so the account's inbound port
-   *  starts or stops listening. */
-  accountListening: Pick<AccountListening, "changed">;
   /** Live skill catalog — read by `GET /api/skills` for the Skills app and
    * the chat composer's slash-command autocomplete. `getRegistryLoadFailures`
    * surfaces app-owned skills that were declared but failed to load, so the
@@ -301,4 +299,10 @@ export interface ApiHandle {
 export interface Feature {
   routes: Hono;
   actions: readonly Action[];
+}
+
+/** The chat settings as the dashboard reads them: an app's, and a list that
+ *  can keep only the chats a guardian set a value on. */
+export interface DashboardChatSettings extends Omit<ChatSettingsControl, "list"> {
+  list(input: ListChatSettingsInput & { changed?: boolean }): Promise<ChatSettingsPage>;
 }

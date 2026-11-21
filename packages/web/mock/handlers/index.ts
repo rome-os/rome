@@ -4,6 +4,7 @@ import { questionCardRender } from "../fixtures/question-card";
 import type { Question } from "@rome/api-types/question-card";
 import type {
   ChatId,
+  ChatSettingField,
   ChatSettings,
   ChatSettingsListItem,
   PartialChatSettings,
@@ -63,11 +64,8 @@ import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
-import type { ConnectedAccountEntry } from "@rome/api-types/connected-accounts";
-import { connections } from "./connections-store";
+import { CHAT_RULE_DEFAULTS, chatRuleDefaultsOf, connections } from "./connections-store";
 
-/** Connected accounts left by a disconnect in this session, each with its
- *  agent. Core keeps them, so Envoys lists them as disconnected. */
 /** The questions of the mock `ask_question` card: one per layout the card takes. */
 const WAITLIST_QUESTIONS: Question[] = [
   {
@@ -96,7 +94,6 @@ const WAITLIST_QUESTIONS: Question[] = [
   },
 ];
 
-const disconnectedAccounts: ConnectedAccountEntry[] = [];
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
@@ -630,6 +627,28 @@ const transcripts: Record<string, ChatMessage[]> = {
       },
     ],
   ),
+  // The main chat's other task chats, so each opens from its task list row.
+  "mock-task-chat-table": turn(
+    "mock-task-chat-table",
+    1,
+    "2026-08-05T08:50:00.000Z",
+    "Book a table for four on Friday evening.",
+    [text("Osteria 23 has a back room for four at 19:00. It needs your approval to hold it.")],
+  ),
+  "mock-task-chat-pr-review": turn(
+    "mock-task-chat-pr-review",
+    1,
+    "2026-08-05T09:05:00.000Z",
+    "Review the open pull requests.",
+    [text("Three are open. I am reading the second one now.")],
+  ),
+  "mock-task-chat-visa": turn(
+    "mock-task-chat-visa",
+    1,
+    "2026-08-05T09:10:00.000Z",
+    "Check the visa appointment.",
+    [text("No earlier slot yet. I will look again in 20 minutes.")],
+  ),
   ...Object.fromEntries(
     curatedChats.map((chat) => [
       chat.id,
@@ -1100,6 +1119,12 @@ const chatSessions: ChatSession[] = [
     awaitingGuardian: true,
     triggerKind: "concierge",
   },
+  { ...session("mock-task-chat-table", "Book a table for Friday"), triggerKind: "concierge" },
+  {
+    ...session("mock-task-chat-pr-review", "Review the open pull requests"),
+    triggerKind: "concierge",
+  },
+  { ...session("mock-task-chat-visa", "Check the visa appointment"), triggerKind: "concierge" },
   // A chat that works in a folder on another computer groups under that folder.
   {
     ...session("mock-chat-device-folder", "Fix the flaky e2e test"),
@@ -1353,13 +1378,50 @@ const composioStatus: { composio: ComposioCliStatus } = {
   },
 };
 
-const conversationDefaults: ChatSettings = {
-  enabled: true,
-  activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
-  replies: { placement: "thread" },
-  routing: { agentName: null },
-  session: { reset: { mode: "idle", idleMinutes: 10_080 } },
-};
+const conversationDefaults: ChatSettings = CHAT_RULE_DEFAULTS;
+
+const DISCORD_FIELDS: ChatSettingField[] = [
+  "enabled",
+  "activation.mode",
+  "activation.botMessages",
+  "activation.whenOthersMentioned",
+  "replies.placement",
+  "routing.agentName",
+  "session.reset",
+];
+
+/** A channel on the mock Discord bot, with any values a guardian set on it. */
+function discordChannel(
+  chatId: string,
+  displayName: string,
+  containerName: string,
+  overrides: PartialChatSettings = {},
+): ChatSettingsListItem {
+  const configured = Object.keys(overrides).length > 0;
+  return {
+    availability: "online",
+    source: configured ? "configured" : "live",
+    snapshot: {
+      conversation: {
+        ref: { connectionId: "discord-1", chatId: chatId as ChatId },
+        connectionKind: "discord",
+        service: "discord",
+        kind: "channel",
+        displayName,
+        containerName,
+      },
+      supportedFields: DISCORD_FIELDS,
+      effective: mergeSettings(structuredClone(conversationDefaults), overrides),
+      overrides: structuredClone(overrides),
+      ...(configured
+        ? {
+            updatedAt: "2026-11-18T09:30:00.000Z",
+            updatedBy: { kind: "guardian" as const, displayName: "Mock Guardian" },
+          }
+        : {}),
+    },
+  };
+}
 
 const conversationSettings: { items: ChatSettingsListItem[] } = {
   items: [
@@ -1390,6 +1452,18 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
         updatedBy: { kind: "guardian", displayName: "Mock Guardian" },
       },
     },
+    discordChannel("general", "general", "Rome", { activation: { mode: "all" } }),
+    discordChannel("launch", "launch-planning", "Rome", { routing: { agentName: "pm-assistant" } }),
+    discordChannel("random", "random", "Rome", { enabled: false }),
+    discordChannel("announcements", "announcements", "Rome"),
+    discordChannel("design", "design", "Rome"),
+    discordChannel("standup", "standup", "Rome"),
+    discordChannel("support", "customer-support", "Rome Community", {
+      replies: { placement: "inline" },
+    }),
+    discordChannel("welcome", "welcome", "Rome Community"),
+    discordChannel("feedback", "feedback", "Rome Community"),
+    discordChannel("showcase", "showcase", "Rome Community"),
     {
       availability: "offline",
       source: "known",
@@ -1402,7 +1476,8 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
           displayName: "Ray",
           containerName: undefined,
         },
-        supportedFields: ["enabled", "session.reset"],
+        // A direct message offers only the session reset.
+        supportedFields: ["session.reset"],
         effective: {
           ...conversationDefaults,
           session: { reset: { mode: "daily", atHour: 4 } },
@@ -1766,68 +1841,6 @@ export const handlers = [
     HttpResponse.json({ agents: mockAgentNames.map((name) => ({ name })) }),
   ),
   http.get("/api/connections", () => HttpResponse.json(connections)),
-  // Every connected account, the ones a connection reaches and the ones left
-  // disconnected with their agent, as core lists them.
-  http.get("/api/connected-accounts", () =>
-    HttpResponse.json({
-      accounts: [
-        ...connections.connections.flatMap((connection) =>
-          connection.id !== null && connection.account && connection.agent !== undefined
-            ? [
-                {
-                  account: connection.account,
-                  name: Object.values(connection.display)[0]?.displayName ?? null,
-                  agent: connection.agent,
-                  connection: connection.id,
-                },
-              ]
-            : [],
-        ),
-        ...disconnectedAccounts,
-      ],
-    }),
-  ),
-  // A disconnected account can be unlinked by its account. Linking it waits
-  // until it is connected again, which mock mode cannot do.
-  http.put("/api/connected-accounts/:platform/:accountId/agent", async ({ params, request }) => {
-    const body = (await request.json()) as { agent: string | null };
-    const entry = disconnectedAccounts.find(
-      (candidate) =>
-        candidate.account.platform === String(params.platform) &&
-        candidate.account.id === String(params.accountId),
-    );
-    if (!entry) return HttpResponse.json({ error: "Unknown account." }, { status: 404 });
-    if (body.agent !== null) {
-      return HttpResponse.json(
-        { error: "This account is not connected. Connect it again to link an agent." },
-        { status: 409 },
-      );
-    }
-    entry.agent = null;
-    return HttpResponse.json({ account: entry });
-  }),
-  // Link an agent to a connected account, named by its connection's id. Only
-  // this account changes: an agent may be linked to any number of accounts,
-  // several on one platform included.
-  http.put("/api/accounts/:id/agent", async ({ params, request }) => {
-    const id = String(params.id);
-    const body = (await request.json()) as { agent: string | null };
-    // Core stores main by its canonical id and accepts the short name.
-    const agent = body.agent === "main" ? MAIN_AGENT_ID : body.agent;
-    const target = connections.connections.find((candidate) => candidate.id === id);
-    if (!target) return HttpResponse.json({ error: "Unknown account." }, { status: 404 });
-    if (agent !== null && !mockAgentNames.includes(agent)) {
-      return HttpResponse.json({ error: `Agent ${agent} is not loaded.` }, { status: 400 });
-    }
-    if (agent !== null && !target.link) {
-      return HttpResponse.json(
-        { error: `${target.connectionKind} accounts do not take an agent.` },
-        { status: 400 },
-      );
-    }
-    target.agent = agent;
-    return HttpResponse.json({ account: { id, agent, link: target.link ?? null } });
-  }),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
   // above without this would make every one of those buttons fail locally.
   // Teardown is real here, the way the route runs it: the grant relocks and
@@ -1846,9 +1859,6 @@ export const handlers = [
     if (!(grant in connection.grants)) {
       return HttpResponse.json({ error: "Unknown grant." }, { status: 404 });
     }
-    // The name the connection showed, which its connected account keeps.
-    const shown = connection.display[grant];
-    const name = shown?.displayName || shown?.handle || null;
     connection.grants[grant] = "unauthorized";
     connection.state = null;
     connection.display[grant] = null;
@@ -1866,18 +1876,9 @@ export const handlers = [
       };
     }
     // Core ends the connection of a service that names its accounts, which
-    // the services that take an agent are. The connected account stays with
-    // its agent, listed as disconnected.
+    // the services that take an agent are.
     const unconnectedAccount = Boolean(connection.link);
     if (!unconnectedAccount) return HttpResponse.json({ ok: true, connection });
-    if (connection.account && connection.agent) {
-      disconnectedAccounts.push({
-        account: connection.account,
-        name,
-        agent: connection.agent,
-        connection: null,
-      });
-    }
     const others = connections.connections.filter(
       (candidate) =>
         candidate !== connection && candidate.connectionKind === connection.connectionKind,
@@ -1894,7 +1895,38 @@ export const handlers = [
     return HttpResponse.json({ ok: true, connection: null });
   }),
   http.get("/api/integrations/composio/status", () => HttpResponse.json(composioStatus)),
-  http.get("/api/chat-settings", () => HttpResponse.json(conversationSettings)),
+  http.get("/api/chat-settings", ({ request }) => {
+    const search = new URL(request.url).searchParams;
+    const connectionId = search.get("connectionId");
+    const query = search.get("query")?.trim().toLocaleLowerCase();
+    const changed = search.get("changed") === "true";
+    return HttpResponse.json({
+      items: conversationSettings.items.filter((item) => {
+        const chat = item.snapshot.conversation;
+        if (connectionId && chat.ref.connectionId !== connectionId) return false;
+        if (changed && Object.keys(item.snapshot.overrides).length === 0) return false;
+        if (!query) return true;
+        return [chat.connectionKind, chat.containerName, chat.displayName]
+          .filter(Boolean)
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query);
+      }),
+    });
+  }),
+  http.post("/api/chat-settings/reset", async ({ request }) => {
+    const body = (await request.json()) as { ref: { connectionId: string; chatId: string } };
+    const found = conversationSettings.items.find(
+      (candidate) =>
+        candidate.snapshot.conversation.ref.connectionId === body.ref.connectionId &&
+        candidate.snapshot.conversation.ref.chatId === body.ref.chatId,
+    );
+    if (!found) return HttpResponse.json({ error: "Unknown conversation" }, { status: 404 });
+    found.source = "live";
+    found.snapshot.overrides = {};
+    found.snapshot.effective = chatRuleDefaultsOf(found.snapshot.conversation.connectionKind);
+    return HttpResponse.json(found.snapshot);
+  }),
   // Auto-save writes through on every edit, so mock mode needs a real write
   // path or the dashboard would toast an error on each change.
   http.patch("/api/chat-settings", async ({ request }) => {
@@ -1922,6 +1954,7 @@ export const handlers = [
       delete found.snapshot.overrides.routing;
       found.snapshot.effective.routing.agentName = null;
     }
+    found.source = "configured";
     found.snapshot.updatedAt = new Date().toISOString();
     found.snapshot.updatedBy = { kind: "guardian", displayName: identity.displayName ?? undefined };
     return HttpResponse.json(found.snapshot);

@@ -56,7 +56,7 @@ export function TurnActions({
     // the row visible while the feedback draft is open (its popover is
     // portaled, so group-focus-within can't see it) and once a rating is
     // recorded.
-    <div className="-ml-[var(--control-action-offset)] mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
+    <div className="-ml-[var(--control-action-offset-sm)] mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
       {copyText ? <CopyMessageButton text={copyText} /> : null}
       {reply ? <ReplyButton source={reply} /> : null}
       {reply ? <ShareMessageButton messageId={reply.messageId} turn={reply} /> : null}

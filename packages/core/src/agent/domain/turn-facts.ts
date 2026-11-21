@@ -41,6 +41,11 @@ export interface TurnFacts {
   isSubagent: boolean;
   /** The actions the agent's definition lets it call. */
   actions: readonly string[];
+  /**
+   * Actions the session's place withholds, by name: they are left out of
+   * what `actions` grants, a `"*"` grant included. Absent, none are.
+   */
+  withheldActions?: readonly string[];
   /** How the session's cards draw. */
   widgets: WidgetDrawing;
   /** The running turn's id, or undefined between turns. */

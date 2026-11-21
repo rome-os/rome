@@ -41,6 +41,29 @@ function renderState(state: SetupState, over: Partial<SetupRenderProps> = {}) {
 }
 
 describe("SetupRenderer standard renderers", () => {
+  it("awaiting-redirect hands the sign-in to the system browser in the desktop app", () => {
+    asDesktopApp();
+    const open = rs.spyOn(window, "open").mockReturnValue(null);
+    renderState({ status: "awaiting-redirect", url: "https://slack.test/oauth/v2/authorize" });
+    const link = screen.getByTestId("setup-redirect").querySelector("a") as HTMLAnchorElement;
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    link.dispatchEvent(event);
+    expect(open).toHaveBeenCalledWith("https://slack.test/oauth/v2/authorize");
+    expect(event.defaultPrevented).toBe(true);
+    open.mockRestore();
+  });
+
+  it("awaiting-redirect navigates the same window in a browser", () => {
+    const open = rs.spyOn(window, "open").mockReturnValue(null);
+    renderState({ status: "awaiting-redirect", url: "https://slack.test/oauth/v2/authorize" });
+    const link = screen.getByTestId("setup-redirect").querySelector("a") as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe("https://slack.test/oauth/v2/authorize");
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    link.dispatchEvent(event);
+    expect(open).not.toHaveBeenCalled();
+    open.mockRestore();
+  });
+
   it("awaiting-input renders the form and submits typed answers", () => {
     const onSubmit = rs.fn();
     renderState(

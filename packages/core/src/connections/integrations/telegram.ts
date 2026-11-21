@@ -22,7 +22,7 @@ import { tokenPaste } from "../schemes.js";
 import type { SetupFn } from "../setup/types.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
 import { addressIsConversationFeature } from "./talk-features.js";
-import { WAKES_ON_EVERY_MESSAGE } from "../../chat-settings/rules.js";
+import { SESSION_RESET_ONLY_CHAT_RULES } from "@rome/api-types/chat-rules";
 
 /**
  * True iff `err` is a Telegram "credential refused" — a grammy `GrammyError`
@@ -216,7 +216,7 @@ export function makeTelegramDescriptor(deps: TelegramDescriptorDeps = {}): Conne
     grant: "bot",
     // Today's behaviour, stated: chats wake on every message the platform
     // delivers, and only the session reset is the guardian's to set.
-    chatRules: { offers: ["session.reset"], fixed: WAKES_ON_EVERY_MESSAGE },
+    chatRules: SESSION_RESET_ONLY_CHAT_RULES,
     auth: botScheme,
     capabilities: {
       talker: {

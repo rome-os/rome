@@ -28,7 +28,7 @@ import { evaluateProviderSessionReset } from "../domain/session-reset.js";
 import { setupChanged, setupFingerprint } from "../domain/session-setup.js";
 import { ROME_TOOL_GROUPS } from "../domain/rome-tools.js";
 import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
-import { catchUpPrompt } from "../domain/catch-up.js";
+import { CATCH_UP_LIMIT, catchUpPrompt } from "../domain/catch-up.js";
 import {
   handoffSections,
   LIGHT_HANDOFF,
@@ -80,7 +80,12 @@ import {
   type SentHeaders,
   withoutRepeatedHeaders,
 } from "../domain/prompt.js";
-import { type AgentPolicy, resolveAgentPolicy } from "../domain/agent-policy.js";
+import {
+  type AgentPolicy,
+  type PlaceSetup,
+  policyInPlace,
+  resolveAgentPolicy,
+} from "../domain/agent-policy.js";
 import { createRomeTools } from "./rome-tools.js";
 import { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "../domain/widget-drawing.js";
 import { type AgentAction, type AgentActions } from "../domain/agent-action.js";
@@ -400,6 +405,12 @@ interface ManagerDeps {
    * nothing is added.
    */
   chatInstructions?: (thread: ThreadContext | undefined) => Promise<string | null>;
+  /**
+   * How the place a session serves changes its agent's setup there, or null
+   * when it changes nothing. Asked once when the session's setup is made.
+   * Absent, every place takes the agent's setup as it is.
+   */
+  placeSetup?: (agentName: string, thread: ThreadContext | undefined) => PlaceSetup | null;
   /** The name of Rome's account behind a connection, as a mention of it shows
    *  in a message, or null when the connection reports none. Absent, the
    *  thread context names no account. */
@@ -1067,8 +1078,19 @@ function sessionSetupOf(
   isSubagent: boolean,
 ): SessionSetupSource {
   const config = agent.definition;
-  const promptAgent = { ...config, name: agent.localName, owner: agent.ownerType };
-  const policy = resolveAgentPolicy({ name: agent.localName, policy: config.policy });
+  // The place can override the agent's policy and instructions and take
+  // actions away, never add them.
+  const place = deps.placeSetup?.(agent.name, init.threadContext) ?? null;
+  const promptAgent = {
+    ...config,
+    name: agent.localName,
+    owner: agent.ownerType,
+    systemPromptPrefix: place?.systemPromptPrefix ?? config.systemPromptPrefix,
+  };
+  const policy = policyInPlace(
+    resolveAgentPolicy({ name: agent.localName, policy: config.policy }),
+    place,
+  );
   // Interactive inline UI (`propose_routine` cards, app components) pauses the
   // agent for a human reply. That only works when (a) the channel's surface can
   // render it, and (b) this session will actually receive the next user turn.
@@ -1080,6 +1102,7 @@ function sessionSetupOf(
   // the session's life.
   const widgets = widgetDrawingFor({ placeDrawsCards: init.drawsCards === true, isSubagent });
   const allowList = config.actions ?? [];
+  const withheldActions = place?.withoutActions ?? [];
   const subagents = subagentsOf(deps.agentLoader, config);
   let externalMcpServers: Record<string, McpServerConfig> | undefined;
   if (config.networkDiscovery) {
@@ -1094,7 +1117,7 @@ function sessionSetupOf(
   // the parent's thread key) get no defer tool — a wakeup is a top-level
   // conversation primitive.
   const deferTool: DeferTool | undefined =
-    init.guardianFacing === true && !isSubagent
+    init.guardianFacing === true && !isSubagent && place?.withoutDefer !== true
       ? {
           schedule: (turn, wakeUp) => deps.defer.schedule(turn, wakeUp),
           finalText: policy.finalText,
@@ -1153,6 +1176,7 @@ function sessionSetupOf(
         sessionId: "",
         isSubagent,
         actions: allowList,
+        withheldActions,
         widgets,
         turnId: () => undefined,
         threadContext: () => opening.threadContext,
@@ -1349,6 +1373,11 @@ async function openSession(
   const { log } = deps;
   const agent = requireAgent(deps.agentLoader, key.agentName);
   const config = agent.definition;
+  // The agent's policy where this session opens: its place may override it.
+  const placedPolicy = policyInPlace(
+    resolveAgentPolicy({ name: agent.localName, policy: config.policy }),
+    deps.placeSetup?.(agent.name, init.threadContext) ?? null,
+  );
   const owningAppId = agent.ownerType === "app" ? agent.ownerId : undefined;
   const sessionToolsFor = sessionToolsOf(
     deps,
@@ -1457,10 +1486,7 @@ async function openSession(
       });
       reason = undefined;
     }
-    const handsOff =
-      !!deps.handoffs &&
-      !config.codeBacked &&
-      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal;
+    const handsOff = !!deps.handoffs && !config.codeBacked && placedPolicy.handoffOnRenewal;
     // A setup change hands off lightly, unless what the successor would read
     // is too large for its first turn.
     const light =
@@ -1588,7 +1614,10 @@ async function openSession(
     sessionId,
     getRomeSessionId: () => impl.currentTurnRomeSessionIdRef,
     getTurnId: () => impl.currentTurnId,
-    getThreadContext: () => impl.currentTurnThreadContextRef,
+    // The session's tools are built while it first opens, before `impl`
+    // exists, and read the place it opens in then.
+    getThreadContext: () =>
+      impl === undefined ? init.threadContext : impl.currentTurnThreadContextRef,
     getSharedContext: () => impl.currentTurnSharedContextRef,
     getChildManager: () => impl.childManager,
     childChannelThreadKey: key.channelThreadKey,
@@ -1616,8 +1645,12 @@ async function openSession(
     // in the same session. An agent whose definition omits its actions, or
     // that the catalog no longer holds, may call none: never the list it
     // had when the session opened.
+    // The session's place may withhold some of them, as its setup does.
     get actions() {
       return deps.agentLoader.find(key.agentName)?.definition.actions ?? [];
+    },
+    get withheldActions() {
+      return deps.placeSetup?.(key.agentName, refs.getThreadContext())?.withoutActions ?? [];
     },
     widgets,
     turnId: refs.getTurnId,
@@ -2058,10 +2091,7 @@ async function openSession(
     // open tasks and its messages, whether or not a handoff was written: all
     // its predecessor held after a setup change, else the recent ones.
     carriesMessages:
-      continuesChat &&
-      !opts.isSubagent &&
-      !config.codeBacked &&
-      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+      continuesChat && !opts.isSubagent && !config.codeBacked && placedPolicy.handoffOnRenewal
         ? session.handoff === LIGHT_HANDOFF
           ? "held"
           : "recent"
@@ -2081,9 +2111,7 @@ async function openSession(
     // Past this size a turn's end renews the session with a handoff
     // (docs/concepts/sessions.md#handoff).
     contextLimitTokens:
-      !opts.isSubagent &&
-      !config.codeBacked &&
-      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+      !opts.isSubagent && !config.codeBacked && placedPolicy.handoffOnRenewal
         ? deps.handoffs?.contextLimitTokens
         : undefined,
     onContextFull: opts.onContextFull ? () => opts.onContextFull?.(impl) : undefined,
@@ -4112,8 +4140,26 @@ class AgentSessionImpl implements AgentSession {
         const read = named.length > 0 ? await promptFacts.read(named) : [];
         const byId = (id: number | null | undefined) =>
           id == null ? null : (read.find((message) => message.id === id) ?? null);
+        // A thread that starts here knows nothing said before the session
+        // opened, and Rome's record may not hold it: its first turn reads the
+        // chat's latest messages from where the chat lives
+        // (docs/domains/participation.md#projection).
+        const first = earliestOf(unseen, byId(sink.currentId));
+        const opening =
+          // Not when the unseen messages fill the catch-up already, so a
+          // platform that rations reads, such as Slack, keeps its read.
+          !this.isSubagent &&
+          this.threadFresh &&
+          !this.threadContextInjected &&
+          unseen.length < CATCH_UP_LIMIT &&
+          promptFacts.earlier
+            ? await promptFacts
+                .earlier(sink.threadContext as ThreadContext, first?.at ?? new Date(), first?.id)
+                // A read that fails opens the session as if there were none.
+                .catch(() => null)
+            : null;
         userPrompt = catchUpPrompt(userPrompt, {
-          unseen,
+          unseen: opening ? [...opening, ...unseen] : unseen,
           quoted: byId(sink.quotedId),
           replyTo: sink.replyTo,
           current: byId(sink.currentId),
@@ -4538,4 +4584,22 @@ function subagentsOf(agents: AgentCatalog, config: AgentDefinition): Subagent[] 
     name,
     description: requireAgent(agents, name).definition.description,
   }));
+}
+
+/** When the first of the messages a turn catches up on or answers was said. */
+/** The earliest of the unseen messages and the current one, the one first
+ *  recorded where two share a second. */
+function earliestOf<M extends { at: Date; id: number }>(
+  unseen: readonly M[],
+  current: M | null,
+): M | null {
+  let earliest: M | null = null;
+  for (const message of [...unseen, ...(current ? [current] : [])]) {
+    const t = message.at.getTime();
+    const e = earliest?.at.getTime();
+    if (earliest === null || e === undefined || t < e || (t === e && message.id < earliest.id)) {
+      earliest = message;
+    }
+  }
+  return earliest;
 }

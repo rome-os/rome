@@ -137,9 +137,9 @@ export interface BackendTurnRunnerDeps {
   /** Runs when a webchat continuation starts, after it has waited its turn in
    * the queue, so it resolves its model from the chat's current selection. */
   beforeTurn?: (params: BackendTurnParams) => Promise<unknown>;
-  /** Whether the agent's policy keeps its text private, so its turn
+  /** Whether the agent's text stays private on `channel`, so its turn
    * delivers no reply. Absent ⇒ every agent's reply is delivered. */
-  isTextPrivate?: (agentName: string) => boolean;
+  isTextPrivate?: (agentName: string, channel: string) => boolean;
 }
 
 export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBackendTurnRunner {
@@ -218,7 +218,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     reply: string,
     turnId?: string,
   ): Promise<void> => {
-    if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) {
+    if (!reply.trim() || deps.isTextPrivate?.(params.agentName, params.channel)) {
       log.info("backend turn produced no reply; nothing to deliver", {
         channel: params.channel,
         threadId: params.threadId,
@@ -322,7 +322,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             await emit({ ...msg, agent: params.agentName }, { recorded: true });
           }
           if (outcome === "interrupted" && stopRequested?.()) outcome = "stopped";
-          if (!reply.trim() || deps.isTextPrivate?.(params.agentName)) return;
+          if (!reply.trim() || deps.isTextPrivate?.(params.agentName, params.channel)) return;
           await send.send(params.threadId as ChatId, {
             text: reply,
             ...(turnId ? { turnId } : {}),

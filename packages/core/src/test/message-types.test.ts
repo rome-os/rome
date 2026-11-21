@@ -100,6 +100,7 @@ holds<
     | "replyTo"
     | "thread"
     | "chatThread"
+    | "openedThread"
     | "addressing"
     | "fromBot"
     | "mentionsOthers"

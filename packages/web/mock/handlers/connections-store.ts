@@ -1,5 +1,49 @@
 import type { ApiConnection } from "@/lib/connections-api";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
+import {
+  asChatSettings,
+  chatRuleDefaults,
+  DISCORD_CHAT_RULES,
+  effectiveChatRules,
+  FEISHU_CHAT_RULES,
+  type KindChatRules,
+  SESSION_RESET_ONLY_CHAT_RULES,
+  WECHAT_CHAT_RULES,
+} from "@rome/api-types/chat-rules";
+import type { ChatSettings } from "@rome/api-types/chat-settings";
+
+// What each kind of connection offers: the declarations core runs on.
+const CHAT_RULES: Record<string, KindChatRules> = {
+  discord: DISCORD_CHAT_RULES,
+  feishu: FEISHU_CHAT_RULES,
+  wechat: WECHAT_CHAT_RULES,
+  telegram: SESSION_RESET_ONLY_CHAT_RULES,
+  email: SESSION_RESET_ONLY_CHAT_RULES,
+  whatsapp: SESSION_RESET_ONLY_CHAT_RULES,
+  linkedin: SESSION_RESET_ONLY_CHAT_RULES,
+};
+
+/** The values a chat runs on where nobody set one and no kind fixed one. */
+export const CHAT_RULE_DEFAULTS: ChatSettings = asChatSettings(chatRuleDefaults());
+
+/** What a group chat of the kind `connectionKind` runs on where nobody set
+ *  a value, worked out as core works it out. */
+export function chatRuleDefaultsOf(connectionKind: string): ChatSettings {
+  const kind = CHAT_RULES[connectionKind] ?? SESSION_RESET_ONLY_CHAT_RULES;
+  return asChatSettings(effectiveChatRules(kind, {}));
+}
+
+/** A kind's connection fields for its chat rules: what it offers, and what
+ *  its group chats run on where nobody set a value. */
+function chatRuleFields(
+  kind: KindChatRules | undefined,
+): Pick<ApiConnection, "chatRules" | "chatRuleDefaults"> {
+  if (!kind) return { chatRules: [], chatRuleDefaults: null };
+  return {
+    chatRules: [...kind.offers],
+    chatRuleDefaults: asChatSettings(effectiveChatRules(kind, {})),
+  };
+}
 
 // The connection ledger. In its own module because two surfaces read it and one
 // of them writes it: the Connections page revokes a grant, and the send routes
@@ -34,6 +78,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: null,
       link: null,
       severalAccounts: false,
+      chatRules: [],
     },
     ...[
       {
@@ -67,6 +112,7 @@ export const connections: { connections: ApiConnection[] } = {
         agent: service === "feishu" ? MAIN_AGENT_ID : null,
         link: service === "feishu" ? "own_account" : null,
         severalAccounts,
+        ...chatRuleFields(CHAT_RULES[service]),
       }),
     ),
     {
@@ -91,6 +137,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: MAIN_AGENT_ID,
       link: "own_account",
       severalAccounts: true,
+      ...chatRuleFields(CHAT_RULES.discord),
     },
     {
       id: "telegram-1",
@@ -114,6 +161,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: MAIN_AGENT_ID,
       link: "own_account",
       severalAccounts: true,
+      ...chatRuleFields(CHAT_RULES.telegram),
     },
     {
       // The channel behind the People page's WhatsApp section: the address-book
@@ -139,6 +187,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: null,
       link: null,
       severalAccounts: false,
+      ...chatRuleFields(CHAT_RULES.whatsapp),
     },
     {
       id: "linkedin-1",
@@ -160,6 +209,7 @@ export const connections: { connections: ApiConnection[] } = {
       agent: null,
       link: null,
       severalAccounts: false,
+      ...chatRuleFields(CHAT_RULES.linkedin),
     },
     // The OAuth services this host offers but nobody has connected. Core lists
     // them as placeholders (`id: null`), so the page has something to offer.

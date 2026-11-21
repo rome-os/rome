@@ -4,6 +4,7 @@
 // the `expiresAt` envelope).
 
 import type {
+  ChannelMessage,
   ChatDescriptor,
   ChatId,
   ChatSettingsControl,
@@ -36,10 +37,34 @@ export interface TalkDirectory {
   }): Promise<{ conversations: ChatDescriptor[]; nextCursor?: string }>;
 }
 
+/** What one read of a chat's history asks the platform for. Every bound is
+ *  optional, and `limit` is already defaulted and capped. */
+export interface TalkHistoryRead {
+  /** Only messages said at or after this instant. */
+  since?: Date;
+  /** Only messages said at or before this instant. */
+  until?: Date;
+  /** Only messages said before the one with this platform id. */
+  olderThan?: string;
+  /** Only messages said after the one with this platform id: the `limit`
+   *  right after it. Not with `olderThan`. */
+  newerThan?: string;
+  limit: number;
+}
+
+/** A chat's history as the platform keeps it, read live, so it holds
+ *  messages Rome never heard. */
+export interface TalkHistory {
+  /** The chat's messages within the bounds, newest first, at most `limit`.
+   *  Rejects with an error naming the chat when the account may not read it. */
+  read(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]>;
+}
+
 export interface TalkFeatureMap {
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
   directory: TalkDirectory;
+  history: TalkHistory;
   /** A talker answers only `chatFor`. The channel port adds the deprecated
    *  `conversationFor` for callers. */
   directMessaging: Pick<ChannelDirectMessaging, "chatFor">;
@@ -359,6 +384,23 @@ export interface ConnectionDescriptor {
   /** Grant-state-driven custody of out-of-process artifacts (token files, shell
    *  auth). Omitted by connection kinds with no such artifact — most descriptors. */
   custody?: GrantCustody;
+  /**
+   * Take back at the platform what the grant gave, when the guardian
+   * disconnects: revoke a token, release a binding. It runs before the
+   * connection is deleted, with the grant's material and profile, and only for
+   * a disconnect the guardian asked for, never when a grant degrades or a fix
+   * ends a connection. A rejection does not stop the disconnect: the
+   * connection still ends, and the reason comes back to the guardian, since
+   * the access may still be live at the platform. Run again after a failure,
+   * it must finish what is left. Omitted by kinds with nothing to take back.
+   * `signal` aborts when the disconnect stops waiting, after which the
+   * connection is gone and may be connected again, so the kind must change
+   * nothing more at the platform.
+   */
+  onDisconnect?(
+    grant: { material: SecretRecord; profile: ProfileRecord },
+    opts: { signal: AbortSignal },
+  ): Promise<void>;
   /** True when the guardian can add another account of this connection kind, each
    *  with its own Connection and channel. A connection kind that keeps its stores or
    *  adapter state under one channel, or is a single presence by nature
@@ -381,6 +423,10 @@ export interface ConnectionDescriptor {
    *  that says which kinds take an agent. Vocabulary:
    *  docs/domains/chats.md#connected-account. */
   link?: AccountLink;
+  /** True when a newly connected own account of this kind starts with the
+   *  Concierge as its agent, so it answers from its first message. Absent, it
+   *  starts with none until the guardian links one. */
+  startsWithConcierge?: boolean;
   /** The chat rules the kind's chats offer the guardian, and the values it
    *  fixes for the rules it does not offer. Core owns the rules and runs
    *  them. A kind that hears messages declares it: one that leaves it unset
@@ -401,6 +447,10 @@ export interface ConnectionDescriptor {
        *  the talker does: webchat's talker is wired to `deliver`, but its turns
        *  start from its own route. Absent means the deliveries back it. */
       receives?: boolean;
+      /** True when the talker reads a chat's history from the platform
+       *  (`TalkHistory`), so the channel it backs has a `messages` port read
+       *  live. Absent means it does not, and the channel reads no messages. */
+      reads?: boolean;
       /** True when the surface that delivers this channel's next human turn
        *  renders interactive cards, so an agent may pause on one for a reply.
        *  Absent means it does not, and a card falls back to prose. */

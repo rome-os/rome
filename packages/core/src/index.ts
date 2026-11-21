@@ -81,7 +81,7 @@ import {
   legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
-import type { Channel, ChannelsService, ChatStopHandler } from "@rome-os/app-runtime";
+import type { Channel, ChannelsService, ChatId, ChatStopHandler } from "@rome-os/app-runtime";
 import { conciergeChatGuard } from "./concierge/automated-input.js";
 import { resolveAutomatedSender } from "./api/routes/chat-senders.js";
 import { actionExecutionContext } from "./apps/actions/context.js";
@@ -208,6 +208,7 @@ import {
   codexLoginKind,
   SharedCodexAccountService,
   romeCreditsProxyRoutes,
+  policyInPlace,
   resolveAgentPolicy,
   createSystemPrompts,
 } from "./agent/index.js";
@@ -227,6 +228,8 @@ import { registerAgentNameAction } from "./people/guardian-profile/index.js";
 import { personHistory } from "./people/person-history/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
 import { registerReadPersonAction } from "./people/actions/read-person.js";
+import { routineControlService, routineOperations } from "./routines/control.js";
+import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
 import { registerPersonalDataActions } from "./personal-data/actions.js";
@@ -255,6 +258,7 @@ import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
+import { agentOfKindIn, conciergePlaceSetup } from "./concierge/on-connection.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -392,6 +396,10 @@ import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./app-host/api.js";
 import { RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
+import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
+import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
+import { SlackMessageCopyRepository } from "./connections/kinds/slack-app/message-copy.js";
+import { SLACK_APP_KIND } from "./connections/integrations/slack-app.js";
 import {
   RELAY_SETTING_KEY,
   deriveDepositUrl,
@@ -456,14 +464,15 @@ async function main() {
   );
   const connectedAccounts = new ConnectedAccountsRepository(db);
   // Read on each call, so the registry built below answers it.
+  // The kind of connection decides each account's agent: the Concierge for a
+  // kind that asks for it, such as Rome's Slack app, and main for every other
+  // (docs/architecture/channels.md#an-accounts-agent).
   const accountAgents = {
     kindOf: (connectionId: string) => connectionKindOf(connectionRegistry)(connectionId),
-    linkOf: (kind: string) => accountLinkOf(connectionRegistry)(kind),
-    accounts: connectedAccounts,
+    agentOfKind: (kind: string) => agentOfKindIn(connectionRegistry)(kind),
   };
-  // Rome listens to an account of a linkable connection kind only while it has an
-  // agent: each inbound port reads this by connection, and a link tells it.
-  const accountListening = new AccountListening(accountAgents);
+  // Rome listens to every account, since each one has its kind's agent.
+  const accountListening = new AccountListening();
   // The connection kind a channel name belongs to. Whatever is keyed by connection kind, such
   // as a descriptor or a channel policy, reads it.
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
@@ -660,7 +669,7 @@ async function main() {
           if (!talks(record.connectionKind)) return;
           const claimed = { ...record, domain: domainOf(event.profile), account: event.account };
           channelRecords.claim(tx, claimed, record.createdAt);
-          connectedAccounts.add(tx, record.id);
+          connectedAccounts.add(tx, record.id, accountAgents.agentOfKind(record.connectionKind));
           rememberOwnAccountProfile(
             accountProfilesRepo,
             tx,
@@ -676,7 +685,11 @@ async function main() {
         case "fixed":
           if (!talks(connection.connectionKind) || !event.account) return;
           channelRecords.ensureAccount(tx, connection, event.account, new Date());
-          connectedAccounts.add(tx, connection.id);
+          connectedAccounts.add(
+            tx,
+            connection.id,
+            accountAgents.agentOfKind(connection.connectionKind),
+          );
           rememberOwnAccountProfile(
             accountProfilesRepo,
             tx,
@@ -1340,12 +1353,25 @@ async function main() {
         labels: chatsWired.labels,
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface,
+        // A new session reads the chat's latest messages from where the chat
+        // lives, and only from a platform that answers them live, bounded at
+        // `until`. A store a personal account syncs, such as WhatsApp's, also
+        // holds what the guardian said before Rome was connected, and refuses
+        // `until` (app-host/accounts-service.ts), so it reads none.
+        latest: (place, { limit, until, olderThan }) =>
+          channelsService.query(place.channel, {
+            chatId: place.threadId as ChatId,
+            until,
+            ...(olderThan === undefined ? {} : { olderThan }),
+            limit,
+          }),
       }),
       subagentCalls,
       subagentSessions: (manager, parentLink, inherited) =>
         subagentSessions(manager, parentLink, webchatRepo, inherited),
       turnMiddleware,
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
+      placeSetup: conciergePlaceSetup,
       chatInstructions: taskChatInstructions({ webchatRepo }),
       ownAccountName: ownAccountNames(connectionRegistry),
       sessionTracing: romeSessionTracing,
@@ -1477,12 +1503,16 @@ async function main() {
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
     replies: chatsWired.replies,
-    isTextPrivate: (agentName) => {
+    // The place can change the agent's policy: on a connection the
+    // Concierge's text is the reply (docs/architecture/concierge.md).
+    isTextPrivate: (agentName, channel) => {
       const agent = agentLoader.find(agentName);
       return (
         agent !== undefined &&
-        resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }).finalText ===
-          "private"
+        policyInPlace(
+          resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }),
+          conciergePlaceSetup(agentName, { channel }),
+        ).finalText === "private"
       );
     },
   });
@@ -1508,6 +1538,15 @@ async function main() {
   registerTaskRunAction(actionRegistry, concierge);
   registerReadPersonAction(actionRegistry, {
     people: peopleRepo,
+    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+  });
+  // What the system app's routine actions do beyond create, search and
+  // delete: in this process directly, from a worker over `routines.control`.
+  const routineOps = routineOperations({
+    routines: routinesRepo,
+    engine: routineEngine,
+    routineRuns: routineRunsRepo,
+    actionExecutions: actionExecutionsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
@@ -1610,8 +1649,18 @@ async function main() {
         actionExecutionContext.getStore()?.agentName,
       )) ?? channelsService.send(target, chatId, message),
   });
+  const routineCreation = routineCreationService({
+    routinesRepo,
+    routineEngine,
+    actionRegistry,
+    agentRunner,
+    resolveOneOffDate: (trigger: Trigger) =>
+      resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
+    hasTriggerType: (type) => routineEngine.hasProvider(type),
+  });
   const appActionDeps = {
     agentRunner,
+    routineCreation,
     resolveOneOffDate: (trigger: Trigger) =>
       resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
     resolveArtifactReference,
@@ -1629,6 +1678,7 @@ async function main() {
     wakeGateFor,
     routinesRepo,
     routineEngine,
+    routineControl: routineControlService(routineOps),
     // Real coordinators in the main process; workers inject the matching proxies
     // (see worker-runtime.ts) so the event/app-lifecycle actions are
     // process-agnostic — they never branch on where they run.
@@ -1895,6 +1945,30 @@ async function main() {
   const { RomeCloudMailProvider } = await import("./connections/kinds/email/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
+    // Rome's own Slack app: Slack's Web API at the configured origin, Rome
+    // Cloud for sign-in and the workspace binding, and a relay drain per
+    // workspace for its events.
+    slackApp: {
+      api: createSlackAppWebApi(config.slackApiBaseUrl),
+      cloud: romeCloudSlackApp(),
+      copy: new SlackMessageCopyRepository(db),
+      listens: (connectionId) => accountListening.listens(connectionId),
+      openMailbox: (mailbox, onFrame) => {
+        const drainer = new RelayDrainer(
+          [
+            {
+              connectUrl: mailbox.connectUrl,
+              drainKey: mailbox.drainKey,
+              targetAppId: SLACK_APP_KIND,
+              targetPath: [],
+            },
+          ],
+          (_drain, event) => onFrame({ headers: event.headers, body: event.body }),
+        );
+        drainer.start();
+        return { stop: () => drainer.stop() };
+      },
+    },
     settingsRepo,
     chatSettings,
     chatStop,
@@ -2199,7 +2273,12 @@ async function main() {
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
     {
-      ...routineWorkerCalls({ routinesRepo, routineEngine }),
+      ...routineWorkerCalls({
+        routinesRepo,
+        routineEngine,
+        routineCreation,
+        routineOperations: routineOps,
+      }),
       ...mailWorkerCalls(actionRegistry),
       ...connectionWorkerCalls({
         appConnections,
@@ -2384,7 +2463,6 @@ async function main() {
       appStore,
       actionRegistry,
       agentLoader,
-      accountListening,
       skillCatalog,
       ogImageStore,
       db,

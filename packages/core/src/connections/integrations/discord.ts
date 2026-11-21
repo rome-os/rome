@@ -26,7 +26,7 @@ import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from
 import { directoryPage } from "./talk-features.js";
 import { requireOnFirstUse } from "../../lib/require-on-first-use.js";
 import type { ChatSettingsPort } from "../types.js";
-import type { KindChatRules } from "../../chat-settings/rules.js";
+import { DISCORD_CHAT_RULES } from "@rome/api-types/chat-rules";
 
 const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
 
@@ -43,19 +43,6 @@ export const discordGrantProfileSchema = z
   })
   .strict();
 export type DiscordGrantProfile = z.infer<typeof discordGrantProfileSchema>;
-
-/** A self-created Discord bot offers every chat rule. */
-export const DISCORD_CHAT_RULES: KindChatRules = {
-  offers: [
-    "enabled",
-    "activation.mode",
-    "activation.botMessages",
-    "activation.whenOthersMentioned",
-    "replies.placement",
-    "routing.agentName",
-    "session.reset",
-  ],
-};
 
 /** Pure display projection: the bot username reads as the handle. `botId` stays
  *  owner-side and never widens the display surface. */
@@ -263,6 +250,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
     auth: botScheme,
     capabilities: {
       talker: {
+        reads: true,
         build(cred, kit): Talker {
           const token = cred.material as { token: string };
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
@@ -363,6 +351,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             inboundMedia,
             activity,
             directory,
+            history: { read: (chatId, read) => adapter.readHistory(chatId, read) },
           };
           return {
             start(deliver, fault): void {
