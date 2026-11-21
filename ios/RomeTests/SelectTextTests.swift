@@ -29,14 +29,14 @@ import UIKit
         text.attribute(.paragraphStyle, at: location, effectiveRange: nil) as? NSParagraphStyle
     }
 
-    private func font(_ text: NSAttributedString, at location: Int) -> UIFont? {
+    private func fontAt(_ text: NSAttributedString, at location: Int) -> UIFont? {
         text.attribute(.font, at: location, effectiveRange: nil) as? UIFont
     }
 
     @Test func aParagraphKeepsTheBodyTypeAndLineSpacing() throws {
         let (text, _) = string("Hello there")
         #expect(text.string == "Hello there")
-        let font = try #require(font(text, at: 0))
+        let font = try #require(fontAt(text, at: 0))
         #expect(font.pointSize == ScaledFont.scaled(16, for: .large))
         #expect(paragraph(text, at: 0)?.lineSpacing == 5)
     }
@@ -56,7 +56,7 @@ import UIKit
 
     @Test func aHeadingIsSemiboldAndLarger() throws {
         let (text, _) = string("# Title\n\nBody")
-        let heading = try #require(font(text, at: 0))
+        let heading = try #require(fontAt(text, at: 0))
         #expect(heading.pointSize == ScaledFont.scaled(20, for: .large))
         let traits = heading.fontDescriptor.object(forKey: .traits) as? [UIFontDescriptor.TraitKey: Any]
         #expect(traits?[.weight] as? CGFloat == UIFont.Weight.semibold.rawValue)
@@ -95,12 +95,12 @@ import UIKit
     @Test func inlineRunsKeepTheirLook() throws {
         let (text, _) = string("plain **bold** *italic* `code` [link](https://example.com)")
         let ns = text.string as NSString
-        let bold = try #require(font(text, at: ns.range(of: "bold").location))
+        let bold = try #require(fontAt(text, at: ns.range(of: "bold").location))
         #expect(bold.fontDescriptor.symbolicTraits.contains(.traitBold))
-        let italic = try #require(font(text, at: ns.range(of: "italic").location))
+        let italic = try #require(fontAt(text, at: ns.range(of: "italic").location))
         #expect(italic.fontDescriptor.symbolicTraits.contains(.traitItalic))
         let code = ns.range(of: "code").location
-        #expect(font(text, at: code)?.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) == true)
+        #expect(fontAt(text, at: code)?.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) == true)
         #expect(text.attribute(.backgroundColor, at: code, effectiveRange: nil) != nil)
         let link = ns.range(of: "link").location
         #expect((text.attribute(.link, at: link, effectiveRange: nil) as? URL)?.absoluteString == "https://example.com")
