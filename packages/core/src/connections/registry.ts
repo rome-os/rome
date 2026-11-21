@@ -1141,14 +1141,22 @@ class ConnectionImpl implements Connection {
     if (slot.kind === "talker") {
       (epoch.instance as Talker).start((msg) => {
         epoch.disconnectStreak = 0; // a successful delivery ends any backoff run
-        for (const handler of slot.messageHandlers) {
-          void handler(msg).catch((err) => {
-            this.log.error("Talk onMessage handler threw", {
-              connectionId: this.id,
-              error: errMsg(err),
-            });
-          });
-        }
+        // Settles once every handler has: the Talker's acceptance (Talker.start).
+        const accepted = Promise.all(
+          slot.messageHandlers.map((handler) =>
+            handler(msg).catch((err: unknown) => {
+              this.log.error("Talk onMessage handler threw", {
+                connectionId: this.id,
+                error: errMsg(err),
+              });
+              throw err;
+            }),
+          ),
+        ).then(() => undefined);
+        // A Talker that ignores the promise leaves no unhandled rejection; one
+        // that awaits it still sees the rejection.
+        accepted.catch(() => {});
+        return accepted;
       }, fault);
     } else if (slot.kind === "watcher") {
       (epoch.instance as Watcher).start((event) => {

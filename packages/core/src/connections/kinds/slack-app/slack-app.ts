@@ -4,10 +4,10 @@
 // Cloud, not to the instance. Rome Cloud checks Slack's signature, finds the
 // instance the workspace is bound to, and deposits the event, signed with the
 // workspace's forward secret, into that workspace's relay mailbox. This adapter
-// drains that mailbox, checks the forward signature and the workspace, drops
-// what it has already seen by Slack's event id, and delivers each direct
-// message, and each mention of the app in a group, as the connection's own
-// record. Replies go straight to Slack's Web API with the bot token the
+// drains that mailbox, checks the forward signature and the workspace, and
+// hands each direct message, and each mention of the app in a group, to Rome,
+// telling the mailbox it arrived only once Chats has it on record. The
+// connection keeps no record of its own. Replies go straight to Slack's Web API with the bot token the
 // instance got at sign-in; a reply to a mention goes in a thread under it.
 
 import type { ChannelMessage, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
@@ -33,12 +33,10 @@ import { SlackReadGate } from "./read-gate.js";
 import { type FetchHistoryPage, readTimeline } from "./timeline.js";
 import { SlackMemberChannels } from "./channels.js";
 import { compareTs } from "./timeline-order.js";
-import type { SlackMessageCopy } from "./message-copy.js";
-
-export type { SlackMessageCopy } from "./message-copy.js";
 import type { SlackAppMailbox } from "./rome-cloud.js";
 import type { SlackAppUser, SlackAppWebApi, SlackChannel } from "./web-api.js";
 import type { Message } from "../../message.js";
+import { RecordingStopped } from "../../types.js";
 
 const log = createLogger("slack-app");
 
@@ -51,10 +49,6 @@ const HOUR_MS = 60 * 60 * 1000;
 /** Renew the drain key this long before it expires. Rome Cloud issues 90-day keys. */
 const RENEW_BEFORE_EXPIRY_MS = 7 * 24 * HOUR_MS;
 const RENEW_RETRY_MS = HOUR_MS;
-/** A message handed to Rome this soon before the last hand-off is handed over
- *  again on start: handing over does not wait for Rome to record it, so a
- *  stop may have cut it off. Rome ignores a message it already holds. */
-const HAND_OVER_AGAIN_MS = 15 * 60 * 1000;
 /** How long a history read waits for its authors' names. */
 const NAME_WAIT_MS = 3_000;
 /** How long after a removal event the token it outlived is looked at again. */
@@ -121,13 +115,11 @@ export interface SlackAppAdapterConfig {
    *  leave a restart with a refused one. */
   onMailboxRefreshed?: (mailbox: SlackAppMailbox) => Promise<void>;
   onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
-  /** The connection's own copy of the direct messages it hears. */
-  copy: SlackMessageCopy;
   /** Whether Rome listens to the account now. A message heard while it does
-   *  not is neither kept nor handed over, so linking an agent later brings
+   *  not is not handed over, so linking an agent later brings
    *  none of it back (docs/domains/chats.md). Absent, Rome always listens. */
   listened?: () => boolean;
-  /** Now, for the copy's times. */
+  /** Now, for the age of Slack's answer on a sender's membership. */
   now?: () => Date;
   /** How reads of Slack's history take turns. Defaults to Slack's allowance. */
   readGate?: SlackReadGate;
@@ -182,11 +174,11 @@ function withinRead(ts: string, read: TalkHistoryRead): boolean {
 }
 
 /**
- * The connection's `Message` for `kept`, a message as its copy keeps it, said
- * to the bot account `receivedBy`. Platform facts only: Rome works out whom it
+ * The connection's `Message` for `kept`, a message as the connection reads
+ * it, said to the bot account `receivedBy`. Platform facts only: Rome works out whom it
  * addresses (docs/domains/connections.md#message). The app hears a group only
- * when it is mentioned, so a mention lists the bot's account; the copy keeps
- * no other account a message mentions, so none is listed.
+ * when it is mentioned, so a mention lists the bot's account; no other account
+ * a message mentions is listed.
  */
 export function messageOf(
   kept: ChannelMessage,
@@ -223,7 +215,7 @@ function describe(error: unknown): string {
 }
 
 export class SlackAppAdapter {
-  private handler?: (message: Message) => void;
+  private handler?: (message: Message) => void | Promise<void>;
   private drain: { stop(): Promise<void> | void } | null = null;
   private readonly dedup = new InboundDedup(5_000);
   private readonly userNames = new Map<string, { at: number; user: SlackAppUser }>();
@@ -249,7 +241,7 @@ export class SlackAppAdapter {
       new SlackReadGate({ intervalMs: HISTORY_INTERVAL_MS, maxWaitMs: HISTORY_MAX_WAIT_MS });
   }
 
-  onInbound(handler: (message: Message) => void): void {
+  onInbound(handler: (message: Message) => void | Promise<void>): void {
     this.handler = handler;
   }
 
@@ -280,7 +272,6 @@ export class SlackAppAdapter {
     if (this.keyExpired()) {
       throw new Error("The Slack mailbox key expired and Rome Cloud could not renew it.");
     }
-    this.handOverKept();
     this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
     this.scheduleRenewal();
     log.info("slack app started", { teamId: this.config.teamId });
@@ -409,45 +400,6 @@ export class SlackAppAdapter {
     return this.handleEvent(payload, payload.event_id);
   }
 
-  /** Hand Rome again what it may not hold: what the copy kept but never
-   *  handed over, and what it handed over just before it last stopped,
-   *  however long ago. Rome ignores a message it already holds. A sender's
-   *  membership is trusted as long as a fresh answer from Slack is, so a
-   *  message kept longer than that goes without it: after a long stop, a
-   *  member's message reads as anyone else's, and fails closed. */
-  private handOverKept(): void {
-    const kept = this.config.copy.mayNotHold(this.config.teamId, HAND_OVER_AGAIN_MS);
-    if (kept.length > 0) {
-      log.info("slack app handing over kept messages", { count: kept.length });
-    }
-    const now = this.now().getTime();
-    for (const { eventId, message, senderFullMember, receivedAt } of kept) {
-      const fresh = now - receivedAt.getTime() < USER_CACHE_TTL_MS;
-      this.handOver(
-        eventId,
-        { ...message, channel: this.config.channel },
-        senderFullMember && fresh,
-      );
-    }
-  }
-
-  /** Hand `message` to Rome without waiting on it, and note it was handed. */
-  private handOver(eventId: string, message: ChannelMessage, senderFullMember?: boolean): void {
-    if (!this.handler) return;
-    try {
-      this.handler(
-        messageOf(
-          message,
-          slackSenderId(this.config.teamId, this.config.botUserId),
-          senderFullMember,
-        ),
-      );
-    } catch (error) {
-      log.error("message handler error", { messageId: message.messageId, error: describe(error) });
-    }
-    this.config.copy.handedOver(this.config.teamId, eventId, this.now());
-  }
-
   private now(): Date {
     return this.config.now?.() ?? new Date();
   }
@@ -516,36 +468,34 @@ export class SlackAppAdapter {
         ? { inThread: `${event.channel}:${event.thread_ts}` as ChatId }
         : {}),
     };
-    // The mailbox is told the message was received only once the copy holds
-    // it: a write that fails answers 500, and the mailbox delivers it again.
-    // The drain gives up on a frame after a few retries and waits to be
-    // resumed, so the failure also reports the connection down: the runtime
-    // starts it again after a backoff, with a fresh drain that retries the
-    // frame. An event the copy holds already is a redelivery.
-    let fresh: boolean;
+    // The mailbox is told the message was received only once Chats has it on
+    // record (docs/domains/connections.md#message). A delivery that is
+    // refused or not recorded in time answers 500, and the mailbox delivers it
+    // again; Chats records a message it already holds only once. The drain
+    // gives up on a frame after a few retries and waits to be resumed, so the
+    // refusal also reports the connection down: the runtime starts it again
+    // after a backoff, with a fresh drain that retries the frame. Recording
+    // stopping is no fault: an app swapping its hook stops it for a moment,
+    // and the drain's own retries outlast that.
+    if (!this.handler) return { status: 500 };
     try {
-      fresh = this.config.copy.keep(
-        {
-          teamId: payload.team_id,
-          eventId,
-          channelId: event.channel,
-          ts: event.ts,
-          ...(event.thread_ts ? { threadTs: event.thread_ts } : {}),
-          userId: author,
-          text: message.text,
+      await this.handler(
+        messageOf(
           message,
+          slackSenderId(this.config.teamId, this.config.botUserId),
           senderFullMember,
-        },
-        this.now(),
+        ),
       );
     } catch (error) {
-      log.error("slack app could not keep a message", { error: describe(error) });
+      if (error instanceof RecordingStopped) {
+        log.info("slack app message not recorded yet: recording stopped");
+        return { status: 500 };
+      }
+      log.error("slack app message not accepted", { error: describe(error) });
       this.config.onFault?.({ kind: "transport", cause: error });
       return { status: 500 };
     }
-    if (!fresh) return { status: 200 };
     log.info("message received", { chatId: message.chatId });
-    this.handOver(eventId, message, senderFullMember);
     return { status: 200 };
   }
 

@@ -60,6 +60,15 @@ export interface ConnectionPortsDeps {
    *  else does, so what the sender called themselves reaches the account
    *  profile cache (account-profiles.ts). Must not throw. */
   heard?: (message: ChannelMessage) => void;
+  /** Settles once the consumer that accepts inbound messages, Chats, has
+   *  accepted message `messageId` said in `chatId` on `channel` through
+   *  Connection `connectionId` (Talker.start). Called before the message is
+   *  handed to any subscriber. Absent, a message counts as accepted once it
+   *  is handed over. */
+  accepted?: (
+    channel: string,
+    ref: { connectionId: string; chatId: string; messageId: string },
+  ) => Promise<void>;
 }
 
 /**
@@ -316,8 +325,9 @@ function connectionInbound(backing: Backing): ChannelInbound {
   // in the order they are pushed here, which admission keeps as arrival
   // order (R4). A conversation is keyed by the Connection it arrived on as
   // well, so two Connections' conversations sharing an id never share a queue.
-  // Nothing upstream waits on delivery, so dispatch returns once every event
-  // is buffered. A subscription's waiting events are dropped when it ends
+  // Dispatch returns once every event is buffered and Chats has accepted the
+  // message (Talker.start), so a Talker can await its delivery before it
+  // tells its platform. A subscription's waiting events are dropped when it ends
   // (R3); a handler already running keeps running, and its subscriber owns
   // stopping it.
   const dispatchFrom =
@@ -336,9 +346,17 @@ function connectionInbound(backing: Backing): ChannelInbound {
         message: named,
         ref: { connectionId, chatId: message.chatId },
       };
+      // Waited on from before any subscriber can hear it, so its recording
+      // cannot come first.
+      const accepted = deps.accepted?.(channel, {
+        connectionId,
+        chatId: message.chatId,
+        messageId: message.messageId,
+      });
       // A Connection id is a UUID, so the first colon ends it.
       const conversation = `${connectionId}:${message.chatId}`;
       for (const buffers of subscriptions) buffers.push(conversation, event);
+      await accepted;
     };
 
   const listens = (connection: Connection): boolean =>

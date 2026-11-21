@@ -309,44 +309,6 @@ export const linkedinMessages = sqliteTable(
   ],
 );
 
-// Rome's Slack app's own copy of the messages it hears, direct messages and
-// mentions of it in a group, one row per Slack event. Only
-// connections/kinds/slack-app reads or writes it, through its repository
-// there: outside the connection, nothing can tell whether the copy exists.
-// The mailbox is told a message was received only once its row is written,
-// so a crash or a stop before then loses nothing: the mailbox delivers it
-// again, and on start the connection hands over what it kept but never
-// handed over.
-export const slackAppMessages = sqliteTable(
-  "slack_app_messages",
-  {
-    teamId: text("team_id").notNull(),
-    // Slack's event id: Slack retries and the relay delivers at least once, so
-    // a second delivery of the same event writes nothing.
-    eventId: text("event_id").notNull(),
-    // The conversation id: a direct message's (D…) or a group's (C…, G…).
-    channelId: text("channel_id").notNull(),
-    ts: text("ts").notNull(),
-    threadTs: text("thread_ts"),
-    userId: text("user_id").notNull(),
-    // The text as Rome reads it, Slack's markup decoded.
-    text: text("text").notNull(),
-    saidAt: integer("said_at", { mode: "timestamp_ms" }).notNull(),
-    // The message as the connection keeps it, without Slack's raw payload.
-    // The connection hands Rome its `Message` made from this.
-    message: text("message", { mode: "json" }).notNull(),
-    receivedAt: integer("received_at", { mode: "timestamp_ms" }).notNull(),
-    // When it was handed to Rome. Null when the connection stopped between
-    // keeping it and handing it over, so the next start hands it over.
-    handedOverAt: integer("handed_over_at", { mode: "timestamp_ms" }),
-  },
-  (table) => [
-    primaryKey({ columns: [table.teamId, table.eventId] }),
-    index("idx_slack_app_messages_chat_said").on(table.teamId, table.channelId, table.saidAt),
-    index("idx_slack_app_messages_unhanded").on(table.teamId, table.handedOverAt),
-  ],
-);
-
 // The Slack app connections the guardian opened to their workspace's other
 // members, by connection id: a row means a full member who is not the
 // guardian is answered there. Off is no row. A fix keeps the connection, so it
