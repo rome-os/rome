@@ -157,9 +157,9 @@ set +a
 # certificate. SLACKENV_EXTRA_CA adds a CA the host's own network needs.
 # wss-primary.slack.com is where Socket Mode connects (slack_bot). A certificate
 # made for fewer names is made again.
-# slack.romeos.io, cloud.slackenv.test and relay.slackenv.test are the
-# slack-gateway Worker, Rome Cloud and the relay over https (gateway-tls).
-TLS_NAMES="slack.com api.slack.com wss-primary.slack.com slack.romeos.io cloud.slackenv.test relay.slackenv.test"
+# slack.romeos.io, 127.0.0.1 and relay.slackenv.test are the slack-gateway
+# Worker, Rome Cloud and the relay over https (gateway-tls).
+TLS_NAMES="slack.com api.slack.com wss-primary.slack.com slack.romeos.io 127.0.0.1 relay.slackenv.test"
 if [ ! -f "$STATE_DIR/tls/tls.crt" ] || [ "$(cat "$STATE_DIR/tls/names" 2>/dev/null)" != "$TLS_NAMES" ]; then
   # shellcheck disable=SC2086 # one argument per name
   node "$ENV_DIR/tools/make-cert.mjs" "$STATE_DIR/tls" $TLS_NAMES
@@ -191,13 +191,27 @@ RELAY_ORIGIN=http://relay:8787
 # Slack retries after about 0 s, 1 min and 5 min; shortened here (DIFFERENCES.md).
 export FAKE_SLACK_RETRY_DELAYS_MS="${FAKE_SLACK_RETRY_DELAYS_MS:-1000,10000,30000}"
 export ROME_IMAGE="${SLACKENV_ROME_IMAGE:-slackenv-rome:${ROME_SHA:0:12}}"
-CLOUD="http://127.0.0.1:$PANTHEON_PORT"
+# Rome Cloud's one origin, on the host, in the browser and in every container.
+# With the Worker it is https, as in production: the Worker checks an
+# instance's token audience and its OAuth redirect against its https
+# ROME_CLOUD_URL, so Rome Cloud, the signers and the Worker share this origin.
+# CLOUD_TARGET is where an instance's forwarder sends that port, CLOUD_SELF
+# where Rome Cloud's own does.
+export CLOUD_ORIGIN="http://127.0.0.1:$PANTHEON_PORT" CLOUD_TARGET=pantheon-net:3100 CLOUD_SELF=127.0.0.1:3100 PANTHEON_PLAIN_PORT=$PANTHEON_PORT
+if [ "$SLACK_GATEWAY" = on ]; then
+  CLOUD_ORIGIN="https://127.0.0.1:$PANTHEON_PORT"
+  CLOUD_TARGET="gateway-tls:$PANTHEON_PORT"
+  CLOUD_SELF="gateway-tls:$PANTHEON_PORT"
+  PANTHEON_PLAIN_PORT=$((PANTHEON_PORT + 1))
+fi
+CLOUD="$CLOUD_ORIGIN"
 
 # What compose interpolates, kept for ctl.sh and down.sh. The model credential
 # is left out: only `up` passes it, through this script's environment.
 for v in SLACKENV_PROJECT SLACKENV_NODE_IMAGE SLACKENV_POSTGRES_IMAGE SLACKENV_PLAYWRIGHT_IMAGE \
   SLACKENV_PLAYWRIGHT_VERSION HOST_UID HOST_GID ENV_DIR STATE_DIR \
-  PANTHEON_PORT FAKE_SLACK_PORT ROME_A_PORT ROME_B_PORT BROWSER_PORT MODEL_PROXY_HOST_PORT SLACK_GATEWAY_PORT ROME_IMAGE AGENT_MODEL FAKE_SLACK_EVENTS_URL \
+  PANTHEON_PORT FAKE_SLACK_PORT ROME_A_PORT ROME_B_PORT BROWSER_PORT MODEL_PROXY_HOST_PORT SLACK_GATEWAY_PORT SLACK_GATEWAY \
+  CLOUD_ORIGIN CLOUD_TARGET CLOUD_SELF PANTHEON_PLAIN_PORT ROME_IMAGE AGENT_MODEL FAKE_SLACK_EVENTS_URL \
   FAKE_SLACK_RETRY_DELAYS_MS SLACK_APP_ID SLACK_CLIENT_ID SLACK_CLIENT_SECRET SLACK_SIGNING_SECRET \
   ROME_A_JWT_SECRET ROME_B_JWT_SECRET; do
   printf '%s=%s\n' "$v" "${!v}"
@@ -243,7 +257,7 @@ SLACK_CLIENT_ID=$SLACK_CLIENT_ID
 SLACK_CLIENT_SECRET=$SLACK_CLIENT_SECRET
 SLACK_SIGNING_SECRET=$SLACK_SIGNING_SECRET
 GATEWAY_SHARED_SECRET=$GATEWAY_SHARED_SECRET
-ROME_CLOUD_URL=https://cloud.slackenv.test
+ROME_CLOUD_URL=$CLOUD
 RELAY_ORIGIN=https://relay.slackenv.test
 SLACK_ORIGIN=https://slack.com
 EOF
@@ -288,7 +302,7 @@ if [ ! -f "$STATE_DIR/browser-client/node_modules/playwright-core/package.json" 
     npm install --prefix /client --no-audit --no-fund --silent "playwright-core@$SLACKENV_PLAYWRIGHT_VERSION" >/dev/null
 fi
 wait_for "the fake Slack" 60 curl -fsS "http://127.0.0.1:$FAKE_SLACK_PORT/_control/health"
-wait_for "Rome Cloud" 600 curl -fsS -o /dev/null "$CLOUD/api/health"
+wait_for "Rome Cloud" 600 curl -fsS --cacert "$STATE_DIR/trust.pem" -o /dev/null "$CLOUD/api/health"
 # run-server answers plain HTTP once it listens.
 wait_for "the browser" 300 curl -s -o /dev/null "http://127.0.0.1:$BROWSER_PORT/"
 [ "$SLACK_GATEWAY" = off ] ||
@@ -312,7 +326,7 @@ for name in $([ "$CLOUD_ONLY" = 1 ] || echo a b); do
   wait_for "$svc" 600 compose exec -T "$svc" node -e 'fetch("http://127.0.0.1:9368/health").then(r=>process.exit(r.ok?0:1),()=>process.exit(1))'
   port_var="ROME_$(echo "$name" | tr a-z A-Z)_PORT"
   log "enrolling $svc in Rome Cloud"
-  node "$ENV_DIR/tools/enroll.mjs" "$CLOUD" "http://127.0.0.1:${!port_var}" "guardian-$name@slackenv.test" \
+  NODE_EXTRA_CA_CERTS="$STATE_DIR/trust.pem" node "$ENV_DIR/tools/enroll.mjs" "$CLOUD" "http://127.0.0.1:${!port_var}" "guardian-$name@slackenv.test" \
     "$STATE_DIR/$svc-cookies.json" >"$STATE_DIR/$svc-enroll.json"
 done
 

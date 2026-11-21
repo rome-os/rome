@@ -90,6 +90,40 @@ read_only() {
   fi
 }
 
+# Where each running container of the stack resolves slack.romeos.io, as
+# {ok, gateway_tls, containers: {name: [addresses]}}. ok when every address is
+# gateway-tls's on the network, or 127.0.0.1 in a container on the host's
+# network (the browser's hosts entry); a container with no network resolves
+# nothing. Anything else, or a container that cannot be asked, fails.
+gateway_resolution() {
+  local tls c name net addrs out=()
+  tls="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$(compose ps -q gateway-tls)")"
+  for c in $(compose ps -q --status running); do
+    name="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$c")"
+    net="$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$c")"
+    # shellcheck disable=SC2016 # expanded inside the container
+    addrs="$(docker exec "$c" sh -c '
+      if command -v getent >/dev/null; then getent ahostsv4 slack.romeos.io
+      elif command -v nslookup >/dev/null; then nslookup slack.romeos.io 2>/dev/null | sed -n "s/^Address: //p"
+      else echo unchecked; fi' 2>/dev/null |
+      awk '{print $1}' | grep -E '^([0-9.]+|unchecked)$' | sort -u | tr '\n' ' ' || true)"
+    out+=("$name" "$net" "$addrs")
+  done
+  node -e '
+    const [tls, ...rest] = process.argv.slice(1);
+    const inside = tls.trim().split(/\s+/).filter(Boolean);
+    const containers = {};
+    let ok = inside.length > 0;
+    for (let i = 0; i < rest.length; i += 3) {
+      const [name, net, addrs] = rest.slice(i, i + 3);
+      const list = addrs.trim().split(/\s+/).filter(Boolean);
+      containers[name] = list;
+      // "unchecked": the container has no resolver tool, so it cannot be shown safe.
+      for (const a of list) if (!inside.includes(a) && !(net === "host" && a === "127.0.0.1")) ok = false;
+    }
+    console.log(JSON.stringify({ ok, gateway_tls: inside, containers }));' "$tls" "${out[@]}"
+}
+
 # The member whose direct message the conversation is, from the fake Slack,
 # so the chat is found by its key as well as by its address.
 member_of() {
@@ -294,9 +328,10 @@ case "$action" in
       const w = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).workspaces[process.argv[2] === "rome-a" ? 0 : 1];
       console.log(w.id, w.members.find((m) => m.is_owner).id);' "$ENV_DIR/config/workspaces.json" "$svc")
     shared="$(sed -n 's/^GATEWAY_SHARED_SECRET=//p' "$STATE_DIR/secrets.env")"
-    cloud_port="$(sed -n 's/^PANTHEON_PORT=//p' "$STATE_DIR/compose.env")"
+    cloud="$(sed -n 's/^CLOUD_ORIGIN=//p' "$STATE_DIR/compose.env")"
     slack_port="$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
-    probe=(--team "$team" --user "$user" --cloud "http://127.0.0.1:$cloud_port" --slack "http://127.0.0.1:$slack_port")
+    probe=(--team "$team" --user "$user" --cloud "$cloud" --slack "http://127.0.0.1:$slack_port"
+      --resolution "$(gateway_resolution)")
     if [ -n "$(compose ps -q --status running "$svc")" ]; then
       compose exec -T -e GATEWAY_SHARED_SECRET="$shared" "$svc" node --input-type=module - "${probe[@]}" <"$ENV_DIR/tools/gateway-probe.mjs"
     else

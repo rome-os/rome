@@ -4,7 +4,7 @@
 // own certificate, which the containers trust through NODE_EXTRA_CA_CERTS,
 // and passes each request on by its Host header.
 //
-// Usage: node tls-proxy.mjs <cert> <key> <port> <host>=<target-host>:<port> ...
+// Usage: node tls-proxy.mjs <cert> <key> <port>[,<port>...] <host>=<target-host>:<port> ...
 
 import { readFileSync } from "node:fs";
 import { request } from "node:http";
@@ -71,12 +71,15 @@ export function parseRoutes(specs) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const [cert, key, port, ...specs] = process.argv.slice(2);
+  // <port> may list several, comma separated: one listener each, same routes.
+  const [cert, key, ports, ...specs] = process.argv.slice(2);
   const routes = parseRoutes(specs);
-  startTlsProxy({
-    cert: readFileSync(cert),
-    key: readFileSync(key),
-    port: Number(port),
-    routes,
-  }).on("listening", () => console.log(`tls-proxy on ${port}: ${[...routes.keys()].join(", ")}`));
+  for (const port of ports.split(",").map(Number)) {
+    startTlsProxy({
+      cert: readFileSync(cert),
+      key: readFileSync(key),
+      port,
+      routes,
+    }).on("listening", () => console.log(`tls-proxy on ${port}: ${[...routes.keys()].join(", ")}`));
+  }
 }

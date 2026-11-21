@@ -102,7 +102,7 @@ console.log(
               url: `http://127.0.0.1:${e.SLACK_GATEWAY_PORT}`,
               network_url: "https://slack.romeos.io",
               health: "https://slack.romeos.io/health",
-              rome_cloud_url: "https://cloud.slackenv.test",
+              rome_cloud_url: e.CLOUD_ORIGIN,
               relay_origin: "https://relay.slackenv.test",
               slack_origin: "https://slack.com",
               logs: [ctl, "logs", "slack-gateway"],
@@ -167,8 +167,12 @@ console.log(
         })),
       },
       rome_cloud: {
-        url: `http://127.0.0.1:${e.PANTHEON_PORT}`,
-        dev_sign_in: `http://127.0.0.1:${e.PANTHEON_PORT}/api/auth/dev/start?email=`,
+        // https with the slack-gateway Worker, under the environment's own
+        // certificate: trust_pem for Node, and ignoreHTTPSErrors (or the CA)
+        // in a browser context.
+        url: e.CLOUD_ORIGIN,
+        dev_sign_in: `${e.CLOUD_ORIGIN}/api/auth/dev/start?email=`,
+        trust_pem: join(stateDir, "trust.pem"),
         // SQL on stdin, a JSON array of rows on stdout, read only.
         query: [ctl, "cloud-query"],
       },

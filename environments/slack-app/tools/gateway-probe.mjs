@@ -2,10 +2,13 @@
 // Rome instance, with no Rome code on the Worker's contract yet. It runs in the
 // instance's network with the instance's signer socket, and checks, in order:
 //
+//   pinned     every container of the stack resolves slack.romeos.io inside
+//              the stack only (ctl.sh checks it and passes --resolution)
 //   health     GET /health answers {ok: true, service: "slack-gateway"}
 //   refused    POST /v1/slack/auth.test, a method Rome's connection does not
-//              make, answers 403 method_not_allowed, and the fake Slack saw
-//              no auth.test call
+//              make, twice on the same key (Rome Cloud checks the first, the
+//              Worker's cache the second): 403 method_not_allowed both times,
+//              and the fake Slack saw no auth.test call
 //   connect    POST /v1/connect with the instance's own relay mailbox (from
 //              Rome Cloud's POST /api/relay/mailboxes) answers a deposit key
 //   bind       the fake Slack's approve screen gives a code, and Rome Cloud's
@@ -15,13 +18,17 @@
 //              Worker, which answers 200
 //   mailbox    that event is in the instance's mailbox, with x-rome-slack: 1
 //              and an x-rome-slack-signature the deposit key verifies
+//   cached     users.info for the member, twice on the cached key, answers
+//              Slack's ok both times, each one call at the fake Slack
 //
 // It drains the mailbox and acknowledges what it finds, so a running instance
 // may take the event first; the mailbox check then says so.
 //
 // Usage: node gateway-probe.mjs --team T --user U --text '...'
-//          [--gateway https://slack.romeos.io] [--cloud http://127.0.0.1:47100]
+//          [--gateway https://slack.romeos.io] [--cloud https://127.0.0.1:47100]
 //          [--slack http://127.0.0.1:47200] [--socket /run/rome-signer/signer.sock]
+//          [--resolution '{"ok":…, …}']
+// --cloud is Rome Cloud's origin, the one its signers name as audience.
 // GATEWAY_SHARED_SECRET comes from the environment. Prints one JSON object;
 // exit 0 when every check passed.
 
@@ -32,7 +39,7 @@ const flags = {};
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i += 2) flags[argv[i].replace(/^--/, "")] = argv[i + 1];
 const gateway = flags.gateway ?? "https://slack.romeos.io";
-const cloud = flags.cloud ?? "http://127.0.0.1:47100";
+const cloud = flags.cloud ?? "https://127.0.0.1:47100";
 const slack = flags.slack ?? "http://127.0.0.1:47200";
 const socketPath = flags.socket ?? "/run/rome-signer/signer.sock";
 const { team, user } = flags;
@@ -96,6 +103,18 @@ const json = (method, body, headers = {}) => ({
 const asInstance = async (method, body, headers = {}) =>
   json(method, body, { authorization: `Bearer ${await instanceToken()}`, ...headers });
 
+// pinned
+if (flags.resolution !== undefined) {
+  let pinned;
+  try {
+    pinned = JSON.parse(flags.resolution);
+  } catch {
+    pinned = { ok: false, error: "--resolution is not JSON" };
+  }
+  checks.pinned = { ...pinned, ok: pinned?.ok === true };
+  if (!checks.pinned.ok) finish();
+}
+
 // health
 const health = await call(`${gateway}/health`);
 checks.health = {
@@ -105,22 +124,27 @@ checks.health = {
 };
 if (!checks.health.ok) finish();
 
-// refused: before /v1/connect, so the Worker asks Rome Cloud about this
-// instance's key instead of checking a cached one.
+// refused: twice. The first token's key is new to the Worker, so Rome Cloud
+// checks it; the second is checked against the Worker's cache, whose audience
+// rule is the Worker's own.
 const seq = (await call(`${slack}/_control/calls?since=0`)).body?.seq ?? 0;
-const refused = await call(
-  `${gateway}/v1/slack/auth.test`,
-  await asInstance("POST", {}, { "x-slack-team": team }),
-);
+const refusals = [];
+for (let i = 0; i < 2; i++) {
+  refusals.push(
+    await call(
+      `${gateway}/v1/slack/auth.test`,
+      await asInstance("POST", {}, { "x-slack-team": team }),
+    ),
+  );
+}
 const atSlack = (await call(`${slack}/_control/calls?method=auth.test&since=${seq}`)).body;
 checks.refused = {
   ok:
-    refused.status === 403 &&
-    refused.body?.error === "method_not_allowed" &&
+    refusals.every((r) => r.status === 403 && r.body?.error === "method_not_allowed") &&
     Array.isArray(atSlack?.calls) &&
     atSlack.calls.length === 0,
-  status: refused.status,
-  body: refused.body,
+  statuses: refusals.map((r) => r.status),
+  body: refusals[1].body,
   calls_at_slack: atSlack?.calls?.length ?? null,
 };
 
@@ -157,7 +181,7 @@ const form = new URLSearchParams({
   client_id: state.body?.client_id ?? state.body?.app?.client_id ?? "",
   scope:
     "app_mentions:read,channels:history,channels:read,chat:write,groups:history,groups:read,im:history,im:read,im:write,users:read",
-  redirect_uri: "https://cloud.slackenv.test/api/slack/callback",
+  redirect_uri: `${cloud}/api/slack/callback`,
   state: "gateway-probe",
   team,
   user,
@@ -215,6 +239,27 @@ checks.mailbox = found
       frames_seen: frames.length,
       note: "not in the mailbox: a running instance may have taken it first (ctl.sh stop the instance and probe again)",
     };
+
+// cached: an allowed call, twice, on the key the Worker has cached by now
+const before = (await call(`${slack}/_control/calls?since=0`)).body?.seq ?? 0;
+const infos = [];
+for (let i = 0; i < 2; i++) {
+  infos.push(
+    await call(
+      `${gateway}/v1/slack/users.info`,
+      await asInstance("POST", { user }, { "x-slack-team": team }),
+    ),
+  );
+}
+const infoCalls = (await call(`${slack}/_control/calls?method=users.info&since=${before}`)).body;
+checks.cached = {
+  ok:
+    infos.every((r) => r.status === 200 && r.body?.ok === true && r.body?.user?.id === user) &&
+    infoCalls?.calls?.length === 2,
+  statuses: infos.map((r) => r.status),
+  slack_ok: infos.map((r) => r.body?.ok ?? r.body?.error ?? null),
+  calls_at_slack: infoCalls?.calls?.length ?? null,
+};
 finish();
 
 /** Reads the mailbox for up to 10 s, acknowledging each frame, and returns

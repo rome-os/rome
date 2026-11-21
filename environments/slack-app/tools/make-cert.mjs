@@ -64,7 +64,13 @@ export function makeCert(hosts) {
   const serial = certSerial(randomBytes(16));
   const now = new Date();
   const ecdsaSha256 = seq(oid("1.2.840.10045.4.3.2"));
-  const san = seq(...hosts.map((h) => der(0x82, Buffer.from(h))));
+  // An IPv4 address is an iPAddress name, any other a dNSName.
+  const ipv4 = /^\d{1,3}(\.\d{1,3}){3}$/;
+  const san = seq(
+    ...hosts.map((h) =>
+      ipv4.test(h) ? der(0x87, Buffer.from(h.split(".").map(Number))) : der(0x82, Buffer.from(h)),
+    ),
+  );
   const extensions = explicit(
     3,
     seq(

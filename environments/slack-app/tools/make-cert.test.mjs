@@ -19,3 +19,11 @@ test("generated certificates always parse", () => {
     assert.match(x509.subjectAltName ?? "", /slack\.com/);
   }
 });
+
+test("an IPv4 address is named as an address, so https://127.0.0.1 verifies", () => {
+  const { cert } = makeCert(["slack.romeos.io", "127.0.0.1"]);
+  const x509 = new X509Certificate(cert);
+  assert.equal(x509.checkIP("127.0.0.1"), "127.0.0.1");
+  assert.equal(x509.checkHost("slack.romeos.io"), "slack.romeos.io");
+  assert.match(x509.subjectAltName, /IP Address:127\.0\.0\.1/);
+});
