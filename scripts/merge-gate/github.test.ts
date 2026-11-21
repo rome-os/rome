@@ -104,3 +104,41 @@ describe("restClient.putCheckRun", () => {
     expect(f.calls[1]?.body).not.toHaveProperty("head_sha");
   });
 });
+
+describe("restClient auto-merge", () => {
+  it("reads the PR's node id and whether auto-merge is on from GraphQL", async () => {
+    const pr = { id: "PR_7", autoMergeRequest: { enabledAt: "2026-11-20T00:00:00Z" } };
+    const f = fakeFetch([json({ data: { repository: { pullRequest: pr } } })]);
+    expect(await client(f.fetch).autoMerge("o/r", 7)).toEqual({
+      pullRequestId: "PR_7",
+      enabled: true,
+    });
+    expect(f.calls[0]).toMatchObject({
+      method: "POST",
+      url: "https://api.test/graphql",
+      body: { variables: { owner: "o", name: "r", number: 7 } },
+    });
+  });
+
+  it("reads auto-merge as off when the PR has no auto-merge request", async () => {
+    const pr = { id: "PR_7", autoMergeRequest: null };
+    const f = fakeFetch([json({ data: { repository: { pullRequest: pr } } })]);
+    expect((await client(f.fetch).autoMerge("o/r", 7)).enabled).toBe(false);
+  });
+
+  it("throws GitHub's messages when GraphQL answers with errors", async () => {
+    const f = fakeFetch([json({ data: null, errors: [{ message: "Head sha didn't match" }] })]);
+    await expect(client(f.fetch).enableAutoMerge("PR_7", "sha1")).rejects.toThrow(
+      "Head sha didn't match",
+    );
+  });
+
+  it("turns auto-merge off by the PR's node id", async () => {
+    const f = fakeFetch([json({ data: { disablePullRequestAutoMerge: {} } })]);
+    await client(f.fetch).disableAutoMerge("PR_7");
+    expect(f.calls[0]?.body).toMatchObject({ variables: { pullRequestId: "PR_7" } });
+    expect(String((f.calls[0]?.body as { query: string }).query)).toContain(
+      "disablePullRequestAutoMerge",
+    );
+  });
+});

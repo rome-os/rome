@@ -1,5 +1,6 @@
-// The GitHub REST calls behind the collector's GitHub interface, over the
-// global fetch so the workflow installs nothing.
+// The GitHub calls behind the collector's GitHub interface, over the global
+// fetch so the workflow installs nothing. Auto-merge exists only in GraphQL, so
+// its three calls go to <apiUrl>/graphql and the rest go to REST.
 
 import { type ApiFile, CHECK_NAME, type CheckReport, type GitHub } from "./collect.js";
 
@@ -9,7 +10,11 @@ type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 const FILES_PER_PAGE = 100;
 const MAX_FILE_PAGES = 30;
 
-/** A GitHub client that authenticates with `token`. Every non-2xx response throws, except a 404 from readFile. */
+/**
+ * A GitHub client that authenticates with `token`. Every non-2xx response
+ * throws, except a 404 from readFile, and so does a GraphQL response that
+ * carries errors, with GitHub's messages as the error's message.
+ */
 export function restClient(opts: { token: string; apiUrl: string; fetch?: Fetch }): GitHub {
   const doFetch = opts.fetch ?? fetch;
   const headers = (accept = "application/vnd.github+json") => ({
@@ -27,6 +32,20 @@ export function restClient(opts: { token: string; apiUrl: string; fetch?: Fetch 
     });
     if (!res.ok) throw await httpError(method, path, res);
     return res.json();
+  }
+
+  async function graphql(query: string, variables: Record<string, unknown>): Promise<unknown> {
+    const res = await doFetch(`${opts.apiUrl}/graphql`, {
+      method: "POST",
+      headers: { ...headers(), "Content-Type": "application/json" },
+      body: JSON.stringify({ query, variables }),
+    });
+    if (!res.ok) throw await httpError("POST", "/graphql", res);
+    const body = (await res.json()) as { data?: unknown; errors?: { message?: string }[] };
+    if (body.errors && body.errors.length > 0) {
+      throw new Error(body.errors.map((e) => e.message ?? "unknown error").join("; "));
+    }
+    return body.data;
   }
 
   return {
@@ -71,8 +90,47 @@ export function restClient(opts: { token: string; apiUrl: string; fetch?: Fetch 
       if (own) await call("PATCH", `/repos/${repo}/check-runs/${own.id}`, body);
       else await call("POST", `/repos/${repo}/check-runs`, { ...body, head_sha: headSha });
     },
+
+    async autoMerge(repo, number) {
+      const [owner, name] = repo.split("/");
+      const data = (await graphql(AUTO_MERGE_QUERY, { owner, name, number })) as {
+        repository?: { pullRequest?: { id?: string; autoMergeRequest?: unknown } | null } | null;
+      } | null;
+      const pr = data?.repository?.pullRequest;
+      if (!pr || typeof pr.id !== "string")
+        throw new Error(`pull request ${repo}#${number} not found`);
+      return { pullRequestId: pr.id, enabled: pr.autoMergeRequest != null };
+    },
+
+    async enableAutoMerge(pullRequestId, headSha) {
+      await graphql(ENABLE_AUTO_MERGE, {
+        pullRequestId,
+        mergeMethod: "SQUASH",
+        expectedHeadOid: headSha,
+      });
+    },
+
+    async disableAutoMerge(pullRequestId) {
+      await graphql(DISABLE_AUTO_MERGE, { pullRequestId });
+    },
   };
 }
+
+const AUTO_MERGE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) { id autoMergeRequest { enabledAt } }
+  }
+}`;
+
+const ENABLE_AUTO_MERGE = `mutation($pullRequestId: ID!, $mergeMethod: PullRequestMergeMethod!, $expectedHeadOid: GitObjectID!) {
+  enablePullRequestAutoMerge(input: { pullRequestId: $pullRequestId, mergeMethod: $mergeMethod, expectedHeadOid: $expectedHeadOid }) {
+    clientMutationId
+  }
+}`;
+
+const DISABLE_AUTO_MERGE = `mutation($pullRequestId: ID!) {
+  disablePullRequestAutoMerge(input: { pullRequestId: $pullRequestId }) { clientMutationId }
+}`;
 
 function encodePath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");

@@ -1,7 +1,14 @@
 name: Merge gate
 
-# Reports on every PR to main whether it could have merged itself, and why, as
-# the `merge gate` check run. It merges nothing. Gate code: scripts/merge-gate/.
+# Decides on every PR to main whether it may merge itself, and why, and reports
+# it as the `merge gate` check run. Gate code: scripts/merge-gate/.
+#
+# The gate never merges a PR itself. When the policy is enabled and the PR
+# qualifies, it turns GitHub's auto-merge on, bound to the head commit, and
+# GitHub merges once every required check is green. For a PR that needs you, or
+# when the gate cannot decide, it turns auto-merge off before it writes the
+# check run. With the policy disabled it only reports. Main requires the
+# `merge gate` check, so a new head commit cannot merge before the gate judges it.
 #
 # pull_request_target runs this file and the gate as they are on main, never as
 # the PR has them, so a PR cannot change the rules it is judged by. The PR's
@@ -13,9 +20,11 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
 
+# Turning auto-merge on or off needs contents and pull-requests write. The gate
+# makes no other write than those two calls and the check run.
 permissions:
-  contents: read
-  pull-requests: read
+  contents: write
+  pull-requests: write
   checks: write
 
 concurrency:
@@ -47,7 +56,8 @@ jobs:
 
       # tsx is pinned to an exact version and fetched by npx, because the gate
       # must run in a repository with no workspace install. run.ts exits 0
-      # whatever the gate decides or fails on.
+      # whatever the gate decides or fails on, and makes every auto-merge call
+      # before it writes the check run.
       - name: Decide and report
         id: gate
         continue-on-error: true
@@ -56,17 +66,37 @@ jobs:
         run: npx --yes tsx@4.21.0 scripts/merge-gate/run.ts
 
       # Runs only when run.ts never started or crashed outright, such as when
-      # npx cannot fetch tsx. The PR still gets a check run saying so.
+      # npx cannot fetch tsx. The gate decided nothing, so this step does what
+      # run.ts does when it cannot decide: it reads whether auto-merge is on now
+      # and turns it off if so, then writes a neutral check run. When it cannot
+      # read or turn off auto-merge, the check run fails, which blocks the merge.
       - name: Report that the gate could not run
         if: steps.gate.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_ID: ${{ github.event.pull_request.node_id }}
         run: |
-          summary='**Merge gate: needs-you.** The gate could not decide, so this PR waits for you. The "Decide and report" step of this workflow run failed before it reported; its log has the error.'
+          conclusion=neutral
+          title='needs you: the gate could not decide'
+          because='The gate could not decide, so this PR waits for you. The "Decide and report" step of this workflow run failed before it reported; its log has the error.'
+          if enabled=$(gh api graphql -f id="$PR_ID" --jq '.data.node.autoMergeRequest != null' \
+            -f query='query($id: ID!) { node(id: $id) { ... on PullRequest { autoMergeRequest { enabledAt } } } }'); then
+            if [ "$enabled" = true ] && ! gh api graphql -f id="$PR_ID" --silent \
+              -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }'; then
+              conclusion=failure
+            fi
+          else
+            conclusion=failure
+          fi
+          if [ "$conclusion" = failure ]; then
+            title='needs you: auto-merge could not be turned off'
+            because="$because Auto-merge could not be turned off, so this check fails to block the merge."
+          fi
+          summary=$(printf '%s\n\n%s' '**Merge gate: needs you.**' "$because")
           echo "$summary" >>"$GITHUB_STEP_SUMMARY"
           gh api --method POST "repos/$REPO/check-runs" \
-            -f name='merge gate' -f head_sha="$HEAD_SHA" -f status=completed -f conclusion=neutral \
-            -f 'output[title]=needs you: the gate could not decide' -f "output[summary]=$summary" \
+            -f name='merge gate' -f head_sha="$HEAD_SHA" -f status=completed -f conclusion="$conclusion" \
+            -f "output[title]=$title" -f "output[summary]=$summary" \
             || echo "::warning title=merge gate::the gate could not report"

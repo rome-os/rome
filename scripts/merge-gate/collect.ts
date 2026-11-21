@@ -39,7 +39,15 @@ export interface ApiFile {
 export interface CheckReport {
   title: string;
   summary: string;
-  conclusion: "success" | "neutral";
+  /** `failure` only when auto-merge could not be turned off, so the required check blocks the merge. */
+  conclusion: "success" | "neutral" | "failure";
+}
+
+/** A PR's auto-merge state, as the API reports it at the time of the call. */
+export interface AutoMerge {
+  /** The PR's GraphQL node id, which the auto-merge mutations take. */
+  pullRequestId: string;
+  enabled: boolean;
 }
 
 /** The GitHub calls the collector makes, so tests can fake them. */
@@ -50,6 +58,12 @@ export interface GitHub {
   readFile(repo: string, path: string, ref: string): Promise<string | undefined>;
   /** Creates the check run on `headSha`, or updates the one this workflow made there before. */
   putCheckRun(repo: string, headSha: string, report: CheckReport): Promise<void>;
+  /** Reads whether auto-merge is on for the PR. */
+  autoMerge(repo: string, number: number): Promise<AutoMerge>;
+  /** Turns auto-merge on with the squash method. GitHub refuses it once the head is no longer `headSha`. */
+  enableAutoMerge(pullRequestId: string, headSha: string): Promise<void>;
+  /** Turns auto-merge off. Throws when GitHub refuses, such as when it is already off. */
+  disableAutoMerge(pullRequestId: string): Promise<void>;
 }
 
 /** Reads a `pull_request_target` event payload. Throws when a needed field is missing. */
@@ -164,6 +178,48 @@ export function reportFor(decision: Decision): CheckReport {
     summary: fit(decision.summary),
     conclusion: "neutral",
   };
+}
+
+/** The line after the blank line of a `merge` summary once auto-merge is on. */
+export const MERGING_LINE =
+  "Every changed path is listed in the merge policy, so this PR merges itself once its required checks pass.";
+
+/** The check run for a `merge` decision once auto-merge is on for the head commit. */
+export function mergingReport(decision: Decision): CheckReport {
+  const lines = decision.summary.split("\n");
+  lines[2] = MERGING_LINE;
+  return { ...reportFor(decision), summary: fit(lines.join("\n")) };
+}
+
+/** The check run for a `merge` decision when auto-merge could not be turned on. */
+export function enableFailedReport(decision: Decision, error: unknown): CheckReport {
+  const lines = decision.summary.split("\n");
+  lines.splice(3, 0, "", `Auto-merge could not be turned on: ${messageOf(error)}.`);
+  return {
+    title: "qualifies, but auto-merge could not be turned on",
+    summary: fit(lines.join("\n")),
+    conclusion: "neutral",
+  };
+}
+
+/**
+ * The check run when auto-merge may still be on for a PR that needs you: turning
+ * it off failed, or reading whether it was on failed. `report` is the check run
+ * the gate would write otherwise.
+ */
+export function disableFailedReport(report: CheckReport, error: unknown): CheckReport {
+  const lines = report.summary.split("\n");
+  lines.splice(3, 0, "", `Auto-merge could not be turned off: ${messageOf(error)}.`);
+  return {
+    title: "needs you: auto-merge could not be turned off",
+    summary: fit(lines.join("\n")),
+    conclusion: "failure",
+  };
+}
+
+function messageOf(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.trim().replace(/\.$/, "");
 }
 
 /** The check run when the gate could not decide. */

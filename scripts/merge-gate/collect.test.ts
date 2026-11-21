@@ -70,6 +70,11 @@ function fakeGitHub(files: ApiFile[], contents: Record<string, string> = {}, fai
     async putCheckRun(_repo, _sha, report) {
       posted.push(report);
     },
+    async autoMerge() {
+      return { pullRequestId: "PR_1", enabled: false };
+    },
+    async enableAutoMerge() {},
+    async disableAutoMerge() {},
   };
   return { gh, reads, posted };
 }
