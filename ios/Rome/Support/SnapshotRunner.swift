@@ -214,6 +214,35 @@ enum SnapshotRunner {
             model.workspace?.topics.setFolded(false)
             model.workspace?.topics.refresh()
             try? await Task.sleep(for: .seconds(0.8))
+            // A topic chat open under the drawer: its row takes the selected card.
+            if only.isEmpty || only.contains("05e-drawer-topic-open") {
+                model.debugCommand = .section(.topic("topic-trip"))
+                try? await Task.sleep(for: .seconds(1))
+                await capture("05e-drawer-topic-open", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .drawer(true) }
+                model.debugCommand = .drawer(false)
+                try? await Task.sleep(for: .seconds(0.4))
+                model.debugCommand = .section(.chat)
+                try? await Task.sleep(for: .seconds(0.4))
+            }
+            // Two topic chats pinned: atop the list, the latest pinned first, each with a pin.
+            if only.isEmpty || only.contains("05f-drawer-pinned"), let workspace = model.workspace {
+                await workspace.pinTopic("topic-books", pinned: true)
+                await workspace.pinTopic("topic-home", pinned: true)
+                await capture("05f-drawer-pinned", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .drawer(true) }
+                model.debugCommand = .drawer(false)
+                await workspace.pinTopic("topic-books", pinned: false)
+                await workspace.pinTopic("topic-home", pinned: false)
+                try? await Task.sleep(for: .seconds(0.4))
+            }
+            // More topic chats than the drawer's first page.
+            if only.isEmpty || only.contains("05g-drawer-long") {
+                model.openDemo(.longChat)
+                try? await Task.sleep(for: .seconds(2))
+                await capture("05g-drawer-long", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .drawer(true) }
+                model.debugCommand = .drawer(false)
+                model.openDemo()
+                try? await Task.sleep(for: .seconds(2))
+            }
             await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.tasks) }
             await capture("06b-agent-task-chat", style: styleName, in: directory, wait: 2) {
                 model.debugCommand = .agentRoute([.taskChat(chatId: "chat-price", title: "价格追踪：发提醒邮件")])
@@ -406,6 +435,8 @@ enum SnapshotRunner {
             if only.isEmpty || !only.isDisjoint(with: ["58b-load-failed", "58c-load-retrying"]),
                let demo = model.workspace?.backend as? DemoBackend, let store = model.workspace?.topicStore("topic-errors") {
                 demo.unreadableChats.insert("topic-errors")
+                // The bar shows on the second failure in a row.
+                await store.reload()
                 await store.reload()
                 await capture("58b-load-failed", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.topic("topic-errors")) }
                 store.retryHold = .seconds(4)
@@ -419,6 +450,8 @@ enum SnapshotRunner {
             await capture("57-agent-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-cards")) }
             // An itinerary whose stops open in Maps.
             await capture("57-agent-itinerary", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-itinerary")) }
+            // Task links in each status: running, needs you, done, failed, stopped, no response, later.
+            await capture("65-task-links", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-task-links")) }
             // Share-location cards: shared, not shared, and one still open.
             await capture("57-location-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-location")) }
             // The drawer over a topic chat: its row selected.

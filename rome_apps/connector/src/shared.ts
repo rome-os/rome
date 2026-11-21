@@ -23,8 +23,8 @@ export const ROME_USER_ID = "rome-guardian";
  * these — they're connected/disconnected in Settings → Connections. This is
  * the server-side twin of the web catalog's `romeManaged` flag, so the gate
  * holds at the agent entry point too, not just the UI. Rome-managed toolkits are
- * acted on via `connector_proxy` (direct REST/GraphQL with Rome's OAuth token),
- * never `connector_tool_execute` (Composio-only). GitHub also exposes
+ * acted on via `connector:connector_proxy` (direct REST/GraphQL with Rome's OAuth token),
+ * never `connector:connector_tool_execute` (Composio-only). GitHub also exposes
  * `gh`/`git` in the shell, and its events arrive via Rome's own GitHub webhook,
  * never a Composio trigger.
  */
@@ -39,8 +39,8 @@ export function isRomeManagedToolkit(toolkit: string): boolean {
  * server-side twin of the curated web catalog's slugs (`web/lib/connections.ts`).
  * Composio's tool search ranks across its *entire* catalog, including toolkits
  * with no OAuth path the owner could never authorize, so this set is the single
- * gate every entry point applies: `connector_search` filters its results to it,
- * and `connector_connect` / the dashboard connect route reject anything outside
+ * gate every entry point applies: `connector:connector_search` filters its results to it,
+ * and `connector:connector_connect` / the dashboard connect route reject anything outside
  * it (rather than render a connect card that would dead-end at `ensureAuthConfig`).
  * A drift guard in `shared.test.ts` keeps this set equal to the catalog slugs.
  * Derived from the SDK's `SUPPORTED_CONNECTORS` so adding a connectable toolkit
@@ -54,7 +54,7 @@ export function isSupportedToolkit(toolkit: string): boolean {
 
 /**
  * The default provider API host per toolkit, derived from the SDK catalog's
- * `apiHost`. When a `connector_proxy` call omits `host`, Rome fills it from here
+ * `apiHost`. When a `connector:connector_proxy` call omits `host`, Rome fills it from here
  * so the agent supplies only a relative `path` for the common single-host
  * toolkits — it never has to know or repeat the host. A toolkit whose host is
  * per-connection (Supabase's `<ref>.supabase.co`, which omits `apiHost` in the
@@ -77,7 +77,7 @@ const PER_CONNECTION_HOST_EXAMPLE: Record<string, string> = {
 
 /**
  * The provider API domains each toolkit's credential may be sent to, keyed by
- * toolkit slug. `connector_proxy` injects the connection's live OAuth credential
+ * toolkit slug. `connector:connector_proxy` injects the connection's live OAuth credential
  * into a request to a caller-supplied endpoint, so an unconstrained endpoint is a
  * credential-exfiltration vector: point it at an attacker host and the token
  * leaks. This allowlist is the gate — the resolved token is only ever forwarded
@@ -122,7 +122,7 @@ export type ProxyEndpointRejection =
   | { code: "host_not_allowed"; message: string };
 
 /**
- * Fail-closed validation for a `connector_proxy` endpoint. Returns a rejection
+ * Fail-closed validation for a `connector:connector_proxy` endpoint. Returns a rejection
  * (never throws) when the endpoint is anything other than an `https` URL whose
  * host belongs to the toolkit's allowlisted provider domains, so the connection's
  * credential can never be forwarded to an off-provider (attacker-controlled) host.
@@ -173,7 +173,7 @@ export type BuildProxyEndpointResult =
   | { ok: false; message: string };
 
 /**
- * Assemble a `connector_proxy` call's absolute endpoint from a relative `path`
+ * Assemble a `connector:connector_proxy` call's absolute endpoint from a relative `path`
  * and an optional `host`. Host precedence: the explicit `host` arg, else the
  * toolkit's default API host (`TOOLKIT_DEFAULT_API_HOST`). Fails (never throws,
  * mirroring `validateProxyEndpoint`) when `path` is a full URL rather than a
@@ -231,11 +231,11 @@ export function romeManagedConnectHint(toolkit: string): string {
   return `${toolkit} is connected by Rome itself, not by this app. Call the connect_account tool with ${JSON.stringify({ kind })} to show the connect card, then retry once it is connected. Where no card shows, ask the guardian to connect ${toolkit} in Settings → Connections.`;
 }
 
-/** Guidance for an agent that reached `connector_tool_execute` (Composio-only)
+/** Guidance for an agent that reached `connector:connector_tool_execute` (Composio-only)
  *  for a Rome-managed toolkit. These have no Composio tools — they're driven by
- *  `connector_proxy` against the provider's native API with Rome's OAuth token. */
+ *  `connector:connector_proxy` against the provider's native API with Rome's OAuth token. */
 export function romeManagedToolExecuteHint(toolkit: string): string {
-  return `${toolkit} is managed by Rome and has no Composio tools. Call the provider's native API with connector_proxy (toolkit "${toolkit}") instead. If it is not connected: ${romeManagedConnectHint(toolkit)}`;
+  return `${toolkit} is managed by Rome and has no Composio tools. Call the provider's native API with connector:connector_proxy (toolkit "${toolkit}") instead. If it is not connected: ${romeManagedConnectHint(toolkit)}`;
 }
 
 /** Guidance for an agent that reached a Composio surface for GitHub. GitHub has
@@ -275,8 +275,8 @@ export async function loadCredentialClient(): Promise<ComposioClient | null> {
 
 /**
  * The agent-facing error for a Composio call that threw. Points the agent at
- * `connector_login` only when a fresh `ping()` gets a 401, which is the same
- * check `connector_login` uses to decide the saved sign-in is rejected. A 401
+ * `connector:connector_login` only when a fresh `ping()` gets a 401, which is the same
+ * check `connector:connector_login` uses to decide the saved sign-in is rejected. A 401
  * that the ping does not confirm is about something other than the saved key,
  * so it keeps the `<fallbackPrefix>: <message>` form and the agent is never
  * sent to a login that would answer `signed_in`. Pings only on a 401, and keeps
@@ -292,7 +292,7 @@ export async function composioActionError(
   if (isComposioAuthenticationError(err)) {
     const ping = await client.ping();
     if (!ping.ok && ping.status === 401) {
-      return `Composio rejected Rome's saved sign-in (HTTP 401). Call connector_login to sign in again, then re-run ${rerun}. Upstream: ${message}`;
+      return `Composio rejected Rome's saved sign-in (HTTP 401). Call connector:connector_login to sign in again, then re-run ${rerun}. Upstream: ${message}`;
     }
   }
   return `${fallbackPrefix}: ${message}`;
@@ -311,7 +311,7 @@ export type SubscribeFeedResult =
 /**
  * Arm a Composio trigger so its events flow onto Rome's event bus, returning the
  * canonical `eventName` (topic) a routine binds to. This is the single
- * subscribe path shared by the `connector_event_subscribe` action and the
+ * subscribe path shared by the `connector:connector_event_subscribe` action and the
  * dashboard's `POST /feeds` route, so both enforce the same fail-closed checks.
  *
  * `expectedToolkit`, when given, is cross-checked against the trigger's
@@ -362,7 +362,7 @@ export async function subscribeTriggerFeed(
         code: "no_connected_account",
         message: isRomeManagedToolkit(provider)
           ? romeManagedConnectHint(provider)
-          : `No active connected account for "${provider}" — run connector_connect for this toolkit first.`,
+          : `No active connected account for "${provider}" — run connector:connector_connect for this toolkit first.`,
       };
     }
     if (resolved.kind === "ambiguous") {

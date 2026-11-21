@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -63,7 +64,7 @@ describe("WechatAdapter.send against the peer", () => {
     adapter = peer.createAdapter(statePath);
     // The adapter answers only users it has heard from, with their context token.
     const heard = deferred<ChannelMessage>();
-    adapter.onInbound(async (message) => heard.resolve(message));
+    adapter.onInbound(async (message) => heard.resolve(channelMessageOf(message, "wechat")));
     await adapter.start();
     peer.emitMessage("hello");
     await heard.promise;

@@ -1,15 +1,7 @@
-import {
-  type KeyboardEvent,
-  type MouseEvent,
-  type PointerEvent,
-  type ReactNode,
-  type RefObject,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import type { ReactNode } from "react";
+import { ChevronLeft } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
 import { RomeMascot } from "./RomeMascot";
@@ -38,32 +30,19 @@ export const CONCIERGE_LEADING_SLOT = "conciergeHeaderLeading";
  */
 export const CONCIERGE_TITLEBAR_SLOT = "conciergeTitlebar";
 
-/** One entry of the header's quick menu: what it opens, never a count or a mark. */
-export interface HeaderMenuItem {
-  key: string;
-  icon: ReactNode;
-  label: string;
-  run: () => void;
-}
-
-/** The header's quick menu, opened from its badge. */
-export interface HeaderMenu {
-  items: HeaderMenuItem[];
-  /** A quiet line at the menu's foot, such as the model that last answered. */
-  caption?: ReactNode;
-}
-
 /**
  * The middle of a chat's floating header, centred top to bottom: the agent in
  * a round badge, a small name tag overlapping the badge's lower edge, and, in
  * a Concierge chat, a capsule under it with what the Concierge is doing right
  * now. The name and the status are separate, so a short name stays under the
  * badge whatever the status's length. Idle, the status capsule is gone, and
- * the mascot only blinks. The status line is a live region, so a screen
- * reader hears it change; idle, it stays in the page, read but not drawn.
+ * the mascot only blinks, unless the caller gives an `idleText` for the
+ * capsule to say instead (a blank topic chat's welcome). The status line is a
+ * live region, so a screen reader hears it change; idle with no `idleText`,
+ * it stays in the page, read but not drawn.
  *
- * The badge is no action of its own: hovering it, or a click or tap, shows its
- * `menu`. Without the badge, the name tag shows it.
+ * The badge and the name tag are no actions: what a chat opens is in the
+ * header's buttons (`ChatHeaderActions`).
  *
  * Its root lays out as `contents`: the pieces are items of the header's grid.
  * The badge takes the first row, where the side buttons centre on it, and
@@ -77,8 +56,8 @@ export function ConciergeHeaderStatus({
   activity = { kind: "idle" },
   badge = true,
   avatar,
-  menu,
   showsActivity = true,
+  idleText,
 }: {
   name: ReactNode;
   /** What the Concierge is doing; an ordinary chat leaves it idle. */
@@ -87,99 +66,64 @@ export function ConciergeHeaderStatus({
   badge?: boolean;
   /** What the badge holds; the Concierge's mascot when not given. */
   avatar?: ReactNode;
-  menu?: HeaderMenu;
   /**
    * Whether the activity capsule shows under the name: the Concierge's. An
    * ordinary chat's header has none, and its name tag may run longer.
    */
   showsActivity?: boolean;
+  /**
+   * What the status capsule says while the Concierge is idle. Without it an
+   * idle capsule is not drawn; any activity takes its place.
+   */
+  idleText?: string;
 }) {
   const { t } = useTranslation("chat");
-  const status = statusText(activity, t);
+  const status = statusText(activity, t) ?? idleText ?? null;
   const busy = activity.kind !== "idle";
-  const menuLabel = t("chatHeader.menu");
-  const focusRing =
-    "cursor-pointer outline-none outline-2 outline-offset-2 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50";
-  const trigger = (props: BadgeMenuProps | null) =>
-    props ? { type: "button" as const, "aria-label": menuLabel, ...props } : {};
-  const badgeRef = useRef<HTMLElement>(null);
-  const nameRef = useRef<HTMLElement>(null);
-  // The menu stands beside the badge alone, drawn over a long name tag rather
-  // than pushed out by it. Without the badge, the name tag that opens it.
-  const anchor = useRef({
-    getBoundingClientRect: () =>
-      (badgeRef.current ?? nameRef.current)?.getBoundingClientRect() ?? new DOMRect(),
-  });
-  const badgeEl = (props: BadgeMenuProps | null) => {
-    const Badge = props ? "button" : "div";
-    return (
-      <Badge
-        ref={badgeRef as never}
-        data-concierge-header-badge
-        {...trigger(props)}
+  const badgeEl = (
+    <div
+      data-concierge-header-badge
+      className={cn(
+        "pointer-events-auto col-start-2 row-start-1 flex size-11 items-center justify-center justify-self-center rounded-full",
+        FLOATING_SURFACE,
+      )}
+    >
+      {avatar ?? (
+        // About 60% of the badge, so the bob and the squash keep inside it.
+        <RomeMascot
+          alive={busy && activity.kind !== "needsYou"}
+          // A touch lighter than the text it sits beside.
+          className="h-6.5 w-auto text-foreground/80"
+        />
+      )}
+    </div>
+  );
+  const nameEl = (
+    <div
+      data-concierge-header-name
+      className={cn(
+        badge ? "row-start-2 -mt-1" : "row-start-1",
+        // Above the badge, so the tag covers the badge's edge, not the reverse.
+        "pointer-events-auto relative z-10 col-start-2 flex h-5 min-w-0 max-w-full items-center justify-self-center rounded-full px-2",
+        FLOATING_SURFACE,
+      )}
+    >
+      {/* Eight CJK characters at the tag's own size, then an ellipsis. */}
+      {/* A chat title runs to about twice that, and never into the side buttons. */}
+      <span
         className={cn(
-          "pointer-events-auto col-start-2 row-start-1 flex size-11 items-center justify-center justify-self-center rounded-full",
-          FLOATING_SURFACE,
-          props && focusRing,
+          "truncate text-aux font-medium text-muted-foreground",
+          showsActivity ? "max-w-[8em]" : "max-w-[min(16em,calc(100cqw-16rem))]",
         )}
       >
-        {avatar ?? (
-          // About 60% of the badge, so the bob and the squash keep inside it.
-          <RomeMascot
-            alive={busy && activity.kind !== "needsYou"}
-            // A touch lighter than the text it sits beside.
-            className={cn("h-6.5 w-auto text-foreground/80", props && "cursor-pointer")}
-          />
-        )}
-      </Badge>
-    );
-  };
-  const nameEl = (props: BadgeMenuProps | null) => {
-    const NameTag = props ? "button" : "div";
-    return (
-      <NameTag
-        ref={nameRef as never}
-        data-concierge-header-name
-        {...trigger(props)}
-        className={cn(
-          props && focusRing,
-          badge ? "row-start-2 -mt-1" : "row-start-1",
-          // Above the badge, so the tag covers the badge's edge, not the reverse.
-          "pointer-events-auto relative z-10 col-start-2 flex h-5 min-w-0 max-w-full items-center justify-self-center rounded-full px-2",
-          FLOATING_SURFACE,
-        )}
-      >
-        {/* Eight CJK characters at the tag's own size, then an ellipsis. */}
-        {/* A chat title runs to about twice that, and never into the side buttons. */}
-        <span
-          className={cn(
-            "truncate text-aux font-medium text-muted-foreground",
-            showsActivity ? "max-w-[8em]" : "max-w-[min(16em,calc(100cqw-16rem))]",
-          )}
-        >
-          {name}
-        </span>
-      </NameTag>
-    );
-  };
+        {name}
+      </span>
+    </div>
+  );
   return (
     <div data-concierge-header-status data-activity={activity.kind} className="contents">
-      {badge ? (
-        menu ? (
-          <QuickMenu menu={menu} anchor={anchor}>
-            {badgeEl}
-          </QuickMenu>
-        ) : (
-          badgeEl(null)
-        )
-      ) : null}
-      {!badge && menu ? (
-        <QuickMenu menu={menu} anchor={anchor}>
-          {nameEl}
-        </QuickMenu>
-      ) : (
-        nameEl(null)
-      )}
+      {badge ? badgeEl : null}
+      {nameEl}
       {showsActivity ? (
         <div
           data-concierge-header-activity
@@ -226,140 +170,24 @@ function statusText(
   }
 }
 
-// How long the pointer may be off both the badge and the menu before it closes,
-// so it can cross the gap between them.
-const LEAVE_DELAY_MS = 150;
-
-/** Where the header leaves no room beside the badge: the phone layout. */
-const NARROW_QUERY = "(width < 48rem)";
-
-type BadgeMenuProps = {
-  onClick: (event: MouseEvent<HTMLElement>) => void;
-  onPointerEnter: (event: PointerEvent<HTMLElement>) => void;
-  onPointerLeave: (event: PointerEvent<HTMLElement>) => void;
-  onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
-  "aria-haspopup": "menu";
-  "aria-expanded": boolean;
-};
-
 /**
- * The badge's quick menu, to the right of the badge, each item opening its
- * tab in the side pane. Hovering the badge shows it, and a click or a tap
- * shows it too, where nothing hovers; the badge opens nothing itself. Arrow
- * Down shows it from the keyboard and moves into it. It holds no counts or
- * marks.
+ * The link a task chat's header starts with: back to the Concierge chat it
+ * reports to, named by that chat. It floats like the header's round buttons.
  */
-function QuickMenu({
-  menu,
-  anchor,
-  children,
-}: {
-  menu: HeaderMenu;
-  anchor: RefObject<{ getBoundingClientRect: () => DOMRect }>;
-  children: (props: BadgeMenuProps) => ReactNode;
-}) {
+export function BackToConciergeChat({ to, name }: { to: string; name: string }) {
   const { t } = useTranslation("chat");
-  const [open, setOpen] = useState(false);
-  const narrow =
-    open && typeof window.matchMedia === "function" && window.matchMedia(NARROW_QUERY).matches;
-  const leaveTimer = useRef<number | null>(null);
-  // Set when the keyboard opened the menu, which then takes focus.
-  const fromKeyboard = useRef(false);
-  const cancelLeave = () => {
-    if (leaveTimer.current !== null) window.clearTimeout(leaveTimer.current);
-    leaveTimer.current = null;
-  };
-  const leave = () => {
-    cancelLeave();
-    leaveTimer.current = window.setTimeout(() => setOpen(false), LEAVE_DELAY_MS);
-  };
-  useEffect(() => cancelLeave, []);
-  const choose = (run: () => void) => {
-    setOpen(false);
-    run();
-  };
-  const badgeProps: BadgeMenuProps = {
-    "aria-haspopup": "menu",
-    "aria-expanded": open,
-    onPointerEnter: (event) => {
-      if (event.pointerType !== "mouse") return;
-      cancelLeave();
-      setOpen(true);
-    },
-    onPointerLeave: (event) => {
-      if (event.pointerType === "mouse") leave();
-    },
-    // A hover has shown it already; a click keeps it, and a tap toggles it.
-    onClick: (event) => {
-      event.preventDefault();
-      cancelLeave();
-      setOpen((was) =>
-        (event.nativeEvent as globalThis.PointerEvent).pointerType === "mouse" ? true : !was,
-      );
-    },
-    onKeyDown: (event) => {
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        fromKeyboard.current = true;
-        setOpen(true);
-      }
-    },
-  };
   return (
-    <Popover open={open} onOpenChange={setOpen} modal={false}>
-      <PopoverAnchor virtualRef={anchor} />
-      {children(badgeProps)}
-      <PopoverContent
-        role="menu"
-        aria-label={t("chatHeader.menu")}
-        // Beside the badge, as on a desktop; under it where a phone leaves no
-        // room at its side.
-        side={narrow ? "bottom" : "right"}
-        align={narrow ? "center" : "start"}
-        sideOffset={8}
-        collisionPadding={8}
-        // Hover or a tap leaves focus where it was; Arrow Down moves it to
-        // the first item.
-        onOpenAutoFocus={(event) => {
-          if (!fromKeyboard.current) event.preventDefault();
-          fromKeyboard.current = false;
-        }}
-        onKeyDown={(event) => {
-          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-          event.preventDefault();
-          const all = [...event.currentTarget.querySelectorAll<HTMLElement>("[role=menuitem]")];
-          const at = all.indexOf(document.activeElement as HTMLElement);
-          const step = event.key === "ArrowDown" ? 1 : -1;
-          all[(at + step + all.length) % all.length]?.focus();
-        }}
-        onPointerEnter={cancelLeave}
-        onPointerLeave={(event) => {
-          if (event.pointerType === "mouse") leave();
-        }}
-        className="w-auto max-w-64 min-w-40 gap-1 p-1"
-      >
-        {menu.items.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            role="menuitem"
-            data-concierge-menu-item={item.key}
-            onClick={() => choose(item.run)}
-            className="flex h-[var(--control-h-md)] w-full min-w-0 cursor-pointer items-center gap-2 rounded-8 px-2 text-left text-ui text-foreground outline-none outline-1 -outline-offset-1 outline-transparent hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground"
-          >
-            {item.icon}
-            <span className="min-w-0 truncate">{item.label}</span>
-          </button>
-        ))}
-        {menu.caption ? (
-          <div
-            data-concierge-menu-caption
-            className="flex min-w-0 items-center gap-2 border-t border-border-subtle px-2 pt-2 pb-1 text-aux text-muted-foreground [&_svg]:size-3.5 [&_svg]:shrink-0"
-          >
-            {menu.caption}
-          </div>
-        ) : null}
-      </PopoverContent>
-    </Popover>
+    <Link
+      to={to}
+      data-back-to-concierge-chat
+      aria-label={t("taskLink.backTo", { name })}
+      className={cn(
+        "pointer-events-auto col-start-1 row-start-1 inline-flex h-[var(--control-h-md)] max-w-48 shrink-0 items-center gap-1 justify-self-start rounded-full pl-2 pr-3 text-ui text-foreground transition hover:bg-surface-hover outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50",
+        FLOATING_SURFACE,
+      )}
+    >
+      <ChevronLeft className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="truncate">{name}</span>
+    </Link>
   );
 }

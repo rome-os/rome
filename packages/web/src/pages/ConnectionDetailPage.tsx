@@ -13,7 +13,7 @@ import { ConnectionDetailBody } from "@/components/ConnectionDetail";
 import { accountRoute, buildConnectionCards } from "@/lib/connection-cards";
 import { CONNECTIONS_REFRESH_INTERVAL_MS, fetchConnections } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
-import { Page, Measure, Section } from "@rome-os/ui/page";
+import { Measure, Page, Section } from "@rome-os/ui/page";
 
 /**
  * Per-account Connection detail page (`/settings/connections/:serviceId`).

@@ -128,6 +128,10 @@ describe("GET /connections", () => {
       agent: null,
       link: "own_account",
       severalAccounts: false,
+      chatRules: ["session.reset"],
+      chatRuleDefaults: expect.objectContaining({
+        activation: { mode: "all", botMessages: "all", whenOthersMentioned: "respond" },
+      }),
     });
 
     // Nothing granted on discord yet: its grant unauthorized, everything
@@ -233,6 +237,49 @@ describe("GET /connections", () => {
       account: null,
       link: null,
       severalAccounts: false,
+      // A kind that declares no chat rules offers the session reset alone.
+      chatRules: ["session.reset"],
+      chatRuleDefaults: expect.objectContaining({
+        activation: { mode: "all", botMessages: "all", whenOthersMentioned: "respond" },
+      }),
+    });
+  });
+
+  it("lists the chat rules each kind offers, in the dashboard's order, and none for a kind with no chats", async () => {
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
+    const telegram = makePasteTalkWithProfile();
+    telegram.descriptor.chatRules = { offers: ["session.reset", "enabled"] };
+    const discord = makeBotAll();
+    discord.descriptor.chatRules = { offers: [] };
+    delete (discord.descriptor.capabilities as { talker?: unknown }).talker;
+    registry.register(telegram.descriptor);
+    registry.register(discord.descriptor);
+
+    const res = await makeApp(registry).request("/connections");
+    const { connections } = await res.json();
+
+    expect(
+      connections.map((c: { connectionKind: string; chatRules: string[] }) => [
+        c.connectionKind,
+        c.chatRules,
+      ]),
+    ).toEqual([
+      ["fake-discord", []],
+      ["fake-telegram", ["enabled", "session.reset"]],
+    ]);
+    // A kind that fixes nothing runs its group chats on Core's defaults.
+    const byKind = new Map(
+      connections.map((c: { connectionKind: string; chatRuleDefaults: unknown }) => [
+        c.connectionKind,
+        c.chatRuleDefaults,
+      ]),
+    );
+    expect(byKind.get("fake-discord")).toBeNull();
+    expect(byKind.get("fake-telegram")).toMatchObject({
+      enabled: true,
+      activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
+      replies: { placement: "thread" },
+      routing: { agentName: null },
     });
   });
 
@@ -788,6 +835,36 @@ describe("DELETE /connections/:id", () => {
     expect(await ledger.all()).toEqual([]);
     // The live talk epoch was torn down with the connection.
     expect(fixture.talkerFactory.instances[0].state.stopCount).toBe(1);
+  });
+
+  it("takes back a kind's access at the platform, and warns when that failed", async () => {
+    const ledger = makeLedger();
+    const registry = new ConnectionRegistry({ repository: ledger });
+    const fixture = makePasteTalkWithProfile();
+    const taken: unknown[] = [];
+    registry.register({
+      ...fixture.descriptor,
+      onDisconnect: async ({ material }) => {
+        taken.push(material);
+        throw new Error("platform unreachable");
+      },
+    });
+    const conn = await registry.connect("fake-telegram", "Telegram");
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.validCredential());
+
+    const res = await makeApp(registry).request(`/connections/${conn.id}`, {
+      method: "DELETE",
+      headers: SAME_ORIGIN,
+    });
+
+    expect(res.status).toBe(200);
+    expect(taken).toHaveLength(1);
+    expect(await res.json()).toEqual({
+      ok: true,
+      warning:
+        "Disconnected in Rome, but the service may still hold Rome's access: platform unreachable. Remove Rome there too.",
+    });
+    expect(await ledger.all()).toEqual([]);
   });
 
   it("404s an unknown connection and rejects cross-site requests", async () => {

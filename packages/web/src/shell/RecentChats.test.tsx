@@ -72,6 +72,8 @@ interface MockSession {
   pinnedAt?: string | null;
   agentName?: string;
   triggerKind?: string;
+  /** What `GET /chat/sessions/:id` adds for a task chat: the Concierge chat it reports to. */
+  taskOf?: { conciergeChatId: string; conciergeChatName: string; main: boolean };
   deviceFolder?: { deviceId: string; deviceName: string; platform: string | null; path: string };
 }
 
@@ -97,6 +99,13 @@ function mockSessions(sessions: MockSession[], settings?: Record<string, unknown
     const url = String(input);
     const method = init?.method ?? "GET";
     if (url === "/api/settings" && settings) return Response.json(settings);
+    const one = url.match(/^\/api\/chat\/sessions\/([^/?]+)$/)?.[1];
+    if (one && method === "GET") {
+      const found = sessions.find((s) => s.id === one);
+      return found
+        ? Response.json(found)
+        : new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+    }
     if (url.startsWith("/api/chat/sessions") && method === "GET") {
       const status = new URL(url, "http://localhost").searchParams.get("status") ?? "active";
       const filtered = sessions.filter((s) => {
@@ -114,6 +123,13 @@ function mockSessions(sessions: MockSession[], settings?: Record<string, unknown
         status: 200,
         headers: { "content-type": "application/json" },
       });
+    }
+    if (/\/api\/chat\/sessions\/[^/]+\/pin$/.test(url) && method === "PATCH") {
+      const id = url.match(/\/api\/chat\/sessions\/([^/]+)\/pin$/)?.[1];
+      const body = JSON.parse(String(init?.body ?? "{}")) as { pinned?: boolean };
+      const target = sessions.find((s) => s.id === id);
+      if (target) target.pinnedAt = body.pinned ? new Date().toISOString() : null;
+      return Response.json(target ?? {});
     }
     if (/\/api\/chat\/sessions\/[^/]+\/name$/.test(url) && method === "PATCH") {
       const id = url.match(/\/api\/chat\/sessions\/([^/]+)\/name$/)?.[1];
@@ -181,7 +197,7 @@ function textIndex(container: HTMLElement, text: string): number {
 }
 
 describe("RecentChats", () => {
-  it("lists the main chat as Main chat and the task chats under Tasks in Concierge mode, with no Projects", async () => {
+  it("lists the main chat as Main chat in Concierge mode, with no Projects, no Tasks panel and no task chat", async () => {
     concierge.chatId = "concierge";
     mockSessions(
       [
@@ -191,22 +207,38 @@ describe("RecentChats", () => {
       ],
       { agentName: "Milo" },
     );
-    const user = userEvent.setup();
     renderRecentChats();
     const entry = await screen.findByRole("link", { name: "Main chat" });
     expect(entry.getAttribute("href")).toBe("/message");
-    // The Tasks panel starts folded.
-    await user.click(await screen.findByRole("button", { name: /^Tasks/ }));
-    const task = await screen.findByRole("link", { name: /Find flights/ });
-    expect(task.getAttribute("href")).toBe("/chat/task-1");
-    expect(
-      within(screen.getByRole("region", { name: /^Tasks/ })).getByRole("link", {
-        name: /Find flights/,
-      }),
-    ).toBe(task);
+    // The Tasks view is in the Concierge chat's side panel: the list has no
+    // panel, and the task chat is no chat of it.
+    expect(screen.queryByRole("button", { name: /^Tasks/ })).toBeNull();
+    expect(screen.queryByRole("region", { name: /^Tasks/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Find flights/ })).toBeNull();
     expect(screen.queryByRole("link", { name: "My own chat" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Projects" })).toBeNull();
     expect(screen.queryByRole("link", { name: /^(Milo|Concierge)$/ })).toBeNull();
+  });
+
+  it("marks the Concierge chat a task chat reports to while the task chat is open", async () => {
+    concierge.chatId = "concierge";
+    concierge.chats = [
+      { id: "concierge", name: "Main chat", main: true, unread: 0 },
+      { id: "topic-1", name: "Trips", main: false, unread: 0 },
+    ];
+    mockSessions([
+      { ...sessionRow("concierge", "Concierge"), agentName: "core:concierge" },
+      { ...sessionRow("topic-1", "Trips"), agentName: "core:concierge" },
+      {
+        ...sessionRow("task-1", "Find flights"),
+        triggerKind: "concierge",
+        taskOf: { conciergeChatId: "topic-1", conciergeChatName: "Trips", main: false },
+      },
+    ]);
+    renderRecentChats("/chat/task-1");
+    const topic = await screen.findByRole("link", { name: /Trips/ });
+    await waitFor(() => expect(topic.className).toContain("shadow-4"));
+    expect(screen.getByRole("link", { name: "Main chat" }).className).not.toContain("shadow-4");
   });
 
   it("lists only common and fork chats under Projects in Chat mode, and hides the Concierge section", async () => {
@@ -225,7 +257,6 @@ describe("RecentChats", () => {
     expect(screen.queryByRole("link", { name: /Find flights/ })).toBeNull();
     expect(screen.queryByRole("link", { name: "Calendar" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Main chat" })).toBeNull();
-    expect(screen.queryByRole("region", { name: /^Tasks/ })).toBeNull();
     expect(document.querySelector("hr")).toBeNull();
   });
 
@@ -424,8 +455,11 @@ describe("RecentChats", () => {
       renderRecentChats();
       const entry = await screen.findByRole("link", { name: "Calendar, 2 unread messages" });
       expect(entry.getAttribute("href")).toBe("/chat/topic-1");
-      expect(entry.firstElementChild?.querySelector("[data-concierge-unread]")).toBeTruthy();
-      expect(entry.firstElementChild?.querySelector("svg")).toBeNull();
+      // The count sits on the corner of the #, which still shows.
+      expect(entry.firstElementChild?.querySelector("[data-concierge-unread]")?.textContent).toBe(
+        "2",
+      );
+      expect(entry.firstElementChild?.querySelector("svg.lucide-hash")).toBeTruthy();
       // The main chat is the Concierge entry, not a row of its own.
       expect(screen.queryByRole("link", { name: /^Concierge, / })).toBeNull();
 
@@ -462,6 +496,93 @@ describe("RecentChats", () => {
         }),
       );
       await waitFor(() => expect(screen.getByTestId("location-path").textContent).toBe("/message"));
+    });
+  });
+
+  describe("pinning a Concierge topic chat", () => {
+    const topic = (id: string, name: string, extra: Partial<MockSession> = {}) => ({
+      ...sessionRow(id, name),
+      agentName: "core:concierge",
+      ...extra,
+    });
+
+    beforeEach(() => {
+      concierge.chatId = "concierge";
+      concierge.chats = [
+        { id: "concierge", name: "Concierge", main: true, unread: 0 },
+        { id: "topic-old", name: "Old pin", main: false, unread: 0 },
+        { id: "topic-new", name: "New pin", main: false, unread: 0 },
+        { id: "topic-busy", name: "Busy", main: false, unread: 0 },
+      ];
+    });
+
+    it("lists pinned topic chats first, the latest pin on top, each with a pin", async () => {
+      mockSessions([
+        topic("concierge", "Concierge"),
+        topic("topic-old", "Old pin", {
+          activityAt: "2026-07-01T10:00:00.000Z",
+          pinnedAt: "2026-07-02T10:00:00.000Z",
+        }),
+        topic("topic-new", "New pin", {
+          activityAt: "2026-07-01T09:00:00.000Z",
+          pinnedAt: "2026-07-03T10:00:00.000Z",
+        }),
+        // The latest activity, but not pinned: under the pins.
+        topic("topic-busy", "Busy", { activityAt: "2026-07-09T10:00:00.000Z" }),
+      ]);
+      const { container } = renderRecentChats();
+      // The pins come with the chat list, after the Concierge's own list.
+      await waitFor(() =>
+        expect(
+          screen.getByRole("link", { name: "New pin" }).querySelector("[data-topic-pinned]"),
+        ).toBeTruthy(),
+      );
+      expect(
+        screen.getByRole("link", { name: "Busy" }).querySelector("svg.lucide-hash"),
+      ).toBeTruthy();
+      expect(textIndex(container, "New pin")).toBeLessThan(textIndex(container, "Old pin"));
+      expect(textIndex(container, "Old pin")).toBeLessThan(textIndex(container, "Busy"));
+    });
+
+    it("pins and unpins a topic chat from its menu", async () => {
+      const spy = mockSessions([
+        topic("concierge", "Concierge"),
+        topic("topic-old", "Old pin", { pinnedAt: "2026-07-02T10:00:00.000Z" }),
+        topic("topic-new", "New pin"),
+        topic("topic-busy", "Busy"),
+      ]);
+      const user = userEvent.setup();
+      renderRecentChats();
+      await user.click(await screen.findByRole("button", { name: "Actions for Busy" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Pin" }));
+      await user.click(await screen.findByRole("button", { name: "Actions for Old pin" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Unpin" }));
+      const pins = spy.mock.calls
+        .filter(([url]) => String(url).endsWith("/pin"))
+        .map(([url, init]) => [String(url), JSON.parse(String(init?.body))]);
+      expect(pins).toEqual([
+        ["/api/chat/sessions/topic-busy/pin", { pinned: true }],
+        ["/api/chat/sessions/topic-old/pin", { pinned: false }],
+      ]);
+    });
+
+    it("shows an archived topic chat unpinned, with no pin in its menu", async () => {
+      localStorage.setItem("rome-recent-chats-status-filter", "archived");
+      mockSessions([
+        topic("concierge", "Concierge"),
+        topic("old-topic", "Old topic", {
+          archivedAt: "2026-07-08T12:00:00.000Z",
+          pinnedAt: "2026-07-02T10:00:00.000Z",
+        }),
+      ]);
+      const user = userEvent.setup();
+      renderRecentChats();
+      const row = await screen.findByRole("link", { name: "Old topic" });
+      expect(row.querySelector("[data-topic-pinned]")).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Actions for Old topic" }));
+      await screen.findByRole("menuitem", { name: "Unarchive chat" });
+      expect(screen.queryByRole("menuitem", { name: "Pin" })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "Unpin" })).toBeNull();
     });
   });
 
@@ -817,8 +938,11 @@ describe("RecentChats", () => {
       mockConcierge();
       renderRecentChats();
       const entry = await screen.findByRole("link", { name: "Main chat, 3 unread messages" });
-      expect(entry.firstElementChild?.querySelector("[data-concierge-unread]")).toBeTruthy();
-      expect(entry.firstElementChild?.querySelector("svg")).toBeNull();
+      // The count sits on the corner of the logo, which still shows.
+      expect(entry.firstElementChild?.querySelector("[data-concierge-unread]")?.textContent).toBe(
+        "3",
+      );
+      expect(entry.firstElementChild?.querySelector("svg")).toBeTruthy();
     });
 
     it("says Main chat, not the name the guardian gave their agent", async () => {
@@ -863,14 +987,14 @@ describe("RecentChats", () => {
       mockConcierge();
       renderRecentChats();
       const entry = await screen.findByRole("link", { name: "Main chat, 99+ unread messages" });
-      expect(entry.querySelector("[data-concierge-unread]")?.textContent).toContain("99+");
+      expect(entry.querySelector("[data-concierge-unread]")?.textContent).toBe("99+");
     });
 
     it("shows the unread count as its only badge", async () => {
       server.unread = 3;
       mockConcierge();
       renderRecentChats();
-      // The link's label is the unread count alone: the tasks live in the chat's Tasks panel.
+      // The link's label is the unread count alone: the tasks live in the chat's Tasks view.
       const entry = await screen.findByRole("link", { name: "Main chat, 3 unread messages" });
       expect(
         within(entry)

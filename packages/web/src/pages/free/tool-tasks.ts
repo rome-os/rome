@@ -16,7 +16,7 @@ export interface ToolTasksHost {
    */
   compact: boolean;
   /**
-   * Adds the tab for Concierge chat `chatId`'s task list and selects it. A
+   * Adds the tab for Concierge chat `chatId`'s tasks and selects it. A
    * collapsed pane shows it without saving a change to its state.
    */
   show: (chatId: string) => void;

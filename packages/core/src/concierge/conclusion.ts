@@ -60,12 +60,6 @@ export function conclusionOf(answer: string): Conclusion {
   return length > CONCLUSION_MAX_CHARS ? { kind: "too_long", length } : { kind: "found", text };
 }
 
-/** Whether `answer`'s conclusion is the fixed line that says it has no news. */
-export function hasNothingToReport(answer: string): boolean {
-  const conclusion = conclusionOf(answer);
-  return conclusion.kind === "found" && conclusion.text === NOTHING_TO_REPORT;
-}
-
 /**
  * The answer with the conclusion's markers removed and everything else
  * untouched: a line the markers leave empty goes with them, and no other

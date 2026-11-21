@@ -1,5 +1,5 @@
 // Main-process bridge to the live EmailAdapter. Channel contract: docs/architecture/channels.md.
-// The `email_inbound` action runs in a forked action worker, where the channel
+// The `system:email_inbound` action runs in a forked action worker, where the channel
 // adapter map holds only RPC proxies — the real EmailAdapter (with its inbound
 // secret, MailProvider, and onMessage pipeline) lives in the main process. This
 // control resolves that adapter per call so an email channel enabled/disabled at

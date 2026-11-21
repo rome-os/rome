@@ -17,6 +17,8 @@ import {
 } from "./db.js";
 import * as schema from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
+import type * as connections from "../connections/message.js";
+import { legacyMessage } from "../connections/test-fixtures.js";
 import { givenGrant } from "../connections/connection.js";
 import type { GrantValue } from "../connections/grant.js";
 import type { Credential } from "../connections/types.js";
@@ -231,7 +233,7 @@ export interface SentMessage {
 export class FakeTransport {
   /** Every message sent and accepted, oldest first. */
   readonly sentMessages: SentMessage[] = [];
-  private readonly listeners = new Set<(message: ChannelMessage) => Promise<void>>();
+  private readonly listeners = new Set<(message: connections.Message) => Promise<void>>();
 
   constructor(readonly channel = "test") {}
 
@@ -243,7 +245,7 @@ export class FakeTransport {
   }
 
   /** What the Connection's talker delivers through. */
-  listen(listener: (message: ChannelMessage) => Promise<void>): () => void {
+  listen(listener: (message: connections.Message) => Promise<void>): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -256,7 +258,9 @@ export class FakeTransport {
    */
   async receive(overrides: Partial<ChannelMessage> = {}): Promise<ChannelMessage> {
     const message = buildMessage({ channel: this.channel, ...overrides });
-    await Promise.all([...this.listeners].map((listener) => listener(message)));
+    // The talker hands over the Connections message apps receive this as.
+    const heard = legacyMessage(message);
+    await Promise.all([...this.listeners].map((listener) => listener(heard)));
     return message;
   }
 }
@@ -288,7 +292,7 @@ export function createTestConnections(
       id,
       connectionKind,
       withTalker: (call: (talker: TestTalker) => unknown) => call(live),
-      hearTalker: (handler: (message: ChannelMessage) => Promise<void>) =>
+      hearTalker: (handler: (message: connections.Message) => Promise<void>) =>
         transport.listen(handler),
       isUnlocked: (capability: string) => capability === "chat",
       status: () => ({ chat: { state: "unlocked" } }),
@@ -845,7 +849,7 @@ export async function buildTestDeps(
     sessionOpeningFor: sessionOpeningFor({ channelSurface: testChannelSurface }),
     conversationTitleGenerator: {
       async generate(firstMessage) {
-        return normalizeConversationTitle(firstMessage) ?? "New Chat";
+        return normalizeConversationTitle(firstMessage) ?? "New chat";
       },
     },
     agentRunner,

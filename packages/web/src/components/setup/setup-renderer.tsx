@@ -93,6 +93,14 @@ export function StandardSetupRenderer(
             href={state.url}
             className="text-info-fg underline underline-offset-2"
             rel="noreferrer"
+            onClick={(event) => {
+              // The desktop window has no keychain or platform authenticator,
+              // so a sign-in with a passkey cannot finish there. `window.open`
+              // reaches the shell, which hands the URL to the system browser.
+              if (!isElectronShell()) return;
+              event.preventDefault();
+              window.open(state.url);
+            }}
           >
             {labels.continue}
           </a>

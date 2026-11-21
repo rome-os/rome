@@ -4,6 +4,7 @@ import { questionCardRender } from "../fixtures/question-card";
 import type { Question } from "@rome/api-types/question-card";
 import type {
   ChatId,
+  ChatSettingField,
   ChatSettings,
   ChatSettingsListItem,
   PartialChatSettings,
@@ -64,7 +65,7 @@ import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
 import type { ConnectedAccountEntry } from "@rome/api-types/connected-accounts";
-import { connections } from "./connections-store";
+import { CHAT_RULE_DEFAULTS, chatRuleDefaultsOf, connections } from "./connections-store";
 
 /** Connected accounts left by a disconnect in this session, each with its
  *  agent. Core keeps them, so Envoys lists them as disconnected. */
@@ -1353,13 +1354,50 @@ const composioStatus: { composio: ComposioCliStatus } = {
   },
 };
 
-const conversationDefaults: ChatSettings = {
-  enabled: true,
-  activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
-  replies: { placement: "thread" },
-  routing: { agentName: null },
-  session: { reset: { mode: "idle", idleMinutes: 10_080 } },
-};
+const conversationDefaults: ChatSettings = CHAT_RULE_DEFAULTS;
+
+const DISCORD_FIELDS: ChatSettingField[] = [
+  "enabled",
+  "activation.mode",
+  "activation.botMessages",
+  "activation.whenOthersMentioned",
+  "replies.placement",
+  "routing.agentName",
+  "session.reset",
+];
+
+/** A channel on the mock Discord bot, with any values a guardian set on it. */
+function discordChannel(
+  chatId: string,
+  displayName: string,
+  containerName: string,
+  overrides: PartialChatSettings = {},
+): ChatSettingsListItem {
+  const configured = Object.keys(overrides).length > 0;
+  return {
+    availability: "online",
+    source: configured ? "configured" : "live",
+    snapshot: {
+      conversation: {
+        ref: { connectionId: "discord-1", chatId: chatId as ChatId },
+        connectionKind: "discord",
+        service: "discord",
+        kind: "channel",
+        displayName,
+        containerName,
+      },
+      supportedFields: DISCORD_FIELDS,
+      effective: mergeSettings(structuredClone(conversationDefaults), overrides),
+      overrides: structuredClone(overrides),
+      ...(configured
+        ? {
+            updatedAt: "2026-11-18T09:30:00.000Z",
+            updatedBy: { kind: "guardian" as const, displayName: "Mock Guardian" },
+          }
+        : {}),
+    },
+  };
+}
 
 const conversationSettings: { items: ChatSettingsListItem[] } = {
   items: [
@@ -1390,6 +1428,18 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
         updatedBy: { kind: "guardian", displayName: "Mock Guardian" },
       },
     },
+    discordChannel("general", "general", "Rome", { activation: { mode: "all" } }),
+    discordChannel("launch", "launch-planning", "Rome", { routing: { agentName: "pm-assistant" } }),
+    discordChannel("random", "random", "Rome", { enabled: false }),
+    discordChannel("announcements", "announcements", "Rome"),
+    discordChannel("design", "design", "Rome"),
+    discordChannel("standup", "standup", "Rome"),
+    discordChannel("support", "customer-support", "Rome Community", {
+      replies: { placement: "inline" },
+    }),
+    discordChannel("welcome", "welcome", "Rome Community"),
+    discordChannel("feedback", "feedback", "Rome Community"),
+    discordChannel("showcase", "showcase", "Rome Community"),
     {
       availability: "offline",
       source: "known",
@@ -1402,7 +1452,8 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
           displayName: "Ray",
           containerName: undefined,
         },
-        supportedFields: ["enabled", "session.reset"],
+        // A direct message offers only the session reset.
+        supportedFields: ["session.reset"],
         effective: {
           ...conversationDefaults,
           session: { reset: { mode: "daily", atHour: 4 } },
@@ -1894,7 +1945,38 @@ export const handlers = [
     return HttpResponse.json({ ok: true, connection: null });
   }),
   http.get("/api/integrations/composio/status", () => HttpResponse.json(composioStatus)),
-  http.get("/api/chat-settings", () => HttpResponse.json(conversationSettings)),
+  http.get("/api/chat-settings", ({ request }) => {
+    const search = new URL(request.url).searchParams;
+    const connectionId = search.get("connectionId");
+    const query = search.get("query")?.trim().toLocaleLowerCase();
+    const changed = search.get("changed") === "true";
+    return HttpResponse.json({
+      items: conversationSettings.items.filter((item) => {
+        const chat = item.snapshot.conversation;
+        if (connectionId && chat.ref.connectionId !== connectionId) return false;
+        if (changed && Object.keys(item.snapshot.overrides).length === 0) return false;
+        if (!query) return true;
+        return [chat.connectionKind, chat.containerName, chat.displayName]
+          .filter(Boolean)
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query);
+      }),
+    });
+  }),
+  http.post("/api/chat-settings/reset", async ({ request }) => {
+    const body = (await request.json()) as { ref: { connectionId: string; chatId: string } };
+    const found = conversationSettings.items.find(
+      (candidate) =>
+        candidate.snapshot.conversation.ref.connectionId === body.ref.connectionId &&
+        candidate.snapshot.conversation.ref.chatId === body.ref.chatId,
+    );
+    if (!found) return HttpResponse.json({ error: "Unknown conversation" }, { status: 404 });
+    found.source = "live";
+    found.snapshot.overrides = {};
+    found.snapshot.effective = chatRuleDefaultsOf(found.snapshot.conversation.connectionKind);
+    return HttpResponse.json(found.snapshot);
+  }),
   // Auto-save writes through on every edit, so mock mode needs a real write
   // path or the dashboard would toast an error on each change.
   http.patch("/api/chat-settings", async ({ request }) => {
@@ -1922,6 +2004,7 @@ export const handlers = [
       delete found.snapshot.overrides.routing;
       found.snapshot.effective.routing.agentName = null;
     }
+    found.source = "configured";
     found.snapshot.updatedAt = new Date().toISOString();
     found.snapshot.updatedBy = { kind: "guardian", displayName: identity.displayName ?? undefined };
     return HttpResponse.json(found.snapshot);

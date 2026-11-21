@@ -296,7 +296,11 @@ describe("skill_review", () => {
       "skills:\n  - skills/deploy-preview\n",
     );
     expect(installCalls).toEqual([
-      { name: "app_management", op: "install", source: { mode: "source", path: carrierDir } },
+      {
+        name: "system:app_management",
+        op: "install",
+        source: { mode: "source", path: carrierDir },
+      },
     ]);
     const { runId } = result.data as { runId: string };
     const runs = createRunsRepository(appDb());

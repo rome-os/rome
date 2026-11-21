@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import {
   and,
@@ -21,61 +20,76 @@ import type { DrizzleDb, DrizzleTx } from "../index.js";
 import type { ChatRef } from "../../chats/storage/place.js";
 import { MessageRepository } from "../../chats/storage/message-repository.js";
 import { MAIN_CHAT_NAME, mainChatIdOf } from "../../concierge/main-chat.js";
-import { GUARDIAN_OWNER, ownerOf } from "../../webchat/owner.js";
-import { createLogger } from "../../logger.js";
-import { CHAT_MESSAGES } from "../../chats/storage/messages-sql.js";
+import { ownerOf } from "../../webchat/owner.js";
 import {
   conciergeMessageTasks,
   conciergeMessageTurns,
-  conciergeTasks,
   romeSessions,
+  taskChats,
 } from "../schema.js";
 
-const log = createLogger("concierge-tasks");
-export type ConciergeTaskRow = typeof conciergeTasks.$inferSelect;
-type ConciergeTaskState = ConciergeTaskRow["state"];
+type TaskChatRow = typeof taskChats.$inferSelect;
 
 /**
- * A row with the name of the task chat it links, which is the chat's own, the
- * Concierge chat it came from, and the id of its source message when that
- * message still exists in that Concierge chat.
+ * A task as the Concierge's code reads it: the task chat's side-table row
+ * with the facts the chat itself holds (docs/domains/chats.md#task). The task
+ * is its task chat, so `id` and `sessionId` are both the chat's id, `title`
+ * is the chat's name, `ownerKey` the chat's owner, and `archivedAt` the
+ * chat's archive time. Only the facts of `task_chats` are stored on the row.
+ */
+export interface ConciergeTaskRow {
+  /** The task's id: its task chat's id. */
+  id: string;
+  /** The task chat's id, the same as `id`. */
+  sessionId: string;
+  /** The task chat's name. */
+  title: string;
+  ownerKey: string;
+  /** The Concierge chat the task reports to, as stored: null is the main chat. */
+  chatId: string | null;
+  sourceMessageId: number | null;
+  note: string | null;
+  stoppedAt: Date | null;
+  lastOutcome: TaskChatRow["lastOutcome"];
+  outcomeUnsaid: boolean;
+  expiredWaitAt: Date | null;
+  noResponseUnlisted: boolean;
+  reportGivenUp: boolean;
+  endedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  archivedAt: Date | null;
+}
+
+/**
+ * A row with the name of its task chat, the Concierge chat it came from, and
+ * the id of its source message when that message still exists in that
+ * Concierge chat.
  */
 export interface ConciergeTaskWithChat {
   row: ConciergeTaskRow;
-  chat: { id: string; name: string } | null;
+  chat: { id: string; name: string };
   /** The Concierge chat the row came from: its owner's main chat when the row names none or its chat is gone. */
   conciergeChat: { id: string; name: string; main: boolean };
-  /** Whose Concierge the row is, as the row records it. Never sent to a client. */
+  /** Whose Concierge the row is, as its chat records it. Never sent to a client. */
   owner: string;
   sourceMessageId: string | null;
 }
 
-/** One write of a batch. An entry without `id` creates a row, one with `id`
- *  updates it. A field left out is left as it is; `null` clears a nullable one. */
+/** What the Concierge may change on a task: its note, and the message it points to. */
 export interface ConciergeTaskWrite {
-  id?: string;
-  title?: string;
-  state?: ConciergeTaskState;
-  summary?: string | null;
+  /** What the Concierge keeps for its later self. Null clears it. */
   note?: string | null;
-  waitingOn?: string | null;
-  dueAt?: Date | null;
-  rank?: number | null;
-  sessionId?: string | null;
-  /** The Concierge chat the row came from. Null is the main chat. */
+  /** The Concierge chat the task reports to. Null is the main chat. */
   chatId?: string | null;
-  /** A message of the row's Concierge chat, by its key there; the caller has
-   *  checked it. */
+  /** A message of the task's Concierge chat, by its key there; the caller has checked it. */
   sourceMessageId?: string | null;
-  archived?: boolean;
 }
 
 /** `write`: settles the task events owed for the row. `refresh`: tells readers
  *  without settling those events. */
 type ChangeKind = "write" | "refresh";
 type ChangeListener = (task: ConciergeTaskWithChat, change: ChangeKind) => void;
-
-const isFinished = (state: ConciergeTaskState) => state === "done" || state === "dropped";
 
 /** A guardian message in a Concierge chat, by its key there. */
 export interface MessageTarget {
@@ -112,11 +126,56 @@ export interface MessageMarkRow {
   endedAs: string[];
 }
 
+/** A task row as its select returns it, with the chat's own facts beside it. */
+interface JoinedTask {
+  task: TaskChatRow;
+  name: string;
+  ownerKey: string | null;
+  createdAt: Date;
+  archivedAt: Date | null;
+}
+
+function toRow({ task, name, ownerKey, createdAt, archivedAt }: JoinedTask): ConciergeTaskRow {
+  return {
+    id: task.sessionId,
+    sessionId: task.sessionId,
+    title: name,
+    ownerKey: ownerOf({ ownerKey }),
+    chatId: task.conciergeChatId,
+    sourceMessageId: task.sourceMessageId,
+    note: task.note,
+    stoppedAt: task.stoppedAt,
+    lastOutcome: task.lastOutcome,
+    outcomeUnsaid: task.outcomeUnsaid,
+    expiredWaitAt: task.expiredWaitAt,
+    noResponseUnlisted: task.noResponseUnlisted,
+    reportGivenUp: task.reportGivenUp,
+    endedAt: task.endedAt,
+    createdAt,
+    updatedAt: task.updatedAt,
+    archivedAt,
+  };
+}
+
+const JOINED = {
+  task: taskChats,
+  name: romeSessions.name,
+  ownerKey: romeSessions.ownerKey,
+  createdAt: romeSessions.createdAt,
+  archivedAt: romeSessions.archivedAt,
+} as const;
+
 /**
- * The Concierge's todo list. Only the Concierge's tools write it; every write
- * tells the change listeners, which push the row to the panel and settle the
- * task events the Concierge owed for it.
+ * The Concierge's task chats (docs/domains/chats.md#task): one row of facts
+ * per task chat, kept beside what the chat itself holds. Every write tells the
+ * change listeners, which push the row to the Tasks view and settle the task
+ * events the Concierge owed for it.
  */
+/** The task's last outcome with its owner's mark of done taken off: a mark ends only the stop it came with. */
+const notMarkedDone = sql<
+  TaskChatRow["lastOutcome"]
+>`CASE WHEN ${taskChats.lastOutcome} = 'done_by_owner' THEN NULL ELSE ${taskChats.lastOutcome} END`;
+
 export class ConciergeTasksRepository {
   private listeners = new Set<ChangeListener>();
   private messageListeners = new Set<(target: MessageTarget) => void>();
@@ -141,10 +200,13 @@ export class ConciergeTasksRepository {
     chatId: string,
     isOpen: (rows: ConciergeTaskRow[]) => Promise<Set<string>>,
   ): Promise<number> {
-    const rows = await this.db
-      .select()
-      .from(conciergeTasks)
-      .where(and(eq(conciergeTasks.chatId, chatId), isNull(conciergeTasks.archivedAt)));
+    const rows = (
+      await this.db
+        .select(JOINED)
+        .from(taskChats)
+        .innerJoin(romeSessions, eq(romeSessions.id, taskChats.sessionId))
+        .where(and(eq(taskChats.conciergeChatId, chatId), isNull(romeSessions.archivedAt)))
+    ).map(toRow);
     const openIds = await isOpen(rows);
     const open = rows.filter((row) => openIds.has(row.id));
     for (const { id } of open) await this.announce(id, "refresh");
@@ -152,12 +214,12 @@ export class ConciergeTasksRepository {
   }
 
   /**
-   * Task chat `chatId` is archived or deleted: the row of `owner` that links
-   * the chat is archived, in the one transaction that `alsoIn` archives or
-   * deletes the chat in, and stopped for that reason when `stop` says the
-   * task is still open. A task that already ended keeps how it ended.
-   * Answers the row, or null when the chat links no row of `owner`; the chat
-   * is archived or deleted either way.
+   * Task chat `chatId` is archived or deleted: the row of `owner` is stopped
+   * when `stop` says the task is still open, in the one transaction that
+   * `alsoIn` archives or deletes the chat in. A task that already ended keeps
+   * how it ended. Deleting the chat deletes the row with it. Answers the row
+   * as it stood, or null when the chat is no task chat of `owner`'s; the
+   * chat is archived or deleted either way.
    */
   async endWithChat(
     chatId: string,
@@ -167,86 +229,69 @@ export class ConciergeTasksRepository {
     now = new Date(),
     stop = true,
   ): Promise<ConciergeTaskRow | null> {
+    // What a deleted task leaves behind is told once it is gone: its row
+    // goes with the chat, and so do the links of its messages.
+    const gone =
+      end === "deleted"
+        ? { task: await this.getWithChat(chatId), messages: await this.messagesOfTask(chatId) }
+        : null;
     const ended = this.db.transaction((tx) => {
-      const row = tx
-        .select()
-        .from(conciergeTasks)
-        .where(eq(conciergeTasks.sessionId, chatId))
+      const found = tx
+        .select(JOINED)
+        .from(taskChats)
+        .innerJoin(romeSessions, eq(romeSessions.id, taskChats.sessionId))
+        .where(eq(taskChats.sessionId, chatId))
         .get();
-      const own = row && ownerOf(row) === owner ? row : null;
-      const [written] = own
-        ? tx
-            .update(conciergeTasks)
-            .set({
-              stoppedAt: own.stoppedAt ?? (stop ? now : null),
-              stopReason: own.stopReason ?? (stop ? end : null),
-              // Only a row archiving the chat archived comes back with it.
-              archivedAt: own.archivedAt ?? now,
-              archivedWithChat: own.archivedAt ? own.archivedWithChat : true,
-              updatedAt: now,
-            })
-            .where(eq(conciergeTasks.id, own.id))
-            .returning()
-            .all()
-        : [];
+      const own = found && ownerOf({ ownerKey: found.ownerKey }) === owner ? found : null;
+      if (own) {
+        tx.update(taskChats)
+          .set({
+            stoppedAt: own.task.stoppedAt ?? (stop ? now : null),
+            // Stopped by the archive here, it ends stopped, never as marked done.
+            ...(own.task.stoppedAt === null && stop ? { lastOutcome: notMarkedDone } : {}),
+            updatedAt: now,
+          })
+          .where(eq(taskChats.sessionId, chatId))
+          .run();
+      }
       alsoIn(tx);
-      return written ?? null;
+      if (!own) return null;
+      // As it stands after the write: archived by the chat's own archive.
+      const after = tx
+        .select(JOINED)
+        .from(taskChats)
+        .innerJoin(romeSessions, eq(romeSessions.id, taskChats.sessionId))
+        .where(eq(taskChats.sessionId, chatId))
+        .get();
+      return toRow(
+        after ?? {
+          ...own,
+          task: { ...own.task, stoppedAt: own.task.stoppedAt ?? (stop ? now : null) },
+        },
+      );
     });
-    if (ended) await this.announce(ended.id, "refresh");
+    if (ended && end === "archived") await this.announce(ended.id, "refresh");
+    if (ended && gone?.task) {
+      for (const listener of this.listeners) listener(gone.task, "refresh");
+      this.messageChanged(gone.messages);
+    }
     return ended;
   }
 
   /**
-   * Task `id` is archived on its own, with no task chat to archive it with:
-   * it leaves the task list, and no chat brings it back. An archived row
-   * keeps when it was archived.
+   * How task `id`'s task chat's latest work ended. Rome writes it; the
+   * Concierge never does. A task its owner marked done keeps that until it is
+   * taken up again: the turn its marking stopped ends after it, and changes
+   * nothing.
    */
-  async archive(id: string, now = new Date()): Promise<void> {
-    const archived = await this.db
-      .update(conciergeTasks)
-      .set({ archivedAt: now, archivedWithChat: false, updatedAt: now })
-      .where(and(eq(conciergeTasks.id, id), isNull(conciergeTasks.archivedAt)))
-      .returning({ id: conciergeTasks.id });
-    if (archived.length > 0) await this.announce(id, "refresh");
-  }
-
-  /**
-   * Archived task chat `chatId` is back, and so is the row of `owner` that
-   * archiving it archived. It stays stopped. A row archived before its chat
-   * stays archived.
-   */
-  async restoreWithChat(chatId: string, owner: string, now = new Date()): Promise<void> {
-    const row = await this.findBySession(chatId);
-    if (!row || ownerOf(row) !== owner || !row.archivedWithChat) return;
-    await this.db
-      .update(conciergeTasks)
-      .set({ archivedAt: null, archivedWithChat: false, updatedAt: now })
-      .where(eq(conciergeTasks.id, row.id));
-    await this.announce(row.id, "refresh");
-  }
-
-  /**
-   * Task `id`'s summary, from the result its task chat just gave: Rome keeps
-   * a finished task's line current. A summary the Concierge writes after
-   * this replaces it, as any write does.
-   */
-  async setResultSummary(id: string, summary: string, now = new Date()): Promise<void> {
-    await this.db
-      .update(conciergeTasks)
-      .set({ summary, updatedAt: now })
-      .where(eq(conciergeTasks.id, id));
-    await this.announce(id, "refresh");
-  }
-
-  /** How task `id`'s task chat's latest work ended. Rome writes it; the Concierge never does. */
   async setLastOutcome(
     id: string,
     outcome: "succeeded" | "failed" | "stopped",
     now = new Date(),
     options: { reported?: boolean } = {},
   ): Promise<void> {
-    await this.db
-      .update(conciergeTasks)
+    const changed = await this.db
+      .update(taskChats)
       // A result waits for the Concierge's report; a stop has none to give.
       .set({
         lastOutcome: outcome,
@@ -255,51 +300,88 @@ export class ConciergeTasksRepository {
         reportGivenUp: false,
         updatedAt: now,
       })
-      .where(eq(conciergeTasks.id, id));
-    await this.announce(id, "refresh");
+      .where(
+        and(
+          eq(taskChats.sessionId, id),
+          or(
+            isNull(taskChats.stoppedAt),
+            isNull(taskChats.lastOutcome),
+            ne(taskChats.lastOutcome, "done_by_owner"),
+          ),
+        ),
+      )
+      .returning({ id: taskChats.sessionId });
+    if (changed.length > 0) await this.announce(id, "refresh");
   }
 
-  /** Task `id` was stopped by `by`. A stop is kept: a later one changes nothing. */
-  async stop(id: string, by: "concierge" | "guardian", now = new Date()): Promise<void> {
+  /**
+   * Its owner marked task `id` done: it is stopped as a stop stops it, and
+   * ends done. One already stopped changes nothing. Answers whether it was
+   * marked.
+   */
+  async markDone(id: string, now = new Date()): Promise<boolean> {
+    const marked = await this.db
+      .update(taskChats)
+      .set({
+        stoppedAt: now,
+        lastOutcome: "done_by_owner",
+        outcomeUnsaid: false,
+        reportGivenUp: false,
+        updatedAt: now,
+      })
+      .where(and(eq(taskChats.sessionId, id), isNull(taskChats.stoppedAt)))
+      .returning({ id: taskChats.sessionId });
+    if (marked.length > 0) await this.announce(id, "refresh");
+    return marked.length > 0;
+  }
+
+  /**
+   * Task `id` was stopped by `by`. A stop is kept: a later one changes
+   * nothing. A stop is no mark of done, so it never ends one done.
+   */
+  async stop(id: string, now = new Date()): Promise<void> {
     const stopped = await this.db
-      .update(conciergeTasks)
-      .set({ stoppedAt: now, stopReason: by, updatedAt: now })
-      .where(and(eq(conciergeTasks.id, id), isNull(conciergeTasks.stoppedAt)))
-      .returning({ id: conciergeTasks.id });
+      .update(taskChats)
+      .set({ stoppedAt: now, lastOutcome: notMarkedDone, updatedAt: now })
+      .where(and(eq(taskChats.sessionId, id), isNull(taskChats.stoppedAt)))
+      .returning({ id: taskChats.sessionId });
     if (stopped.length > 0) await this.announce(id, "refresh");
   }
 
   /**
-   * Task `id`, stopped by the Concierge or its owner, takes new work: it is
-   * stopped no more. A task stopped by archiving or deleting its chat stays
-   * stopped. Answers whether it was resumed.
+   * Task `id`, stopped, takes new work: it is stopped no more. A task whose
+   * chat is archived stays stopped, since nothing runs in an archived chat.
+   * One its owner marked done is marked no more: the new work ends as it
+   * ends. Answers whether it was resumed.
    */
   async resume(id: string, now = new Date()): Promise<boolean> {
     const resumed = await this.db
-      .update(conciergeTasks)
-      .set({ stoppedAt: null, stopReason: null, updatedAt: now })
+      .update(taskChats)
+      .set({ stoppedAt: null, lastOutcome: notMarkedDone, updatedAt: now })
       .where(
         and(
-          eq(conciergeTasks.id, id),
-          inArray(conciergeTasks.stopReason, ["concierge", "guardian"]),
+          eq(taskChats.sessionId, id),
+          isNotNull(taskChats.stoppedAt),
+          inArray(
+            taskChats.sessionId,
+            this.db
+              .select({ id: romeSessions.id })
+              .from(romeSessions)
+              .where(isNull(romeSessions.archivedAt)),
+          ),
         ),
       )
-      .returning({ id: conciergeTasks.id });
+      .returning({ id: taskChats.sessionId });
     if (resumed.length > 0) await this.announce(id, "refresh");
     return resumed.length > 0;
   }
 
   /**
-   * Task `id` never started: its first message did not reach its task chat,
-   * and that chat is gone. The row stays, failed, so the task does not start
-   * again unseen.
+   * Task `id`'s first turn could not start: it is a task chat whose first turn
+   * failed, so it ended failed, and its owner reads the error in the chat.
    */
   async markStartFailed(id: string, now = new Date()): Promise<void> {
-    await this.db
-      .update(conciergeTasks)
-      .set({ lastOutcome: "failed", state: "dropped", completedAt: now, updatedAt: now })
-      .where(eq(conciergeTasks.id, id));
-    await this.announce(id, "refresh");
+    await this.setLastOutcome(id, "failed", now, { reported: false });
   }
 
   onChange(listener: ChangeListener): () => void {
@@ -309,40 +391,37 @@ export class ConciergeTasksRepository {
     };
   }
 
+  private selectRows(where: SQL | undefined) {
+    return this.db
+      .select(JOINED)
+      .from(taskChats)
+      .innerJoin(romeSessions, eq(romeSessions.id, taskChats.sessionId))
+      .where(where);
+  }
+
   async get(id: string): Promise<ConciergeTaskRow | null> {
-    const [row] = await this.db.select().from(conciergeTasks).where(eq(conciergeTasks.id, id));
-    return row ?? null;
+    const [found] = await this.selectRows(eq(taskChats.sessionId, id));
+    return found ? toRow(found) : null;
   }
 
   /** The rows of `ids` that exist, in one read. */
   async getMany(ids: readonly string[]): Promise<ConciergeTaskRow[]> {
     if (ids.length === 0) return [];
-    return this.db
-      .select()
-      .from(conciergeTasks)
-      .where(inArray(conciergeTasks.id, [...ids]));
+    return (await this.selectRows(inArray(taskChats.sessionId, [...ids]))).map(toRow);
   }
 
   async getWithChat(id: string): Promise<ConciergeTaskWithChat | null> {
-    const found = await this.withChat(eq(conciergeTasks.id, id));
+    const found = await this.withChat(eq(taskChats.sessionId, id));
     return found[0] ?? null;
   }
 
   /** The rows of the task chats `sessionIds`, in one read. */
   async findBySessions(sessionIds: readonly string[]): Promise<ConciergeTaskRow[]> {
-    if (sessionIds.length === 0) return [];
-    return this.db
-      .select()
-      .from(conciergeTasks)
-      .where(inArray(conciergeTasks.sessionId, [...new Set(sessionIds)]));
+    return this.getMany([...new Set(sessionIds)]);
   }
 
   async findBySession(sessionId: string): Promise<ConciergeTaskRow | null> {
-    const [row] = await this.db
-      .select()
-      .from(conciergeTasks)
-      .where(eq(conciergeTasks.sessionId, sessionId));
-    return row ?? null;
+    return this.get(sessionId);
   }
 
   /**
@@ -352,9 +431,9 @@ export class ConciergeTasksRepository {
   async setSourceMessage(id: string, chatId: string, messageId: string): Promise<void> {
     const stored = chatId === CONCIERGE_CHAT_ID ? null : chatId;
     await this.db
-      .update(conciergeTasks)
-      .set({ chatId: stored, sourceMessageId: this.sources.idOf(chatId, messageId) })
-      .where(eq(conciergeTasks.id, id));
+      .update(taskChats)
+      .set({ conciergeChatId: stored, sourceMessageId: this.sources.idOf(chatId, messageId) })
+      .where(eq(taskChats.sessionId, id));
     await this.announce(id, "refresh");
   }
 
@@ -367,27 +446,27 @@ export class ConciergeTasksRepository {
     const message = this.sources.idOf(chatId, messageKey);
     if (message === null) return [];
     return this.withChat(
-      and(isNull(conciergeTasks.archivedAt), eq(conciergeTasks.sourceMessageId, message)),
+      and(isNull(romeSessions.archivedAt), eq(taskChats.sourceMessageId, message)),
     );
   }
 
   /**
-   * The rows the panel shows: not archived, every state but the finished ones
-   * whatever their age, and the finished ones completed at or after `doneSince`.
+   * The rows the panel shows: not archived, every open one whatever its age,
+   * and the ended ones that ended at or after `doneSince`.
    */
   async listForPanel(doneSince: Date): Promise<ConciergeTaskWithChat[]> {
     return this.withChat(
       and(
-        isNull(conciergeTasks.archivedAt),
+        isNull(romeSessions.archivedAt),
         // Open, or ended inside the window, as its derived status read it.
-        or(isNull(conciergeTasks.endedAt), gte(conciergeTasks.endedAt, doneSince)),
+        or(isNull(taskChats.endedAt), gte(taskChats.endedAt, doneSince)),
       ),
     );
   }
 
   /**
    * One Concierge chat's rows that can still be doing something: not
-   * archived, and either still open or finished with a task chat that was
+   * archived, and either still open or ended with a task chat that was
    * active at or after `activeSince`. A finished row's chat that is resumed
    * counts, however long ago the row finished, while a finished row whose
    * chat went quiet does not, so the read stays bounded. A chat is narrowed
@@ -402,13 +481,16 @@ export class ConciergeTasksRepository {
   ): Promise<ConciergeTaskWithChat[]> {
     const ofChat =
       conciergeChatId === mainChatIdOf(owner)
-        ? eq(conciergeTasks.ownerKey, owner)
-        : eq(conciergeTasks.chatId, conciergeChatId);
+        ? or(
+            eq(romeSessions.ownerKey, owner),
+            owner === "guardian" ? isNull(romeSessions.ownerKey) : undefined,
+          )
+        : eq(taskChats.conciergeChatId, conciergeChatId);
     const rows = await this.withChat(
       and(
         ofChat,
-        isNull(conciergeTasks.archivedAt),
-        or(isNull(conciergeTasks.endedAt), gte(romeSessions.activityAt, activeSince)),
+        isNull(romeSessions.archivedAt),
+        or(isNull(taskChats.endedAt), gte(romeSessions.activityAt, activeSince)),
       ),
     );
     return rows.filter((task) => task.conciergeChat.id === conciergeChatId);
@@ -430,28 +512,24 @@ export class ConciergeTasksRepository {
     const origin = alias(romeSessions, "origin");
     const rows = await this.db
       .select({
-        id: conciergeTasks.id,
-        title: conciergeTasks.title,
-        sessionId: conciergeTasks.sessionId,
-        chatId: conciergeTasks.chatId,
+        sessionId: taskChats.sessionId,
+        title: romeSessions.name,
+        ownerKey: romeSessions.ownerKey,
+        chatId: taskChats.conciergeChatId,
         originId: origin.id,
         originArchivedAt: origin.archivedAt,
       })
-      .from(conciergeTasks)
-      .leftJoin(origin, eq(origin.id, conciergeTasks.chatId))
-      .where(
-        and(
-          isNotNull(conciergeTasks.sessionId),
-          inArray(conciergeTasks.sessionId, [...new Set(chatIds)]),
-          eq(conciergeTasks.ownerKey, owner),
-        ),
-      );
+      .from(taskChats)
+      .innerJoin(romeSessions, eq(romeSessions.id, taskChats.sessionId))
+      .leftJoin(origin, eq(origin.id, taskChats.conciergeChatId))
+      .where(inArray(taskChats.sessionId, [...new Set(chatIds)]));
     const main = mainChatIdOf(owner);
     return rows.flatMap((row) => {
+      if (ownerOf({ ownerKey: row.ownerKey }) !== owner) return [];
       const chat =
         row.chatId && row.originId !== null && row.originArchivedAt === null ? row.chatId : main;
-      return chat === conciergeChatId && row.sessionId
-        ? [{ chatId: row.sessionId, task: { id: row.id, title: row.title } }]
+      return chat === conciergeChatId
+        ? [{ chatId: row.sessionId, task: { id: row.sessionId, title: row.title } }]
         : [];
     });
   }
@@ -459,7 +537,7 @@ export class ConciergeTasksRepository {
   /**
    * The task chats `owner`'s Concierge chat `conciergeChatId` started, ended
    * and archived tasks included, each with its chat's name. The main chat
-   * started a task that names no chat. A task whose chat is gone has none.
+   * started a task that names no chat.
    */
   async taskChatsStartedBy(
     conciergeChatId: string,
@@ -467,23 +545,26 @@ export class ConciergeTasksRepository {
   ): Promise<Array<{ chatId: string; name: string }>> {
     const startedBy =
       conciergeChatId === mainChatIdOf(owner)
-        ? or(isNull(conciergeTasks.chatId), eq(conciergeTasks.chatId, conciergeChatId))
-        : eq(conciergeTasks.chatId, conciergeChatId);
+        ? or(isNull(taskChats.conciergeChatId), eq(taskChats.conciergeChatId, conciergeChatId))
+        : eq(taskChats.conciergeChatId, conciergeChatId);
     const rows = await this.db
-      .select({ chatId: romeSessions.id, chatName: romeSessions.name, title: conciergeTasks.title })
-      .from(conciergeTasks)
-      .innerJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
-      .where(and(eq(conciergeTasks.ownerKey, owner), startedBy));
-    return rows.map((row) => ({ chatId: row.chatId, name: row.chatName.trim() || row.title }));
+      .select({
+        chatId: romeSessions.id,
+        chatName: romeSessions.name,
+        ownerKey: romeSessions.ownerKey,
+      })
+      .from(taskChats)
+      .innerJoin(romeSessions, eq(romeSessions.id, taskChats.sessionId))
+      .where(startedBy);
+    return rows
+      .filter((row) => ownerOf({ ownerKey: row.ownerKey }) === owner)
+      .map((row) => ({ chatId: row.chatId, name: row.chatName }));
   }
 
-  /** The Concierge's own view: not archived, finished rows only on request. */
+  /** The Concierge's own view: not archived, ended rows only on request. */
   async listForAgent(includeDone: boolean): Promise<ConciergeTaskWithChat[]> {
     return this.withChat(
-      and(
-        isNull(conciergeTasks.archivedAt),
-        includeDone ? undefined : isNull(conciergeTasks.endedAt),
-      ),
+      and(isNull(romeSessions.archivedAt), includeDone ? undefined : isNull(taskChats.endedAt)),
     );
   }
 
@@ -493,119 +574,92 @@ export class ConciergeTasksRepository {
    */
   async listBehindTheirChat(): Promise<ConciergeTaskRow[]> {
     const rows = await this.db
-      .select({ task: conciergeTasks })
-      .from(conciergeTasks)
-      .innerJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
+      .select(JOINED)
+      .from(taskChats)
+      .innerJoin(romeSessions, eq(romeSessions.id, taskChats.sessionId))
       .where(
         and(
-          isNull(conciergeTasks.archivedAt),
-          sql`cast(${romeSessions.activityAt} as integer) * 1000 > cast(${conciergeTasks.updatedAt} as integer)`,
+          isNull(romeSessions.archivedAt),
+          sql`cast(${romeSessions.activityAt} as integer) * 1000 > cast(${taskChats.updatedAt} as integer)`,
         ),
       );
-    return rows.map((row) => row.task);
+    return rows.map(toRow);
   }
 
   /**
-   * Writes a batch in one transaction: all of it or none. Answers the written
-   * rows in the order given and tells the change listeners once it is stored.
+   * Makes the row of task chat `sessionId`, which reports to Concierge chat
+   * `write.chatId` (null: the main chat) and points to `write.sourceMessageId`.
+   * The chat exists already, and its owner is the task's. Tells the change
+   * listeners once it is stored.
    */
-  async upsertMany(writes: ConciergeTaskWrite[], now = new Date()): Promise<ConciergeTaskRow[]> {
-    // `transaction` is synchronous on better-sqlite3, so the body uses `.run()`
-    // and `.all()` and never awaits.
-    const written = await this.db.transaction((tx) => {
-      const out: ConciergeTaskRow[] = [];
-      for (const write of writes) {
-        const existing = write.id
-          ? (tx.select().from(conciergeTasks).where(eq(conciergeTasks.id, write.id)).get() ?? null)
-          : null;
-        if (write.id && !existing) throw new Error(`No task ${write.id}`);
-        // A row links one task chat in its life: the chat it ran in is its
-        // history, so another chat is another task.
-        if (existing?.linkedAt && write.sessionId && write.sessionId !== existing.sessionId) {
-          throw new Error(`Task ${existing.id} already had a task chat. Start a new task instead.`);
-        }
-        if (write.sessionId) {
-          const taken = tx
-            .select({ id: conciergeTasks.id })
-            .from(conciergeTasks)
-            .where(
-              and(
-                eq(conciergeTasks.sessionId, write.sessionId),
-                existing ? ne(conciergeTasks.id, existing.id) : undefined,
-              ),
-            )
-            .get();
-          if (taken)
-            throw new Error(`Chat ${write.sessionId} is already linked to task ${taken.id}`);
-        }
-        const state = write.state ?? existing?.state ?? "next";
-        const archivedAt =
-          write.archived === undefined
-            ? (existing?.archivedAt ?? null)
-            : write.archived
-              ? (existing?.archivedAt ?? now)
-              : null;
-        const completedAt = isFinished(state) ? (existing?.completedAt ?? now) : null;
-        const chatId = write.chatId !== undefined ? write.chatId : (existing?.chatId ?? null);
-        const fields = {
-          title: write.title ?? existing?.title ?? "",
-          state,
-          summary: write.summary !== undefined ? write.summary : (existing?.summary ?? null),
-          note: write.note !== undefined ? write.note : (existing?.note ?? null),
-          waitingOn:
-            write.waitingOn !== undefined ? write.waitingOn : (existing?.waitingOn ?? null),
-          dueAt: write.dueAt !== undefined ? write.dueAt : (existing?.dueAt ?? null),
-          rank: write.rank !== undefined ? write.rank : (existing?.rank ?? null),
-          sessionId:
-            write.sessionId !== undefined ? write.sessionId : (existing?.sessionId ?? null),
-          chatId: chatId === CONCIERGE_CHAT_ID ? null : chatId,
-          sourceMessageId:
-            write.sourceMessageId !== undefined
-              ? write.sourceMessageId === null
-                ? null
-                : this.sources.idOf(chatId ?? CONCIERGE_CHAT_ID, write.sourceMessageId)
-              : (existing?.sourceMessageId ?? null),
-          updatedAt: now,
-          completedAt,
-          archivedAt,
-          linkedAt: existing?.linkedAt ?? (write.sessionId ? now : null),
-        };
-        if (existing) {
-          const [row] = tx
-            .update(conciergeTasks)
-            .set(fields)
-            .where(eq(conciergeTasks.id, existing.id))
-            .returning()
-            .all();
-          out.push(row);
-        } else {
-          if (!fields.title) throw new Error("A new task needs a title");
-          // A row is the owner's of the chat it is made in, for good: it stays
-          // theirs after that chat is archived or deleted. A chat that cannot
-          // be found names no owner, so the row is not made: it never
-          // defaults to the guardian's list.
-          let ownerKey = GUARDIAN_OWNER;
-          if (fields.chatId) {
-            const origin = tx
-              .select({ ownerKey: romeSessions.ownerKey })
-              .from(romeSessions)
-              .where(eq(romeSessions.id, fields.chatId))
-              .get();
-            if (!origin) throw new Error(`No Concierge chat ${fields.chatId}`);
-            ownerKey = ownerOf(origin);
-          }
-          const [row] = tx
-            .insert(conciergeTasks)
-            .values({ id: randomUUID(), createdAt: now, ownerKey, ...fields })
-            .returning()
-            .all();
-          out.push(row);
-        }
+  async create(
+    sessionId: string,
+    write: ConciergeTaskWrite = {},
+    now = new Date(),
+  ): Promise<ConciergeTaskRow> {
+    const chatId = write.chatId ?? null;
+    const stored = chatId === CONCIERGE_CHAT_ID ? null : chatId;
+    this.db.transaction((tx) => {
+      const chat = tx
+        .select({ id: romeSessions.id })
+        .from(romeSessions)
+        .where(eq(romeSessions.id, sessionId))
+        .get();
+      if (!chat) throw new Error(`No chat ${sessionId}`);
+      if (stored) {
+        const origin = tx
+          .select({ id: romeSessions.id })
+          .from(romeSessions)
+          .where(eq(romeSessions.id, stored))
+          .get();
+        if (!origin) throw new Error(`No Concierge chat ${stored}`);
       }
-      return out;
+      tx.insert(taskChats)
+        .values({
+          sessionId,
+          conciergeChatId: stored,
+          sourceMessageId:
+            write.sourceMessageId == null
+              ? null
+              : this.sources.idOf(chatId ?? CONCIERGE_CHAT_ID, write.sourceMessageId),
+          note: write.note ?? null,
+          updatedAt: now,
+        })
+        .run();
     });
-    for (const row of written) await this.announce(row.id, "write");
-    return written;
+    await this.announce(sessionId, "write");
+    return (await this.get(sessionId)) as ConciergeTaskRow;
+  }
+
+  /**
+   * Writes what the Concierge may change on task `id`: its note, and the
+   * message it points to, which moves it to that message's Concierge chat.
+   * Fields left out stay. Tells the change listeners once it is stored.
+   */
+  async write(id: string, write: ConciergeTaskWrite, now = new Date()): Promise<ConciergeTaskRow> {
+    const existing = await this.get(id);
+    if (!existing) throw new Error(`No task ${id}`);
+    const chatId = write.chatId !== undefined ? write.chatId : existing.chatId;
+    await this.db
+      .update(taskChats)
+      .set({
+        ...(write.note !== undefined ? { note: write.note } : {}),
+        ...(write.chatId !== undefined
+          ? { conciergeChatId: chatId === CONCIERGE_CHAT_ID ? null : chatId }
+          : {}),
+        ...(write.sourceMessageId !== undefined
+          ? {
+              sourceMessageId:
+                write.sourceMessageId === null
+                  ? null
+                  : this.sources.idOf(chatId ?? CONCIERGE_CHAT_ID, write.sourceMessageId),
+            }
+          : {}),
+        updatedAt: now,
+      })
+      .where(eq(taskChats.sessionId, id));
+    await this.announce(id, "write");
+    return (await this.get(id)) as ConciergeTaskRow;
   }
 
   /** Listens for a change of the facts a guardian message's status reads. */
@@ -980,7 +1034,7 @@ export class ConciergeTasksRepository {
    */
   async linkMessage(taskId: string, target: MessageTarget): Promise<LinkUndo> {
     const own = and(
-      eq(conciergeMessageTasks.taskId, taskId),
+      eq(conciergeMessageTasks.taskChatId, taskId),
       eq(conciergeMessageTasks.chatId, target.chatId),
       eq(conciergeMessageTasks.messageKey, target.messageKey),
     );
@@ -997,7 +1051,7 @@ export class ConciergeTasksRepository {
         .set({ endedAs: LINK_SUPERSEDED })
         .where(
           and(
-            eq(conciergeMessageTasks.taskId, taskId),
+            eq(conciergeMessageTasks.taskChatId, taskId),
             isNull(conciergeMessageTasks.endedAs),
             or(
               ne(conciergeMessageTasks.chatId, target.chatId),
@@ -1016,10 +1070,10 @@ export class ConciergeTasksRepository {
           .from(conciergeMessageTasks)
           .get()?.max ?? 0) + 1;
       tx.insert(conciergeMessageTasks)
-        .values({ taskId, ...target, seq })
+        .values({ taskChatId: taskId, ...target, seq })
         .onConflictDoUpdate({
           target: [
-            conciergeMessageTasks.taskId,
+            conciergeMessageTasks.taskChatId,
             conciergeMessageTasks.chatId,
             conciergeMessageTasks.messageKey,
           ],
@@ -1040,7 +1094,7 @@ export class ConciergeTasksRepository {
   async unlinkMessage(taskId: string, target: MessageTarget, undo: LinkUndo): Promise<void> {
     this.db.transaction((tx) => {
       const own = and(
-        eq(conciergeMessageTasks.taskId, taskId),
+        eq(conciergeMessageTasks.taskChatId, taskId),
         eq(conciergeMessageTasks.chatId, target.chatId),
         eq(conciergeMessageTasks.messageKey, target.messageKey),
       );
@@ -1051,7 +1105,7 @@ export class ConciergeTasksRepository {
           .set({ endedAs: null })
           .where(
             and(
-              eq(conciergeMessageTasks.taskId, taskId),
+              eq(conciergeMessageTasks.taskChatId, taskId),
               eq(conciergeMessageTasks.chatId, other.chatId),
               eq(conciergeMessageTasks.messageKey, other.messageKey),
               eq(conciergeMessageTasks.endedAs, LINK_SUPERSEDED),
@@ -1069,7 +1123,9 @@ export class ConciergeTasksRepository {
       this.db
         .select({ seq: conciergeMessageTasks.seq })
         .from(conciergeMessageTasks)
-        .where(and(eq(conciergeMessageTasks.taskId, taskId), isNull(conciergeMessageTasks.endedAs)))
+        .where(
+          and(eq(conciergeMessageTasks.taskChatId, taskId), isNull(conciergeMessageTasks.endedAs)),
+        )
         .get()?.seq ?? null
     );
   }
@@ -1086,7 +1142,7 @@ export class ConciergeTasksRepository {
       .set({ endedAs })
       .where(
         and(
-          eq(conciergeMessageTasks.taskId, taskId),
+          eq(conciergeMessageTasks.taskChatId, taskId),
           isNull(conciergeMessageTasks.endedAs),
           lte(conciergeMessageTasks.seq, upToSeq),
         ),
@@ -1098,11 +1154,6 @@ export class ConciergeTasksRepository {
     this.messageChanged(changed);
   }
 
-  /** Tells the message listeners about the messages task `taskId` was made for again, for state kept outside them. */
-  async retellMessagesOf(taskId: string): Promise<void> {
-    this.messageChanged(await this.messagesOfTask(taskId));
-  }
-
   /** The guardian messages task `taskId` was made for. */
   async messagesOfTask(taskId: string): Promise<MessageTarget[]> {
     return this.db
@@ -1111,7 +1162,7 @@ export class ConciergeTasksRepository {
         messageKey: conciergeMessageTasks.messageKey,
       })
       .from(conciergeMessageTasks)
-      .where(eq(conciergeMessageTasks.taskId, taskId));
+      .where(eq(conciergeMessageTasks.taskChatId, taskId));
   }
 
   /** Forgets the turns and tasks of Concierge chat `chatId`'s messages, once the chat is deleted. */
@@ -1165,7 +1216,7 @@ export class ConciergeTasksRepository {
     for (const row of await this.db
       .select({
         messageKey: conciergeMessageTasks.messageKey,
-        taskId: conciergeMessageTasks.taskId,
+        taskId: conciergeMessageTasks.taskChatId,
         endedAs: conciergeMessageTasks.endedAs,
       })
       .from(conciergeMessageTasks)
@@ -1189,15 +1240,15 @@ export class ConciergeTasksRepository {
    */
   async markWaitExpired(id: string, waitingSince: Date): Promise<boolean> {
     const marked = await this.db
-      .update(conciergeTasks)
+      .update(taskChats)
       .set({ expiredWaitAt: waitingSince, noResponseUnlisted: true })
       .where(
         and(
-          eq(conciergeTasks.id, id),
-          or(isNull(conciergeTasks.expiredWaitAt), ne(conciergeTasks.expiredWaitAt, waitingSince)),
+          eq(taskChats.sessionId, id),
+          or(isNull(taskChats.expiredWaitAt), ne(taskChats.expiredWaitAt, waitingSince)),
         ),
       )
-      .returning({ id: conciergeTasks.id });
+      .returning({ id: taskChats.sessionId });
     if (marked.length > 0) await this.announce(id, "refresh");
     return marked.length > 0;
   }
@@ -1208,10 +1259,10 @@ export class ConciergeTasksRepository {
    */
   async clearWaitExpired(id: string): Promise<void> {
     const cleared = await this.db
-      .update(conciergeTasks)
+      .update(taskChats)
       .set({ expiredWaitAt: null, noResponseUnlisted: false })
-      .where(and(eq(conciergeTasks.id, id), isNotNull(conciergeTasks.expiredWaitAt)))
-      .returning({ id: conciergeTasks.id });
+      .where(and(eq(taskChats.sessionId, id), isNotNull(taskChats.expiredWaitAt)))
+      .returning({ id: taskChats.sessionId });
     if (cleared.length > 0) await this.announce(id, "refresh");
   }
 
@@ -1219,10 +1270,10 @@ export class ConciergeTasksRepository {
   async noResponseUnlisted(taskIds: readonly string[]): Promise<string[]> {
     if (taskIds.length === 0) return [];
     const rows = await this.db
-      .select({ id: conciergeTasks.id })
-      .from(conciergeTasks)
+      .select({ id: taskChats.sessionId })
+      .from(taskChats)
       .where(
-        and(inArray(conciergeTasks.id, [...taskIds]), eq(conciergeTasks.noResponseUnlisted, true)),
+        and(inArray(taskChats.sessionId, [...taskIds]), eq(taskChats.noResponseUnlisted, true)),
       );
     return rows.map((row) => row.id);
   }
@@ -1231,37 +1282,20 @@ export class ConciergeTasksRepository {
   async markNoResponseListed(taskIds: readonly string[]): Promise<void> {
     if (taskIds.length === 0) return;
     await this.db
-      .update(conciergeTasks)
+      .update(taskChats)
       .set({ noResponseUnlisted: false })
-      .where(inArray(conciergeTasks.id, [...taskIds]));
+      .where(inArray(taskChats.sessionId, [...taskIds]));
   }
 
   /** The task chat of every stopped task, and when it stopped, so nothing approved later runs for one. */
   async stoppedTaskChats(): Promise<{ chatId: string; stoppedAt: number }[]> {
     const rows = await this.db
-      .select({
-        chatId: conciergeTasks.sessionId,
-        stoppedAt: conciergeTasks.stoppedAt,
-        stopReason: conciergeTasks.stopReason,
-        archivedAt: conciergeTasks.archivedAt,
-      })
-      .from(conciergeTasks)
-      .where(and(isNotNull(conciergeTasks.stoppedAt), isNotNull(conciergeTasks.sessionId)));
-    // A chat unarchived after its archive stopped the task is in use again.
+      .select({ chatId: taskChats.sessionId, stoppedAt: taskChats.stoppedAt })
+      .from(taskChats)
+      .where(isNotNull(taskChats.stoppedAt));
     return rows.flatMap((row) =>
-      row.chatId && row.stoppedAt && (row.stopReason !== "archived" || row.archivedAt)
-        ? [{ chatId: row.chatId, stoppedAt: row.stoppedAt.getTime() }]
-        : [],
+      row.stoppedAt ? [{ chatId: row.chatId, stoppedAt: row.stoppedAt.getTime() }] : [],
     );
-  }
-
-  /** Rows `taskIds` were listed in a digest that ran to its end, as never started. */
-  async markUnstartedListed(taskIds: readonly string[], now = new Date()): Promise<void> {
-    if (taskIds.length === 0) return;
-    await this.db
-      .update(conciergeTasks)
-      .set({ unstartedListedAt: now })
-      .where(inArray(conciergeTasks.id, [...taskIds]));
   }
 
   /**
@@ -1276,27 +1310,27 @@ export class ConciergeTasksRepository {
   ): Promise<void> {
     if (ended.length > 0) {
       await this.db
-        .update(conciergeTasks)
+        .update(taskChats)
         .set({ endedAt: now })
-        .where(and(inArray(conciergeTasks.id, [...ended]), isNull(conciergeTasks.endedAt)));
+        .where(and(inArray(taskChats.sessionId, [...ended]), isNull(taskChats.endedAt)));
     }
     if (open.length > 0) {
       // Its no-response note stays: a turn Rome runs on its own, such as the
       // one after an approval it turned down, opens the task only for a
       // while. Only someone writing to it clears the note (clearWaitExpired).
       await this.db
-        .update(conciergeTasks)
+        .update(taskChats)
         .set({ endedAt: null })
-        .where(and(inArray(conciergeTasks.id, [...open]), isNotNull(conciergeTasks.endedAt)));
+        .where(and(inArray(taskChats.sessionId, [...open]), isNotNull(taskChats.endedAt)));
     }
   }
 
   /** The tasks whose task chat's result the Concierge has not reported yet. */
   async tasksWithUnsaidOutcome(): Promise<string[]> {
     const rows = await this.db
-      .select({ id: conciergeTasks.id })
-      .from(conciergeTasks)
-      .where(eq(conciergeTasks.outcomeUnsaid, true));
+      .select({ id: taskChats.sessionId })
+      .from(taskChats)
+      .where(eq(taskChats.outcomeUnsaid, true));
     return rows.map((row) => row.id);
   }
 
@@ -1306,9 +1340,9 @@ export class ConciergeTasksRepository {
    */
   async markGivenUp(taskId: string): Promise<void> {
     await this.db
-      .update(conciergeTasks)
+      .update(taskChats)
       .set({ outcomeUnsaid: false, reportGivenUp: true })
-      .where(eq(conciergeTasks.id, taskId));
+      .where(eq(taskChats.sessionId, taskId));
     await this.announce(taskId, "refresh");
   }
 
@@ -1316,10 +1350,10 @@ export class ConciergeTasksRepository {
   async markReported(taskIds: readonly string[]): Promise<void> {
     if (taskIds.length === 0) return;
     const reported = await this.db
-      .update(conciergeTasks)
+      .update(taskChats)
       .set({ outcomeUnsaid: false })
-      .where(and(inArray(conciergeTasks.id, [...taskIds]), eq(conciergeTasks.outcomeUnsaid, true)))
-      .returning({ id: conciergeTasks.id });
+      .where(and(inArray(taskChats.sessionId, [...taskIds]), eq(taskChats.outcomeUnsaid, true)))
+      .returning({ id: taskChats.sessionId });
     for (const { id } of reported) await this.announce(id, "refresh");
   }
 
@@ -1338,25 +1372,20 @@ export class ConciergeTasksRepository {
     const origin = alias(romeSessions, "origin");
     const rows = await this.db
       .select({
-        task: conciergeTasks,
-        chatName: romeSessions.name,
+        ...JOINED,
         originName: origin.name,
         originArchivedAt: origin.archivedAt,
       })
-      .from(conciergeTasks)
-      .leftJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
-      .leftJoin(origin, eq(origin.id, conciergeTasks.chatId))
+      .from(taskChats)
+      .innerJoin(romeSessions, eq(romeSessions.id, taskChats.sessionId))
+      .leftJoin(origin, eq(origin.id, taskChats.conciergeChatId))
       .where(where)
-      .orderBy(asc(conciergeTasks.createdAt), desc(conciergeTasks.id));
-    // A row whose chat is archived or gone belongs to its owner's main chat,
-    // so its buttons and results reach a chat that owner can write in. The
-    // owner is the row's own, never read from a chat that may be gone.
-    type Origin = {
-      originName: string | null;
-      originArchivedAt: Date | null;
-    };
-    const ownerOfRow = (task: ConciergeTaskRow) => ownerOf(task);
-    const mainIds = [...new Set(rows.map((row) => mainChatIdOf(ownerOfRow(row.task))))];
+      .orderBy(asc(romeSessions.createdAt), desc(taskChats.sessionId));
+    const tasks = rows.map((found) => ({ found, row: toRow(found) }));
+    // A row whose Concierge chat is archived or gone belongs to its owner's
+    // main chat, so its buttons and results reach a chat that owner can write
+    // in. The owner is the task chat's own.
+    const mainIds = [...new Set(tasks.map(({ row }) => mainChatIdOf(row.ownerKey)))];
     const mainNames = new Map(
       mainIds.length > 0
         ? (
@@ -1367,31 +1396,32 @@ export class ConciergeTasksRepository {
           ).map((row) => [row.id, row.name] as const)
         : [],
     );
-    const conciergeChatOf = (task: ConciergeTaskRow, origin: Origin) => {
-      const owner = ownerOfRow(task);
-      const main = mainChatIdOf(owner);
-      return task.chatId && origin.originName !== null && origin.originArchivedAt === null
-        ? { id: task.chatId, name: origin.originName, main: task.chatId === main }
+    const conciergeChatOf = ({
+      row,
+      found,
+    }: {
+      row: ConciergeTaskRow;
+      found: { originName: string | null; originArchivedAt: Date | null };
+    }) => {
+      const main = mainChatIdOf(row.ownerKey);
+      return row.chatId && found.originName !== null && found.originArchivedAt === null
+        ? { id: row.chatId, name: found.originName, main: row.chatId === main }
         : { id: main, name: mainNames.get(main) ?? MAIN_CHAT_NAME, main: true };
     };
     // Only a message the row's Concierge chat still holds counts as a source.
     const sources = this.sources.keysOf(
-      rows.flatMap((row) =>
-        row.task.sourceMessageId
-          ? [{ id: row.task.sourceMessageId, chatId: conciergeChatOf(row.task, row).id }]
+      tasks.flatMap((task) =>
+        task.row.sourceMessageId
+          ? [{ id: task.row.sourceMessageId, chatId: conciergeChatOf(task).id }]
           : [],
       ),
     );
-    return rows.map((origin) => ({
-      row: origin.task,
-      chat:
-        origin.task.sessionId && origin.chatName !== null
-          ? { id: origin.task.sessionId, name: origin.chatName }
-          : null,
-      conciergeChat: conciergeChatOf(origin.task, origin),
-      owner: ownerOfRow(origin.task),
-      sourceMessageId:
-        (origin.task.sourceMessageId && sources.get(origin.task.sourceMessageId)) || null,
+    return tasks.map((task) => ({
+      row: task.row,
+      chat: { id: task.row.sessionId, name: task.row.title },
+      conciergeChat: conciergeChatOf(task),
+      owner: task.row.ownerKey,
+      sourceMessageId: (task.row.sourceMessageId && sources.get(task.row.sourceMessageId)) || null,
     }));
   }
 }

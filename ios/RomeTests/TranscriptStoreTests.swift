@@ -106,6 +106,16 @@ final class FakeBackend: RomeBackend {
         topicChats.removeAll { $0.id == id }
     }
 
+    var pinFails = false
+    /// Pins as the server does: on the chat list's row.
+    func pinChat(_ id: String, pinned: Bool) async throws {
+        calls.append(pinned ? "pin \(id)" : "unpin \(id)")
+        if pinFails { throw APIError.network }
+        if let index = sessionRows.firstIndex(where: { $0.id == id }) {
+            sessionRows[index].pinnedAt = pinned ? RomeDate.string(.now) : nil
+        }
+    }
+
     func deleteChat(_ id: String) async throws {
         calls.append("delete \(id)")
         topicChats.removeAll { $0.id == id }
@@ -211,6 +221,19 @@ final class FakeBackend: RomeBackend {
         stoppedFromList.append(taskId)
         if let stopListedError { throw stopListedError }
     }
+    /// Every other task list action, as "<action> <row>"; each fails with
+    /// `listActionError` when it is set.
+    var listActions: [String] = []
+    var listActionError: APIError?
+    private func listAction(_ text: String) throws {
+        listActions.append(text)
+        if let listActionError { throw listActionError }
+    }
+    func markListedTaskDone(chatId: String, taskId: String) async throws { try listAction("done \(taskId)") }
+    func cancelListedCheck(chatId: String, checkId: String) async throws { try listAction("cancel \(checkId)") }
+    func unfollowListed(chatId: String, source: String, target: String) async throws { try listAction("unfollow \(source):\(target)") }
+    func setListedRoutineEnabled(chatId: String, routineId: String, enabled: Bool) async throws { try listAction("\(enabled ? "resume" : "pause") \(routineId)") }
+    func deleteListedRoutine(chatId: String, routineId: String) async throws { try listAction("delete \(routineId)") }
 
     /// Off, every send fails, as it always did here.
     var sendSucceeds = false

@@ -1,6 +1,5 @@
 // @rstest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
@@ -53,49 +52,35 @@ describe("ConciergeTopicEmptyState", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("en");
   });
-  const renderTopic = (onStart = rs.fn()) =>
-    render(
-      <MemoryRouter>
-        <ConciergeTopicEmptyState onStart={onStart} />
-      </MemoryRouter>,
-    );
 
-  it("offers three topic kinds at once, with no request, and sends the picked one", async () => {
+  it("offers three short suggestions at once, with no request, and hands over the picked one's full message", async () => {
     const fetchSpy = rs.spyOn(globalThis, "fetch");
     const onStart = rs.fn();
-    renderTopic(onStart);
-    expect(screen.getByRole("region", { name: "Start an ongoing topic" })).toBeTruthy();
-    expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "Be my life helper: schedule, bills, deliveries and other errands live here",
-      "Keep track of work here: project progress, PRs and meetings",
-      "Help me plan next month's trip, and keep everything about it here",
-    ]);
+    render(<ConciergeTopicEmptyState onStart={onStart} />);
+    const region = screen.getByRole("region", { name: "Suggestions" });
+    // Only the suggestions: no title, description, link or icon.
+    expect(region.textContent).toBe(
+      "Keep my bills and errands hereTrack my work and meetingsPlan next month's trip",
+    );
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(region.querySelector("svg")).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
-    const work = screen.getByRole("button", {
-      name: "Keep track of work here: project progress, PRs and meetings",
-    });
-    // A long starter wraps inside its border and grows taller, at the column's width.
-    expect(work.className).toContain("whitespace-normal");
-    expect(work.className).toContain("w-full");
-    await userEvent.click(work);
-    expect(onStart).toHaveBeenCalledWith(
-      "Keep track of work here: project progress, PRs and meetings",
-    );
-    expect(screen.getByRole("link", { name: "Ask in the main chat →" }).getAttribute("href")).toBe(
-      "/message",
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Track my work and meetings" }));
+    expect(onStart).toHaveBeenCalledWith("Track my work here: project progress, PRs and meetings");
   });
 
   it("offers them in the guardian's language", async () => {
     await i18n.changeLanguage("zh-CN");
-    renderTopic();
-    expect(screen.getByRole("region", { name: "开一个长期话题" })).toBeTruthy();
+    const onStart = rs.fn();
+    render(<ConciergeTopicEmptyState onStart={onStart} />);
+    expect(screen.getByRole("region", { name: "建议" })).toBeTruthy();
     expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual([
-      "当我的生活小助手：日程、账单、快递这些琐事都放这里",
-      "帮我跟进工作上的事：项目进度、PR、会议都放这里",
-      "帮我规划下个月的旅行，相关的事都放这里",
+      "账单和杂事放这里",
+      "跟进工作和会议",
+      "规划下个月的旅行",
     ]);
-    expect(screen.getByText("只是问个问题？")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "规划下个月的旅行" }));
+    expect(onStart).toHaveBeenCalledWith("帮我规划下个月的旅行，相关的事都放在这里");
     await i18n.changeLanguage("en");
   });
 });

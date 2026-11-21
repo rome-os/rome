@@ -3,13 +3,10 @@
 // turn per Concierge chat the rows came from, so a burst of changes is one
 // turn per chat rather than one per change.
 //
-//   urgent  flush 2 s after the row went dirty: a result the Concierge asked
-//           for, an error, a question or an approval
-//   quiet   flush after 60 s, or with the next flush: the guardian's own
-//           messages and turns, scheduled turns, a deleted chat
-//
-//   passive  never flushes on its own: a scheduled turn that finished with
-//           nothing to ask or report goes with the next flush or digest
+//   urgent  flush 2 s after the row went dirty: the end of any task chat
+//           turn, whoever started it, a question or an approval
+//   quiet   flush after 60 s, or with the next flush: what is no turn's
+//           end, such as a deleted chat, the owner's stop or a catch-up
 //
 // At most one flush runs, at least 10 s after the last one started. A flush
 // reads the rows from the database when it builds, so delivering a row twice
@@ -49,20 +46,12 @@ export interface TaskChange {
   urgent: boolean;
   /** A line for the payload with what the database does not hold: the question, the approval, the guardian's words. */
   detail?: string;
-  /**
-   * Needs no word from the Concierge, such as a scheduled turn that finished
-   * with nothing to ask: it waits for the next flush or digest, and wakes no
-   * turn of its own.
-   */
-  passive?: boolean;
 }
 
 /** A row waiting for a flush, as the payload builder sees it. */
 export interface DirtyTask {
   taskId: string;
   changes: TaskChange[];
-  /** No change of the row is urgent, so the payload marks it `quiet`. */
-  quiet: boolean;
 }
 
 /** One system turn of a flush: the payload for the rows of one Concierge chat. */
@@ -74,8 +63,6 @@ export interface TaskEventDelivery {
   /** The rows the payload carries. */
   taskIds: string[];
   prompt: string;
-  /** No row in it has an urgent change. */
-  quiet: boolean;
 }
 
 export interface TaskEventDeps {
@@ -105,8 +92,6 @@ interface Dirty {
   version: number;
   changes: TaskChange[];
   urgent: boolean;
-  /** Every change needs no word: the row waits for another one's flush. */
-  passive: boolean;
   /** Until when the row waits for a turn that took its cut-short report over: never past RETRY_MS. */
   carriedUntil?: number;
   /** When the flush that took this row built its payload. */
@@ -218,7 +203,6 @@ export class TaskEventCoalescer {
         since: now,
         changes: [change],
         urgent: change.urgent,
-        passive: change.passive === true,
       });
     } else if (entry.builtAt !== undefined && entry.since <= entry.builtAt && !entry.undelivered) {
       // Everything the entry holds went into a payload already. This change
@@ -228,12 +212,10 @@ export class TaskEventCoalescer {
       entry.since = now;
       entry.changes = [change];
       entry.urgent = change.urgent;
-      entry.passive = change.passive === true;
     } else {
       entry.version = ++this.versions;
       entry.changes.push(change);
       entry.urgent ||= change.urgent;
-      entry.passive &&= change.passive === true;
       // A write must not settle a change that no turn has carried yet.
       if (entry.undelivered) entry.builtAt = undefined;
     }
@@ -258,28 +240,6 @@ export class TaskEventCoalescer {
     if (this.inFlight.has(taskId)) this.saidInFlight.add(taskId);
   }
 
-  /**
-   * The rows of `taskIds` whose every change needs no word, which a digest
-   * lists instead of a turn of their own. Read only: the digest settles them
-   * with {@link settlePassive} once its turn ran to its end.
-   */
-  passiveOf(taskIds: readonly string[]): string[] {
-    return taskIds.filter((taskId) => {
-      const entry = this.dirty.get(taskId);
-      return entry?.passive === true && !this.inFlight.has(taskId);
-    });
-  }
-
-  /**
-   * Settles the rows of `taskIds` a digest listed. A row that got a change
-   * needing a word meanwhile stays, for a turn of its own.
-   */
-  settlePassive(taskIds: readonly string[]): void {
-    const settled = this.passiveOf(taskIds);
-    for (const taskId of settled) this.dirty.delete(taskId);
-    if (settled.length > 0) this.changed();
-  }
-
   /** The rows waiting for a flush. */
   get pending(): string[] {
     return [...this.dirty.keys()];
@@ -296,8 +256,6 @@ export class TaskEventCoalescer {
   }
 
   private dueAt(entry: Dirty): number {
-    // A passive row waits for another row's flush.
-    if (entry.passive) return Number.POSITIVE_INFINITY;
     const due = entry.since + (entry.urgent ? URGENT_DELAY_MS : QUIET_DELAY_MS);
     return Math.max(due, entry.notBefore ?? Number.NEGATIVE_INFINITY);
   }
@@ -308,7 +266,6 @@ export class TaskEventCoalescer {
     // The running flush re-arms when it ends.
     if (this.flushing || this.dirty.size === 0) return;
     const due = Math.min(...[...this.dirty.values()].map((entry) => this.dueAt(entry)));
-    if (due === Number.POSITIVE_INFINITY) return;
     const at = Math.max(due, this.lastFlushStartedAt + MIN_FLUSH_SPACING_MS);
     // A mark arrives in whoever's request changed the row; the flush runs
     // every owner's turns, so its timer must carry no one's session actor.
@@ -352,7 +309,6 @@ export class TaskEventCoalescer {
           entry,
           changes: entry.changes,
           urgent: entry.urgent,
-          passive: entry.passive,
           version: entry.version,
         },
       ]),
@@ -368,7 +324,6 @@ export class TaskEventCoalescer {
       const tasks = taken.map(([taskId, entry]) => ({
         taskId,
         changes: entry.changes,
-        quiet: !entry.urgent,
       }));
       const deliveries = await this.deps.render(tasks);
       if (deliveries.length === 0) {
@@ -425,10 +380,7 @@ export class TaskEventCoalescer {
     superseded: Set<string>,
     stopped: Set<string>,
     completed: Set<string>,
-    carried: Map<
-      string,
-      { entry: Dirty; changes: TaskChange[]; urgent: boolean; passive: boolean; version: number }
-    >,
+    carried: Map<string, { entry: Dirty; changes: TaskChange[]; urgent: boolean; version: number }>,
   ): void {
     const reported: string[] = [];
     for (const taskId of taskIds) {
@@ -446,8 +398,6 @@ export class TaskEventCoalescer {
           // changes go back in front of it, and no write has settled them.
           entry.changes = [...before.changes, ...entry.changes];
           entry.urgent ||= before.urgent;
-          // News that needs a word stays so with a passive change after it.
-          entry.passive &&= before.passive;
           entry.builtAt = undefined;
         }
         entry.undelivered = true;

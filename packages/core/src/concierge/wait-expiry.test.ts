@@ -50,7 +50,7 @@ describe("WaitExpiry", () => {
   afterEach(() => testDb.close());
 
   it("ends a task its owner did not answer within the wait, once, and turns its approvals down", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const row = await repo.create("task-chat");
     waiting.set("task-chat", NOW - 2 * HOUR);
     await expiry.expire(row!.id);
     // Not due yet: nothing happens.
@@ -75,7 +75,7 @@ describe("WaitExpiry", () => {
   });
 
   it("handles an expiry once when two calls for one task overlap", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const row = await repo.create("task-chat");
     waiting.set("task-chat", NOW - 25 * HOUR);
     await Promise.all([expiry.expire(row!.id), expiry.expire(row!.id)]);
     expect(expired).toHaveLength(1);
@@ -83,12 +83,12 @@ describe("WaitExpiry", () => {
   });
 
   it("never ends a stopped or archived task's wait for no response", async () => {
-    const [stopped, archived] = await repo.upsertMany([
-      { title: "Stopped", sessionId: "task-chat" },
-      { title: "Archived" },
-    ]);
-    await repo.stop(stopped!.id, "guardian");
-    await repo.upsertMany([{ id: archived!.id, archived: true }]);
+    await new ChatsWebChatRepository(testDb.db).createSession("archived-chat", "Archived");
+    const stopped = await repo.create("task-chat");
+    const archived = await repo.create("archived-chat");
+    await repo.stop(stopped!.id);
+    // A task is archived with its chat.
+    await new ChatsWebChatRepository(testDb.db).archiveSession("archived-chat");
     waiting.set("task-chat", NOW - 30 * HOUR);
     await expiry.expire(stopped!.id);
     await expiry.expire(archived!.id);
@@ -97,7 +97,7 @@ describe("WaitExpiry", () => {
   });
 
   it("keeps the expiry before it turns approvals down, and tries a failed turn-down again", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const row = await repo.create("task-chat");
     waiting.set("task-chat", NOW - 30 * HOUR);
     let fail = true;
     const flaky = new WaitExpiry({
@@ -127,7 +127,7 @@ describe("WaitExpiry", () => {
   });
 
   it("handles a wait that expired while Rome was down when it starts", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const row = await repo.create("task-chat");
     waiting.set("task-chat", NOW - 30 * HOUR);
     const stop = expiry.start();
     await new Promise((resolve) => setTimeout(resolve, 30));
@@ -136,7 +136,7 @@ describe("WaitExpiry", () => {
   });
 
   it("stops reading a task once its wait is handled, though its card stays open", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const row = await repo.create("task-chat");
     waiting.set("task-chat", NOW - 30 * HOUR);
     const reads = rs.spyOn(repo, "get");
     const stop = expiry.start();
@@ -151,7 +151,7 @@ describe("WaitExpiry", () => {
   });
 
   it("keeps a task whose approval Rome turned down ended for no response, through the turn that carries on", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const row = await repo.create("task-chat");
     waiting.set("task-chat", NOW - 30 * HOUR);
     await expiry.expire(row!.id);
     // The approval is turned down, so nothing waits; the turn that carries on
@@ -167,7 +167,7 @@ describe("WaitExpiry", () => {
   });
 
   it("has the expiry kept before any approval is turned down", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const row = await repo.create("task-chat");
     waiting.set("task-chat", NOW - 30 * HOUR);
     let keptFirst: boolean | null = null;
     const ordered = new WaitExpiry({
@@ -184,7 +184,7 @@ describe("WaitExpiry", () => {
   });
 
   it("turns down at start an approval a restart left pending after its expiry was kept", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const row = await repo.create("task-chat");
     waiting.set("task-chat", NOW - 30 * HOUR);
     await repo.markWaitExpired(row!.id, new Date(NOW - 30 * HOUR));
     const stop = expiry.start();
@@ -196,7 +196,7 @@ describe("WaitExpiry", () => {
   });
 
   it("backs off a turn-down that keeps failing instead of trying again at once", async () => {
-    await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await repo.create("task-chat");
     waiting.set("task-chat", NOW - 30 * HOUR);
     let attempts = 0;
     const failing = new WaitExpiry({
@@ -215,7 +215,7 @@ describe("WaitExpiry", () => {
   });
 
   it("lists a task that ended for no response in the next digest, once", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const row = await repo.create("task-chat");
     waiting.set("task-chat", NOW - 30 * HOUR);
     await expiry.expire(row!.id);
     expect(await repo.noResponseUnlisted([row!.id])).toEqual([row!.id]);
@@ -226,7 +226,7 @@ describe("WaitExpiry", () => {
   });
 
   it("ends all the waits open in a task chat as one, and does not end it again for a newer card in it", async () => {
-    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const row = await repo.create("task-chat");
     const t0 = NOW - 30 * HOUR;
     const t1 = NOW - 20 * HOUR;
     // An approval at T0, and a question card at T1 nobody answered either.

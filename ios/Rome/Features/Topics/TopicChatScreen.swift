@@ -9,8 +9,9 @@ struct TopicChatScreen: View {
     /// Whose draft the composer keeps: the chat, or the blank chat until it exists.
     let draftKey: String
     let onMenu: () -> Void
-    /// The header's mascot was tapped: the Agent page, for this chat.
-    let onAgent: (String?) -> Void
+    /// The Agent page for this chat: on a tab from the header's buttons, or
+    /// as it was last from the mascot (nil).
+    let onAgent: (String?, AgentTab?) -> Void
     /// The chat was archived or deleted: the shell shows the main Chat.
     let onArchived: () -> Void
     let onCreated: (String) -> Void
@@ -25,13 +26,8 @@ struct TopicChatScreen: View {
     @State private var startFailure: SendFailure = .unknown
     @State private var startingImages: [ComposerImage] = []
     @State private var renaming = false
-    /// The delete alert, once the chat's follows and open tasks are read.
-    @State private var deleting: TopicDeletePrompt?
-    /// The archive alert, once the chat's follows and open tasks are read
-    /// and there is something to ask about.
-    @State private var archiving: TopicArchivePrompt?
-    /// Set while that read runs, so a second tap on Delete or Archive starts no other.
-    @State private var readingWork = false
+    /// Archive or Delete from the header, while it is read and asked.
+    @State private var retiring: TopicRetireRequest?
     @State private var newName = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
@@ -62,13 +58,17 @@ struct TopicChatScreen: View {
                     composerFocused = false
                     onMenu()
                 },
-                onAgent: { onAgent(chatId) },
+                onAgent: { onAgent(chatId, $0) },
                 onRename: { title in
                     newName = title
                     renaming = true
                 },
-                onArchive: { title in askToArchive(title) },
-                onDelete: { title in askToDelete(title) }
+                onPin: { pinned in
+                    guard let chatId else { return }
+                    Task { await workspace.pinTopic(chatId, pinned: pinned) }
+                },
+                onArchive: { title in retire(.archive, title) },
+                onDelete: { title in retire(.delete, title) }
             )
         }
         .overlay(alignment: .top) {
@@ -85,13 +85,9 @@ struct TopicChatScreen: View {
                 Task { await workspace.renameTopic(chatId, to: name) }
             }
         }
-        .deleteTopicChatAlert($deleting) { id, stoppingWork in
-            Task { if await workspace.deleteTopic(id, stoppingWork: stoppingWork) { onArchived() } }
-        }
-        .archiveTopicChatAlert($archiving) { id, stoppingWork in
-            archive(id, stoppingWork: stoppingWork)
-        }
+        .topicRetire($retiring, workspace: workspace) { _ in onArchived() }
         .pageBackground()
+        .environment(\.taskLinks, chatId.flatMap { workspace.taskLinks(forChat: $0) })
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onReply: { store?.restoreReply($0) }, prefill: Binding(
             get: { workspace.composerPrefills[chatId ?? draftKey] },
             set: { workspace.composerPrefills[chatId ?? draftKey] = $0 }
@@ -189,37 +185,11 @@ struct TopicChatScreen: View {
         }
     }
 
-    /// Reads what the delete would move, then asks.
-    private func askToDelete(_ name: String) {
-        guard let chatId, !readingWork else { return }
-        readingWork = true
-        Task {
-            let work = await workspace.topicWork(chatId)
-            readingWork = false
-            deleting = TopicDeletePrompt(id: chatId, name: name, work: work)
-        }
-    }
-
-    /// Reads what the archive would move, then asks; with nothing to ask
-    /// about, or when it cannot be read, it archives at once, as before.
-    private func askToArchive(_ name: String) {
-        guard let chatId, !readingWork else { return }
-        readingWork = true
-        Task {
-            let work = await workspace.topicWork(chatId)
-            readingWork = false
-            if let work, !work.isEmpty {
-                archiving = TopicArchivePrompt(id: chatId, name: name, work: work)
-            } else {
-                archive(chatId)
-            }
-        }
-    }
-
-    private func archive(_ id: String, stoppingWork: Bool = false) {
-        Task {
-            if await workspace.archiveTopic(id, stoppingWork: stoppingWork) { onArchived() }
-        }
+    /// Archive or Delete from the header: a second tap while the first is
+    /// read starts no other.
+    private func retire(_ action: TopicRetireRequest.Action, _ name: String) {
+        guard let chatId, retiring == nil else { return }
+        retiring = TopicRetireRequest(chatId: chatId, name: name, action: action)
     }
 
     /// Sends the draft with the composer's photos.
@@ -300,33 +270,45 @@ private struct TopicChatHeader: View {
     let draftKey: String
     let share: ChatShareFlow?
     let onMenu: () -> Void
-    /// The header's mascot was tapped: the Agent page, for this chat.
-    let onAgent: () -> Void
+    /// The Agent page for this chat, on a tab or as it was last.
+    let onAgent: (AgentTab?) -> Void
     /// Rename, with the chat's current title.
     let onRename: (String) -> Void
+    /// Pin (true) or unpin (false).
+    let onPin: (Bool) -> Void
     /// Archive, with the chat's current title.
     let onArchive: (String) -> Void
     /// Delete, with the chat's current title.
     let onDelete: (String) -> Void
     @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         let title = TopicChatsStore.title(chatId.flatMap(workspace.topics.chat))
+        let activity = workspace.topics.activity(for: chatId)
         ChatHeader(
             // The Concierge's name, as in the main chat; the topic's own
             // title stays in the "…" menu.
             name: workspace.agentDisplayName,
             menuTitle: title,
-            activity: workspace.topics.activity(for: chatId),
+            activity: activity,
             announces: chatId != nil && model.visibleChat == chatId,
             onMenu: onMenu,
             onAgent: onAgent,
             zoomSource: AgentZoom.source(chatId ?? draftKey),
-            // A blank chat has nothing to rename, archive or delete yet.
+            tasks: chatId.flatMap { workspace.taskList(forChat: $0) },
+            // A blank chat has nothing to rename, pin, archive or delete yet.
             onRename: chatId == nil ? nil : { onRename(title) },
+            pinned: chatId.map(workspace.topics.isPinned) ?? false,
+            onPin: chatId == nil ? nil : onPin,
             onArchive: chatId == nil ? nil : { onArchive(title) },
             onDelete: chatId == nil ? nil : { onDelete(title) }
         )
         .shareModeHeader(share)
+        // Rows blur under the header as in the main Chat, past the status
+        // capsule while one hangs below the row.
+        .background(alignment: .top) {
+            ChatHeaderBlur(reach: ChatHeaderBlur.reach(statusShows: activity?.statusLine != nil, dynamicTypeSize))
+        }
     }
 }

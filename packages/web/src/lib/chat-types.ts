@@ -36,6 +36,11 @@ export interface ChatSession {
   parentSessionId?: string | null;
   /** Why the chat exists, when something other than the guardian started it, e.g. `concierge`. */
   triggerKind?: string | null;
+  /**
+   * Present on `GET /chat/sessions/:id` for a task chat: the Concierge chat it
+   * reports to, which its header links back to.
+   */
+  taskOf?: { conciergeChatId: string; conciergeChatName: string; main: boolean } | null;
   /** ISO timestamp when the chat was archived (soft-hidden), or null. */
   archivedAt?: string | null;
   /** ISO timestamp when this chat was pinned by the guardian, or null. */

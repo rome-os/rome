@@ -356,7 +356,7 @@ describe("fetch_channel_history", () => {
       const result = await action.execute({ channel: "webchat", limit: 5 });
       expect(result).toEqual({
         status: "error",
-        error: "Paging with limit or cursor needs a threadId.",
+        error: "Paging with limit, cursor, olderThan or newerThan needs a threadId.",
       });
       expect(query).not.toHaveBeenCalled();
     });
@@ -377,6 +377,62 @@ describe("fetch_channel_history", () => {
         limit: 2,
       });
       expect((result as { data: { nextCursor: string | null } }).data.nextCursor).toBeNull();
+    });
+  });
+
+  describe("an account read by message id", () => {
+    function discordDeps(page: ChannelMessage[]) {
+      const query = rs.fn<ChannelsService["query"]>().mockResolvedValue(page);
+      const account = { platform: "discord", id: "bot-1" };
+      const deps = {
+        channelsService: {
+          list: async () => [{ name: "discord", account, platform: "discord", sendable: true }],
+          send: async (_channel: string, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      };
+      return { query, account, action: createAction(actionConfig, deps) };
+    }
+    const said = (id: string, minute: number, extra: Partial<ChannelMessage> = {}) =>
+      makeMessage({
+        messageId: id,
+        text: id,
+        timestamp: new Date(Date.UTC(2026, 10, 19, 8, minute)),
+        ...extra,
+      });
+
+    it("names each message and the thread it opened", async () => {
+      const { action } = discordDeps([
+        said("m2", 2, { openedThread: "t1" as ChatId }),
+        said("m1", 1),
+      ]);
+
+      const result = await action.execute({ platform: "discord", threadId: "general" });
+
+      const content = (result as { data: { content: string } }).data.content;
+      expect(content).toContain("**Alice** (message m1): m1");
+      expect(content).toContain("**Alice** (message m2, opened thread t1): m2");
+    });
+
+    it("reads on from the newest message of a full page read forward", async () => {
+      const { query, account, action } = discordDeps([said("m3", 3), said("m2", 2)]);
+
+      const result = await action.execute({
+        platform: "discord",
+        threadId: "general",
+        newerThan: "m1",
+        limit: 2,
+      });
+
+      expect(query).toHaveBeenCalledWith(account, {
+        chatId: "general",
+        since: new Date(0),
+        newerThan: "m1",
+        limit: 2,
+      });
+      const data = (result as { data: Record<string, unknown> }).data;
+      expect(data.nextNewerThan).toBe("m3");
+      expect(data).not.toHaveProperty("nextCursor");
     });
   });
 });

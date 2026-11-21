@@ -9,7 +9,7 @@ tools:
   - Glob
   - Grep
 actions:
-  - get_webchat_conversations
+  - dream:get_webchat_conversations
 systemPromptPrefix: |
   You are the skill-review agent. Your sole purpose is to review a conversation
   and decide whether a reusable skill should be saved or updated.
@@ -23,7 +23,7 @@ systemPromptPrefix: |
 
   ## Process
 
-  1. Call get_webchat_conversations with windowHours: 2. If you know a specific
+  1. Call dream:get_webchat_conversations with windowHours: 2. If you know a specific
      session ID, pass it as sessionId to scope the review to that session only.
   2. Use list_skills or search_skills to check for an existing matching skill.
   3. Save only in your working directory, a staging copy of the user-skills

@@ -11,6 +11,7 @@ import {
   type ConciergeService,
   isConciergeChat,
   isMainConciergeChat,
+  TASK_CHAT_TRIGGER_KIND,
 } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type {
@@ -43,6 +44,7 @@ import {
   type TraceEventDto,
 } from "../trace-segments.js";
 import type {
+  AgentPlan,
   TraceAccounting,
   TraceModelUsage,
   TraceSnapshot,
@@ -964,6 +966,19 @@ export function openToolOf(
   return [...(running?.openTools.values() ?? [])].at(-1) ?? null;
 }
 
+/** The plan of a chat's running turn, as its Plan card shows it: the latest
+ *  unfinished stream that has one. A send queued behind it has none yet. */
+export function turnPlanOf(
+  streams: readonly Pick<ActiveWebchatStream, "finished" | "segmentBuilder">[],
+): AgentPlan | null {
+  for (const stream of [...streams].reverse()) {
+    if (stream.finished) continue;
+    const plan = stream.segmentBuilder.snapshot().summary.plan;
+    if (plan?.steps.length) return plan;
+  }
+  return null;
+}
+
 interface ActiveWebchatStream {
   streamId: string;
   sessionId: string;
@@ -1000,7 +1015,7 @@ interface ActiveWebchatStream {
    * accumulation resets at the *block boundary* (a complete `text` block),
    * never on tool_use — what to show during tool calls is client policy
    * (delayed fold: keep the last block until the next one starts). Transient —
-   * the durable reply is still persisted via `send_message` on `result`.
+   * the durable reply is still persisted via `system:send_message` on `result`.
    */
   assistantText: string;
   assistantBlockIx: number;
@@ -1115,6 +1130,8 @@ export interface WebchatRuntime {
    * has not come back, as the trace names it. Null when it is in none.
    */
   openTool(sessionId: string): string | null;
+  /** The plan of the chat's running turn, as its Plan card shows it, or null for none. */
+  turnPlan(sessionId: string): AgentPlan | null;
   /**
    * Calls `listener` with the chat's id whenever it starts or stops running a
    * turn, or its running turn enters or leaves a tool; the latter alone comes
@@ -1313,6 +1330,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
   const openTool = (sessionId: string): string | null =>
     openToolOf(activeStreams.get(sessionId) ?? []);
+  const turnPlan = (sessionId: string): AgentPlan | null =>
+    turnPlanOf(activeStreams.get(sessionId) ?? []);
   deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
   // A task that ended closes its chat's cards, so the chat waits on no one:
   // a stop's `session_running` is every client's cue to read the list again,
@@ -2198,7 +2217,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!input.continuable) {
       try {
         const result = await deps.actionEngine.run(
-          "show_app",
+          "system:show_app",
           { appId: SESSIONS_HOST_APP_ID, route: forkSessionId },
           {
             initiator: input.initiator,
@@ -2219,7 +2238,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             placement: { appId: SESSIONS_HOST_APP_ID, route: forkSessionId },
           };
         }
-        log.warn("show_app did not return the fork session placement", {
+        log.warn("system:show_app did not return the fork session placement", {
           sessionId: input.session.id,
           turnId: input.turnId,
           forkSessionId,
@@ -3060,7 +3079,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     // Time-ordered, so new chats sit together in the id index (RFC 9562).
     const id = uuidv7();
-    const name = body.name || "New Chat";
+    const name = body.name || "New chat";
     let project;
     try {
       project = await ensureStoredProjectSelection(
@@ -3186,10 +3205,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       webchatSessionKey(sessionId),
       session.agentName ?? MAIN_AGENT,
     );
+    // A task chat names the Concierge chat it reports to, so its header links back.
+    const task =
+      session.triggerKind === TASK_CHAT_TRIGGER_KIND
+        ? await deps.concierge?.deps.tasks.repo.getWithChat(sessionId)
+        : null;
     return c.json({
       ...toWebchatSessionResponse(session, messageCount),
       model: runtimeSession?.model ?? null,
       reasoningEffort: runtimeSession?.reasoningEffort ?? null,
+      ...(task
+        ? {
+            taskOf: {
+              conciergeChatId: task.conciergeChat.id,
+              conciergeChatName: task.conciergeChat.name,
+              main: task.conciergeChat.main,
+            },
+          }
+        : {}),
     });
   });
 
@@ -3220,15 +3253,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (sess) {
       await sess.close("user").catch(() => undefined);
     }
-    // A task chat's task stops with it: its row is stopped and archived in
-    // the delete's own transaction, and the Concierge hears of it quietly.
-    let taskId: string | null = null;
-    if (deps.concierge) taskId = await deps.concierge.endTaskChat(sessionId, "deleted");
+    // A task chat's task stops with it: its running work stops, and the task
+    // goes with the chat in the delete's own transaction.
+    if (deps.concierge) await deps.concierge.endTaskChat(sessionId, "deleted");
     else await deps.webchatRepo.deleteSession(sessionId);
     // Told after the delete, as an archive is, so the activity reads the
     // chat's finished rows as the main chat's.
     if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo, true);
-    if (taskId) deps.concierge?.chatDeleted(taskId);
     // Durable audit signal for guardian-initiated chat deletion. Keep the
     // payload free of chat titles and message content because the OTLP
     // record can outlive the local session data it describes.
@@ -4558,9 +4589,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // The main Concierge chat keeps its fixed name, and so does a topic chat
     // started with one. An untitled topic chat is named from its first
     // message, as an ordinary chat is.
+    // A task chat is named by the task that started it, so its first message
+    // does not rename it.
     const autoTitle =
-      policy.autoTitle ||
-      (isConciergeChat(session) && !isMainConciergeChat(session) && session.name === "");
+      session.triggerKind !== TASK_CHAT_TRIGGER_KIND &&
+      (policy.autoTitle ||
+        (isConciergeChat(session) && !isMainConciergeChat(session) && session.name === ""));
 
     // Build the durable transcript payload before acquiring the AgentSession.
     // A recoverable model-resolution failure is still an accepted user turn:
@@ -5125,7 +5159,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                     ? lastCompletedText?.blockId
                     : undefined;
               await deps.actionEngine.run(
-                "send_message",
+                "system:send_message",
                 {
                   channel: "webchat",
                   threadId: sessionId,
@@ -5686,6 +5720,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     isRunning: isSessionRunning,
     isBusy: isSessionBusy,
     openTool,
+    turnPlan,
     onTurnChange(listener) {
       turnListeners.add(listener);
       return () => {

@@ -293,10 +293,8 @@ describe("ChatOutputs", () => {
       "core:concierge",
     );
     const tasks = new ConciergeTasksRepository(testDb.db);
-    await tasks.upsertMany([
-      { title: "Report", state: "doing", sessionId: "task-1" },
-      { title: "Other", state: "doing", sessionId: "task-2", chatId: "topic-1" },
-    ]);
+    await tasks.create("task-1", {});
+    await tasks.create("task-2", { chatId: "topic-1" });
     const report = join(projects, "demo", "report.md");
     writeFileSync(report, "# Report");
     await write("task-1", "t1", report);
@@ -332,7 +330,7 @@ describe("ChatOutputs", () => {
     );
     await chats.createSession("task-1", "Draft the report");
     const tasks = new ConciergeTasksRepository(testDb.db);
-    await tasks.upsertMany([{ title: "Report", state: "doing", sessionId: "task-1" }]);
+    await tasks.create("task-1", {});
     const report = join(projects, "demo", "report.md");
     writeFileSync(report, "# Report");
     await write("task-1", "t1", report);

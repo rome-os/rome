@@ -48,6 +48,7 @@ export function testRomeTools(options: TestRomeToolsOptions = {}): RomeTools {
       list: () => [],
       permits: () => true,
       appOf: () => undefined,
+      find: () => undefined,
       run: async () => ({ status: "ok", data: { ok: true } }),
     },
     skills: { list: () => [] },

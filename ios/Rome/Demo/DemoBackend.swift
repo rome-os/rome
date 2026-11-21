@@ -14,6 +14,10 @@ final class LocalEventBus: LiveEventSource {
     }
 
     func unsubscribe(_ token: UUID) { handlers[token] = nil }
+
+    /// Whether anyone still listens to `topic`.
+    func isListening(to topic: String) -> Bool { handlers.values.contains { $0.topic == topic } }
+
     func pause() {}
     func resume() {}
 
@@ -49,6 +53,8 @@ final class DemoBackend: RomeBackend {
     private var topicChats: [ConciergeChat] = []
     /// Each topic chat's last activity, for the chat list; the drawer sorts by it.
     private var topicActivity: [String: Date] = [:]
+    /// When each pinned topic chat was pinned. None is pinned at first.
+    private var topicPins: [String: Date] = [:]
     /// Files sent with messages, by their asset path.
     private var assets: [String: Data] = [:]
     private var approvals: [String: ApprovalRecord] = [:]
@@ -218,6 +224,11 @@ final class DemoBackend: RomeBackend {
         bus.emit(LiveTopic.chat(id), .sessionName(sessionId: id, name: name))
     }
 
+    func pinChat(_ id: String, pinned: Bool) async throws {
+        try await pause(0.2)
+        topicPins[id] = pinned ? .now : nil
+    }
+
     func archiveChat(_ id: String) async throws {
         try await pause(0.2)
         topicChats.removeAll { $0.id == id }
@@ -366,7 +377,7 @@ final class DemoBackend: RomeBackend {
 
     func sessions() async throws -> [ChatSession] {
         Array(chats.values) + topicChats.map { chat in
-            ChatSession(id: chat.id, name: chat.name, activityAt: topicActivity[chat.id].map(RomeDate.string))
+            ChatSession(id: chat.id, name: chat.name, activityAt: topicActivity[chat.id].map(RomeDate.string), pinnedAt: topicPins[chat.id].map(RomeDate.string))
         }
     }
 
@@ -381,8 +392,43 @@ final class DemoBackend: RomeBackend {
         }
     }
 
-    /// The demo's task list: its tasks in the groups their status gives
-    /// them, with a schedule, a lone check, a follow and a routine.
+    /// The task chats the demo's task links name, by id.
+    private var taskLinkInfo: [String: TaskLinkInfo] = [:]
+
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse {
+        try await pause(0.1)
+        return TaskLinksResponse(tasks: ids.compactMap { taskLinkInfo[$0] })
+    }
+
+    /// The main chat's rows that are no task chat: a reminder, a follow and
+    /// routines (a daily one, a paused weekly one, a one-off), made on the
+    /// first read so their times count from then. The row actions change them.
+    private var listExtras: [TaskListItem]?
+
+    private func extras(nowMs: Double) -> [TaskListItem] {
+        if let listExtras { return listExtras }
+        let hour = 3_600_000.0
+        let made = nowMs - 6 * 24 * hour
+        let oneOffDate: String = {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.string(from: Date(timeIntervalSince1970: (nowMs + 2 * 24 * hour) / 1000))
+        }()
+        let items: [TaskListItem] = [
+            .check(.init(check: .init(id: "check-flight", name: "看看机票有没有降价", at: nowMs + 3 * hour, waitingFor: nil, createdAt: made))),
+            .routine(.init(id: "r-passport", name: "提醒续签护照", trigger: .init(type: "schedule", localTime: "10:00", rrule: nil, date: oneOffDate), enabled: true, nextRunAt: nowMs + 2 * 24 * hour, lastRun: nil, createdAt: made)),
+            .routine(.init(id: "r-summary", name: "每日总结", trigger: .init(type: "schedule", localTime: "21:00", rrule: "FREQ=DAILY"), enabled: true, nextRunAt: nowMs + 5 * hour, lastRun: nil, createdAt: made)),
+            .follow(.init(source: "github", label: "GitHub", target: "rome-os/rome", state: "active", digestTimes: ["09:00", "18:00"], nextAt: nowMs + 7 * hour, createdAt: made)),
+            .routine(.init(id: "r-weekly", name: "周报提醒", trigger: .init(type: "schedule", localTime: "17:00", rrule: "FREQ=WEEKLY;BYDAY=FR"), enabled: false, nextRunAt: nil, lastRun: .init(status: "error", firedAt: made), createdAt: made)),
+        ]
+        listExtras = items
+        return items
+    }
+
+    /// The demo's task list in the one panel's groups: its tasks in the
+    /// groups their status gives them, a scheduled task between runs in
+    /// Scheduled, with a lone reminder, a follow and routines.
     func taskList(chatId: String) async throws -> TaskListResponse {
         try await pause(0.2)
         let nowMs = Date.now.timeIntervalSince1970 * 1000
@@ -406,21 +452,70 @@ final class DemoBackend: RomeBackend {
             )
             let key: TaskListGroup.Key = switch status {
             case "needs_you": .needsYou
-            case "later": .later
+            case "later": item.schedule == nil ? .later : .scheduled
             case "ended": .ended
             default: .active
             }
             groups[key, default: []].append(.task(item))
         }
-        if chat == nil {
-            groups[.later, default: []].append(.check(.init(check: .init(id: "check-flight", name: "看看机票有没有降价", at: nowMs + 3 * 3_600_000, waitingFor: nil))))
-            groups[.onItsOwn, default: []] += [
-                .follow(.init(source: "github", label: "GitHub", target: "rome-os/rome", state: "active", digestTimes: ["09:00", "18:00"])),
-                .routine(.init(id: "r-summary", name: "每日总结", trigger: .init(type: "schedule", localTime: "21:00", rrule: "FREQ=DAILY"), enabled: true, nextRunAt: nowMs + 5 * 3_600_000, lastRun: nil)),
-            ]
+        // The empty demo has none, so its tab shows "No tasks yet".
+        if chat == nil, variant != .empty {
+            for item in extras(nowMs: nowMs) {
+                let key: TaskListGroup.Key
+                switch item {
+                case .routine(let routine): key = routine.trigger.date != nil && routine.trigger.rrule == nil ? .later : .scheduled
+                case .follow: key = .scheduled
+                default: key = .later
+                }
+                groups[key, default: []].append(item)
+            }
         }
-        let order: [TaskListGroup.Key] = [.needsYou, .active, .later, .onItsOwn, .ended]
+        let order: [TaskListGroup.Key] = [.needsYou, .active, .later, .scheduled, .ended]
         return TaskListResponse(chatId: chatId, groups: order.compactMap { key in groups[key].map { TaskListGroup(key: key, items: $0) } })
+    }
+
+    /// Changes a row that is no task chat, then reads the list again; one
+    /// the list does not hold is not found.
+    private func changeExtra(_ id: String, chatId: String, _ change: (inout [TaskListItem], Int) -> Void) async throws {
+        try await pause(0.4)
+        guard var items = listExtras, let index = items.firstIndex(where: { $0.id == id }) else { throw APIError.notFound }
+        change(&items, index)
+        listExtras = items
+        bus.emit(LiveTopic.chatTasks(chatId), .taskListChanged(chatId: chatId))
+    }
+
+    func cancelListedCheck(chatId: String, checkId: String) async throws {
+        try await changeExtra("check:\(checkId)", chatId: chatId) { items, index in items.remove(at: index) }
+    }
+
+    func unfollowListed(chatId: String, source: String, target: String) async throws {
+        try await changeExtra("follow:\(source):\(target)", chatId: chatId) { items, index in items.remove(at: index) }
+    }
+
+    func setListedRoutineEnabled(chatId: String, routineId: String, enabled: Bool) async throws {
+        let nowMs = Date.now.timeIntervalSince1970 * 1000
+        try await changeExtra("routine:\(routineId)", chatId: chatId) { items, index in
+            guard case .routine(var routine) = items[index] else { return }
+            routine.enabled = enabled
+            routine.nextRunAt = enabled ? nowMs + 24 * 3_600_000 : nil
+            items[index] = .routine(routine)
+        }
+    }
+
+    func deleteListedRoutine(chatId: String, routineId: String) async throws {
+        try await changeExtra("routine:\(routineId)", chatId: chatId) { items, index in items.remove(at: index) }
+    }
+
+    /// Marks a demo task done: it ends as done, and its list reads again.
+    func markListedTaskDone(chatId: String, taskId: String) async throws {
+        try await pause(0.4)
+        guard let index = tasks.firstIndex(where: { $0.id == taskId }) else { throw APIError.notFound }
+        tasks[index].status = "ended"
+        tasks[index].endReason = "done"
+        tasks[index].state = .done
+        tasks[index].completedAt = Date.now.timeIntervalSince1970 * 1000
+        tasks[index].updatedAt = tasks[index].completedAt!
+        bus.emit(LiveTopic.chatTasks(chatId), .taskListChanged(chatId: chatId))
     }
 
     /// Stops a demo task: it ends as stopped, and its list reads again.
@@ -988,10 +1083,11 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-lists", name: "搬家清单", main: false, unread: 0),
             ConciergeChat(id: "topic-cards", name: "周末安排", main: false, unread: 0),
             ConciergeChat(id: "topic-itinerary", name: "东京一日", main: false, unread: 0),
+            ConciergeChat(id: "topic-task-links", name: "任务进度", main: false, unread: 0),
         ]
         // Latest first in the drawer: the trip, then the errors, and so on.
         // The cafés come eighth, past the first five, for the drawer over it.
-        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800]
+        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
@@ -1251,6 +1347,24 @@ final class DemoBackend: RomeBackend {
         ]
         // Cards the Concierge composed itself: Rome's own, every value
         // written out, with no `bind`.
+        // Task links in each status, the way the Concierge refers to its tasks.
+        taskLinkInfo = Dictionary(uniqueKeysWithValues: [
+            TaskLinkInfo(id: "chat-site", name: "官网首页双语文案", status: "active"),
+            TaskLinkInfo(id: "chat-price", name: "价格追踪：发提醒邮件", status: "needs_you"),
+            TaskLinkInfo(id: "chat-login", name: "修复登录页样式", status: "ended", endReason: "done"),
+            TaskLinkInfo(id: "chat-export", name: "导出季度报表", status: "ended", endReason: "failed"),
+            TaskLinkInfo(id: "chat-quotes", name: "抓取供应商报价", status: "ended", endReason: "stopped"),
+            TaskLinkInfo(id: "chat-research", name: "竞品定价调研", status: "ended", endReason: "no_response"),
+            TaskLinkInfo(id: "chat-weekly", name: "每周一整理周报", status: "later"),
+            TaskLinkInfo(id: "chat-blur", name: "iOS 退出 task chat 后头部模糊变实心", status: "active"),
+            TaskLinkInfo(id: "chat-reload", name: "iOS 长气泡展开和折叠时图片重新加载，先在 Mac mini 上复现", status: "needs_you"),
+        ].map { ($0.id, $0) })
+        messages["topic-task-links"] = [
+            user("tl1", "我的任务都怎么样了？", at: at(9, 30), session: "topic-task-links"),
+            agent("[官网首页双语文案](#rome-task=chat-site) 还在逐段翻译，好了告诉你。其余的：\n\n- [价格追踪：发提醒邮件](#rome-task=chat-price) 等你批准\n- [修复登录页样式](#rome-task=chat-login) 改好了\n- [导出季度报表](#rome-task=chat-export) 没导出来，表格权限不够\n- [抓取供应商报价](#rome-task=chat-quotes) 你停掉了\n- [竞品定价调研](#rome-task=chat-research) 没等到你的回答\n- [每周一整理周报](#rome-task=chat-weekly) 下周一开始", at: at(9, 31), session: "topic-task-links"),
+            // Chips on a wrapped paragraph's first line, and one that wraps itself.
+            agent("在查了：[iOS 退出 task chat 后头部模糊变实心](#rome-task=chat-blur)。会在 Mac mini 上复现、找根因，先给你看修法，不直接改。\n\n另一件：[iOS 长气泡展开和折叠时图片重新加载，先在 Mac mini 上复现](#rome-task=chat-reload) 等你确认。", at: at(9, 32), session: "topic-task-links"),
+        ]
         messages["topic-itinerary"] = [
             user("it1", "周六在东京怎么安排？", at: at(9, 0), session: "topic-itinerary"),
             parts([Self.agentItinerary], at: at(9, 1), session: "topic-itinerary"),

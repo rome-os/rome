@@ -889,7 +889,7 @@ describe("ChatSearchDialog agent messaging", () => {
     expect(requests).toHaveLength(2);
     expect(requests[0]).toMatchObject({
       url: "/api/chat/sessions",
-      body: { name: "New Chat", projectPath: "default", agentName: "research:writer" },
+      body: { name: "New chat", projectPath: "default", agentName: "research:writer" },
     });
     expect(requests[1]).toMatchObject({
       url: "/api/chat/sessions/new-chat/turns",

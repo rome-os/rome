@@ -1,7 +1,7 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /**
- * Dream data model: one row per run of the `dream` or `skill_review` action,
+ * Dream data model: one row per run of the `dream` or `dream:skill_review` action,
  * and one row per file change its agent made. Logical names only; the daemon
  * joins the `dream__` prefix.
  */
