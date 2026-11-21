@@ -43,7 +43,7 @@ function registerEveryKind(registry: ConnectionRegistry): void {
     slackApp: {
       api: {},
       cloud: {},
-      openMailbox: () => ({ stop() {} }),
+      openMailbox: () => ({ stop() {}, attempts: 4 }),
       copy: {},
       listens: () => true,
     },
@@ -101,7 +101,7 @@ describe("registerBuiltinConnections", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  // Migration 0151 deletes stored Slack bot (`slack_bot`) connections, but one
+  // Migration 0152 deletes stored Slack bot (`slack_bot`) connections, but one
   // can still arrive after it, such as from a restored backup.
   it("boots past a stored Slack bot, skipping it, and still offers Rome's Slack app", async () => {
     const stored = {

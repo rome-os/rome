@@ -74,6 +74,8 @@ export interface Inbound {
     /** The platform address it was said at, and the thread's parent. */
     readonly address: ChatId;
     readonly parentAddress?: ChatId;
+    /** The platform's id for the message, as the Connection delivered it. */
+    readonly messageId: string;
   };
 }
 
@@ -775,6 +777,7 @@ function toInbound(
       account,
       connectionId: event.ref.connectionId,
       address: message.chatId,
+      messageId: message.messageId,
       ...(message.parentChatId === undefined ? {} : { parentAddress: message.parentChatId }),
     },
   };

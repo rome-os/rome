@@ -14,7 +14,7 @@ import type { Person } from "../people/model/person.js";
 import { ChatEvents } from "../chats/storage/events.js";
 import { messageToRome } from "../chats/storage/message.js";
 import { chatKey, placeIn } from "../chats/storage/place.js";
-import { inboundRecording } from "../connections/inbound-recording.js";
+import { type InboundRecording, inboundRecording } from "../connections/inbound-recording.js";
 import { WebChatRepository } from "../webchat/repository.js";
 import { chatMessages, romeSessions } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/db.js";
@@ -95,6 +95,7 @@ describe("messagesSaid", () => {
   let said: ReturnType<typeof messagesSaid>;
   /** The events the last port built hears on. */
   let events: ChatEvents;
+  let recorder: InboundRecording;
 
   function build(
     overrides: {
@@ -106,16 +107,27 @@ describe("messagesSaid", () => {
     } = {},
   ) {
     events = new ChatEvents();
+    const wakes = overrides.wakes ?? wiring.links;
     const recording = inboundRecording(
-      { chats: wiring.chats, messages: wiring.messages, events, adapters: wiring.adapters },
+      {
+        chats: wiring.chats,
+        messages: wiring.messages,
+        events,
+        adapters: wiring.adapters,
+        hold: (messageId) => {
+          wakes.wakeUndecided(messageId);
+          return () => wakes.wakeDecided(messageId);
+        },
+      },
       [telegram.channel, second.channel, ...(overrides.channels ?? [])],
     );
+    recorder = recording;
     return messagesSaid({
       chats: wiring.chats,
       sessions: overrides.sessions ?? new ChatsWebChatRepository(testDb.db),
       recording,
       events,
-      wakes: overrides.wakes ?? wiring.links,
+      wakes,
       ...(overrides.labels ? { labels: overrides.labels } : {}),
     });
   }
@@ -143,8 +155,7 @@ describe("messagesSaid", () => {
   const lines = () => testDb.db.select().from(chatMessages).all();
   /** Waits for every delivery the adapter queued to be heard. */
   const settled = async () => {
-    await wiring.adapters.of(telegram.channel).settled();
-    await wiring.adapters.of(second.channel).settled();
+    await recorder.settled();
   };
 
   it("records nothing until a hook subscribes", async () => {
@@ -205,6 +216,121 @@ describe("messagesSaid", () => {
     expect(wiring.links.unseen(session)).toHaveLength(0);
     await said.decided(event.recorded);
     expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["Hello"]);
+  });
+
+  it("records a place's next message while a turn there still runs, and holds it out of that turn's catch-up until its wake is decided", async () => {
+    const running = gate();
+    const started = gate();
+    const heard: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event);
+      if (event.message.messageId !== "tg-1") return;
+      started.open();
+      await running.opened;
+    });
+    const later = (id: string, minutes: number) =>
+      message({ messageId: id, text: id, timestamp: new Date(Date.now() + minutes * 60_000) });
+    await telegram.deliver(later("tg-1", 1));
+    await started.opened;
+    // Handed over while the first is still being heard: recorded at once.
+    await telegram.deliver(later("tg-2", 2));
+    expect(lines().map((line) => line.text)).toEqual(["tg-1", "tg-2"]);
+    const [first] = heard;
+    if (!first) throw new Error("not heard");
+    const session = first.recorded.chatRecordId;
+    await said.decided(first.recorded);
+    // On record, and its MessageSaid not yet raised: no catch-up reads it.
+    // The first, decided and taken by no turn, is caught up on; the second is not.
+    expect(heard).toHaveLength(1);
+    expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["tg-1"]);
+
+    running.open();
+    await settled();
+    const second = heard[1];
+    if (!second) throw new Error("second not heard");
+    expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["tg-1"]);
+    await said.decided(second.recorded);
+    expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["tg-1", "tg-2"]);
+  });
+
+  describe("lets go of every message it holds from its record", () => {
+    /** TurnLinks' count of who still decides each message, as the wakes the
+     *  hook and recording take and let go of. */
+    function counted() {
+      const deciding = new Map<number, number>();
+      const wakes = {
+        wakeUndecided: (id: number) => {
+          deciding.set(id, (deciding.get(id) ?? 0) + 1);
+        },
+        wakeDecided: (id: number) => {
+          const left = (deciding.get(id) ?? 0) - 1;
+          if (left > 0) deciding.set(id, left);
+          else deciding.delete(id);
+        },
+      };
+      return { wakes, held: () => [...deciding.keys()] };
+    }
+
+    it("once the hook decides its wake", async () => {
+      const { wakes, held } = counted();
+      const hook = build({ wakes });
+      const heard: SaidInboundEvent[] = [];
+      hook.subscribe(async (event) => {
+        heard.push(event);
+      });
+      await telegram.deliver(message());
+      await settled();
+      expect(held()).toEqual([lines()[0]?.id]);
+      for (const event of heard) await hook.decided(event.recorded);
+      expect(held()).toEqual([]);
+    });
+
+    it("when its raise is dropped because the hook left", async () => {
+      const { wakes, held } = counted();
+      const hook = build({ wakes });
+      const blocked = gate();
+      const leave = hook.subscribe(async () => blocked.opened);
+      await telegram.deliver(message({ messageId: "tg-1" }));
+      await telegram.deliver(message({ messageId: "tg-2" }));
+      leave();
+      blocked.open();
+      await settled();
+      expect(lines()).toHaveLength(2);
+      expect(held()).toEqual([]);
+    });
+
+    it("when a listener throws while hearing it", async () => {
+      const { wakes, held } = counted();
+      const hook = build({ wakes });
+      const heard: SaidInboundEvent[] = [];
+      hook.subscribe(async (event) => {
+        heard.push(event);
+      });
+      events.subscribe(async () => {
+        throw new Error("listener down");
+      });
+      await telegram.deliver(message());
+      await settled();
+      for (const event of heard) await hook.decided(event.recorded);
+      expect(heard).toHaveLength(1);
+      expect(held()).toEqual([]);
+    });
+
+    it("for each of Rome's accounts that heard it", async () => {
+      const { wakes, held } = counted();
+      const hook = build({ wakes });
+      const heard: SaidInboundEvent[] = [];
+      hook.subscribe(async (event) => {
+        heard.push(event);
+      });
+      const supergroup = { chatId: "-1001234567890" as ChatId };
+      await telegram.deliver(message(supergroup));
+      await second.deliver(message({ ...supergroup, account: SECOND, channel: "telegram-2" }));
+      await settled();
+      expect(heard).toHaveLength(2);
+      for (const event of heard) await hook.decided(event.recorded);
+      expect(held()).toEqual([]);
+    });
   });
 
   it("raises a line two of Rome's accounts heard once for each, recorded once", async () => {
@@ -311,7 +437,12 @@ describe("messagesSaid", () => {
           throw new Error("disk full");
         },
       },
-      wakes: { wakeUndecided: () => undefined, wakeDecided: (id) => decided.push(id) },
+      wakes: {
+        wakeUndecided: () => undefined,
+        wakeDecided: (id) => {
+          decided.push(id);
+        },
+      },
     });
     const heard: SaidInboundEvent[] = [];
     failing.subscribe(async (event) => {
@@ -321,10 +452,12 @@ describe("messagesSaid", () => {
     await settled();
 
     expect(heard).toHaveLength(0);
-    expect(decided).toEqual([lines()[0]?.id]);
+    // Once as recording lets it go, once as the hook that heard it does.
+    const id = lines()[0]?.id;
+    expect(decided).toEqual([id, id]);
   });
 
-  it("drops what is still queued when the last hook leaves", async () => {
+  it("records, but raises nothing for, what is still queued when the last hook leaves", async () => {
     let release = () => {};
     const blocked = new Promise<void>((resolve) => {
       release = resolve;
@@ -347,7 +480,7 @@ describe("messagesSaid", () => {
     await settled();
 
     expect(heard).toEqual(["tg-1"]);
-    expect(lines()).toHaveLength(1);
+    expect(lines()).toHaveLength(2);
   });
 
   it("stops recording once the last hook leaves", async () => {
@@ -405,7 +538,9 @@ describe("messagesSaid", () => {
     expect(heard).toEqual(["tg-1", "tg-2"]);
   });
 
-  it("drops what was queued for a hook that left, even when a new one subscribes at once", async () => {
+  it("raises what was queued for a hook that left to the one that subscribes in its place", async () => {
+    // tg-2 is on record and its delivery settled when the hook swaps, so the
+    // platform will not deliver it again: the reloaded hook must hear it.
     const blocked = gate();
     const firstHeard = gate();
     const heard: string[] = [];
@@ -428,8 +563,8 @@ describe("messagesSaid", () => {
     await settled();
 
     expect(heard).toEqual(["tg-1"]);
-    expect(reloaded).toEqual(["tg-3"]);
-    expect(lines()).toHaveLength(2);
+    expect(reloaded).toEqual(["tg-2", "tg-3"]);
+    expect(lines()).toHaveLength(3);
   });
   it("holds a line until every hook hearing it has decided its wake", async () => {
     const first: SaidInboundEvent[] = [];

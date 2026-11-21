@@ -8,7 +8,6 @@ import { featureRules } from "./rules/features.js";
 import { kindRulesFor } from "./rules/kinds.js";
 import { layerRules } from "./rules/layers.js";
 import { libraryRules } from "./rules/library.js";
-import { slackAppCopyRules } from "./rules/slack-app-copy.js";
 
 const root = mkdtempSync(join(tmpdir(), "import-rules-"));
 
@@ -308,25 +307,6 @@ describe("checkImports with the library rule", () => {
       "lib/probe.test.ts:1 → ../apps/catalog.js (apps/catalog.ts) [lib-imports-no-context]",
       "lib/probe.test.ts:2 → @/agent/index.js (agent/index.ts) [lib-imports-no-context]",
     ]);
-  });
-});
-
-describe("the Slack app copy rule", () => {
-  const [rule] = slackAppCopyRules;
-  const imports = (from: string) =>
-    rule.rejects({
-      from,
-      specifier: "./message-copy.js",
-      kind: "file",
-      to: "connections/kinds/slack-app/message-copy.ts",
-    });
-
-  it("lets only the Slack app connection and the wiring import the copy", () => {
-    expect(imports("connections/kinds/slack-app/slack-app.ts")).toBe(false);
-    expect(imports("connections/kinds/slack-app/slack-app.test.ts")).toBe(false);
-    expect(imports("index.ts")).toBe(false);
-    expect(imports("connections/integrations/slack-app.ts")).toBe(true);
-    expect(imports("concierge/tools.ts")).toBe(true);
   });
 });
 

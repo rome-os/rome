@@ -67,9 +67,9 @@ function ids(sqlite: Database.Database, sql: string): unknown[] {
   );
 }
 
-const SLACK_BOT = "0151_remove_slack_bot_connections";
+const SLACK_BOT = "0152_remove_slack_bot_connections";
 
-describe("0151 removes the Slack bot's connections", () => {
+describe("0152 removes the Slack bot's connections", () => {
   it("deletes the Slack bot's connections and grants, and keeps the Slack sign-in and Rome's Slack app", () => {
     const sqlite = databaseBefore(SLACK_BOT);
     connect(sqlite, "conn-bot", "slack_bot", "T1:B1");

@@ -21,11 +21,7 @@ import { CredentialRejected, Disconnected } from "../errors.js";
 import { isSlackCredentialError } from "../kinds/slack/slack.js";
 import type { SlackAppCloud, SlackAppInstall } from "../kinds/slack-app/rome-cloud.js";
 import { SlackAppRefused } from "../kinds/slack-app/rome-cloud.js";
-import {
-  type OpenMailbox,
-  SlackAppAdapter,
-  type SlackMessageCopy,
-} from "../kinds/slack-app/slack-app.js";
+import { type OpenMailbox, SlackAppAdapter } from "../kinds/slack-app/slack-app.js";
 import type { SlackAppWebApi } from "../kinds/slack-app/web-api.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
@@ -233,8 +229,6 @@ export interface SlackAppDescriptorDeps {
   api: SlackAppWebApi;
   cloud: SlackAppCloud;
   openMailbox: OpenMailbox;
-  /** The connection's own copy of the messages it hears and reads. */
-  copy: SlackMessageCopy;
   /** Whether Rome listens to the account behind a connection. */
   listens: (connectionId: string) => boolean;
   instanceOrigin?: () => string;
@@ -404,8 +398,7 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
     },
     capabilities: {
       talker: {
-        // The connection reads a chat from its own copy where that holds the
-        // whole chat, and from Slack where it does not (slack-app/timeline.ts).
+        // The connection reads a chat from Slack (slack-app/timeline.ts).
         reads: true,
         build(cred, kit): Talker {
           const material = materialOf(cred.material);
@@ -433,10 +426,12 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
             // keeps the adapter on the stored key, which the relay still takes.
             onMailboxRefreshed: (mailbox) => kit.persist({ ...material, ...mailbox }),
             onFault: ({ kind, cause }) => routeFault(cause, kind),
-            copy: deps.copy,
             listened: () => deps.listens(kit.connectionId),
           });
           return {
+            // The mailbox is told a message is had only once Chats has it on
+            // record, so `deliver` must hand back its acceptance.
+            awaitsAcceptance: true,
             start(deliver, fault): void {
               faultSink = fault;
               adapter.onInbound(deliver);

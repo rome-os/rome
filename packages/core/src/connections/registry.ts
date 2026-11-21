@@ -31,6 +31,7 @@ import {
   DuplicateKindConnectionsError,
   RenewalUnavailable,
 } from "./errors.js";
+import { DeliveryRefused } from "./types.js";
 import type {
   Act,
   Actor,
@@ -1125,16 +1126,34 @@ class ConnectionImpl implements Connection {
   private startInstance(slot: CapabilitySlot, epoch: Epoch): void {
     const fault = (err: StreamFault) => this.handleFault(slot, err, epoch);
     if (slot.kind === "talker") {
-      (epoch.instance as Talker).start((msg) => {
+      const talker = epoch.instance as Talker;
+      talker.start((msg) => {
         epoch.disconnectStreak = 0; // a successful delivery ends any backoff run
-        for (const handler of slot.messageHandlers) {
-          void handler(msg).catch((err) => {
-            this.log.error("Talk onMessage handler threw", {
-              connectionId: this.id,
-              error: errMsg(err),
-            });
-          });
-        }
+        // Settles once every handler has: the Talker's acceptance (Talker.start).
+        const accepted = Promise.all(
+          slot.messageHandlers.map((handler) =>
+            handler(msg).catch((err: unknown) => {
+              // A refusal is logged where it happens, and is no handler bug.
+              if (err instanceof DeliveryRefused) {
+                this.log.debug("Talk delivery refused for now", {
+                  connectionId: this.id,
+                  error: errMsg(err),
+                });
+              } else {
+                this.log.error("Talk onMessage handler threw", {
+                  connectionId: this.id,
+                  error: errMsg(err),
+                });
+              }
+              throw err;
+            }),
+          ),
+        ).then(() => undefined);
+        // Only a Talker that declares it waits gets the promise (Talker.start),
+        // so one that forwards `deliver` cannot wait on recording by accident.
+        // The catch leaves no unhandled rejection when nobody awaits it.
+        accepted.catch(() => {});
+        return talker.awaitsAcceptance ? accepted : undefined;
       }, fault);
     } else if (slot.kind === "watcher") {
       (epoch.instance as Watcher).start((event) => {

@@ -265,7 +265,7 @@ describe("telegram inbound delivery", () => {
     });
     const delivered: unknown[] = [];
     talker.start(
-      (msg) => delivered.push(channelMessageOf(msg, "telegram")),
+      (msg) => void delivered.push(channelMessageOf(msg, "telegram")),
       () => {},
     );
     await factory.untilPolling();
