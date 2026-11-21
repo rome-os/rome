@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import {
   EventBusTriggerProvider,
   matchesSource,
@@ -56,18 +56,27 @@ describe("EventBusTriggerProvider", () => {
     provider = new EventBusTriggerProvider(bus, repo);
   });
 
+  afterEach(() => {
+    provider.stop();
+    rs.useRealTimers();
+  });
+
   it("ends a once wait at its deadline when no event came, and never fires it twice", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    const now = new Date("2026-01-01T00:00:00Z");
+    rs.setSystemTime(now);
+    const deadline = new Date(now.getTime() + 1_000).toISOString();
     const fired: Record<string, unknown>[] = [];
     const routine = buildRoutine({
       trigger: { type: "event-bus", eventName: "ci.done", once: true },
-      args: { deadline: new Date(Date.now() + 60).toISOString(), waitingFor: "the CI run" },
+      args: { deadline, waitingFor: "the CI run" },
     });
     await provider.activate(routine, async (payload) => void fired.push(payload));
-    await new Promise((resolve) => setTimeout(resolve, 1_200));
-    await flush();
-    expect(fired).toEqual([
-      expect.objectContaining({ deadlinePassed: true, waitingFor: "the CI run" }),
-    ]);
+    await rs.advanceTimersByTimeAsync(999);
+    expect(fired).toEqual([]);
+    expect(repo.updates).toEqual([]);
+    await rs.advanceTimersByTimeAsync(1);
+    expect(fired).toEqual([{ deadlinePassed: true, waitingFor: "the CI run", deadline }]);
     expect(repo.updates).toEqual([{ id: routine.id, data: { enabled: false } }]);
     publish(bus, { name: "ci.done" });
     await flush();
@@ -86,15 +95,21 @@ describe("EventBusTriggerProvider", () => {
   });
 
   it("drops a wait's deadline once its event came", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    const now = new Date("2026-01-01T00:00:00Z");
+    rs.setSystemTime(now);
     const fired: Record<string, unknown>[] = [];
     const routine = buildRoutine({
       trigger: { type: "event-bus", eventName: "ci.done", once: true },
-      args: { deadline: new Date(Date.now() + 60).toISOString() },
+      args: { deadline: new Date(now.getTime() + 1_000).toISOString() },
     });
     await provider.activate(routine, async (payload) => void fired.push(payload));
+    expect(rs.getTimerCount()).toBe(1);
     publish(bus, { name: "ci.done", payload: { ok: 1 } });
-    await new Promise((resolve) => setTimeout(resolve, 1_200));
     await flush();
+    expect(fired).toEqual([{ ok: 1 }]);
+    expect(rs.getTimerCount()).toBe(0);
+    await rs.advanceTimersByTimeAsync(1_000);
     expect(fired).toEqual([{ ok: 1 }]);
   });
 
