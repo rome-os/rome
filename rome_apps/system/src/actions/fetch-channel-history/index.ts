@@ -266,6 +266,8 @@ export function createAction(
           ...(cursor ? { after: cursor } : {}),
           ...(olderThan ? { olderThan } : {}),
           ...(newerThan ? { newerThan } : {}),
+          // Named whenever paging, so the page and the full-page check below
+          // agree on its size.
           ...(paging ? { limit: limit ?? DEFAULT_LIMIT } : {}),
         });
         // A page read forward continues from its newest message while it is
