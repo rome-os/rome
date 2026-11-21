@@ -22,6 +22,8 @@ class MockEventSource {
   readonly url: string;
   readonly withCredentials: boolean;
   readonly close = rs.fn();
+  /** Event types whose removal throws, as an extension proxy can. */
+  readonly removeFailures = new Set<string>();
   readyState = MockEventSource.OPEN;
   private readonly listeners = new Map<string, Set<EventListener>>();
 
@@ -38,6 +40,7 @@ class MockEventSource {
   }
 
   removeEventListener(type: string, listener: EventListener): void {
+    if (this.removeFailures.has(type)) throw new TypeError("Illegal invocation");
     this.listeners.get(type)?.delete(listener);
   }
 
@@ -341,5 +344,136 @@ describe("useSseEvents", () => {
     expect(source.listenerCount("open")).toBe(0);
     expect(source.listenerCount("error")).toBe(0);
     expect(source.close).toHaveBeenCalledOnce();
+  });
+
+  it("closes the connection and stops callbacks when a listener cannot be removed", () => {
+    const handler = rs.fn();
+    const onReconnect = rs.fn();
+    const onError = rs.fn();
+    const error = rs.spyOn(console, "error").mockImplementation(() => {});
+    const { unmount } = renderHook(() =>
+      useMessageEvent("/events", { schema: z.string(), fn: handler }, { onReconnect, onError }),
+    );
+    const source = MockEventSource.instances[0];
+    act(() => source.emit("open"));
+    source.removeFailures.add("open");
+    source.removeFailures.add("error");
+    source.removeFailures.add("message");
+
+    expect(() => unmount()).not.toThrow();
+
+    expect(source.close).toHaveBeenCalledOnce();
+    expect(error).toHaveBeenCalledWith(
+      "SSE listener removal failed",
+      expect.objectContaining({ url: "/events", eventName: "open" }),
+    );
+    expect(error).toHaveBeenCalledWith(
+      "SSE listener removal failed",
+      expect.objectContaining({ url: "/events", eventName: "error" }),
+    );
+    expect(error).toHaveBeenCalledWith(
+      "SSE listener removal failed",
+      expect.objectContaining({ url: "/events", eventName: "message" }),
+    );
+
+    act(() => {
+      source.emit("open");
+      source.emitError(MockEventSource.CLOSED);
+      source.emit("message", JSON.stringify("late"));
+    });
+    expect(onReconnect).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("keeps removing later listeners after one removal fails", () => {
+    const handler = rs.fn();
+    const error = rs.spyOn(console, "error").mockImplementation(() => {});
+    const { unmount } = renderHook(() =>
+      useSseEvents("/events", { changed: { schema: z.string(), fn: handler } }),
+    );
+    const source = MockEventSource.instances[0];
+    source.removeFailures.add("open");
+
+    unmount();
+
+    expect(error).toHaveBeenCalledWith(
+      "SSE listener removal failed",
+      expect.objectContaining({ url: "/events", eventName: "open" }),
+    );
+    expect(source.listenerCount("error")).toBe(0);
+    expect(source.listenerCount("changed")).toBe(0);
+    expect(source.close).toHaveBeenCalledOnce();
+  });
+
+  it("closes the old connection when its listener removal throws on a URL change", () => {
+    const handler = rs.fn();
+    const error = rs.spyOn(console, "error").mockImplementation(() => {});
+    const { rerender } = renderHook(
+      ({ url }: { url: string }) => useMessageEvent(url, { schema: z.string(), fn: handler }),
+      { initialProps: { url: "/first" } },
+    );
+    const first = MockEventSource.instances[0];
+    first.removeFailures.add("message");
+
+    rerender({ url: "/second" });
+
+    expect(first.close).toHaveBeenCalledOnce();
+    const second = MockEventSource.instances[1];
+    expect(second.url).toBe("/second");
+    expect(error).toHaveBeenCalledWith(
+      "SSE listener removal failed",
+      expect.objectContaining({ url: "/first", eventName: "message" }),
+    );
+
+    act(() => first.emit("message", JSON.stringify("old")));
+    expect(handler).not.toHaveBeenCalled();
+
+    act(() => second.emit("message", JSON.stringify("new")));
+    expect(handler).toHaveBeenCalledWith("new");
+  });
+
+  it("closes the fallback connection when the live socket takes over and removal throws", () => {
+    const handler = rs.fn();
+    const error = rs.spyOn(console, "error").mockImplementation(() => {});
+    const { rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useMessageEvent("/events", { schema: z.string(), fn: handler }, { enabled }),
+      { initialProps: { enabled: true } },
+    );
+    const source = MockEventSource.instances[0];
+    source.removeFailures.add("message");
+
+    rerender({ enabled: false });
+
+    expect(source.close).toHaveBeenCalledOnce();
+    expect(error).toHaveBeenCalledWith(
+      "SSE listener removal failed",
+      expect.objectContaining({ url: "/events", eventName: "message" }),
+    );
+    act(() => source.emit("message", JSON.stringify("late")));
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("contains a close failure after teardown", () => {
+    const handler = rs.fn();
+    const error = rs.spyOn(console, "error").mockImplementation(() => {});
+    const { unmount } = renderHook(() =>
+      useMessageEvent("/events", { schema: z.string(), fn: handler }),
+    );
+    const source = MockEventSource.instances[0];
+    source.removeFailures.add("message");
+    source.close.mockImplementation(() => {
+      throw new TypeError("Illegal invocation");
+    });
+
+    expect(() => unmount()).not.toThrow();
+
+    expect(error).toHaveBeenCalledWith(
+      "SSE connection close failed",
+      expect.objectContaining({ url: "/events" }),
+    );
+    act(() => source.emit("message", JSON.stringify("late")));
+    expect(handler).not.toHaveBeenCalled();
   });
 });
