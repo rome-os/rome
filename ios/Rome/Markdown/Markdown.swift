@@ -734,11 +734,17 @@ struct MarkdownText: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: SelectableText.blockSpacing) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { position, block in
+                view(for: block, at: position)
+            }
+        }
+        // Select mode lays text views over the text, which select it but
+        // draw none of it: the text on screen is the same before, during and
+        // after, so nothing moves as select mode starts or ends.
+        .overlay(alignment: .topLeading) {
             if selectable {
-                selectableBlocks
-            } else {
-                ForEach(Array(blocks.enumerated()), id: \.offset) { position, block in
-                    view(for: block, at: position)
+                VStack(alignment: .leading, spacing: SelectableText.blockSpacing) {
+                    selectableBlocks
                 }
             }
         }
@@ -765,8 +771,9 @@ struct MarkdownText: View {
         }
     }
 
-    /// The blocks in select mode: each run of text one text view, the first
-    /// of them opening selected.
+    /// The blocks in select mode, laid over the text: each run of text one
+    /// text view whose glyphs are clear, a code block one that draws its own,
+    /// and the rest their place.
     @ViewBuilder
     private var selectableBlocks: some View {
         let style = SelectableTextStyle(fontSize: fontSize, lineSpacing: lineSpacing, color: UIColor(color), dynamicTypeSize: dynamicTypeSize, displayScale: displayScale)
@@ -775,9 +782,12 @@ struct MarkdownText: View {
         ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
             switch segment {
             case .text(let run):
-                SelectableTextView(text: run.text, quotes: run.quotes, markers: run.markers, start: SelectionStart(point: selectFrom, first: index == first))
+                // Its quote bars and list markers are the text's own, below.
+                SelectableTextView(text: SelectableText.invisible(run.text), start: SelectionStart(point: selectFrom, first: index == first))
                     .padding(.top, SelectableText.topSpace(run.text))
             case .code(let text):
+                // Drawn over the code block, which it covers: its own lines
+                // scroll sideways as the selection moves.
                 ScrollView(.horizontal, showsIndicators: false) {
                     SelectableTextView(text: text, wraps: false, start: SelectionStart(point: selectFrom, first: index == first))
                         .padding(.horizontal, 16)
@@ -785,7 +795,8 @@ struct MarkdownText: View {
                 }
                 .background(Palette.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             case .block(let position, let block):
-                view(for: block, at: position)
+                // Its place only: the block itself is drawn, and tapped, below.
+                view(for: block, at: position).hidden()
             }
         }
     }

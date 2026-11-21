@@ -356,3 +356,73 @@ import UIKit
     }
 }
 
+
+/// What select mode draws: the text on screen is the same before, during and
+/// after it, line by line, so nothing moves as it starts or ends.
+@MainActor
+@Suite(.serialized) struct SelectModeDrawingTests {
+    /// Each text line's dark ink, as its centre (x, y) in pixels.
+    static func lines(_ image: UIImage) -> [CGPoint] {
+        let cg = image.cgImage!
+        let w = cg.width, h = cg.height
+        var data = [UInt8](repeating: 0, count: w * h * 4)
+        let context = CGContext(data: &data, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        func ink(_ x: Int, _ y: Int) -> Double {
+            let i = (y * w + x) * 4
+            let sum = Int(data[i]) + Int(data[i + 1]) + Int(data[i + 2])
+            return sum < 300 ? Double(300 - sum) : 0
+        }
+        var result: [CGPoint] = []
+        var sx = 0.0, sy = 0.0, total = 0.0
+        for y in 0..<h {
+            var row = 0.0
+            for x in 0..<w {
+                let value = ink(x, y)
+                guard value > 0 else { continue }
+                row += value; sx += Double(x) * value; sy += Double(y) * value
+            }
+            total += row
+            if row == 0, total > 0 {
+                result.append(CGPoint(x: sx / total, y: sy / total))
+                sx = 0; sy = 0; total = 0
+            }
+        }
+        return result
+    }
+
+    private func render(_ view: some View) async throws -> UIImage {
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let size = CGSize(width: 300, height: 260)
+        let host = UIHostingController(rootView: view.frame(width: size.width, height: size.height, alignment: .topLeading).background(Color.white))
+        let window = UIWindow(windowScene: scene)
+        window.overrideUserInterfaceStyle = .light
+        window.frame = CGRect(origin: .zero, size: size)
+        window.rootViewController = host
+        window.isHidden = false
+        try await Task.sleep(for: .milliseconds(400))
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        window.isHidden = true
+        return image
+    }
+
+    @Test(arguments: [
+        "出版社回信了，说书稿下周一前可以看。",
+        "First paragraph of the reply, long enough to wrap here.\n\n第二段：今天的摘要，三封邮件。",
+        "1. 今天的邮件摘要第 1 条：项目进度、会议时间和需要你回复的事项。\n2. 第二条，短一点。",
+        "> A quoted line that wraps at this width, then **bold** and `code`.",
+    ])
+    func everyLineStaysWhereItIs(source: String) async throws {
+        let normal = Self.lines(try await render(MarkdownText(source: source, color: .black).fixedSize(horizontal: false, vertical: true)))
+        SelectingTextView.opensSelection = false
+        defer { SelectingTextView.opensSelection = true }
+        let selecting = Self.lines(try await render(MarkdownText(source: source, color: .black, selectable: true).fixedSize(horizontal: false, vertical: true)))
+        #expect(normal.count == selecting.count)
+        for (a, b) in zip(normal, selecting) {
+            #expect(abs(a.x - b.x) < 0.01 && abs(a.y - b.y) < 0.01, "line moved from \(a) to \(b)")
+        }
+    }
+}

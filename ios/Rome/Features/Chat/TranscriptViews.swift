@@ -168,16 +168,20 @@ struct UserBubble: View {
                     if hasBubble {
                         Group {
                             if !text.isEmpty {
-                                if selection?.isSelecting(row: rowID, text: text) == true {
-                                    SelectableTextView(
-                                        text: SelectableText.plain(text, style: SelectableTextStyle(color: .white, dynamicTypeSize: dynamicTypeSize)),
-                                        start: SelectionStart(point: selection?.target?.point, first: true), tint: .white)
-                                } else {
-                                    Text(text)
-                                        .romeFont(16)
-                                        .lineSpacing(5)
-                                        .foregroundStyle(.white)
-                                }
+                                Text(text)
+                                    .romeFont(16)
+                                    .lineSpacing(5)
+                                    .foregroundStyle(.white)
+                                    // Select mode lays a text view over it that
+                                    // selects it but draws none of it, so the
+                                    // text never moves as select mode starts or ends.
+                                    .overlay(alignment: .topLeading) {
+                                        if selection?.isSelecting(row: rowID, text: text) == true {
+                                            SelectableTextView(
+                                                text: SelectableText.invisible(SelectableText.plain(text, style: SelectableTextStyle(color: .white, dynamicTypeSize: dynamicTypeSize))),
+                                                start: SelectionStart(point: selection?.target?.point, first: true), tint: .white)
+                                        }
+                                    }
                             }
                         }
                             .quotedAbove(quote, tone: .sent, hasContent: !text.isEmpty, onTap: onQuote)

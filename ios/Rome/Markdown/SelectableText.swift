@@ -303,6 +303,18 @@ enum SelectableText {
         return NSRange(location: start, length: end - start)
     }
 
+    /// `text` with its glyphs, fills and lines clear: laid over the same text
+    /// drawn by SwiftUI, it selects it without drawing it a second time.
+    static func invisible(_ text: NSAttributedString) -> NSAttributedString {
+        let out = NSMutableAttributedString(attributedString: text)
+        let all = NSRange(location: 0, length: out.length)
+        out.addAttribute(.foregroundColor, value: UIColor.clear, range: all)
+        out.removeAttribute(.backgroundColor, range: all)
+        out.removeAttribute(.strikethroughStyle, range: all)
+        out.removeAttribute(.underlineStyle, range: all)
+        return out
+    }
+
     /// What Copy writes for `text` taken from these strings: its line
     /// breaks as newlines.
     nonisolated static func copied(_ text: String) -> String {
@@ -465,6 +477,13 @@ final class SelectingTextView: UITextView {
     private let wraps: Bool
     var start: SelectionStart?
     private var selectedOnce = false
+    #if DEBUG
+    /// Tests only: select mode opens no selection, so what it draws can be
+    /// compared with the text alone.
+    static var opensSelection = true
+    #else
+    static let opensSelection = true
+    #endif
     var quotes: [NSRange] = [] {
         didSet { if quotes != oldValue { setNeedsLayout() } }
     }
@@ -491,6 +510,15 @@ final class SelectingTextView: UITextView {
         backgroundColor = .clear
         // Its selection handles reach past the text; a scroll view clips them.
         clipsToBounds = false
+        // A text view is a scroll view, which from iOS 26 blurs what is under
+        // the status bar at its edges; this one never scrolls, and the blur
+        // smeared its first line near the top of the screen.
+        if #available(iOS 26, *) {
+            topEdgeEffect.isHidden = true
+            bottomEdgeEffect.isHidden = true
+            leftEdgeEffect.isHidden = true
+            rightEdgeEffect.isHidden = true
+        }
         textContainerInset = .zero
         dataDetectorTypes = []
         // The string carries each link's colour.
@@ -594,7 +622,7 @@ final class SelectingTextView: UITextView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window != nil, start != nil, !selectedOnce else { return }
+        guard window != nil, start != nil, !selectedOnce, Self.opensSelection else { return }
         selectedOnce = true
         selectStart(tries: 4)
     }
