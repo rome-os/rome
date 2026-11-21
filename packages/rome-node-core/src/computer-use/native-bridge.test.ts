@@ -337,6 +337,46 @@ describe("native computer-use transport", () => {
     expect(f.connections).toEqual([["hello"], ["hello", "stop_status"]]);
   });
 
+  it("keeps readiness cached across ordinary not_dispatched helper rejections", async () => {
+    const source = {
+      path: "/bundled/app",
+      requirement: "stable",
+      implementationSha256: "a".repeat(64),
+      executableSha256: "b".repeat(64),
+      architecture: "arm64" as const,
+    };
+    const f = await server((request, send, fail) => {
+      if (request.method === "hello") {
+        send({
+          protocolVersion: 1,
+          bundleId: "com.rome.computer-use",
+          permissions: { accessibility: true, screenCapture: true },
+          capabilities: { actions: [] },
+          architecture: "arm64",
+          implementationSha256: source.implementationSha256,
+        });
+      } else if (request.method === "act") {
+        fail({
+          code: "stale_element",
+          message: "Target moved",
+          details: { effectStatus: "not_dispatched" },
+        });
+      } else send({ status: "cancelled" });
+    });
+    assets.inspect.mockResolvedValue(source);
+    const bridge = createComputerUseNativeBridge({
+      stateDir: f.stateDir,
+      bundledAppPath: source.path,
+    });
+    await expect(bridge.call("act", { sessionId: "s1" })).rejects.toMatchObject({
+      code: "stale_element",
+      details: { effectStatus: "not_dispatched" },
+    });
+    expect(await bridge.call("cancel", { sessionId: "s1" })).toEqual({ status: "cancelled" });
+    expect(assets.inspect).toHaveBeenCalledTimes(1);
+    expect(f.connections).toEqual([["hello"], ["hello", "act"], ["hello", "cancel"]]);
+  });
+
   it.each([
     true,
     false,

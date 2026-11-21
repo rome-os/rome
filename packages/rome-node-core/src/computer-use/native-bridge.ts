@@ -442,11 +442,7 @@ export function createComputerUseNativeBridge(
         value = await callSocket(method, params, verify);
       } catch (error) {
         // A socket that never connected dispatched nothing. Written requests are never retried.
-        if (!unavailable(error)) {
-          if (error instanceof ComputerUseError && error.details.effectStatus === "not_dispatched")
-            ready = undefined;
-          throw error;
-        }
+        if (!unavailable(error)) throw error;
         ready = undefined;
         source = await ensure();
         value = await callSocket(method, params, verify);
