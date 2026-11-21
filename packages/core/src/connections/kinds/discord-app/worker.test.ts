@@ -122,6 +122,9 @@ describe("the Discord gateway Worker and Rome Cloud, as the instance calls them"
       .cloud.typing("4")
       .catch((error: unknown) => error);
     expect(isDiscordAppCredentialError(botToken)).toBe(false);
+    expect((botToken as Error).message).toBe(
+      "Discord did not accept Rome's bot right now. Try again later.",
+    );
     const elsewhere = await answering(403, { error: "not_bound" })
       .cloud.typing("4")
       .catch((error: unknown) => error);
