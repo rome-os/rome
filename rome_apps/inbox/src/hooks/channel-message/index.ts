@@ -353,6 +353,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
         },
         {
           initiator: `connection:${connectionId}`,
+          // A burst from more chats than there are workers waits for one
+          // rather than dropping the message. The hook holds no worker.
+          whenWorkersBusy: "queue",
           channelContext: {
             connectionId,
             channel: service,

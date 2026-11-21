@@ -381,6 +381,10 @@ export interface ConnectionDescriptor {
    *  that says which kinds take an agent. Vocabulary:
    *  docs/domains/chats.md#connected-account. */
   link?: AccountLink;
+  /** True when a newly connected own account of this kind starts with the
+   *  Concierge as its agent, so it answers from its first message. Absent, it
+   *  starts with none until the guardian links one. */
+  startsWithConcierge?: boolean;
   /** The chat rules the kind's chats offer the guardian, and the values it
    *  fixes for the rules it does not offer. Core owns the rules and runs
    *  them. A kind that hears messages declares it: one that leaves it unset

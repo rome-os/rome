@@ -205,6 +205,14 @@
           }
         }
       },
+      "slack_app": {
+        "bot": {
+          "title": "Rome in your Slack",
+          "bullets": {
+            "reply": "Answer direct messages in your Slack workspace as your Concierge"
+          }
+        }
+      },
       "slack_bot": {
         "bot": {
           "titleFallback": "Your agent's Slack account",

@@ -41,7 +41,12 @@ export {
   type ModelResolutionRequest,
 } from "./domain/model-resolution.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
-export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
+export {
+  policyInPlace,
+  resolveAgentPolicy,
+  type AgentPolicy,
+  type PlaceSetup,
+} from "./domain/agent-policy.js";
 export { turnStatus, turnStop, type TurnEnding } from "./domain/turn-end.js";
 export { shapedResult, type AnswerShape, type ReadAnswerShape } from "./domain/answer-shape.js";
 export { catchUpPrompt } from "./domain/catch-up.js";
