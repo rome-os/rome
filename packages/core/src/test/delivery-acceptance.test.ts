@@ -111,6 +111,8 @@ describe("a delivery settles once Chats has the message on record", () => {
           },
         },
         events,
+        // No wake to decide here: nothing reads catch-up.
+        hold: () => () => {},
         adapters: {
           of: (on) => {
             const adapter = wiring.adapters.of(on);

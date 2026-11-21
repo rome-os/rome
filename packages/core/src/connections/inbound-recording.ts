@@ -47,8 +47,10 @@ export interface InboundRecordingDeps {
    *  own hold, answering the release. That rests on Agents listening first
    *  and taking its hold synchronously.
    *  A listener that decides its wake holds it on its own for longer
-   *  (docs/domains/participation.md#wake). */
-  hold?: (messageId: number) => () => void;
+   *  (docs/domains/participation.md#wake). Required: a message is on record
+   *  before its raise, so without it a turn could read one whose wake is not
+   *  decided yet. */
+  hold: (messageId: number) => () => void;
 }
 
 export interface InboundRecording {
@@ -179,7 +181,7 @@ export function inboundRecording(
   ): void => {
     const { via } = message;
     // Held from its record until its MessageSaid is raised, let go once.
-    let letGo = deps.hold?.(recorded.id);
+    let letGo: (() => void) | undefined = deps.hold(recorded.id);
     const release = (): void => {
       letGo?.();
       letGo = undefined;
