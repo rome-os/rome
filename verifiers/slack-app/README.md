@@ -65,6 +65,8 @@ Order: R11, R1, R3, the second binding (workspace B to the second instance), smo
 | `R9-extra-call` | The instance lists the workspace's members on connect. | R9 fails |
 | `R10-two-entries`, `R10-bot-connects`, `R10-oauth-connects` | Connect offers an old kind, or one can be started. | R10 fails |
 | `R10-old-works` | Stored old connections are listed and the older bot answers. | R10 fails |
+| `own-pace` | Not a break: the port paces reads at one per 90 s and says when to try again. | R9 and R14 pass, having waited |
+| `R14-pace-long` | A thread read is refused with a wait past the verifier's 150 s cap. | R14 fails |
 | `dm-only` | Not a break: the app asks for no group scopes. | R14 not checked |
 | `R14-lists-all`, `R14-quiet-read`, `R14-no-thread`, `R14-hears-all` | The port lists or reads `#quiet`, reads no thread, or a plain group message is recorded. | R14 fails |
 | `R14-no-reapprove` | Under the old scopes the port passes Slack's error through, not a request to approve again. | R14 fails |
@@ -73,6 +75,8 @@ Order: R11, R1, R3, the second binding (workspace B to the second instance), smo
 It passes when every scored rule passes on the good stand-in, `no-port` gets R9 and R14 not checked with the rest passing, and each break gets its expected result. It writes `out/proof/summary.md`. `PROVE_CASES=good,R5-top` runs only the named cases.
 
 ## Limits
+
+- Slack paces history reads at about one a minute per workspace, and the product says so when it refuses one. R9 and R14 space each port read a minute after the last `conversations.history` or `conversations.replies` the fake saw in that workspace, and a read refused with a stated wait of at most 150 s is waited out and tried once more; the evidence records the wait. A refusal with no stated wait, or a second refusal, fails.
 
 - The verifier trusts the fake Slack's records of what was posted and called.
 - R4 cannot see when Rome Cloud's mailbox is acknowledged. A stop during a burst catches a connection that acknowledges early only when the stop lands between the acknowledgement and the record.

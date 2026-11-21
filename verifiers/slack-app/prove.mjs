@@ -149,6 +149,9 @@ const CASES = [
   { name: "R14-no-thread", breaks: "R14-no-thread", rule: "R14", what: "a thread read answers nothing" },
   { name: "R14-hears-all", breaks: "R14-hears-all", rule: "R14", what: "a plain group message is heard and recorded" },
   { name: "R14-no-reapprove", breaks: "R14-no-reapprove", rule: "R14", what: "under the old scopes the connection does not say it needs approving again" },
+  { name: "own-pace", breaks: "own-pace", rule: "R14", result: "pass", env: { VERIFIER_ONLY: "R9,R14" }, what: "the port paces reads at one per 90 s and says when to try again; each refused read is waited out and passes" },
+  { name: "own-pace-R9", breaks: "own-pace", rule: "R9", result: "pass", env: { VERIFIER_ONLY: "R9,R14" }, what: "R9's read under the same pace" },
+  { name: "R14-pace-long", breaks: "R14-pace-long", rule: "R14", env: { VERIFIER_ONLY: "R9,R14" }, what: "a thread read is refused with a wait past the 150 s cap" },
   { name: "only-R14", breaks: "", rule: "R14", result: "pass", env: { VERIFIER_ONLY: "R14" }, what: "--only R14 scores R14 after R1 and the second binding; the rest are not checked" },
   {
     name: "memory-line",

@@ -4,7 +4,7 @@
 // on record.
 
 import { code } from "../lib/codes.mjs";
-import { refused, why } from "../lib/port.mjs";
+import { pacedRead, refused, why } from "../lib/port.mjs";
 import { phase, sleep, waitFor } from "../lib/http.mjs";
 import { dmOnRecord, onRecord } from "../lib/record.mjs";
 import { connectAs } from "./connect.mjs";
@@ -23,6 +23,8 @@ async function throughPort(ctx, g, member) {
   const inst = ctx.a;
   const ops = [];
   const op = (name, ok, why, extra = {}) => ops.push({ op: name, result: ok ? "pass" : "fail", why, ...extra });
+  // Each paced read: how long it waited, and the refusal it waited out.
+  const paces = (ctx.r14Paces = []);
 
   phase("R14: list groups");
   const groups = await inst.port("groups", {});
@@ -34,13 +36,17 @@ async function throughPort(ctx, g, member) {
   // Said in #news with no mention, so only Slack's history holds it.
   const said = `The bakery van parks by the fountain (${code("R14N", 0)}).`;
   await ctx.slack.groupMessage(ws.id, member, said, g.news);
-  const read = await inst.port("read", { chat: g.news });
+  const readPaced = await pacedRead(ctx, inst, ws.id, "read", { chat: g.news });
+  const read = readPaced.answer;
+  paces.push({ read: "#news", ...readPaced, answer: undefined });
   op("read #news", !refused(read) && text(read).includes(code("R14N", 0)), refused(read) ? `refused: ${why(read)}` : text(read).includes(code("R14N", 0)) ? "held the message said there" : "did not hold the message said there");
 
   phase("R14: read a thread in #news");
   const root = await ctx.slack.groupMessage(ws.id, member, `Plans for the picnic (${code("R14T", 0)}).`, g.news);
   await ctx.slack.groupMessage(ws.id, ws.guardian, `The blanket is in the van (${code("R14T", 1)}).`, g.news, { thread_ts: root.ts });
-  const thread = await inst.port("thread", { chat: g.news, ts: root.ts });
+  const threadPaced = await pacedRead(ctx, inst, ws.id, "thread", { chat: g.news, ts: root.ts });
+  const thread = threadPaced.answer;
+  paces.push({ read: "thread in #news", ...threadPaced, answer: undefined });
   op("read a thread", !refused(thread) && text(thread).includes(code("R14T", 1)), refused(thread) ? `refused: ${why(thread)}` : text(thread).includes(code("R14T", 1)) ? "held the reply in the thread" : "did not hold the reply in the thread");
 
   phase("R14: send to #news");
@@ -56,7 +62,9 @@ async function throughPort(ctx, g, member) {
   phase("R14: nothing of #quiet");
   const quietSaid = `The marmalade jars are in the cellar (${code("R14Q", 0)}).`;
   await ctx.slack.groupMessage(ws.id, member, quietSaid, g.quiet);
-  const quiet = await inst.port("read", { chat: g.quiet });
+  const quietPaced = await pacedRead(ctx, inst, ws.id, "read", { chat: g.quiet });
+  const quiet = quietPaced.answer;
+  paces.push({ read: "#quiet", ...quietPaced, answer: undefined });
   const quietSince = await ctx.slack.seq();
   const quietSend = await inst.port("send", { chat: g.quiet, text: `Into quiet (${code("R14Q", 1)})` });
   await sleep(ctx.env.timeouts.settleSeconds * 1000);
@@ -139,7 +147,9 @@ async function oldPermissions(ctx) {
         ["a group listing", "groups", {}],
         ["a read of #general", "read", { chat: general }],
       ]) {
-        const answer = await inst.port(op, args);
+        const paced = op === "read" ? await pacedRead(ctx, inst, ws.id, op, args) : { answer: await inst.port(op, args) };
+        const answer = paced.answer;
+        if (paced.retried) evidence.paces = [...(evidence.paces ?? []), { read: name, ...paced, answer: undefined }];
         evidence[op] = answer;
         const says = refused(answer) && REAPPROVE.test(why(answer));
         ops.push({
@@ -190,7 +200,7 @@ export async function r14(ctx) {
   } finally {
     await ctx.slack.config({ history_limit: limitWas });
   }
-  const evidence = { groups: g, operations: ops, oldPermissions: old?.evidence ?? null };
+  const evidence = { groups: g, operations: ops, pacedReads: ctx.r14Paces ?? null, oldPermissions: old?.evidence ?? null };
   const list = ops.map((o) => `${o.op} ${o.result} (${o.why})`).join("; ");
   if (ops.some((o) => o.result === "fail")) return { result: "fail", reason: list, evidence };
   const notRun = [...unchecked, ...ops.filter((o) => o.result === "not checked").map((o) => `${o.op}: ${o.why}`)];

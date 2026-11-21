@@ -3,7 +3,7 @@
 // (the environment's `port` control), and every call the fake Slack saw.
 
 import { code } from "../lib/codes.mjs";
-import { refused, why } from "../lib/port.mjs";
+import { pacedRead, refused, why } from "../lib/port.mjs";
 import { waitFor } from "../lib/http.mjs";
 
 /** What Rome's app may call at Slack: send, read, and keeping the connection. */
@@ -74,10 +74,11 @@ export async function r9(ctx) {
 
     // Read: the chat's recent messages, read at Slack, hold the one just sent.
     const readSince = await ctx.slack.seq();
-    const read = await inst.port("read", { chat: dm });
+    const paced = await pacedRead(ctx, inst, ws.id, "read", { chat: dm });
+    const read = paced.answer;
     const history = (await ctx.slack.calls({ team: ws.id, method: "conversations.history", since: readSince })).length;
     const holds = JSON.stringify(read ?? "").includes(tag);
-    evidence.read = { chat: dm, holdsTheSend: holds, historyCalls: history, refused: refused(read) ? why(read) : null };
+    evidence.read = { chat: dm, waitedSeconds: paced.waitedSeconds, retriedAfter: paced.firstRefusal, holdsTheSend: holds, historyCalls: history, refused: refused(read) ? why(read) : null };
     if (refused(read)) problems.push(`the port refused a read of a direct message: ${why(read)}`);
     else if (!holds) problems.push("a read through the port did not hold the message just sent");
 

@@ -867,7 +867,13 @@ async function port(op, a) {
   const groupWork = op === "groups" || ((op === "read" || op === "thread") && !String(a.chat).startsWith("D"));
   if (groupWork && !breaks.has("R14-no-reapprove") && !(await workspaceScopes(conn.team)).includes("channels:history"))
     return { error: "Approve Rome's Slack app again in Slack so it can see your groups.", at: "rome" };
-  const refusedBy = (r) => (r.ok ? null : { refused: r.error });
+  // Slack's pace, said as the product says it: when to try again.
+  const refusedBy = (r) =>
+    r.ok
+      ? null
+      : r.error === "ratelimited"
+        ? { refused: `Slack lets Rome read this workspace's history about once a minute. Try again in ${r.retryAfter ?? 60} seconds.`, at: "connector" }
+        : { refused: r.error };
   switch (op) {
     case "send": {
       const r = await api(conn.botToken, "chat.postMessage", {
@@ -877,19 +883,32 @@ async function port(op, a) {
       });
       return refusedBy(r) ?? { ok: true, ts: r.ts };
     }
-    case "read": {
+    case "read":
+    case "thread": {
+      // Variant own-pace gates its reads itself, as the product does, here
+      // at one per 90 s per workspace, longer than the verifier's spacing,
+      // and says when to try again; broken
+      // R14-pace-long states a wait past the verifier's cap.
+      if (breaks.has("own-pace") || breaks.has("R14-pace-long")) {
+        const left = (lastRead.get(conn.team) ?? 0) + 90_000 - Date.now();
+        if (left > 0 || (breaks.has("R14-pace-long") && op === "thread"))
+          return {
+            refused: `Slack lets Rome read this workspace's history about once a minute, and other reads are waiting. Try again in ${breaks.has("R14-pace-long") ? 400 : Math.ceil(left / 1000)} seconds.`,
+            at: "connector",
+          };
+        lastRead.set(conn.team, Date.now());
+      }
+      if (op === "thread") {
+        if (breaks.has("R14-no-thread")) return { messages: [] };
+        const r = await api(conn.botToken, "conversations.replies", { channel: a.chat, ts: a.ts, limit: 15 });
+        return refusedBy(r) ?? { messages: r.messages.map((m) => ({ ts: m.ts, text: m.text })) };
+      }
       if (breaks.has("R14-quiet-read") && !a.chat.startsWith("D")) {
         const x = await (await fetch(`${SLACK}/_control/history?team=${conn.team}&channel=${a.chat}`)).json();
         if (x.messages?.length) return { messages: x.messages.map((m) => ({ ts: m.ts, text: m.text })) };
       }
       const r = await api(conn.botToken, "conversations.history", { channel: a.chat, limit: 15 });
-      if (!r.ok) return { refused: r.error };
-      return { messages: breaks.has("R9-no-read") ? [] : r.messages.map((m) => ({ ts: m.ts, text: m.text })) };
-    }
-    case "thread": {
-      if (breaks.has("R14-no-thread")) return { messages: [] };
-      const r = await api(conn.botToken, "conversations.replies", { channel: a.chat, ts: a.ts, limit: 15 });
-      return refusedBy(r) ?? { messages: r.messages.map((m) => ({ ts: m.ts, text: m.text })) };
+      return refusedBy(r) ?? { messages: breaks.has("R9-no-read") ? [] : r.messages.map((m) => ({ ts: m.ts, text: m.text })) };
     }
     case "groups": {
       const r = await api(conn.botToken, "conversations.list", { types: "public_channel" });
@@ -903,6 +922,9 @@ async function port(op, a) {
       return { refused: `no operation ${op}` };
   }
 }
+
+/** When each workspace was last read, for variant own-pace. */
+const lastRead = new Map();
 
 // Broken R6: whatever waited in the mailbox while stopped is thrown away.
 // Broken R6-drop5: the first 5 of them are, as a full worker pool would.
