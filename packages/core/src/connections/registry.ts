@@ -1128,7 +1128,10 @@ class ConnectionImpl implements Connection {
     if (slot.kind === "talker") {
       const talker = epoch.instance as Talker;
       talker.start((msg) => {
-        epoch.disconnectStreak = 0; // a successful delivery ends any backoff run
+        // A successful delivery ends any backoff run. For a Talker that waits
+        // for acceptance, only an accepted one does: a delivery refused again
+        // after each rebuild must not hold the backoff at its first step.
+        if (!talker.awaitsAcceptance) epoch.disconnectStreak = 0;
         // Settles once every handler has: the Talker's acceptance (Talker.start).
         const accepted = Promise.all(
           slot.messageHandlers.map((handler) =>
@@ -1152,7 +1155,12 @@ class ConnectionImpl implements Connection {
         // Only a Talker that declares it waits gets the promise (Talker.start),
         // so one that forwards `deliver` cannot wait on recording by accident.
         // The catch leaves no unhandled rejection when nobody awaits it.
-        accepted.catch(() => {});
+        accepted.then(
+          () => {
+            if (talker.awaitsAcceptance) epoch.disconnectStreak = 0;
+          },
+          () => {},
+        );
         return talker.awaitsAcceptance ? accepted : undefined;
       }, fault);
     } else if (slot.kind === "watcher") {
