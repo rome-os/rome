@@ -228,6 +228,7 @@ import { registerAgentNameAction } from "./people/guardian-profile/index.js";
 import { personHistory } from "./people/person-history/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
 import { registerReadPersonAction } from "./people/actions/read-person.js";
+import { routineControlService, routineOperations } from "./routines/control.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
 import { registerPersonalDataActions } from "./personal-data/actions.js";
@@ -1526,6 +1527,14 @@ async function main() {
     people: peopleRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
+  // What the system app's routine actions do beyond create, search and
+  // delete: in this process directly, from a worker over `routines.control`.
+  const routineOps = routineOperations({
+    routines: routinesRepo,
+    routineRuns: routineRunsRepo,
+    actionExecutions: actionExecutionsRepo,
+    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+  });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
@@ -1645,6 +1654,7 @@ async function main() {
     wakeGateFor,
     routinesRepo,
     routineEngine,
+    routineControl: routineControlService(routineOps),
     // Real coordinators in the main process; workers inject the matching proxies
     // (see worker-runtime.ts) so the event/app-lifecycle actions are
     // process-agnostic — they never branch on where they run.
@@ -2239,7 +2249,7 @@ async function main() {
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
     {
-      ...routineWorkerCalls({ routinesRepo, routineEngine }),
+      ...routineWorkerCalls({ routinesRepo, routineEngine, routineOperations: routineOps }),
       ...gmailWorkerCalls(actionRegistry),
       ...connectionWorkerCalls({
         appConnections,

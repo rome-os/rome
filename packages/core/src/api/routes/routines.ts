@@ -14,6 +14,7 @@ import type { ApiDeps } from "../deps.js";
 import { validateActionArgs } from "../../apps/actions/validate-action-args.js";
 import { CHAT_ROUTINE_KEY_PREFIX } from "../../routines/chat-routine-key.js";
 import type { Trigger } from "../../routines/types.js";
+import { listRoutineRuns, readRoutineRun } from "../../routines/runs.js";
 
 // The engine merges trigger payloads into action args under this key. Forbid
 // it in user-supplied args so we never silently overwrite caller data.
@@ -154,87 +155,6 @@ const MAX_ROUTINE_KEY_LENGTH = 200;
 interface UpdateRoutineBody {
   name?: string;
   enabled?: boolean;
-}
-
-// Rebuilds the action-execution tree for a run from the flat `action_executions`
-// rows that share its root executionId. Two subtleties:
-//  - The root is found by `parentId == null`, NOT `id === rootExecutionId`: on
-//    the routine path the root action gets a fresh id while rootExecutionId is a
-//    pre-seeded group key, so no row's id equals it.
-//  - `{mode:"timestamp"}` is second-resolution, so ordering siblings by
-//    startedAt can tie; the build order is ascending createdAt with a stable
-//    sort — best-effort for same-second siblings.
-
-interface ActionExecutionRowLike {
-  id: string;
-  actionName: string;
-  actionType: string | null;
-  status: string;
-  args: unknown;
-  error: string | null;
-  durationMs: number | null;
-  initiator: string | null;
-  actor?: unknown;
-  parentId: string | null;
-  startedAt: Date | null;
-  finishedAt: Date | null;
-  createdAt: Date;
-}
-
-/** Mirror of the web `ActionNode` shape (minus the recursive type name). */
-export interface ActionTraceNode {
-  id: string;
-  actionName: string;
-  status: string;
-  durationMs: number | null;
-  error: string | null;
-  actionType: string | null;
-  initiator: string | null;
-  actor: unknown;
-  args: unknown;
-  startedAt: number | null;
-  finishedAt: number | null;
-  children: ActionTraceNode[];
-}
-
-const toEpochSeconds = (d: Date | null): number | null =>
-  d ? Math.floor(d.getTime() / 1000) : null;
-
-export function buildActionTrace(rows: ActionExecutionRowLike[]): ActionTraceNode[] {
-  // Ascending createdAt so same-second siblings keep DB insertion order.
-  const ordered = [...rows].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  const byId = new Map<string, ActionTraceNode>();
-  for (const r of ordered) {
-    byId.set(r.id, {
-      id: r.id,
-      actionName: r.actionName,
-      status: r.status,
-      durationMs: r.durationMs ?? null,
-      error: r.error ?? null,
-      actionType: r.actionType ?? null,
-      initiator: r.initiator ?? null,
-      actor: r.actor ?? null,
-      args: r.args ?? null,
-      startedAt: toEpochSeconds(r.startedAt),
-      finishedAt: toEpochSeconds(r.finishedAt),
-      children: [],
-    });
-  }
-  const roots: ActionTraceNode[] = [];
-  for (const r of ordered) {
-    const node = byId.get(r.id)!;
-    const parent = r.parentId ? byId.get(r.parentId) : undefined;
-    // Root = no parent. An orphan (parentId set but absent from the set) is
-    // reparented to root rather than silently dropped.
-    if (parent) parent.children.push(node);
-    else roots.push(node);
-  }
-  const sortChildren = (nodes: ActionTraceNode[]) => {
-    nodes.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
-    for (const n of nodes) sortChildren(n.children);
-  };
-  sortChildren(roots);
-  return roots;
 }
 
 export function routinesRoutes(deps: ApiDeps): Hono {
@@ -521,29 +441,20 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     const id = c.req.param("id");
     const limit = parseInt(c.req.query("limit") ?? "20", 10);
     const offset = parseInt(c.req.query("offset") ?? "0", 10);
-
-    const runs = await deps.routineRunsRepo.findByRoutineId(id, {
-      limit,
-      offset,
-    });
-    return c.json(runs);
+    return c.json(
+      await listRoutineRuns({ routineRuns: deps.routineRunsRepo }, id, { limit, offset }),
+    );
   });
 
   // Lazy-loaded when a run row is expanded.
   app.get("/routines/:id/runs/:runId/trace", async (c) => {
-    const id = c.req.param("id");
-    const runId = c.req.param("runId");
-    const run = await deps.routineRunsRepo.findById(runId);
-    if (!run || run.routineId !== id) {
-      return c.json({ error: "Run not found" }, 404);
-    }
-    const rows = await deps.actionExecutionsRepo.findByRootExecutionIds([run.executionId]);
-    return c.json({
-      runId: run.id,
-      status: run.status,
-      error: run.error ?? null,
-      roots: buildActionTrace(rows),
-    });
+    const detail = await readRoutineRun(
+      { routineRuns: deps.routineRunsRepo, actionExecutions: deps.actionExecutionsRepo },
+      c.req.param("id"),
+      c.req.param("runId"),
+    );
+    if (!detail) return c.json({ error: "Run not found" }, 404);
+    return c.json(detail);
   });
 
   return app;

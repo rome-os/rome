@@ -45,6 +45,7 @@ import {
   FeedbackServiceProxy,
   CloudProfileProxy,
   RoutineEngineProxy,
+  RoutineControlProxy,
   SystemUpgradeServiceProxy,
   ChannelsServiceProxy,
   AppConnectionsProxy,
@@ -241,6 +242,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       // process) lets the event/app-lifecycle actions call their dep directly
       // without branching on which process they run in.
       routineEngine: new RoutineEngineProxy(),
+      routineControl: new RoutineControlProxy(),
       eventBus: new EventBusProxy(),
       eventCatalog: new EventCatalogProxy(),
       appStore: new AppStoreProxy(),

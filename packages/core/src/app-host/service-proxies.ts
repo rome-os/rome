@@ -18,6 +18,11 @@
 import { callMain, isTransportUncertain } from "../apps/actions/worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 import type {
+  RoutineControlOp,
+  RoutineControlResult,
+  RoutineControlService,
+} from "../routines/control.js";
+import type {
   AgentFeedback,
   FeedbackOutcome,
   FeedbackService,
@@ -159,6 +164,14 @@ export class RoutineEngineProxy implements RoutineEngine {
   /** Tear down a routine's triggers in the main process. */
   async deactivate(routineId: string): Promise<void> {
     await callMain("routines.cancel", { routineId });
+  }
+}
+
+/** Worker-side stand-in for core's routine operations: the main process runs
+ * them, for the turn of this worker's action. */
+export class RoutineControlProxy implements RoutineControlService {
+  call(op: RoutineControlOp, input: unknown): Promise<RoutineControlResult> {
+    return callMain<RoutineControlResult>("routines.control", { op, input });
   }
 }
 
