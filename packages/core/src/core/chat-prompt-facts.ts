@@ -30,14 +30,15 @@ export interface ChatPromptFactsDeps {
   channelSurface: ChannelSurfaces;
   /**
    * The latest messages of the chat `place` names said at or before `until`,
-   * newest first, as the channel reads them from where the chat lives. The
-   * bound applies before the limit, so messages said since the session's
-   * first take no room. Rejects where it reads none. Absent, a new session
-   * reads nothing earlier.
+   * and before the message with platform id `olderThan` when given, newest
+   * first, as the channel reads them from where the chat lives. The bounds
+   * apply before the limit, so messages said since the session's first take
+   * no room. Rejects where it reads none. Absent, a new session reads nothing
+   * earlier.
    */
   latest?: (
     place: ThreadContext,
-    read: { limit: number; until: Date },
+    read: { limit: number; until: Date; olderThan?: string },
   ) => Promise<ChannelMessage[]>;
   /** How long a read of the latest messages may take. Defaults to 5s. */
   latestWaitMs?: number;
@@ -60,7 +61,7 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
     },
     read: async (messageIds) => deps.labels.read(deps.messages.byIds(messageIds).map(contextOf)),
     seen: (messageIds, chatId, turnId) => deps.facts.seen(messageIds, chatId, turnId),
-    async earlier(place, before) {
+    async earlier(place, before, first) {
       // Only a direct message: in a group, the platform also holds what was
       // said before Rome joined, which no turn's catch-up shows.
       if (
@@ -70,12 +71,23 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
         handsEveryMessage(place.channel)
       )
         return null;
-      // One more than kept: the bound takes in a message said at `before`.
-      const read = deps.latest(place, { limit: EARLIER_MESSAGES + 1, until: before });
+      // Rome's record keeps whole seconds, so what was said just before the
+      // session's first message may share its second. Knowing that message's
+      // platform id, the read takes in the whole second and is bounded below
+      // that message, so messages said after it in the same second take no
+      // room on the platform's page.
+      const key = first === undefined ? undefined : deps.messages.byIds([first])[0]?.key;
+      const until = key === undefined ? before : new Date(before.getTime() + 999);
+      // One more than kept: the bound takes in a message said at `until`.
+      const read = deps.latest(place, {
+        limit: EARLIER_MESSAGES + 1,
+        until,
+        ...(key === undefined ? {} : { olderThan: key }),
+      });
       read.catch(() => {});
       const page = await within(read, deps.latestWaitMs ?? EARLIER_WAIT_MS);
       if (!page) return null;
-      const said = earlierMessages(page, before);
+      const said = earlierMessages(...olderThan(page, before, key));
       const labelled = await deps.labels.read(said.map((message, i) => lineOf(message, -(i + 1))));
       return labelled.map(
         (message, i): UnseenMessage => ({
@@ -87,6 +99,21 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
       );
     },
   };
+}
+
+/** The messages of `page`, newest first, said before the session's first
+ *  message, with the bound they were said before. A page read below that
+ *  message, by its key, holds only messages said before it, and one that
+ *  holds it anyway is cut there by its own order, so a message said in the
+ *  same millisecond is kept. With no key, `before` cuts. */
+function olderThan(
+  page: readonly ChannelMessage[],
+  before: Date,
+  key: string | undefined,
+): [readonly ChannelMessage[], Date] {
+  if (key === undefined) return [page, before];
+  const at = page.findIndex((m) => m.messageId === key);
+  return [page.slice(at + 1), new Date(8.64e15)];
 }
 
 /** The messages of `page` said before `before`, oldest first, within the
