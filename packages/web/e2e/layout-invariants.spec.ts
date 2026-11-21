@@ -26,7 +26,6 @@ import { collectButtonViolations, collectRowHeightViolations } from "./layout-in
 const ROUTES = [
   "/settings/appearance",
   "/settings/connections",
-  "/settings/channels",
   "/settings/ai-tools",
   "/settings/favors",
   "/settings/advanced",
@@ -68,7 +67,7 @@ for (const route of ROUTES) {
     await page.goto(route);
     // Wait for real content rather than skeletons. The signal is any control
     // this sweep measures, not a Button specifically — /settings/appearance
-    // and /settings/channels render none, and waiting on one there times out
+    // renders none, and waiting on one there times out
     // against a page that is in fact fully rendered.
     //
     // `filter({ visible: true })` before `first()` is load-bearing: `first()`

@@ -36,6 +36,13 @@ import { ConnectedAccountsRepository } from "../../db/repositories/connected-acc
 import { accountLinkOf } from "../../chats/connected-accounts/account-links.js";
 import type { ApiDeps } from "../deps.js";
 import { requireConnectionRegistry } from "../helpers.js";
+import type { ChatSettingField, ChatSettings } from "@rome-os/app-runtime";
+import {
+  UNDECLARED_CHAT_RULES,
+  asChatSettings,
+  effectiveChatRules,
+  offeredChatRules,
+} from "../../chat-settings/rules.js";
 
 /** What a connection lets Rome do, by capability. `talk` repeats `chat` under
  *  its old name for dashboard tabs opened before the rename. */
@@ -123,6 +130,13 @@ export interface ConnectionView
   /** Whether the guardian opened the connection to its workspace's other
    *  members, so they are answered. Absent for a kind with no such switch. */
   answerMembers?: boolean;
+  /** The chat rules the connection's kind offers the guardian on its group
+   *  chats, in the order the dashboard lists them. Empty for a kind that
+   *  offers none, whose page then shows no chat rules. */
+  chatRules: ChatSettingField[];
+  /** The values the kind's group chats run on where nobody set one: its
+   *  fixed values, else Core's defaults. Null for a kind with no chats. */
+  chatRuleDefaults: ChatSettings | null;
 }
 
 /** Per-grant extras for the detail view — grant envelope fields the list
@@ -160,6 +174,18 @@ function accountView(
 ): AccountValue | null {
   const account = descriptor && record ? reachedAccount(descriptor, record) : undefined;
   return account ? { platform: account.platform, id: account.accountId } : null;
+}
+
+/** The chat rules a kind offers, or none for a kind that has no chats. */
+function chatRulesOfKind(descriptor: ConnectionDescriptor | null): ChatSettingField[] {
+  return descriptor?.capabilities.talker ? offeredChatRules(descriptor.chatRules) : [];
+}
+
+/** What a kind's group chats run on where nobody set a value, or null for a
+ *  kind that has no chats. */
+function chatRuleDefaultsOfKind(descriptor: ConnectionDescriptor | null): ChatSettings | null {
+  if (!descriptor?.capabilities.talker) return null;
+  return asChatSettings(effectiveChatRules(descriptor.chatRules ?? UNDECLARED_CHAT_RULES, {}));
 }
 
 function buildConnectionView(
@@ -214,6 +240,8 @@ function buildConnectionView(
     link,
     severalAccounts: offersAnother(registry.getDescriptor(conn.connectionKind)),
     ...answerMembersOf(registry.getDescriptor(conn.connectionKind), conn.id),
+    chatRules: chatRulesOfKind(registry.getDescriptor(conn.connectionKind)),
+    chatRuleDefaults: chatRuleDefaultsOfKind(registry.getDescriptor(conn.connectionKind)),
   };
 }
 
@@ -305,6 +333,8 @@ function placeholderView(
     account: null,
     link: descriptor.link ?? null,
     severalAccounts: offersAnother(descriptor),
+    chatRules: chatRulesOfKind(descriptor),
+    chatRuleDefaults: chatRuleDefaultsOfKind(descriptor),
   };
 }
 

@@ -1,10 +1,11 @@
 import Foundation
 
 // A Concierge chat's task list, the Agent page's Tasks tab: everything that
-// runs for the chat, grouped by the server (`GET /chats/:chatId/tasks`).
+// runs for the chat, in the one panel's groups the server makes
+// (`GET /chats/:chatId/tasks?grouping=panel`).
 // docs/domains/chats.md#task-list
 
-/// `GET /chats/:chatId/tasks`: the groups that have rows, in order.
+/// `GET /chats/:chatId/tasks?grouping=panel`: the groups that have rows, in order.
 /// Read leniently: a group or a row this build cannot read is left out and
 /// logged, never the whole list.
 struct TaskListResponse: Decodable, Hashable, Sendable {
@@ -27,7 +28,7 @@ struct TaskListResponse: Decodable, Hashable, Sendable {
 
 struct TaskListGroup: Decodable, Hashable, Sendable, Identifiable {
     enum Key: String, Decodable, Sendable, CaseIterable {
-        case needsYou = "needs_you", active, later, onItsOwn = "on_its_own", ended
+        case needsYou = "needs_you", active, later, scheduled, ended
 
         /// The fixed order of the groups, Ended always last.
         var order: Int { Self.allCases.firstIndex(of: self) ?? 0 }
@@ -159,6 +160,13 @@ enum TaskListItem: Decodable, Hashable, Sendable, Identifiable {
         var nextRunAt: Double?
         var lastRun: LastRun?
         var createdAt: Double?
+        /// The task whose task chat it works for; nil for the chat's own routines.
+        var fromTask: FromTask?
+
+        struct FromTask: Decodable, Hashable, Sendable {
+            var id: String
+            var title: String
+        }
     }
 
     private enum CodingKeys: String, CodingKey { case kind }
@@ -261,7 +269,7 @@ extension TaskListItem.Follow {
 }
 
 extension TaskListItem.Routine {
-    private enum CodingKeys: String, CodingKey { case id, name, trigger, enabled, nextRunAt, lastRun, createdAt }
+    private enum CodingKeys: String, CodingKey { case id, name, trigger, enabled, nextRunAt, lastRun, createdAt, fromTask }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -273,5 +281,49 @@ extension TaskListItem.Routine {
         nextRunAt = c.lenient(Double.self, .nextRunAt)
         lastRun = c.lenient(LastRun.self, .lastRun)
         createdAt = c.lenient(Double.self, .createdAt)
+        fromTask = c.lenient(FromTask.self, .fromTask)
     }
+}
+
+// MARK: - Row actions
+
+/// What a row's long-press menu offers, as the web's row menu does
+/// (docs/domains/chats.md#task-list). Each acts on the one row through an
+/// owner-only route of `/chats/:chatId/tasks`.
+enum TaskListAction: String, Hashable, Sendable, CaseIterable {
+    /// A one-off task that has not ended: it ends done.
+    case markDone
+    /// A task that has not ended; a scheduled one loses its schedule.
+    case stop
+    /// A reminder no task has.
+    case cancel
+    case pause
+    case resume
+    /// A routine, once confirmed.
+    case delete
+    /// A follow, once confirmed.
+    case unfollow
+
+    /// The menu of `item`: none on an ended task.
+    static func menu(for item: TaskListItem) -> [TaskListAction] {
+        switch item {
+        case .task(let task):
+            guard !TaskListWords.isEnded(task.task) else { return [] }
+            // A scheduled task is only stopped, never marked done.
+            return task.schedule == nil ? [.markDone, .stop] : [.stop]
+        case .check:
+            return [.cancel]
+        case .follow:
+            return [.unfollow]
+        case .routine(let routine):
+            return [routine.enabled ? .pause : .resume, .delete]
+        }
+    }
+
+    /// Whether it asks first: it cannot be undone from the list.
+    var confirms: Bool { self == .delete || self == .unfollow }
+
+    /// Whether the row stays pending until its task reads as ended, not
+    /// just until the next read.
+    var holdsUntilEnded: Bool { self == .stop || self == .markDone }
 }

@@ -1,3 +1,4 @@
+import type { ChatSettingField, ChatSettings } from "@rome/api-types/chat-settings";
 /**
  * Client types + fetchers for the registry-native connection surface
  * (`GET /api/connections`). The types mirror the backend's
@@ -85,6 +86,12 @@ export interface ApiConnection extends ConnectionAccountFields {
   /** Whether the guardian opened the account to its workspace's other
    *  members, so they are answered. Absent for a kind with no such switch. */
   answerMembers?: boolean;
+  /** The chat rules the connection's kind offers on its group chats. Empty
+   *  for a kind that offers none. Absent from a core that predates it. */
+  chatRules?: ChatSettingField[];
+  /** The values the kind's group chats run on where nobody set one. Null
+   *  for a kind with no chats, and absent from a core that predates it. */
+  chatRuleDefaults?: ChatSettings | null;
 }
 
 /** Answer the other members of the account's workspace, or stop. */

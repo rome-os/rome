@@ -18,7 +18,7 @@ describe("chat settings routes", () => {
   it("passes server-backed filters and pagination to the shared control", async () => {
     const { app, list } = harness();
     const response = await app.request(
-      "/chat-settings?connectionId=conn-1&query=launch&cursor=next&limit=20&availability=offline",
+      "/chat-settings?connectionId=conn-1&query=launch&cursor=next&limit=20&availability=offline&changed=true",
     );
 
     expect(response.status).toBe(200);
@@ -28,6 +28,7 @@ describe("chat settings routes", () => {
       cursor: "next",
       limit: 20,
       availability: "offline",
+      changed: true,
     });
   });
 

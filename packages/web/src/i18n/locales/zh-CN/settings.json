@@ -12,7 +12,6 @@
     "Connections": "连接",
     "Favors": "Favors",
     "Trust": "信任",
-    "Channels": "渠道",
     "AI Tools": "AI 工具",
     "Advanced": "高级",
     "Devices": "设备"
@@ -439,17 +438,7 @@
   },
   "channels": {
     "conversationSettings": {
-      "configure": "配置聊天",
-      "searchPlaceholder": "搜索提供商、工作区或聊天",
-      "allConnections": "所有连接",
-      "anyStatus": "所有状态",
-      "connectionFilterAria": "按连接筛选",
-      "statusFilterAria": "按状态筛选",
-      "status": {
-        "online": "在线",
-        "offline": "离线",
-        "notConnected": "未连接"
-      },
+      "searchPlaceholder": "搜索聊天",
       "kinds": {
         "channel": "频道",
         "group": "群组",
@@ -457,12 +446,8 @@
         "topic": "话题"
       },
       "loading": "正在加载聊天…",
-      "emptyTitle": "未找到可配置的聊天",
-      "emptyDescription": "在受支持的平台上连接一个账号，或发送一条消息让 Rome 发现该聊天。",
+      "emptyTitle": "所有聊天都使用默认规则",
       "loadMore": "加载更多",
-      "overrideCount_one": "{{count}} 项覆盖",
-      "overrideCount_other": "{{count}} 项覆盖",
-      "providerDefaults": "产品默认值",
       "sections": {
         "activation": "触发",
         "replies": "回复",
@@ -479,24 +464,24 @@
         "sessionReset": "提供商会话重置"
       },
       "descriptions": {
-        "sessionReset": "清除模型提供商侧保存的智能体记忆"
-      },
-      "source": {
-        "overridden": "已覆盖"
+        "sessionReset": "清除模型提供商侧保存的智能体记忆。"
       },
       "options": {
-        "mention": "仅被提及时",
         "mentions": "仅提及消息",
         "all": "全部",
         "ignore": "忽略",
         "respond": "响应",
         "thread": "原生话题",
-        "inline": "会话内"
+        "inline": "会话内",
+        "replyRule": {
+          "mention": "仅在对它说话时",
+          "all": "每条消息"
+        }
       },
       "mainAgent": "main（默认）",
       "accountAgent": "{{agent}}（此账号的智能体）",
-      "silentAccount": "此账号有智能体之前，这里的消息不会到达 Rome。",
-      "silentAccountLink": "<account>在账号页面关联</account>。",
+      "silentAccount": "此关联账号有智能体之前，这里的消息不会到达 Rome。",
+      "silentAccountLink": "<account>在外派智能体中关联一个</account>。",
       "silentAccountOverride": "关联后，此聊天选择的 {{agent}} 将生效。",
       "sessionReset": {
         "never": "永不",
@@ -513,7 +498,38 @@
         "utc": "UTC"
       },
       "saving": "保存中…",
-      "retry": "重试"
+      "retry": "重试",
+      "chatRules": {
+        "title": "聊天规则"
+      },
+      "otherChats": "群聊默认：",
+      "addChat": "添加聊天",
+      "noMatches": "没有匹配的聊天",
+      "findChats": "Rome 在某个聊天中收到消息后，该聊天会出现在这里。",
+      "close": "关闭",
+      "addDialog": {
+        "title": "添加聊天"
+      },
+      "resetToDefaults": "恢复默认",
+      "changed": "已改动默认值",
+      "summary": {
+        "defaults": "使用默认规则",
+        "on": "开启",
+        "off": "关闭",
+        "thread": "在话题中回复",
+        "inline": "直接回复",
+        "agent": "由 {{agent}} 回答",
+        "resetNever": "从不重置",
+        "resetDaily": "每天 {{time}} UTC 重置",
+        "resetIdle": "闲置 {{duration}}后重置",
+        "minutes_one": "{{count}} 分钟",
+        "minutes_other": "{{count}} 分钟",
+        "hours_one": "{{count}} 小时",
+        "hours_other": "{{count}} 小时",
+        "days_one": "{{count}} 天",
+        "days_other": "{{count}} 天"
+      },
+      "allListed": "这里的聊天都已有单独的规则。"
     },
     "restartNeededFallback": "后端不可达 — 需要重启以应用更改",
     "disconnectFailedFallback": "断开失败。",
