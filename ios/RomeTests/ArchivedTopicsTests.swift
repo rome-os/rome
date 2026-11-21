@@ -171,7 +171,7 @@ import Testing
 
     @Test func theRestoreAlertListsTheMovedFollows() {
         let prompt = TopicRestorePrompt(id: "topic-1", name: "Car", moved: [.init(source: "gmail", label: "Gmail", target: "dealer@example.com")])
-        #expect(prompt.title == "Restore “Car”?")
+        #expect(prompt.title == "Unarchive “Car”?")
         #expect(prompt.message == """
         When this chat was archived, these follows moved to Chat:
         • Following Gmail · dealer@example.com

@@ -68,7 +68,7 @@ private struct TopicRetireModifier: ViewModifier {
     }
 }
 
-/// Restore asked for an archived topic chat, from its row in the Archived
+/// Unarchive asked for an archived topic chat, from its row in the Archived
 /// sheet or its banner.
 struct TopicRestoreRequest: Equatable {
     let chatId: String

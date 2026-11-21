@@ -4259,26 +4259,6 @@
         }
       }
     },
-    "Restore" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "恢复"
-          }
-        }
-      }
-    },
-    "Restore “%@”?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "恢复“%@”？"
-          }
-        }
-      }
-    },
     "Results, questions and reminders" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5955,6 +5935,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在回复"
+          }
+        }
+      }
+    },
+    "Unarchive" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消归档"
+          }
+        }
+      }
+    },
+    "Unarchive “%@”?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消归档“%@”？"
           }
         }
       }

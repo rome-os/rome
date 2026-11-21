@@ -14,7 +14,7 @@ struct ArchivedTopicsSheet: View {
 
     private var store: ArchivedTopicsStore { workspace.archivedTopics }
 
-    /// A second Restore or Delete while the first is read starts no other.
+    /// A second Unarchive or Delete while the first is read starts no other.
     private func restore(_ chat: ConciergeChat) {
         guard restoring == nil, deleting == nil else { return }
         restoring = TopicRestoreRequest(chatId: chat.id, name: TopicChatsStore.title(chat))
@@ -62,18 +62,18 @@ struct ArchivedTopicsSheet: View {
                 ForEach(chats.prefix(shown)) { chat in
                     ArchivedTopicRow(chat: chat) { onOpen(chat.id) }
                         .sheetRow()
-                        // Restore, which a full swipe takes, then Delete, which
+                        // Unarchive, which a full swipe takes, then Delete, which
                         // only a tap takes and which always asks. Not the
                         // destructive role, which drops the row before the
                         // guardian has answered.
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button { restore(chat) } label: { Label("Restore", systemImage: "tray.and.arrow.up") }
+                            Button { restore(chat) } label: { Label("Unarchive", systemImage: "tray.and.arrow.up") }
                                 .tint(Palette.primary)
                             Button { delete(chat) } label: { Label("Delete", systemImage: "trash") }
                                 .tint(Palette.destructive)
                         }
                         .contextMenu {
-                            Button { restore(chat) } label: { Label("Restore", systemImage: "tray.and.arrow.up") }
+                            Button { restore(chat) } label: { Label("Unarchive", systemImage: "tray.and.arrow.up") }
                             Button(role: .destructive) { delete(chat) } label: { Label("Delete", systemImage: "trash") }
                         }
                 }

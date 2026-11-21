@@ -87,7 +87,7 @@ struct TopicRestorePrompt: Identifiable {
     let name: String
     let moved: [ConciergeChatWork.Follow]
 
-    var title: String { String(localized: "Restore “\(name)”?") }
+    var title: String { String(localized: "Unarchive “\(name)”?") }
 
     var message: String {
         TopicDeletePrompt.asking(

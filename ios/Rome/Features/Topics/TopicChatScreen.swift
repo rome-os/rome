@@ -28,7 +28,7 @@ struct TopicChatScreen: View {
     @State private var renaming = false
     /// Archive or Delete from the header, while it is read and asked.
     @State private var retiring: TopicRetireRequest?
-    /// Restore from the archived chat's banner, while it is read and asked.
+    /// Unarchive from the archived chat's banner, while it is read and asked.
     @State private var restoring: TopicRestoreRequest?
     @State private var newName = ""
     @State private var composerFocused = false
@@ -36,7 +36,7 @@ struct TopicChatScreen: View {
 
     private var store: TranscriptStore? { chatId.map(workspace.topicStore) }
 
-    /// An archived chat reads only: a banner offers Restore, and there is no
+    /// An archived chat reads only: a banner offers Unarchive, and there is no
     /// composer, so nothing sent can bring it back unasked.
     private var archived: Bool { workspace.isArchivedTopic(chatId) }
 
@@ -81,7 +81,7 @@ struct TopicChatScreen: View {
         .overlay(alignment: .top) {
             VStack(spacing: 8) {
                 if archived, let chatId {
-                    TopBanner(kind: .archived, text: String(localized: "This chat is archived"), actionTitle: String(localized: "Restore"), busy: restoring != nil) {
+                    TopBanner(kind: .archived, text: String(localized: "This chat is archived"), actionTitle: String(localized: "Unarchive"), busy: restoring != nil) {
                         guard restoring == nil else { return }
                         restoring = TopicRestoreRequest(chatId: chatId, name: TopicChatsStore.title(workspace.topicChat(chatId)))
                     }
