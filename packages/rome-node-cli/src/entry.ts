@@ -109,6 +109,9 @@ async function main(): Promise<void> {
       outcome: { type: "string" },
       text: { type: "string" },
       content: { type: "string" },
+      host: { type: "string" },
+      port: { type: "string" },
+      "assets-dir": { type: "string" },
     },
   });
   if (values.help || positionals.length === 0 || positionals[0] === "help") {
@@ -123,6 +126,11 @@ async function main(): Promise<void> {
     throw new Error("--server is only supported by rome-node auth.");
   if (values["device-code"] && !(positionals[0] === "connect" && positionals.length === 1))
     throw new Error("--device-code is only supported by rome-node connect.");
+  const webOptions = ["host", "port", "assets-dir"] as const;
+  if (positionals[0] !== "web" && webOptions.some((option) => values[option] !== undefined))
+    throw new Error(
+      `--${webOptions.find((option) => values[option] !== undefined)} is only supported by rome-node web.`,
+    );
   if (
     (values.input !== undefined || values.output !== undefined) &&
     !(positionals[0] === "device" && positionals[1] === "run")
@@ -144,6 +152,40 @@ async function main(): Promise<void> {
     throw new Error(
       `--${auditOptions.find((option) => values[option] !== undefined)} is only supported by rome-node audit.`,
     );
+  if (positionals[0] === "web") {
+    if (positionals.length !== 1) throw new Error("Usage: rome-node web [options]");
+    const host = values.host ?? process.env.ROME_NODE_WEB_HOST ?? "127.0.0.1";
+    const portText = values.port ?? process.env.ROME_NODE_WEB_PORT ?? "4310";
+    const port = Number(portText);
+    if (!Number.isInteger(port) || port < 0 || port > 65535) {
+      throw new Error("--port must be an integer between 0 and 65535.");
+    }
+    const { startWebServer } = await import("./web/server.js");
+    await withShutdown(async (signal) => {
+      const running = await startWebServer({
+        host,
+        port,
+        configDirectory: config.directory,
+        cloudUrl: values.cloud ?? process.env.ROME_NODE_CLOUD_URL,
+        explicitCloudUrl:
+          values.cloud !== undefined || process.env.ROME_NODE_CLOUD_URL !== undefined,
+        name: values.name ?? process.env.ROME_NODE_NAME,
+        explicitName: values.name !== undefined || process.env.ROME_NODE_NAME !== undefined,
+        assetsDir: values["assets-dir"] ?? process.env.ROME_NODE_WEB_ASSETS_DIR,
+        password: process.env.ROME_NODE_UI_PASSWORD,
+        version: version(),
+      });
+      try {
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      } finally {
+        await running.close();
+      }
+    });
+    return;
+  }
   if (positionals[0] === "audit") {
     const { AuditStore } = await import("@rome-os/node-core/host");
     await runAudit(
@@ -255,11 +297,14 @@ async function main(): Promise<void> {
     const {
       AuditStore,
       connectHost,
+      connectLimitedHost,
       defaultDeviceName,
       loginDevice,
       loginDeviceCode,
       createFileCredentialStore,
     } = await import("@rome-os/node-core/host");
+    const { readHostExecutionEnabled } = await import("./host-config.js");
+    const executionEnabled = await readHostExecutionEnabled(config.directory);
     const name = values.name ?? defaultDeviceName();
     const audit = await AuditStore.open({
       path: cliAuditPath(config.directory),
@@ -273,18 +318,22 @@ async function main(): Promise<void> {
         `Audit log unavailable: ${audit.state.message}\nRemote requests will be refused until it is fixed. Run rome-node audit status.\n`,
       );
     else process.stderr.write(`Audit log: ${audit.path}\n`);
+    if (!executionEnabled) {
+      process.stderr.write(
+        "Remote execution (Computer Use) is disabled in web-config.json; connecting in limited mode (computer_use_off).\n",
+      );
+    }
     // On a terminal, the status screen replaces the Connection lines once sign-in is over.
     const screen = process.stdout.isTTY ? await loadConnectUi() : undefined;
     let ui: ConnectUi | undefined;
     const cloud = values.cloud ?? "https://romeos.cc";
-    await withShutdown((signal) =>
-      connectHost({
-        audit,
+    await withShutdown((signal) => {
+      const hostOptions = {
         cloudUrl: cloud,
         name,
         signal,
         credentials: createFileCredentialStore(join(config.directory, "credential.json")),
-        authorize: (origin, deviceName, abort) =>
+        authorize: (origin: string, deviceName: string, abort: AbortSignal) =>
           values["device-code"]
             ? loginDeviceCode(origin, deviceName, abort, (prompt) => {
                 process.stderr.write(
@@ -299,10 +348,14 @@ async function main(): Promise<void> {
                   `Open this URL in your browser to authorize ${deviceName}:\n${url}\n`,
                 );
               }),
-        onEvent: (event) => {
+        onEvent: (
+          event: Parameters<NonNullable<Parameters<typeof connectHost>[0]["onEvent"]>>[0],
+        ) => {
           if (event.type === "authorization_required")
             process.stderr.write(
-              "While connect is running, Rome instances in your account can execute programs and read or change files as your OS user.\n",
+              executionEnabled
+                ? "While connect is running, Rome instances in your account can execute programs and read or change files as your OS user.\n"
+                : "Remote execution is disabled in web-config.json; this device will connect in limited mode and refuse remote actions.\n",
             );
           else if (event.type === "retrying")
             process.stderr.write("Rome Cloud is unavailable; keeping credentials and retrying.\n");
@@ -317,8 +370,11 @@ async function main(): Promise<void> {
           else if (ui) ui.setStatus(event.status);
           else process.stderr.write(`Connection: ${event.status}\n`);
         },
-      }),
-    ).finally(() => {
+      };
+      return executionEnabled
+        ? connectHost({ ...hostOptions, audit })
+        : connectLimitedHost(hostOptions);
+    }).finally(() => {
       ui?.stop();
       audit.close();
     });

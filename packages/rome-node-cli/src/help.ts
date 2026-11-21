@@ -6,6 +6,7 @@ Usage:
 
 Commands:
   connect          Keep this computer online as a remote executor.
+  web              Run the local Web UI to manage connection and audit logs.
   auth             Configure caller authorization through stdin or server mode.
   auth status      Report local caller configuration without revealing the token.
   device           List authorized devices (they may be offline).
@@ -51,6 +52,8 @@ By default, the browser returns to a loopback listener on this computer.
 Use --device-code over SSH or on a headless computer to approve from another device.
 This mode prints a URL and user code without opening a browser or callback listener.
 Stored credentials are reused in either mode. SSH is not detected automatically.
+If <config dir>/web-config.json has executionEnabled set to false, connect honors it
+and runs in limited mode (refusing remote actions with computer_use_off).
 The process stays in the foreground. Ctrl+C disconnects and preserves authorization.
 On a terminal it shows the connection, request counts, and the latest requests. Otherwise
 it prints plain status lines to stderr, as a service or a redirect needs.
@@ -65,6 +68,41 @@ Options:
 Example:
   rome-node connect --name "My computer"
   rome-node connect --device-code --name "Remote Linux" --cloud https://romeos.cc
+`,
+  web: `Usage: rome-node web [--host <addr>] [--port <port>] [--cloud <origin>] [--name <name>] [--assets-dir <dir>]
+
+Start a lightweight Web UI to manage this computer's Rome Cloud device authorization,
+connection state, remote execution toggle, and local audit health.
+Built for container and headless deployments where a browser is easier than CLI logs.
+
+When bound to a loopback address (default: 127.0.0.1), local loopback access is
+passwordless until you set a custom password inside the Web UI (persisted as an scrypt
+hash in <config dir>/web-auth.json) or via ROME_NODE_UI_PASSWORD.
+When bound to a non-loopback address (such as --host 0.0.0.0 in Docker) with no
+password configured, a one-time setup token is printed to stderr on startup and must
+be used in the Web UI to set the first password.
+
+Web UI static assets are prebuilt in the official Docker image (ghcr.io/rome-os/rome-node)
+and available in a monorepo checkout after building @rome-os/node-web. The standalone
+@rome-os/node npm package does not bundle frontend assets; pass --assets-dir to serve
+a built asset directory from npm.
+
+Options:
+  --host <addr>       Listen address (default: ROME_NODE_WEB_HOST or 127.0.0.1).
+  --port <port>       Listen port (default: ROME_NODE_WEB_PORT or 4310).
+  --cloud <origin>    Default Cloud origin (default: ROME_NODE_CLOUD_URL or https://romeos.cc).
+  --name <name>       Default device name (default: ROME_NODE_NAME or computer hostname).
+  --assets-dir <dir>  Path to built Web UI static files (or ROME_NODE_WEB_ASSETS_DIR).
+
+Environment:
+  ROME_NODE_CONFIG_DIR      Configuration directory for credentials, web settings, and audit log.
+  ROME_NODE_UI_PASSWORD     Optional password for the Web UI (overrides any UI-managed password
+                            and skips the one-time setup token on non-loopback binds).
+  ROME_NODE_WEB_ASSETS_DIR  Directory containing the built Web UI assets.
+
+Example:
+  rome-node web
+  rome-node web --host 0.0.0.0 --port 4310
 `,
   auth: `Usage:
   rome-node auth [--cloud <origin>] < token-file

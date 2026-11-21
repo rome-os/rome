@@ -2,6 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import type { ConciergeTaskRow } from "../db/repositories/concierge-tasks.js";
 import type { TaskChatCards } from "../webchat/repository.js";
 import {
+  approvalLine,
   cardAt,
   openCards,
   settledCard,
@@ -411,5 +412,17 @@ describe("a card whose task ended", () => {
       "guardian",
     );
     expect(JSON.parse(filled!.content)[0].card).toMatchObject({ id: "a1", closed: true });
+  });
+});
+
+describe("approvalLine", () => {
+  it("is the preview's title, else the description", () => {
+    const description = 'Action "system:vault_apply" requires guardian approval';
+    const preview = (title: unknown) => ({ preview: { kind: "secret_access", title } });
+    expect(approvalLine(preview("Use CF_API_TOKEN for 15 min"), description)).toBe(
+      "Use CF_API_TOKEN for 15 min",
+    );
+    const without = [null, undefined, {}, { preview: {} }, preview(""), preview("  "), preview(3)];
+    for (const payload of without) expect(approvalLine(payload, description)).toBe(description);
   });
 });

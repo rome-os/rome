@@ -7,9 +7,11 @@ import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/hooks/use-theme";
 import en from "@/i18n/locales/en/chat.json";
 import zh from "@/i18n/locales/zh-CN/chat.json";
+import type { ChatMessage } from "@/lib/chat-types";
 import ChatMarkdown from "./ChatMarkdown";
 import { ConciergeBubble } from "./ConciergeBubble";
 import { ImagePreviewContent } from "./composer/ImagePreviewContent";
+import { UserMessageBubble } from "./UserMessageBubble";
 
 const i18n = createInstance();
 await i18n.init({ lng: "en", resources: { en: { chat: en }, "zh-CN": { chat: zh } } });
@@ -568,5 +570,92 @@ describe("the viewer in a Concierge bubble", () => {
       });
       expect(details.getAttribute("aria-expanded")).toBe("false");
     }
+  });
+});
+
+describe("the pictures a guardian uploaded with a message", () => {
+  const A = "0123456789abcdef0123456789abcdef";
+  const B = "fedcba9876543210fedcba9876543210";
+  const C = "00112233445566778899aabbccddeeff";
+
+  function Sent({ texts }: { texts: string[] }) {
+    return (
+      <I18nextProvider i18n={i18n}>
+        <ThemeProvider>
+          <MemoryRouter>
+            {texts.map((text, index) => {
+              const msg: ChatMessage = {
+                id: `m${index}`,
+                sessionId: "s1",
+                role: "user",
+                content: JSON.stringify([{ type: "text", content: text }]),
+                createdAt: "2026-11-20T00:00:00.000Z",
+              };
+              return <UserMessageBubble key={msg.id} msg={msg} text={text} own />;
+            })}
+          </MemoryRouter>
+        </ThemeProvider>
+      </I18nextProvider>
+    );
+  }
+
+  it("pages between them, past a file that is not a picture", async () => {
+    render(
+      <Sent
+        texts={[
+          [
+            "Which one reads better?",
+            "",
+            `- File 1: [a.png](</api/assets/${A}.png>)`,
+            `- File 2: [notes.pdf](</api/assets/${C}.pdf>)`,
+            `- File 3: [b.png](</api/assets/${B}.png>)`,
+          ].join("\n"),
+        ]}
+      />,
+    );
+    await openFrom("a.png");
+    expect(counter()).toBe("1 / 2");
+    await act(async () => {
+      fireEvent.click(button("Next picture"));
+    });
+    expect(shown()).toBe(`/api/assets/${B}.png`);
+    expect(counter()).toBe("2 / 2");
+    expect(button("Next picture").disabled).toBe(true);
+  });
+
+  it("keeps another message's uploads, and a picture in the text, out of the set", async () => {
+    render(
+      <Sent
+        texts={[
+          [
+            "![Inline](https://example.com/i.jpg)",
+            "",
+            `- File 1: [a.png](</api/assets/${A}.png>)`,
+            `- File 2: [b.png](</api/assets/${B}.png>)`,
+          ].join("\n"),
+          `- File 1: [c.png](</api/assets/${C}.png>)`,
+        ]}
+      />,
+    );
+    await openFrom("b.png");
+    expect(counter()).toBe("2 / 2");
+    await act(async () => {
+      fireEvent.click(button("Previous picture"));
+    });
+    expect(shown()).toBe(`/api/assets/${A}.png`);
+    expect(button("Previous picture").disabled).toBe(true);
+  });
+
+  it("leaves a picture in the text to its own text", async () => {
+    render(
+      <Sent
+        texts={[
+          `![Inline](https://example.com/i.jpg)\n\n- File 1: [a.png](</api/assets/${A}.png>)`,
+        ]}
+      />,
+    );
+    await openFrom("Inline");
+    expect(dialog().querySelector("output[aria-live]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Next picture" })).toBeNull();
   });
 });
