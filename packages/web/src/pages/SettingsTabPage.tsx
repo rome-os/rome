@@ -94,7 +94,6 @@ import {
 } from "@/lib/advanced-easter-egg";
 import { AppKeysRow, VaultRow } from "@/components/app-keys-section";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
-import { ChannelsSettingsPage } from "@/components/channels/channels-settings-page";
 import { AiToolsPanel } from "@/components/ai-tools-panel";
 import { SystemVersionRow } from "@/components/system-upgrade-section";
 import { SystemDiagnosisRow } from "@/components/system-diagnosis-section";
@@ -140,7 +139,6 @@ export const TABS = [
   "Appearance",
   "Connections",
   "Devices",
-  "Channels",
   "AI Tools",
   "Favors",
   "Advanced",
@@ -149,7 +147,7 @@ export const TABS = [
 type Tab = (typeof TABS)[number];
 
 // Only these tabs read what `loadAll` fetches (/api/settings). Connections,
-// Devices, Channels and Favors own their requests, and Appearance reads the theme/i18n context, so neither the initial settings load
+// Devices and Favors own their requests, and Appearance reads the theme/i18n context, so neither the initial settings load
 // nor a settings failure has anything to say about them — gating every tab on one
 // request would strand a guardian on a healthy tab.
 const SETTINGS_BACKED_TABS: ReadonlySet<Tab> = new Set<Tab>(["AI Tools", "Advanced"]);
@@ -281,6 +279,10 @@ export default function SettingsPage() {
 
   // Unknown settings slugs are not pages. Redirect them to the canonical
   // default instead of rendering Appearance under a stale URL.
+  // Chat rules moved from their own tab onto each connection's page.
+  if (params.tab === "channels") {
+    return <Navigate to="/settings/connections" replace />;
+  }
   if (params.tab && !normalizedTab) {
     return <Navigate to="/settings/appearance" replace />;
   }
@@ -322,11 +324,6 @@ export default function SettingsPage() {
           {activeTab === "Devices" && (
             <Measure>
               <DevicesSection />
-            </Measure>
-          )}
-          {activeTab === "Channels" && (
-            <Measure>
-              <ChannelsSettingsPage />
             </Measure>
           )}
           {activeTab === "Favors" && (

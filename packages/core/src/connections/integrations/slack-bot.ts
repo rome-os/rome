@@ -32,7 +32,7 @@ import { CredentialRejected, Disconnected } from "../errors.js";
 import { credentialsPaste } from "../schemes.js";
 import type { SetupFn, SetupForm, SetupFormField, SetupInteraction } from "../setup/types.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
-import { WAKES_ON_EVERY_MESSAGE } from "../../chat-settings/rules.js";
+import { SESSION_RESET_ONLY_CHAT_RULES } from "@rome/api-types/chat-rules";
 
 export const SLACK_BOT_KIND = "slack_bot";
 
@@ -336,7 +336,7 @@ export function makeSlackBotDescriptor(deps: SlackBotDescriptorDeps = {}): Conne
     grant: "bot",
     // Today's behaviour, stated: chats wake on every message the platform
     // delivers, and only the session reset is the guardian's to set.
-    chatRules: { offers: ["session.reset"], fixed: WAKES_ON_EVERY_MESSAGE },
+    chatRules: SESSION_RESET_ONLY_CHAT_RULES,
     auth: botScheme,
     capabilities: {
       talker: {

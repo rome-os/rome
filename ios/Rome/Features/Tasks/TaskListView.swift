@@ -1,17 +1,17 @@
 import SwiftUI
 
-/// The Agent page's Tasks and Routines tabs: what runs for one Concierge chat.
-/// Tasks lists its task chats, grouped as Needs you, Active, Later and Ended;
-/// Routines lists what is no task chat, in one list by the time each runs
-/// next. A task chat's row is its name and one line of state and time, opens
-/// the chat when tapped, and has Stop in its long-press menu
+/// The Agent page's Tasks tab: everything that runs for one Concierge chat,
+/// in the web panel's groups: Needs you, Active, Later, Scheduled and Ended,
+/// empty ones left out. Each row is its name and one line of state and time;
+/// a task chat's row opens the chat when tapped. A row's long-press menu acts
+/// on it (`TaskListAction`), and Delete and Unfollow ask first
 /// (docs/domains/chats.md#task-list).
 struct TaskListView: View {
-    enum Mode { case tasks, routines }
     let store: TaskListStore?
-    let mode: Mode
     let onOpenChat: (ConciergeTask.LinkedChat) -> Void
     @State private var endedOpen = false
+    /// The action waiting on its alert.
+    @State private var confirming: TaskListConfirm?
 
     var body: some View {
         // Times count down by the minute.
@@ -29,6 +29,25 @@ struct TaskListView: View {
             }
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: store?.failure)
+        .alert(
+            confirming?.title ?? "",
+            isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
+            presenting: confirming
+        ) { asked in
+            Button(asked.button, role: .destructive) { store?.perform(asked.action, on: asked.item) }
+            Button("Cancel", role: .cancel) {}
+        } message: { asked in
+            Text(verbatim: asked.message)
+        }
+    }
+
+    /// Runs `action` from `item`'s menu, or asks first where it cannot be undone.
+    private func run(_ action: TaskListAction, on item: TaskListItem) {
+        if action.confirms {
+            confirming = TaskListConfirm(action: action, item: item)
+        } else {
+            store?.perform(action, on: item)
+        }
     }
 
     @ViewBuilder
@@ -50,42 +69,25 @@ struct TaskListView: View {
                 Spacer()
             }
         } else if let store {
-            let tasks = store.groups.filter { $0.key != .onItsOwn }
-            let onItsOwn = store.groups.first { $0.key == .onItsOwn }?.items ?? []
-            VStack(spacing: 0) {
-                ScrollView {
-                    // Leading: a folded group, its header alone, keeps to the left
-                    // edge instead of centering on its own line.
-                    VStack(alignment: .leading, spacing: 18) {
-                        if mode == .routines {
-                            if onItsOwn.isEmpty {
-                                emptyLine("No routines yet")
-                            } else {
-                                VStack(spacing: 0) {
-                                    ForEach(Array(onItsOwn.enumerated()), id: \.element.id) { index, item in
-                                        row(item, store: store, now: now, last: index == onItsOwn.count - 1)
-                                    }
-                                }
-                                .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
-                                .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
-                                .hairline(radius: Metrics.groupRadius)
-                            }
-                        } else if tasks.isEmpty {
-                            emptyLine("No tasks yet")
-                        } else {
-                            ForEach(tasks) { group in
-                                section(group, store: store, now: now)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
+            ScrollView {
+                // Leading: a folded group, its header alone, keeps to the left
+                // edge instead of centering on its own line.
+                VStack(alignment: .leading, spacing: 18) {
+                    if store.groups.isEmpty {
+                        emptyLine("No tasks yet")
+                    } else {
+                        ForEach(store.groups) { group in
+                            section(group, store: store, now: now)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
-                    .padding(.bottom, 24)
-                    .animation(.spring(response: 0.4, dampingFraction: 0.88), value: store.groups)
                 }
-                .scrollIndicators(.hidden)
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 24)
+                .animation(.spring(response: 0.4, dampingFraction: 0.88), value: store.groups)
             }
+            .scrollIndicators(.hidden)
         } else {
             empty
         }
@@ -126,7 +128,7 @@ struct TaskListView: View {
         case .needsYou: return "Needs you"
         case .active: return "Active"
         case .later: return "Later"
-        case .onItsOwn: return "Routines"
+        case .scheduled: return "Scheduled"
         case .ended: return "Ended"
         }
     }
@@ -198,85 +200,201 @@ struct TaskListView: View {
 
     @ViewBuilder
     private func row(_ item: TaskListItem, store: TaskListStore, now: Date, last: Bool) -> some View {
+        let pending = store.pending[item.id]
+        // Nothing more is offered while an action is under way.
+        let actions = pending == nil ? TaskListAction.menu(for: item) : []
+        let onAction = { (action: TaskListAction) in run(action, on: item) }
         switch item {
         case .task(let task):
             TaskListRow(
                 item: task,
-                stopping: store.stopping.contains(task.task.id),
+                pending: pending,
+                actions: actions,
                 now: now,
                 last: last,
-                onStop: { store.stopTask(task.task.id) },
+                onAction: onAction,
                 onOpenChat: task.task.chat.map { chat in { onOpenChat(chat) } }
             )
         case .check(let check):
-            TaskListPlainRow(title: check.check.name, line: TaskListWords.check(check, now: now), created: item.createdAt, last: last)
+            TaskListPlainRow(
+                symbol: "clock",
+                title: check.check.name,
+                line: pending.map(TaskListWords.pending) ?? TaskListWords.check(check, now: now),
+                created: item.createdAt,
+                actions: actions,
+                last: last,
+                onAction: onAction
+            )
         case .follow(let listed):
             let follow = store.shown(listed)
-            TaskListPlainRow(title: follow.target, line: TaskListWords.follow(follow, now: now), created: item.createdAt, dimmed: follow.state != "active", last: last)
+            TaskListPlainRow(
+                symbol: "dot.radiowaves.left.and.right",
+                title: follow.target,
+                line: pending.map(TaskListWords.pending) ?? TaskListWords.follow(follow, now: now),
+                created: item.createdAt,
+                dimmed: follow.state != "active",
+                actions: actions,
+                last: last,
+                onAction: onAction
+            )
         case .routine(let routine):
             TaskListPlainRow(
+                symbol: "flowchart",
                 title: routine.name,
-                line: TaskListWords.routine(routine, now: now),
+                line: pending.map(TaskListWords.pending) ?? TaskListWords.routine(routine, now: now),
                 created: item.createdAt,
-                failed: routine.lastRun?.status == "error",
+                failed: routine.lastRun?.status == "error" && pending == nil,
                 dimmed: !routine.enabled,
-                last: last
+                actions: actions,
+                last: last,
+                onAction: onAction
             )
         }
     }
 }
 
-/// A row with nothing to press: a check, a follow or a routine. They change
-/// by asking Chat, on the web's Routines page or in settings.
+/// An action that asks first, with the alert's words.
+struct TaskListConfirm: Identifiable {
+    let action: TaskListAction
+    let item: TaskListItem
+
+    var id: String { item.id }
+
+    var title: String {
+        switch item {
+        case .routine(let routine): return String(localized: "Delete “\(routine.name)”?")
+        case .follow(let follow): return String(localized: "Unfollow \(follow.target)?")
+        default: return ""
+        }
+    }
+
+    var message: String {
+        action == .delete
+            ? String(localized: "It stops running and is removed. This cannot be undone.")
+            : String(localized: "Its alerts and digest entries stop coming here. To follow it again, ask Chat.")
+    }
+
+    var button: LocalizedStringKey { action == .delete ? "Delete" : "Unfollow" }
+}
+
+/// The long-press menu every row shares: titled with when its work was made,
+/// as a message's menu is with its time, then the row's actions.
+private struct TaskListRowMenu: View {
+    let created: Date?
+    let actions: [TaskListAction]
+    let onAction: (TaskListAction) -> Void
+
+    var body: some View {
+        if actions.isEmpty {
+            if let created { Text(verbatim: TaskListWords.created(created)) }
+        } else {
+            Section {
+                ForEach(actions, id: \.self) { action in
+                    Button(role: action.destructive ? .destructive : nil) { onAction(action) } label: {
+                        Label(action.label, systemImage: action.symbol)
+                    }
+                }
+            } header: {
+                if let created { Text(verbatim: TaskListWords.created(created)) }
+            }
+        }
+    }
+}
+
+extension TaskListAction {
+    /// The menu item's words, as the web's row menu says them.
+    var label: LocalizedStringKey {
+        switch self {
+        case .markDone: return "Mark as done"
+        case .stop: return "Stop"
+        case .cancel: return "Cancel"
+        case .pause: return "Pause"
+        case .resume: return "Resume"
+        case .delete: return "Delete"
+        case .unfollow: return "Unfollow"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .markDone: return "checkmark.circle"
+        case .stop: return "stop.circle"
+        case .cancel: return "xmark.circle"
+        case .pause: return "pause.circle"
+        case .resume: return "play.circle"
+        case .delete: return "trash"
+        case .unfollow: return "minus.circle"
+        }
+    }
+
+    /// Red in the menu: it ends work for good.
+    var destructive: Bool { self == .stop || self == .delete }
+}
+
+/// A row that opens nothing: a reminder, a follow or a routine. Its actions
+/// are in its long-press menu.
 struct TaskListPlainRow: View {
+    /// The SF Symbol of its kind, in the slot a task row's status mark takes,
+    /// so every row's title starts on one line: a reminder a clock, a follow
+    /// radio waves, a routine a flowchart, as the web's Clock, Radio and Workflow.
+    let symbol: String
     let title: String
     let line: String
     let created: Date?
     var failed = false
     var dimmed = false
+    var actions: [TaskListAction] = []
     let last: Bool
+    var onAction: (TaskListAction) -> Void = { _ in }
 
     var body: some View {
         TaskListRowFrame(last: last) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(verbatim: title)
-                    .romeFont(16, .medium)
-                    .tracking(-0.3)
-                    .foregroundStyle(dimmed ? Palette.sub : Palette.fg)
-                    .lineLimit(2)
-                if !line.isEmpty {
-                    Text(verbatim: line)
-                        .romeFont(13)
-                        .foregroundStyle(failed ? Palette.destructive : Palette.sub)
-                        .lineLimit(1)
+            HStack(spacing: 10) {
+                Image(systemName: symbol)
+                    .romeFont(16)
+                    .foregroundStyle(Palette.sub)
+                    // A paused routine or an unavailable follow fades its glyph too.
+                    .opacity(dimmed ? 0.5 : 1)
+                    .frame(width: 20, height: 20)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(verbatim: title)
+                        .romeFont(16, .medium)
+                        .tracking(-0.3)
+                        .foregroundStyle(dimmed ? Palette.sub : Palette.fg)
+                        .lineLimit(2)
+                    if !line.isEmpty {
+                        Text(verbatim: line)
+                            .romeFont(13)
+                            .foregroundStyle(failed ? Palette.destructive : Palette.sub)
+                            .lineLimit(1)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        // Long-pressed, it says when it was made, and offers nothing else.
         .contextMenu {
-            if let created { Text(verbatim: TaskListWords.created(created)) }
+            TaskListRowMenu(created: created, actions: actions, onAction: onAction)
         }
         .accessibilityElement(children: .combine)
     }
 }
 
 /// A task chat's row: its status mark, its name and one line of state and
-/// time. Tapping it opens the task chat; Stop is in the long-press menu, and
-/// nothing asks to confirm.
+/// time. Tapping it opens the task chat; Mark as done and Stop are in the
+/// long-press menu, and nothing asks to confirm.
 struct TaskListRow: View {
     let item: TaskListItem.Task
 
     private var created: Date? { TaskListItem.task(item).createdAt }
-    let stopping: Bool
+    let pending: TaskListAction?
+    let actions: [TaskListAction]
     let now: Date
     let last: Bool
-    let onStop: () -> Void
+    let onAction: (TaskListAction) -> Void
     let onOpenChat: (() -> Void)?
 
     private var status: String { TaskListWords.status(item.task) }
-    /// Stop on every task that has not ended; a scheduled one loses its schedule.
-    private var stops: Bool { status != "ended" && !stopping }
 
     var body: some View {
         Button { onOpenChat?() } label: {
@@ -290,9 +408,9 @@ struct TaskListRow: View {
                             .foregroundStyle(status == "ended" ? Palette.sub : Palette.fg)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
-                        Text(verbatim: TaskListWords.task(item, now: now, stopping: stopping))
+                        Text(verbatim: TaskListWords.task(item, now: now, pending: pending))
                             .romeFont(13)
-                            .foregroundStyle(status == "needs_you" && !stopping ? Palette.warningText : Palette.sub)
+                            .foregroundStyle(status == "needs_you" && pending == nil ? Palette.warningText : Palette.sub)
                             .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -301,17 +419,8 @@ struct TaskListRow: View {
         }
         .buttonStyle(RowPressStyle())
         .disabled(onOpenChat == nil)
-        // Titled with when the task was made, as a message's menu is with its time.
         .contextMenu {
-            if stops {
-                Section {
-                    Button(role: .destructive, action: onStop) { Label("Stop", systemImage: "stop.circle") }
-                } header: {
-                    if let created { Text(verbatim: TaskListWords.created(created)) }
-                }
-            } else if let created {
-                Text(verbatim: TaskListWords.created(created))
-            }
+            TaskListRowMenu(created: created, actions: actions, onAction: onAction)
         }
         .accessibilityElement(children: .combine)
     }

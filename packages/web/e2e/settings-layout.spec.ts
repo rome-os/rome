@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const tabs = ["appearance", "connections", "channels", "ai-tools", "favors", "advanced"];
+const tabs = ["appearance", "connections", "ai-tools", "favors", "advanced"];
 
 for (const width of [390, 1440]) {
   test(`Settings keeps its header and controls inside the viewport at ${width}px`, async ({
@@ -12,7 +12,7 @@ for (const width of [390, 1440]) {
     const dialog = page.getByRole("dialog", { name: "Settings" });
     const heading = dialog.getByRole("heading", { name: "Settings", exact: true });
     // Load once, then switch sections from the menu. Each fresh load also
-    // renders the main chat behind the dialog, and six of them exceed the
+    // renders the main chat behind the dialog, and five of them exceed the
     // test timeout on a shared runner.
     await page.goto(`/settings/${tabs[0]}`);
     for (const tab of tabs) {
@@ -30,7 +30,6 @@ for (const width of [390, 1440]) {
           .or(body.getByRole("switch"))
           .first(),
       ).toBeVisible();
-      if (tab === "channels") await expect(dialog.locator("article").first()).toBeVisible();
       if (tab === "advanced") {
         // Developer settings is always open, so its switches show without a click.
         await expect(
