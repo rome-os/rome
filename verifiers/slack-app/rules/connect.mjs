@@ -96,7 +96,7 @@ async function signInCheck(ctx, inst, ws, rule) {
   const accounts = await inst.accounts();
   const account = walk.connectionId
     ? accounts.find((x) => x.connection === walk.connectionId)
-    : accounts.find((x) => x.account.platform === "slack" && x.connection);
+    : accounts.find((x) => x.account?.platform === "slack" && x.connection);
   evidence.connectionId = walk.connectionId;
   evidence.account = account ?? null;
 
@@ -132,6 +132,8 @@ async function signInCheck(ctx, inst, ws, rule) {
   if (walk.signIns !== 1) problems.push(`Connect took ${walk.signIns} sign-ins, not 1`);
   if (slackScreens > 1) problems.push(`Slack asked for approval ${slackScreens} times, not once`);
   if (!account) problems.push("no connected account for the new connection");
+  else if (account.account?.platform !== "slack")
+    problems.push(`the new connection's account is ${JSON.stringify(account.account)}, not a Slack account`);
   else if (account.agent !== CONCIERGE)
     problems.push(`the connected account's agent is ${account.agent ?? "none"}, not the Concierge`);
   if (!reply.ok)
@@ -172,7 +174,7 @@ export async function r2(ctx) {
 
   // Whatever Slack connection the instance still holds goes first, so the
   // check does not hang on how many workspaces one instance can hold.
-  const left = (await inst.accounts()).filter((x) => x.account?.platform === "slack" && x.connection);
+  const left = (await inst.accounts()).filter((x) => (x.account?.platform === "slack" || /^slack/.test(x.kind ?? "")) && x.connection);
   evidence.disconnectedFirst = [];
   for (const x of left) {
     await inst.disconnect(x.connection);

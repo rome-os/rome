@@ -379,11 +379,30 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
       return { error: "more than 5 screens in the sign-in" };
     },
 
-    /** Every connected account with its agent and connection. */
+    /**
+     * Every held connection's account, from GET /api/connections (Rome took
+     * GET /api/connected-accounts out in #2527): per connection its id, kind,
+     * state, account ({platform, id}) and the agent that answers on it, which
+     * the kind decides. Placeholders (no id) are left out. Throws, naming the
+     * path and status, when the route does not answer a list.
+     */
     async accounts() {
-      const res = await call("/connected-accounts");
-      if (!res.ok) throw new Error(`connected-accounts on ${inst.name}: ${res.status}`);
-      return res.data.accounts;
+      const res = await call("/connections");
+      const list = Array.isArray(res.data) ? res.data : res.data?.connections;
+      if (!res.ok || !Array.isArray(list))
+        throw new Error(
+          `GET /api/connections on ${inst.name} answered ${res.status} without a connections list: ${JSON.stringify(res.data).slice(0, 200)}`,
+        );
+      return list
+        .filter((c) => c?.id)
+        .map((c) => ({
+          connection: c.id,
+          kind: c.connectionKind ?? null,
+          state: c.state ?? null,
+          account: c.account ?? (c.platform ? { platform: c.platform, id: null } : null),
+          agent: c.agent ?? null,
+          link: c.link ?? null,
+        }));
     },
 
     /**
@@ -442,7 +461,7 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
     /** True once the instance's API answers. */
     async up() {
       try {
-        return (await call("/connected-accounts", { retry: false })).ok;
+        return (await call("/connections", { retry: false })).ok;
       } catch {
         return false;
       }

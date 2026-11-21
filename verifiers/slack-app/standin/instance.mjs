@@ -134,7 +134,8 @@ const server = await serve(async (req, res, url) => {
     setup.state = { status: "done", grant: { connectionId } };
     return send(res, 200, { matched: true, state: setup.state });
   }
-  if (p === "/api/connected-accounts") return send(res, 200, { accounts: db.accounts });
+  // Rome took GET /api/connected-accounts out (#2527); the accounts show on
+  // GET /api/connections.
   // R12: each connection's switch for answering other full members, off on
   // a fresh connect. Broken R12-default-on starts on; R12-switch-sticks
   // cannot be turned off; R12-instance-wide also turns the instance-wide
@@ -181,7 +182,19 @@ const server = await serve(async (req, res, url) => {
       ...(breaks.has("R10-two-entries") ? [{ id: null, connectionKind: "slack_bot", label: "Slack bot" }] : []),
     ];
     const held = [
-      ...db.connections.map((c) => ({ id: c.id, connectionKind: "slack_app", label: "slack_app", state: "working" })),
+      ...db.connections.map((c) => {
+        const a = db.accounts.find((x) => x.connection === c.id);
+        return {
+          id: c.id,
+          connectionKind: "slack_app",
+          label: "slack_app",
+          state: "working",
+          platform: a ? "slack" : null,
+          account: a ? a.account : null,
+          link: "own_account",
+          agent: a?.agent ?? null,
+        };
+      }),
       ...(db.old ?? []).map((c) => ({ id: c.id, connectionKind: c.kind, label: c.kind, state: "working" })),
     ];
     return send(res, 200, { connections: [...held, ...placeholders] });
