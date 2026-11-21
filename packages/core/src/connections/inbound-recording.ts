@@ -43,7 +43,9 @@ export interface InboundRecordingDeps {
    *  rejects. Defaults to {@link DELIVERY_ACCEPT_TIMEOUT_MS}. */
   acceptTimeoutMs?: number;
   /** Holds recorded message `messageId` out of every read a turn makes from
-   *  its record until its MessageSaid has been heard, answering the release.
+   *  its record until its MessageSaid's first listener, Agents, has taken its
+   *  own hold, answering the release. That rests on Agents listening first
+   *  and taking its hold synchronously.
    *  A listener that decides its wake holds it on its own for longer
    *  (docs/domains/participation.md#wake). */
   hold?: (messageId: number) => () => void;
@@ -57,7 +59,7 @@ export interface InboundRecording {
    */
   listen(): () => void;
   /** The platform's event recorded message `id` arrived in on channel
-   *  `channel`, from its record until its MessageSaid has been heard. */
+   *  `channel`, from its record until its MessageSaid's listeners were called. */
   heard(channel: string, id: number): InboundEvent | undefined;
   /** Record `channels` too, such as a second bot whose Talk first unlocked. */
   addChannels(channels: readonly Channel[]): void;
@@ -169,7 +171,7 @@ export function inboundRecording(
 
   /** Queue MessageSaid for `recorded` as heard on `via`, behind the raises of
    *  its place's earlier messages, holding the platform's event for the
-   *  listeners until they have heard it. */
+   *  listeners until they were called. */
   const raise = (
     recorded: RecordedMessage,
     message: Inbound,
