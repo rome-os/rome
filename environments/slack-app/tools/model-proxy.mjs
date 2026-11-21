@@ -8,6 +8,11 @@
 // MODEL_PROXY_API_KEY (sent as x-api-key) or MODEL_PROXY_OAUTH_TOKEN (sent as
 // a bearer token). GET /_stats answers how many requests went through, by the
 // model Rome asked for.
+//
+// With MODEL_PROXY_CONTROL_PORT set (the isolated environment only, never the
+// live stack), it also answers ctl.sh port's scripted turns itself
+// (port-script.mjs), and that port, published to the host alone, takes the
+// jobs: POST /_port, GET and DELETE /_port/<nonce>. It forwards nothing.
 
 import { createServer } from "node:http";
 
@@ -20,7 +25,11 @@ const upstream = (process.env.MODEL_PROXY_UPSTREAM ?? "https://api.anthropic.com
 const apiKey = process.env.MODEL_PROXY_API_KEY ?? "";
 const oauthToken = process.env.MODEL_PROXY_OAUTH_TOKEN ?? "";
 const OAUTH_BETA = "oauth-2025-04-20";
-const stats = { requests: 0, asked: {}, statuses: {} };
+const stats = { requests: 0, asked: {}, statuses: {}, scripted: 0 };
+const controlPort = process.env.MODEL_PROXY_CONTROL_PORT;
+const script = controlPort
+  ? (await import("./port-script.mjs")).createPortScript({ model: pinned })
+  : null;
 
 // Headers that must not be forwarded as they are.
 const HOP = new Set([
@@ -57,6 +66,16 @@ createServer(async (req, res) => {
   if (body.length && (req.headers["content-type"] ?? "").includes("application/json")) {
     try {
       const json = JSON.parse(body.toString("utf8"));
+      const scripted = script?.answer(json);
+      if (scripted) {
+        stats.scripted += 1;
+        if (req.url.startsWith("/v1/messages/count_tokens") && scripted.status === 200) {
+          res.writeHead(200, { "content-type": "application/json" });
+          return res.end('{"input_tokens":1}');
+        }
+        res.writeHead(scripted.status, scripted.headers);
+        return res.end(scripted.body);
+      }
       if (typeof json.model === "string") {
         stats.asked[json.model] = (stats.asked[json.model] ?? 0) + 1;
         json.model = pinned;
@@ -124,3 +143,34 @@ createServer(async (req, res) => {
 }).listen(port, () =>
   console.log(JSON.stringify({ msg: "model proxy listening", port, pinned, upstream })),
 );
+
+if (script) {
+  createServer(async (req, res) => {
+    const send = (status, body) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const nonce = req.url.match(/^\/_port\/([a-z0-9]+)$/)?.[1];
+    if (req.method === "GET" && req.url === "/_stats") return send(200, stats);
+    if (req.method === "POST" && req.url === "/_port") {
+      let body;
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch {
+        return send(400, { error: "the job must be JSON" });
+      }
+      const out = script.register(body);
+      return send(out.status, out.body);
+    }
+    if (nonce && req.method === "GET") {
+      const job = script.job(nonce);
+      return job ? send(200, job) : send(404, { error: `no job ${nonce}` });
+    }
+    if (nonce && req.method === "DELETE") return send(200, { removed: script.remove(nonce) });
+    send(404, { error: "not found" });
+  }).listen(Number(controlPort), () =>
+    console.log(JSON.stringify({ msg: "model proxy control listening", port: controlPort })),
+  );
+}

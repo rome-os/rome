@@ -3,6 +3,7 @@
 #
 #   environments/slack-app/ctl.sh stop|start|status rome-a|rome-b
 #   environments/slack-app/ctl.sh wipe-chat rome-a|rome-b <Slack conversation id> [--text <text>]...
+#   environments/slack-app/ctl.sh port rome-a|rome-b send|read|thread|groups|call '<json>'
 #   environments/slack-app/ctl.sh record rome-a|rome-b '{"chat":"<conversation id>[:<thread ts>]"}'
 #   environments/slack-app/ctl.sh cloud-query        (SQL on stdin, JSON rows out)
 #   environments/slack-app/ctl.sh distribution on|off   (the app's public distribution)
@@ -17,6 +18,9 @@
 # (tools/wipe-chat.mjs) and starts it again if it was running. record prints
 # the messages Chats has on record for a conversation (tools/chat-record.mjs),
 # reading the database without writing it, the instance running or not.
+# port makes one call to the Slack app connection's own port through an agent's
+# execute_action and connector:connector_proxy, in a dashboard turn the model
+# proxy answers itself (tools/port.mjs): a test-only path, one turn per call.
 # cloud-query runs
 # one query on Rome Cloud's database as a role that can only read.
 # old-connections writes the two older Slack connections an upgrade leaves
@@ -36,7 +40,7 @@ compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/comp
 action="${1:-}"
 svc="${2:-}"
 case "$action" in
-  stop | start | status | wipe-chat | record | token-file | old-connections) case "$svc" in rome-a | rome-b) ;; *)
+  stop | start | status | wipe-chat | record | port | token-file | old-connections) case "$svc" in rome-a | rome-b) ;; *)
     echo "instance must be rome-a or rome-b" >&2
     exit 2
     ;;
@@ -52,7 +56,7 @@ case "$action" in
     exit 2
   } ;;
   *)
-    sed -n '2,26p' "$0"
+    sed -n '2,30p' "$0"
     exit 2
     ;;
 esac
@@ -202,6 +206,17 @@ case "$action" in
       let wipe; try { wipe = JSON.parse(process.env.RESULT.trim().split("\n").at(-1)); } catch { wipe = { ok: false, error: "no result from the wipe", output: process.env.RESULT }; }
       console.log(JSON.stringify({ instance: process.env.INSTANCE, state: process.env.STATE, ...wipe }));'
     exit "$code"
+    ;;
+  port)
+    proxy_port="$(sed -n 's/^MODEL_PROXY_HOST_PORT=//p' "$STATE_DIR/compose.env")"
+    [ -n "$proxy_port" ] || {
+      echo "this bring-up predates ctl.sh port; run up.sh again" >&2
+      exit 1
+    }
+    port_var="ROME_$(echo "${svc#rome-}" | tr a-z A-Z)_PORT"
+    exec node "$ENV_DIR/tools/port.mjs" "${3:-}" "${4:-}" \
+      --instance "http://127.0.0.1:$(sed -n "s/^$port_var=//p" "$STATE_DIR/compose.env")" \
+      --cookies "$STATE_DIR/$svc-cookies.json" --proxy "http://127.0.0.1:$proxy_port"
     ;;
   record)
     chat="$(node -e '

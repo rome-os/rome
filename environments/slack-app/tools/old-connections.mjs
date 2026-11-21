@@ -256,7 +256,8 @@ async function check(instance, cookiesFile, fake, writtenFile, tokenFile) {
   // The bot's Socket Mode connection is open now: one from before the
   // restart has closed, so the fake's history of hellos would not do.
   let open = false;
-  const waitS = Number(process.env.OLD_CONNECTIONS_WAIT_S ?? 60);
+  // A Rome that does not list the bot never opens it: no wait then.
+  const waitS = view(bot.connection_id) ? Number(process.env.OLD_CONNECTIONS_WAIT_S ?? 60) : 1;
   for (let i = 0; i < waitS && !open; i++) {
     const { open_sockets } = await fetch(`${fake}/_control/state`).then((r) => r.json());
     open = open_sockets.some((x) => x.app_id === bot.app_id);

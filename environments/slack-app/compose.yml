@@ -161,6 +161,10 @@ services:
       MODEL_PROXY_MODEL: ${AGENT_MODEL}
       MODEL_PROXY_API_KEY: ${MODEL_PROXY_API_KEY:-}
       MODEL_PROXY_OAUTH_TOKEN: ${MODEL_PROXY_OAUTH_TOKEN:-}
+      # ctl.sh port's jobs (tools/port-script.mjs); the host reaches only this.
+      MODEL_PROXY_CONTROL_PORT: "8081"
+    ports:
+      - 127.0.0.1:${MODEL_PROXY_HOST_PORT}:8081
     volumes:
       - ${ENV_DIR}:/env:ro
       # NODE_EXTRA_CA_CERTS names this file, so a host CA reaches upstream calls.
