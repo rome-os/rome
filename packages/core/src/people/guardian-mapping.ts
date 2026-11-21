@@ -12,11 +12,15 @@ const log = createLogger("guardian-mapping");
  * address (WhatsApp pairing today) and by the connection routes. Returns
  * `true` when a link was created or re-canonicalized, `false` when the
  * account was already linked or dismissed, or no guardian person exists.
+ * With `addOnly`, the account is one more of the guardian's, as each Discord
+ * account the guardian binds to Rome's Discord bot is: it is added beside the
+ * guardian's other accounts on the platform, and none of them is re-pointed.
  */
 export async function linkGuardianToAccount(
   repo: PeopleRepository,
   platform: string,
   accountId: string,
+  opts: { addOnly?: boolean } = {},
 ): Promise<boolean> {
   const account: Account = { platform, id: accountId };
   const existing = await repo.byAccount(account);
@@ -37,7 +41,7 @@ export async function linkGuardianToAccount(
 
   const guardian = guardians[0];
 
-  const stale = staleAddress(guardian.links, platform);
+  const stale = opts.addOnly ? undefined : staleAddress(guardian.links, platform);
   if (stale) {
     if (repo.readdress(guardian.id, { platform, id: stale }, accountId)) {
       log.info("re-canonicalized guardian link", {

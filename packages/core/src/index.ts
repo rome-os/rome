@@ -2239,7 +2239,9 @@ async function main() {
       // People decides who an account is; each one the Worker forwards the
       // guardian bound while signed in to this Rome's Rome Cloud account.
       linkGuardian: async (userId) => {
-        await linkGuardianToAccount(peopleRepo, "discord", userId);
+        // One more of the guardian's accounts: never re-points another, such
+        // as a second bound account or the guardian's own bot's link.
+        await linkGuardianToAccount(peopleRepo, "discord", userId, { addOnly: true });
       },
       nameOf: async (userId) =>
         (await peopleRepo.byAccount({ platform: "discord", id: userId }))?.displayName,

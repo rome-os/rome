@@ -91,11 +91,11 @@ describe("Rome's Discord bot, as a frame from its Worker reaches it", () => {
     expect(thread.where.thread).toEqual({ parentChatId: "777777777777777777" });
   });
 
-  it("acknowledges a frame once its message is on record, after putting its author under the guardian", async () => {
+  it("hands the message to Rome after putting its author under the guardian, and acknowledges it", async () => {
     const linked: string[] = [];
     const bot = adapter([], linked);
     const delivered: Message[] = [];
-    bot.start(async (message) => {
+    bot.start((message) => {
       delivered.push(message);
     });
     const { bytes, signature } = frame(deposit());
@@ -104,15 +104,30 @@ describe("Rome's Discord bot, as a frame from its Worker reaches it", () => {
     expect(delivered.map((message) => message.id)).toEqual(["333333333333333333"]);
   });
 
-  it("asks for a frame again when its message was not recorded, and drops one it can never take", async () => {
+  it("acknowledges every signed frame, also when Rome cannot take its message, and refuses an invalid one", async () => {
     const bot = adapter();
     const { bytes, signature } = frame(deposit());
-    // Not started yet: nothing records it.
-    expect(await bot.ingest(bytes, signature)).toEqual({ status: 503 });
-    bot.start(async () => {
-      throw new Error("not recorded within 120000ms");
+    // Not started yet: the message is dropped with a log, never asked for again.
+    expect(await bot.ingest(bytes, signature)).toEqual({ status: 200 });
+    bot.start(() => {
+      throw new Error("recording stopped");
     });
-    expect(await bot.ingest(bytes, signature)).toEqual({ status: 503 });
+    expect(await bot.ingest(bytes, signature)).toEqual({ status: 200 });
+    const failingLink = new DiscordAppAdapter({
+      botId: BOT,
+      botUsername: "Rome",
+      depositKey: KEY,
+      cloud: {} as DiscordAppCloud,
+      linkGuardian: async () => {
+        throw new Error("database is locked");
+      },
+    });
+    const delivered: Message[] = [];
+    failingLink.start((message) => delivered.push(message));
+    expect(await failingLink.ingest(bytes, signature)).toEqual({ status: 200 });
+    // The message still reaches Rome when its author could not be linked.
+    expect(delivered).toHaveLength(1);
+    // A frame the Worker did not sign, or that is no message, is refused.
     expect(await bot.ingest(bytes, "0".repeat(64))).toEqual({ status: 401 });
     const junk = frame({ hello: "world" });
     expect(await bot.ingest(junk.bytes, junk.signature)).toEqual({ status: 400 });
