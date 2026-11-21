@@ -322,7 +322,7 @@ describe("wechat inbound delivery", () => {
     );
     const delivered: unknown[] = [];
     talker.start(
-      (msg) => delivered.push(channelMessageOf(msg, "wechat")),
+      (msg) => void delivered.push(channelMessageOf(msg, "wechat")),
       () => {},
     );
     await rs.waitFor(() => expect(delivered).toHaveLength(1));

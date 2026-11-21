@@ -2,9 +2,9 @@
 // onto it. Vocabulary: docs/domains/participation.md#wake.
 //
 // A message said to Rome wakes an agent or does not, and until that is
-// decided no catch-up reads it. Agents holds it out from the moment Chats
-// raises MessageSaid, and lets it go once the hook that heard it says the wake
-// is decided. Nothing hears through it until the Chats switch.
+// decided no catch-up reads it. Recording holds it out from its record until
+// MessageSaid has been heard; Agents holds it from the raise, and lets it go
+// once the hook that heard it says the wake is decided. Nothing hears through it until the Chats switch.
 
 import type {
   InboundEvent,
@@ -39,9 +39,9 @@ const log = createLogger("messages-said");
 
 /**
  * The hook's port onto recorded messages. Call it before anything else
- * listens to `events`: its listener holds each message out of catch-up, and
- * Chats raises MessageSaid in the same step it records the message, so the
- * first listener acts before anything can read it.
+ * listens to `events`: its listener holds each message out of catch-up past
+ * the raise, and recording holds it from its record until then, so no turn
+ * reads it before its wake is decided.
  *
  * Each raise is held once, and let go once every hook that was hearing when
  * it was raised has decided it, or has left.

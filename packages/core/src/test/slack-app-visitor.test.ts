@@ -103,16 +103,9 @@ describe("Slack app members who did not sign in (R12)", () => {
         onFrame = handler;
         return { stop: () => {} };
       },
-      // The connection's copy is its own business: this test reads only what
-      // it hands over.
-      copy: {
-        keep: () => true,
-        handedOver: () => {},
-        mayNotHold: () => [],
-      },
     });
     const heard: ChannelMessage[] = [];
-    adapter.onInbound((message) => heard.push(channelMessageOf(message, "slack_app")));
+    adapter.onInbound((message) => void heard.push(channelMessageOf(message, "slack_app")));
     await adapter.start();
     await onFrame!(dm(1, "D_GUARDIAN", INSTALLER));
     await onFrame!(dm(2, "D_MEMBER", "U_MEMBER"));

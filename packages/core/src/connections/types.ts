@@ -293,6 +293,22 @@ export interface RuntimeKit {
   // kit.webhook() lands in phase 6 — do not add it now.
 }
 
+/** How long a delivered message may wait to be recorded before its
+ *  delivery rejects, so the platform can deliver it again. A chat records its
+ *  messages one at a time, so a message waits behind its chat's earlier ones. */
+export const DELIVERY_ACCEPT_TIMEOUT_MS = 2 * 60_000;
+
+/** A delivery's rejection when recording stopped before the message was on
+ *  record, as while an app swaps its hook. Recording starts again moments
+ *  later, so a connection can let its platform deliver the message again
+ *  without treating the refusal as a fault. */
+export class RecordingStopped extends Error {
+  constructor() {
+    super("dropped before it was recorded: recording stopped");
+    this.name = "RecordingStopped";
+  }
+}
+
 /** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
 export interface Talker extends TalkFeatures {
   /**
@@ -305,8 +321,20 @@ export interface Talker extends TalkFeatures {
    * Different chats may deliver in any order. A `KeyedMutex` keyed by chat,
    * held from the platform's event to `deliver`, keeps the rule; the adapter
    * conformance suite checks it.
+   *
+   * Acceptance: `deliver` returns at once, and its promise settles once the
+   * message's consumers have accepted it. For Chats that means recorded in
+   * its chat, or found on record already. It rejects when a consumer did not
+   * accept it: dropped before it was recorded, failed, or not recorded within
+   * {@link DELIVERY_ACCEPT_TIMEOUT_MS}. A message Rome decides to leave out,
+   * such as one with nothing to answer or from a sender admission refuses,
+   * counts as accepted. Each Talker decides what to do with the promise: one
+   * whose platform delivers again what it was not told it has awaits it
+   * before telling the platform, and one whose platform holds nothing after
+   * delivering may ignore it. Awaiting it never holds up the next `deliver`:
+   * the order is the order of the calls (docs/domains/connections.md#message).
    */
-  start(deliver: (msg: Message) => void, fault: (err: StreamFault) => void): void;
+  start(deliver: (msg: Message) => void | Promise<void>, fault: (err: StreamFault) => void): void;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
