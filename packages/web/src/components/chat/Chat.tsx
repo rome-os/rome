@@ -2539,7 +2539,8 @@ export function Chat({
       : []),
   ];
   const actions: HeaderMenuItem[] = [
-    ...(isMainChat
+    // An archived topic chat is renamed once it is unarchived.
+    ...(isMainChat || (isTopicChat && isArchived)
       ? []
       : [
           {

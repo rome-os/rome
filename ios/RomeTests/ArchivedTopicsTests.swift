@@ -169,6 +169,15 @@ import Testing
         #expect(older.movedFollows.isEmpty)
     }
 
+    /// As on the web: an archived topic chat's "…" offers only Unarchive and
+    /// Delete for the chat, no Rename or Pin; the Tasks button and the
+    /// Agent's status stay as in any topic chat.
+    @Test func anArchivedChatsMenuOffersUnarchiveAndDelete() {
+        #expect(TopicHeaderMenu(blank: false, archived: true).items == [.unarchive, .delete])
+        #expect(TopicHeaderMenu(blank: false, archived: false).items == [.rename, .pin, .archive, .delete])
+        #expect(TopicHeaderMenu(blank: true, archived: false).items.isEmpty)
+    }
+
     @Test func theRestoreAlertListsTheMovedFollows() {
         let prompt = TopicRestorePrompt(id: "topic-1", name: "Car", moved: [.init(source: "gmail", label: "Gmail", target: "dealer@example.com")])
         #expect(prompt.title == "Unarchive “Car”?")

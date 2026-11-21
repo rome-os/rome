@@ -75,16 +75,14 @@ struct TopicChatScreen: View {
                     Task { await workspace.pinTopic(chatId, pinned: pinned) }
                 },
                 onArchive: { title in retire(.archive, title) },
+                onUnarchive: unarchive,
                 onDelete: { title in retire(.delete, title) }
             )
         }
         .overlay(alignment: .top) {
             VStack(spacing: 8) {
-                if archived, let chatId {
-                    TopBanner(kind: .archived, text: String(localized: "This chat is archived"), actionTitle: String(localized: "Unarchive"), busy: restoring != nil) {
-                        guard restoring == nil else { return }
-                        restoring = TopicRestoreRequest(chatId: chatId, name: TopicChatsStore.title(workspace.topicChat(chatId)))
-                    }
+                if archived {
+                    TopBanner(kind: .archived, text: String(localized: "This chat is archived"), actionTitle: String(localized: "Unarchive"), busy: restoring != nil, action: unarchive)
                     .transition(.opacity)
                 }
                 if let store { TranscriptBanners(store: store) }
@@ -206,6 +204,13 @@ struct TopicChatScreen: View {
         }
     }
 
+    /// Unarchive from the banner or the header's "…": a second tap while
+    /// the first is read starts no other.
+    private func unarchive() {
+        guard let chatId, restoring == nil else { return }
+        restoring = TopicRestoreRequest(chatId: chatId, name: TopicChatsStore.title(workspace.topicChat(chatId)))
+    }
+
     /// Archive or Delete from the header: a second tap while the first is
     /// read starts no other.
     private func retire(_ action: TopicRetireRequest.Action, _ name: String) {
@@ -299,6 +304,8 @@ private struct TopicChatHeader: View {
     let onPin: (Bool) -> Void
     /// Archive, with the chat's current title.
     let onArchive: (String) -> Void
+    /// Unarchive, for an archived chat.
+    let onUnarchive: () -> Void
     /// Delete, with the chat's current title.
     let onDelete: (String) -> Void
     @Environment(AppModel.self) private var model
@@ -307,9 +314,7 @@ private struct TopicChatHeader: View {
     var body: some View {
         let title = TopicChatsStore.title(chatId.flatMap(workspace.topicChat))
         let activity = workspace.topics.activity(for: chatId)
-        // An archived chat is never pinned and offers no pin; it is restored
-        // from its banner, not archived again.
-        let archived = workspace.isArchivedTopic(chatId)
+        let menu = TopicHeaderMenu(blank: chatId == nil, archived: workspace.isArchivedTopic(chatId))
         ChatHeader(
             // The Concierge's name, as in the main chat; the topic's own
             // title stays in the "…" menu.
@@ -322,11 +327,12 @@ private struct TopicChatHeader: View {
             zoomSource: AgentZoom.source(chatId ?? draftKey),
             tasks: chatId.flatMap { workspace.taskList(forChat: $0) },
             // A blank chat has nothing to rename, pin, archive or delete yet.
-            onRename: chatId == nil ? nil : { onRename(title) },
-            pinned: !archived && (chatId.map(workspace.topics.isPinned) ?? false),
-            onPin: chatId == nil || archived ? nil : onPin,
-            onArchive: chatId == nil || archived ? nil : { onArchive(title) },
-            onDelete: chatId == nil ? nil : { onDelete(title) }
+            onRename: menu.has(.rename) ? { onRename(title) } : nil,
+            pinned: menu.has(.pin) && (chatId.map(workspace.topics.isPinned) ?? false),
+            onPin: menu.has(.pin) ? onPin : nil,
+            onArchive: menu.has(.archive) ? { onArchive(title) } : nil,
+            onUnarchive: menu.has(.unarchive) ? onUnarchive : nil,
+            onDelete: menu.has(.delete) ? { onDelete(title) } : nil
         )
         .shareModeHeader(share)
         // Rows blur under the header as in the main Chat, past the status
@@ -335,4 +341,25 @@ private struct TopicChatHeader: View {
             ChatHeaderBlur(reach: ChatHeaderBlur.reach(statusShows: activity?.statusLine != nil, dynamicTypeSize))
         }
     }
+}
+
+/// What a topic chat's header "…" offers for the chat itself, besides Share
+/// and Shared links: a blank chat nothing yet; an archived one, as on the web,
+/// only Unarchive and Delete, since it is renamed and pinned once it is back.
+struct TopicHeaderMenu: Equatable {
+    enum Item: Equatable, CaseIterable { case rename, pin, archive, unarchive, delete }
+
+    let items: [Item]
+
+    init(blank: Bool, archived: Bool) {
+        if blank {
+            items = []
+        } else if archived {
+            items = [.unarchive, .delete]
+        } else {
+            items = [.rename, .pin, .archive, .delete]
+        }
+    }
+
+    func has(_ item: Item) -> Bool { items.contains(item) }
 }
