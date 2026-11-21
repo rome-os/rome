@@ -55,10 +55,12 @@ export interface InboundRecording {
    * Settles once message `messageId`, said in `chatId` on `channel` through
    * Connection `connectionId`, is on record in its chat, whether recorded now
    * or found there already. Call it before the message is handed to the
-   * channel's subscribers. It resolves at once when `channel` is not being
-   * recorded, and when the message reaches an account Rome does not listen
-   * to. It rejects when the message is dropped or fails before it is on
-   * record, or is not on record within the timeout.
+   * channel's subscribers. It resolves at once when recording never covers
+   * `channel`, and when the message reaches an account Rome does not listen
+   * to. It rejects with RecordingStopped when `channel` is covered but
+   * nobody listens now, as during a hook swap, and when recording stops
+   * before the message is on record. It rejects when the message is dropped
+   * or fails before it is on record, or is not on record within the timeout.
    */
   accepted(
     channel: string,
@@ -288,7 +290,14 @@ export function inboundRecording(
       if (listeners > 0) for (const channel of added) subscribe(channel);
     },
     accepted(channel, ref) {
-      if (!recording.has(channel)) return Promise.resolve();
+      if (!recording.has(channel)) {
+        // A channel recording covers but nobody listens to now, as between a
+        // hook's swap and its return, records nothing until it is back: the
+        // platform should deliver the message again. Only a channel recording
+        // never covers counts its messages as accepted.
+        const covered = known.some((each) => each.name === channel && each.inbound);
+        return covered ? Promise.reject(new RecordingStopped()) : Promise.resolve();
+      }
       const key = waitKey(channel, ref);
       return new Promise<void>((resolve, reject) => {
         const timeoutMs = deps.acceptTimeoutMs ?? DELIVERY_ACCEPT_TIMEOUT_MS;

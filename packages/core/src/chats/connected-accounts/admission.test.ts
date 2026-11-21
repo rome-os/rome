@@ -7,6 +7,7 @@ import { DrizzleConnectionsRepository } from "../../connections/repository-db.js
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { tokenPaste } from "../../connections/schemes.js";
 import type { ConnectionDescriptor, Talker } from "../../connections/types.js";
+import { AdmissionTimedOut, OrderedAdmission } from "./admission.js";
 import { connectionPorts } from "./connection-ports.js";
 
 describe("a channel's Connection across epochs", () => {
@@ -177,5 +178,38 @@ describe("a channel's Connection across epochs", () => {
       }),
     );
     await rs.waitFor(() => expect(admit).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("OrderedAdmission", () => {
+  const inbound = (messageId: string) => ({ messageId, chatId: "c" }) as ChannelMessage;
+  const connection = { id: "conn-1", connectionKind: "telegram" };
+
+  it("rejects a delivery whose admission runs past its time, so it is not taken as accepted, and admits the next", async () => {
+    const admission = new OrderedAdmission(
+      (_id, _kind, message) =>
+        message.messageId === "stuck" ? new Promise<boolean>(() => {}) : Promise.resolve(true),
+      { admissionTimeoutMs: 20 },
+    );
+    const heard: string[] = [];
+    const hear = async (message: ChannelMessage) => {
+      heard.push(message.messageId);
+    };
+    const stuck = admission.deliver(connection, inbound("stuck"), hear);
+    const next = admission.deliver(connection, inbound("next"), hear);
+    await expect(stuck).rejects.toBeInstanceOf(AdmissionTimedOut);
+    await expect(next).resolves.toBeUndefined();
+    expect(heard).toEqual(["next"]);
+  });
+
+  it("resolves a delivery admission refuses, which Rome leaves out", async () => {
+    const admission = new OrderedAdmission(async () => false);
+    const heard: string[] = [];
+    await expect(
+      admission.deliver(connection, inbound("refused"), async (message) => {
+        heard.push(message.messageId);
+      }),
+    ).resolves.toBeUndefined();
+    expect(heard).toEqual([]);
   });
 });
