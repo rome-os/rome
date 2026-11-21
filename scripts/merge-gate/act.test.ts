@@ -95,9 +95,11 @@ const listed = {
 };
 const unlisted = { ...listed, filename: "packages/core/src/index.ts" };
 
+const noWait = async () => {};
+
 async function run(api: Api, enabled: boolean) {
   const f = fakeApi(api);
-  const gh = restClient({ token: "t", apiUrl: "https://api.test", fetch: f.fetch });
+  const gh = restClient({ token: "t", apiUrl: "https://api.test", fetch: f.fetch, wait: noWait });
   const report = await judge(gh, pr, policy(enabled));
   const step = (r: Request) => {
     const q = r.body?.query ?? "";
@@ -262,16 +264,17 @@ describe("judge, when auto-merge cannot be changed", () => {
   });
 
   it("names the HTTP status when the enable call fails without GraphQL errors", async () => {
-    const { report } = await run({ files: [listed], enable: 502 }, true);
+    const { report, steps } = await run({ files: [listed], enable: 502 }, true);
+    expect(steps.filter((s) => s === "enable")).toHaveLength(4);
     expect(report.conclusion).toBe("neutral");
     expect(report.summary).toContain("Auto-merge could not be turned on: HTTP 502.");
   });
 
   it("merge: counts a failed read of auto-merge as a failed enable, with no enable call", async () => {
-    const { report, steps } = await run({ files: [listed], stateStatus: 502 }, true);
+    const { report, steps } = await run({ files: [listed], stateStatus: 403 }, true);
     expect(steps).toEqual([FILES, "read auto-merge", LIST, "create check run neutral"]);
     expect(report.title).toBe("qualifies, but auto-merge could not be turned on");
-    expect(report.summary).toContain("Auto-merge could not be turned on: HTTP 502.");
+    expect(report.summary).toContain("Auto-merge could not be turned on: HTTP 403.");
   });
 
   it("writes a failure run when auto-merge cannot be turned off", async () => {
@@ -303,10 +306,67 @@ describe("judge, when auto-merge cannot be changed", () => {
       url.endsWith("/check-runs") && init?.method === "POST"
         ? new Response("{}", { status: 500 })
         : f.fetch(url, init);
-    const gh = restClient({ token: "t", apiUrl: "https://api.test", fetch: failing });
+    const gh = restClient({ token: "t", apiUrl: "https://api.test", fetch: failing, wait: noWait });
     await expect(judge(gh, pr, policy(true))).rejects.toThrow("500");
     expect(f.requests.some((r) => r.body?.query?.includes("enablePullRequestAutoMerge"))).toBe(
       false,
     );
+  });
+
+  it("merge: completes the run after a 404 on its update, with one enable call", async () => {
+    const f = fakeApi({ files: [listed] });
+    let patches = 0;
+    const flaky = async (url: string, init?: RequestInit) =>
+      init?.method === "PATCH" && ++patches === 1
+        ? (f.requests.push({ method: "PATCH", url }), new Response("{}", { status: 404 }))
+        : f.fetch(url, init);
+    const gh = restClient({ token: "t", apiUrl: "https://api.test", fetch: flaky, wait: noWait });
+    const report = await judge(gh, pr, policy(true));
+    expect(report.conclusion).toBe("success");
+    expect(f.requests.filter((r) => r.method === "PATCH")).toHaveLength(2);
+    expect(
+      f.requests.filter((r) => r.body?.query?.includes("enablePullRequestAutoMerge")),
+    ).toHaveLength(1);
+  });
+
+  it("merge: turns auto-merge off again, then throws, when the last write keeps failing", async () => {
+    const f = fakeApi({ files: [listed] });
+    const failing = async (url: string, init?: RequestInit) => {
+      if (init?.method !== "PATCH") return f.fetch(url, init);
+      f.requests.push({ method: "PATCH", url });
+      return new Response("{}", { status: 404 });
+    };
+    const gh = restClient({ token: "t", apiUrl: "https://api.test", fetch: failing, wait: noWait });
+    await expect(judge(gh, pr, policy(true))).rejects.toThrow("404");
+    const steps = f.requests.map((r) => {
+      const q = r.body?.query ?? "";
+      if (q.includes("enablePullRequestAutoMerge")) return "enable";
+      if (q.includes("disablePullRequestAutoMerge")) return "disable";
+      return r.method;
+    });
+    expect(steps.slice(-7)).toEqual([
+      "enable",
+      "GET",
+      "PATCH",
+      "PATCH",
+      "PATCH",
+      "PATCH",
+      "disable",
+    ]);
+  });
+
+  it("needs you: throws without an extra call when the last write keeps failing", async () => {
+    const f = fakeApi({ files: [unlisted] });
+    const failing = async (url: string, init?: RequestInit) =>
+      url.endsWith("/check-runs") && init?.method === "POST"
+        ? (f.requests.push({ method: "POST", url }), new Response("{}", { status: 503 }))
+        : f.fetch(url, init);
+    const gh = restClient({ token: "t", apiUrl: "https://api.test", fetch: failing, wait: noWait });
+    await expect(judge(gh, pr, policy(true))).rejects.toThrow("503");
+    expect(
+      f.requests.filter((r) => r.method === "POST" && !r.url.endsWith("/graphql")),
+    ).toHaveLength(4);
+    expect(f.requests.at(-1)?.method).toBe("POST");
+    expect(f.requests.at(-1)?.url).toBe("https://api.test/repos/o/rome/check-runs");
   });
 });

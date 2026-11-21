@@ -29,8 +29,17 @@ function fakeFetch(responses: Response[]) {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
+/** Records each wait instead of sleeping. */
+const waits: number[] = [];
 const client = (fetch: ReturnType<typeof fakeFetch>["fetch"]) =>
-  restClient({ token: "t", apiUrl: "https://api.test", fetch });
+  restClient({
+    token: "t",
+    apiUrl: "https://api.test",
+    fetch,
+    wait: async (ms) => {
+      waits.push(ms);
+    },
+  });
 
 const report = { title: "would merge itself", summary: "s", conclusion: "success" as const };
 
@@ -124,8 +133,8 @@ describe("restClient.putCheckRun, in progress", () => {
 
 describe("restClient auto-merge", () => {
   it("names the HTTP status when GraphQL fails without errors", async () => {
-    const f = fakeFetch([json({ message: "Server Error" }, 502)]);
-    await expect(client(f.fetch).disableAutoMerge("PR_7")).rejects.toThrow(/^HTTP 502$/);
+    const f = fakeFetch([json({ message: "Forbidden" }, 403)]);
+    await expect(client(f.fetch).disableAutoMerge("PR_7")).rejects.toThrow(/^HTTP 403$/);
   });
 
   it("joins GitHub's messages with a semicolon, also on a non-2xx response", async () => {
@@ -167,5 +176,81 @@ describe("restClient auto-merge", () => {
     expect(String((f.calls[0]?.body as { query: string }).query)).toContain(
       "disablePullRequestAutoMerge",
     );
+  });
+});
+
+describe("restClient retries", () => {
+  const checkRuns = (id: number) => json({ check_runs: [{ id, app: { slug: "github-actions" } }] });
+
+  it("updates a check run again after a 404, waiting about a second", async () => {
+    waits.length = 0;
+    const f = fakeFetch([checkRuns(9), json({ message: "Not Found" }, 404), json({ id: 9 })]);
+    await client(f.fetch).putCheckRun("o/r", "sha1", report);
+    expect(f.calls.map((c) => c.method)).toEqual(["GET", "PATCH", "PATCH"]);
+    expect(f.calls[2]?.url).toBe("https://api.test/repos/o/r/check-runs/9");
+    expect(waits).toEqual([1000]);
+  });
+
+  it("gives up after four tries in a row, with waits of 1, 2 and 4 seconds", async () => {
+    waits.length = 0;
+    const f = fakeFetch([
+      checkRuns(9),
+      json({ message: "Not Found" }, 404),
+      json({ message: "boom" }, 502),
+      json({ message: "slow down" }, 429),
+      json({ message: "Not Found" }, 404),
+    ]);
+    await expect(client(f.fetch).putCheckRun("o/r", "sha1", report)).rejects.toThrow("404");
+    expect(f.calls.map((c) => c.method)).toEqual(["GET", "PATCH", "PATCH", "PATCH", "PATCH"]);
+    expect(waits).toEqual([1000, 2000, 4000]);
+  });
+
+  it("does not retry a 422", async () => {
+    waits.length = 0;
+    const f = fakeFetch([checkRuns(9), json({ message: "Unprocessable" }, 422)]);
+    await expect(client(f.fetch).putCheckRun("o/r", "sha1", report)).rejects.toThrow("422");
+    expect(f.calls).toHaveLength(2);
+    expect(waits).toEqual([]);
+  });
+
+  it("does not retry a 404 on a check run create", async () => {
+    const f = fakeFetch([json({ check_runs: [] }), json({ message: "Not Found" }, 404)]);
+    await expect(client(f.fetch).putCheckRun("o/r", "sha1", report)).rejects.toThrow("404");
+    expect(f.calls).toHaveLength(2);
+  });
+
+  it("retries a network error on a check run create", async () => {
+    let failed = false;
+    const f = fakeFetch([json({ check_runs: [] }), json({ id: 1 }, 201)]);
+    const flaky = async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST" && !failed) {
+        failed = true;
+        throw new TypeError("fetch failed");
+      }
+      return f.fetch(url, init);
+    };
+    await client(flaky).putCheckRun("o/r", "sha1", report);
+    expect(f.calls.map((c) => c.method)).toEqual(["GET", "POST"]);
+  });
+
+  it("retries a GraphQL mutation on a 5xx and returns the later answer", async () => {
+    const f = fakeFetch([json({}, 503), json({ data: { enablePullRequestAutoMerge: {} } })]);
+    await client(f.fetch).enableAutoMerge("PR_7", "sha1");
+    expect(f.calls).toHaveLength(2);
+  });
+
+  it("does not retry GraphQL errors, nor a 404 outside a check run update", async () => {
+    const errors = fakeFetch([json({ errors: [{ message: "nope" }] })]);
+    await expect(client(errors.fetch).enableAutoMerge("PR_7", "sha1")).rejects.toThrow("nope");
+    expect(errors.calls).toHaveLength(1);
+    const missing = fakeFetch([json({}, 404)]);
+    await expect(client(missing.fetch).autoMerge("o/r", 7)).rejects.toThrow("HTTP 404");
+    expect(missing.calls).toHaveLength(1);
+  });
+
+  it("names the last answer's status when GraphQL keeps failing", async () => {
+    const f = fakeFetch([json({}, 502), json({}, 502), json({}, 502), json({}, 504)]);
+    await expect(client(f.fetch).disableAutoMerge("PR_7")).rejects.toThrow(/^HTTP 504$/);
+    expect(f.calls).toHaveLength(4);
   });
 });

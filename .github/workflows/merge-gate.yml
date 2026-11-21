@@ -57,7 +57,9 @@ jobs:
 
       # tsx is pinned to an exact version and fetched by npx, because the gate
       # must run in a repository with no workspace install. run.ts exits 0
-      # whatever the gate decides or fails on. On a qualifying PR it marks the
+      # whatever the gate decides. It exits 1 only when it cannot write the
+      # check run after retries, so the next step completes the run instead of
+      # leaving the required check in progress. On a qualifying PR it marks the
       # check run in progress before it turns auto-merge on, and completes it
       # after.
       - name: Decide and report
@@ -67,13 +69,15 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: npx --yes tsx@4.21.0 scripts/merge-gate/run.ts
 
-      # Runs only when run.ts never started or crashed outright, such as when
-      # npx cannot fetch tsx. The gate decided nothing and cannot read the
-      # policy, so this step follows the needs-you row as if the policy were
-      # enabled: it reads whether auto-merge is on and turns it off only if so,
-      # then writes a neutral check run. When it cannot read or turn off
+      # Runs when run.ts never started or crashed outright, such as when npx
+      # cannot fetch tsx, and when it could not write the check run. This step
+      # cannot read the policy, so it follows the needs-you row as if the policy
+      # were enabled: it reads whether auto-merge is on and turns it off only if
+      # so, then writes a neutral check run. When it cannot read or turn off
       # auto-merge, the check run fails, which blocks the merge. It updates the
-      # run run.ts may have left in progress rather than add a second one.
+      # run run.ts may have left in progress rather than add a second one. Each
+      # call is tried up to 4 times on the answers run.ts retries, and the step
+      # fails when it cannot write the check run either.
       - name: Report that the gate could not run
         if: steps.gate.outcome == 'failure'
         env:
@@ -93,10 +97,26 @@ jobs:
             m=$(sed -e 's/^gh: //' -e 's/[.[:space:]]*$//' "$1" | paste -sd ' ' -)
             echo "${m:-unknown error}"
           }
-          if enabled=$(gh api graphql -f id="$PR_ID" --jq '.data.node.autoMergeRequest != null' \
-            -f query='query($id: ID!) { node(id: $id) { ... on PullRequest { autoMergeRequest { enabledAt } } } }' 2>"$err"); then
-            if [ "$enabled" = true ] && ! gh api graphql -f id="$PR_ID" --silent \
-              -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }' 2>"$err"; then
+          # Runs a gh call up to 4 times, waiting 1, 2 and 4 seconds, while its
+          # error is a 5xx, a 429 or a network error, or a 404 when the first
+          # argument is "update". gh writes an HTTP failure as "(HTTP <status>)",
+          # and a GraphQL error as its messages with no status, which is not
+          # retried. Its stderr goes to $err and its stdout passes through.
+          retry() {
+            local retried='\(HTTP (5[0-9][0-9]|429)\)|dial tcp|connection (reset|refused)|timeout|EOF|error connecting'
+            if [ "$1" = update ]; then retried="$retried|\(HTTP 404\)"; fi
+            shift
+            local wait
+            for wait in 1 2 4 0; do
+              if "$@" 2>"$err"; then return 0; fi
+              if [ "$wait" = 0 ] || ! grep -Eq "$retried" "$err"; then return 1; fi
+              sleep "$wait"
+            done
+          }
+          if enabled=$(retry read gh api graphql -f id="$PR_ID" --jq '.data.node.autoMergeRequest != null' \
+            -f query='query($id: ID!) { node(id: $id) { ... on PullRequest { autoMergeRequest { enabledAt } } } }'); then
+            if [ "$enabled" = true ] && ! retry write gh api graphql -f id="$PR_ID" --silent \
+              -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }'; then
               conclusion=failure
             fi
           else
@@ -108,14 +128,16 @@ jobs:
             summary=$(printf '%s\n\n%s' "$summary" "Auto-merge could not be turned off: $(message_of "$err").")
           fi
           echo "$summary" >>"$GITHUB_STEP_SUMMARY"
-          own=$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs?check_name=merge%20gate&per_page=100" \
-            --jq '[.check_runs[] | select(.app.slug == "github-actions") | .id][0] // empty' 2>/dev/null || true)
+          own=$(retry read gh api "repos/$REPO/commits/$HEAD_SHA/check-runs?check_name=merge%20gate&per_page=100" \
+            --jq '[.check_runs[] | select(.app.slug == "github-actions") | .id][0] // empty' || true)
           if [ -n "$own" ]; then
-            target=(--method PATCH "repos/$REPO/check-runs/$own")
+            target=(update --method PATCH "repos/$REPO/check-runs/$own")
           else
-            target=(--method POST "repos/$REPO/check-runs" -f head_sha="$HEAD_SHA")
+            target=(write --method POST "repos/$REPO/check-runs" -f head_sha="$HEAD_SHA")
           fi
-          gh api "${target[@]}" \
+          if ! retry "${target[0]}" gh api --silent "${target[@]:1}" \
             -f name='merge gate' -f status=completed -f conclusion="$conclusion" \
-            -f "output[title]=$title" -f "output[summary]=$summary" \
-            || echo "::warning title=merge gate::the gate could not report"
+            -f "output[title]=$title" -f "output[summary]=$summary"; then
+            echo "::error title=merge gate::the check run could not be written: $(message_of "$err")"
+            exit 1
+          fi
