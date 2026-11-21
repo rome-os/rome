@@ -22,6 +22,16 @@ export type Admission = (
  *  database reads, so fifteen seconds means the database is stuck. */
 export const ADMISSION_TIMEOUT_MS = 15_000;
 
+/** An admission that ran past {@link ADMISSION_TIMEOUT_MS}. The message was
+ *  not admitted, so its delivery is not accepted and the platform may deliver
+ *  it again. */
+export class AdmissionTimedOut extends Error {
+  constructor(timeoutMs: number) {
+    super(`not admitted: admission ran past ${timeoutMs}ms`);
+    this.name = "AdmissionTimedOut";
+  }
+}
+
 export interface OrderedAdmissionOptions {
   admissionTimeoutMs?: number;
 }
@@ -35,7 +45,8 @@ export interface OrderedAdmissionOptions {
  * admission begins, so subscribers hear a conversation in arrival order. An
  * admission therefore holds up its conversation's next message for as long as
  * it runs, so it waits only on its reads. An admission that runs past the timeout fails closed: the
- * message is not admitted, and the next one proceeds in order.
+ * message is not admitted, its delivery rejects with {@link AdmissionTimedOut},
+ * and the next one proceeds in order.
  */
 export class OrderedAdmission {
   private readonly admissions = new KeyedMutex();
@@ -46,7 +57,9 @@ export class OrderedAdmission {
   ) {}
 
   /** Hands `message` to `hear` once it is admitted. Resolves when `hear` has
-   *  finished; the conversation is released as soon as `hear` starts. */
+   *  finished, or at once for a message admission refuses; rejects with
+   *  {@link AdmissionTimedOut} when admission runs past its time. The
+   *  conversation is released as soon as `hear` starts. */
   async deliver(
     connection: { id: string; connectionKind: string },
     message: ChannelMessage,
@@ -74,7 +87,7 @@ export class OrderedAdmission {
   ): Promise<boolean> {
     const timeoutMs = this.options.admissionTimeoutMs ?? ADMISSION_TIMEOUT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const timedOut = new Promise<false>((resolve) => {
+    const timedOut = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
         log.warn("admission timed out; message not admitted", {
           connectionId: connection.id,
@@ -82,7 +95,7 @@ export class OrderedAdmission {
           messageId: message.messageId,
           timeoutMs,
         });
-        resolve(false);
+        reject(new AdmissionTimedOut(timeoutMs));
       }, timeoutMs);
     });
     try {

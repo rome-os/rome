@@ -322,19 +322,25 @@ export interface Talker extends TalkFeatures {
    * held from the platform's event to `deliver`, keeps the rule; the adapter
    * conformance suite checks it.
    *
-   * Acceptance: `deliver` returns at once, and its promise settles once the
-   * message's consumers have accepted it. For Chats that means recorded in
-   * its chat, or found on record already. It rejects when a consumer did not
-   * accept it: dropped before it was recorded, failed, or not recorded within
+   * Acceptance: a Talker that declares {@link Talker.awaitsAcceptance} gets
+   * from `deliver` a promise that settles once the message's consumers have
+   * accepted it. For Chats that means recorded in its chat, or found on
+   * record already. It rejects when a consumer did not accept it: dropped
+   * before it was recorded, failed, or not recorded within
    * {@link DELIVERY_ACCEPT_TIMEOUT_MS}. A message Rome decides to leave out,
    * such as one with nothing to answer or from a sender admission refuses,
-   * counts as accepted. Each Talker decides what to do with the promise: one
-   * whose platform delivers again what it was not told it has awaits it
-   * before telling the platform, and one whose platform holds nothing after
-   * delivering may ignore it. Awaiting it never holds up the next `deliver`:
-   * the order is the order of the calls (docs/domains/connections.md#message).
+   * counts as accepted. Any other Talker gets nothing back, so forwarding
+   * `deliver` from a receive loop never makes the loop wait on recording.
+   * Either way `deliver` returns at once, and awaiting the promise never
+   * holds up the next `deliver`: the order is the order of the calls
+   * (docs/domains/connections.md#message).
    */
   start(deliver: (msg: Message) => void | Promise<void>, fault: (err: StreamFault) => void): void;
+  /** True when this Talker waits for each delivery to be accepted before it
+   *  tells its platform, as a mailbox whose platform delivers again what it
+   *  was not told it has. Only then does `deliver` return the acceptance
+   *  promise (`start`). Absent means it does not wait. */
+  readonly awaitsAcceptance?: boolean;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
