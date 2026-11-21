@@ -36,6 +36,24 @@ Order: R11, R1, R3, the second binding (workspace B to the second instance), smo
 
 `--only` takes rule ids or a group name (`access`, `hear`, `speak`, `structure`). R1, R3 and the second binding always run.
 
+## Worker side (rule set v5)
+
+Rule set v5 (`rules.md`, approved 2026-11-21) moves Rome Cloud's Slack side into the `slack-gateway` Worker and adds R15 (the token stays in Rome Cloud). Until Rome's side of the Worker's contract lands, `run.sh --worker <env.json>` (`worker.mjs`) scores the Worker's side with the verifier's own stand-in instance, `gateway/agent.mjs`, run as rome-a and rome-b through the environment's `as_instance` control, so the instance JWT never leaves the instance's network. Each result names the parts only Rome can show as "needs the Rome side"; R1, R2, R10 and R14 are not checked.
+
+| Rule | Worker side, as checked |
+|---|---|
+| R3 | The second instance's bind of workspace A answers 409 with a reason. The first still holds A, and its direct message reaches its mailbox, not the second's. |
+| R4 | 20 direct messages, one at a time: each answered 200 to Slack, each in the instance's mailbox signed with its deposit key and `x-rome-slack: 1`. |
+| R5 | 10 mentions, 5 in threads a member started: all in the mailbox, each threaded one with its thread. |
+| R6 | 20 direct messages while nothing drains the mailbox for `stopSeconds`: all there after. |
+| R7 | 10 events with a bad signature: refused to Slack (401) and in no mailbox. R4's 20 events of A: none in the mailbox of the instance bound to B. |
+| R8 | Removing the app in Slack lets the workspace go within 1 minute; binding again from the same instance holds it again; disconnecting revokes the token (Slack's auth.test refuses it) and another instance can then bind the workspace. |
+| R9 | A send arrives from the bot token and a read holds it; `search.messages`, `chat.delete`, `conversations.invite`, `users.list`, `reactions.add` and `auth.test` answer 403 with no call at the fake; every call the fake saw is a send, a read or upkeep, none with a user token. |
+| R15 | No token the fake issued (its `GET /_control/tokens`) appears in any answer or delivery either instance got, in the Worker's log, or on the instance (`find_secret`). 10 calls from the instance bound to B in workspace A: 0 reach Slack. |
+| R11 | As v4, and the Worker's tables (gateway/) are judged too: the binding, its delivery and the workspace's token pass; message content and member data fail. |
+
+`prove-worker.mjs` proves it against a stand-in Worker (`standin/gateway.mjs`, with stand-in Rome Cloud, relay and signer) and a worktree of the real rome-cloud for R11. `BREAK` switches one promise off: `W-R3-takeover`, `W-R4-drop`, `W-R5-thread`, `W-R6-expire`, `W-R7-signature`, `W-R7-route`, `W-R8-uninstall`, `W-R8-keep-token`, `W-R8-held`, `W-R9-any`, `W-R15-token`, `W-R15-deposit`, `W-R15-log`, `W-R15-cross`, `W-R11-message`, `W-R11-relay`; each must fail its rule, and the good Worker must pass all nine.
+
 ## Stand-in
 
 `prove.mjs` shows the verifier can tell good from broken before the product exists. It runs the environment's own fake Slack (taken from the environment branch by git ref), a stand-in Rome Cloud and relay (`standin/cloud.mjs`), and two stand-in instances (`standin/instance.mjs`) started by `standin/up.mjs`. The stand-in instance records each message before it acknowledges its mailbox, answers apart from recording, serves the port and record controls (`/_port`, `/_record`), and ignores stored old Slack connections. `STANDIN_NO_PORT=1` gives neither control, as the environment on main. `BREAK` switches one rule off at a time:

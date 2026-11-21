@@ -24,7 +24,7 @@ const KINDS = [
   {
     kind: "message content",
     allowed: false,
-    test: /^(text|body|content|message|message_?(text|body|content)|blocks|attachments|files?)$/i,
+    test: /^(text|body|content|message|message_?(text|body|content)|blocks|attachments|files?)$|_(text|body|content)$/i,
   },
   {
     kind: "Slack member data",
@@ -37,12 +37,12 @@ const KINDS = [
     allowed: true,
     // `generation` counts a workspace's claims, so a late release cannot end
     // a newer one: part of the binding (planner's ruling, rome-cloud 0070).
-    test: /^(id|team_?id|workspace_?id|enterprise_?id|(account_?)?instance_?id|app_?id|bot_?user_?id|status|(claim_?)?generation|(created|updated|bound|unbound|deleted)_?at)$/i,
+    test: /^(id|team_?(id|name)|workspace_?id|enterprise_?id|(account_?)?instance_?id|app_?id|bot_?user_?id|status|(claim_?)?generation|(created|updated|bound|unbound|deleted)_?at)$/i,
   },
   {
     kind: "delivery",
     allowed: true,
-    test: /^(mailbox_?id|mailbox|forward_?(secret|key)(_?(hash|enc(rypted)?))?|relay_?(secret|key)|delivery_?(secret|url))$/i,
+    test: /^(mailbox_?id|mailbox|deposit_?(url|key)|forward_?(secret|key)(_?(hash|enc(rypted)?))?|relay_?(secret|key)|delivery_?(secret|url))$/i,
   },
   {
     kind: "sign-in attempt",
@@ -53,7 +53,12 @@ const KINDS = [
 
 const kindOf = (name) => KINDS.find((k) => k.test.test(name)) ?? { kind: "unknown", allowed: null };
 
-export async function r11(ctx) {
+/**
+ * R11. Rule set v5 (`v5`): Rome Cloud also holds the workspace's token, in
+ * the slack-gateway Worker's own store, so a token beside the binding passes
+ * there, and the Worker's tables (under gateway/) are judged too.
+ */
+export async function r11(ctx, { v5 = false } = {}) {
   const { rome, romeCloud, romeCloudBase } = ctx.env.repos;
   const evidence = {};
   const problems = [];
@@ -69,8 +74,8 @@ export async function r11(ctx) {
         `the webhook relay differs from ${romeCloudBase} in ${relay.split("\n").length} file(s)`,
       );
 
-    const stored = await storedColumns(romeCloud, romeCloudBase);
-    const judged = stored.columns.map((c) => judge(c, stored));
+    const stored = await storedColumns(romeCloud, romeCloudBase, v5 ? ["packages/pantheon", "gateway"] : ["packages/pantheon"]);
+    const judged = stored.columns.map((c) => judge(c, stored, v5));
     evidence.romeCloudStores = { files: stored.files, columns: judged };
     const bad = judged.filter((c) => c.allowed === false);
     // An attempt table whose lifetime fails is named once, not per column.
@@ -144,8 +149,9 @@ export async function r11(ctx) {
   if (unchecked.length) return { result: "not checked", reason: unchecked.join("; "), evidence };
   return {
     result: "pass",
-    reason:
-      "The relay is unchanged, the import rules pass, connections import nothing from apps, and Rome Cloud stores only the binding.",
+    reason: v5
+      ? "The relay is unchanged, the import rules pass, connections import nothing from apps, and Rome Cloud stores the workspace to instance binding and the workspace's token, nothing of chats or messages."
+      : "The relay is unchanged, the import rules pass, connections import nothing from apps, and Rome Cloud stores only the binding.",
     evidence,
   };
 }
@@ -156,12 +162,15 @@ export async function r11(ctx) {
  * check can tell. Also returns every added line under packages/pantheon, for
  * finding where a table's rows are removed.
  */
-async function storedColumns(dir, base) {
-  const changed = (await git(dir, "diff", "--name-only", base, "--", "packages/pantheon"))
+async function storedColumns(dir, base, paths = ["packages/pantheon"]) {
+  const changed = (await git(dir, "diff", "--name-only", base, "--", ...paths))
     .split("\n")
     .filter(Boolean);
   const files = changed.filter(
-    (f) => /(schema|migration|drizzle|\/db\/|\.sql$)/i.test(f) && !/\.(md|json|snap)$/.test(f),
+    (f) =>
+      (/(schema|migration|drizzle|\/db\/|\.sql$)/i.test(f) || /^gateway\/src\/.*store\.ts$/.test(f)) &&
+      !/\.(md|json|snap)$/.test(f) &&
+      !/\.test\./.test(f),
   );
   const addedOf = async (file) =>
     (await git(dir, "diff", "-U0", base, "--", file))
@@ -267,7 +276,7 @@ function lifetimeOf(table, { columns, tables, allAdded }) {
  * In an attempt table every other column passes when the table's lifetime
  * holds: its outcome is cleared on redemption and expired rows are deleted.
  */
-function judge(column, stored) {
+function judge(column, stored, v5 = false) {
   const k = kindOf(column.name);
   const out = { file: column.file, table: column.table, name: column.name, kind: k.kind };
   if (k.allowed === false) return { ...out, allowed: false, why: k.kind };
@@ -297,6 +306,9 @@ function judge(column, stored) {
       lifetime,
     };
   }
+  // v5: Rome Cloud holds the workspace's token beside its binding.
+  if (k.allowed === "token" && v5)
+    return { ...out, allowed: true, why: "the workspace's token, which Rome Cloud holds (v5)" };
   if (k.allowed === "token")
     return {
       ...out,

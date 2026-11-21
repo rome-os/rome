@@ -82,6 +82,12 @@ function fromEnvironment(raw) {
       romeDependencies: raw.repos.rome_dependencies,
     },
     slack: { control: raw.fake_slack?.control },
+    // Rome Cloud's slack-gateway Worker (rule set v5); null without it.
+    gateway: raw.slack_gateway && {
+      url: raw.slack_gateway.url,
+      logs: raw.slack_gateway.logs,
+      tokens: raw.slack_gateway.tokens ?? raw.fake_slack?.tokens,
+    },
     // R10's browser: a Playwright server, and the client folder to load.
     browser: raw.browser,
     romeCloud: { query: raw.rome_cloud?.query },
@@ -93,6 +99,14 @@ function fromEnvironment(raw) {
         stop: i.stop,
         start: i.start,
         oldConnections: i.control?.old_connections,
+        // v5: runs the verifier's stand-in instance (gateway/agent.mjs) as
+        // this instance, and counts where given values are found on it.
+        asInstance:
+          i.control?.as_instance ??
+          (raw.slack_gateway && Array.isArray(i.stop) && i.stop[1] === "stop" ? [i.stop[0], "as-instance", i.stop[2]] : undefined),
+        findSecret:
+          i.control?.find_secret ??
+          (raw.slack_gateway && Array.isArray(i.stop) && i.stop[1] === "stop" ? [i.stop[0], "find-secret", i.stop[2]] : undefined),
         // R10: which of the seeded old rows are still stored, read only.
         // ctl.sh's own `old-rows` when env.json names none.
         oldRows:

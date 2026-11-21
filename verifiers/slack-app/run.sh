@@ -2,7 +2,7 @@
 # Scores the official Slack app on rule set v4: R1 to R11 and R14, each a
 # promise the Slack connection keeps, checked at its edges. A smoke check (a
 # direct message gets a reply) runs outside the score.
-# Usage: verifiers/slack-app/run.sh [--r6-stop <seconds>] [--only <ids>] [--min-free-gb <n>] <env.json> [out dir]
+# Usage: verifiers/slack-app/run.sh [--worker] [--r6-stop <seconds>] [--only <ids>] [--min-free-gb <n>] <env.json> [out dir]
 # Writes report.json and report.md to the out dir (default: out/<time> here).
 # --r6-stop sets how long R6 holds the instance stopped (also
 # VERIFIER_R6_STOP_SECONDS). Default: env.json's, else 120. The rule's is 3600.
@@ -14,6 +14,9 @@
 # (/proc/meminfo), then report it not checked if it still does.
 # R12 is no longer a rule, so the old --r12-allow-members is accepted and
 # ignored.
+# --worker scores rule set v5 on the slack-gateway Worker's side instead,
+# with the verifier's stand-in instance (gateway/agent.mjs) run as each
+# instance through the environment's as_instance control (worker.mjs).
 set -euo pipefail
 
 while [ $# -gt 0 ]; do
@@ -27,6 +30,9 @@ while [ $# -gt 0 ]; do
     --min-free-gb)
       export VERIFIER_MIN_FREE_GB="${2:?--min-free-gb needs a number}"
       shift 2 ;;
+    --worker)
+      entry=worker.mjs
+      shift ;;
     --r12-allow-members)
       echo "run.sh: --r12-allow-members is ignored; R12 is no longer a rule" >&2
       shift ;;
@@ -46,4 +52,4 @@ if [ -n "$(git -C "$here" status --porcelain -- .)" ]; then
 fi
 commit="$(git -C "$here" rev-parse HEAD)"
 
-exec node "$here/verify.mjs" "$env_json" "$out" "$commit"
+exec node "$here/${entry:-verify.mjs}" "$env_json" "$out" "$commit"

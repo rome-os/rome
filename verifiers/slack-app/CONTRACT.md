@@ -63,6 +63,12 @@ A refusal is `{refused: why}`, or an error object carrying `at` (`rome` or `conn
 
 `logs [--since <ISO time>]` prints the instance's log (since that time when given), one entry a line, as `compose logs` does: JSON after the service's prefix, with `level` (a name or pino's number). R10 splits each start at the line holding "Rome started". Before it, it counts error-level entries and warnings that name a seeded row's connection id (else its account id, else its kind); after it, error-level entries about an old row, by its ids, `slack_bot`, an old kind under a key naming a kind, or `component` `connections`.
 
+## Worker side (v5)
+
+`worker.mjs` reads, besides the above: `slack_gateway.logs` (the Worker's log, argv), `fake_slack.tokens` or `${control}/tokens` (`{tokens: [{value, team, kind, revoked}]}`, every token the fake issued), and per instance `control.as_instance` (default `ctl.sh as-instance <instance>`) and `control.find_secret` (default `ctl.sh find-secret <instance>`).
+
+`as_instance FILE OP JSON` runs the node file `gateway/agent.mjs` in the instance's network with its signer (Rome stopped), with `GATEWAY`, `CLOUD`, `SLACK` and `GATEWAY_SHARED_SECRET` set, and prints what it prints. `find_secret '<json list of strings>'` prints, read-only, `{counts: {"<place>": n}}`: where on the instance (database table and column, the grant's credential, files under the homes and /run, its logs) any of the strings is found, never the content.
+
 ## Fake Slack control
 
 The environment's control API (`environments/slack-app/README.md`). The verifier uses `GET /state` (workspaces with members, groups, scopes, `history_limit`, `distribution`), `POST /sign-in`, `POST /dm`, `POST /forged {mode: bad_signature}`, `POST /mention {thread_ts?}`, `POST /group-message {channel, thread_ts?, send_event?}`, `POST /redeliver {event_id}` (R4; a 404 "no control route" leaves that part not checked), `GET /deliveries?event_id`, `GET /posts?team&channel&since` (with `threadTs`, `appId`, `tokenKind`), `GET /calls?team&method&since` (with `method`, `teamId`, `tokenKind`), `POST /uninstall`, `POST /auth-test`, `POST /config {history_limit, distributed}`, `GET /approvals?since`, `POST /grant-limit {team, scopes}` and `POST /socket-event`. It reads only records after the `seq` it saw before acting.
