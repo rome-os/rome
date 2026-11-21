@@ -167,4 +167,31 @@ describe("Rome's Discord bot, as a frame from its Worker reaches it", () => {
     ).rejects.toThrow("no attachments");
     expect(send).not.toHaveBeenCalled();
   });
+
+  it("shows typing and reacts through the Worker, refusing a message id that is not Discord's", async () => {
+    const calls: unknown[] = [];
+    const bot = new DiscordAppAdapter({
+      botId: BOT,
+      botUsername: "Rome",
+      depositKey: KEY,
+      cloud: {
+        typing: async (channelId: string) => {
+          calls.push(["typing", channelId]);
+        },
+        react: async (input: unknown) => {
+          calls.push(["react", input]);
+        },
+      } as unknown as DiscordAppCloud,
+      linkGuardian: async () => {},
+    });
+    await bot.showTyping("444444444444444444" as ChatId);
+    await bot.react("444444444444444444" as ChatId, "333333333333333333", "👍");
+    expect(calls).toEqual([
+      ["typing", "444444444444444444"],
+      ["react", { channelId: "444444444444444444", messageId: "333333333333333333", emoji: "👍" }],
+    ]);
+    await expect(bot.react("4" as ChatId, "not-an-id", "👍")).rejects.toThrow(
+      "not a Discord message id",
+    );
+  });
 });

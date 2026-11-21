@@ -119,6 +119,7 @@ describe("a Slack app backlog, end to end", () => {
           authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
           postMessage: async () => ({ ts: "9.0" }),
           openDirectMessage: async () => "D_NEW",
+          addReaction: async () => {},
           userName: async () => ({ displayName: "Member" }),
           conversationHistory: async () => ({ messages: [], hasMore: false }),
           conversationReplies: async () => ({ messages: [] }),

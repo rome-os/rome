@@ -204,6 +204,7 @@ import { ActionWorkerCoordinator } from "./apps/actions/action-subprocess.js";
 import { endInterruptedRuns } from "./apps/actions/restart-recovery.js";
 import { WorkerRpcServer } from "./apps/actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./apps/actions/worker-rpc-client.js";
+import { connectionTyping } from "./core/connection-typing.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import type { ChatResetPolicy } from "./core/chat-reset-policy.js";
 import {
@@ -1349,9 +1350,22 @@ async function main() {
     ownerOf: async (taskId) => (await conciergeTasksRepo.getWithChat(taskId))?.owner ?? null,
   });
   const conciergeTasksRepo = new ConciergeTasksRepository(db);
+  // The connection behind a channel, for what its talker offers that no
+  // channel port carries: typing by the dashboard's rule, and reactions.
+  const connectionOfChannel = (channel: string) => {
+    const id = channelRecords.byId(channel)?.connectionId;
+    return id ? connectionRegistry.all().find((connection) => connection.id === id) : undefined;
+  };
   const concierge: ConciergeService = new ConciergeService({
     skillCatalog,
     settingsRepo,
+    reactInChat: async (chat, messageId, emoji) => {
+      const added = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.add(chat.threadId as ChatId, messageId, emoji),
+      );
+      if (!added) throw new Error("This chat's account takes no reaction.");
+      await added;
+    },
     // Who answers a chat on a connection, as the inbox routes it: the
     // account's agent (a task started there reports there when it is the
     // Concierge).
@@ -1544,6 +1558,15 @@ async function main() {
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
     chatResetPolicy,
     openingFor,
+    connectionTyping({
+      typingOf: (channel) => {
+        const connection = connectionOfChannel(channel);
+        if (!connection?.withTalker((talker) => talker.typing !== undefined)) return null;
+        return (chatId) =>
+          connection.withTalker((talker) => talker.typing?.show(chatId as ChatId)) ??
+          Promise.resolve();
+      },
+    }),
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 

@@ -48,7 +48,7 @@ import { automatedSource } from "../webchat/automated-source.js";
 import { replyQuoteOf } from "../webchat/reply-quote.js";
 import { GUARDIAN_OWNER, ownerOf } from "../webchat/owner.js";
 import { getInstanceOrigin } from "../instance/rome-cloud-origin.js";
-import { CONNECTION_TASK_TOOLS, conciergePlaceSetup } from "./on-connection.js";
+import { CONNECTION_TOOLS, conciergePlaceSetup } from "./on-connection.js";
 import {
   parseTaskSchedule,
   SCHEDULE_REPORTS,
@@ -228,7 +228,7 @@ export async function buildConciergeTools(
   if (!isConciergeAgent(context.agentName) || context.isSubagent) return [];
   const { webchatRepo, messages, tasks } = service.deps;
   // On a connection the Concierge answers in plain text, and keeps only the
-  // tools for tasks (CONNECTION_TASK_TOOLS): a task started there reports to
+  // tools for tasks (CONNECTION_TOOLS): a task started there reports to
   // that chat. Every other tool needs a Concierge chat on the dashboard.
   const onConnection = conciergePlaceSetup(context.agentName, context.getThreadContext()) !== null;
   // The connection chat this session is in, for a turn whose thread does not
@@ -259,6 +259,29 @@ export async function buildConciergeTools(
       throw new Error("This tool works only during a turn in a Concierge chat");
     }
     return { chatId: thread.threadId, turnId };
+  };
+
+  // A reaction in a chat on a connection: one emoji on the guardian's
+  // message, sent to the platform. It cannot be taken back there, and no
+  // message status follows it.
+  const reactOnConnection = async (args: Record<string, unknown>) => {
+    const { chatId, turnId } = currentTurn();
+    const { emoji } = args;
+    if (emoji === null) throw new Error("A reaction here cannot be taken back.");
+    if (!(CONCIERGE_REACTIONS as readonly unknown[]).includes(emoji)) {
+      throw new Error(`emoji must be one of ${CONCIERGE_REACTIONS.join(" ")}`);
+    }
+    const chat = await service.connectionChat(chatId);
+    if (!chat) throw new Error("This chat takes no reaction.");
+    const target =
+      optionalString(args, "message_id") ??
+      (await webchatRepo.getTurnChatMessages(chatId, turnId))
+        .filter((row) => row.role === "user")
+        .at(-1)?.id;
+    if (!target) throw new Error("No message of the guardian's in this turn to react to.");
+    if (!service.deps.reactInChat) throw new Error("This chat takes no reaction.");
+    await service.deps.reactInChat(chat, target, emoji as string);
+    return `Reacted ${emoji as string}.`;
   };
 
   // A task's link as this chat shows it: a chip on the dashboard, and the
@@ -905,6 +928,7 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runTool("react", input, async (args) => {
+          if (onConnection) return reactOnConnection(args);
           const { chatId } = currentTurn();
           // Only a Concierge chat, the main chat or a topic chat, takes a reaction.
           if (!(await service.conciergeChat(chatId))) {
@@ -1603,6 +1627,6 @@ export async function buildConciergeTools(
     },
   ];
   return onConnection
-    ? tools.filter((tool) => (CONNECTION_TASK_TOOLS as readonly string[]).includes(tool.name))
+    ? tools.filter((tool) => (CONNECTION_TOOLS as readonly string[]).includes(tool.name))
     : tools;
 }

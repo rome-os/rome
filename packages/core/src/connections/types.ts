@@ -63,9 +63,24 @@ export interface TalkHistory {
   read(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]>;
 }
 
+/** Showing a chat that a message is being written: a typing indicator that
+ *  lapses on its own after a few seconds, so a caller shows it again while the
+ *  writing lasts. Core drives it by the same rule as the dashboard's typing
+ *  dots (core/message-writing.ts). */
+export interface TalkTyping {
+  show(chatId: ChatId): Promise<void>;
+}
+
+/** Reacting to a message in a chat with an emoji, as the account. */
+export interface TalkReactions {
+  add(chatId: ChatId, messageId: string, emoji: string): Promise<void>;
+}
+
 export interface TalkFeatureMap {
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
+  typing: TalkTyping;
+  reactions: TalkReactions;
   directory: TalkDirectory;
   history: TalkHistory;
   /** A talker answers only `chatFor`. The channel port adds the deprecated

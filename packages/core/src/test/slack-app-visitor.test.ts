@@ -93,6 +93,7 @@ describe("Slack app members who did not sign in (R12)", () => {
         authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
         postMessage: async () => ({ ts: "9.0" }),
         openDirectMessage: async () => "D_NEW",
+        addReaction: async () => {},
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
         conversationReplies: async () => ({ messages: [] }),
