@@ -68,6 +68,7 @@ const BULLET_KEYS: Record<string, string[]> = {
   "agents.bot": ["reply", "start"],
   "github.user": ["work", "watch"],
   "google.user": ["work"],
+  "microsoft.user": ["work"],
   "shopify.user": ["work"],
   "composio.user": ["act"],
 };
@@ -134,5 +135,6 @@ const PRIVACY_SLOTS = new Set([
   "wechat.session",
   "github.user",
   "google.user",
+  "microsoft.user",
   "shopify.user",
 ]);

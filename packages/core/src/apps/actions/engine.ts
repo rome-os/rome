@@ -157,10 +157,14 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   // Reads of the personal-data store (personal-data/actions.ts).
   "core:personal_data_catalog",
   "core:personal_data_query",
-  // The device actions (connections/device/actions.ts). The node client that
-  // calls a device lives in main.
+  // The mail actions (connections/gmail, connections/outlook). Only main holds
+  // the mail credentials.
   "core:gmail_read",
   "core:gmail_send",
+  "core:outlook_read",
+  "core:outlook_send",
+  // The device actions (connections/device/actions.ts). The node client that
+  // calls a device lives in main.
   "core:device_describe",
   "core:device_run",
   "core:app_connection_read",

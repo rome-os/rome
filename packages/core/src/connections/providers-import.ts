@@ -10,6 +10,7 @@ import {
   OAUTH_PROVIDER_GRANTS,
   githubGrantProfileSchema,
   googleGrantProfileSchema,
+  microsoftGrantProfileSchema,
   shopifyGrantProfileSchema,
   type OAuthProviderGrantProfile,
 } from "./integrations/oauth-providers.js";
@@ -92,6 +93,11 @@ export function grantProfileFromBundle(
     case "google":
       // Google's schema has no login key — a raw handle never lands.
       return googleGrantProfileSchema.parse(withScopes(pickRawKeys(account, IDENTITY_KEYS)));
+    case "microsoft":
+      // Microsoft serves no avatar URL and mints no handle.
+      return microsoftGrantProfileSchema.parse(
+        withScopes(pickRawKeys(account, ["subject", "displayName", "email"])),
+      );
     case "github":
       return githubGrantProfileSchema.parse(
         withScopes(pickRawKeys(account, [...IDENTITY_KEYS, "login"])),

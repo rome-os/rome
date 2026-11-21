@@ -38,6 +38,7 @@ import { AppWidget } from "./AppWidget";
 import { ChatWidget } from "./ChatWidget";
 import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
+import { ChatComponent } from "@/components/chat/ChatComponent";
 import { PinnedChatWidget } from "./PinnedChatWidget";
 import { useConciergeChatId, useConciergeChats, useConciergeName } from "@/hooks/use-concierge";
 import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
@@ -476,6 +477,13 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
             // route before the link is followed; the href then carries it.
             onOpenIntent={flushAppLink}
             activations={toolActivations}
+            taskChat={(id, onGone) => (
+              <ChatComponent
+                sessionId={id}
+                onSessionCreated={() => {}}
+                onSessionNotFound={onGone}
+              />
+            )}
           >
             <ChatWidget
               sessionId={chatSessionId}
