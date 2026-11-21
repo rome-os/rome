@@ -19,7 +19,7 @@ import {
   forwardSignature,
 } from "../connections/kinds/slack-app/forward.js";
 import { chatPromptFacts } from "../core/chat-prompt-facts.js";
-import { slackAppMessages, slackAppTimeline } from "../db/schema/system.js";
+import { slackAppMessages } from "../db/schema/system.js";
 import { createTestDb, type TestDb } from "./db.js";
 import { channelMessageOf } from "../chats/connected-accounts/channel-message.js";
 
@@ -162,7 +162,6 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
 
     // The copy wiped, and the connection restarted on it.
     testDb.db.delete(slackAppMessages).run();
-    testDb.db.delete(slackAppTimeline).run();
     const second = connect();
     await second.start();
     const readsBeforeWiped = slack.conversationHistory.mock.calls.length;

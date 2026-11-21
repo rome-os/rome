@@ -342,72 +342,9 @@ export const slackAppMessages = sqliteTable(
   },
   (table) => [
     primaryKey({ columns: [table.teamId, table.eventId] }),
-    // A chat's messages, and a search of them, newest first.
-    index("idx_slack_app_messages_chat_said").on(
-      table.teamId,
-      table.channelId,
-      table.saidAt,
-      table.ts,
-    ),
-    // A search of the workspace, newest first.
-    index("idx_slack_app_messages_said").on(table.teamId, table.saidAt, table.ts),
+    index("idx_slack_app_messages_chat_said").on(table.teamId, table.channelId, table.saidAt),
     index("idx_slack_app_messages_unhanded").on(table.teamId, table.handedOverAt),
   ],
-);
-
-// Rome's Slack app's copy of each chat's timeline, the messages Slack's
-// conversations.history answers, one row per message. It is filled from
-// Slack's history pages and from the messages the app hears, its own posts
-// among them, and the connection reads a chat from it while it can tell the
-// copy holds every message there. Only connections/kinds/slack-app reads or writes
-// it, through its repository there.
-export const slackAppTimeline = sqliteTable(
-  "slack_app_timeline",
-  {
-    teamId: text("team_id").notNull(),
-    // The conversation id: a direct message's (D…) or a group's.
-    channelId: text("channel_id").notNull(),
-    ts: text("ts").notNull(),
-    // The message just before this one in the chat, as far as the connection
-    // knows it: "" when this is the chat's first message, null when unknown.
-    // A link is written only where the connection saw both messages with
-    // nothing between them (slack-app/timeline.ts).
-    prevTs: text("prev_ts"),
-    saidAt: integer("said_at", { mode: "timestamp_ms" }).notNull(),
-    // The message as a read answers it, without Slack's raw payload.
-    message: text("message", { mode: "json" }).notNull(),
-  },
-  (table) => [
-    primaryKey({ columns: [table.teamId, table.channelId, table.ts] }),
-    // A search of a chat, and of the workspace, newest first.
-    index("idx_slack_app_timeline_chat_said").on(
-      table.teamId,
-      table.channelId,
-      table.saidAt,
-      table.ts,
-    ),
-    index("idx_slack_app_timeline_said").on(table.teamId, table.saidAt, table.ts),
-  ],
-);
-
-// The newest edit or deletion Slack sent the Slack app for each message, so a
-// retried or late event, or a history page read before the change, never
-// brings back what was deleted or an earlier text. Only
-// connections/kinds/slack-app reads or writes it, through its repository there.
-export const slackAppChanges = sqliteTable(
-  "slack_app_changes",
-  {
-    teamId: text("team_id").notNull(),
-    channelId: text("channel_id").notNull(),
-    // The changed message's ts.
-    ts: text("ts").notNull(),
-    // The ts of the event that made the change: a later change replaces an
-    // earlier one, and an earlier one arriving late changes nothing.
-    changedTs: text("changed_ts").notNull(),
-    // The text as Rome reads it after the change, or null when it was deleted.
-    text: text("text"),
-  },
-  (table) => [primaryKey({ columns: [table.teamId, table.channelId, table.ts] })],
 );
 
 // One row per LinkedIn account seen in a thread's participant list. Person-level

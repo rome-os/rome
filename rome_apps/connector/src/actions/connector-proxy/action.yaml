@@ -32,7 +32,8 @@ description: |
   ({ channel, limit?, latest?, oldest? }) and `/api/conversations.replies`
   ({ channel, ts, limit?, cursor? }) read, `/api/conversations.list` ({ query?, limit? }) lists
   the channels the app is a member of, and `/api/search.messages`
-  ({ query, count?, channel? }) searches. A channel is named by its id or as
+  ({ query, count?, channel }) searches one channel's newest page, so it
+  names the channel. A channel is named by its id or as
   `#name`. History answers newest first, and a page can hold fewer messages
   than `limit` with more before it: page back by passing the oldest `ts` as
   `latest` until a page comes back empty, which is the only one with
