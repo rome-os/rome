@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRightIcon } from "@radix-ui/react-icons";
+import { ChevronRight } from "lucide-react";
 import Markdown from "@/components/chat/ChatMarkdown";
 
 /**
@@ -44,7 +44,7 @@ export function ThinkingBlock({ content }: { content: string }) {
         }`}
       >
         {hasBody ? (
-          <ChevronRightIcon
+          <ChevronRight
             className={`ml-3 h-3 w-3 flex-none text-subtle-foreground transition-transform ${
               open ? "rotate-90" : ""
             }`}

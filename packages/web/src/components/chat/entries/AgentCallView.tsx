@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { PlayIcon } from "@radix-ui/react-icons";
+import { Play } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { RomeSessionRefDto } from "@rome/api-types/trace-segments";
 import { CollapsibleTraceRow } from "@/components/agent-trace/CollapsibleTraceRow";
@@ -25,7 +25,7 @@ export function AgentCallView({
   const label = agent ? t("blocks.agentSession", { agent }) : t("blocks.sessionFallback");
   return (
     <CollapsibleTraceRow
-      icon={<PlayIcon />}
+      icon={<Play className="size-3.5" />}
       label={label}
       // Wider gutters than the tool-group body keep the denser session fields aligned.
       bodyClassName="flex flex-col gap-3 pt-1 pr-3 pb-3 pl-9"

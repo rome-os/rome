@@ -1,4 +1,4 @@
-import { EnterIcon } from "@radix-ui/react-icons";
+import { LogIn } from "lucide-react";
 import { CollapsibleTraceRow } from "@/components/agent-trace/CollapsibleTraceRow";
 
 /**
@@ -9,7 +9,7 @@ import { CollapsibleTraceRow } from "@/components/agent-trace/CollapsibleTraceRo
 export function SystemInputView({ label, content }: { label: string; content: string }) {
   return (
     <CollapsibleTraceRow
-      icon={<EnterIcon />}
+      icon={<LogIn className="size-3.5" />}
       label={label}
       bodyClassName="flex flex-col gap-3 pt-1 pr-3 pb-3 pl-9"
     >

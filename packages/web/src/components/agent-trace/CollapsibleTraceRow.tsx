@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { ChevronDownIcon, ChevronRightIcon } from "@radix-ui/react-icons";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 // Default body padding follows the trace's scale-safe compact rhythm
 // (4px top, 0 right, 4px bottom, 8px left). Consumers that wrap something
@@ -41,7 +41,7 @@ export function CollapsibleTraceRow({
         <span className="flex-1" />
         {meta}
         <span className="flex-none text-subtle-foreground">
-          {open ? <ChevronDownIcon /> : <ChevronRightIcon />}
+          {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
         </span>
       </button>
       {open && <div className={bodyClassName}>{children}</div>}

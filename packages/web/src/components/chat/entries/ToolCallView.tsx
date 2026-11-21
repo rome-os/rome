@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRightIcon } from "@radix-ui/react-icons";
+import { ChevronRight } from "lucide-react";
 import { describeBashCall } from "@/lib/bash-call-label";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { formatTracePrimitive, normalizeTracePayload } from "@/lib/trace-format";
@@ -56,7 +56,7 @@ export function ToolCallView({
         onClick={() => setOpen((v) => !v)}
         className="flex w-full select-text items-center gap-2 rounded-8 py-2 pr-3 pl-7 text-left"
       >
-        <ChevronRightIcon
+        <ChevronRight
           className={`h-3 w-3 flex-none text-subtle-foreground transition-transform ${
             open ? "rotate-90" : ""
           }`}

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRightIcon } from "@radix-ui/react-icons";
+import { ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSubagentProgress } from "@/hooks/use-subagent-progress";
 import { artifactLocalName } from "@/lib/artifact-name";
@@ -74,7 +74,7 @@ export function SubagentCallView({
         onClick={() => setOpen((value) => !value)}
         className="flex w-full select-text items-center gap-2 rounded-8 py-2 pr-3 pl-7 text-left"
       >
-        <ChevronRightIcon
+        <ChevronRight
           className={`h-3 w-3 flex-none text-subtle-foreground transition-transform ${
             open ? "rotate-90" : ""
           }`}

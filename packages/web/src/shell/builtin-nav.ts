@@ -1,13 +1,16 @@
 import {
-  ActivityLogIcon,
-  ArchiveIcon,
-  CalendarIcon,
-  DashboardIcon,
-  GearIcon,
-  PersonIcon,
-  Pencil2Icon,
-} from "@radix-ui/react-icons";
-import { Bot, Chrome as ChromeIcon, FolderKanban, Megaphone } from "lucide-react";
+  Activity,
+  Archive,
+  Bot,
+  Calendar,
+  Chrome as ChromeIcon,
+  FolderKanban,
+  LayoutGrid,
+  Megaphone,
+  Settings,
+  SquarePen,
+  User,
+} from "lucide-react";
 import type { ComponentType } from "react";
 
 /** Rome's own dashboard destinations. The sidebar, the Apps launcher, page
@@ -28,7 +31,7 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
     id: "apps",
     href: "/apps",
     labelKey: "nav.apps",
-    Icon: DashboardIcon,
+    Icon: LayoutGrid,
     sidebarIconMotion: "tilt",
   },
   {
@@ -38,20 +41,20 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
     Icon: FolderKanban,
     sidebarIconMotion: "tilt",
   },
-  { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: ArchiveIcon },
-  { id: "people", href: "/people", labelKey: "nav.people", Icon: PersonIcon },
+  { id: "memory", href: "/memory", labelKey: "nav.memory", Icon: Archive },
+  { id: "people", href: "/people", labelKey: "nav.people", Icon: User },
   // Off the sidebar until the guardian pins it: main answers assistants, so
   // their chats are read now and then rather than watched.
   { id: "assistants", href: "/assistants", labelKey: "nav.assistants", Icon: Bot },
   { id: "envoys", href: "/envoys", labelKey: "nav.envoys", Icon: Megaphone },
-  { id: "routines", href: "/routines", labelKey: "nav.routines", Icon: CalendarIcon },
+  { id: "routines", href: "/routines", labelKey: "nav.routines", Icon: Calendar },
   {
     // One page for sessions and the event log. It keeps the Sessions address,
     // which the app SDK and show_app open sessions at.
     id: "activity",
     href: "/sessions",
     labelKey: "nav.activity",
-    Icon: ActivityLogIcon,
+    Icon: Activity,
     aliases: ["sessions", "events"],
   },
   {
@@ -69,8 +72,8 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
     id: "chat",
     href: "/message",
     labelKey: "nav.chat",
-    Icon: Pencil2Icon,
+    Icon: SquarePen,
     sidebarIconMotion: "tilt",
   },
-  { id: "settings", href: "/settings", labelKey: "nav.settings", Icon: GearIcon },
+  { id: "settings", href: "/settings", labelKey: "nav.settings", Icon: Settings },
 ] as const;

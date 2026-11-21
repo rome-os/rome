@@ -7,7 +7,7 @@ export interface IconButtonProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label" | "children"> {
   /** Required accessible label. Used for both `aria-label` and `title`. */
   label: string;
-  /** The icon node — typically a 16–20px `<svg>` from `@radix-ui/react-icons` or `lucide-react`. */
+  /** The icon node — typically a 16–20px `<svg>` from `lucide-react`, the one icon set. */
   icon: ReactNode;
   /**
    * The shared control vocabulary: `sm` = 28px, `md` = 36px, `lg` = 44px, off
