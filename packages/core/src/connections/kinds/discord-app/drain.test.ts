@@ -34,7 +34,7 @@ describe("Discord frames in the instance's mailbox", () => {
     expect(seen).toEqual([["conn-1", { body, signature: "abc" }]]);
   });
 
-  it("are dropped with the bot off, and asked for again while it cannot take them", async () => {
+  it("are dropped and acknowledged with the bot off or its connection not running", async () => {
     expect(
       await deliverDiscordFrame(
         registry([], async () => ({ status: 200 })),
@@ -48,6 +48,6 @@ describe("Discord frames in the instance's mailbox", () => {
         }),
         { headers: {}, body },
       ),
-    ).toEqual({ status: 503 });
+    ).toEqual({ status: 200 });
   });
 });

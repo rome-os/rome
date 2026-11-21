@@ -221,7 +221,6 @@ export function createDiscordAppDescriptor(deps: DiscordAppDescriptorDeps): Conn
           };
 
           return {
-            awaitsAcceptance: true,
             start(deliver, onFault): void {
               fault = onFault;
               adapter.start(deliver);
