@@ -94,6 +94,8 @@ function wordsFor(code: string, status: number): string {
     case "route_denied":
       return "Rome's Discord bot can't do that.";
     // Discord's own answers, passed on by the proxy.
+    case "http_401":
+      return "Discord did not accept Rome's bot right now. Try again later.";
     case "http_403":
       return "Rome's Discord bot isn't allowed to do that there. A server admin can give it the permission.";
     case "http_404":
