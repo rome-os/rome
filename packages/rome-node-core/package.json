@@ -50,7 +50,7 @@
     "build": "tsc -p tsconfig.build.json",
     "prepare": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm build && ../../scripts/test-env.sh rstest"
+    "test": "pnpm build && ../../scripts/test-env.sh rstest --include 'src/**/*.test.ts'"
   },
   "dependencies": {
     "ws": "^8.18.0"
