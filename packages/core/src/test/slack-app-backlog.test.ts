@@ -179,6 +179,7 @@ describe("a Slack app backlog, end to end", () => {
         },
         expiresAt: "never",
       });
+    // Recorded, and every queued MessageSaid raised.
     return { said, grant, settled: () => recorder.settled() };
   }
 
