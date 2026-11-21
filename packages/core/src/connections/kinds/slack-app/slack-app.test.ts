@@ -13,7 +13,6 @@ import { SlackMessageCopyRepository } from "./message-copy.js";
 import { slackMessage, type SlackWireMessage } from "./message.js";
 import { SlackApiError } from "../slack/slack.js";
 import { SlackReadGate } from "./read-gate.js";
-import { slackAppTimeline } from "../../../db/schema.js";
 import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 
 /** The connection's copy, in a database of its own. */
@@ -397,7 +396,7 @@ describe("Slack app mentions in a group (R5)", () => {
 });
 
 describe("Slack app events for its own posts", () => {
-  it("hands over no event for its own post in a direct message, sends nothing, and keeps it only in the chat's timeline", async () => {
+  it("hands over no event for its own post in a direct message, and sends nothing", async () => {
     const mailbox = fakeMailbox();
     const { adapter: a, delivered, api, copy } = adapter(mailbox);
     await a.start();
@@ -411,11 +410,6 @@ describe("Slack app events for its own posts", () => {
     expect(api.postMessage).not.toHaveBeenCalled();
     // Not kept as a message to hand over: a restart hands over nothing.
     expect(copy.mayNotHold(TEAM, Number.MAX_SAFE_INTEGER)).toEqual([]);
-    // Kept in the chat's timeline, as the post it is.
-    expect(copy.timelineRow(TEAM, "D_GUARDIAN", own.event.ts)?.message).toMatchObject({
-      direction: "outbound",
-      text: "Rome's reply",
-    });
   });
 
   it("drops its own post in a group, and still hears another bot that mentions it", async () => {
@@ -935,7 +929,7 @@ function historyAdapter(
 const texts = (messages: ChannelMessage[]) => messages.map((m) => m.text);
 
 describe("Slack app reads a direct message (R13)", () => {
-  it("reads from Slack what its copy lacks, then the same from its copy", async () => {
+  it("reads from Slack on every read, since the connection keeps no copy of the chat", async () => {
     const slack = fakeSlackHistory();
     for (let i = 1; i <= 10; i++) slack.say(i, i % 2 === 0 ? "bot" : "member");
     const mailbox = fakeMailbox();
@@ -955,196 +949,20 @@ describe("Slack app reads a direct message (R13)", () => {
 
     const again = await a.readHistory("D_GUARDIAN" as never, { limit: 10 });
     expect(again).toEqual(first);
-    expect(slack.calls).toHaveLength(1);
+    expect(slack.calls).toHaveLength(2);
   });
 
-  it("answers the same with its copy wiped as with it whole", async () => {
+  it("pages back from the oldest message a read answered", async () => {
     const slack = fakeSlackHistory();
     for (let i = 1; i <= 12; i++) slack.say(i, i % 3 === 0 ? "bot" : "member");
     const mailbox = fakeMailbox();
-    const { adapter: a, db } = historyAdapter(mailbox, slack);
+    const { adapter: a } = historyAdapter(mailbox, slack);
     await a.start();
-    const whole = await a.readHistory("D_GUARDIAN" as never, { limit: 12 });
-
-    db.delete(slackAppTimeline).run();
-    const wiped = await a.readHistory("D_GUARDIAN" as never, { limit: 12 });
-    expect(wiped).toEqual(whole);
-    // Paging back from the oldest gives the same messages as well.
     const older = await a.readHistory("D_GUARDIAN" as never, {
       olderThan: "1700000000.000007",
       limit: 3,
     });
     expect(texts(older)).toEqual(["message 6", "message 5", "message 4"]);
-  });
-
-  it("forgets a link across a message from another workspace that arrives late", async () => {
-    const slack = fakeSlackHistory();
-    slack.say(1);
-    const mailbox = fakeMailbox();
-    const { adapter: a, db } = historyAdapter(mailbox, slack);
-    await a.start();
-    // A read heads the chat at message 1; then message 3 is heard, and
-    // message 2, said before it by someone in another workspace, arrives late.
-    await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
-    Object.assign(slack.say(2), { user: "U_EXT" });
-    slack.say(3);
-    await mailbox.deposit(frame(dmEvent(3)));
-    const late = dmEvent(2);
-    await mailbox.deposit(frame({ ...late, event: { ...late.event, user_team: "T_OTHER" } }));
-
-    const read = await a.readHistory("D_GUARDIAN" as never, {
-      olderThan: "1700000000.000003",
-      limit: 2,
-    });
-    db.delete(slackAppTimeline).run();
-    const wiped = await a.readHistory("D_GUARDIAN" as never, {
-      olderThan: "1700000000.000003",
-      limit: 2,
-    });
-
-    expect(texts(read)).toEqual(["message 2", "message 1"]);
-    expect(read).toEqual(wiped);
-  });
-
-  it("reads past a message heard late when a page already kept newer ones", async () => {
-    const slack = fakeSlackHistory();
-    for (let i = 1; i <= 4; i++) slack.say(i);
-    const mailbox = fakeMailbox();
-    const { adapter: a, db } = historyAdapter(mailbox, slack);
-    await a.start();
-    await mailbox.deposit(frame(dmEvent(1)));
-    // A page below message 4 keeps 3, 2 and 1; then message 2's event lands.
-    await a.readHistory("D_GUARDIAN" as never, { olderThan: "1700000000.000004", limit: 3 });
-    await mailbox.deposit(frame(dmEvent(2)));
-
-    const whole = await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
-    db.delete(slackAppTimeline).run();
-    const wiped = await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
-
-    expect(texts(whole)).toEqual(["message 4"]);
-    expect(whole).toEqual(wiped);
-  });
-
-  it("reads a message that reached Slack but never the instance", async () => {
-    const slack = fakeSlackHistory();
-    const mailbox = fakeMailbox();
-    const db = createTestDb().db;
-    const first = historyAdapter(mailbox, slack, { db });
-    await first.adapter.start();
-    slack.say(1);
-    await mailbox.deposit(frame(dmEvent(1)));
-    await first.adapter.stop();
-
-    // Said while the instance was away, and lost on the way: never deposited.
-    slack.say(2);
-    const second = historyAdapter(mailbox, slack, { db });
-    await second.adapter.start();
-    slack.say(3);
-    await mailbox.deposit(frame(dmEvent(3)));
-
-    const read = await second.adapter.readHistory("D_GUARDIAN" as never, { limit: 3 });
-    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
-  });
-
-  it("links no message to an older one Slack delivers again after a restart", async () => {
-    const slack = fakeSlackHistory();
-    const mailbox = fakeMailbox();
-    const db = createTestDb().db;
-    const first = historyAdapter(mailbox, slack, { db });
-    await first.adapter.start();
-    for (const i of [1, 2, 3]) {
-      slack.say(i);
-      await mailbox.deposit(frame(dmEvent(i)));
-    }
-    await first.adapter.stop();
-
-    const second = historyAdapter(mailbox, slack, { db });
-    await second.adapter.start();
-    // Message 1 again, then a new message.
-    await mailbox.deposit(frame(dmEvent(1)));
-    slack.say(4);
-    await mailbox.deposit(frame(dmEvent(4)));
-
-    const read = await second.adapter.readHistory("D_GUARDIAN" as never, { limit: 4 });
-    expect(texts(read)).toEqual(["message 4", "message 3", "message 2", "message 1"]);
-  });
-
-  it("links no message across one it failed to note", async () => {
-    const slack = fakeSlackHistory();
-    const mailbox = fakeMailbox();
-    const { adapter: a, copy } = historyAdapter(mailbox, slack);
-    await a.start();
-    for (const i of [1, 2, 3]) slack.say(i);
-    await mailbox.deposit(frame(dmEvent(1)));
-    const keepRun = copy.keepRun.bind(copy);
-    const failing = rs.spyOn(copy, "keepRun").mockImplementationOnce(() => {
-      throw new Error("disk full");
-    });
-    await mailbox.deposit(frame(dmEvent(2)));
-    failing.mockImplementation(keepRun);
-    await mailbox.deposit(frame(dmEvent(3)));
-
-    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
-    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
-  });
-
-  it("links no message across a bot's post with no user, which Slack's history still shows", async () => {
-    const slack = fakeSlackHistory();
-    const mailbox = fakeMailbox();
-    const { adapter: a } = historyAdapter(mailbox, slack);
-    await a.start();
-    const said = [1, 2, 3].map((i) => slack.say(i));
-    Object.assign(said[1], { subtype: "bot_message", bot_id: "B_OTHER", user: undefined });
-    const bot = dmEvent(2);
-    const { user: _user, ...botEvent } = bot.event as Record<string, unknown>;
-    await mailbox.deposit(
-      frame(dmEvent(1)),
-      frame({ ...bot, event: { ...botEvent, subtype: "bot_message", bot_id: "B_OTHER" } }),
-      frame(dmEvent(3)),
-    );
-
-    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
-    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
-  });
-
-  it("links no message across one from another workspace, which Slack's history still shows", async () => {
-    const slack = fakeSlackHistory();
-    const mailbox = fakeMailbox();
-    const { adapter: a } = historyAdapter(mailbox, slack);
-    await a.start();
-    for (const i of [1, 2, 3]) slack.say(i);
-    const external = dmEvent(2);
-    await mailbox.deposit(
-      frame(dmEvent(1)),
-      frame({ ...external, event: { ...external.event, user_team: "T_OTHER" } }),
-      frame(dmEvent(3)),
-    );
-
-    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 2 });
-    expect(texts(read)).toEqual(["message 3", "message 2"]);
-  });
-
-  it("links no message across one heard while Rome did not listen to the account, which Slack's history still shows", async () => {
-    const slack = fakeSlackHistory();
-    const mailbox = fakeMailbox();
-    let listening = true;
-    const { adapter: a, delivered } = historyAdapter(mailbox, slack, {
-      listened: () => listening,
-    });
-    await a.start();
-    for (const i of [1, 2]) slack.say(i);
-    // A read of the whole chat tells the drain its newest message.
-    await a.readHistory("D_GUARDIAN" as never, { limit: 2 });
-    for (const i of [3, 4, 5]) slack.say(i);
-    await mailbox.deposit(frame(dmEvent(3)));
-    listening = false;
-    await mailbox.deposit(frame(dmEvent(4)));
-    listening = true;
-    await mailbox.deposit(frame(dmEvent(5)));
-    expect(texts(delivered)).toEqual(["message 3", "message 5"]);
-
-    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
-    expect(texts(read)).toEqual(["message 5", "message 4", "message 3"]);
   });
 
   it("answers a read without the names Slack is slow to give, asking once per author", async () => {
@@ -1170,213 +988,6 @@ describe("Slack app reads a direct message (R13)", () => {
     } finally {
       rs.useRealTimers();
     }
-  });
-
-  it("reads from its copy what it heard and sent in one drain, without asking Slack", async () => {
-    const slack = fakeSlackHistory();
-    slack.say(1);
-    const mailbox = fakeMailbox();
-    const { adapter: a } = historyAdapter(mailbox, slack);
-    await a.start();
-    await a.readHistory("D_GUARDIAN" as never, { limit: 5 });
-    expect(slack.calls).toHaveLength(1);
-
-    slack.say(2);
-    await mailbox.deposit(frame(dmEvent(2)));
-    // Rome's reply, and Slack's event for it.
-    const reply = slack.say(3, "bot");
-    const api = a as unknown as { config: { api: SlackAppWebApi } };
-    (api.config.api.postMessage as ReturnType<typeof rs.fn>).mockResolvedValueOnce({
-      ts: reply.ts,
-    });
-    await a.send("D_GUARDIAN" as never, { text: "message 3" } as never);
-    await mailbox.deposit(
-      frame({ ...dmEvent(3), event: { ...dmEvent(3).event, user: BOT, bot_id: "B_ROME" } }),
-    );
-
-    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 5 });
-    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
-    expect(slack.calls).toHaveLength(1);
-  });
-
-  it("links no message it sent to the one before, until Slack's event for it comes", async () => {
-    const slack = fakeSlackHistory();
-    const mailbox = fakeMailbox();
-    const { adapter: a, copy } = historyAdapter(mailbox, slack);
-    await a.start();
-    slack.say(1);
-    await mailbox.deposit(frame(dmEvent(1)));
-    // Message 2 is said, and its event is still on the way when Rome posts 3.
-    slack.say(2);
-    const reply = slack.say(3, "bot");
-    const api = a as unknown as { config: { api: SlackAppWebApi } };
-    (api.config.api.postMessage as ReturnType<typeof rs.fn>).mockResolvedValueOnce({
-      ts: reply.ts,
-    });
-    await a.send("D_GUARDIAN" as never, { text: "message 3" } as never);
-    // The send's answer shows nothing of message 2, so it links nothing.
-    expect(copy.timelineRow(TEAM, "D_GUARDIAN", reply.ts)?.prevTs ?? null).toBeNull();
-    // Nor does a read before the events come trust the copy's newest.
-    const before = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
-    expect(texts(before)).toEqual(["message 3", "message 2", "message 1"]);
-
-    await mailbox.deposit(
-      frame(dmEvent(2)),
-      frame({ ...dmEvent(3), event: { ...dmEvent(3).event, user: BOT, bot_id: "B_ROME" } }),
-    );
-    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
-    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
-  });
-
-  it("reads from its copy again once a post's event came before Slack's answer to the send", async () => {
-    const slack = fakeSlackHistory();
-    const mailbox = fakeMailbox();
-    const { adapter: a } = historyAdapter(mailbox, slack);
-    await a.start();
-    slack.say(1);
-    await mailbox.deposit(frame(dmEvent(1)));
-    // A read asks Slack for the chat's newest once; the drain carries it on.
-    await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
-    const reply = slack.say(2, "bot");
-    const api = a as unknown as { config: { api: SlackAppWebApi } };
-    let answer!: (value: { ts: string }) => void;
-    (api.config.api.postMessage as ReturnType<typeof rs.fn>).mockReturnValueOnce(
-      new Promise((resolve) => {
-        answer = resolve;
-      }),
-    );
-    const sending = a.send("D_GUARDIAN" as never, { text: "message 2" } as never);
-    await mailbox.deposit(
-      frame({ ...dmEvent(2), event: { ...dmEvent(2).event, user: BOT, bot_id: "B_ROME" } }),
-    );
-    answer({ ts: reply.ts });
-    await sending;
-
-    const asked = slack.calls.length;
-    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
-    expect(texts(read)).toEqual(["message 2"]);
-    expect(slack.calls.length).toBe(asked);
-  });
-
-  it("answers a retry into a new drain the same with its copy wiped as whole", async () => {
-    const answers: string[][] = [];
-    for (const wipe of [false, true]) {
-      const slack = fakeSlackHistory();
-      for (const i of [1, 2]) slack.say(i);
-      const first = fakeMailbox();
-      const before = historyAdapter(first, slack);
-      await before.adapter.start();
-      await first.deposit(frame(dmEvent(1)), frame(dmEvent(2)));
-      await before.adapter.stop();
-      if (wipe) {
-        before.db.delete(slackAppTimeline).run();
-      }
-
-      // Slack retries message 1 into the new drain, and nothing new follows.
-      const second = fakeMailbox();
-      const after = historyAdapter(second, slack, { db: before.db });
-      await after.adapter.start();
-      await second.deposit(frame(dmEvent(1)));
-      answers.push(texts(await after.adapter.readHistory("D_GUARDIAN" as never, { limit: 1 })));
-    }
-    expect(answers).toEqual([["message 2"], ["message 2"]]);
-  });
-
-  it("takes no message Slack sends again after a restart for the chat's newest", async () => {
-    const slack = fakeSlackHistory();
-    for (const i of [1, 2, 3]) slack.say(i);
-    const first = fakeMailbox();
-    const before = historyAdapter(first, slack);
-    await before.adapter.start();
-    await first.deposit(frame(dmEvent(1)), frame(dmEvent(2)), frame(dmEvent(3)));
-    await before.adapter.stop();
-
-    // Slack retries message 1 into the new drain, and nothing new follows.
-    const second = fakeMailbox();
-    const after = historyAdapter(second, slack, { db: before.db });
-    await after.adapter.start();
-    await second.deposit(frame(dmEvent(1)));
-
-    const read = await after.adapter.readHistory("D_GUARDIAN" as never, { limit: 1 });
-    expect(texts(read)).toEqual(["message 3"]);
-  });
-
-  it("takes no backlog message older than what the copy holds for the chat's newest", async () => {
-    const slack = fakeSlackHistory();
-    const said = Array.from({ length: 5 }, (_, i) => slack.say(i + 1));
-    const first = fakeMailbox();
-    const before = historyAdapter(first, slack);
-    await before.adapter.start();
-    await first.deposit(frame(dmEvent(4)), frame(dmEvent(5)));
-    await before.adapter.stop();
-
-    // After a restart the mailbox hands over message 1, which the copy never held.
-    const second = fakeMailbox();
-    const after = historyAdapter(second, slack, { db: before.db });
-    await after.adapter.start();
-    await second.deposit(frame({ ...dmEvent(1), event: { ...dmEvent(1).event, ts: said[0].ts } }));
-
-    const read = await after.adapter.readHistory("D_GUARDIAN" as never, { limit: 1 });
-    expect(texts(read)).toEqual(["message 5"]);
-  });
-
-  it("asks Slack again after a message heard out of order", async () => {
-    const slack = fakeSlackHistory();
-    const mailbox = fakeMailbox();
-    const { adapter: a } = historyAdapter(mailbox, slack);
-    await a.start();
-    for (const i of [1, 2, 3]) slack.say(i);
-    await mailbox.deposit(frame(dmEvent(1)));
-    // Slack retried message 2 later than it sent message 3.
-    await mailbox.deposit(frame(dmEvent(3)));
-    await mailbox.deposit(frame(dmEvent(2)));
-
-    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
-    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
-  });
-
-  it("moves the drain on past a message a page brought before its event", async () => {
-    const slack = fakeSlackHistory();
-    const mailbox = fakeMailbox();
-    const { adapter: a, copy } = historyAdapter(mailbox, slack);
-    await a.start();
-    const said = [slack.say(1)];
-    await mailbox.deposit(frame(dmEvent(1)));
-    // A read asks Slack for the chat's newest once; the drain carries it on.
-    await a.readHistory("D_GUARDIAN" as never, { limit: 1 });
-    said.push(slack.say(2), slack.say(3));
-    // Message 2 reached the copy from a page of Slack's, with no link yet.
-    const context = { channel: "slack_app", teamId: TEAM, botUserId: BOT, chatId: "D_GUARDIAN" };
-    copy.keepRun(TEAM, "D_GUARDIAN", {
-      messages: [{ ts: said[1].ts, message: slackMessage(context, said[1])! }],
-      before: null,
-    });
-    await mailbox.deposit(frame(dmEvent(2)), frame(dmEvent(3)));
-
-    expect(copy.timelineRow(TEAM, "D_GUARDIAN", said[2].ts)?.prevTs).toBe(said[1].ts);
-    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
-    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
-  });
-
-  it("links no message across one a page brought before a late event", async () => {
-    const slack = fakeSlackHistory();
-    const mailbox = fakeMailbox();
-    const { adapter: a, copy } = historyAdapter(mailbox, slack);
-    await a.start();
-    const said = [1, 2, 3].map((i) => slack.say(i));
-    await mailbox.deposit(frame(dmEvent(1)));
-    // Message 2 reached the copy from a page of Slack's; its event comes late.
-    const context = { channel: "slack_app", teamId: TEAM, botUserId: BOT, chatId: "D_GUARDIAN" };
-    copy.keepRun(TEAM, "D_GUARDIAN", {
-      messages: [{ ts: said[1].ts, message: slackMessage(context, said[1])! }],
-      before: null,
-    });
-    await mailbox.deposit(frame(dmEvent(3)));
-    await mailbox.deposit(frame(dmEvent(2)));
-
-    expect(copy.timelineRow(TEAM, "D_GUARDIAN", said[2].ts)?.prevTs).toBeNull();
-    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 3 });
-    expect(texts(read)).toEqual(["message 3", "message 2", "message 1"]);
   });
 
   it("says where to read on when a page holds only messages it does not read", async () => {
@@ -1416,7 +1027,7 @@ describe("Slack app reads a direct message (R13)", () => {
     expect(texts(read)).toEqual(["message 6", "message 5"]);
   });
 
-  it("reads forward from a wiped copy when one page reaches the read's time bound", async () => {
+  it("reads forward when one page reaches the read's time bound", async () => {
     const slack = fakeSlackHistory();
     const mailbox = fakeMailbox();
     const { adapter: a } = historyAdapter(mailbox, slack);
@@ -1457,7 +1068,7 @@ describe("Slack app reads a direct message (R13)", () => {
     expect(texts(newer)).toEqual(["message 5", "message 4"]);
   });
 
-  it("reads below its own upper bound when the newest message it holds is past it", async () => {
+  it("reads below its own upper bound when a newer message was heard", async () => {
     const slack = fakeSlackHistory();
     const mailbox = fakeMailbox();
     const { adapter: a } = historyAdapter(mailbox, slack);

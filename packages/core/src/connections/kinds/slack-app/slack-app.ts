@@ -30,7 +30,7 @@ import {
 import { isForwardedBy } from "./forward.js";
 import { authorOf, inTimeline, isSaid, slackMessage, type SlackWireMessage } from "./message.js";
 import { SlackReadGate } from "./read-gate.js";
-import { noteInDrain, readTimeline, type SlackTimelineDeps } from "./timeline.js";
+import { readTimeline } from "./timeline.js";
 import type { SlackMessageCopy } from "./message-copy.js";
 
 export type { SlackMessageCopy } from "./message-copy.js";
@@ -171,17 +171,6 @@ export class SlackAppAdapter {
   /** A second look at the token after a removal event it outlived. */
   private recheckTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly readGate: SlackReadGate;
-  /** The newest message heard in each direct message since the drain opened. */
-  private readonly heads = new Map<string, string>();
-  /** Whether a drain is open, so what it delivers is heard in it. */
-  private draining = false;
-  /** The app's posts in each direct message that Slack has not sent back as
-   *  events yet. Until it does, and while a send waits on Slack's answer, the
-   *  drain does not know the chat's newest message, so a read asks Slack. */
-  private readonly unheardPosts = new Map<string, Set<string>>();
-  /** Posts still waiting on Slack's answer in each direct message, with the
-   *  ones whose event came back before that answer did. */
-  private readonly posting = new Map<string, { sends: number; heard: Set<string> }>();
 
   constructor(private readonly config: SlackAppAdapterConfig) {
     this.mailbox = config.mailbox;
@@ -221,11 +210,6 @@ export class SlackAppAdapter {
     if (this.keyExpired()) {
       throw new Error("The Slack mailbox key expired and Rome Cloud could not renew it.");
     }
-    // A new drain: what came before it is a break in every chat's timeline.
-    this.heads.clear();
-    this.unheardPosts.clear();
-    this.posting.clear();
-    this.draining = true;
     this.handOverKept();
     this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
     this.scheduleRenewal();
@@ -322,8 +306,6 @@ export class SlackAppAdapter {
     const drain = this.drain;
     this.drain = null;
     await drain?.stop();
-    this.draining = false;
-    this.heads.clear();
   }
 
   /** Handle one drained frame. Exposed for tests. */
@@ -410,41 +392,23 @@ export class SlackAppAdapter {
     const wire: SlackWireMessage = { ...event, ts: event.ts };
     // Slack sends the app an event for each of its own posts. Those are
     // matched on the bot's own user from the install, not on any bot id, so
-    // another bot that mentions the app is still heard. In a direct message
-    // the app hears every message, its own too, so its own post still shows
-    // the drain what comes after what there; it is never handed over.
-    if (event.user === this.config.botUserId) {
-      if (direct) {
-        this.noteHeard(event.channel, wire);
-        this.postHeard(event.channel, event.ts);
-      }
-      return { status: 200 };
-    }
+    // another bot that mentions the app is still heard. Its own post is never
+    // handed over.
+    if (event.user === this.config.botUserId) return { status: 200 };
     // Slack user ids are per workspace: an author from another workspace
     // (Slack Connect) never speaks under this workspace's address.
-    // Slack's history still shows such a message, so the drain's timeline
-    // breaks there rather than linking across it.
-    if (isExternalAuthor(payload)) {
-      return direct ? this.breakAt(event.channel, wire) : { status: 200 };
-    }
+    if (isExternalAuthor(payload)) return { status: 200 };
     // A bot or workflow that mentions the app posts as a bot_message, often
     // with no user: the bot is its author. Only a mention is taken from one,
     // since the app's own posts are told apart by their user.
     if (!isSaid(event.subtype)) return { status: 200 };
     const author = event.user ?? (mention ? authorOf(event) : undefined);
-    if (!author || typeof event.text !== "string") {
-      // Slack's history still shows a bot's post Rome does not hear, so the
-      // drain's timeline breaks there rather than linking across it.
-      return direct ? this.breakAt(event.channel, wire) : { status: 200 };
-    }
+    if (!author || typeof event.text !== "string") return { status: 200 };
     const said = slackMessage(this.context(event.channel), wire);
     if (!said) return { status: 200 };
     // Rome does not listen to the account, so the message is neither kept nor
-    // handed over. The drain's timeline breaks there, so a read once an agent
-    // is linked asks Slack for it rather than link across it.
-    if (this.config.listened && !this.config.listened()) {
-      return direct ? this.breakAt(event.channel, wire) : { status: 200 };
-    }
+    // handed over. A read once an agent is linked asks Slack for it.
+    if (this.config.listened && !this.config.listened()) return { status: 200 };
 
     const name = event.user ? await this.lookUpName(event.user) : {};
     const message: ChannelMessage = {
@@ -482,7 +446,6 @@ export class SlackAppAdapter {
       this.config.onFault?.({ kind: "transport", cause: error });
       return { status: 500 };
     }
-    if (direct) this.noteHeard(event.channel, wire, message);
     if (!fresh) return { status: 200 };
     log.info("message received", { chatId: message.chatId });
     this.handOver(eventId, message);
@@ -545,21 +508,11 @@ export class SlackAppAdapter {
     const threadTs = parsed.threadTs ?? replyThreadOf(parsed.channelId, replyTo);
     let firstTs: string | undefined;
     for (const chunk of splitSlackText(text)) {
-      // The post joins the drain's timeline from its own event, which Slack
-      // sends in order with what others said: a send's answer shows nothing
-      // of what was said just before it. The event can come before the answer.
-      const awaited = !threadTs && parsed.channelId.startsWith("D");
-      if (awaited) this.beginPost(parsed.channelId);
-      let sent: { ts: string } | undefined;
-      try {
-        sent = await this.config.api.postMessage(
-          this.config.botToken,
-          { channel: parsed.channelId, markdown: chunk, threadTs },
-          this.abort.signal,
-        );
-      } finally {
-        if (awaited) this.endPost(parsed.channelId, sent?.ts);
-      }
+      const sent = await this.config.api.postMessage(
+        this.config.botToken,
+        { channel: parsed.channelId, markdown: chunk, threadTs },
+        this.abort.signal,
+      );
       firstTs ??= sent.ts;
     }
     return { chatId, ...(firstTs ? { messageId: slackMessageId(firstTs, threadTs) } : {}) };
@@ -572,88 +525,6 @@ export class SlackAppAdapter {
       botUserId: this.config.botUserId,
       chatId,
     };
-  }
-
-  private timeline(): SlackTimelineDeps {
-    return {
-      teamId: this.config.teamId,
-      copy: this.config.copy,
-      heads: this.heads,
-      hearsEvery: (channelId) =>
-        this.draining &&
-        channelId.startsWith("D") &&
-        !this.unheardPosts.has(channelId) &&
-        !this.posting.has(channelId),
-      fetchPage: (channelId, bounds) =>
-        this.readGate.run(
-          `${channelId}:${bounds.latest ?? ""}`,
-          () => this.fetchPage(channelId, bounds.latest),
-          this.abort.signal,
-        ),
-    };
-  }
-
-  /** Break a direct message's timeline at `wire`, a message Slack's history
-   *  shows that the connection does not keep: the drain links nothing across
-   *  it, and a link the copy already holds across it, written before it
-   *  arrived late, is forgotten. A write that fails answers 500, and the
-   *  mailbox delivers the event again. */
-  private breakAt(channelId: string, wire: SlackWireMessage): { status: number } {
-    this.heads.delete(channelId);
-    if (!inTimeline(wire)) return { status: 200 };
-    try {
-      this.config.copy.unlinkAcross(this.config.teamId, channelId, wire.ts);
-    } catch (error) {
-      log.error("slack app could not break its timeline", { error: describe(error) });
-      this.config.onFault?.({ kind: "transport", cause: error });
-      return { status: 500 };
-    }
-    return { status: 200 };
-  }
-
-  /** Note a direct message's timeline message heard in this drain. A failure
-   *  leaves a break, which a read takes from Slack. */
-  private noteHeard(channelId: string, wire: SlackWireMessage, said?: ChannelMessage): void {
-    if (!this.draining || !inTimeline(wire)) return;
-    const message = said ?? slackMessage(this.context(channelId), wire);
-    if (!message) return;
-    try {
-      const { raw: _raw, ...kept } = message;
-      noteInDrain(this.timeline(), channelId, wire.ts, kept);
-    } catch (error) {
-      // The message is missing from the timeline, so the next one heard must
-      // not link across it.
-      this.heads.delete(channelId);
-      log.warn("slack app could not note a message in its timeline", { error: describe(error) });
-    }
-  }
-
-  private beginPost(channelId: string): void {
-    const posting = this.posting.get(channelId) ?? { sends: 0, heard: new Set<string>() };
-    posting.sends += 1;
-    this.posting.set(channelId, posting);
-  }
-
-  /** Note a send's answer: its post waits for its event unless that came
-   *  first. Posts heard early are forgotten once no send waits, since only a
-   *  waiting one can claim them. */
-  private endPost(channelId: string, ts: string | undefined): void {
-    const posting = this.posting.get(channelId);
-    if (ts !== undefined && !posting?.heard.has(ts)) {
-      const posts = this.unheardPosts.get(channelId) ?? new Set<string>();
-      posts.add(ts);
-      this.unheardPosts.set(channelId, posts);
-    }
-    if (posting && --posting.sends === 0) this.posting.delete(channelId);
-  }
-
-  private postHeard(channelId: string, ts: string): void {
-    const posts = this.unheardPosts.get(channelId);
-    if (!posts?.delete(ts)) {
-      this.posting.get(channelId)?.heard.add(ts);
-      return;
-    }
-    if (posts.size === 0) this.unheardPosts.delete(channelId);
   }
 
   private async fetchPage(channelId: string, latest: string | undefined) {
@@ -714,7 +585,16 @@ export class SlackAppAdapter {
       );
     }
     try {
-      return await readTimeline(this.timeline(), channelId as ChatId, read);
+      return await readTimeline(
+        (channel, bounds) =>
+          this.readGate.run(
+            `${channel}:${bounds.latest ?? ""}`,
+            () => this.fetchPage(channel, bounds.latest),
+            this.abort.signal,
+          ),
+        channelId as ChatId,
+        read,
+      );
     } catch (error) {
       if (error instanceof SlackApiError && NOT_READABLE.has(error.code)) {
         throw new Error(`This Slack account may not read chat ${chatId} (${error.code})`);

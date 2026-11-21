@@ -347,31 +347,6 @@ export const slackAppMessages = sqliteTable(
   ],
 );
 
-// Rome's Slack app's copy of each chat's timeline, the messages Slack's
-// conversations.history answers, one row per message. It is filled from
-// Slack's history pages and from the messages the app hears, its own posts
-// among them, and the connection reads a chat from it while it can tell the
-// copy holds every message there. Only connections/kinds/slack-app reads or writes
-// it, through its repository there.
-export const slackAppTimeline = sqliteTable(
-  "slack_app_timeline",
-  {
-    teamId: text("team_id").notNull(),
-    // The conversation id: a direct message's (D…) or a group's.
-    channelId: text("channel_id").notNull(),
-    ts: text("ts").notNull(),
-    // The message just before this one in the chat, as far as the connection
-    // knows it: "" when this is the chat's first message, null when unknown.
-    // A link is written only where the connection saw both messages with
-    // nothing between them (slack-app/timeline.ts).
-    prevTs: text("prev_ts"),
-    saidAt: integer("said_at", { mode: "timestamp_ms" }).notNull(),
-    // The message as a read answers it, without Slack's raw payload.
-    message: text("message", { mode: "json" }).notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.teamId, table.channelId, table.ts] })],
-);
-
 // One row per LinkedIn account seen in a thread's participant list. Person-level
 // facts live here rather than on the membership row so a name or headline is
 // stored once, not once per thread the person appears in.

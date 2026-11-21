@@ -1,28 +1,13 @@
-// A chat's history as the Slack app connection reads it: from its copy of the
-// chat's timeline where the copy can tell it holds every message there, and
-// from Slack's conversations.history where it cannot. Contract: `TalkHistory`
-// (connections/types.ts).
-//
-// The copy knows a message comes right before another only when the
-// connection saw both with nothing between them:
-//   - two messages next to each other on one page Slack answered;
-//   - two messages heard one after the other in one drain of the mailbox, in
-//     a direct message, where the app hears every message, its own included.
-// The drain counts because the mailbox holds every event Rome Cloud deposits
-// until the connection takes it, in order, while the instance is stopped
-// too. Each start opens a new drain and forgets the last, so what came before
-// is a break. A message heard out of order shows a link around it wrong, and
-// the copy forgets that link. Anything else is a break, and the read asks
-// Slack from the break rather than guess. So a message that reached Slack and
-// never the instance still shows in a read: the copy holds no link over it.
+// A chat's history as the Slack app connection reads it: from Slack's
+// conversations.history, live. Contract: `TalkHistory` (connections/types.ts).
+// The connection keeps no record of its own, so every read asks Slack.
 //
 // Slack lets an app read one page of a conversation a minute, of up to 15
-// messages, so a read asks Slack at most once. It answers what it has, which
-// may be fewer than its limit: a reader reads on from the oldest message.
+// messages, so a read asks Slack once. It answers what it has, which may be
+// fewer than its limit: a reader reads on from the oldest message.
 
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { TalkHistoryRead } from "../../types.js";
-import type { SlackMessageCopy, TimelineRow } from "./message-copy.js";
 import { compareTs, tsAt } from "./timeline-order.js";
 
 /** One page of a chat's history as Slack answered it, newest first. */
@@ -30,8 +15,9 @@ export interface SlackHistoryPage {
   messages: Array<{ ts: string; message: ChannelMessage }>;
   /** Whether Slack holds older messages than the page within its bounds. */
   hasMore: boolean;
-  /** The oldest message Slack answered, kept or not: a page of only joins
-   *  or edits keeps none, while Slack holds older messages below it. */
+  /** The oldest message Slack answered, read or not: a page of only joins
+   *  or edits holds none Rome reads, while Slack holds older messages below
+   *  it. */
   oldest?: string;
 }
 
@@ -40,18 +26,6 @@ export type FetchHistoryPage = (
   channelId: string,
   bounds: { latest?: string },
 ) => Promise<SlackHistoryPage>;
-
-export interface SlackTimelineDeps {
-  teamId: string;
-  copy: SlackMessageCopy;
-  fetchPage: FetchHistoryPage;
-  /** The newest message heard in each direct message in this drain, by chat. */
-  heads: Map<string, string>;
-  /** Whether a message newer than a page's newest would be heard in this
-   *  drain: true in a direct message while a drain is open, unless a post the
-   *  app sent there has not come back as an event yet. */
-  hearsEvery: (channelId: string) => boolean;
-}
 
 /** One microsecond later, so an inclusive bound reads as an exclusive one. */
 function justAfter(ts: string): string {
@@ -62,113 +36,28 @@ function justAfter(ts: string): string {
     : `${seconds}.${String(next).padStart(6, "0")}`;
 }
 
-/** Note a message the connection heard in a direct message, its own post
- *  included once it comes back as an event, in the drain open now. One the
- *  copy holds already, such as from a page Slack answered before its event
- *  arrived, still moves the drain on past the head: the next one heard comes
- *  after it. Its link is written only where the copy had none, since a link
- *  from Slack's page is the surer of the two. */
-export function noteInDrain(
-  deps: SlackTimelineDeps,
-  channelId: string,
-  ts: string,
-  message: ChannelMessage,
-): void {
-  const head = deps.heads.get(channelId);
-  const follows = head !== undefined && compareTs(head, ts) < 0;
-  const held = deps.copy.timelineRow(deps.teamId, channelId, ts);
-  // A drain's first message never heads the chat: it may be Slack sending a
-  // backlog, such as a retry into a new drain, and newer messages may have
-  // been said since, whether or not the copy holds them. The chat's newest is
-  // known again once a read with no upper bound asks Slack (readTimeline).
-  const heads = follows;
-  if (!held) {
-    deps.copy.keepRun(deps.teamId, channelId, {
-      messages: [{ ts, message }],
-      before: follows ? head : null,
-    });
-  } else if (follows && held.prevTs === null) {
-    deps.copy.keepRun(deps.teamId, channelId, {
-      messages: [{ ts, message: held.message }],
-      before: head,
-    });
-  }
-  if (heads) deps.heads.set(channelId, ts);
-}
-
-/** The chat's newest message, as the drain knows it, or undefined when the
- *  drain does not hear every message there. A head the copy holds newer
- *  messages than is not trusted: a page read below a later message can keep
- *  messages newer than one heard late, and the chat's newest is then unknown. */
-function headOf(deps: SlackTimelineDeps, channelId: string): string | undefined {
-  if (!deps.hearsEvery(channelId)) return undefined;
-  const head = deps.heads.get(channelId);
-  if (head === undefined || deps.copy.holdsNewer(deps.teamId, channelId, head)) return undefined;
-  return head;
-}
-
 /** The messages of `chatId` within `read`'s bounds, newest first, at most
  *  `read.limit`, and fewer where Slack's page ran out first. */
 export async function readTimeline(
-  deps: SlackTimelineDeps,
+  fetchPage: FetchHistoryPage,
   chatId: ChatId,
   read: TalkHistoryRead,
 ): Promise<ChannelMessage[]> {
   const channelId = chatId as string;
-  if (read.newerThan !== undefined) return readForward(deps, channelId, read);
+  if (read.newerThan !== undefined) return readForward(fetchPage, channelId, read);
   const since = read.since ? tsAt(read.since) : undefined;
   const until = read.until ? tsAt(read.until) : undefined;
   const within = (ts: string) =>
     (since === undefined || compareTs(ts, since) >= 0) &&
     (until === undefined || compareTs(ts, until) <= 0);
-  const found: ChannelMessage[] = [];
-  const row = (ts: string) => deps.copy.timelineRow(deps.teamId, channelId, ts);
-
-  // `above` is the message just above the next one to take, when the copy
-  // holds it; `next` is that next one: "" past the chat's first message,
-  // null when the copy does not know.
-  let above: string | undefined;
-  let next: string | null;
-  if (read.olderThan !== undefined) {
-    above = read.olderThan;
-    next = row(read.olderThan)?.prevTs ?? null;
-  } else {
-    // With no upper bound, the newest message heard in this drain is the
-    // chat's newest, while the drain hears every message there.
-    next = headOf(deps, channelId) ?? null;
-  }
-  while (found.length < read.limit) {
-    if (next === "") return found;
-    const current: TimelineRow | null = next === null ? null : row(next);
-    if (!current) break;
-    if (since !== undefined && compareTs(current.ts, since) < 0) return found;
-    if (within(current.ts)) found.push(current.message);
-    above = current.ts;
-    next = current.prevTs;
-  }
-  if (found.length >= read.limit) return found;
-
-  // The copy does not know what comes next: ask Slack, below the last
-  // message taken or below the read's own bound.
-  // Below the last message taken, which the page then links to, unless that
-  // is still newer than the read's own bound: then below the bound, with no
-  // link, since the messages between are not read.
+  // Below the read's own upper bound, whichever is lower.
   const bound = until !== undefined ? justAfter(until) : undefined;
-  const adjacent = above !== undefined && (bound === undefined || compareTs(above, bound) <= 0);
-  const latest = adjacent ? above : bound;
-  const page = await deps.fetchPage(channelId, latest !== undefined ? { latest } : {});
-  deps.copy.keepRun(deps.teamId, channelId, {
-    messages: page.messages,
-    before: page.hasMore ? null : "",
-    ...(adjacent ? { after: above } : {}),
-  });
-  // Slack's newest, read with no upper bound: anything newer is heard in the
-  // drain, so it heads the chat unless a newer one was heard meanwhile.
-  const newest = page.messages[0]?.ts;
-  if (latest === undefined && newest !== undefined && deps.hearsEvery(channelId)) {
-    const head = deps.heads.get(channelId);
-    if (head === undefined || compareTs(head, newest) < 0) deps.heads.set(channelId, newest);
-  }
+  const latest =
+    read.olderThan !== undefined && (bound === undefined || compareTs(read.olderThan, bound) < 0)
+      ? read.olderThan
+      : bound;
+  const page = await fetchPage(channelId, latest !== undefined ? { latest } : {});
+  const found: ChannelMessage[] = [];
   for (const { ts, message } of page.messages) {
     if (found.length >= read.limit) break;
     if (since !== undefined && compareTs(ts, since) < 0) break;
@@ -186,63 +75,31 @@ export async function readTimeline(
 
 /** The `limit` messages right after `newerThan`, newest first. */
 async function readForward(
-  deps: SlackTimelineDeps,
+  fetchPage: FetchHistoryPage,
   channelId: string,
   read: TalkHistoryRead,
 ): Promise<ChannelMessage[]> {
   const from = read.newerThan as string;
   const until = read.until ? tsAt(read.until) : undefined;
   const since = read.since ? tsAt(read.since) : undefined;
-  const found: TimelineRow[] = [];
-  const head = headOf(deps, channelId);
-  let current = from;
-  let known = deps.copy.timelineRow(deps.teamId, channelId, from) !== null;
-  // Whether the copy reached the chat's newest message or the read's bound.
-  let ended = false;
-  while (known && found.length < read.limit) {
-    if (current === head) {
-      ended = true;
-      break;
-    }
-    const after = deps.copy.timelineAfter(deps.teamId, channelId, current);
-    if (!after) {
-      known = false;
-      break;
-    }
-    if (until !== undefined && compareTs(after.ts, until) > 0) {
-      ended = true;
-      break;
-    }
-    // Messages before the read's lower bound take no room on the page.
-    if (since === undefined || compareTs(after.ts, since) >= 0) found.push(after);
-    current = after.ts;
-  }
-  const done = known && (found.length >= read.limit || ended);
-  if (!done) {
-    // Slack answers a chat newest first, so the page is the messages right
-    // after `from` only when it holds every one of them.
-    const page = await deps.fetchPage(
-      channelId,
-      until !== undefined ? { latest: justAfter(until) } : {},
+  // Slack answers a chat newest first, so the page is the messages right
+  // after `from` only when it holds every one of them.
+  const page = await fetchPage(channelId, until !== undefined ? { latest: justAfter(until) } : {});
+  const newer = page.messages.filter(({ ts }) => compareTs(ts, from) > 0);
+  const wanted = newer.filter(({ ts }) => since === undefined || compareTs(ts, since) >= 0);
+  // The page reaches the read's lower bound, `from` or `since`, once it
+  // holds a message at or below it.
+  const reaches = page.messages.some(
+    ({ ts }) => compareTs(ts, from) <= 0 || (since !== undefined && compareTs(ts, since) <= 0),
+  );
+  if (!reaches && page.hasMore) {
+    throw new Error(
+      `More than ${page.messages.length} messages follow ${from} in Slack chat ${channelId}, and Slack answers its newest first. Read back from the newest with olderThan instead.`,
     );
-    deps.copy.keepRun(deps.teamId, channelId, { messages: page.messages, before: null });
-    const newer = page.messages.filter(({ ts }) => compareTs(ts, from) > 0);
-    const wanted = newer.filter(({ ts }) => since === undefined || compareTs(ts, since) >= 0);
-    // The page reaches the read's lower bound, `from` or `since`, once it
-    // holds a message at or below it.
-    const reaches = page.messages.some(
-      ({ ts }) => compareTs(ts, from) <= 0 || (since !== undefined && compareTs(ts, since) <= 0),
-    );
-    if (!reaches && page.hasMore) {
-      throw new Error(
-        `More than ${page.messages.length} messages follow ${from} in Slack chat ${channelId}, and Slack answers its newest first. Read back from the newest with olderThan instead.`,
-      );
-    }
-    found.length = 0;
-    for (const { ts, message } of [...wanted].reverse()) {
-      if (found.length >= read.limit) break;
-      found.push({ ts, prevTs: null, message });
-    }
   }
-  return found.reverse().map(({ message }) => message);
+  return [...wanted]
+    .reverse()
+    .slice(0, read.limit)
+    .reverse()
+    .map(({ message }) => message);
 }

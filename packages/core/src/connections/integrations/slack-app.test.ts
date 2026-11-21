@@ -162,12 +162,6 @@ describe("the Slack app talker", () => {
         keep: () => true,
         handedOver: () => {},
         mayNotHold: () => [],
-        keepRun: () => {},
-        timelineRow: () => null,
-        timelineBefore: () => [],
-        timelineAfter: () => null,
-        holdsNewer: () => false,
-        unlinkAcross: () => {},
       },
       listens: () => true,
     });
