@@ -6,6 +6,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { AppGrid, STORAGE_KEY } from "./AppGrid";
+import type { GatedFeature } from "@rome/api-types/features";
+import { hiddenFeatures, isShownInTest } from "@/test/features";
+
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 const LAST_OPENED_KEY = "rome-app-last-opened";
 const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
@@ -83,6 +89,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  hiddenFeatures.clear();
   cleanup();
   rs.unstubAllGlobals();
   localStorage.clear();
@@ -303,5 +310,27 @@ describe("Recent apps on the rail", () => {
 
     await screen.findByRole("link", { name: "Bravo" });
     expect(screen.getByRole("img", { name: "Not opened on this device" })).toBeTruthy();
+  });
+});
+
+describe("Apps of a hidden feature", () => {
+  it("never shows a cached app whose feature is hidden, even before the app list loads", async () => {
+    seed([fixture("a", "Alpha"), fixture("inbox", "Inbox", { origin: "builtin" })], {
+      a: minutesAgo(1),
+      inbox: minutesAgo(2),
+    });
+    hiddenFeatures.add("inbox");
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (input: RequestInfo | URL): Promise<Response> => {
+        const url = String(input);
+        if (url === "/api/apps") return new Promise<Response>(() => {});
+        if (url === "/api/settings") return Response.json({});
+        return new Response(null, { status: 404 });
+      }),
+    );
+    renderSidebar();
+    expect(await screen.findByRole("link", { name: "Alpha", exact: true })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Inbox", exact: true })).toBeNull();
   });
 });

@@ -5,8 +5,15 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { PeopleList } from "@rome/api-types/people";
 import { usePeople } from "./use-people";
+import type { GatedFeature } from "@rome/api-types/features";
+import { hiddenFeatures, isShownInTest } from "@/test/features";
+
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 afterEach(() => {
+  hiddenFeatures.clear();
   cleanup();
   rs.restoreAllMocks();
 });
@@ -60,5 +67,23 @@ describe("usePeople", () => {
     const { result } = renderHook(() => usePeople(), { wrapper: wrapper() });
 
     await waitFor(() => expect(result.current.data).toEqual([]));
+  });
+
+  it("offers no listing it read before People was hidden", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
+      Response.json(peopleList())) as typeof fetch);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result, rerender } = renderHook(() => usePeople(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      ),
+    });
+    await waitFor(() => expect(result.current.data).toEqual(peopleList().people));
+
+    hiddenFeatures.add("people");
+    rerender();
+
+    expect(result.current.data).toBeUndefined();
+    expect(queryClient.getQueryData(["people"])).toEqual(peopleList().people);
   });
 });

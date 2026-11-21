@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { ProjectSelector } from "@/components/project-selector";
 import { SourceConnect } from "@/components/sync/SourceConnect";
 import { cn } from "@/lib/utils";
+import { isShown } from "@/lib/features";
+import { appFeature } from "@rome/api-types/features";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
 import { ChatApiError, createProject as apiCreateProject, saveSetting } from "@/lib/chat-api";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
@@ -300,7 +302,11 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       closeMentionPicker();
     }
   }, [agentMentionLocked, closeMentionPicker]);
-  const effectiveMention = pinnedAgentMention ?? draftAgentMention;
+  // A mention kept from before its app's feature was hidden, such as one in a
+  // saved draft, is neither shown nor sent.
+  const shownDraftMention =
+    draftAgentMention && isShown(appFeature(draftAgentMention.appId)) ? draftAgentMention : null;
+  const effectiveMention = pinnedAgentMention ?? shownDraftMention;
   const coarsePointer = useCoarsePointer();
 
   // The empty box shows one hint, picked again on each send rather than on a
@@ -357,8 +363,12 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     () => storedDraft?.personaId ?? "",
   );
 
+  // A persona kept from before People was hidden, such as one in a saved
+  // draft, is not sent: the guardian speaks as themselves while it is hidden.
   const personaId =
-    selectedPersonId && (impersonationEnabled || !settings) ? selectedPersonId : undefined;
+    selectedPersonId && isShown("people") && (impersonationEnabled || !settings)
+      ? selectedPersonId
+      : undefined;
 
   const [impersonationMenuOpen, setImpersonationMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -657,7 +667,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
           reasoningEffort,
           projectPath: draftProjectName,
           deviceFolder: draftDeviceFolder ?? undefined,
-          agentMention: draftAgentMention ?? undefined,
+          agentMention: shownDraftMention ?? undefined,
           skillName,
         };
         void invokeOnSend(snapshot)
@@ -685,7 +695,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       draftModelSelection,
       draftProjectName,
       draftDeviceFolder,
-      draftAgentMention,
+      shownDraftMention,
       onSend,
       invokeOnSend,
     ],
@@ -734,7 +744,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       deviceFolder: draftDeviceFolder ?? undefined,
       // Pinned sessions ignore this; draft hosts read it to lock the new
       // session to the picked agent.
-      agentMention: draftAgentMention ?? undefined,
+      agentMention: shownDraftMention ?? undefined,
       skillName: skill?.name,
       inputId,
       replyTo: replyDraft?.target ?? undefined,

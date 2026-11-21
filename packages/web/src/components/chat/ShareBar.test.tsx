@@ -3,14 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@/i18n";
 import { createShare } from "@/lib/chat-api";
+import type { GatedFeature } from "@rome/api-types/features";
+import { hiddenFeatures, isShownInTest } from "@/test/features";
 import { ShareBar } from "./ShareBar";
 
-const placements = [
+const placements: { id: string; type: string; targetId?: string; order: number }[] = [
   { id: "w-app", type: "app", targetId: "studio", order: 1 },
   { id: "w-projects", type: "projects", order: 2 },
 ];
 
 rs.mock("@/pages/free/use-free-cells", () => ({ useFreeCells: () => ({ placements }) }));
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 rs.mock("@/hooks/use-apps", () => ({
   useAppsList: () => ({ apps: [{ id: "studio", displayName: "Studio", iconUrl: null }] }),
 }));
@@ -29,6 +34,7 @@ beforeEach(async () => {
   rs.mocked(createShare).mockResolvedValue({ id: "tok", url: "/share/tok", title: "Plan" });
 });
 afterEach(() => {
+  hiddenFeatures.clear();
   cleanup();
   rs.clearAllMocks();
 });
@@ -54,5 +60,27 @@ describe("ShareBar", () => {
     fireEvent.click(projects);
     expect(projects.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByText(/Exposes every file in this project/)).toBeTruthy();
+  });
+
+  it("offers no saved widget of a hidden feature's app, and leaves it out of the link", async () => {
+    hiddenFeatures.add("inbox");
+    placements.push({ id: "w-inbox", type: "app", targetId: "inbox", order: 3 });
+    try {
+      render(
+        <ShareBar sessionId="s" selectedTurnIds={["t1"]} agentName="Flint" onExit={() => {}} />,
+      );
+      expect(screen.getAllByRole("switch")).toHaveLength(2);
+      expect(screen.queryByRole("switch", { name: "inbox" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+      await waitFor(() =>
+        expect(createShare).toHaveBeenCalledWith("s", {
+          turnIds: ["t1"],
+          layout: [placements[0]],
+          agentName: "Flint",
+        }),
+      );
+    } finally {
+      placements.pop();
+    }
   });
 });

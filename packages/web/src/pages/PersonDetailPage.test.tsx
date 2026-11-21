@@ -14,6 +14,14 @@ import {
 } from "@rome/api-types/people";
 import i18n from "@/i18n";
 import PersonDetailPage from "./PersonDetailPage";
+import type { GatedFeature } from "@rome/api-types/features";
+import { isShownInTest } from "@/test/features";
+
+// These tests reach People or Inbox, so they run with every feature
+// shown.
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 // The person page: who they are on top, one account's timeline below. What is
 // under test is that the page reads the two routes that own it, `GET

@@ -16,6 +16,8 @@ import {
   FakeWebSocket,
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
+import type { GatedFeature } from "@rome/api-types/features";
+import { hiddenFeatures, isShownInTest } from "@/test/features";
 import { FreeGrid } from "./FreeGrid";
 import { selectTool, setActiveSession } from "./use-free-cells";
 
@@ -58,6 +60,9 @@ rs.mock("@/components/chat/Chat", () => ({
     chatHost.onSessionLayout = props.onSessionLayout;
     return null;
   },
+}));
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
 }));
 rs.mock("./AppWidget", () => ({
   AppWidget: ({ placementId }: { placementId: string }) => {
@@ -150,6 +155,7 @@ beforeEach(() => {
   rs.mocked(fetch).mockClear();
 });
 afterEach(() => {
+  hiddenFeatures.clear();
   cleanup();
   rs.unstubAllGlobals();
   localStorage.clear();
@@ -519,6 +525,33 @@ describe("FreeGrid layout from the first messages page", () => {
     renderSession("cached-chat");
     expect(screen.getByRole("tab", { name: "notes" })).toBeTruthy();
     expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining("/layout"), expect.anything());
+  });
+
+  it("mounts no saved widget of a hidden feature's app, and keeps it in the saved layout", () => {
+    hiddenFeatures.add("inbox");
+    const saved = [...cached, { id: "inbox", type: "app", targetId: "inbox", order: 1 }];
+    localStorage.setItem("rome:free-layout:inbox-chat", JSON.stringify(saved));
+    renderSession("inbox-chat");
+    expect(screen.getByRole("tab", { name: "notes" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "inbox" })).toBeNull();
+    expect(mounted).toHaveBeenCalledWith("notes");
+    expect(mounted).not.toHaveBeenCalledWith("inbox");
+    expect(JSON.parse(localStorage.getItem("rome:free-layout:inbox-chat")!)).toEqual(saved);
+  });
+
+  it("opens the first shown widget when the saved open one is a hidden feature's app", () => {
+    hiddenFeatures.add("inbox");
+    const saved = [
+      { id: "inbox", type: "app", targetId: "inbox", order: 0 },
+      { id: "notes", type: "app", targetId: "notes", order: 1 },
+    ];
+    const view = { activeId: "inbox", collapsed: false, unreadIds: ["inbox"] };
+    localStorage.setItem("rome:free-layout:inbox-open", JSON.stringify(saved));
+    localStorage.setItem("rome:tool-view:inbox-open", JSON.stringify(view));
+    renderSession("inbox-open");
+    expect(screen.getByRole("tab", { name: "notes" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByRole("tab", { name: "inbox" })).toBeNull();
+    expect(JSON.parse(localStorage.getItem("rome:tool-view:inbox-open")!)).toEqual(view);
   });
 
   it("applies the layout the first page carries", () => {

@@ -1,13 +1,21 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import {
   isUnreachableStatus,
+  listChatAgents,
   listSessionMessagePage,
   plainErrorText,
   postSessionTurn,
   postSessionTurnJson,
 } from "./chat-api";
+import type { GatedFeature } from "@rome/api-types/features";
+import { hiddenFeatures, isShownInTest } from "@/test/features";
+
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 afterEach(() => {
+  hiddenFeatures.clear();
   rs.unstubAllGlobals();
 });
 
@@ -292,5 +300,24 @@ describe("listSessionMessagePage", () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/chat/sessions/s1/messages?limit=10&before=c1");
     expect(page).toMatchObject({ messages: [], nextCursor: "t1" });
+  });
+});
+
+describe("listChatAgents", () => {
+  it("keeps the agents of an app that is a hidden feature, for labels and icons", async () => {
+    hiddenFeatures.add("inbox");
+    const inbox = {
+      ownerId: "inbox",
+      ownerType: "app",
+      label: "Inbox",
+      description: "",
+      iconUrl: null,
+      agents: [{ name: "inbox:sentinel", localName: "sentinel", description: "" }],
+    };
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => Response.json([inbox])),
+    );
+    expect((await listChatAgents()).map((g) => g.ownerId)).toEqual(["inbox"]);
   });
 });

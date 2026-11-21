@@ -36,7 +36,9 @@ import { useRecentApps } from "@/hooks/use-recent-apps";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import { isHiddenInLauncher } from "@/lib/chat-helpers";
 import { isChatPath } from "@/lib/chat-session";
-import { APP_NAV, type BuiltinNavEntry } from "./builtin-nav";
+import { type BuiltinNavEntry, useBuiltinNav } from "./builtin-nav";
+import { appFeature } from "@rome/api-types/features";
+import { isShown } from "@/lib/features";
 import { RailAppIcon, RailLabel, RecentAppsRail, railDotClass } from "./RecentAppsRail";
 import {
   ACTIVE_CLASS,
@@ -175,13 +177,19 @@ interface AppGridProps {
 export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   const { t } = useTranslation("common");
   const { t: tApps } = useTranslation("apps");
+  const builtinNav = useBuiltinNav();
   const location = useLocation();
   const navigate = useNavigate();
   const [pins, setPins] = useState<PinnedEntry[]>(() =>
     normalizeSidebarPins(readLocalPins() ?? DEFAULT_SIDEBAR_PINS),
   );
-  const [installedApps, setInstalledApps] =
-    useState<(InstalledAppCard | CachedApp)[]>(readLocalApps);
+  const [storedApps, setInstalledApps] = useState<(InstalledAppCard | CachedApp)[]>(readLocalApps);
+  // The cached list is filtered too, so a hidden app read from the cache never
+  // shows, even while the app list loads.
+  const installedApps = useMemo(
+    () => storedApps.filter((app) => isShown(appFeature(app.id))),
+    [storedApps],
+  );
   const labelled = useContext(RailLabelsContext);
   const tileClass = railLinkClass(labelled);
   // Chat opens the main chat in Concierge mode, else the ordinary chat last
@@ -395,7 +403,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     );
   };
 
-  const builtinMap = new Map(APP_NAV.map((b) => [b.id, b]));
+  const builtinMap = new Map(builtinNav.map((b) => [b.id, b]));
 
   const renderPin = (pin: PinnedEntry): React.ReactNode => {
     if (pin.type === "builtin") {

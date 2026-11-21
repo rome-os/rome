@@ -13,6 +13,14 @@ import * as timestampModule from "@/lib/message-timestamp" with { rstest: "impor
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { chatSearchShortcutForPlatform, isChatSearchShortcut } from "@/lib/chat-search-shortcut";
 import { agentMentionQuery, ChatSearchDialog, matchRanges } from "./ChatSearchDialog";
+import type { GatedFeature } from "@rome/api-types/features";
+import { isShownInTest } from "@/test/features";
+
+// These tests reach People or Inbox, so they run with every feature
+// shown.
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 // Counts timestamp formatting, which every drawn chat row does.
 const formatted = rs.hoisted(() => ({ count: 0 }));

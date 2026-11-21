@@ -21,6 +21,12 @@ import {
 } from "./ChatComposer";
 import { ReplyDraftHarness } from "./reply/reply-draft-harness";
 import type { ReplyTarget } from "./reply/reply-draft";
+import type { GatedFeature } from "@rome/api-types/features";
+import { hiddenFeatures, isShownInTest } from "@/test/features";
+
+rs.mock("@/lib/features", () => ({
+  isShown: (feature?: GatedFeature) => isShownInTest(feature),
+}));
 
 // The composer reads this once each time it renders.
 const composerRenders = rs.hoisted(() => ({ count: 0 }));
@@ -36,6 +42,7 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+  hiddenFeatures.clear();
   cleanup();
   sessionStorage.clear();
   localStorage.clear();
@@ -957,6 +964,33 @@ describe("New chat draft", () => {
     else act(() => composerRef.current?.submit("Quick entry"));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(onSend.mock.calls[0][0].personaId).toBe(draft.personaId);
+  });
+
+  it("shows and sends no mention of a hidden feature's app restored from a draft", async () => {
+    hiddenFeatures.add("inbox");
+    saveNewChatDraft({
+      ...draft,
+      agentMention: { appId: "inbox", agentName: "inbox:sentinel", appLabel: "Inbox" },
+    });
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer({ persistNewChatDraft: true, onSend }, { settings: {} });
+    expect(screen.queryByText("Inbox")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0].agentMention).toBeUndefined();
+  });
+
+  it("sends no persona restored from a draft while People is hidden", async () => {
+    hiddenFeatures.add("people");
+    saveNewChatDraft(draft);
+    const onSend = rs.fn().mockResolvedValue(undefined);
+    renderComposer(
+      { persistNewChatDraft: true, onSend },
+      { settings: { enableImpersonation: true } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0].personaId).toBeUndefined();
   });
 
   it("restores a draft device folder and sends it with the first turn", async () => {

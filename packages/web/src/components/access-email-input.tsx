@@ -9,6 +9,7 @@ import { parseEmailTextarea } from "@/lib/email-list";
 import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 import { cn } from "@/lib/utils";
 import { useAccountSearch } from "@/pages/people/use-roster";
+import { isShown } from "@/lib/features";
 
 /**
  * The email field of an access allow-list, completing from the contacts list
@@ -54,8 +55,11 @@ export function AccessEmailInput({
   // A space can sit inside a name ("Mira Chen"), so only a comma or semicolon
   // says a list is being typed. A pasted list takes the paste path anyway.
   const searchable = term.length > 0 && !/[,;]/.test(term);
+  // Suggestions come from the contacts People keeps, so none show while it is
+  // hidden.
+  const people = isShown("people");
   const search = useAccountSearch(searchable ? term : "", {
-    enabled: searchable && !disabled,
+    enabled: searchable && !disabled && people,
     channel: EMAIL_CHANNEL,
   });
   // The page lags the typed term by the debounce, so an answer to an older
@@ -63,12 +67,12 @@ export function AccessEmailInput({
   // fixed channel, so the current answer is never cut down to less than the
   // server returned.
   const suggestions = useMemo(() => {
-    if (!searchable || !search.data) return [];
+    if (!searchable || !search.data || !people) return [];
     const matching = search.data.accounts.filter((account) =>
       accountMatchesQuery(account, term, { matchChannel: false }),
     );
     return contactEmailSuggestions(matching, { exclude, limit: 6 });
-  }, [searchable, search.data, term, exclude]);
+  }, [searchable, search.data, people, term, exclude]);
 
   const open = !dismissed && !disabled && suggestions.length > 0;
   const active = open && highlight >= 0 && highlight < suggestions.length ? highlight : -1;

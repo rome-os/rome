@@ -18,11 +18,12 @@ import {
 import { relativeTime } from "@/lib/routine-language";
 import { useAppsList } from "@/hooks/use-apps";
 import { useFreeCells, type WidgetPlacement } from "@/pages/free/use-free-cells";
+import { isPlacementShown } from "@/pages/free/widget-visibility";
 import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 
 function shareableWidgets(placements: WidgetPlacement[]): WidgetPlacement[] {
   return [...placements]
-    .filter((p) => p.type === "app" || p.type === "projects")
+    .filter((p) => (p.type === "app" || p.type === "projects") && isPlacementShown(p))
     .sort((a, b) => a.order - b.order);
 }
 

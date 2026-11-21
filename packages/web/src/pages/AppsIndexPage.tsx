@@ -46,7 +46,7 @@ import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useAppLifecycle } from "@/hooks/use-app-lifecycle";
 import { useLongPressMenu } from "@/hooks/use-long-press-menu";
 import { useSidebarPins } from "@/hooks/use-sidebar-pins";
-import { APP_NAV } from "@/shell/builtin-nav";
+import { type BuiltinNavEntry, useBuiltinNav } from "@/shell/builtin-nav";
 import { TITLEBAR_SLOT } from "@/shell/DesktopTitlebar";
 
 function isInFlight(phase: AppViewState): boolean {
@@ -291,6 +291,7 @@ function SectionHeader({ title, count }: SectionHeaderProps) {
 export default function AppsIndexPage() {
   const { t } = useTranslation("apps");
   const { t: tCommon } = useTranslation("common");
+  const builtinNav = useBuiltinNav();
   const navigate = useNavigate();
   const { apps, error: appsError } = useAppsList();
   const invalidateApps = useInvalidateApps();
@@ -316,13 +317,13 @@ export default function AppsIndexPage() {
   };
   // Apps, Chat and Projects are fixed on the sidebar and Settings is in the
   // profile menu, so none of them needs a tile here.
-  const builtinPages = APP_NAV.filter(
+  const builtinPages = builtinNav.filter(
     (b) => !["apps", "chat", "projects", "settings"].includes(b.id),
   );
 
   const normalizedQuery = query.trim().toLowerCase();
   const isSearching = normalizedQuery.length > 0;
-  const matchesBuiltin = (entry: (typeof APP_NAV)[number]): boolean => {
+  const matchesBuiltin = (entry: BuiltinNavEntry): boolean => {
     if (!isSearching) return true;
     const haystack = [
       tCommon(entry.labelKey),
@@ -356,7 +357,7 @@ export default function AppsIndexPage() {
   // load keeps showing skeletons even when a query is active.
   const noMatches = isSearching && visibleApps !== null && resultCount === 0;
 
-  const renderBuiltinTile = (entry: (typeof APP_NAV)[number]) => {
+  const renderBuiltinTile = (entry: BuiltinNavEntry) => {
     const label = tCommon(entry.labelKey);
     const pinned = isPinned("builtin", entry.id);
     return (
