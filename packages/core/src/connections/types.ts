@@ -298,14 +298,32 @@ export interface RuntimeKit {
  *  messages one at a time, so a message waits behind its chat's earlier ones. */
 export const DELIVERY_ACCEPT_TIMEOUT_MS = 2 * 60_000;
 
-/** A delivery's rejection when recording stopped before the message was on
- *  record, as while an app swaps its hook. Recording starts again moments
- *  later, so a connection can let its platform deliver the message again
- *  without treating the refusal as a fault. */
-export class RecordingStopped extends Error {
+/** A delivery that a consumer refused to accept for now, though nothing is
+ *  wrong with the message or its handler: the platform can deliver it again.
+ *  Each kind of refusal is logged where it happens, so it is not a handler
+ *  error (Talker.start). */
+export class DeliveryRefused extends Error {}
+
+/** A delivery's rejection when nothing records its message: recording
+ *  stopped before the message was on record, or nobody records the channel
+ *  now, as during a hook swap or while no app's message hook is loaded. A
+ *  connection can let its platform deliver the message again without treating
+ *  the refusal as a fault, and the message stays with the platform until
+ *  recording is back. */
+export class RecordingStopped extends DeliveryRefused {
   constructor() {
     super("dropped before it was recorded: recording stopped");
     this.name = "RecordingStopped";
+  }
+}
+
+/** A delivery's rejection when its message was not recorded within
+ *  {@link DELIVERY_ACCEPT_TIMEOUT_MS}, as behind a busy chat. The platform can
+ *  deliver it again, and Chats records it once. */
+export class NotRecordedInTime extends DeliveryRefused {
+  constructor(timeoutMs: number) {
+    super(`not recorded within ${timeoutMs}ms`);
+    this.name = "NotRecordedInTime";
   }
 }
 

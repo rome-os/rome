@@ -31,6 +31,7 @@ import {
   DuplicateKindConnectionsError,
   RenewalUnavailable,
 } from "./errors.js";
+import { DeliveryRefused } from "./types.js";
 import type {
   Act,
   Actor,
@@ -1132,10 +1133,18 @@ class ConnectionImpl implements Connection {
         const accepted = Promise.all(
           slot.messageHandlers.map((handler) =>
             handler(msg).catch((err: unknown) => {
-              this.log.error("Talk onMessage handler threw", {
-                connectionId: this.id,
-                error: errMsg(err),
-              });
+              // A refusal is logged where it happens, and is no handler bug.
+              if (err instanceof DeliveryRefused) {
+                this.log.debug("Talk delivery refused for now", {
+                  connectionId: this.id,
+                  error: errMsg(err),
+                });
+              } else {
+                this.log.error("Talk onMessage handler threw", {
+                  connectionId: this.id,
+                  error: errMsg(err),
+                });
+              }
               throw err;
             }),
           ),
