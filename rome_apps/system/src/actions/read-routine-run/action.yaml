@@ -1,0 +1,7 @@
+name: read_routine_run
+type: system
+description: Read one run of a routine — its status, its error, and every action it ran as a tree, with each action's status, error, duration and arguments (long ones cut short). Use it to explain why a run failed or what it did. Get the run's id from system:list_routine_runs
+complexity: simple
+speed: fast
+reliability: high
+sideEffects: read-only

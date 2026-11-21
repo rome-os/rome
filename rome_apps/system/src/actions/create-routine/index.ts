@@ -1,22 +1,15 @@
-import { createAppLogger, defineAction, getCurrentActionContext, z } from "@rome-os/app-runtime";
+import { defineAction, z } from "@rome-os/app-runtime";
 import type {
   Action,
   ActionConfig,
   ActionResult,
-  AgentRunnerInterface,
   AppActionRuntimeDeps,
-  Routine,
-  RoutineEngine,
-  RoutinesRepository,
-  Trigger,
 } from "@rome-os/app-runtime";
 export type { CreateRoutineOutput } from "./types.js";
 
-const log = createAppLogger("create-routine");
-
-// The engine merges trigger payloads into action args under this key. Forbid
-// it in caller-supplied args so a routine never silently overwrites it.
-const RESERVED_ARG_KEY = "__triggerPayload";
+// The rules for a new routine live in core (routines/create.ts), shared with the
+// Routines page. This action is how agents and apps reach them: it declares the
+// input agents read and hands it to core's `routineCreation`.
 
 const scheduleTriggerSchema = z.object({
   type: z.literal("schedule"),
@@ -91,446 +84,26 @@ export const createRoutineInputSchema = z.object({
 
 export type CreateRoutineInput = z.infer<typeof createRoutineInputSchema>;
 
+/** Core's routine creation: the main process's own, or a worker's call to it.
+ * It reads who asks (the calling app, or the agent) from the running action. */
+export interface RoutineCreationService {
+  create(input: unknown): Promise<ActionResult>;
+}
+
 export interface CreateRoutineDeps {
-  routinesRepo: RoutinesRepository;
-  /** Real engine in the main process, RPC-backed proxy in the action worker —
-   * injected per process, so this action never knows where it runs. */
-  routineEngine: RoutineEngine;
-  /** The action registry of the executing process. Used to reject a routine
-   * bound to an action that doesn't exist, or with args its input schema
-   * rejects — otherwise the routine persists and fails on every fire. Both the
-   * main process and the action worker put a fully-populated registry in the
-   * action deps. */
-  actionRegistry: ActionExistenceChecker;
-  /** Core's resolver that stores "once at the next localTime" as a dated
-   * one-off, the same one POST /routines uses. Each process binds it to its own
-   * guardian-timezone setting. */
-  resolveOneOffDate: (trigger: Trigger) => Promise<Trigger>;
-  /** Answers whether an agent may call an action, with the same resolution as
-   * the agent tool gate. Without it, agents cannot schedule explicit actions. */
-  agentRunner?: Pick<AgentRunnerInterface, "hasAction">;
+  routineCreation: RoutineCreationService;
 }
-
-/** What create_routine asks the action registry about a target action: whether
- * it is registered, whether it is explicit, and whether args fit its input
- * schema. Named (rather than an inline shape) so the dependency reads as a
- * contract; the runtime passes the full registry, which satisfies it. */
-export interface ActionExistenceChecker {
-  has(name: string): boolean | Promise<boolean>;
-  /** True when the action is `visibility: explicit`. */
-  isExplicit(name: string): boolean | Promise<boolean>;
-  /** The full ID of the one action whose name without its app is `name`. */
-  suggest?(name: string): string | undefined | Promise<string | undefined>;
-  /** An error message when `args` fail the action's input schema, else null. */
-  validateArgs(name: string, args: Record<string, unknown>): string | null | Promise<string | null>;
-}
-
-/** Error returned when a routine names an action that isn't registered. Names
- * the remedy so the agent routes correctly instead of guessing again: build the
- * missing automation as a workflow (which registers a `<appId>_run` action),
- * or fall back to the always-available `system:summon` / `system:send_message`. */
-export function unknownActionError(actionName: string, suggestion?: string): string {
-  return (
-    `actionName "${actionName}" is not a registered action. ` +
-    (suggestion ? `Did you mean "${suggestion}"? ` : "") +
-    `To run multi-step work that doesn't exist yet, build it first with the ` +
-    `workflow_creation skill (it registers a "<appId>_run" action), then bind the ` +
-    `routine to that action. For one-shot judgement or a notification, use the ` +
-    `built-in "system:summon" or "system:send_message".`
-  );
-}
-
-// An agent's hint names only an action it holds, so it learns of nothing more.
-async function suggestFor(
-  deps: CreateRoutineDeps,
-  actionName: string,
-  agentName: string | undefined,
-): Promise<string | undefined> {
-  const suggestion = await deps.actionRegistry.suggest?.(actionName);
-  if (!suggestion || !agentName) return suggestion;
-  return (await deps.agentRunner?.hasAction?.(agentName, suggestion)) === true
-    ? suggestion
-    : undefined;
-}
-
-const LOCAL_TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-// The FREQ and BYDAY tokens ScheduleTriggerProvider.rruleToCron understands.
-// It silently falls back (unknown FREQ → DAILY, unknown BYDAY → Sunday), so a
-// typo would otherwise produce a live routine on the wrong cadence. Reject
-// anything outside these sets up front.
-const VALID_FREQ = new Set(["MINUTELY", "HOURLY", "DAILY", "WEEKLY", "MONTHLY", "YEARLY"]);
-const VALID_BYDAY = new Set(["SU", "MO", "TU", "WE", "TH", "FR", "SA"]);
-
-// The clauses ScheduleTriggerProvider.rruleToCron actually applies for each
-// FREQ. Anything else in the RRULE (e.g. INTERVAL under WEEKLY, BYDAY under
-// DAILY, or COUNT/UNTIL anywhere) is silently ignored by the cron conversion,
-// changing the cadence the caller asked for — so reject it. Keep in sync with
-// rruleToCron; the deeper fix is for that converter to fail loudly itself.
-const HONORED_CLAUSES: Record<string, Set<string>> = {
-  MINUTELY: new Set(["FREQ", "INTERVAL"]),
-  HOURLY: new Set(["FREQ", "INTERVAL"]),
-  DAILY: new Set(["FREQ", "INTERVAL"]),
-  WEEKLY: new Set(["FREQ", "BYDAY"]),
-  MONTHLY: new Set(["FREQ", "INTERVAL", "BYMONTHDAY"]),
-  YEARLY: new Set(["FREQ", "BYMONTH", "BYMONTHDAY"]),
-};
-
-/** Convert a wall-clock date+time in `tzid` to the real UTC instant — the same
- * algorithm `ScheduleTriggerProvider.parseDateAndLocalTime` uses at fire time.
- * Treats the fields as if they were UTC, then corrects by the zone's offset at
- * that instant. Inlined because app actions can't import core internals. */
-function wallClockToUtc(date: string, localTime: string, tzid: string): Date {
-  const [year, month, day] = date.split("-").map(Number);
-  const [hour, minute] = localTime.split(":").map(Number);
-  const guessUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0);
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: tzid,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    })
-      .formatToParts(new Date(guessUtcMs))
-      .map((p) => [p.type, p.value]),
-  );
-  const tzWallMs = Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    // Intl can emit "24" for midnight in some locales — normalize to 0.
-    Number(parts.hour) === 24 ? 0 : Number(parts.hour),
-    Number(parts.minute),
-    0,
-  );
-  return new Date(guessUtcMs - (tzWallMs - guessUtcMs));
-}
-
-/** Trim the exact-match string fields of an event-bus trigger so a value with
- * stray whitespace (`" gmail.x "`) isn't persisted verbatim and then never
- * matched by EventBusTriggerProvider's exact comparison. `equals` is left
- * untouched — it's matched against payload values that may legitimately contain
- * whitespace. Schedule triggers pass through unchanged. */
-function canonicalizeTrigger(trigger: CreateRoutineInput["trigger"]): Trigger {
-  if (trigger.type === "schedule") {
-    // A dated one-off is an absolute instant: pin it to a `fixed` zone at
-    // creation. `floating` would make the scheduler resolve the fire
-    // instant against the guardian's *live* zone, which (a) disagrees with the
-    // past-date check below — computed from the stored `tzid` — and (b) would
-    // silently move the instant if the guardian's zone later changes, even
-    // though a one-off should fire at the moment it was scheduled for. The
-    // supplied `tzid` is the zone at creation, so pinning it resolves the
-    // one-off to a stable absolute instant.
-    if (trigger.date && trigger.tzMode !== "fixed") {
-      return { ...trigger, tzMode: "fixed" };
-    }
-    return trigger;
-  }
-  // Event-bus triggers need their match strings trimmed.
-  if (trigger.type !== "event-bus") return trigger;
-  return {
-    ...trigger,
-    eventName: trigger.eventName.trim(),
-    ...(trigger.sourcePattern !== undefined ? { sourcePattern: trigger.sourcePattern.trim() } : {}),
-    ...(trigger.filter
-      ? { filter: trigger.filter.map((c) => ({ field: c.field.trim(), equals: c.equals })) }
-      : {}),
-  };
-}
-
-/** Validate trigger fields per type. Returns an error string (for the agent to
- * relay) or null. Fails closed so a malformed trigger never becomes an enabled
- * routine that silently never fires. */
-function validateTrigger(trigger: Trigger): string | null {
-  if (trigger.type === "schedule") {
-    if (!LOCAL_TIME_RE.test(trigger.localTime)) {
-      return `trigger.localTime "${trigger.localTime}" must be HH:mm (24-hour), e.g. 09:30`;
-    }
-    if (trigger.tzid !== "UTC") {
-      try {
-        new Intl.DateTimeFormat("en-US", { timeZone: trigger.tzid });
-      } catch {
-        return `trigger.tzid "${trigger.tzid}" is not a valid IANA timezone`;
-      }
-    }
-    if (trigger.date !== undefined) {
-      if (!DATE_RE.test(trigger.date)) {
-        return 'trigger.date must be "YYYY-MM-DD"';
-      }
-      // Shape alone isn't enough: "2026-02-30" matches the regex but the
-      // scheduler's Date.UTC conversion silently normalizes it to Mar 2, so the
-      // routine fires on a different day than asked. Reject dates that don't
-      // round-trip through a real calendar.
-      const [y, mo, d] = trigger.date.split("-").map(Number);
-      const parsed = new Date(Date.UTC(y, mo - 1, d));
-      if (
-        parsed.getUTCFullYear() !== y ||
-        parsed.getUTCMonth() !== mo - 1 ||
-        parsed.getUTCDate() !== d
-      ) {
-        return `trigger.date "${trigger.date}" is not a real calendar date`;
-      }
-      if (trigger.rrule) {
-        return "trigger.date and trigger.rrule are mutually exclusive";
-      }
-      // A one-off whose instant has already passed would persist as an enabled
-      // routine that never fires (ScheduleTriggerProvider assumes the create
-      // path filtered these out). Compare in the routine's own timezone so a
-      // positive-offset zone can't slip an already-expired one-off through.
-      const fireAt = wallClockToUtc(trigger.date, trigger.localTime, trigger.tzid);
-      if (fireAt.getTime() < Date.now()) {
-        return `trigger.date "${trigger.date}" ${trigger.localTime} is in the past for ${trigger.tzid}`;
-      }
-    }
-    // A blank rrule ("") is neither a real recurrence nor an omitted one: with
-    // no date it reads as "fire once at the next localTime", silently changing
-    // recurring intent into a one-off. Reject it; omit rrule entirely for a
-    // one-off.
-    if (trigger.rrule !== undefined && !trigger.rrule.trim()) {
-      return "trigger.rrule must be a non-empty RRULE when provided (omit it for a one-off)";
-    }
-    if (trigger.rrule) {
-      const upper = trigger.rrule.toUpperCase();
-      const freqMatch = upper.match(/FREQ=([A-Z]+)/);
-      if (!freqMatch || !VALID_FREQ.has(freqMatch[1])) {
-        return `trigger.rrule must specify a valid FREQ (one of ${[...VALID_FREQ].join(", ")})`;
-      }
-      // Reject clauses this FREQ doesn't honor, rather than let the scheduler
-      // silently drop them and fire on a different cadence.
-      const honored = HONORED_CLAUSES[freqMatch[1]];
-      const clauseNames = [...upper.matchAll(/(?:^|;)([A-Z]+)=/g)].map((m) => m[1]);
-      const unsupported = clauseNames.filter((clause) => !honored.has(clause));
-      if (unsupported.length > 0) {
-        return `FREQ=${freqMatch[1]} does not support clause(s): ${[...new Set(unsupported)].join(", ")} — the scheduler would ignore them and fire on a different cadence`;
-      }
-      // Every downstream check (and rruleToCron itself) reads only the first
-      // occurrence of each clause, so a repeat like FREQ=DAILY;INTERVAL=1;INTERVAL=2
-      // or a doubled FREQ silently fires on the first value's cadence while the
-      // caller may have meant the second. Reject any repeated clause.
-      const duplicates = [...new Set(clauseNames.filter((c, i) => clauseNames.indexOf(c) !== i))];
-      if (duplicates.length > 0) {
-        return `trigger.rrule repeats clause(s): ${duplicates.join(", ")} — each clause may appear at most once`;
-      }
-      // rruleToCron consumes only the first number of each numeric clause and
-      // otherwise falls back, so a multi-value ("1,15") or non-numeric ("foo")
-      // clause silently produces the wrong cadence. Match each clause to the end
-      // of its segment and require a single in-range integer.
-      const singleIntClause = (name: string, min: number, max: number): string | null => {
-        const m = upper.match(new RegExp(`${name}=([^;]*)`));
-        if (!m) return null;
-        const v = m[1];
-        if (!/^\d+$/.test(v) || Number(v) < min || Number(v) > max) {
-          return `trigger.rrule ${name} must be a single integer between ${min} and ${max}`;
-        }
-        return null;
-      };
-      // INTERVAL=0/negative produces a `*/0` cron that never fires.
-      const intervalErr = singleIntClause("INTERVAL", 1, 1_000_000);
-      if (intervalErr) return intervalErr;
-      // Reject FREQs whose day/month rruleToCron leaves to a nondeterministic
-      // or silently-assumed default: MONTHLY → every day, WEEKLY → the weekday
-      // the routine happens to be created on, YEARLY → Jan 1.
-      if (freqMatch[1] === "MONTHLY" && !/BYMONTHDAY=\d+/.test(upper)) {
-        return "FREQ=MONTHLY requires BYMONTHDAY=N — without it the schedule silently fires daily (e.g. FREQ=MONTHLY;BYMONTHDAY=15)";
-      }
-      if (freqMatch[1] === "WEEKLY" && !/(?:^|;)BYDAY=/.test(upper)) {
-        return "FREQ=WEEKLY requires BYDAY=... (e.g. BYDAY=MO) — without it the firing day is nondeterministic";
-      }
-      if (
-        freqMatch[1] === "YEARLY" &&
-        !(/(?:^|;)BYMONTH=/.test(upper) && /(?:^|;)BYMONTHDAY=/.test(upper))
-      ) {
-        return "FREQ=YEARLY requires both BYMONTH=M and BYMONTHDAY=D (e.g. BYMONTH=1;BYMONTHDAY=1)";
-      }
-      const bmdErr = singleIntClause("BYMONTHDAY", 1, 31);
-      if (bmdErr) return bmdErr;
-      const bmErr = singleIntClause("BYMONTH", 1, 12);
-      if (bmErr) return bmErr;
-      // Match the whole BYDAY value (up to the next clause) so ordinals like
-      // "1MO" — which rruleToCron silently maps to today's weekday — are caught
-      // rather than partially matched.
-      const byDay = upper.match(/BYDAY=([^;]+)/);
-      if (byDay) {
-        const bad = byDay[1]
-          .split(",")
-          .map((d) => d.trim())
-          .filter((d) => !VALID_BYDAY.has(d));
-        if (bad.length > 0) {
-          return `trigger.rrule has invalid BYDAY token(s): ${bad.join(", ")} (use SU,MO,TU,WE,TH,FR,SA; ordinals like 1MO are not supported)`;
-        }
-      }
-    }
-  }
-  if (trigger.type === "event-bus") {
-    // EventBusTriggerProvider matches on exact eventName equality, so a blank
-    // name can never fire. Validate here too (not only in the Zod schema) so a
-    // direct/programmatic call is fail-closed regardless of how it was built.
-    if (!trigger.eventName.trim()) {
-      return "trigger.eventName must be a non-empty event type (find one with system:search_event_catalog)";
-    }
-    // A blank sourcePattern is falsy to EventBusTriggerProvider, which widens
-    // the routine to every source — the opposite of what a caller who bothered
-    // to send the field intended. Reject it; omit the field to match all.
-    if (trigger.sourcePattern !== undefined && !trigger.sourcePattern.trim()) {
-      return "trigger.sourcePattern must be non-empty when provided (omit it to match all sources)";
-    }
-    for (const cond of trigger.filter ?? []) {
-      if (!cond.field.trim() || typeof cond.equals !== "string") {
-        return "each trigger.filter condition needs a non-empty field and a string equals";
-      }
-      // EventBusTriggerProvider resolves field as a dot-path (path.split(".")),
-      // so an empty or whitespace-only segment (".from", "from.", "from..email")
-      // reads as obj[""] → undefined and the routine can never match. Reject it
-      // before persisting rather than create a live-but-dead routine.
-      if (cond.field.split(".").some((seg) => seg.trim() === "")) {
-        return `trigger.filter field "${cond.field}" has an empty path segment — use dot-separated keys with no blank segments (e.g. message.from.email)`;
-      }
-    }
-  }
-  return null;
-}
-
-/** Bring a freshly-created routine live. Activation is best-effort: the row
- * is already persisted, so a failure degrades to "created but not yet active"
- * (the boot-time `routineEngine.start()` sweep re-activates it) rather than
- * surfacing as a hard error that would make callers retry and duplicate. */
-async function activateRoutine(routine: Routine, engine: RoutineEngine): Promise<void> {
-  try {
-    await engine.activate(routine);
-  } catch (err) {
-    log.error("failed to activate routine", {
-      routineId: routine.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-}
-
-export async function createRoutine(
-  input: CreateRoutineInput,
-  deps: CreateRoutineDeps,
-): Promise<ActionResult> {
-  const args = input.args ?? {};
-  if (Array.isArray(args)) {
-    return {
-      status: "error",
-      error:
-        "args must be a single object — fan-out is unsupported; create one routine per argument set instead",
-    };
-  }
-  if (RESERVED_ARG_KEY in args) {
-    return { status: "error", error: `args may not contain reserved key "${RESERVED_ARG_KEY}"` };
-  }
-
-  // A blank/whitespace actionName fails the exact lookup in actionEngine.run on
-  // every fire; reject and persist the trimmed full ID.
-  const actionName = input.actionName.trim();
-  if (!actionName) {
-    return { status: "error", error: "actionName must be a non-empty action name" };
-  }
-  // Fail closed: a routine bound to a non-existent action would persist and
-  // error on every fire (actionEngine.run throws "Action not found"). Reject at
-  // create time with a remedy the agent can act on.
-  // A routine fires its action outside the agent tool gate, so an explicit
-  // target needs a principal that may call it: the app code that owns the call
-  // (callerAppId), or an agent that holds the action. Unattributed calls, such
-  // as one fired by another routine, a webhook or a favor, fail closed.
-  const context = getCurrentActionContext();
-  if (!(await deps.actionRegistry.has(actionName))) {
-    return {
-      status: "error",
-      error: unknownActionError(actionName, await suggestFor(deps, actionName, context?.agentName)),
-    };
-  }
-  if (!context?.callerAppId && (await deps.actionRegistry.isExplicit(actionName))) {
-    const agentName = context?.agentName;
-    if (!agentName || (await deps.agentRunner?.hasAction?.(agentName, actionName)) !== true) {
-      return {
-        status: "error",
-        error: `actionName "${actionName}" is explicit: only an agent granted it can schedule it`,
-      };
-    }
-  }
-  // Every fire passes these stored args to the action, so args its input
-  // schema rejects would fail every fire.
-  const argsError = await deps.actionRegistry.validateArgs(actionName, args);
-  if (argsError) {
-    return { status: "error", error: argsError };
-  }
-
-  // `name` is the human-readable display label; trim and reject blank so a
-  // whitespace-only " " isn't persisted as a routine with no visible title.
-  const name = input.name.trim();
-  if (!name) {
-    return { status: "error", error: "name must be a non-empty routine name" };
-  }
-
-  // `key` is the optional stable identity for dedup. Trim, treat blank as unset,
-  // and reject a duplicate before insert (the column's UNIQUE constraint is the
-  // authoritative backstop against a create/create race). A taken key is a
-  // caller error — surface it rather than silently creating an unkeyed twin.
-  const key = input.key?.trim() || undefined;
-  if (key) {
-    const existing = await deps.routinesRepo.findByKey(key);
-    if (existing) {
-      return {
-        status: "error",
-        error: `a routine with key "${key}" already exists (id ${existing.id}); delete it first or use a different key`,
-      };
-    }
-  }
-
-  const canonical = canonicalizeTrigger(input.trigger);
-  const triggerError = validateTrigger(canonical);
-  if (triggerError) {
-    return { status: "error", error: triggerError };
-  }
-  const trigger = await deps.resolveOneOffDate(canonical);
-
-  // The runtime attributes the routine to the app that invoked this action (from
-  // action ownership, not caller-supplied) — so any routine an app creates is
-  // managed by that app, and a routine an agent/user creates stays unmanaged.
-  const managedBy = context?.callerAppId;
-
-  const enabled = input.enabled ?? true;
-  const routineId = await deps.routinesRepo.create({
-    name,
-    key,
-    managedBy,
-    trigger,
-    actionName,
-    args,
-    enabled,
-  });
-
-  if (enabled) {
-    const routine: Routine = {
-      id: routineId,
-      name,
-      key,
-      managedBy,
-      enabled: true,
-      trigger,
-      actionName,
-      args,
-      createdAt: new Date(),
-    };
-    await activateRoutine(routine, deps.routineEngine);
-  }
-
-  return { status: "ok", data: { routineId } };
-}
-
-// --- Action factory ---
 
 export function createCreateRoutineAction(config: ActionConfig, deps: CreateRoutineDeps): Action {
   return defineAction({
     config,
     schema: createRoutineInputSchema,
-    execute: (input) => createRoutine(input, deps),
+    execute: async (input) => {
+      const result = await deps.routineCreation.create(input);
+      // Core names an existing routine for a taken key; the agent reads it in
+      // the error text, so only the status and text pass on.
+      return result.status === "error" ? { status: "error", error: result.error } : result;
+    },
   });
 }
 
@@ -539,28 +112,9 @@ export function createAction(
   deps: AppActionRuntimeDeps<CreateRoutineDeps>,
 ): Action {
   // The deps bag is untyped at the wiring seam; a missing dep must fail the
-  // action load at boot, not surface as a runtime TypeError (or worse, a
-  // zombie routine) on first invocation.
-  if (!deps.routineEngine) {
-    throw new Error("system:create_routine requires a routineEngine dep");
-  }
-  if (!deps.routinesRepo) {
-    throw new Error("system:create_routine requires a routinesRepo dep");
-  }
-  if (
-    typeof deps.actionRegistry?.has !== "function" ||
-    typeof deps.actionRegistry.isExplicit !== "function" ||
-    typeof deps.actionRegistry.validateArgs !== "function"
-  ) {
-    throw new Error(
-      "system:create_routine requires an actionRegistry dep with has(), isExplicit() and validateArgs()",
-    );
-  }
-  if (!deps.agentRunner) {
-    throw new Error("system:create_routine requires an agentRunner dep");
-  }
-  if (typeof deps.resolveOneOffDate !== "function") {
-    throw new Error("system:create_routine requires a resolveOneOffDate dep");
+  // action load at boot, not on first invocation.
+  if (typeof deps.routineCreation?.create !== "function") {
+    throw new Error("system:create_routine requires a routineCreation dep");
   }
   return createCreateRoutineAction(config, deps);
 }

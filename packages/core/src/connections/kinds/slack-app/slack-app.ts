@@ -20,7 +20,6 @@ import {
   parseSlackChatId,
   replyThreadOf,
   SlackApiError,
-  type SlackEvent,
   type SlackEventCallback,
   slackMessageId,
   slackSenderId,

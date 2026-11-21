@@ -9,6 +9,7 @@ import {
   type WidgetDrawing,
 } from "../agent/index.js";
 import { isValidTimeZone } from "../lib/timezone.js";
+import { type CreateRoutineInput, newTriggerError } from "./create.js";
 
 /** What `propose_routine` checks before it creates a routine without the
  * guardian's click. */
@@ -179,6 +180,10 @@ export function normalizeRoutineDraftForCard(
         ? buildScheduleTriggerFromInput(o)
         : buildManualTriggerFromInput();
   if (!triggerResult.ok) return triggerResult;
+  // The card's "Turn it on" creates the routine, so the draft meets the same
+  // rules a new routine does.
+  const triggerError = newTriggerError(triggerResult.trigger as CreateRoutineInput["trigger"]);
+  if (triggerError) return { ok: false, error: `propose_routine: ${triggerError}` };
 
   return {
     ok: true,
@@ -201,7 +206,7 @@ type ScheduleTriggerT = import("@rome-os/app-runtime").ScheduleTrigger;
 type ManualTriggerT = import("@rome-os/app-runtime").ManualTrigger;
 
 /** A manual routine carries no trigger config — it never fires on its own and
- * only runs from the dashboard's "Run now" button. The card still confirms the
+ * runs only when asked, from the dashboard's "Run now" or `system:run_routine`. The card still confirms the
  * draft (name, what it does) so the guardian deliberately saves it. */
 function buildManualTriggerFromInput(): { ok: true; trigger: ManualTriggerT } {
   return { ok: true, trigger: { type: "manual" } };
@@ -241,9 +246,9 @@ function buildEventTriggerFromInput(
   return { ok: true, trigger };
 }
 
-/** Validate the schedule fields the same way the `system:create_routine` action does,
- * so a confirm card never creates a silently-dead schedule (bad HH:mm, unknown
- * timezone, or a MONTHLY rule with no day-of-month). */
+/** Shape the schedule fields into a trigger, refusing what cannot be one
+ * (bad HH:mm, unknown timezone, both rrule and date). The rules every new
+ * routine meets run after, in `newTriggerError`. */
 function buildScheduleTriggerFromInput(
   o: Record<string, unknown>,
 ): { ok: true; trigger: ScheduleTriggerT } | { ok: false; error: string } {
@@ -275,14 +280,6 @@ function buildScheduleTriggerFromInput(
       error: "propose_routine: set either rrule (recurring) or date (one-off), not both",
     };
   }
-  if (rrule && rrule.toUpperCase().includes("FREQ=MONTHLY") && !/BYMONTHDAY=/i.test(rrule)) {
-    return {
-      ok: false,
-      error:
-        "propose_routine.rrule FREQ=MONTHLY requires BYMONTHDAY=N, e.g. FREQ=MONTHLY;BYMONTHDAY=1",
-    };
-  }
-
   // Binding. A dated one-off is an absolute instant → always pinned
   // (`fixed`). For a recurring schedule the caller chooses: `floating` (default,
   // follows the guardian's local time) or `fixed` for a zone-anchored routine
@@ -319,7 +316,7 @@ export function proposeRoutineTools(input: {
     {
       name: ROUTINE_PROPOSAL_TOOL,
       description:
-        "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook the guardian runs by hand from the Routines page's 'Run now' button (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with system:search_event_catalog rather than guessing.",
+        "Propose a routine (an automation) to the user as an interactive confirm card in web chat. A routine fires one of three ways: when a matching event arrives (kind: event), on a schedule (kind: schedule), or never on its own — a saved playbook that runs when the guardian asks, from the Routines page's 'Run now' or through system:run_routine (kind: manual). Use this — never create the routine silently — once you've gathered enough detail (the trigger, any narrowing, what to do). By default the card is a draft with a 'Turn it on' button that creates the routine directly; you do not call any create action afterwards. Set activate: true only when the guardian explicitly asked for this exact routine; the card then shows it already on. Gather missing detail first with the ask_question action. For event routines, discover the exact event type with system:search_event_catalog rather than guessing.",
       inputSchema: {
         type: "object",
         required: ["sentence", "name", "watchLabel", "thenSummary", "kind", "actionName", "args"],
@@ -352,7 +349,7 @@ export function proposeRoutineTools(input: {
             type: "string",
             enum: ["event", "schedule", "manual"],
             description:
-              '"event" when the routine should fire on something happening (an email arrives, a payment lands); "schedule" when it should fire at a time or on a recurring cadence ("every Friday at 9am", "tomorrow at noon"); "manual" when it should never fire on its own — a saved playbook the guardian keeps and runs by hand from the Routines page ("save this as something I can run whenever I want"). Manual routines need no eventName/tzid/schedule fields.',
+              '"event" when the routine should fire on something happening (an email arrives, a payment lands); "schedule" when it should fire at a time or on a recurring cadence ("every Friday at 9am", "tomorrow at noon"); "manual" when it should never fire on its own — a saved playbook the guardian keeps and runs when they ask, from the Routines page or through an agent ("save this as something I can run whenever I want"). Manual routines need no eventName/tzid/schedule fields.',
           },
           eventName: {
             type: "string",
