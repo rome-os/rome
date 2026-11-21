@@ -9,6 +9,7 @@ import {
   type WidgetDrawing,
 } from "../agent/index.js";
 import { isValidTimeZone } from "../lib/timezone.js";
+import { type CreateRoutineInput, newTriggerError } from "./create.js";
 
 /** What `propose_routine` checks before it creates a routine without the
  * guardian's click. */
@@ -179,6 +180,10 @@ export function normalizeRoutineDraftForCard(
         ? buildScheduleTriggerFromInput(o)
         : buildManualTriggerFromInput();
   if (!triggerResult.ok) return triggerResult;
+  // The card's "Turn it on" creates the routine, so the draft meets the same
+  // rules a new routine does.
+  const triggerError = newTriggerError(triggerResult.trigger as CreateRoutineInput["trigger"]);
+  if (triggerError) return { ok: false, error: `propose_routine: ${triggerError}` };
 
   return {
     ok: true,
@@ -241,9 +246,9 @@ function buildEventTriggerFromInput(
   return { ok: true, trigger };
 }
 
-/** Validate the schedule fields the same way the `system:create_routine` action does,
- * so a confirm card never creates a silently-dead schedule (bad HH:mm, unknown
- * timezone, or a MONTHLY rule with no day-of-month). */
+/** Shape the schedule fields into a trigger, refusing what cannot be one
+ * (bad HH:mm, unknown timezone, both rrule and date). The rules every new
+ * routine meets run after, in `newTriggerError`. */
 function buildScheduleTriggerFromInput(
   o: Record<string, unknown>,
 ): { ok: true; trigger: ScheduleTriggerT } | { ok: false; error: string } {
@@ -275,14 +280,6 @@ function buildScheduleTriggerFromInput(
       error: "propose_routine: set either rrule (recurring) or date (one-off), not both",
     };
   }
-  if (rrule && rrule.toUpperCase().includes("FREQ=MONTHLY") && !/BYMONTHDAY=/i.test(rrule)) {
-    return {
-      ok: false,
-      error:
-        "propose_routine.rrule FREQ=MONTHLY requires BYMONTHDAY=N, e.g. FREQ=MONTHLY;BYMONTHDAY=1",
-    };
-  }
-
   // Binding. A dated one-off is an absolute instant → always pinned
   // (`fixed`). For a recurring schedule the caller chooses: `floating` (default,
   // follows the guardian's local time) or `fixed` for a zone-anchored routine

@@ -163,6 +163,15 @@ export function unknownActionError(actionName: string, suggestion?: string): str
   );
 }
 
+/** The routine actions only the guardian's own message can call
+ * (routines/turn-access.ts). */
+const GUARDIAN_MESSAGE_ONLY = new Set([
+  "system:pause_routine",
+  "system:resume_routine",
+  "system:run_routine",
+  "system:stop_routine",
+]);
+
 // An agent's hint names only an action it holds, so it learns of nothing more.
 async function suggestFor(
   deps: CreateRoutineDeps,
@@ -230,6 +239,13 @@ function canonicalizeTrigger(trigger: CreateRoutineInput["trigger"]): Trigger {
       ? { filter: trigger.filter.map((c) => ({ field: c.field.trim(), equals: c.equals })) }
       : {}),
   };
+}
+
+/** Why a trigger cannot start a new routine, or null when it can. A routine's
+ * draft card checks it before it shows the draft, so "Turn it on" cannot fail on
+ * a rule the agent could still have fixed. */
+export function newTriggerError(trigger: CreateRoutineInput["trigger"]): string | null {
+  return validateTrigger(canonicalizeTrigger(trigger));
 }
 
 /** Validate trigger fields per type. Returns an error string (for the agent to
@@ -444,6 +460,13 @@ export async function createRoutine(
     return {
       status: "error",
       error: unknownActionError(actionName, await suggestFor(deps, actionName, agentName)),
+    };
+  }
+  // A routine's fire acts through loopback, which these refuse on every fire.
+  if (GUARDIAN_MESSAGE_ONLY.has(actionName)) {
+    return {
+      status: "error",
+      error: `actionName "${actionName}" takes the guardian's own message, so a routine cannot run it`,
     };
   }
   // A routine fires its action outside the agent tool gate, so an explicit

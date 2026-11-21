@@ -1686,6 +1686,24 @@ describe("create_routine — naming the action", () => {
     expect(result.error).toContain('Did you mean "coding:coding_task"?');
   });
 
+  it.each([
+    "system:pause_routine",
+    "system:resume_routine",
+    "system:run_routine",
+    "system:stop_routine",
+  ])("refuses %s, which only the guardian's own message can call", async (actionName) => {
+    const result = await createRoutine(nightly(actionName), {
+      routinesRepo: repo,
+      actionRegistry: allActions,
+      routineEngine: makeFakeEngine(),
+      resolveOneOffDate,
+    });
+
+    if (result.status !== "error") throw new Error("expected an error");
+    expect(result.error).toContain("guardian's own message");
+    expect(await repo.findAll()).toHaveLength(0);
+  });
+
   it("stores the full ID it was given", async () => {
     const result = await createRoutine(nightly("  coding:coding_task "), {
       routinesRepo: repo,
