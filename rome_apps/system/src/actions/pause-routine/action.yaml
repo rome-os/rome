@@ -1,6 +1,6 @@
 name: pause_routine
 type: system
-description: Pause a routine — it stays saved but stops firing until resumed. Use it when the guardian asks to stop, pause or turn off a routine for now, rather than delete it. Only in the guardian's private chat, in a turn their own message started. Find the routine's id with search_routine
+description: Pause a routine — it stays saved but stops firing until resumed. Use it when the guardian asks to stop, pause or turn off a routine for now, rather than delete it. Only in the guardian's private chat, in a turn their own message started, so a routine cannot use it as its action. Find the routine's id with system:search_routine
 complexity: simple
 speed: fast
 reliability: high
