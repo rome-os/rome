@@ -98,9 +98,7 @@ jobs:
     uses: ./.github/workflows/rome-node.yml
     with:
       publish_image: true
-      publish_latest: true
-      tag_version: true
-      skip_package_checks: true
+      tag_release: true
 
   publish-manual:
     name: Publish manual package
@@ -121,6 +119,4 @@ jobs:
     uses: ./.github/workflows/rome-node.yml
     with:
       publish_image: ${{ !inputs.dry_run }}
-      publish_latest: ${{ !inputs.dry_run }}
-      tag_version: ${{ !inputs.dry_run }}
-      skip_package_checks: true
+      tag_release: ${{ !inputs.dry_run }}

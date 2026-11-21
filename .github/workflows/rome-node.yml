@@ -43,10 +43,6 @@ on:
         description: Publish the Docker image to GitHub Container Registry
         type: boolean
         default: false
-      publish_latest:
-        description: Also move the latest tag on GitHub Container Registry
-        type: boolean
-        default: false
   workflow_call:
     inputs:
       publish_image:
@@ -54,18 +50,8 @@ on:
         required: false
         type: boolean
         default: false
-      publish_latest:
-        description: Also move the latest tag when publishing a stable release
-        required: false
-        type: boolean
-        default: false
-      tag_version:
-        description: Also tag the image with the version from packages/rome-node-cli/package.json
-        required: false
-        type: boolean
-        default: false
-      skip_package_checks:
-        description: Skip standalone npm archive checks (already covered by sdk-publish.yml)
+      tag_release:
+        description: Also tag the image as the immutable semver version from packages/rome-node-cli/package.json and latest (for stable releases)
         required: false
         type: boolean
         default: false
@@ -75,7 +61,6 @@ permissions:
 
 jobs:
   package:
-    if: ${{ !inputs.skip_package_checks }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -222,8 +207,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish the multi-platform image
         env:
-          TAG_VERSION: ${{ inputs.tag_version || false }}
-          PUBLISH_LATEST: ${{ inputs.publish_latest || false }}
+          TAG_RELEASE: ${{ inputs.tag_release || false }}
         run: |
           set -euo pipefail
           repo="ghcr.io/rome-os/rome-node"
@@ -235,23 +219,32 @@ jobs:
 
           semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$'
           stable_semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-          version=""
 
-          if [[ "$TAG_VERSION" == "true" ]]; then
+          if [[ "$TAG_RELEASE" == "true" ]]; then
             version=$(jq -er '.version' packages/rome-node-cli/package.json)
             if [[ ! "$version" =~ $semver ]]; then
               echo "::error::Version '${version}' in packages/rome-node-cli/package.json is not strict semver; refusing to publish."
               exit 1
             fi
-            tags+=("${repo}:${version}")
-            labels+=("org.opencontainers.image.version=${version}")
-          fi
 
-          if [[ "$PUBLISH_LATEST" == "true" ]]; then
-            if [[ "$TAG_VERSION" == "true" && ! "$version" =~ $stable_semver ]]; then
-              echo "Skipping :latest tag for prerelease version '${version}'."
-            else
+            # Enforce semver tag immutability: refuse to overwrite an already-published
+            # version tag (e.g. a manual release.yml dispatch after newer commits landed
+            # on main). "Not found" is the only proceed path; fail closed on registry errors.
+            ref="${repo}:${version}"
+            if out=$(docker buildx imagetools inspect "$ref" 2>&1); then
+              echo "::error::${ref} already exists; semver tags are immutable — cut a new version."
+              exit 1
+            elif ! grep -qiE 'not found|manifest unknown|no such manifest|name unknown' <<< "$out"; then
+              echo "::error::Could not verify ${ref} is unpublished: ${out}"
+              exit 1
+            fi
+
+            tags+=("$ref")
+            labels+=("org.opencontainers.image.version=${version}")
+            if [[ "$version" =~ $stable_semver ]]; then
               tags+=("${repo}:latest")
+            else
+              echo "Skipping :latest tag for prerelease version '${version}'."
             fi
           fi
 
