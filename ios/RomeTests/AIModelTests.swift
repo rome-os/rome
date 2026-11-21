@@ -58,7 +58,7 @@ import Testing
     @Test func noDefaultMeansChatCannotReply() {
         let summary = AIModelSummary.of(status(default: nil), showsUsage: true, credits: nil)
         #expect(summary == .notSetUp)
-        #expect(summary.text == "Not set up · Chat cannot reply")
+        #expect(summary.text == "Not set up")
         #expect(summary.tone == .danger)
         #expect(summary.offersConnect)
         // Credits a server could use, but not chosen: still not set up.

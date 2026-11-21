@@ -567,16 +567,6 @@
         }
       }
     },
-    "Accounts" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "账号"
-          }
-        }
-      }
-    },
     "Accounts and services" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1213,16 +1203,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Chat"
-          }
-        }
-      }
-    },
-    "Chat cannot reply until an account below is logged in." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "登录下面的一个账号之前，Chat 无法回复。"
           }
         }
       }
@@ -2605,6 +2585,16 @@
         }
       }
     },
+    "In use" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用中"
+          }
+        }
+      }
+    },
     "Instances are managed in Rome Cloud." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2971,6 +2961,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "登录 Claude"
+          }
+        }
+      }
+    },
+    "Log in to an account so Chat can reply." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录一个账号，Chat 才能回复。"
           }
         }
       }
@@ -3355,16 +3355,6 @@
         }
       }
     },
-    "New chats and chats that follow the default" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新聊天，以及跟随默认的聊天"
-          }
-        }
-      }
-    },
     "New code" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3711,16 +3701,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未设置"
-          }
-        }
-      }
-    },
-    "Not set up · Chat cannot reply" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未设置 · Chat 无法回复"
           }
         }
       }
@@ -5691,6 +5671,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "连接已断开"
+          }
+        }
+      }
+    },
+    "The default runs new chats and the chats that follow it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认的模型用于新聊天，以及跟随默认的聊天。"
           }
         }
       }

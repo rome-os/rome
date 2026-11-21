@@ -87,7 +87,7 @@ enum AIModelSummary: Equatable {
         case .paused(let provider, let until): return "\(provider.name) · \(AIUsageText.quota(until: until))"
         case .needsLogin(let provider, true): return "\(provider.name) · \(String(localized: "Log in again"))"
         case .needsLogin(let provider, false): return "\(provider.name) · \(String(localized: "Not logged in"))"
-        case .notSetUp: return String(localized: "Not set up · Chat cannot reply")
+        case .notSetUp: return String(localized: "Not set up")
         case .credits(let dollars?): return "\(DefaultModelProvider.romeCredits.name) · \(String(localized: "\(AIUsageText.dollars(dollars)) left"))"
         case .credits(nil): return DefaultModelProvider.romeCredits.name
         }
@@ -225,8 +225,9 @@ struct AIModelRow: View {
                         Text(verbatim: summary.text)
                             .romeFont(13)
                             .foregroundStyle(summary.tone.color)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
+                            // One line: a long state loses its tail, never wraps.
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
                 Spacer(minLength: 8)
@@ -257,9 +258,9 @@ struct AIModelRow: View {
     }
 }
 
-/// Settings → AI model: the default model and the accounts behind it, each
-/// with its login. Choosing the default, and Rome credits, come later; the
-/// page leaves room for them under each section.
+/// Settings → AI model: one list of what chats can run on, each account with
+/// its login and the default tagged. Rome credits show only while they are
+/// the default; choosing them, or another default, comes later.
 struct AIModelScreen: View {
     let store: AIModelStore
     let backend: RomeBackend
@@ -270,14 +271,37 @@ struct AIModelScreen: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                SettingsGroup(header: "Default") { defaultRow }
-                SettingsGroup(header: "Accounts") {
+            VStack(alignment: .leading, spacing: 8) {
+                // No default: why the guardian is here.
+                if store.summary == .notSetUp {
+                    Text("Log in to an account so Chat can reply.")
+                        .romeFont(13)
+                        .foregroundStyle(Palette.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
+                }
+                SettingsGroup {
+                    let onCredits = store.summaryProvider == .romeCredits
+                    if onCredits {
+                        AIAccountRow(
+                            id: "rome-credits",
+                            mark: Image(systemName: "dollarsign.circle"),
+                            name: DefaultModelProvider.romeCredits.name,
+                            line: AIAccountLine(text: store.creditsLine, tone: .plain, action: .none),
+                            isDefault: true,
+                            busy: false,
+                            last: false,
+                            onLogIn: {},
+                            onLogOut: {}
+                        )
+                    }
                     ForEach(Array(AIAccount.allCases.enumerated()), id: \.element) { index, account in
                         AIAccountRow(
-                            account: account,
+                            id: account.rawValue,
+                            mark: Image(account == .chatgpt ? "ChatGPTMark" : "ClaudeMark"),
+                            name: account.name,
                             line: store.line(account),
-                            isDefault: store.status?.defaultProvider?.provider == account.provider,
+                            isDefault: store.summaryProvider == account.provider,
                             busy: store.loggingOut == account,
                             last: index == AIAccount.allCases.count - 1,
                             onLogIn: { login = account },
@@ -285,12 +309,18 @@ struct AIModelScreen: View {
                         )
                     }
                 }
+                if store.summaryProvider != nil {
+                    Text("The default runs new chats and the chats that follow it.")
+                        .romeFont(13)
+                        .foregroundStyle(Palette.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
+                }
                 if let failed = store.logoutFailed {
                     Text(verbatim: String(localized: "Could not log out of \(failed.name)"))
                         .romeFont(13)
                         .foregroundStyle(Palette.destructive)
                         .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
-                        .padding(.top, -18)
                 }
             }
             .padding(.horizontal, 16)
@@ -321,39 +351,6 @@ struct AIModelScreen: View {
             Text("Logs out on this server only.")
         }
     }
-
-    private var defaultRow: some View {
-        let provider = store.summaryProvider
-        return HStack(spacing: 12) {
-            Image(systemName: "sparkles")
-                .romeFont(15)
-                .foregroundStyle(Palette.fg)
-                .frame(width: 30, height: 30)
-                .background(Palette.secondaryFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            VStack(alignment: .leading, spacing: 2) {
-                if store.status == nil {
-                    Text("Loading…").romeFont(17).foregroundStyle(Palette.sub)
-                } else if let provider {
-                    Text(verbatim: provider.name).romeFont(17).foregroundStyle(Palette.fg)
-                    Text("New chats and chats that follow the default")
-                        .romeFont(13)
-                        .foregroundStyle(Palette.sub)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text("Not set up").romeFont(17).foregroundStyle(Palette.destructive)
-                    Text("Chat cannot reply until an account below is logged in.")
-                        .romeFont(13)
-                        .foregroundStyle(Palette.sub)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(minHeight: 60)
-        .accessibilityElement(children: .combine)
-    }
 }
 
 extension AIModelStore {
@@ -365,11 +362,19 @@ extension AIModelStore {
         case .loading, .notSetUp: return nil
         }
     }
+
+    /// The Rome credits row's line: what is left, when it is known.
+    var creditsLine: String {
+        credits?.availableDollars.map { String(localized: "\(AIUsageText.dollars($0)) left") } ?? String(localized: "In use")
+    }
 }
 
-/// One AI account on the AI model page: its state, and Log in or Log out.
+/// One row of the AI model page: an account with its state and Log in or
+/// Log out, or Rome credits while they are the default.
 struct AIAccountRow: View {
-    let account: AIAccount
+    let id: String
+    let mark: Image
+    let name: String
     let line: AIAccountLine
     let isDefault: Bool
     let busy: Bool
@@ -380,7 +385,7 @@ struct AIAccountRow: View {
     var body: some View {
         HStack(spacing: 12) {
             // The brand marks the web shows, as template images.
-            Image(account == .chatgpt ? "ChatGPTMark" : "ClaudeMark")
+            mark
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
@@ -392,7 +397,7 @@ struct AIAccountRow: View {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(verbatim: account.name).romeFont(17).foregroundStyle(Palette.fg)
+                        Text(verbatim: name).romeFont(17).foregroundStyle(Palette.fg)
                         if isDefault {
                             Text("Default")
                                 .romeFont(11, .semibold)
@@ -444,6 +449,6 @@ struct AIAccountRow: View {
         }
         .padding(.horizontal, 14)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("ai-account-\(account.rawValue)")
+        .accessibilityIdentifier("ai-account-\(id)")
     }
 }

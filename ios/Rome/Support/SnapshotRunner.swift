@@ -319,6 +319,17 @@ enum SnapshotRunner {
                     model.debugCommand = .settings([.aiModel(login: nil)])
                 }
             }
+            // The page with no default, and with Rome credits as the default.
+            for (name, preview) in [("11l-ai-model-not-set-up", DemoBackend.AIModelPreview.notSetUp), ("11m-ai-model-credits", .credits)] {
+                await capture(name, style: styleName, in: directory, wait: 1.5) {
+                    DemoBackend.aiModelPreview = preview
+                    model.debugCommand = .settings(nil)
+                    Task {
+                        try? await Task.sleep(for: .seconds(0.4))
+                        model.debugCommand = .settings([.aiModel(login: nil)])
+                    }
+                }
+            }
             DemoBackend.aiModelPreview = .ready
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))
