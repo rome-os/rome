@@ -13,9 +13,10 @@ final class ArchivedTopicsStore {
     private(set) var loaded = false
     private var refreshWork: Task<Void, Never>?
     private var refreshAgain = false
-    /// Chats restored or deleted here: a list asked for before the server
-    /// took the change would bring them back.
-    @ObservationIgnored private var gone: Set<String> = []
+    /// Chats restored or deleted here, and when: a list asked for before
+    /// that would bring them back. A list asked for after it drops the
+    /// entry, so a chat archived again elsewhere shows again.
+    @ObservationIgnored private var gone: [String: Date] = [:]
 
     init(backend: RomeBackend) {
         self.backend = backend
@@ -41,9 +42,11 @@ final class ArchivedTopicsStore {
             await Task.yield()
             repeat {
                 refreshAgain = false
+                let asked = Date.now
                 // Unreachable, or an instance without the Concierge: keep what is held.
                 if let sessions = try? await backend.archivedTopicChats() {
-                    let listed = Self.ordered(sessions).filter { !gone.contains($0.id) }
+                    gone = Self.pending(gone, askedAt: asked)
+                    let listed = Self.ordered(sessions).filter { gone[$0.id] == nil }
                     if listed != chats { chats = listed }
                     loaded = true
                 }
@@ -62,7 +65,7 @@ final class ArchivedTopicsStore {
 
     /// A chat archived here: listed first now, ahead of the refetch.
     func add(_ chat: ConciergeChat) {
-        gone.remove(chat.id)
+        gone[chat.id] = nil
         guard !contains(chat.id) else { return }
         chats.insert(chat, at: 0)
         refresh()
@@ -70,10 +73,14 @@ final class ArchivedTopicsStore {
 
     /// An archived chat found elsewhere, such as a search hit: known from
     /// now on, so it opens read only, until the list is read again.
-    func note(_ session: ChatSession) {
-        guard session.isArchivedTopicChat, !contains(session.id), !gone.contains(session.id) else { return }
+    /// Returns whether the chat is held as archived now. A hit read before
+    /// the chat was unarchived or deleted here is not taken.
+    @discardableResult
+    func note(_ session: ChatSession) -> Bool {
+        guard session.isArchivedTopicChat, gone[session.id] == nil else { return false }
         // Last: its place comes with the next read of the list.
-        chats.append(ConciergeChat(id: session.id, name: session.name, main: false))
+        if !contains(session.id) { chats.append(ConciergeChat(id: session.id, name: session.name, main: false)) }
+        return true
     }
 
     /// A rename this app made: shown now.
@@ -83,8 +90,14 @@ final class ArchivedTopicsStore {
 
     /// A chat restored or deleted here leaves the list.
     func remove(_ id: String) {
-        gone.insert(id)
+        gone[id] = .now
         chats.removeAll { $0.id == id }
+    }
+
+    /// The changes made here that a list asked for at `askedAt` may not
+    /// know yet: those made at or after it. Older ones the list already reflects.
+    nonisolated static func pending(_ gone: [String: Date], askedAt: Date) -> [String: Date] {
+        gone.filter { $0.value >= askedAt }
     }
 
     /// The topic chats of the archived list, latest activity first; chats

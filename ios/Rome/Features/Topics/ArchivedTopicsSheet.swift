@@ -8,6 +8,8 @@ struct ArchivedTopicsSheet: View {
     let workspace: Workspace
     /// A row was tapped: the sheet closes, then the chat opens.
     let onOpen: (String) -> Void
+    /// A chat was deleted from the sheet: the shell leaves it if it is open.
+    var onDeleted: (String) -> Void = { _ in }
     @State private var limit = TopicChatsStore.pageSize
     @State private var restoring: TopicRestoreRequest?
     @State private var deleting: TopicRetireRequest?
@@ -39,7 +41,7 @@ struct ArchivedTopicsSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Palette.sheet)
         .topicRestore($restoring, workspace: workspace)
-        .topicRetire($deleting, workspace: workspace) { _ in }
+        .topicRetire($deleting, workspace: workspace, onRetired: onDeleted)
         .onAppear { store.refresh() }
     }
 

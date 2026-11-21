@@ -402,6 +402,26 @@ final class Workspace {
         topics.chat(chatId) ?? archivedTopics.chat(chatId)
     }
 
+    /// Where a search hit opens.
+    enum SearchHitTarget: Equatable {
+        case main
+        case topic(String)
+        case taskChat(String, title: String)
+    }
+
+    /// Where a search hit opens. The hit's own archive state wins over the
+    /// drawer's list, which may be older: an archived topic chat opens read
+    /// only, and leaves the drawer if it was still listed there.
+    func openSearchHit(_ session: ChatSession) -> SearchHitTarget {
+        if isMainChat(session.id) { return .main }
+        if archivedTopics.note(session) {
+            topics.remove(session.id)
+            return .topic(session.id)
+        }
+        if topics.chat(session.id) != nil { return .topic(session.id) }
+        return .taskChat(session.id, title: session.name)
+    }
+
     /// Whether topic chat `chatId` is archived: it opens read only.
     func isArchivedTopic(_ chatId: String?) -> Bool {
         chatId.map(archivedTopics.contains) ?? false

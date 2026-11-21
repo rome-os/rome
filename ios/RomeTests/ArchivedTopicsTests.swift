@@ -116,17 +116,41 @@ import Testing
         #expect(workspace.topics.chats.isEmpty)
     }
 
-    /// A list asked for before the server took a restore does not bring the chat back.
+    /// A list asked for before the chat was unarchived here, and answered
+    /// after, does not bring it back.
     @Test func aStaleListKeepsARestoredChatOut() async {
         let backend = FakeBackend()
         backend.archivedRows = [archived("topic-1", "Car", daysAgo: 1)]
+        backend.archivedDelay = .milliseconds(150)
         let store = ArchivedTopicsStore(backend: backend)
         store.refresh()
-        await settle()
+        // The read is under way, still holding the chat, when it is unarchived.
+        try? await Task.sleep(for: .milliseconds(30))
         store.remove("topic-1")
-        store.refresh()
-        await settle()
+        try? await Task.sleep(for: .milliseconds(400))
+        #expect(store.loaded)
         #expect(store.count == 0)
+    }
+
+    /// Unarchived here, then archived again on the web: the next read shows
+    /// it, and its search hit opens it read only again.
+    @Test func aChatArchivedAgainElsewhereShowsAgain() async {
+        let backend = FakeBackend()
+        let row = archived("topic-1", "Car", daysAgo: 1)
+        backend.archivedRows = [row]
+        let workspace = workspace(backend)
+        workspace.archivedTopics.refresh()
+        await settle()
+        #expect(await workspace.restoreTopic("topic-1"))
+        #expect(!workspace.isArchivedTopic("topic-1"))
+        // Archived again on the web.
+        try? await Task.sleep(for: .milliseconds(5))
+        backend.archivedRows = [row]
+        workspace.archivedTopics.refresh()
+        await settle()
+        #expect(workspace.archivedTopics.chats.map(\.id) == ["topic-1"])
+        #expect(workspace.isArchivedTopic("topic-1"))
+        #expect(workspace.archivedTopics.note(row))
     }
 
     @Test func deleteTakesTheChatOutOfTheSheet() async {
@@ -141,6 +165,36 @@ import Testing
         workspace.archivedTopics.refresh()
         await settle()
         #expect(workspace.archivedTopics.chats.map(\.id) == ["topic-2"])
+    }
+
+    /// A hit that says the chat is archived wins over the drawer's older
+    /// list: it opens read only and leaves the drawer.
+    @Test func anArchivedHitOfAChatTheDrawerStillListsOpensReadOnly() async {
+        let backend = FakeBackend()
+        backend.topicChats = [ConciergeChat(id: "topic-1", name: "Car", main: false, unread: 0)]
+        let workspace = workspace(backend)
+        workspace.topics.start()
+        await settle()
+        #expect(workspace.topics.chat("topic-1") != nil)
+        // Archived on the web since the drawer last read its list.
+        #expect(workspace.openSearchHit(archived("topic-1", "Car", daysAgo: 1)) == .topic("topic-1"))
+        #expect(workspace.isArchivedTopic("topic-1"))
+        #expect(workspace.topics.chat("topic-1") == nil)
+        // An active topic chat and a task chat open as before.
+        backend.topicChats.append(ConciergeChat(id: "topic-2", name: "Trip", main: false, unread: 0))
+        workspace.topics.refresh()
+        await settle()
+        #expect(workspace.openSearchHit(ChatSession(id: "topic-2", name: "Trip", agentName: ChatSession.conciergeAgent)) == .topic("topic-2"))
+        #expect(!workspace.isArchivedTopic("topic-2"))
+        #expect(workspace.openSearchHit(ChatSession(id: "chat-9", name: "Hotel", triggerKind: ChatSession.taskChatTrigger)) == .taskChat("chat-9", title: "Hotel"))
+    }
+
+    /// The open chat deleted from the Archived sheet, or archived or deleted
+    /// from the drawer, leaves the screen for the main Chat; another stays.
+    @Test func retiringTheOpenChatShowsTheMainChat() {
+        #expect(MainShell.section(after: .topic("topic-1"), retired: "topic-1") == .chat)
+        #expect(MainShell.section(after: .topic("topic-2"), retired: "topic-1") == nil)
+        #expect(MainShell.section(after: .chat, retired: "topic-1") == nil)
     }
 
     /// An archived chat found by search opens read only, with an Archived label.

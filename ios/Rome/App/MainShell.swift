@@ -138,9 +138,7 @@ struct MainShell: View {
                     },
                     // The open chat archived or deleted from its row: the main
                     // Chat shows, as from the chat's own header; the drawer stays.
-                    onTopicGone: { id in
-                        if section == .topic(id) { show(.chat) }
-                    },
+                    onTopicGone: leave,
                     // Over the open drawer, as Settings is.
                     onArchived: {
                         openArchived = nil
@@ -554,34 +552,40 @@ struct MainShell: View {
                 .environment(\.offScreen, covered)
             case .search:
                 SearchScreen(workspace: workspace, onMenu: { toggleNavigation() }) { hit in
-                    if workspace.isMainChat(hit.session.id) {
-                        show(.chat)
-                    } else if workspace.topics.chat(hit.session.id) != nil {
-                        show(.topic(hit.session.id))
-                    } else if hit.session.isArchivedTopicChat {
-                        // Read only, with its Restore banner.
-                        workspace.archivedTopics.note(hit.session)
-                        show(.topic(hit.session.id))
-                    } else {
-                        path.append(.taskChat(chatId: hit.session.id, title: hit.session.name))
+                    switch workspace.openSearchHit(hit.session) {
+                    case .main: show(.chat)
+                    case .topic(let id): show(.topic(id))
+                    case .taskChat(let id, let title): path.append(.taskChat(chatId: id, title: title))
                     }
                 }
             }
         }
     }
 
+    /// A topic chat archived or deleted from the drawer or the Archived
+    /// sheet: if it is open, the main Chat shows, as from the chat's own header.
+    private func leave(_ chatId: String) {
+        if let next = Self.section(after: section, retired: chatId) { show(next) }
+    }
+
+    /// Where the shell goes when topic chat `retired` leaves: the main Chat
+    /// if it is the open one, else nowhere (nil).
+    static func section(after current: MainSection, retired: String) -> MainSection? {
+        current == .topic(retired) ? .chat : nil
+    }
+
     /// The Archived sheet: a tapped row closes it, and its chat opens after.
     private var archivedSheet: some View {
-        ArchivedTopicsSheet(workspace: workspace) { id in
+        ArchivedTopicsSheet(workspace: workspace, onOpen: { id in
             openArchived = id
             showArchived = false
-        }
+        }, onDeleted: leave)
     }
 
     /// A pushed page, the Agent page's cover or a large sheet (an app, a
     /// dashboard page, Settings) hides the stack's root. A sheet leaves the
     /// root on screen, so its animations would keep running under it.
-    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil || page != nil || showSettings }
+    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil || page != nil || showSettings || showArchived }
 
     private func topicScreen(chatId: String?, key: UUID? = nil, draftKey: String) -> some View {
         TopicChatScreen(
@@ -674,7 +678,9 @@ struct MainShell: View {
         if agentPage != nil {
             return Self.visibleChat(agentPath: agentPath, covered: agentLinkPage != nil || agentApp != nil || workspace.sharingCoversChat)
         }
-        return Self.visibleChat(section: section, path: path, covered: drawerOpen || showSettings || page != nil || openApp != nil || workspace.sharingCoversChat)
+        // The Archived sheet covers it too: beside a pinned drawer (iPad)
+        // the drawer is not open while the sheet shows.
+        return Self.visibleChat(section: section, path: path, covered: drawerOpen || showSettings || showArchived || page != nil || openApp != nil || workspace.sharingCoversChat)
     }
 
     /// The chat on screen while the Agent page is up: a task chat pushed

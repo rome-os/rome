@@ -146,9 +146,14 @@ final class FakeBackend: RomeBackend {
     var archivedFetches = 0
     var unarchiveFails = false
 
+    /// Holds the archived list's answer back, as read when it was asked.
+    var archivedDelay: Duration?
+
     func archivedTopicChats() async throws -> [ChatSession] {
         archivedFetches += 1
-        return archivedRows.filter(\.isArchivedTopicChat)
+        let rows = archivedRows.filter(\.isArchivedTopicChat)
+        if let archivedDelay { try await Task.sleep(for: archivedDelay) }
+        return rows
     }
 
     func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws {
