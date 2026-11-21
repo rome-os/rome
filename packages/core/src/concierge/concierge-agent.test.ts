@@ -201,17 +201,22 @@ describe("the Concierge agent", () => {
     );
   });
 
-  it("forwards a task's question card itself, and tells an approval in one line with the task link", () => {
+  it("forwards a task's question card or approval itself, and never decides one", () => {
     const asks = line("- A task asks the guardian itself");
     for (const text of [
-      "send its `card id=` with `card_forward` and nothing else",
-      "it is the same card, answered here or in the task chat",
-      "When they answer in words here instead, pass their words on with `chat_send`",
-      "An approval: say once, in one short line with the task's link",
+      "with a question card (`turn_end:completed question`) or an approval (`approval`)",
+      "Send its `card id=` with `card_forward` and nothing else",
+      "even when the same batch brings a conclusion that asks for it",
+      "it is the same card, answered or decided here or in the task chat",
+      "When they answer a question in words here instead, pass their words on with `chat_send`",
+      "Words never decide an approval: point them to the card",
+      "When `card_forward` refuses an approval because this chat cannot show cards, say once, in one short line with the task's link",
       "they decide it in the task chat",
       "Never answer or decide for them",
     ])
       expect(asks).toContain(text);
+    // Deciding in the task chat is no longer the default.
+    expect(asks).not.toContain("An approval: say once");
     expect(prompt).not.toContain("chat_card");
     expect(prompt).not.toContain("ask it in plain words");
     expect(prompt).not.toContain("needs_user");

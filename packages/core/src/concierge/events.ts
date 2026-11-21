@@ -16,6 +16,7 @@ import {
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
 import { finalAnswer, taskChatPlace } from "./task-chat.js";
+import { approvalLine } from "./task-cards.js";
 import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./task-events.js";
 import { ConciergeActivityTracker } from "./activity.js";
 import { stopHolds, type TaskStatusView } from "./tasks.js";
@@ -737,8 +738,10 @@ export function startConciergeEvents(
   };
 
   const onApproval = async (approval: {
+    id: string;
     status: string;
     description: string;
+    payload: unknown;
     threadId: string | null;
   }) => {
     if (approval.status !== "pending" || !approval.threadId) return;
@@ -758,7 +761,11 @@ export function startConciergeEvents(
       taskId,
       kind: "approval",
       urgent: true,
-      detail: `approval: ${excerpt(approval.description, DETAIL_EXCERPT_CHARS)}`,
+      // The id names the card, so the Concierge can forward it with `card_forward`.
+      detail: `card id=${approval.id}: ${excerpt(
+        approvalLine(approval.payload, approval.description),
+        DETAIL_EXCERPT_CHARS,
+      )}`,
     });
   };
 

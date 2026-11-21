@@ -203,6 +203,8 @@ function setup(
   /** The real chat rows the task rows link to. */
   const storedChats = new ChatsWebChatRepository(testDb.db);
   const approvalListeners = new Set<(approval: unknown) => void>();
+  /** The approvals made, as the repository would find them by id. */
+  const approvalRows = new Map<string, Record<string, unknown> & { threadId: string | null }>();
   const resolvedListeners = new Set<(approval: unknown) => void>();
   const quietFlags: boolean[] = [];
   /** Every guardian setting written, in order. */
@@ -418,6 +420,7 @@ function setup(
     },
     tasks,
     approvals: {
+      findById: async (id: string) => approvalRows.get(id) ?? null,
       onCreated: (listener: (approval: unknown) => void) => {
         approvalListeners.add(listener);
         return () => approvalListeners.delete(listener);
@@ -680,9 +683,18 @@ function setup(
     },
     // As the repository tells it: with the chat its payload names kept apart.
     createApproval: (approval: Record<string, unknown>) => {
-      for (const listener of approvalListeners)
-        listener({ ...approval, threadId: threadIdOf(approval.payload) });
+      const row = {
+        id: `approval-${approvalRows.size + 1}`,
+        type: "action_execution",
+        ...approval,
+        threadId: threadIdOf(approval.payload),
+      };
+      approvalRows.set(String(row.id), row);
+      for (const listener of approvalListeners) listener(row);
+      return row;
     },
+    /** The approval `id` as the repository holds it now. */
+    approvalRow: (id: string) => approvalRows.get(id),
     resolveApproval: (approval: Record<string, unknown>) => {
       for (const listener of resolvedListeners)
         listener({ ...approval, threadId: threadIdOf(approval.payload) });
@@ -2033,6 +2045,81 @@ describe("Concierge tools", () => {
       expect(stored(s).some((parts) => parts[0]?.type === "task_chat")).toBe(false);
     });
 
+    /** A pending approval asked in the task chat `chatId`. */
+    const askApproval = (
+      s: ReturnType<typeof setup>,
+      chatId: string,
+      extra: Record<string, unknown> = {},
+    ) =>
+      s.createApproval({
+        status: "pending",
+        description: "Send the booking email",
+        payload: { channelContext: { threadId: chatId } },
+        ...extra,
+      });
+
+    it("forwards a task's pending approval as the card itself, and decides nothing", async () => {
+      const s = await withRows();
+      const asked = askApproval(s, "task-1");
+      const result = text(await s.tool("card_forward", { cardId: String(asked.id) }));
+      expect(result).toMatchObject({ forwarded: "card" });
+      const row = s.messages.get(CONCIERGE_CHAT)?.at(-1);
+      expect(JSON.parse(row?.content ?? "[]")).toEqual([
+        {
+          type: "task_chat",
+          chatId: "task-1",
+          title: "Health",
+          show: "ask",
+          waitedOn: { kind: "approval", id: asked.id },
+        },
+      ]);
+      expect(row?.replyTo).toBe("ack-1");
+      // Twice in one turn is one message.
+      expect(text(await s.tool("card_forward", { cardId: String(asked.id) })).messageId).toBe(
+        result.messageId,
+      );
+      expect(stored(s).filter((parts) => parts[0]?.type === "task_chat")).toHaveLength(1);
+      // Only the guardian's tap decides it.
+      expect(s.approvalRow(String(asked.id))?.status).toBe("pending");
+    });
+
+    it("refuses an approval where this chat cannot draw cards, and names the task chat", async () => {
+      const s = await withRows();
+      const asked = askApproval(s, "task-1");
+      s.drawWidgets("plain_text");
+      const before = stored(s).length;
+      const result = await s.tool("card_forward", { cardId: String(asked.id) });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("decide it in the task chat");
+      expect(stored(s)).toHaveLength(before);
+      expect(s.approvalRow(String(asked.id))?.status).toBe("pending");
+    });
+
+    it("refuses an approval already decided, one outside a task chat, one of another Concierge chat's task, and an unknown id", async () => {
+      const s = await withRows();
+      await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+      s.messages.set(TOPIC_CHAT, [{ id: "t0", role: "user", content: "[]", turnId: "ask" }]);
+      const decided = askApproval(s, "task-1", { status: "approved" });
+      const outside = askApproval(s, CONCIERGE_CHAT);
+      const other = askApproval(s, "task-1");
+      const before = stored(s).length;
+      const refused = async (cardId: string) => {
+        const result = await s.tool("card_forward", { cardId });
+        expect(result.isError).toBe(true);
+        return result.content[0].text as string;
+      };
+
+      expect(await refused(String(decided.id))).toContain("already decided");
+      expect(await refused(String(outside.id))).toContain("No card");
+      expect(await refused("no-such-approval")).toContain("No card");
+      // Another Concierge chat's turn may not forward this chat's task's approval.
+      s.turnIn(TOPIC_CHAT);
+      s.inTurn("ask");
+      expect(await refused(String(other.id))).toContain("belongs to another Concierge chat");
+      expect(stored(s)).toHaveLength(before);
+      expect(s.messages.get(TOPIC_CHAT)).toHaveLength(1);
+    });
+
     it("forwards the card itself, issued again, alone in its message and replying to the task's start", async () => {
       const s = await withRows(cardRow("card-1"), textRow(concluded("Your daily health summary.")));
       const result = text(await s.tool("card_forward", { cardId: "card-1" }));
@@ -3228,7 +3315,7 @@ describe("Concierge events", () => {
     await s.settle();
     await rs.advanceTimersByTimeAsync(5_000);
     expect(s.backendTurns).toEqual([]);
-    s.createApproval({
+    const pending = s.createApproval({
       status: "pending",
       description: "Send the booking email",
       payload: { channelContext: { threadId: chatId } },
@@ -3236,8 +3323,27 @@ describe("Concierge events", () => {
     await s.settle();
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns[0].prompt).toContain('changes="approval"');
-    expect(s.backendTurns[0].prompt).toContain("approval: Send the booking email");
+    expect(s.backendTurns[0].prompt).toContain(`card id=${pending.id}: Send the booking email`);
+    expect(s.backendTurns[0].prompt).not.toContain("approval: ");
     expect(s.quietFlags).toEqual([true]);
+  });
+
+  it("names a pending approval by its preview's title when it has one", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    const asked = s.createApproval({
+      status: "pending",
+      description: 'Action "system:vault_apply" requires guardian approval',
+      payload: {
+        channelContext: { threadId: chatId },
+        preview: { kind: "secret_access", title: "Use CF_API_TOKEN for 15 min", summary: "x" },
+      },
+    });
+    await s.settle();
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns[0].prompt).toContain(`card id=${asked.id}: Use CF_API_TOKEN for 15 min`);
+    expect(s.backendTurns[0].prompt).not.toContain("requires guardian approval");
   });
 
   it("tells the Concierge at once of a task turn that failed before it started, either way it is told", async () => {

@@ -1,0 +1,39 @@
+{
+  "name": "@rome-os/node-web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Lightweight Web UI for controlling a Rome Node container host",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist/web"
+  ],
+  "scripts": {
+    "dev": "rsbuild dev",
+    "build": "rsbuild build",
+    "typecheck": "tsc --noEmit",
+    "test": "../../scripts/test-env.sh rstest"
+  },
+  "devDependencies": {
+    "@rome-os/ui": "workspace:*",
+    "@rsbuild/core": "2.2.3",
+    "@rsbuild/plugin-react": "^2.0.1",
+    "@rstest/core": "^0.11.11",
+    "@tailwindcss/postcss": "^4.1.0",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "25.2.3",
+    "@types/react": "19.2.15",
+    "@types/react-dom": "19.2.3",
+    "jsdom": "^29.1.1",
+    "lucide-react": "^0.468.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rome-os/rome.git",
+    "directory": "packages/rome-node-web"
+  }
+}

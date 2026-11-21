@@ -276,4 +276,65 @@ describe("connect authorization modes", () => {
     }
     expect(f.requests).toHaveLength(0);
   });
+
+  it("connects in limited mode when web-config.json disables remote execution", async () => {
+    const f = await fixture();
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(
+      join(f.root, "web-config.json"),
+      JSON.stringify({ executionEnabled: false }),
+      "utf8",
+    );
+    const child = f.run([
+      "connect",
+      "--device-code",
+      "--name",
+      "Limited Container",
+      "--cloud",
+      f.cloudUrl,
+    ]);
+    await until(() => child.output().includes("Connection: online"));
+    expect(child.output()).toContain("limited mode");
+
+    const infoReply = new Promise<unknown>((resolve) =>
+      f.socket()!.once("message", (data) => resolve(JSON.parse(data.toString()))),
+    );
+    f.socket()!.send(
+      JSON.stringify({
+        id: "info",
+        from: "caller",
+        payload: { type: "request", action: "system.info", args: {} },
+      }),
+    );
+    expect(await infoReply).toMatchObject({
+      id: "info",
+      to: "caller",
+      payload: {
+        ok: true,
+        result: { name: "Limited Container", computerUse: false, actions: [] },
+      },
+    });
+
+    const execReply = new Promise<unknown>((resolve) =>
+      f.socket()!.once("message", (data) => resolve(JSON.parse(data.toString()))),
+    );
+    f.socket()!.send(
+      JSON.stringify({
+        id: "exec-1",
+        from: "caller",
+        payload: { type: "request", action: "exec", args: { command: "echo", args: ["hi"] } },
+      }),
+    );
+    expect(await execReply).toMatchObject({
+      id: "exec-1",
+      to: "caller",
+      payload: {
+        ok: false,
+        error: { code: "computer_use_off" },
+      },
+    });
+
+    f.socket()!.close(4001);
+    expect(await child.exited).toBe(1);
+  }, 10000);
 });

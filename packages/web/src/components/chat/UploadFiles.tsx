@@ -4,11 +4,12 @@ import type { UploadLink } from "@/lib/asset-links";
 
 /**
  * The files of a message the guardian sent: pictures as zoomable thumbnails,
- * every other file as a chip.
+ * every other file as a chip. The pictures page together in the viewer, apart
+ * from any picture in the message's text.
  */
 export function UploadFiles({ uploads }: { uploads: UploadLink[] }) {
   return (
-    <div className="flex flex-wrap items-start gap-2">
+    <div className="flex flex-wrap items-start gap-2" data-uploaded-pictures="">
       {uploads.map((upload) =>
         upload.kind === "image" ? (
           <ChatImage

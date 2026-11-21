@@ -250,7 +250,7 @@ export interface ConciergeDeps {
   checks?: TaskChecks;
   /** Each task's repeating schedule. Absent, no task has one. */
   schedules?: TaskSchedules;
-  approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved">;
+  approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved" | "findById">;
   messages: TaskChatMessages;
   sessionRepository: Pick<SessionRepository, "current">;
   accounts: Pick<ModelAccounts, "read">;
