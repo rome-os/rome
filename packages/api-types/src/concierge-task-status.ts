@@ -15,8 +15,11 @@ export type ConciergeTaskStatus = (typeof CONCIERGE_TASK_STATUSES)[number];
 export const CONCIERGE_TASK_END_REASONS = ["done", "failed", "stopped", "no_response"] as const;
 export type ConciergeTaskEndReason = (typeof CONCIERGE_TASK_END_REASONS)[number];
 
-/** How the task chat's latest turn ended, or its start failed. */
-export type ConciergeTaskOutcome = "succeeded" | "failed" | "stopped";
+/**
+ * How the task chat's latest turn ended, or its start failed; or
+ * `done_by_owner` when its owner marked it done, which ended it as a stop does.
+ */
+export type ConciergeTaskOutcome = "succeeded" | "failed" | "stopped" | "done_by_owner";
 
 /** A task's state and, once it ended, why. */
 export interface ConciergeTaskStatusResult {
@@ -48,7 +51,8 @@ export interface ConciergeTaskFacts {
 export const CONCIERGE_TASK_WAIT_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * A task's status, checked in this order: stopped is always ended·stopped;
+ * A task's status, checked in this order: stopped is always ended, done when
+ * its owner marked it done and stopped otherwise;
  * then a wait on its owner younger than `waitExpiryMs` (needs you); then a
  * running or queued turn, or a result waiting to be reported (active); then a
  * pending check (later); else ended, with its reason. A wait older than `waitExpiryMs`, or one Rome ended so, with
@@ -59,7 +63,12 @@ export function taskStatus(
   now: number,
   waitExpiryMs: number = CONCIERGE_TASK_WAIT_EXPIRY_MS,
 ): ConciergeTaskStatusResult {
-  if (facts.stoppedAt !== null) return { status: "ended", endReason: "stopped" };
+  if (facts.stoppedAt !== null) {
+    return {
+      status: "ended",
+      endReason: facts.lastOutcome === "done_by_owner" ? "done" : "stopped",
+    };
+  }
   const waiting = facts.waitingSince !== null;
   if (waiting && now - (facts.waitingSince as number) < waitExpiryMs) {
     return { status: "needs_you", endReason: null };

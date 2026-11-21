@@ -3,11 +3,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "@rstest/core";
 import { checkImports, formatImportViolation } from "./import-rules.js";
-import { contextRules } from "./rules/contexts.js";
+import { contextEntryRules, contextRules } from "./rules/contexts.js";
 import { featureRules } from "./rules/features.js";
 import { kindRulesFor } from "./rules/kinds.js";
 import { layerRules } from "./rules/layers.js";
 import { libraryRules } from "./rules/library.js";
+import { slackAppCopyRules } from "./rules/slack-app-copy.js";
 
 const root = mkdtempSync(join(tmpdir(), "import-rules-"));
 
@@ -199,6 +200,100 @@ describe("checkImports with the context rules", () => {
     expect(lines).toEqual([
       "agent/infrastructure/apps-probe.ts:1 → ../../apps/catalog.js (apps/catalog.ts) [agent-never-imports-apps]",
       "agent/infrastructure/apps-probe.ts:2 → @/apps/catalog.js (apps/catalog.ts) [agent-never-imports-apps]",
+      "connections/kinds/discord/discord.ts:1 → ../../../people/link-code/index.js (people/link-code/index.ts) [connections-never-imports-people]",
+    ]);
+  });
+});
+
+describe("checkImports with the rules around a connection's message", () => {
+  const at = mkdtempSync(join(tmpdir(), "import-rules-message-"));
+  afterAll(() => rmSync(at, { recursive: true, force: true }));
+  const put = (path: string, text: string) => {
+    mkdirSync(dirname(join(at, path)), { recursive: true });
+    writeFileSync(join(at, path), text);
+  };
+  put("package.json", JSON.stringify({ type: "module" }));
+  put(
+    "tsconfig.json",
+    JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext" } }),
+  );
+  put("src/chats/connected-accounts/channel-message.ts", "export const of = 1;\n");
+  put("src/chats/connected-accounts/connection-ports.ts", 'import "./channel-message.js";\n');
+  put("src/chats/history/reader.ts", 'import "../connected-accounts/channel-message.js";\n');
+  put("src/participation/addressing.ts", "export const addressing = 1;\n");
+  put("src/people/person.ts", "export const person = 1;\n");
+  put(
+    "src/connections/kinds/x/x.ts",
+    [
+      'import "../../../participation/addressing.js";',
+      'import "../../../people/person.js";',
+      'import "../../../chats/connected-accounts/channel-message.js";',
+      "",
+    ].join("\n"),
+  );
+  put(
+    "src/connections/kinds/x/x.test.ts",
+    'import "../../../chats/connected-accounts/channel-message.js";\n',
+  );
+  put("src/test/kit.ts", 'import "../chats/connected-accounts/channel-message.js";\n');
+
+  const lines = checkImports(join(at, "src"), join(at, "tsconfig.json"), [
+    ...contextRules,
+    ...contextEntryRules,
+  ])
+    .map(formatImportViolation)
+    .map((line) => line.replace(/ \(.*\)/, "").replace(/: .*$/, ""));
+
+  it("rejects a connection that imports Participation, People or Chats, and lets its tests reach Chats", () => {
+    expect(lines.filter((line) => line.startsWith("connections/"))).toEqual([
+      "connections/kinds/x/x.ts:1 → ../../../participation/addressing.js [connections-never-imports-participation]",
+      "connections/kinds/x/x.ts:2 → ../../../people/person.js [connections-never-imports-people]",
+      "connections/kinds/x/x.ts:3 → ../../../chats/connected-accounts/channel-message.js [connections-never-imports-chats]",
+      "connections/kinds/x/x.ts:3 → ../../../chats/connected-accounts/channel-message.js [channel-message-built-in-one-place]",
+    ]);
+  });
+
+  it("builds what an app receives only in connection-ports.ts, tests and the test kit", () => {
+    expect(lines.filter((line) => line.includes("[channel-message-built-in-one-place]"))).toEqual([
+      "chats/history/reader.ts:1 → ../connected-accounts/channel-message.js [channel-message-built-in-one-place]",
+      "connections/kinds/x/x.ts:3 → ../../../chats/connected-accounts/channel-message.js [channel-message-built-in-one-place]",
+    ]);
+  });
+});
+
+describe("checkImports with the chat rule declarations", () => {
+  const at = mkdtempSync(join(tmpdir(), "import-rules-chat-rules-"));
+  afterAll(() => rmSync(at, { recursive: true, force: true }));
+  const put = (path: string, text: string) => {
+    mkdirSync(dirname(join(at, path)), { recursive: true });
+    writeFileSync(join(at, path), text);
+  };
+  put("package.json", JSON.stringify({ type: "module" }));
+  put(
+    "tsconfig.json",
+    JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext" } }),
+  );
+  put("src/chat-settings/rules.ts", "export const rules = 1;\n");
+  put("src/chat-settings/service.ts", "export const service = 1;\n");
+  put("src/chat-settings/repository.ts", "export const repository = 1;\n");
+  put(
+    "src/connections/kinds/x/x.ts",
+    [
+      'import "../../../chat-settings/rules.js";',
+      'import "../../../chat-settings/service.js";',
+      'import "../../../chat-settings/repository.js";',
+      "",
+    ].join("\n"),
+  );
+  put("src/connections/kinds/x/x.test.ts", 'import "../../../chat-settings/service.js";\n');
+
+  it("lets a kind import only the rules it declares, and its tests reach the service", () => {
+    const lines = checkImports(join(at, "src"), join(at, "tsconfig.json"), contextEntryRules)
+      .map(formatImportViolation)
+      .map((line) => line.replace(/ \(.*\)/, "").replace(/: .*$/, ""));
+    expect(lines).toEqual([
+      "connections/kinds/x/x.ts:2 → ../../../chat-settings/service.js [connections-declare-chat-rules-only]",
+      "connections/kinds/x/x.ts:3 → ../../../chat-settings/repository.js [connections-declare-chat-rules-only]",
     ]);
   });
 });
@@ -213,6 +308,25 @@ describe("checkImports with the library rule", () => {
       "lib/probe.test.ts:1 → ../apps/catalog.js (apps/catalog.ts) [lib-imports-no-context]",
       "lib/probe.test.ts:2 → @/agent/index.js (agent/index.ts) [lib-imports-no-context]",
     ]);
+  });
+});
+
+describe("the Slack app copy rule", () => {
+  const [rule] = slackAppCopyRules;
+  const imports = (from: string) =>
+    rule.rejects({
+      from,
+      specifier: "./message-copy.js",
+      kind: "file",
+      to: "connections/kinds/slack-app/message-copy.ts",
+    });
+
+  it("lets only the Slack app connection and the wiring import the copy", () => {
+    expect(imports("connections/kinds/slack-app/slack-app.ts")).toBe(false);
+    expect(imports("connections/kinds/slack-app/slack-app.test.ts")).toBe(false);
+    expect(imports("index.ts")).toBe(false);
+    expect(imports("connections/integrations/slack-app.ts")).toBe(true);
+    expect(imports("concierge/tools.ts")).toBe(true);
   });
 });
 

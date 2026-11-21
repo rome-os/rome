@@ -12,7 +12,6 @@
     "Connections": "Connections",
     "Favors": "Favors",
     "Trust": "Trust",
-    "Channels": "Channels",
     "AI Tools": "AI Tools",
     "Advanced": "Advanced",
     "Devices": "Devices"
@@ -203,6 +202,14 @@
           "bulletsFallback": {
             "reply": "Reply when people message this account in your servers",
             "start": "Start a task when a new message arrives"
+          }
+        }
+      },
+      "slack_app": {
+        "bot": {
+          "title": "Rome in your Slack",
+          "bullets": {
+            "reply": "Answer direct messages in your Slack workspace as your Concierge"
           }
         }
       },
@@ -426,17 +433,7 @@
   },
   "channels": {
     "conversationSettings": {
-      "configure": "Configure chats",
-      "searchPlaceholder": "Search provider, workspace, or chat",
-      "allConnections": "All connections",
-      "anyStatus": "Any status",
-      "connectionFilterAria": "Filter by connection",
-      "statusFilterAria": "Filter by status",
-      "status": {
-        "online": "Online",
-        "offline": "Offline",
-        "notConnected": "Not connected"
-      },
+      "searchPlaceholder": "Search chats",
       "kinds": {
         "channel": "Channel",
         "group": "Group",
@@ -444,12 +441,8 @@
         "topic": "Topic"
       },
       "loading": "Loading chats…",
-      "emptyTitle": "No configurable chats found",
-      "emptyDescription": "Connect an account on a supported platform, or send a message so Rome can discover the chat.",
+      "emptyTitle": "Every chat follows the defaults",
       "loadMore": "Load more",
-      "overrideCount_one": "{{count}} override",
-      "overrideCount_other": "{{count}} overrides",
-      "providerDefaults": "product defaults",
       "sections": {
         "activation": "Activation",
         "replies": "Replies",
@@ -466,24 +459,24 @@
         "sessionReset": "Provider session reset"
       },
       "descriptions": {
-        "sessionReset": "Clears the agent's memory kept by the model provider"
-      },
-      "source": {
-        "overridden": "Overridden"
+        "sessionReset": "Clears the agent's memory kept by the model provider."
       },
       "options": {
-        "mention": "Only when mentioned",
         "mentions": "Only mentions",
         "all": "All",
         "ignore": "Ignore",
         "respond": "Respond",
         "thread": "Native thread",
-        "inline": "Inline"
+        "inline": "Inline",
+        "replyRule": {
+          "mention": "Only when addressed",
+          "all": "Every message"
+        }
       },
       "mainAgent": "main (default)",
       "accountAgent": "{{agent}} (this account's agent)",
-      "silentAccount": "Messages here do not reach Rome until this account has an agent.",
-      "silentAccountLink": "<account>Link one on the account</account>.",
+      "silentAccount": "Messages here do not reach Rome until this connected account has an agent.",
+      "silentAccountLink": "<account>Link one in Envoys</account>.",
       "silentAccountOverride": "This chat's choice, {{agent}}, applies once one is linked.",
       "sessionReset": {
         "never": "Never",
@@ -500,7 +493,38 @@
         "utc": "UTC"
       },
       "saving": "Saving…",
-      "retry": "Retry"
+      "retry": "Retry",
+      "chatRules": {
+        "title": "Chat rules"
+      },
+      "otherChats": "Group chats by default:",
+      "addChat": "Add chat",
+      "noMatches": "No chats match",
+      "findChats": "A chat shows up here once Rome sees a message in it.",
+      "close": "Close",
+      "addDialog": {
+        "title": "Add a chat"
+      },
+      "resetToDefaults": "Reset to defaults",
+      "changed": "Changed from the default",
+      "summary": {
+        "defaults": "Follows the defaults",
+        "on": "On",
+        "off": "Off",
+        "thread": "Replies in a thread",
+        "inline": "Replies inline",
+        "agent": "Answered by {{agent}}",
+        "resetNever": "Never resets",
+        "resetDaily": "Resets daily at {{time}} UTC",
+        "resetIdle": "Resets after {{duration}} idle",
+        "minutes_one": "{{count}} minute",
+        "minutes_other": "{{count}} minutes",
+        "hours_one": "{{count}} hour",
+        "hours_other": "{{count}} hours",
+        "days_one": "{{count}} day",
+        "days_other": "{{count}} days"
+      },
+      "allListed": "Every chat here already has rules of its own."
     },
     "restartNeededFallback": "Backend unreachable — restart required to apply changes",
     "disconnectFailedFallback": "Failed to disconnect.",
@@ -1035,8 +1059,17 @@
     "starting": "Starting…",
     "startFailed": "Could not start the device service",
     "setup": {
-      "title": "Connect a computer",
-      "description": "Connect each computer separately.",
+      "title": "Connect a device",
+      "linkDevice": "Link device",
+      "methods": {
+        "desktop": "App",
+        "cli": "Rome Node CLI",
+        "container": "Rome Node container"
+      },
+      "desktopHelp": "Sign in to the Rome app with the same Rome Cloud account. On iOS, open Settings → Connections and turn on Live access for the features you want Rome to use.",
+      "desktopDownload": "Download Rome",
+      "comingSoon": "Coming soon",
+      "containerHelp": "Runs Rome Node in a Docker container using Docker Compose.",
       "commandHelp": "With Rome Node installed, run this in a terminal on the computer you want Rome to use, not on the Rome server.",
       "access": "Approve access in the browser with the same Rome Cloud account. This allows Rome to run programs as your OS user. Keep the terminal open; Ctrl+C disconnects.",
       "instructions": "Installation and connection guide"

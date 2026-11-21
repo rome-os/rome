@@ -170,8 +170,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
     if (service !== AGENTS_CHANNEL && isStopCommand(message.text)) {
       const addressing =
         message.addressing ?? (message.thread?.kind === "dm" ? "direct" : "ambient");
-      if (addressing === "ambient") {
-        log.debug("ignoring group stop command not directed at the bot", {
+      // Another bot cannot stop a turn, however the chat takes bots.
+      if (addressing === "ambient" || message.fromBot) {
+        log.debug("ignoring stop command not directed at the bot by a person", {
           service,
           messageId: message.messageId,
         });
@@ -206,9 +207,9 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
       });
       return;
     }
-    // A test-only back door: the agent's own app runs its turns.
+    // The agent's own app runs its turns (`deprecatedRunsOwnTurns`, ZHA-231).
     if (accountAgent && this.options.unsafeTestOnlyBypassesInbox?.(accountAgent)) {
-      log.debug("account's agent bypasses Inbox; not answering", {
+      log.debug("account's agent runs its own turns; not answering", {
         service,
         agent: accountAgent,
         messageId: message.messageId,
@@ -238,6 +239,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           channel: service,
           place: message.thread?.kind === "dm" ? "direct" : "group",
           threadName: message.thread?.name,
+          ...addressedBy(message),
         },
         {
           person: sender.person
@@ -346,10 +348,14 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
           attachments,
           messageId: message.messageId,
           replyTo: message.replyTo,
+          ...addressedBy(message),
           ...agents,
         },
         {
           initiator: `connection:${connectionId}`,
+          // A burst from more chats than there are workers waits for one
+          // rather than dropping the message. The hook holds no worker.
+          whenWorkersBusy: "queue",
           channelContext: {
             connectionId,
             channel: service,
@@ -454,4 +460,15 @@ export function createHook(deps: ChannelMessageHookDeps): ChannelMessageHookInte
       ...(wakeGateForOf(deps) ? { wakeGateFor: wakeGateForOf(deps) } : {}),
     },
   );
+}
+
+/** How the message addressed Rome's account, as its connection reported it. */
+function addressedBy(
+  message: InboundEvent["message"],
+): Pick<InboundEvent["message"], "addressing" | "fromBot" | "mentionsOthers"> {
+  return {
+    ...(message.addressing ? { addressing: message.addressing } : {}),
+    ...(message.fromBot ? { fromBot: true } : {}),
+    ...(message.mentionsOthers ? { mentionsOthers: true } : {}),
+  };
 }

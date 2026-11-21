@@ -1097,6 +1097,16 @@
         }
       }
     },
+    "Cancelling…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在取消…"
+          }
+        }
+      }
+    },
     "Cannot be connected here" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1293,6 +1303,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "收起输入框"
+          }
+        }
+      }
+    },
+    "Deleting…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在删除…"
           }
         }
       }
@@ -2057,6 +2077,26 @@
         }
       }
     },
+    "Failed to cancel the reminder" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消提醒失败"
+          }
+        }
+      }
+    },
+    "Failed to delete the routine" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除定时任务失败"
+          }
+        }
+      }
+    },
     "Failed to load outputs" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2087,12 +2127,52 @@
         }
       }
     },
+    "Failed to mark the task done" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标记完成失败"
+          }
+        }
+      }
+    },
+    "Failed to pause the routine" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂停定时任务失败"
+          }
+        }
+      }
+    },
+    "Failed to resume the routine" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "恢复定时任务失败"
+          }
+        }
+      }
+    },
     "Failed to stop the task" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "停止任务失败"
+          }
+        }
+      }
+    },
+    "Failed to unfollow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消关注失败"
           }
         }
       }
@@ -2173,6 +2253,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "忙闲时间"
+          }
+        }
+      }
+    },
+    "From %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自 %@"
           }
         }
       }
@@ -2425,6 +2515,16 @@
         }
       }
     },
+    "It stops running and is removed. This cannot be undone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它将不再运行并被移除，无法撤销。"
+          }
+        }
+      }
+    },
     "It's 4 bpm higher than last month, mostly on days you slept under 6 hours." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2441,6 +2541,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "有点温，不算烫：它在充电，又在用蜂窝网络，所以会热一些。"
+          }
+        }
+      }
+    },
+    "Its alerts and digest entries stop coming here. To follow it again, ask Chat." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它的提醒和汇总将不再发到这里。要重新关注，请在 Chat 里说。"
           }
         }
       }
@@ -2751,6 +2861,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "手动例程"
+          }
+        }
+      }
+    },
+    "Mark as done" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标记完成"
+          }
+        }
+      }
+    },
+    "Marking done…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在标记完成…"
           }
         }
       }
@@ -3305,16 +3435,6 @@
         }
       }
     },
-    "No routines yet" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "还没有定时任务"
-          }
-        }
-      }
-    },
     "Not started · Created %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3655,12 +3775,32 @@
         }
       }
     },
+    "Pause" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂停"
+          }
+        }
+      }
+    },
     "Paused" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "已暂停"
+          }
+        }
+      }
+    },
+    "Pausing…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在暂停…"
           }
         }
       }
@@ -3701,6 +3841,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "图片"
+          }
+        }
+      }
+    },
+    "Pin" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "置顶"
+          }
+        }
+      }
+    },
+    "Pinned" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已置顶"
           }
         }
       }
@@ -4059,6 +4219,26 @@
         }
       }
     },
+    "Resume" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "恢复"
+          }
+        }
+      }
+    },
+    "Resuming…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在恢复…"
+          }
+        }
+      }
+    },
     "Retry" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4209,16 +4389,6 @@
         }
       }
     },
-    "Routines" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "定时任务"
-          }
-        }
-      }
-    },
     "Running…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4235,6 +4405,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行"
+          }
+        }
+      }
+    },
+    "Scheduled" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "定时"
           }
         }
       }
@@ -5695,6 +5875,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "了解你的睡眠"
+          }
+        }
+      }
+    },
+    "Unfollow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消关注"
+          }
+        }
+      }
+    },
+    "Unfollow %@?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消关注 %@？"
+          }
+        }
+      }
+    },
+    "Unfollowing…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在取消关注…"
+          }
+        }
+      }
+    },
+    "Unpin" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消置顶"
           }
         }
       }

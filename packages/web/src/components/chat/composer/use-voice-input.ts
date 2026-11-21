@@ -11,6 +11,13 @@ import {
 
 export type VoiceInputState = "idle" | "listening" | "finishing";
 
+/** The field's text with the heard words in, and where they sit in it. */
+export interface VoiceInputPreview {
+  value: string;
+  start: number;
+  end: number;
+}
+
 interface Anchor {
   /** The field as it was when listening started. */
   original: string;
@@ -63,13 +70,18 @@ let inserting = false;
 
 /**
  * Dictation into a composer's textarea. While listening, the heard text shows
- * at the cursor and the field is read-only. When listening ends the text is
- * inserted the way typing inserts it, as one edit, so one undo removes it and
- * the field's change handler sees it as typed text.
+ * at the cursor in `preview`, drawn over the field, and the field is
+ * read-only. The field's own value stays as it was: writing it would clear the
+ * browser's undo history. When listening ends the text is inserted the way
+ * typing inserts it, as one edit, so one undo removes it, earlier edits stay
+ * undoable, and the field's change handler sees it as typed text.
+ *
+ * The draft holds the heard words as they arrive, through `keepDraft`, since
+ * the field's value does not.
  *
  * Why listening stopped on its own is the notice, which the caller keeps with
  * the field's draft. It goes away on the next edit or send. Leaving the chat
- * or the page while listening stops it, and `keepNotice` saves why at once,
+ * or the page while listening stops it, and `keepDraft` saves why at once,
  * since the field is going away.
  */
 export function useVoiceInput({
@@ -78,7 +90,7 @@ export function useVoiceInput({
   setValue,
   notice,
   setNotice,
-  keepNotice,
+  keepDraft,
   onSend,
   deps,
 }: {
@@ -87,15 +99,20 @@ export function useVoiceInput({
   setValue: (next: string) => void;
   notice: DictationStop | null;
   setNotice: (next: DictationStop | null) => void;
-  keepNotice: (stop: DictationStop) => void;
+  /**
+   * Saves `text` as the draft at once without changing the field, with `stop`
+   * when given or else the current notice.
+   */
+  keepDraft: (text: string, stop?: DictationStop) => void;
   /** Sends the field, for `stopAndSend` once the last words are in. */
   onSend?: () => void;
   deps?: DictationDeps;
 }) {
   const info = useVoiceInputInfo();
   const [state, setState] = useState<VoiceInputState>("idle");
-  // Where the spoken text sits in the field while voice input is on.
-  const [spoken, setSpoken] = useState<{ start: number; end: number } | null>(null);
+  const [preview, setPreview] = useState<VoiceInputPreview | null>(null);
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
   const [asking, setAsking] = useState(false);
   const anchorRef = useRef<Anchor | null>(null);
   const dictationRef = useRef<Dictation | null>(null);
@@ -104,27 +121,37 @@ export function useVoiceInput({
   // Waits for a hidden field to show again, to insert the spoken text natively.
   const waitingRef = useRef<ResizeObserver | null>(null);
 
+  const setValueRef = useRef(setValue);
+  setValueRef.current = setValue;
   const onSendRef = useRef(onSend);
   onSendRef.current = onSend;
   // Set by `stopAndSend`: the send waits for the last words.
   const sendWhenDoneRef = useRef(false);
-  const keepNoticeRef = useRef(keepNotice);
-  keepNoticeRef.current = keepNotice;
+  const keepDraftRef = useRef(keepDraft);
+  keepDraftRef.current = keepDraft;
   const setNoticeRef = useRef(setNotice);
   setNoticeRef.current = setNotice;
+  // A new `keepDraft` can save somewhere new, as when a first send makes the
+  // chat while voice input listens, so the heard words are saved there too.
   useEffect(() => {
-    // The heard words are in the field, so the draft already holds them. A
-    // page the browser keeps for Back stays mounted, so the field is given
-    // back here too; on unmount these updates do nothing.
+    if (previewRef.current) keepDraft(previewRef.current.value);
+  }, [keepDraft]);
+  useEffect(() => {
+    // The heard words go into the draft at once, since the field is going
+    // away. A page the browser keeps for Back stays mounted, so the field is
+    // given back here too, with the words in; on unmount these updates do
+    // nothing.
     const leave = (reason: "left-chat" | "page-reloaded") => {
       sendWhenDoneRef.current = false;
       if (!dictationRef.current) return;
       dictationRef.current.cancel();
       dictationRef.current = null;
+      const text = previewRef.current?.value ?? anchorRef.current?.original ?? valueRef.current;
       anchorRef.current = null;
-      keepNoticeRef.current({ reason });
+      keepDraftRef.current(text, { reason });
       setState("idle");
-      setSpoken(null);
+      setPreview(null);
+      if (text !== valueRef.current) setValueRef.current(text);
       setAsking(false);
       setNoticeRef.current({ reason });
     };
@@ -145,19 +172,26 @@ export function useVoiceInput({
       anchorRef.current = null;
       if (!anchor) return;
       const insertion = spokenInsertion(anchor.before, heard, anchor.after);
-      // Back to the field and selection as they were, so the spoken text
-      // replaces the selection the way typing would, and undo brings it back.
+      // The field and selection as they were, so the spoken text replaces
+      // the selection the way typing would, and undo brings it back. The
+      // field is read-only while listening, so its value is still the one
+      // listening started from.
       flushSync(() => {
         setState("idle");
-        setSpoken(null);
-        setValue(anchor.original);
+        setPreview(null);
+        if (valueRef.current !== anchor.original) setValue(anchor.original);
       });
       const el = textareaRef.current;
       if (el) {
         el.focus();
         el.setSelectionRange(anchor.start, anchor.end);
       }
-      if (!insertion) return;
+      // Nothing goes in, so the field's value does not change and the draft
+      // takes it back from the heard words it held.
+      if (!insertion) {
+        keepDraftRef.current(anchor.original);
+        return;
+      }
       if (el && insertNatively(el, insertion)) return;
       const spoken = anchor.before + insertion + anchor.after;
       setValue(spoken);
@@ -205,8 +239,15 @@ export function useVoiceInput({
           const anchor = anchorRef.current;
           if (!anchor) return;
           const insertion = spokenInsertion(anchor.before, heard, anchor.after);
-          setValue(anchor.before + insertion + anchor.after);
-          setSpoken({ start: anchor.before.length, end: anchor.before.length + insertion.length });
+          const next = {
+            value: anchor.before + insertion + anchor.after,
+            start: anchor.before.length,
+            end: anchor.before.length + insertion.length,
+          };
+          // `leave` can run before this renders, and must save these words.
+          previewRef.current = next;
+          setPreview(next);
+          keepDraftRef.current(next.value);
         },
         onAsking: setAsking,
         onDone: (heard, stop) => {
@@ -214,7 +255,7 @@ export function useVoiceInput({
           setAsking(false);
           commit(heard);
           setState("idle");
-          setSpoken(null);
+          setPreview(null);
           setNotice(stop);
           // A stop of its own, such as a lost connection, sends nothing: the
           // guardian reads why before sending.
@@ -324,8 +365,8 @@ export function useVoiceInput({
     stop,
     /** Stops listening, then sends once the last words are in the field. Does nothing while idle. */
     stopAndSend,
-    /** Where the spoken text sits in the field while voice input is on, or null. */
-    spoken,
+    /** The field's text with the heard words in while voice input is on, or null. */
+    preview,
     /** The microphone's loudness from 0 to 1 right now, or 0 while it is not open. */
     level,
   };

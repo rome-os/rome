@@ -300,24 +300,18 @@ struct ConciergeRow: View, Equatable {
         openTaskChat?.run((chatId: chatId, title: title))
     }
 
-    /// Only the Agent's text can be replied to: never a card of any kind
-    /// (task, question, approval, open or folded), nor the guardian's own.
-    static func offersReply(_ row: TranscriptRow) -> Bool {
-        if case .agentText = row { return true }
-        return false
-    }
-
     /// The tap of the quote a reply carries: it goes to the original.
     private func quoteAction() -> (() -> Void)? {
         let actions = store.actions
         return info.quote.map { quote in { actions.quote(original: quote.messageId) } }
     }
 
-    /// The message's time, and Reply on the Agent's messages: the reply bar.
-    private func menu(reply: Bool) -> BubbleMenu {
+    /// The message's time, and Reply where the message takes one
+    /// (`RowInfo.canReply`): the reply bar.
+    private var menu: BubbleMenu {
         let actions = store.actions
-        let onReply: (() -> Void)? = reply
-            ? row.messageId.map { id in { actions.reply(to: id) } }
+        let onReply: (() -> Void)? = info.canReply
+            ? row.messageId.map { [rowId = row.id] id in { actions.reply(to: id, row: rowId) } }
             : nil
         // Share opens share mode on the message's turn; a pending send has none.
         let onShare: (() -> Void)? = !info.canShare ? nil : { [rowId = row.id] in actions.share(fromRow: rowId) }
@@ -336,11 +330,11 @@ struct ConciergeRow: View, Equatable {
         case .separator(_, let date):
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
-            UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu(reply: Self.offersReply(row)),
+            UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu,
                        mark: info.mark,
                        quote: info.quote, onQuote: quoteAction())
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: { openChat($0, $1) }, menu: menu(reply: Self.offersReply(row)),
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: { openChat($0, $1) }, menu: menu,
                         quote: info.quote, onQuote: quoteAction())
         case .sourceLabel(_, let text):
             SourceLabelLine(text: text)
@@ -404,6 +398,10 @@ struct ChatHeader: View {
     var tasks: TaskListStore? = nil
     /// A topic chat's options in the "…" menu; the main Chat has none.
     var onRename: (() -> Void)? = nil
+    /// Whether the topic chat is pinned, for Pin or Unpin.
+    var pinned = false
+    /// Pin (true) or unpin (false) a topic chat.
+    var onPin: ((Bool) -> Void)? = nil
     var onArchive: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
@@ -418,7 +416,7 @@ struct ChatHeader: View {
             // As wide as the capsule on the right, so the identity stays in the middle.
             .frame(width: ChatHeaderButtons.width, alignment: .leading)
             ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces, zoomSource: zoomSource, onTap: { onAgent(nil) }) }
-            ChatHeaderButtons(title: menuTitle ?? "", tasks: tasks, onAgent: onAgent, onRename: onRename, onArchive: onArchive, onDelete: onDelete)
+            ChatHeaderButtons(title: menuTitle ?? "", tasks: tasks, onAgent: onAgent, onRename: onRename, pinned: pinned, onPin: onPin, onArchive: onArchive, onDelete: onDelete)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -657,9 +655,9 @@ enum MenuTitle {
 /// The right of a chat's header: one glass capsule holding Tasks and "…".
 /// Tasks opens the Agent page on its Tasks tab, with a dot while a task needs
 /// the guardian; a chat with no task list yet (a blank topic chat) has "…"
-/// alone, as the web does. "…" holds what else the Agent page shows (Outputs,
-/// Routines), then what is done to the chat: a topic chat's Rename, then
-/// Share and Shared links, then Archive and Delete. The main Chat is only
+/// alone, as the web does. "…" holds what else the Agent page shows (Outputs),
+/// then what is done to the chat: a topic chat's Rename and Pin
+/// or Unpin, then Share and Shared links, then Archive and Delete. The main Chat is only
 /// shared. Each button keeps a 44 pt target; the targets overlap so the
 /// icons sit as close as iOS's own paired toolbar buttons.
 struct ChatHeaderButtons: View {
@@ -670,6 +668,8 @@ struct ChatHeaderButtons: View {
     let tasks: TaskListStore?
     let onAgent: (AgentTab?) -> Void
     var onRename: (() -> Void)? = nil
+    var pinned = false
+    var onPin: ((Bool) -> Void)? = nil
     var onArchive: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     @Environment(\.chatShare) private var share
@@ -695,7 +695,6 @@ struct ChatHeaderButtons: View {
             Menu {
                 Section {
                     Button { onAgent(.outputs) } label: { Label("Outputs", systemImage: "doc.on.doc") }
-                    Button { onAgent(.routines) } label: { Label("Routines", systemImage: "calendar.badge.clock") }
                 } header: {
                     // A system menu wraps its title whatever the line limit: it is cut here.
                     if !title.isEmpty { Text(verbatim: MenuTitle.oneLine(title)) }
@@ -703,6 +702,9 @@ struct ChatHeaderButtons: View {
                 Section {
                     if let onRename {
                         Button(action: onRename) { Label("Rename", systemImage: "pencil") }
+                    }
+                    if let onPin {
+                        TopicPinButton(pinned: pinned) { onPin(!pinned) }
                     }
                     if let share {
                         // Share mode with nothing picked yet, as the web's Share chat.

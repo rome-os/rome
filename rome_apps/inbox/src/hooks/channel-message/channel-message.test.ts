@@ -544,7 +544,7 @@ describe("ChannelMessageHook", () => {
       );
     });
 
-    it("answers nothing on an account whose agent bypasses Inbox", async () => {
+    it("answers nothing on an account whose agent runs its own turns", async () => {
       linked = "chief-of-staff:chief-of-staff";
 
       await harness.emit(FEISHU_2_ID, message({ messageId: "m-1" }));

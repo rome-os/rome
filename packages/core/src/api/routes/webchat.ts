@@ -44,6 +44,7 @@ import {
   type TraceEventDto,
 } from "../trace-segments.js";
 import type {
+  AgentPlan,
   TraceAccounting,
   TraceModelUsage,
   TraceSnapshot,
@@ -965,6 +966,19 @@ export function openToolOf(
   return [...(running?.openTools.values() ?? [])].at(-1) ?? null;
 }
 
+/** The plan of a chat's running turn, as its Plan card shows it: the latest
+ *  unfinished stream that has one. A send queued behind it has none yet. */
+export function turnPlanOf(
+  streams: readonly Pick<ActiveWebchatStream, "finished" | "segmentBuilder">[],
+): AgentPlan | null {
+  for (const stream of [...streams].reverse()) {
+    if (stream.finished) continue;
+    const plan = stream.segmentBuilder.snapshot().summary.plan;
+    if (plan?.steps.length) return plan;
+  }
+  return null;
+}
+
 interface ActiveWebchatStream {
   streamId: string;
   sessionId: string;
@@ -1116,6 +1130,8 @@ export interface WebchatRuntime {
    * has not come back, as the trace names it. Null when it is in none.
    */
   openTool(sessionId: string): string | null;
+  /** The plan of the chat's running turn, as its Plan card shows it, or null for none. */
+  turnPlan(sessionId: string): AgentPlan | null;
   /**
    * Calls `listener` with the chat's id whenever it starts or stops running a
    * turn, or its running turn enters or leaves a tool; the latter alone comes
@@ -1314,6 +1330,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
   const openTool = (sessionId: string): string | null =>
     openToolOf(activeStreams.get(sessionId) ?? []);
+  const turnPlan = (sessionId: string): AgentPlan | null =>
+    turnPlanOf(activeStreams.get(sessionId) ?? []);
   deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
   // A task that ended closes its chat's cards, so the chat waits on no one:
   // a stop's `session_running` is every client's cue to read the list again,
@@ -5762,6 +5780,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     isRunning: isSessionRunning,
     isBusy: isSessionBusy,
     openTool,
+    turnPlan,
     onTurnChange(listener) {
       turnListeners.add(listener);
       return () => {

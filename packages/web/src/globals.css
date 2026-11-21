@@ -151,6 +151,10 @@
 .voice-input-char-in {
   animation: voice-input-char-in 280ms ease-out both;
 }
+/* The copy drawn over the field shows its text while voice input is on. */
+.voice-input-previewing::placeholder {
+  color: transparent;
+}
 @media (prefers-reduced-motion: reduce) {
   .voice-input-char-in {
     animation: none;
@@ -297,11 +301,12 @@
   }
 }
 
+/* The sidebar's unread count on a row icon's corner, in the `unread` pair. */
 [data-concierge-unread] {
-  --row-count-font-size: 0.6875rem;
-  --row-count-line-height: calc(16 / 11);
+  --row-count-font-size: 0.5rem;
+  --row-count-line-height: calc(11 / 8);
   --row-count-px: 0.125rem;
-  --row-count-fg: var(--primary-foreground);
+  --row-count-fg: var(--unread-foreground);
   font-size: var(--row-count-font-size);
   line-height: var(--row-count-line-height);
   color: var(--row-count-fg);
@@ -507,20 +512,17 @@ button.rome-upgrade-row:hover {
 }
 
 /* A task link in the Concierge's message (TaskLink.tsx): the inline code's
-   tint, so it reads as a word in the sentence. It is an inline box with
-   horizontal padding only, so it never makes the line taller; only its 14px
-   mark carries colour. A status change flashes the tint once. */
-/* The chip: the mark, then the name on a faint fill. Only the name carries
-   the fill, so a chip that starts a line starts flush with the text under
-   it, as the iOS chip does. */
+   tint, so it reads as a word in the sentence. The fill sits on the whole
+   link, behind its mark and name, as on iOS. The link is an inline box with
+   horizontal padding only, so it never makes the line taller, and a chip that
+   starts a line has its fill start flush with the text under it; the mark sits
+   inside the padding. Only the 14px mark carries colour. A status change
+   flashes the tint once. */
 [data-task-link] {
   display: inline;
   color: inherit;
   text-decoration: none;
   white-space: nowrap;
-}
-
-[data-task-link-name] {
   background-color: color-mix(in oklab, var(--foreground) 7%, transparent);
   @apply px-1;
   box-decoration-break: clone;
@@ -529,7 +531,7 @@ button.rome-upgrade-row:hover {
   transition: background-color 120ms ease;
 }
 
-[data-task-link]:hover [data-task-link-name] {
+[data-task-link]:hover {
   background-color: color-mix(in oklab, var(--foreground) 12%, transparent);
 }
 
@@ -537,7 +539,7 @@ button.rome-upgrade-row:hover {
   display: inline-block;
   width: 14px;
   height: 14px;
-  margin-right: 2px;
+  margin-right: 4px;
   vertical-align: -2px;
 }
 
@@ -547,7 +549,7 @@ button.rome-upgrade-row:hover {
   height: 14px;
 }
 
-[data-task-link][data-flash] [data-task-link-name] {
+[data-task-link][data-flash] {
   animation: rome-task-link-flash 700ms ease-out;
 }
 
@@ -558,7 +560,7 @@ button.rome-upgrade-row:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-task-link][data-flash] [data-task-link-name] {
+  [data-task-link][data-flash] {
     animation: none;
   }
 }
@@ -961,6 +963,10 @@ button.rome-upgrade-row:hover {
   /* Status colour for a running chat (the sidebar spinner). Only the host
      gets the utility: `--running` is not in the app token contract. */
   --color-running: var(--running);
+  /* The sidebar's unread count, one red in every theme. Host-only, like
+     `--running`. */
+  --color-unread: var(--unread);
+  --color-unread-foreground: var(--unread-foreground);
 
   @keyframes tw-shimmer {
     from {

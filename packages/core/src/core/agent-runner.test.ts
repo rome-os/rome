@@ -1903,6 +1903,135 @@ describe("AgentRunner", () => {
       ).rejects.toThrow("Unknown tool: execute_action");
     });
 
+    it("takes away the actions the session's place withholds, and only there", async () => {
+      registerDemoAction();
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Done" }],
+        [{ type: "result", content: "Done" }],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: (_agent, thread) =>
+          thread?.channel === "telegram" ? { withoutActions: ["demo_action"] } : null,
+      });
+      const definition = agentLoader.find("test-main")!.definition as { actions?: string[] };
+      const granted = definition.actions;
+      definition.actions = ["demo_action"];
+      const run = (channel: string, threadId: string) =>
+        collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: `${channel}:${threadId}`,
+            threadContext: { channel, threadId },
+          }),
+        );
+      try {
+        await run("telegram", "place-1");
+        await run("webchat", "place-2");
+      } finally {
+        definition.actions = granted;
+      }
+      expect(await listActionNames(provider.sessions[0].tools)).toEqual([]);
+      expect(await listActionNames(provider.sessions[1].tools)).toEqual(["demo_action"]);
+    });
+
+    it("takes a withheld action away from a wildcard grant too", async () => {
+      registerDemoAction();
+      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: () => ({ withoutActions: ["demo_action"] }),
+      });
+      const definition = agentLoader.find("test-main")!.definition as { actions?: string[] };
+      const granted = definition.actions;
+      definition.actions = ["*"];
+      try {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: "telegram:wild-1",
+            threadContext: { channel: "telegram", threadId: "wild-1" },
+          }),
+        );
+      } finally {
+        definition.actions = granted;
+      }
+      expect(await listActionNames(provider.sessions[0].tools)).not.toContain("demo_action");
+    });
+
+    it("withholds defer where the session's place says so, and only there", async () => {
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Done" }],
+        [{ type: "result", content: "Done" }],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: (_agent, thread) =>
+          thread?.threadId === "no-wake" ? { withoutDefer: true } : null,
+      });
+      for (const threadId of ["no-wake", "wakes"]) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: `webchat:${threadId}`,
+            threadContext: { channel: "webchat", threadId },
+          }),
+        );
+      }
+      expect(toolNames(provider.sessions[0].tools, "ask_user")).not.toContain("defer");
+      expect(toolNames(provider.sessions[1].tools, "ask_user")).toContain("defer");
+    });
+
+    it("gives the agent its place's instructions in place of its own, and only there", async () => {
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Done" }],
+        [{ type: "result", content: "Done" }],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        placeSetup: (_agent, thread) =>
+          thread?.channel === "telegram" ? { systemPromptPrefix: "You answer on a bot." } : null,
+      });
+      for (const [channel, threadId] of [
+        ["telegram", "bot-1"],
+        ["webchat", "chat-1"],
+      ]) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt: "Hi",
+            channelThreadKey: `${channel}:${threadId}`,
+            threadContext: { channel, threadId },
+          }),
+        );
+      }
+      const [onBot, onDashboard] = provider.sessions.map((session) => session.config.systemPrompt);
+      expect(onBot).toContain("You answer on a bot.");
+      expect(onBot).not.toContain("You are a test main agent.");
+      expect(onDashboard).toContain("You are a test main agent.");
+      expect(onDashboard).not.toContain("You answer on a bot.");
+    });
+
+    it("lets the session's tools read its place while the session first opens", async () => {
+      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
+      const places: Array<string | undefined> = [];
+      const runner = createRunner(provider, undefined, {
+        sessionTools: async (context) => {
+          places.push(context.getThreadContext()?.channel);
+          return [];
+        },
+      });
+      const events = await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "Hi",
+          channelThreadKey: "telegram:cold-1",
+          threadContext: { channel: "telegram", threadId: "cold-1" },
+        }),
+      );
+      expect(events.some((event) => event.type === "error")).toBe(false);
+      expect(places[0]).toBe("telegram");
+    });
+
     it("preserves App Store attribution on isolated forks", async () => {
       const find = agentLoader.find.bind(agentLoader);
       const recordSpy = rs.spyOn(agentLoader, "find").mockImplementation((name) => {
@@ -2360,6 +2489,8 @@ describe("AgentRunner", () => {
       resetPolicy?: ProviderSessionResetPolicy;
       turnLinks?: PromptFacts;
       runLineDeps?: RunLineDeps;
+      placeSetup?: Parameters<typeof createSessions>[0]["placeSetup"];
+      sessionTools?: Parameters<typeof romeToolPorts>[0]["sessionTools"];
     } = {},
   ): AgentRunner {
     const active = provider ?? mockProvider;
@@ -2370,6 +2501,15 @@ describe("AgentRunner", () => {
       {
         ...managerDeps(modelResolver, turnLifecycle, options.appCatalog),
         ...(options.turnLinks ? { promptFacts: options.turnLinks } : {}),
+        ...(options.placeSetup ? { placeSetup: options.placeSetup } : {}),
+        ...(options.sessionTools
+          ? romeToolPorts({
+              actionRegistry,
+              actionEngine,
+              webchatRepo: new ChatsWebChatRepository(testDb.db),
+              sessionTools: options.sessionTools,
+            })
+          : {}),
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
@@ -4310,6 +4450,22 @@ describe("AgentRunner", () => {
           expect(provider.calls.at(-1)?.prompt).toContain("<continuation>");
           expect(provider.calls.at(-1)?.prompt).not.toContain("<handoff>");
           expect(provider.calls.at(-1)?.prompt).toContain("Guardian: Friday at 7 then");
+        });
+
+        it("renews with no handoff and no replay where the session's place turns handoffs off", async () => {
+          const provider = threadedProvider(3);
+          provider["responses"][1] = [{ type: "error", error: "thread gone" }];
+          const { handoffs, asked } = fakeHandoffs({ fallback: async () => null });
+          const runner = renewingRunner(provider, undefined, {
+            handoffs,
+            placeSetup: () => ({ handoffOnRenewal: false }),
+          });
+          await coldTurn(runner);
+          await resetDue();
+          await coldTurn(runner);
+
+          expect(asked.context).toBe(0);
+          expect(provider.calls.at(-1)?.prompt).not.toContain("Guardian: Friday at 7 then");
         });
 
         /** Lets a turn end's background renewal run, as a guardian's pause would. */

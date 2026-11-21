@@ -175,7 +175,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const chatSettings = new ChatSettingsControlProxy();
   const appChatSettings = legacyChatIdSettings(chatSettings);
   const wakeGateFor = wakeGateLoader({
-    chatEnabled: async (chat) => (await appChatSettings.get(chat)).effective.enabled,
+    chatSettings: (chat) => appChatSettings.get(chat),
     bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,

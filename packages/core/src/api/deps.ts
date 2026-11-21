@@ -78,7 +78,9 @@ import type { SystemUpgradeService } from "../instance/system-upgrade/service.js
 import type {
   AppRuntimeRepositories,
   ChatSettingsControl,
+  ChatSettingsPage,
   ChannelsService,
+  ListChatSettingsInput,
 } from "@rome-os/app-runtime";
 import type { FavorService } from "../favors/index.js";
 import type { ConnectionRegistry } from "../connections/index.js";
@@ -113,7 +115,7 @@ export interface ApiDeps {
   concierge?: ConciergeService;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
-  chatSettings: ChatSettingsControl;
+  chatSettings: DashboardChatSettings;
   actionEngine: ActionEngine;
   actionLoader: Pick<ActionLoader, "get" | "getAllRecords" | "getRegistryLoadFailures">;
   db: DrizzleDb;
@@ -317,4 +319,10 @@ export interface ApiHandle {
 export interface Feature {
   routes: Hono;
   actions: readonly Action[];
+}
+
+/** The chat settings as the dashboard reads them: an app's, and a list that
+ *  can keep only the chats a guardian set a value on. */
+export interface DashboardChatSettings extends Omit<ChatSettingsControl, "list"> {
+  list(input: ListChatSettingsInput & { changed?: boolean }): Promise<ChatSettingsPage>;
 }

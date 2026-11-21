@@ -14,7 +14,6 @@ import {
 } from "../oauth/rome-cloud-oauth.js";
 import { credentialFromBundle, grantProfileFromBundle } from "../providers-import.js";
 import type { ConnectionRegistry } from "../registry.js";
-import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";
@@ -23,8 +22,10 @@ import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { makeSlackBotDescriptor } from "./slack-bot.js";
+import { makeSlackAppDescriptor, type SlackAppDescriptorDeps } from "./slack-app.js";
 import { createWechatDescriptor } from "./wechat.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
+import type { ChatSettingsPort } from "../types.js";
 
 export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
 export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
@@ -35,6 +36,7 @@ export { makeAgentsDescriptor } from "./agents.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
 export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-providers.js";
 export { makeSlackBotDescriptor, SLACK_BOT_KIND } from "./slack-bot.js";
+export { makeSlackAppDescriptor, SLACK_APP_KIND } from "./slack-app.js";
 
 /**
  * The runtime dependencies the descriptor factories need, threaded from index.ts
@@ -43,7 +45,7 @@ export { makeSlackBotDescriptor, SLACK_BOT_KIND } from "./slack-bot.js";
  */
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
-  chatSettings: ChatSettingsService;
+  chatSettings: ChatSettingsPort;
   chatStop: ChatStopHandler;
   peopleRepo: PeopleRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
@@ -51,10 +53,6 @@ export interface BuiltinConnectionDeps {
   listAgents: () => string[];
   /** The agent linked to a Connection's channel (Discord in-chat settings). */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
-  /** A test-only back door: whether an agent keeps the Inbox app off the
-   *  accounts linked to it (`app-host/inbox-bypass.ts`). Such an account hears
-   *  every message, whatever its chats' settings say. */
-  unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
   /** Guardian auto-map on WhatsApp connect (canonical self JID → channel mapping). */
@@ -70,6 +68,9 @@ export interface BuiltinConnectionDeps {
    *  the begin-redirect (mints the PKCE attempt) and the return-leg redeem both
    *  read/write the `oauth_pending_attempts` table. */
   db: DrizzleDb;
+  /** Rome's own Slack app: its Web API client, Rome Cloud, and how to drain a
+   *  workspace's relay mailbox. Absent, the kind is not offered. */
+  slackApp?: SlackAppDescriptorDeps;
 }
 
 /**
@@ -89,12 +90,12 @@ export function registerBuiltinConnections(
       peopleRepo: deps.peopleRepo,
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,
-      unsafeTestOnlyBypassesInbox: deps.unsafeTestOnlyBypassesInbox,
       hasAgent: deps.hasAgent,
     }),
   );
   registry.register(makeTelegramUserDescriptor());
   registry.register(makeSlackBotDescriptor());
+  if (deps.slackApp) registry.register(makeSlackAppDescriptor(deps.slackApp));
   registry.register(createWechatDescriptor());
   registry.register(
     makeEmailDescriptor({

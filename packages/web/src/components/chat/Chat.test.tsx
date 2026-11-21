@@ -44,6 +44,7 @@ import {
   listSessionTurns,
   markSessionRead,
   openTurnStream,
+  pinSession,
   postSessionTurn,
   renameSession,
 } from "@/lib/chat-api";
@@ -493,6 +494,7 @@ rs.mock("@/lib/chat-api", () => {
     createSession: rs.fn(),
     deleteSession: rs.fn(),
     renameSession: rs.fn().mockResolvedValue(undefined),
+    pinSession: rs.fn().mockResolvedValue(undefined),
     interruptTurn: rs.fn(),
     listSessionMessages,
     // The newest page reads like the whole list unless a test says otherwise.
@@ -3054,20 +3056,18 @@ describe("Chat Concierge empty state", () => {
     renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
     // The header settles once the chat loads; Tasks has its own button.
     fireEvent.click(await screen.findByRole("button", { name: "concierge.menu.tasks" }));
-    expect(mockOpenTaskList).toHaveBeenLastCalledWith("tasks");
+    expect(mockOpenTaskList).toHaveBeenCalled();
     // The logo opens nothing.
     expect(document.querySelector("[data-concierge-header-badge]")?.tagName).toBe("DIV");
     await user.click(screen.getByRole("button", { name: "navbar.more" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "concierge.menu.outputs",
-      "concierge.menu.routines",
       "recentChats.rename",
+      "recentChats.pin",
       "share.title",
       "navbar.archive",
       "navbar.delete",
     ]);
-    await user.click(screen.getByRole("menuitem", { name: "concierge.menu.routines" }));
-    expect(mockOpenTaskList).toHaveBeenLastCalledWith("routines");
   });
 
   it("offers Share chat but no Archive or Delete for the main chat, and all three for a topic chat", async () => {
@@ -3084,7 +3084,6 @@ describe("Chat Concierge empty state", () => {
     // The main chat is only shared: no Rename, Archive or Delete.
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "concierge.menu.outputs",
-      "concierge.menu.routines",
       "share.title",
     ]);
     await user.keyboard("{Escape}");
@@ -3119,6 +3118,47 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() =>
       expect(rs.mocked(renameSession)).toHaveBeenCalledWith("topic-1", "Trip plans"),
     );
+  });
+
+  it("pins and unpins a topic chat from the header's ⋯ menu, and offers no pin in the main chat", async () => {
+    const user = userEvent.setup();
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: null,
+      pinnedAt: null,
+    });
+    const topic = renderChat(
+      <Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />,
+    );
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "recentChats.pin" }));
+    await waitFor(() => expect(rs.mocked(pinSession)).toHaveBeenCalledWith("topic-1", true));
+    topic.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: null,
+      pinnedAt: "2026-11-20T10:00:00.000Z",
+    });
+    const pinned = renderChat(
+      <Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />,
+    );
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "recentChats.unpin" }));
+    await waitFor(() => expect(rs.mocked(pinSession)).toHaveBeenCalledWith("topic-1", false));
+    pinned.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: null,
+      archivedAt: null,
+      pinnedAt: null,
+    });
+    renderChat(<Chat sessionId="concierge" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    expect(screen.queryByRole("menuitem", { name: "recentChats.pin" })).toBeNull();
   });
 
   it("offers Share chat in a common chat too", async () => {

@@ -53,6 +53,8 @@ final class DemoBackend: RomeBackend {
     private var topicChats: [ConciergeChat] = []
     /// Each topic chat's last activity, for the chat list; the drawer sorts by it.
     private var topicActivity: [String: Date] = [:]
+    /// When each pinned topic chat was pinned. None is pinned at first.
+    private var topicPins: [String: Date] = [:]
     /// Files sent with messages, by their asset path.
     private var assets: [String: Data] = [:]
     private var approvals: [String: ApprovalRecord] = [:]
@@ -222,6 +224,11 @@ final class DemoBackend: RomeBackend {
         bus.emit(LiveTopic.chat(id), .sessionName(sessionId: id, name: name))
     }
 
+    func pinChat(_ id: String, pinned: Bool) async throws {
+        try await pause(0.2)
+        topicPins[id] = pinned ? .now : nil
+    }
+
     func archiveChat(_ id: String) async throws {
         try await pause(0.2)
         topicChats.removeAll { $0.id == id }
@@ -370,7 +377,7 @@ final class DemoBackend: RomeBackend {
 
     func sessions() async throws -> [ChatSession] {
         Array(chats.values) + topicChats.map { chat in
-            ChatSession(id: chat.id, name: chat.name, activityAt: topicActivity[chat.id].map(RomeDate.string))
+            ChatSession(id: chat.id, name: chat.name, activityAt: topicActivity[chat.id].map(RomeDate.string), pinnedAt: topicPins[chat.id].map(RomeDate.string))
         }
     }
 
@@ -393,8 +400,35 @@ final class DemoBackend: RomeBackend {
         return TaskLinksResponse(tasks: ids.compactMap { taskLinkInfo[$0] })
     }
 
-    /// The demo's task list: its tasks in the groups their status gives
-    /// them, with a schedule, a lone check, a follow and a routine.
+    /// The main chat's rows that are no task chat: a reminder, a follow and
+    /// routines (a daily one, a paused weekly one, a one-off), made on the
+    /// first read so their times count from then. The row actions change them.
+    private var listExtras: [TaskListItem]?
+
+    private func extras(nowMs: Double) -> [TaskListItem] {
+        if let listExtras { return listExtras }
+        let hour = 3_600_000.0
+        let made = nowMs - 6 * 24 * hour
+        let oneOffDate: String = {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.string(from: Date(timeIntervalSince1970: (nowMs + 2 * 24 * hour) / 1000))
+        }()
+        let items: [TaskListItem] = [
+            .check(.init(check: .init(id: "check-flight", name: "看看机票有没有降价", at: nowMs + 3 * hour, waitingFor: nil, createdAt: made))),
+            .routine(.init(id: "r-passport", name: "提醒续签护照", trigger: .init(type: "schedule", localTime: "10:00", rrule: nil, date: oneOffDate), enabled: true, nextRunAt: nowMs + 2 * 24 * hour, lastRun: nil, createdAt: made)),
+            .routine(.init(id: "r-summary", name: "每日总结", trigger: .init(type: "schedule", localTime: "21:00", rrule: "FREQ=DAILY"), enabled: true, nextRunAt: nowMs + 5 * hour, lastRun: nil, createdAt: made)),
+            .follow(.init(source: "github", label: "GitHub", target: "rome-os/rome", state: "active", digestTimes: ["09:00", "18:00"], nextAt: nowMs + 7 * hour, createdAt: made)),
+            .routine(.init(id: "r-weekly", name: "周报提醒", trigger: .init(type: "schedule", localTime: "17:00", rrule: "FREQ=WEEKLY;BYDAY=FR"), enabled: false, nextRunAt: nil, lastRun: .init(status: "error", firedAt: made), createdAt: made)),
+        ]
+        listExtras = items
+        return items
+    }
+
+    /// The demo's task list in the one panel's groups: its tasks in the
+    /// groups their status gives them, a scheduled task between runs in
+    /// Scheduled, with a lone reminder, a follow and routines.
     func taskList(chatId: String) async throws -> TaskListResponse {
         try await pause(0.2)
         let nowMs = Date.now.timeIntervalSince1970 * 1000
@@ -418,21 +452,70 @@ final class DemoBackend: RomeBackend {
             )
             let key: TaskListGroup.Key = switch status {
             case "needs_you": .needsYou
-            case "later": .later
+            case "later": item.schedule == nil ? .later : .scheduled
             case "ended": .ended
             default: .active
             }
             groups[key, default: []].append(.task(item))
         }
-        if chat == nil {
-            groups[.later, default: []].append(.check(.init(check: .init(id: "check-flight", name: "看看机票有没有降价", at: nowMs + 3 * 3_600_000, waitingFor: nil))))
-            groups[.onItsOwn, default: []] += [
-                .follow(.init(source: "github", label: "GitHub", target: "rome-os/rome", state: "active", digestTimes: ["09:00", "18:00"])),
-                .routine(.init(id: "r-summary", name: "每日总结", trigger: .init(type: "schedule", localTime: "21:00", rrule: "FREQ=DAILY"), enabled: true, nextRunAt: nowMs + 5 * 3_600_000, lastRun: nil)),
-            ]
+        // The empty demo has none, so its tab shows "No tasks yet".
+        if chat == nil, variant != .empty {
+            for item in extras(nowMs: nowMs) {
+                let key: TaskListGroup.Key
+                switch item {
+                case .routine(let routine): key = routine.trigger.date != nil && routine.trigger.rrule == nil ? .later : .scheduled
+                case .follow: key = .scheduled
+                default: key = .later
+                }
+                groups[key, default: []].append(item)
+            }
         }
-        let order: [TaskListGroup.Key] = [.needsYou, .active, .later, .onItsOwn, .ended]
+        let order: [TaskListGroup.Key] = [.needsYou, .active, .later, .scheduled, .ended]
         return TaskListResponse(chatId: chatId, groups: order.compactMap { key in groups[key].map { TaskListGroup(key: key, items: $0) } })
+    }
+
+    /// Changes a row that is no task chat, then reads the list again; one
+    /// the list does not hold is not found.
+    private func changeExtra(_ id: String, chatId: String, _ change: (inout [TaskListItem], Int) -> Void) async throws {
+        try await pause(0.4)
+        guard var items = listExtras, let index = items.firstIndex(where: { $0.id == id }) else { throw APIError.notFound }
+        change(&items, index)
+        listExtras = items
+        bus.emit(LiveTopic.chatTasks(chatId), .taskListChanged(chatId: chatId))
+    }
+
+    func cancelListedCheck(chatId: String, checkId: String) async throws {
+        try await changeExtra("check:\(checkId)", chatId: chatId) { items, index in items.remove(at: index) }
+    }
+
+    func unfollowListed(chatId: String, source: String, target: String) async throws {
+        try await changeExtra("follow:\(source):\(target)", chatId: chatId) { items, index in items.remove(at: index) }
+    }
+
+    func setListedRoutineEnabled(chatId: String, routineId: String, enabled: Bool) async throws {
+        let nowMs = Date.now.timeIntervalSince1970 * 1000
+        try await changeExtra("routine:\(routineId)", chatId: chatId) { items, index in
+            guard case .routine(var routine) = items[index] else { return }
+            routine.enabled = enabled
+            routine.nextRunAt = enabled ? nowMs + 24 * 3_600_000 : nil
+            items[index] = .routine(routine)
+        }
+    }
+
+    func deleteListedRoutine(chatId: String, routineId: String) async throws {
+        try await changeExtra("routine:\(routineId)", chatId: chatId) { items, index in items.remove(at: index) }
+    }
+
+    /// Marks a demo task done: it ends as done, and its list reads again.
+    func markListedTaskDone(chatId: String, taskId: String) async throws {
+        try await pause(0.4)
+        guard let index = tasks.firstIndex(where: { $0.id == taskId }) else { throw APIError.notFound }
+        tasks[index].status = "ended"
+        tasks[index].endReason = "done"
+        tasks[index].state = .done
+        tasks[index].completedAt = Date.now.timeIntervalSince1970 * 1000
+        tasks[index].updatedAt = tasks[index].completedAt!
+        bus.emit(LiveTopic.chatTasks(chatId), .taskListChanged(chatId: chatId))
     }
 
     /// Stops a demo task: it ends as stopped, and its list reads again.

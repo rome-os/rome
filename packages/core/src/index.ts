@@ -222,6 +222,7 @@ import {
   codexLoginKind,
   SharedCodexAccountService,
   romeCreditsProxyRoutes,
+  policyInPlace,
   resolveAgentPolicy,
   createSystemPrompts,
 } from "./agent/index.js";
@@ -269,6 +270,7 @@ import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
+import { agentOnConnect, conciergePlaceSetup } from "./concierge/on-connection.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -327,6 +329,7 @@ import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js";
 import { guardedSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
+import { ownAccountNames } from "./connections/own-account-name.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
 import type { EmailAdapter, EmailSettings } from "./connections/kinds/email/email.js";
@@ -357,7 +360,7 @@ import {
 } from "./paths.js";
 import { createAppActionsSubscriber, registerAppActions } from "./app-host/app-actions-wiring.js";
 import { ChannelMessageHooks } from "./app-host/channel-message-hooks.js";
-import { bypassesInbox } from "./app-host/inbox-bypass.js";
+import { deprecatedRunsOwnTurns } from "./app-host/deprecated-runs-own-turns.js";
 import {
   createCodexImageGenerationProvider,
   createImageGenerationService,
@@ -405,6 +408,10 @@ import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./app-host/api.js";
 import { RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
+import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
+import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
+import { SlackMessageCopyRepository } from "./connections/kinds/slack-app/message-copy.js";
+import { SLACK_APP_KIND } from "./connections/integrations/slack-app.js";
 import {
   RELAY_SETTING_KEY,
   deriveDepositUrl,
@@ -474,6 +481,14 @@ async function main() {
     linkOf: (kind: string) => accountLinkOf(connectionRegistry)(kind),
     accounts: connectedAccounts,
   };
+  // A newly connected own account of a kind that asks for it starts with the
+  // Concierge, the guardian's, so it answers from its first message. One Rome
+  // already has keeps its agent (docs/architecture/channels.md#an-accounts-agent).
+  const agentOnConnectOf = (kind: string) =>
+    agentOnConnect(
+      accountAgents.linkOf(kind),
+      connectionRegistry.getDescriptor(kind)?.startsWithConcierge === true,
+    );
   // Rome listens to an account of a linkable connection kind only while it has an
   // agent: each inbound port reads this by connection, and a link tells it.
   const accountListening = new AccountListening(accountAgents);
@@ -673,7 +688,7 @@ async function main() {
           if (!talks(record.connectionKind)) return;
           const claimed = { ...record, domain: domainOf(event.profile), account: event.account };
           channelRecords.claim(tx, claimed, record.createdAt);
-          connectedAccounts.add(tx, record.id);
+          connectedAccounts.add(tx, record.id, agentOnConnectOf(record.connectionKind));
           rememberOwnAccountProfile(
             accountProfilesRepo,
             tx,
@@ -689,7 +704,7 @@ async function main() {
         case "fixed":
           if (!talks(connection.connectionKind) || !event.account) return;
           channelRecords.ensureAccount(tx, connection, event.account, new Date());
-          connectedAccounts.add(tx, connection.id);
+          connectedAccounts.add(tx, connection.id, agentOnConnectOf(connection.connectionKind));
           rememberOwnAccountProfile(
             accountProfilesRepo,
             tx,
@@ -1405,7 +1420,9 @@ async function main() {
             modelAccounts.read().openai?.account,
           ),
       }),
+      placeSetup: conciergePlaceSetup,
       chatInstructions: taskChatInstructions({ webchatRepo }),
+      ownAccountName: ownAccountNames(connectionRegistry),
       sessionTracing: romeSessionTracing,
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
@@ -1553,12 +1570,16 @@ async function main() {
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
     replies: chatsWired.replies,
-    isTextPrivate: (agentName) => {
+    // The place can change the agent's policy: on a connection the
+    // Concierge's text is the reply (docs/architecture/concierge.md).
+    isTextPrivate: (agentName, channel) => {
       const agent = agentLoader.find(agentName);
       return (
         agent !== undefined &&
-        resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }).finalText ===
-          "private"
+        policyInPlace(
+          resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }),
+          conciergePlaceSetup(agentName, { channel }),
+        ).finalText === "private"
       );
     },
   });
@@ -1781,7 +1802,7 @@ async function main() {
   // SDK 0.7 reads.
   const appChatSettings = legacyChatIdSettings(chatSettings);
   const wakeGateFor = wakeGateLoader({
-    chatEnabled: async (chat) => (await appChatSettings.get(chat)).effective.enabled,
+    chatSettings: (chat) => appChatSettings.get(chat),
     bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,
@@ -2095,6 +2116,30 @@ async function main() {
   const { RomeCloudMailProvider } = await import("./connections/kinds/email/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
+    // Rome's own Slack app: Slack's Web API at the configured origin, Rome
+    // Cloud for sign-in and the workspace binding, and a relay drain per
+    // workspace for its events.
+    slackApp: {
+      api: createSlackAppWebApi(config.slackApiBaseUrl),
+      cloud: romeCloudSlackApp(),
+      copy: new SlackMessageCopyRepository(db),
+      listens: (connectionId) => accountListening.listens(connectionId),
+      openMailbox: (mailbox, onFrame) => {
+        const drainer = new RelayDrainer(
+          [
+            {
+              connectUrl: mailbox.connectUrl,
+              drainKey: mailbox.drainKey,
+              targetAppId: SLACK_APP_KIND,
+              targetPath: [],
+            },
+          ],
+          (_drain, event) => onFrame({ headers: event.headers, body: event.body }),
+        );
+        drainer.start();
+        return { stop: () => drainer.stop() };
+      },
+    },
     settingsRepo,
     chatSettings,
     chatStop,
@@ -2107,7 +2152,6 @@ async function main() {
     listAgents: () => agentLoader.list().map((agent) => agent.name),
     hasAgent: (name) => agentLoader.find(name) !== undefined,
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
-    unsafeTestOnlyBypassesInbox: (agent) => bypassesInbox(agentLoader.find(agent)),
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
       linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {
@@ -2243,7 +2287,8 @@ async function main() {
       messagesSaid: hookMessagesSaid,
       accountAgentOf: hookAgentOf,
       linkedAgentOf: hookAgentOf,
-      unsafeTestOnlyBypassesInbox: (agent) => bypassesInbox(agentLoader.find(agent)),
+      // The SDK keeps the name it shipped with; it means `deprecatedRunsOwnTurns`.
+      unsafeTestOnlyBypassesInbox: (agent) => deprecatedRunsOwnTurns(agentLoader.find(agent)),
       wakeGateFor,
     },
     mayLoad: (appId) =>

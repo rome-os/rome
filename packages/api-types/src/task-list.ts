@@ -1,5 +1,5 @@
-// Wire types of a Concierge chat's Tasks view: its task chats, grouped by
-// status, and what runs on its own beside them (checks, follows, routines).
+// Wire types of a Concierge chat's task list: its task chats, and the checks,
+// follows and routines that run for it, in groups.
 // The server is packages/core/src/concierge/task-list.ts and the clients are
 // packages/web and the iOS app. docs/domains/chats.md#task-list
 
@@ -11,12 +11,26 @@ import {
 } from "./concierge-task-status.js";
 
 /**
- * The groups, in the order the view shows them. The Tasks view shows the task
- * chats in `needs_you`, `active`, `later` and `ended`; the Routines view shows
- * `on_its_own`, a key the iOS app reads and so keeps.
+ * The groups of the two-view grouping, in order: the task chats in
+ * `needs_you`, `active`, `later` and `ended`, and the rest in `on_its_own`.
+ * iOS builds before the one panel read it as their Tasks and Routines tabs,
+ * so a read without `?grouping=panel` keeps answering it.
  */
 export const TASK_LIST_GROUPS = ["needs_you", "active", "later", "on_its_own", "ended"] as const;
-export type TaskListGroupKey = (typeof TASK_LIST_GROUPS)[number];
+
+/**
+ * The groups of the one-panel grouping (`?grouping=panel`), in order. Later
+ * holds the one-off things to come, and Scheduled the recurring ones: a
+ * scheduled task between its runs, a repeating or event routine, and a follow.
+ */
+export const TASK_PANEL_GROUPS = ["needs_you", "active", "later", "scheduled", "ended"] as const;
+
+export type TaskListGroupKey =
+  | (typeof TASK_LIST_GROUPS)[number]
+  | (typeof TASK_PANEL_GROUPS)[number];
+
+/** The query value that asks `GET /api/chats/:chatId/tasks` for the one-panel grouping. */
+export const TASK_LIST_PANEL_GROUPING = "panel";
 
 /** A task's repeating schedule, as its row shows it. */
 export interface TaskListSchedule {
@@ -136,9 +150,11 @@ export interface TaskListGroup {
 }
 
 /**
- * `GET /api/chats/:chatId/tasks`: the groups that have rows, in order. Ended
- * holds its newest {@link TASK_LIST_ENDED_PAGE} rows; `?endedBefore=<cursor>`
- * answers the ended group alone, its next page from that cursor.
+ * `GET /api/chats/:chatId/tasks`: the groups that have rows, in order, of
+ * {@link TASK_LIST_GROUPS}, or of {@link TASK_PANEL_GROUPS} with
+ * `?grouping=panel`. Ended holds its newest {@link TASK_LIST_ENDED_PAGE} rows;
+ * `?endedBefore=<cursor>` answers the ended group alone, its next page from
+ * that cursor.
  */
 export interface TaskListResponse {
   chatId: string;
@@ -197,16 +213,21 @@ const byNullableAsc = (a: number | null, b: number | null) =>
 const laterOf = (item: TaskListItem): number | null => {
   if (item.kind === "task") return item.check?.at ?? item.task.laterAt ?? null;
   if (item.kind === "check") return item.check.at;
+  if (item.kind === "routine") return item.nextRunAt;
   return null;
 };
 
-/** When a row of the Routines view runs next. */
+/** When a row that is no task chat, or a scheduled task, runs next. */
 const nextOf = (item: TaskListItem): number | null => {
   if (item.kind === "follow") return item.nextAt ?? null;
   if (item.kind === "routine") return item.nextRunAt;
   if (item.kind === "check") return item.check.at;
-  return null;
+  return item.check?.at ?? null;
 };
+
+/** One list by next time, the rows with none last, then by name. */
+const byNext = (a: TaskListItem, b: TaskListItem) =>
+  byNullableAsc(nextOf(a), nextOf(b)) || nameOf(a).localeCompare(nameOf(b));
 
 const nameOf = (item: TaskListItem): string => {
   if (item.kind === "follow") return `${item.label} ${item.target}`;
@@ -228,8 +249,8 @@ const SORTERS: Record<TaskListGroupKey, (a: TaskListItem, b: TaskListItem) => nu
     a.kind === "task" && b.kind === "task" ? b.task.updatedAt - a.task.updatedAt : 0,
   // The soonest first.
   later: (a, b) => byNullableAsc(laterOf(a), laterOf(b)),
-  // One list by next time, the rows with none last.
-  on_its_own: (a, b) => byNullableAsc(nextOf(a), nextOf(b)) || nameOf(a).localeCompare(nameOf(b)),
+  on_its_own: byNext,
+  scheduled: byNext,
   // The latest to end first; one id before another when both ended at once.
   ended: (a, b) =>
     a.kind === "task" && b.kind === "task"
@@ -291,18 +312,60 @@ export function pageTaskList(groups: TaskListGroup[], endedBefore?: string): Tas
  * routine run on their own. An archived task is in none.
  */
 export function groupTaskList(parts: TaskListParts): TaskListGroup[] {
+  return grouped(TASK_LIST_GROUPS, parts, (item) =>
+    item.kind === "task" ? statusGroupOf(item) : "on_its_own",
+  );
+}
+
+/**
+ * The rows in the one panel's groups, in order, with empty groups left out.
+ * A task chat is in the group of its status, except a scheduled task between
+ * its runs, which is Scheduled. A one-off check or routine is Later; a
+ * repeating or event routine, a repeating check and a follow are Scheduled.
+ * An archived task is in none.
+ */
+export function groupTaskPanel(parts: TaskListParts): TaskListGroup[] {
+  return grouped(TASK_PANEL_GROUPS, parts, (item) => {
+    switch (item.kind) {
+      case "task": {
+        const key = statusGroupOf(item);
+        return key === "later" && item.schedule !== null ? "scheduled" : key;
+      }
+      case "check":
+        return item.check.recurring ? "scheduled" : "later";
+      case "routine":
+        return isOneOff(item.trigger) ? "later" : "scheduled";
+      case "follow":
+        return "scheduled";
+    }
+  });
+}
+
+/** A routine that fires once, on a date: Later, not Scheduled. */
+const isOneOff = (trigger: TaskListTrigger) =>
+  trigger.type === "schedule" && trigger.rrule === null && trigger.date !== null;
+
+const statusGroupOf = (item: TaskListTaskItem): TaskListGroupKey =>
+  GROUP_OF_STATUS[parseTaskStatus(item.task.status, item.task.endReason).status];
+
+function grouped(
+  order: readonly TaskListGroupKey[],
+  parts: TaskListParts,
+  groupOf: (item: TaskListItem) => TaskListGroupKey,
+): TaskListGroup[] {
   const groups = new Map<TaskListGroupKey, TaskListItem[]>();
-  const add = (key: TaskListGroupKey, item: TaskListItem) =>
+  const items: TaskListItem[] = [
+    ...parts.tasks.filter((item) => item.task.archivedAt === null),
+    ...parts.checks,
+    ...parts.follows,
+    ...parts.routines,
+  ];
+  for (const item of items) {
+    const key = groupOf(item);
     groups.set(key, [...(groups.get(key) ?? []), item]);
-  for (const item of parts.tasks) {
-    if (item.task.archivedAt !== null) continue;
-    add(GROUP_OF_STATUS[parseTaskStatus(item.task.status, item.task.endReason).status], item);
   }
-  for (const item of parts.checks) add("on_its_own", item);
-  for (const item of parts.follows) add("on_its_own", item);
-  for (const item of parts.routines) add("on_its_own", item);
-  return TASK_LIST_GROUPS.flatMap((key) => {
-    const items = groups.get(key);
-    return items ? [{ key, items: [...items].sort(SORTERS[key]) }] : [];
+  return order.flatMap((key) => {
+    const found = groups.get(key);
+    return found ? [{ key, items: [...found].sort(SORTERS[key]) }] : [];
   });
 }

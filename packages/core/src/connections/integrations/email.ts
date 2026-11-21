@@ -3,7 +3,7 @@
 // Email is a Talker with a single `inbox` grant: the Rome Cloud-provisioned
 // `<slug>@romeos.cc` address, its inbound-HMAC secret, and the guardian's
 // resolved address. The transport core — outbound send, inbound HMAC verify +
-// gate + body-pull + the inbound `ChannelMessage`, attachment download — is
+// gate + body-pull + the inbound `Message`, attachment download — is
 // `EmailAdapter` (packages/core/src/connections/kinds/email/email.ts), wrapped here so the
 // runtime's grant-epoch lifecycle and fault→grant-state mapping (registry.ts)
 // drive it. The transport already speaks the channel's record, so inbound and
@@ -52,6 +52,7 @@ import type {
   ProfileRecord,
   Talker,
 } from "../types.js";
+import { SESSION_RESET_ONLY_CHAT_RULES } from "@rome/api-types/chat-rules";
 
 // The `inbox` grant's profile — the non-secret provisioned identity (the
 // `<slug>@romeos.cc` address Rome Cloud minted). Declared next to the material
@@ -277,6 +278,9 @@ export function makeEmailDescriptor(deps: EmailDescriptorDeps): ConnectionDescri
     reviveProfile: (record) => reviveEmailProfile(record),
     accountIdOf: (record) => (typeof record.address === "string" && record.address) || null,
     grant: "inbox",
+    // Today's behaviour, stated: chats wake on every message the platform
+    // delivers, and only the session reset is the guardian's to set.
+    chatRules: SESSION_RESET_ONLY_CHAT_RULES,
     auth: inboxScheme,
     capabilities: {
       talker: {
