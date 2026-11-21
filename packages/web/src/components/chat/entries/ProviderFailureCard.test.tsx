@@ -95,7 +95,9 @@ describe("ProviderFailureCard", () => {
     renderCard({ until: until.toISOString() }, settled);
     const { time } = formatUntil(until.toISOString(), "en");
     // The status line carries the reset time; the reason under it does not.
-    expect(screen.getByText(`Paused · continues today at ${time}`)).toBeTruthy();
+    expect(screen.getByText(`Paused · continues after ${time}`)).toBeTruthy();
+    // Before the reset nothing offers to continue: the usage-limit sweep does.
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
     expect(screen.getByText("ChatGPT quota used up")).toBeTruthy();
     expect(
       document.querySelector("[data-provider-failure]")?.className.includes("border-l-warning"),
@@ -209,23 +211,36 @@ describe("ProviderFailureCard", () => {
     expect(screen.getByText("Claude is not logged in")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Use Rome credits" }));
     const dialog = await screen.findByRole("dialog");
-    // The balance, and the same default choice as any switch: this chat only unless checked.
+    // The balance, and no choice of chats: Rome credits run every chat.
     expect(
-      await within(dialog).findByText("This chat continues on Rome credits ($2.00 left)."),
+      await within(dialog).findByText(
+        "Every chat runs on Rome credits ($2.00 left), and the stopped turn picks up again.",
+      ),
     ).toBeTruthy();
-    expect(
-      within(dialog)
-        .getByRole("checkbox", { name: "Also make default" })
-        .getAttribute("aria-checked"),
-    ).toBe("false");
+    expect(within(dialog).queryByRole("checkbox", { name: "Also make default" })).toBeNull();
     await userEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
     await waitFor(() =>
       expect(calls.find((call) => call.method === "POST")?.body).toEqual({
         kind: "provider",
         provider: "rome_credits",
-        makeDefault: false,
+        makeDefault: true,
+        moveExisting: true,
       }),
     );
+  });
+
+  it("offers Continue once a usage limit's reset time has passed", async () => {
+    const calls = mockApi();
+    const settled = rs.fn();
+    renderCard({ until: new Date(Date.now() - 60_000).toISOString() }, settled);
+    await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === "POST")).toMatchObject({
+        url: "/api/ai-tools/provider-failures/m1/continue",
+      }),
+    );
+    expect(await screen.findByText("Recovered, continued")).toBeTruthy();
+    expect(settled).toHaveBeenCalled();
   });
 
   it("moves to the replacement model, with no make-default choice", async () => {

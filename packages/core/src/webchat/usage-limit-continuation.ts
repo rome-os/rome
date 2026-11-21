@@ -79,8 +79,6 @@ export interface UsageLimitContinuationOptions {
    * settled as failed works again, until the continuation ends.
    */
   onContinue?: (turn: ErroredTurn["turn"]) => Promise<unknown> | void;
-  /** A chat another recovery resumes, such as one with a provider failure card. */
-  skip?: (chatId: string) => boolean;
 }
 
 /**
@@ -110,7 +108,6 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
       // The marker lives in turn_start's prompt, so a recovery can never be recovered again.
       if (attempted.has(turn.messageId) || !turn.runtimeSessionId) continue;
       if (turn.prompt.includes(USAGE_LIMIT_MARKER)) continue;
-      if (options.skip?.(turn.sessionId)) continue;
       if (usageLimitProviderOf(stop, accounts.read()) !== provider) continue;
       try {
         if (!repo.canContinueAfterUsageLimit(turn)) continue;

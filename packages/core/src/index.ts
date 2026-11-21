@@ -1,15 +1,11 @@
-import { continueInterruptedTurns, isRecentActivity } from "./webchat/restart-continuation.js";
+import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { STICKY_HEADERS } from "./core/sticky-headers.js";
 import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
 import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { webchatSessionKey } from "./core/agent-session-key.js";
-import {
-  chatSpendsCredits,
-  createChatProviders,
-  type ChatProviders,
-} from "./webchat/chat-providers.js";
+import { createChatProviders, type ChatProviders } from "./webchat/chat-providers.js";
 import { createProviderFailures } from "./webchat/provider-failures.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
@@ -215,6 +211,7 @@ import {
   createDefaultProviderSetting,
   followingSelection,
   isModelSelectionId,
+  runsOnRomeCredits,
   MODEL_SELECTIONS,
   type DefaultProvider,
   type ModelResolutionErrorPayload,
@@ -1095,7 +1092,6 @@ async function main() {
     beforeDefaultChange: async () => {},
     keep: async () => null,
     follow: async () => {},
-    releaseCredits: async () => 0,
     followingCount: async () => 0,
   };
   const defaultProviders = createDefaultProviders({
@@ -1390,8 +1386,9 @@ async function main() {
     {
       agentLoader,
       sessionRepository,
-      // On Rome credits; kept on another provider, never on them; else as the default says.
-      chatOnCredits: async (chatId) => chatSpendsCredits(await webchatRepo.getSession(chatId)),
+      // Rome credits are the instance's choice: while they run, every chat runs on them.
+      onRomeCredits: () =>
+        runsOnRomeCredits(defaultProviders.current(), defaultProviders.signedIn()),
       systemPrompts,
       modelResolver,
       networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),
@@ -1484,12 +1481,10 @@ async function main() {
   chatProviders = createChatProviders({
     webchatRepo,
     accounts: modelAccounts,
-    // Any login takes every chat off Rome credits.
-    signedIn: () => defaultProviders.signedIn(),
-    selectModel: (chatId, agentName, selection, credits) =>
+    selectModel: (chatId, agentName, selection) =>
       agentSessionManager
         .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })
-        ?.selectModel(selection, { credits }),
+        ?.selectModel(selection),
     lastModel: async (chatId, agentName) => {
       const agent = agentLoader.find(agentName ?? "main")?.name ?? agentName ?? "main";
       const session = await sessionRepository.current(webchatSessionKey(chatId), agent);
@@ -1592,16 +1587,11 @@ async function main() {
   // A provider that cannot run shows a card in the chat, and for unattended
   // chats one notice per incident in the Concierge main chat. Nothing moves a
   // chat to another provider on its own.
-  const selectChatModel = (
-    chatId: string,
-    agentName: string | null,
-    selection: string | null,
-    credits?: boolean,
-  ) => {
+  const selectChatModel = (chatId: string, agentName: string | null, selection: string | null) => {
     if (selection !== null && !isModelSelectionId(selection)) return;
     agentSessionManager
       .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })
-      ?.selectModel(selection, { credits });
+      ?.selectModel(selection);
   };
   const providerFailures = createProviderFailures({
     accounts: modelAccounts,
@@ -1615,11 +1605,8 @@ async function main() {
       const chat = await webchatRepo.getSession(chatId);
       return chat ? actorOfOwner(db, ownerOf(chat)) : undefined;
     },
-    // A request a card stopped runs again only as a continuation would: in a
-    // chat nobody has written in since, not archived, within a day.
-    chatOpen: (chatId) => !webchatRepo.chatClosed(chatId),
-    continues: (chatId, since) =>
-      !webchatRepo.chatMovedOnSince(chatId, since) && isRecentActivity(since, Date.now()),
+    // A newer message in the chat answers instead of a card's resumed turn.
+    movedOnSince: (chatId, since) => webchatRepo.chatMovedOnSince(chatId, since),
     selectModel: selectChatModel,
     canonicalAgent: (agentName) => agentLoader.find(agentName)?.name ?? agentName,
     webchatRepo,
@@ -2867,10 +2854,6 @@ async function main() {
   // the next boot's upgrade comparison runs against it.
   await commitBootVersion(settingsRepo, getBuildInfo());
 
-  // The chats' runtime and channels are up: the turns a restart left to the
-  // provider cards run now.
-  void providerFailures.start();
-
   // The API, actions and agents are ready. One continuation runs at a time,
   // outside boot, and each rechecks its chat after waiting in the webchat queue.
   // Each continuation acts for the person whose turn it continues.
@@ -2892,11 +2875,13 @@ async function main() {
     repo: webchatRepo,
     runner: backendTurnRunner,
     actorOf: continuationActorOf,
-    // A chat with a provider card resumes from its card.
-    skip: (chatId) => providerFailures.carded(chatId),
     // A Concierge turn a limit stopped shows its messages failed; run again,
-    // they work again until the continuation ends.
-    onContinue: (turn) => concierge.deps.tasks.repo.reopenTurn(turn.sessionId, turn.turnId),
+    // they work again until the continuation ends. A provider card in the
+    // chat settles once the continued turn succeeds.
+    onContinue: (turn) => {
+      providerFailures.continuing(turn.sessionId);
+      return concierge.deps.tasks.repo.reopenTurn(turn.sessionId, turn.turnId);
+    },
   });
 
   // Best-effort instance-identity check. Fire-and-forget: announces

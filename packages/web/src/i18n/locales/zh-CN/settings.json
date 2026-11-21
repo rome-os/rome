@@ -771,7 +771,7 @@
     "logoutOutcome": {
       "otherBecomesDefault": "{{provider}} 会成为默认，聊天在下一次回复时切换过去。",
       "pause": "聊天会暂停，直到你重新登录。",
-      "pauseOrCredits": "聊天会暂停，直到你重新登录，或在聊天里选择改用 Rome 额度。"
+      "pauseOrCredits": "聊天会暂停，直到你重新登录，或让所有聊天改用 Rome 额度。"
     }
   },
   "sentinelLog": {

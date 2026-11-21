@@ -908,9 +908,9 @@ export class ConciergeService {
         agentName ?? (isConciergeChat(chat) ? CONCIERGE_AGENT_ID : (chat.agentName ?? "main")),
       channelThreadKey: webchatSessionKey(chatId),
     };
-    // A chat on Rome credits runs its model's strength on Codex, whatever
-    // provider its stored model names.
-    const credits = chat.romeCredits === true;
+    // On Rome credits every chat runs its model's strength on Codex, whatever
+    // provider its stored model names. A login takes the default off them.
+    const credits = this.deps.defaults?.current() === "rome_credits";
     const stored = resolveWebchatLargeModelSelection(chat.largeModelSelection);
     const selected = credits && stored?.providerId !== "openai" ? null : stored;
     const runtime = selected
@@ -947,8 +947,8 @@ export class ConciergeService {
       target.selectionId,
       chat.largeModelSelectionBy === "kept" ? "kept" : "auto",
     );
-    // The move keeps the chat where the guardian put it: kept, or on Rome credits.
-    this.deps.agentSessionManager.find(key)?.selectModel(target.selectionId, { credits });
+    // The move keeps a kept chat kept.
+    this.deps.agentSessionManager.find(key)?.selectModel(target.selectionId);
     this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);
     await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [
       {

@@ -151,7 +151,7 @@ describe("continuation notice through Sessions", () => {
       handoffs?: (resolver: ModelResolver) => RenewalHandoffs;
       /** Codex runs on the Rome credits login, with ChatGPT the default. */
       creditsLogin?: boolean;
-      chatOnCredits?: (chatId: string) => Promise<boolean>;
+      onRomeCredits?: () => boolean;
     } = {},
   ): Sessions {
     const actionRegistry = new ActionRegistryImpl();
@@ -177,7 +177,7 @@ describe("continuation notice through Sessions", () => {
     const manager = createSessions(
       {
         ...(options.handoffs ? { handoffs: options.handoffs(modelResolver) } : {}),
-        ...(options.chatOnCredits ? { chatOnCredits: options.chatOnCredits } : {}),
+        ...(options.onRomeCredits ? { onRomeCredits: options.onRomeCredits } : {}),
         agentLoader: loader,
         sessionRepository,
         sessionSettings: new ChatSessionSettings({ webchatRepo: webchatRepo }),
@@ -368,17 +368,17 @@ describe("continuation notice through Sessions", () => {
     expect(prompt).not.toContain("<handoff>");
   });
 
-  it("spends Rome credits only once its chat is on them, whoever opens the session", async () => {
-    const onCredits = { chat: false };
+  it("spends Rome credits only while every chat runs on them, whoever opens the session", async () => {
+    const onCredits = { instance: false };
     const manager = createManager({
       state: { openai: reportOf("unauthorized"), anthropic: reportOf("unauthorized") },
       creditsLogin: true,
-      chatOnCredits: async () => onCredits.chat,
+      onRomeCredits: () => onCredits.instance,
     });
     // ChatGPT is the default and logged out: the open refuses rather than spend credits.
     await expect(acquire(manager, "gpt-6-luna")).rejects.toThrow(/not signed in|unavailable/i);
-    // Moved onto credits, the same open runs, with no flag from the opener.
-    onCredits.chat = true;
+    // Credits made the instance's choice, the same open runs, with no flag from the opener.
+    onCredits.instance = true;
     const session = await acquire(manager, "gpt-6-luna");
     await chatTurn(session, "Hello on credits.");
     expect(openai.calls.at(-1)?.prompt).toContain("Hello on credits.");

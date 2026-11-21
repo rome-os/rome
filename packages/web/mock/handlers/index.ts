@@ -1078,6 +1078,17 @@ transcripts[PROVIDER_CARDS_CHAT_ID] = [
       alternatives: ["anthropic"],
     }),
   ]),
+  // Its reset passed before the sweep ran: the card offers [Continue].
+  ...turn(PROVIDER_CARDS_CHAT_ID, 7, "2026-08-08T09:02:00.000Z", "Summarise the board meeting.", [
+    providerCard({
+      provider: "anthropic",
+      reason: "quota",
+      card: "wait",
+      until: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+      followsDefault: true,
+      alternatives: [],
+    }),
+  ]),
   ...turn(PROVIDER_CARDS_CHAT_ID, 2, "2026-08-08T09:05:00.000Z", "Book the 9:40 train.", [
     providerCard({
       provider: "openai",
@@ -1133,13 +1144,12 @@ transcripts[PROVIDER_CARDS_CHAT_ID] = [
       card: "wait",
       until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
       chatIds: ["mock-chat-lisbon", "mock-task-question"],
-      alternatives: ["openai"],
     },
   ]),
 ];
 
-/** A failure card's switch: the card settles in place, as the server rewrites it. */
-const switchProviderCard = (messageId: string, change: Record<string, unknown>) => {
+/** A failure card's button: the card settles in place, as the server rewrites it. */
+const settleProviderCard = (messageId: string, change: Record<string, unknown> | null) => {
   for (const messages of Object.values(transcripts)) {
     const index = messages.findIndex((message) => message.id === messageId);
     if (index < 0) continue;
@@ -1149,14 +1159,16 @@ const switchProviderCard = (messageId: string, change: Record<string, unknown>) 
       (part): part is ProviderFailurePart => part.type === "provider_failure",
     );
     if (!card || card.resolved) return false;
-    card.resolved = {
-      at: new Date().toISOString(),
-      by: "switched",
-      ...(change.kind === "model"
-        ? { model: card.replacement?.model }
-        : { provider: change.provider as ProviderFailurePart["provider"] }),
-      continued: true,
-    };
+    card.resolved = !change
+      ? { at: new Date().toISOString(), by: "recovered", continued: true }
+      : {
+          at: new Date().toISOString(),
+          by: "switched",
+          ...(change.kind === "model"
+            ? { model: card.replacement?.model }
+            : { provider: change.provider as ProviderFailurePart["provider"] }),
+          continued: true,
+        };
     messages[index] = { ...message, content: JSON.stringify(parts) };
     return true;
   }
@@ -1742,10 +1754,15 @@ export const handlers = [
     const change = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     if (!change)
       return HttpResponse.json({ error: "A provider or a model is required" }, { status: 400 });
-    return switchProviderCard(String(params.messageId), change)
+    return settleProviderCard(String(params.messageId), change)
       ? HttpResponse.json({ ok: true })
       : HttpResponse.json({ error: "No open card in that message" }, { status: 409 });
   }),
+  http.post("/api/ai-tools/provider-failures/:messageId/continue", ({ params }) =>
+    settleProviderCard(String(params.messageId), null)
+      ? HttpResponse.json({ ok: true })
+      : HttpResponse.json({ error: "No open card in that message" }, { status: 409 }),
+  ),
   http.get("/api/chat/sessions/:sessionId/messages", ({ params, request }) => {
     const messages = transcripts[String(params.sessionId)];
     if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });

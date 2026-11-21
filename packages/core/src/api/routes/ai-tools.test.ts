@@ -744,7 +744,7 @@ describe("Rome credits API", () => {
   });
 });
 
-describe("a card's or a notice's switch, and a resend", () => {
+describe("a card's switch and Continue, and the notices", () => {
   it("is refused to a visitor on a chat that is not theirs, as the chat itself is", async () => {
     const testDb = createTestDb();
     try {
@@ -755,8 +755,7 @@ describe("a card's or a notice's switch, and a resend", () => {
         [CONCIERGE_CHAT_ID]: { id: CONCIERGE_CHAT_ID, agentName: "concierge", triggerKind: null },
       };
       const switchCard = rs.fn(async () => {});
-      const switchOutage = rs.fn(async () => 1);
-      const resend = rs.fn(async () => {});
+      const continueCard = rs.fn(async () => {});
       const app = new Hono().route(
         "/",
         aiToolsRoutes({
@@ -768,8 +767,7 @@ describe("a card's or a notice's switch, and a resend", () => {
               { id: "o1", noticeChatId: CONCIERGE_CHAT_ID, chats: [{ chatId: "task" }] },
             ],
             switchCard,
-            switchOutage,
-            resend,
+            continueCard,
           } as never,
         }),
       );
@@ -784,18 +782,13 @@ describe("a card's or a notice's switch, and a resend", () => {
         );
       const change = { kind: "provider", provider: "openai" };
       expect((await post("/ai-tools/provider-failures/m1/switch", change)).status).toBe(404);
-      expect((await post("/ai-tools/provider-outages/o1/switch", change)).status).toBe(404);
-      expect(
-        (await post("/ai-tools/provider-failures/resend", { chatId: "task", agentName: "main" }))
-          .status,
-      ).toBe(404);
+      expect((await post("/ai-tools/provider-failures/m1/continue", {})).status).toBe(404);
       const listed = await runWithSessionActor(visitor, () =>
         app.request("/ai-tools/provider-outages"),
       );
       expect((await listed.json()).outages).toEqual([]);
       expect(switchCard).not.toHaveBeenCalled();
-      expect(switchOutage).not.toHaveBeenCalled();
-      expect(resend).not.toHaveBeenCalled();
+      expect(continueCard).not.toHaveBeenCalled();
       // The guardian may.
       const own = await app.request("/ai-tools/provider-failures/m1/switch", {
         method: "POST",
@@ -803,6 +796,10 @@ describe("a card's or a notice's switch, and a resend", () => {
         body: JSON.stringify(change),
       });
       expect(own.status).toBe(200);
+      expect(
+        (await app.request("/ai-tools/provider-failures/m1/continue", { method: "POST" })).status,
+      ).toBe(200);
+      expect(continueCard).toHaveBeenCalledWith("m1");
     } finally {
       testDb.close();
     }

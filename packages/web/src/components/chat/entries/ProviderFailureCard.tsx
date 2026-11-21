@@ -14,6 +14,7 @@ import { ChatNotice } from "@/components/chat/ChatNotice";
 import { ProviderSignIn } from "@/components/chat/ProviderSignIn";
 import { Button } from "@/components/ui/button";
 import {
+  continueProviderFailure,
   type ProviderSwitch,
   switchProviderFailure,
   useDefaultProvider,
@@ -58,7 +59,7 @@ export function failureCardKind(part: {
   return part.reason === "model_unavailable" ? "model" : "account";
 }
 
-/** The fields a card and an outage notice share. */
+/** The fields of a card that decide its text and buttons. */
 export interface FailureFacts {
   provider: DefaultModelProvider;
   reason: ProviderFailureReason;
@@ -73,7 +74,7 @@ export interface FailureFacts {
 
 /** The card's one line on what stopped. */
 export function failureText(
-  facts: FailureFacts,
+  facts: Pick<FailureFacts, "provider" | "reason" | "until" | "card" | "model">,
   t: TFunction<"chat">,
   providerName: (provider: DefaultModelProvider) => string,
   locale: string,
@@ -183,28 +184,44 @@ export function resolvedText(
   return t(ran ? "providerFailure.recoveredContinued" : "providerFailure.recovered");
 }
 
+/** Whether `time` has passed, read again when it does. */
+function usePassed(time: string | undefined): boolean {
+  const at = time ? Date.parse(time) : Number.NaN;
+  const [passed, setPassed] = useState(() => !Number.isNaN(at) && at <= Date.now());
+  useEffect(() => {
+    if (Number.isNaN(at)) return;
+    const wait = at - Date.now();
+    if (wait <= 0) {
+      setPassed(true);
+      return;
+    }
+    setPassed(false);
+    // A browser timer holds at most about 24.8 days.
+    const timer = setTimeout(() => setPassed(true), Math.min(wait, 2 ** 31 - 1));
+    return () => clearTimeout(timer);
+  }, [at]);
+  return passed;
+}
+
 /**
  * The buttons a failure offers, grouped by what the guardian has to do:
  * switch to another account (`wait`), log in or switch (`account`), or move
- * to another model (`model`). A provider switch moves this chat only, unless
- * "Also make default" is checked.
+ * to another model (`model`). A quota card also offers [Continue] once its
+ * reset time has passed. A provider switch moves this chat only, unless "Also
+ * make default" is checked; Rome credits are always the default.
  */
 export function FailureActions({
   facts,
   pending,
   failed,
   onSwitch,
-  centered = false,
-  affectedTasks,
+  onContinue,
 }: {
   facts: FailureFacts;
   pending: boolean;
   failed: boolean;
   onSwitch: (change: ProviderSwitch) => void;
-  /** Center the rows, as the main chat's notice is. */
-  centered?: boolean;
-  /** For the main chat's notice: how many stopped tasks the switch moves. */
-  affectedTasks?: number;
+  onContinue: () => void;
 }) {
   const { t } = useTranslation("chat");
   const providerName = useProviderName();
@@ -212,6 +229,7 @@ export function FailureActions({
   const [detailOpen, setDetailOpen] = useState(false);
   // The provider a switch asks to confirm, in the dialog.
   const [confirming, setConfirming] = useState<DefaultModelProvider | null>(null);
+  const reset = usePassed(facts.reason === "quota" ? facts.until : undefined);
   const kind = failureCardKind(facts);
   const providers =
     kind === "model"
@@ -223,9 +241,14 @@ export function FailureActions({
   const replacement = kind === "model" ? facts.replacement : undefined;
   const canLogIn = kind === "account" && facts.reason !== "credits_used_up";
   return (
-    <div className={cn(centered && "flex flex-col items-center")}>
-      {(canLogIn || providers.length > 0 || replacement) && (
-        <div className={cn("mt-3 flex flex-wrap items-center gap-2", centered && "justify-center")}>
+    <div>
+      {(reset || canLogIn || providers.length > 0 || replacement) && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {reset && (
+            <Button type="button" size="sm" disabled={pending} onClick={onContinue}>
+              {t("providerFailure.continue")}
+            </Button>
+          )}
           {canLogIn && (
             <Button
               type="button"
@@ -241,7 +264,7 @@ export function FailureActions({
               key={provider}
               type="button"
               size="sm"
-              variant={!canLogIn && index === 0 ? "default" : "outline"}
+              variant={!canLogIn && !reset && index === 0 ? "default" : "outline"}
               disabled={pending}
               onClick={() => setConfirming(provider)}
             >
@@ -265,7 +288,6 @@ export function FailureActions({
       )}
       <SwitchConfirmDialog
         provider={confirming}
-        affectedTasks={affectedTasks}
         pending={pending}
         onCancel={() => setConfirming(null)}
         onConfirm={(makeDefault, moveExisting) => {
@@ -290,7 +312,7 @@ export function FailureActions({
         </div>
       )}
       {facts.detail && (
-        <div className={cn("mt-3 w-full", !centered && "text-left")}>
+        <div className="mt-3 w-full text-left">
           <button
             type="button"
             className="inline-flex items-center gap-1 text-aux text-muted-foreground hover:text-foreground"
@@ -350,25 +372,36 @@ export function ProviderFailureCard({
     );
   }
 
-  const onSwitch = async (change: ProviderSwitch) => {
-    if (!messageId) return;
+  /** Sends a button's request; the card reads as `settled` until the chat is read again. */
+  const act = async (send: () => Promise<unknown>, settled: ProviderFailureResolution) => {
     setPending(true);
     setFailed(false);
     try {
-      await switchProviderFailure(messageId, change);
-      setSwitched({
-        at: new Date().toISOString(),
-        by: "switched",
-        ...(change.kind === "provider"
-          ? { provider: change.provider }
-          : { model: part.replacement?.model }),
-      });
+      await send();
+      setSwitched(settled);
       onSettled?.();
     } catch {
       setFailed(true);
     } finally {
       setPending(false);
     }
+  };
+  const onSwitch = (change: ProviderSwitch) => {
+    if (!messageId) return;
+    void act(() => switchProviderFailure(messageId, change), {
+      at: new Date().toISOString(),
+      by: "switched",
+      ...(change.kind === "provider"
+        ? { provider: change.provider }
+        : { model: part.replacement?.model }),
+    });
+  };
+  const onContinue = () => {
+    if (!messageId) return;
+    void act(() => continueProviderFailure(messageId), {
+      at: new Date().toISOString(),
+      by: "recovered",
+    });
   };
 
   const status = cardStatus(part, t, i18n.language);
@@ -403,22 +436,23 @@ export function ProviderFailureCard({
         facts={part}
         pending={pending || !messageId}
         failed={failed}
-        onSwitch={(change) => void onSwitch(change)}
+        onSwitch={onSwitch}
+        onContinue={onContinue}
       />
     </div>
   );
 }
 
 /**
- * Confirms a card's switch to another provider: this chat (or the notice's
- * stopped tasks) moves, and with "Also make default" the default too, with
- * the same "Move existing chats too" choice Settings asks. Rome credits name
- * their balance. docs/domains/agents.md#provider-failure
+ * Confirms a card's switch to another provider: this chat moves, and with
+ * "Also make default" the default too, with the same "Move existing chats
+ * too" choice Settings asks. Rome credits are the instance's: every chat runs
+ * on them, and the dialog names their balance.
+ * docs/domains/agents.md#provider-failure
  */
 type SwitchConfirmProps = {
   /** The provider to switch to; null keeps the dialog closed. */
   provider: DefaultModelProvider | null;
-  affectedTasks?: number;
   pending: boolean;
   onCancel: () => void;
   onConfirm: (makeDefault: boolean, moveExisting: boolean) => void;
@@ -429,13 +463,7 @@ function SwitchConfirmDialog(props: SwitchConfirmProps) {
   return props.provider ? <OpenSwitchConfirmDialog {...props} /> : null;
 }
 
-function OpenSwitchConfirmDialog({
-  provider,
-  affectedTasks,
-  pending,
-  onCancel,
-  onConfirm,
-}: SwitchConfirmProps) {
+function OpenSwitchConfirmDialog({ provider, pending, onCancel, onConfirm }: SwitchConfirmProps) {
   const { t, i18n } = useTranslation("chat");
   const providerName = useProviderName();
   const [makeDefault, setMakeDefault] = useState(false);
@@ -452,16 +480,14 @@ function OpenSwitchConfirmDialog({
   }, [open, provider]);
   if (!provider) return null;
   const name = providerName(provider);
+  const onCredits = provider === "rome_credits";
   const balance =
-    provider === "rome_credits" && credits
-      ? formatCreditDollars(credits.availableMicros, i18n.language)
-      : null;
-  const description =
-    affectedTasks !== undefined
-      ? t("providerFailure.confirm.bodyTasks", { count: affectedTasks, provider: name })
-      : provider === "rome_credits" && balance
-        ? t("providerFailure.confirm.bodyCredits", { balance })
-        : t("providerFailure.confirm.body", { provider: name });
+    onCredits && credits ? formatCreditDollars(credits.availableMicros, i18n.language) : null;
+  const description = onCredits
+    ? balance
+      ? t("providerFailure.confirm.bodyCredits", { balance })
+      : t("providerFailure.confirm.bodyCreditsAll")
+    : t("providerFailure.confirm.body", { provider: name });
   return (
     <RomeConfirmDialog
       open={open}
@@ -471,35 +497,43 @@ function OpenSwitchConfirmDialog({
       cancelLabel={t("providerFailure.confirm.cancel")}
       confirmDisabled={pending}
       onCancel={onCancel}
-      onConfirm={() => onConfirm(makeDefault, asksToMove ? moveExisting : true)}
+      onConfirm={() =>
+        onCredits ? onConfirm(true, true) : onConfirm(makeDefault, asksToMove ? moveExisting : true)
+      }
     >
-      <div className="space-y-1">
-        <LabeledCheckbox checked={makeDefault} disabled={pending} onCheckedChange={setMakeDefault}>
-          {t("providerFailure.alsoMakeDefault")}
-        </LabeledCheckbox>
-        {makeDefault ? (
-          asksToMove && (
-            <div className="space-y-1 pt-1 pl-6">
-              <LabeledCheckbox
-                checked={moveExisting}
-                disabled={pending}
-                onCheckedChange={setMoveExisting}
-              >
-                {t("providerFailure.confirm.moveExisting")}
-              </LabeledCheckbox>
-              {moveExisting && (
-                <p className="pl-6 text-aux text-muted-foreground">
-                  {t("providerFailure.confirm.moveExistingHelp", { provider: name })}
-                </p>
-              )}
-            </div>
-          )
-        ) : (
-          <p className="pl-6 text-aux text-muted-foreground">
-            {t("providerFailure.confirm.makeDefaultHelp", { provider: name })}
-          </p>
-        )}
-      </div>
+      {!onCredits && (
+        <div className="space-y-1">
+          <LabeledCheckbox
+            checked={makeDefault}
+            disabled={pending}
+            onCheckedChange={setMakeDefault}
+          >
+            {t("providerFailure.alsoMakeDefault")}
+          </LabeledCheckbox>
+          {makeDefault ? (
+            asksToMove && (
+              <div className="space-y-1 pt-1 pl-6">
+                <LabeledCheckbox
+                  checked={moveExisting}
+                  disabled={pending}
+                  onCheckedChange={setMoveExisting}
+                >
+                  {t("providerFailure.confirm.moveExisting")}
+                </LabeledCheckbox>
+                {moveExisting && (
+                  <p className="pl-6 text-aux text-muted-foreground">
+                    {t("providerFailure.confirm.moveExistingHelp", { provider: name })}
+                  </p>
+                )}
+              </div>
+            )
+          ) : (
+            <p className="pl-6 text-aux text-muted-foreground">
+              {t("providerFailure.confirm.makeDefaultHelp", { provider: name })}
+            </p>
+          )}
+        </div>
+      )}
     </RomeConfirmDialog>
   );
 }

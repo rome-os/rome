@@ -783,10 +783,10 @@
     }
   },
   "providerFailure": {
-    "quota": "{{provider}} quota used up, continues when it resets",
-    "quotaUntil": "{{provider}} quota used up, continues on {{date}} at {{time}}",
-    "quotaUntilToday": "{{provider}} quota used up, continues today at {{time}}",
-    "quotaUntilTomorrow": "{{provider}} quota used up, continues tomorrow at {{time}}",
+    "quota": "{{provider}} hit its usage limit. Rome continues after it resets.",
+    "quotaUntil": "{{provider}} hit its usage limit. Rome continues after {{date}}, {{time}}.",
+    "quotaUntilToday": "{{provider}} hit its usage limit. Rome continues after {{time}}.",
+    "quotaUntilTomorrow": "{{provider}} hit its usage limit. Rome continues tomorrow after {{time}}.",
     "temporary": "{{provider}} is unavailable for now. Rome tries again by itself.",
     "login": "{{provider}} needs you to log in again",
     "removed": "{{provider}} is not logged in",
@@ -797,9 +797,9 @@
     "reasonQuota": "{{provider}} quota used up",
     "reasonTemporary": "{{provider}} is unavailable for now",
     "status": {
-      "pausedToday": "Paused · continues today at {{time}}",
-      "pausedTomorrow": "Paused · continues tomorrow at {{time}}",
-      "pausedOn": "Paused · continues {{date}} at {{time}}",
+      "pausedToday": "Paused · continues after {{time}}",
+      "pausedTomorrow": "Paused · continues tomorrow after {{time}}",
+      "pausedOn": "Paused · continues after {{date}}, {{time}}",
       "pausedRetrying": "Paused · Rome tries again by itself",
       "needsYou": "Needs you",
       "modelUnavailable": "Model unavailable"
@@ -817,15 +817,15 @@
     "confirm": {
       "title": "Switch to {{provider}}?",
       "body": "This chat continues on {{provider}}, and the stopped turn picks up again.",
-      "bodyCredits": "This chat continues on Rome credits ({{balance}} left).",
-      "bodyTasks_one": "The {{count}} affected task continues on {{provider}}.",
-      "bodyTasks_other": "The {{count}} affected tasks continue on {{provider}}.",
+      "bodyCredits": "Every chat runs on Rome credits ({{balance}} left), and the stopped turn picks up again.",
       "makeDefaultHelp": "Other chats that follow the default switch to {{provider}} on their next reply.",
       "moveExisting": "Move existing chats too",
       "moveExistingHelp": "Other chats switch to {{provider}} on their next reply.",
       "switch": "Switch",
-      "cancel": "Cancel"
-    }
+      "cancel": "Cancel",
+      "bodyCreditsAll": "Every chat runs on Rome credits, and the stopped turn picks up again."
+    },
+    "continue": "Continue"
   },
   "providerOutage": {
     "waiting_one": "{{count}} task waiting",

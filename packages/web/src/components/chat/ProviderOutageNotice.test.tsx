@@ -1,7 +1,6 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import type { ProviderOutagePart } from "@rome/api-types/chat";
 import i18n from "@/i18n";
@@ -23,17 +22,11 @@ const OUTAGE: ProviderOutagePart = {
   reason: "temporary",
   card: "wait",
   chatIds: ["t1", "t2"],
-  alternatives: ["openai"],
 };
 
 function renderNotice(part: Partial<ProviderOutagePart>, open = true) {
-  const calls: { url: string; body: unknown }[] = [];
-  rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+  rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
     const url = String(input);
-    if (init?.method === "POST") {
-      calls.push({ url, body: JSON.parse(String(init.body)) });
-      return Response.json({ moved: 2 });
-    }
     if (url === "/api/ai-tools/provider-outages") {
       return Response.json({
         outages: open
@@ -58,32 +51,17 @@ function renderNotice(part: Partial<ProviderOutagePart>, open = true) {
       <ProviderOutageNotice part={{ ...OUTAGE, ...part }} />
     </QueryClientProvider>,
   );
-  return calls;
 }
 
 describe("ProviderOutageNotice", () => {
-  it("lists the waiting tasks and moves them all with one switch", async () => {
-    const calls = renderNotice({});
+  it("lists the waiting tasks and offers no buttons: each task's own card acts", () => {
+    renderNotice({});
     expect(
       screen.getByText("Claude is unavailable for now. Rome tries again by itself."),
     ).toBeTruthy();
     expect(screen.getByText("2 tasks waiting")).toBeTruthy();
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
-
-    await userEvent.click(screen.getByRole("button", { name: "Switch to ChatGPT" }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("The 2 affected tasks continue on ChatGPT.")).toBeTruthy();
-    await userEvent.click(within(dialog).getByRole("checkbox", { name: "Also make default" }));
-    await userEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
-    await waitFor(() =>
-      expect(calls).toEqual([
-        {
-          url: "/api/ai-tools/provider-outages/o1/switch",
-          body: { kind: "provider", provider: "openai", makeDefault: true, moveExisting: true },
-        },
-      ]),
-    );
-    expect(await screen.findByText("Switched to ChatGPT")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Switch|Log in|Use Rome credits/ })).toBeNull();
   });
 
   it("reads as one line once settled", () => {

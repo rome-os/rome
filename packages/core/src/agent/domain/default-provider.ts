@@ -105,3 +105,14 @@ export function reconciledDefault(
   // Credits give way to the first login without a note: nothing was removed.
   return { provider: remaining, moved: current !== "rome_credits" };
 }
+
+/**
+ * Whether every chat runs on Rome credits: they are the default and no AI
+ * account is logged in. Credits are the instance's choice, never one chat's.
+ */
+export function runsOnRomeCredits(
+  current: DefaultProvider | null,
+  signedIn: Pick<SignedInProviders, "anthropic" | "openai">,
+): boolean {
+  return current === "rome_credits" && !signedIn.anthropic && !signedIn.openai;
+}

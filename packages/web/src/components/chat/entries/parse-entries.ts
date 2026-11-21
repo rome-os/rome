@@ -43,7 +43,6 @@ const REQUIRED_FIELDS = {
     provider: "string",
     reason: "string",
     chatIds: "object",
-    alternatives: "object",
   },
   task_chat: { chatId: "string", title: "string" },
   connect_card: { service: "string", label: "string", connect: "object" },

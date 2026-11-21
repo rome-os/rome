@@ -121,7 +121,7 @@ const defaultProviderState = (): DefaultProviderState => {
 /** The outage the provider cards chat's notice points at. */
 export const MOCK_OUTAGE_ID = "mock-outage-claude-quota";
 
-let outages: ProviderOutage[] = [
+const outages: ProviderOutage[] = [
   {
     id: MOCK_OUTAGE_ID,
     provider: "anthropic",
@@ -449,13 +449,6 @@ export const settingsHandlers = [
     return HttpResponse.json({ defaultProvider: defaultProviderState() });
   }),
   http.get("/api/ai-tools/provider-outages", () => HttpResponse.json({ outages })),
-  // Mock mode runs no turns: the chats only move, and the outage closes.
-  http.post("/api/ai-tools/provider-outages/:id/switch", ({ params }) => {
-    const moved = outages.find((outage) => outage.id === params.id)?.chatIds.length;
-    if (moved === undefined) return HttpResponse.json({ error: "Unknown outage" }, { status: 409 });
-    outages = outages.filter((outage) => outage.id !== params.id);
-    return HttpResponse.json({ moved });
-  }),
   http.get("/api/ai-tools/rome-credits", () =>
     HttpResponse.json({ credits: romeCredits } satisfies RomeCreditsResponse),
   ),

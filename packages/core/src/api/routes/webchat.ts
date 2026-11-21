@@ -2087,7 +2087,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           threadContext,
           contextSuffix: buildWebchatContextSuffix(),
           selectionId: modelSelection?.id,
-          credits: input.session.romeCredits ? true : undefined,
           // The source session stays live for the chat's next message, and
           // Claude fixes effort at open, so it opens at the chat's own.
           reasoningEffort: await chatReasoningEffort(input.session, undefined),
@@ -4723,8 +4722,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           // Null clears a selection an open session still holds, so a chat
           // switched back to Auto follows its pin again.
           selectionId: modelSelection?.id ?? null,
-          // A chat moved onto Rome credits spends them; no other chat does.
-          credits: (await deps.webchatRepo.getSession(sessionId))?.romeCredits ? true : undefined,
           reasoningEffort,
         },
       );
@@ -5752,7 +5749,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           threadContext,
           contextSuffix: buildWebchatContextSuffix(),
           selectionId: modelSelection?.id ?? null,
-          credits: session.romeCredits ? true : undefined,
         },
       );
       // Only its id is wanted: no turn follows, so the session is let go.

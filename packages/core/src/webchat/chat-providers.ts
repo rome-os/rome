@@ -2,8 +2,8 @@
 // is not simply the default: the guardian switched only this chat, or changed
 // the default without moving the chats already there. Such a chat is kept on
 // its provider (docs/domains/agents.md#kept-provider). A model its owner
-// picked is never touched here. Rome credits are a flag beside the model: a
-// chat on them runs its model's strength on Codex through them.
+// picked is never touched here. Rome credits are never one chat's: while they
+// are the default, every chat runs on them.
 
 import {
   isModelSelectionId,
@@ -13,28 +13,14 @@ import {
   selectionOfStrength,
   strengthOfSelection,
   type AccountedProviderId,
-  type DefaultProvider,
   type DefaultProviderChange,
   type ModelAccounts,
   type ModelSelectionId,
-  type SignedInProviders,
 } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import type { WebChatRepository } from "./repository.js";
 
 const log = createLogger("chat-providers");
-
-/**
- * Whether a chat may spend Rome credits: true once the guardian moved it onto
- * them, false while it is kept on another provider, undefined when it
- * follows the default, which decides.
- */
-export function chatSpendsCredits(
-  chat: { romeCredits?: boolean | null; largeModelSelectionBy?: string | null } | null | undefined,
-): boolean | undefined {
-  if (chat?.romeCredits) return true;
-  return chat?.largeModelSelectionBy === "kept" ? false : undefined;
-}
 
 export interface ChatProvidersDeps {
   webchatRepo: Pick<
@@ -44,24 +30,13 @@ export interface ChatProvidersDeps {
     | "keptChatCount"
     | "releaseKeptChats"
     | "updateSessionLargeModelSelection"
-    | "updateSessionRomeCredits"
-    | "releaseRomeCreditChats"
   >;
-  accounts: Pick<ModelAccounts, "read"> & Partial<Pick<ModelAccounts, "onChanged">>;
-  /**
-   * The accounts logged in now. Given, any login takes every chat off Rome
-   * credits: they run only while no AI account is logged in.
-   */
-  signedIn?: () => SignedInProviders;
-  /**
-   * Tells a chat's live session, if one is open, the model its next turn runs
-   * and whether it runs on Rome credits.
-   */
+  accounts: Pick<ModelAccounts, "read">;
+  /** Tells a chat's live session, if one is open, the model its next turn runs. */
   selectModel: (
     chatId: string,
     agentName: string | null,
     selection: ModelSelectionId | null,
-    credits?: boolean,
   ) => void;
   /** The model the chat's session last ran, when it ran one. */
   lastModel?: (
@@ -77,12 +52,9 @@ export interface ChatProviders {
   beforeDefaultChange(change: DefaultProviderChange): Promise<void>;
   /**
    * Keeps one chat on `provider`, at the strength it runs now. Null for a
-   * chat its owner picked a model for. Rome credits instead mark the chat as
-   * running on them, whoever chose its model, which stays as it is.
+   * chat its owner picked a model for.
    */
-  keep(chatId: string, provider: DefaultProvider): Promise<ModelSelectionId | null>;
-  /** Takes every chat off Rome credits, back to the model it had. */
-  releaseCredits(): Promise<number>;
+  keep(chatId: string, provider: AccountedProviderId): Promise<ModelSelectionId | null>;
   /** Lets one kept chat follow the default again, from its next run. */
   follow(chatId: string): Promise<void>;
   /**
@@ -135,43 +107,12 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
     agentName: string | null,
     stored: string | null,
     provider: AccountedProviderId,
-    onCredits: boolean,
   ) => {
     const selection = await on(chatId, agentName, stored, provider);
     await deps.webchatRepo.updateSessionLargeModelSelection(chatId, selection, "kept");
-    if (onCredits) await deps.webchatRepo.updateSessionRomeCredits(chatId, false);
-    deps.selectModel(chatId, agentName, selection, false);
+    deps.selectModel(chatId, agentName, selection);
     return selection;
   };
-
-  const releaseCredits = async () => {
-    const released = await deps.webchatRepo.releaseRomeCreditChats();
-    for (const chat of released) {
-      deps.selectModel(
-        chat.id,
-        chat.agentName,
-        isModelSelectionId(chat.largeModelSelection) ? chat.largeModelSelection : null,
-        false,
-      );
-    }
-    if (released.length > 0) {
-      log.info("chats off Rome credits, an AI account is logged in", {
-        released: released.length,
-      });
-    }
-    return released.length;
-  };
-
-  if (deps.signedIn && deps.accounts.onChanged) {
-    const signedIn = deps.signedIn;
-    deps.accounts.onChanged(() => {
-      const now = signedIn();
-      if (!now.anthropic && !now.openai) return;
-      void releaseCredits().catch((error: unknown) =>
-        log.warn("taking chats off Rome credits failed", { error: String(error) }),
-      );
-    });
-  }
 
   return {
     async beforeDefaultChange(change) {
@@ -188,51 +129,20 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
       const chats = await deps.webchatRepo.followingChats();
       for (const chat of chats) {
         const row = await deps.webchatRepo.getSession(chat.id);
-        await keepOn(
-          chat.id,
-          row?.agentName ?? null,
-          chat.largeModelSelection,
-          provider,
-          row?.romeCredits === true,
-        );
+        await keepOn(chat.id, row?.agentName ?? null, chat.largeModelSelection, provider);
       }
       log.info("chats kept on the old default", { provider, chats: chats.length });
     },
     async keep(chatId, provider) {
       const chat = await deps.webchatRepo.getSession(chatId);
       if (!chat) return null;
-      if (provider === "rome_credits") {
-        // Only this chat spends them; its model and who chose it stay.
-        await deps.webchatRepo.updateSessionRomeCredits(chatId, true);
-        const stored = isModelSelectionId(chat.largeModelSelection)
-          ? chat.largeModelSelection
-          : null;
-        deps.selectModel(chatId, chat.agentName ?? null, stored, true);
-        return stored;
-      }
       if (chat.largeModelSelectionBy === "owner") return null;
       if (chat.largeModelSelection && chat.largeModelSelectionBy === null) return null;
-      return await keepOn(
-        chatId,
-        chat.agentName ?? null,
-        chat.largeModelSelection,
-        providerOfDefault(provider),
-        chat.romeCredits === true,
-      );
+      return await keepOn(chatId, chat.agentName ?? null, chat.largeModelSelection, provider);
     },
-    releaseCredits,
     async follow(chatId) {
       const chat = await deps.webchatRepo.getSession(chatId);
       if (!chat) return;
-      if (chat.romeCredits) {
-        await deps.webchatRepo.updateSessionRomeCredits(chatId, false);
-        deps.selectModel(
-          chatId,
-          chat.agentName ?? null,
-          isModelSelectionId(chat.largeModelSelection) ? chat.largeModelSelection : null,
-          false,
-        );
-      }
       if (chat.largeModelSelectionBy !== "kept") return;
       await deps.webchatRepo.updateSessionLargeModelSelection(
         chatId,

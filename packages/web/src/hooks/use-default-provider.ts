@@ -102,14 +102,23 @@ export type ProviderSwitch =
   | { kind: "model"; selection: string };
 
 /**
- * Settles the failure card in message `messageId`: the chat moves, and the
- * stopped turn runs again. The server rewrites the card's message in place.
+ * A card's switch, for the card in message `messageId`: the chat moves, and
+ * the stopped turn runs again at once. The server rewrites the card's message
+ * in place when the turn starts.
  */
 export function switchProviderFailure(messageId: string, change: ProviderSwitch): Promise<unknown> {
   return fetchJson(`/api/ai-tools/provider-failures/${encodeURIComponent(messageId)}/switch`, {
     method: "POST",
     json: change,
     fallback: "Failed to switch",
+  });
+}
+
+/** A quota card's [Continue]: the stopped turn runs again at once, where it ran. */
+export function continueProviderFailure(messageId: string): Promise<unknown> {
+  return fetchJson(`/api/ai-tools/provider-failures/${encodeURIComponent(messageId)}/continue`, {
+    method: "POST",
+    fallback: "Failed to continue",
   });
 }
 
@@ -125,24 +134,6 @@ export function useProviderOutages() {
           fallback: "Failed to load provider outages",
         })
       ).outages,
-  });
-}
-
-/** Moves every chat an outage stopped, which then run again. */
-export function useSwitchOutage() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { outageId: string; change: ProviderSwitch }) =>
-      fetchJson<{ moved: number }>(
-        `/api/ai-tools/provider-outages/${encodeURIComponent(input.outageId)}/switch`,
-        { method: "POST", json: input.change, fallback: "Failed to switch" },
-      ),
-    onSuccess: (_data, input) => {
-      void qc.invalidateQueries({ queryKey: PROVIDER_OUTAGES_QUERY_KEY });
-      if (input.change.kind === "provider" && input.change.makeDefault) {
-        void qc.invalidateQueries({ queryKey: DEFAULT_PROVIDER_QUERY_KEY });
-      }
-    },
   });
 }
 

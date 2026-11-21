@@ -83,7 +83,7 @@ export function aiToolsRoutes(
   const app = new Hono();
 
   // A card or a notice is its chats': only who may open every one of them may
-  // act on it, as on the chats themselves (docs/domains/chats.md#concierge-chat).
+  // act on it or read it, as on the chats themselves (docs/domains/chats.md#concierge-chat).
   const mayOpenAll = async (chatIds: readonly string[]) => {
     if (chatIds.length === 0) return false;
     const owner = await currentChatOwner();
@@ -176,7 +176,7 @@ export function aiToolsRoutes(
     return c.json({ defaultProvider: await defaultJson() });
   });
 
-  /** A card's or a notice's switch, as the body names it. */
+  /** A card's switch, as the body names it. */
   const switchOf = (body: unknown): ProviderSwitch | null => {
     if (typeof body !== "object" || body === null) return null;
     const value = body as Record<string, unknown>;
@@ -196,7 +196,7 @@ export function aiToolsRoutes(
   };
 
   // A card's switch: this chat moves (and with `makeDefault`, the default
-  // too), the card settles, and the stopped turn runs again.
+  // too; Rome credits always are), and the stopped turn runs again at once.
   app.post("/ai-tools/provider-failures/:messageId/switch", async (c) => {
     if (!deps.providerFailures) return c.json({ error: "Not available" }, 404);
     const change = switchOf(await c.req.json().catch(() => null));
@@ -212,19 +212,14 @@ export function aiToolsRoutes(
     }
   });
 
-  // Runs a chat's stopped request again.
-  app.post("/ai-tools/provider-failures/resend", async (c) => {
-    const body = (await c.req.json().catch(() => null)) as {
-      chatId?: unknown;
-      agentName?: unknown;
-    } | null;
-    if (typeof body?.chatId !== "string" || typeof body.agentName !== "string") {
-      return c.json({ error: "chatId and agentName are required" }, 400);
-    }
+  // A card's [Continue]: the stopped turn runs again at once, where it ran.
+  app.post("/ai-tools/provider-failures/:messageId/continue", async (c) => {
     if (!deps.providerFailures) return c.json({ error: "Not available" }, 404);
-    if (!(await mayOpenAll([body.chatId]))) return c.json({ error: "Not found" }, 404);
+    const messageId = c.req.param("messageId");
+    const card = (await deps.providerFailures.cards()).find((open) => open.messageId === messageId);
+    if (card && !(await mayOpenAll([card.chatId]))) return c.json({ error: "Not found" }, 404);
     try {
-      await deps.providerFailures.resend(body.chatId, body.agentName);
+      await deps.providerFailures.continueCard(messageId);
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 409);
@@ -246,24 +241,6 @@ export function aiToolsRoutes(
         since,
       })),
     });
-  });
-
-  // A notice's switch: every chat the incident stopped moves, and runs again.
-  app.post("/ai-tools/provider-outages/:id/switch", async (c) => {
-    if (!deps.providerFailures) return c.json({ error: "Not available" }, 404);
-    const change = switchOf(await c.req.json().catch(() => null));
-    if (!change) return c.json({ error: "A provider or a model is required" }, 400);
-    const outageId = c.req.param("id");
-    const outage = (await deps.providerFailures.outages()).find((open) => open.id === outageId);
-    if (outage && !(await mayOpenAll(outageChats(outage)))) {
-      return c.json({ error: "Not found" }, 404);
-    }
-    try {
-      const moved = await deps.providerFailures.switchOutage(outageId, change);
-      return c.json({ moved });
-    } catch (err) {
-      return c.json({ error: getErrorMessage(err) }, 409);
-    }
   });
 
   // Rome Cloud owns the balance; every instance of the account reads the same one.

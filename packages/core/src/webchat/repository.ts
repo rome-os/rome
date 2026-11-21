@@ -1957,29 +1957,6 @@ export class WebChatRepository {
       });
   }
 
-  /**
-   * Moves one chat onto Rome credits, or off them. Who chose its model, and
-   * the model, stay as they are.
-   */
-  async updateSessionRomeCredits(id: string, romeCredits: boolean) {
-    await this.db.update(romeSessions).set({ romeCredits }).where(eq(romeSessions.id, id));
-  }
-
-  /** Takes every chat off Rome credits. Returns the chats it took off. */
-  async releaseRomeCreditChats(): Promise<
-    Array<{ id: string; agentName: string | null; largeModelSelection: string | null }>
-  > {
-    return await this.db
-      .update(romeSessions)
-      .set({ romeCredits: false })
-      .where(eq(romeSessions.romeCredits, true))
-      .returning({
-        id: romeSessions.id,
-        agentName: romeSessions.agentName,
-        largeModelSelection: romeSessions.largeModelSelection,
-      });
-  }
-
   /** The effort a message to the chat runs at when it names none; null takes the dashboard's. */
   async updateSessionReasoningEffort(id: string, reasoningEffort: string | null) {
     await this.db.update(romeSessions).set({ reasoningEffort }).where(eq(romeSessions.id, id));

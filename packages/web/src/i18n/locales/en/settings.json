@@ -771,7 +771,7 @@
     "logoutOutcome": {
       "otherBecomesDefault": "{{provider}} becomes the default. Chats move to it on their next reply.",
       "pause": "Chats pause until you log in again.",
-      "pauseOrCredits": "Chats pause until you log in again, or until you pick Rome credits in a chat."
+      "pauseOrCredits": "Chats pause until you log in again, or until you switch every chat to Rome credits."
     }
   },
   "sentinelLog": {

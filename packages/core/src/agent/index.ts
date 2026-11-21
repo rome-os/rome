@@ -162,6 +162,7 @@ export {
 export {
   isDefaultProvider,
   providerOfDefault,
+  runsOnRomeCredits,
   type DefaultProvider,
   type DefaultProviderNote,
   type SignedInProviders,

@@ -45,11 +45,11 @@ export type ModelResolutionRequest = (
   | { kind: "exact"; providerId: ProviderId; model: string }
 ) & {
   /**
-   * Whether the ask may spend Rome credits: true when its chat was moved onto
-   * them, false when its chat is kept on another provider. Without it, only a
-   * default of Rome credits spends them.
+   * The ask runs on Codex through Rome credits, as every chat does while they
+   * are the instance's default. Without it, only a default of Rome credits
+   * spends them.
    */
-  credits?: boolean;
+  credits?: true;
 };
 
 /** The guardian's choice of model for each tier and provider. */
@@ -184,15 +184,13 @@ export function resolveModel(
   facts: ModelResolutionFacts,
 ): ModelResolutionOutcome {
   const { reports } = facts;
-  // A Rome credits login serves Codex only for an ask that may spend credits:
-  // the guardian made them the default or moved this chat onto them. Any
-  // other ask reads the guardian's own ChatGPT account, which shows its card.
-  // With no default set, credits run only while no AI account is logged in.
-  // A chat kept on another provider never spends them, whatever the default.
+  // A Rome credits login serves Codex only while credits are the default, or,
+  // with no default set, while no AI account is logged in. Any other ask reads
+  // the guardian's own ChatGPT account, which shows its card.
   const spendsCredits =
-    request.credits ??
-    (facts.defaultProvider === "rome_credits" ||
-      (!facts.defaultProvider && signedInProviders(reports, true).rome_credits));
+    request.credits === true ||
+    facts.defaultProvider === "rome_credits" ||
+    (!facts.defaultProvider && signedInProviders(reports, true).rome_credits);
   const login =
     facts.logins.openai?.kind === "rome_credits" && !spendsCredits
       ? undefined
@@ -205,7 +203,7 @@ export function resolveModel(
 
   if (request.kind === "exact") {
     const { providerId, model } = request;
-    // A chat on Rome credits runs what the gateway serves: a model it does not
+    // On Rome credits a chat runs what the gateway serves: a model it does not
     // serve gives way to the served model of the same strength.
     if (
       request.credits === true &&
@@ -314,18 +312,17 @@ export function resolveModel(
 /**
  * The ask: the chat's exact selection, else the agent's exact model, else its
  * tier. A tier that names no provider follows the default provider and keeps
- * the session's pin while the pin is on that provider. `credits` true runs it
- * on Codex through Rome credits; false keeps it off them whatever the
- * default. Throws on an agent with neither a tier nor a provider and model, or
- * with a model beside a tier.
+ * the session's pin while the pin is on that provider. `credits` runs it on
+ * Codex through Rome credits, at the strength the chat's model has. Throws
+ * on an agent with neither a tier nor a provider and model, or with a model
+ * beside a tier.
  */
 export function modelResolutionRequest(
   selectionId: ModelSelectionId | undefined,
   pin: { providerId: ProviderId; model: string } | undefined,
   agent: { tier?: ModelTier; providerId?: ProviderId; modelId?: string },
-  credits?: boolean,
+  credits = false,
 ): ModelResolutionRequest {
-  if (credits === false) return { ...modelAsk(selectionId, pin, agent), credits: false };
   if (!credits) return modelAsk(selectionId, pin, agent);
   // Rome credits run Codex: the chat's model, whoever chose it, runs at its
   // strength there.

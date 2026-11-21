@@ -783,10 +783,10 @@
     }
   },
   "providerFailure": {
-    "quota": "{{provider}} 额度用完了，重置后自动继续",
-    "quotaUntil": "{{provider}} 额度用完了，{{date}} {{time}} 后自动继续",
-    "quotaUntilToday": "{{provider}} 额度用完了，今天 {{time}} 后自动继续",
-    "quotaUntilTomorrow": "{{provider}} 额度用完了，明天 {{time}} 后自动继续",
+    "quota": "{{provider}} 用量已到上限，重置后 Rome 会接着做。",
+    "quotaUntil": "{{provider}} 用量已到上限，{{date}} {{time}} 之后 Rome 会接着做。",
+    "quotaUntilToday": "{{provider}} 用量已到上限，{{time}} 之后 Rome 会接着做。",
+    "quotaUntilTomorrow": "{{provider}} 用量已到上限，明天 {{time}} 之后 Rome 会接着做。",
     "temporary": "{{provider}} 暂时用不了，Rome 会自己重试。",
     "login": "{{provider}} 需要重新登录",
     "removed": "{{provider}} 未登录",
@@ -797,9 +797,9 @@
     "reasonQuota": "{{provider}} 额度用完了",
     "reasonTemporary": "{{provider}} 暂时用不了",
     "status": {
-      "pausedToday": "已暂停 · 今天 {{time}} 自动继续",
-      "pausedTomorrow": "已暂停 · 明天 {{time}} 自动继续",
-      "pausedOn": "已暂停 · {{date}} {{time}} 自动继续",
+      "pausedToday": "已暂停 · {{time}} 之后继续",
+      "pausedTomorrow": "已暂停 · 明天 {{time}} 之后继续",
+      "pausedOn": "已暂停 · {{date}} {{time}} 之后继续",
       "pausedRetrying": "已暂停 · Rome 会自己重试",
       "needsYou": "需要处理",
       "modelUnavailable": "模型不可用"
@@ -817,15 +817,15 @@
     "confirm": {
       "title": "切换到 {{provider}}？",
       "body": "这个对话改用 {{provider}} 继续，停下的那一轮会接着跑。",
-      "bodyCredits": "这个对话改用 Rome credits 继续（剩余 {{balance}}）。",
-      "bodyTasks_one": "受影响的 {{count}} 个任务改用 {{provider}} 继续。",
-      "bodyTasks_other": "受影响的 {{count}} 个任务改用 {{provider}} 继续。",
+      "bodyCredits": "所有对话都改用 Rome credits（剩余 {{balance}}），停下的那一轮会接着跑。",
       "makeDefaultHelp": "其他跟随默认的对话会在下一次回复时切到 {{provider}}。",
       "moveExisting": "已有聊天也一起切过去",
       "moveExistingHelp": "其他对话会在下一次回复时切到 {{provider}}。",
       "switch": "切换",
-      "cancel": "取消"
-    }
+      "cancel": "取消",
+      "bodyCreditsAll": "所有对话都改用 Rome credits，停下的那一轮会接着跑。"
+    },
+    "continue": "继续"
   },
   "providerOutage": {
     "waiting_one": "{{count}} 个任务在等待",

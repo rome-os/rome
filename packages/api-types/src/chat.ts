@@ -297,9 +297,10 @@ export interface ProviderFailurePart {
 }
 
 /**
- * Host-written notice in the Concierge main chat: unattended chats (task chats,
- * scheduled runs, routines) stopped on one provider failure. One notice per
- * incident, with one push. Each chat also has its own card.
+ * Host-written notice in the owner's Concierge main chat: unattended chats
+ * (task chats, scheduled runs, routines) stopped on one provider failure. One
+ * notice per incident, with one push. It informs only: each chat has its own
+ * card, which acts.
  */
 export interface ProviderOutagePart {
   type: "provider_outage";
@@ -309,13 +310,9 @@ export interface ProviderOutagePart {
   until?: string;
   /** The chats stopped, as of the last write: the task links. */
   chatIds: string[];
-  alternatives: DefaultModelProvider[];
-  /** Set once the provider runs again or the chats ran elsewhere. */
+  /** Set once every chat it lists has run again. */
   resolvedAt?: string;
   card?: ProviderFailureCardKind;
-  credits?: boolean;
-  replacement?: { selection: string; model: string };
-  detail?: string;
   resolved?: ProviderFailureResolution;
 }
 

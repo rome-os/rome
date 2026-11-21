@@ -120,7 +120,7 @@ describe("logoutOutcome", () => {
     };
     expect(logoutOutcome("codex", only, names, t)).toBe("Chats pause until you log in again.");
     expect(logoutOutcome("codex", { ...only, romeCreditsUsable: true }, names, t)).toBe(
-      "Chats pause until you log in again, or until you pick Rome credits in a chat.",
+      "Chats pause until you log in again, or until you switch every chat to Rome credits.",
     );
   });
 });

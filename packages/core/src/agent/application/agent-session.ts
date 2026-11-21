@@ -181,8 +181,6 @@ export interface SessionOpening {
    * turn and null clears it; undefined leaves it as it is.
    */
   selectionId?: ModelSelectionId | null;
-  /** The chat was moved onto Rome credits: its asks may spend them. */
-  credits?: boolean;
   reasoningEffort?: ModelReasoningEffort;
   /**
    * The reset policy of the chat whose message this acquire answers, which
@@ -324,8 +322,7 @@ export interface AgentSession {
    * there when `submit` returns.
    */
   submit(input: AgentTurnInput, options?: SubmitOptions): AgentInputReceipt;
-  /** `credits` says whether the chat runs on Rome credits from its next turn. */
-  selectModel(selectionId: ModelSelectionId | null, options?: { credits?: boolean }): void;
+  selectModel(selectionId: ModelSelectionId | null): void;
   fork(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent>;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   /** Stops the session's running turn, if it has one, and the subagent calls it waits on. */
@@ -447,12 +444,10 @@ interface ManagerDeps {
    */
   handoffs?: RenewalHandoffs;
   /**
-   * Whether the chat may spend Rome credits: true once the guardian moved it
-   * onto them, false while it is kept on another provider, undefined when it
-   * follows the default. Read at open and before each turn, so every opener
-   * and resume agrees. Absent, only `init.credits` says so.
+   * Whether every chat runs on Rome credits now, an instance-wide choice.
+   * Read at open and before each turn. Absent, none does.
    */
-  chatOnCredits?: (chatId: string) => Promise<boolean | undefined>;
+  onRomeCredits?: () => boolean;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
   /** Stamps the session id on the spans a session starts and binds it for logs. */
@@ -769,8 +764,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         // Reusing the Rome session here preserves its turn queue and lets the
         // session swap only the model backend when needed. A selection made
         // in the open chat applies from the next turn.
-        if (init?.selectionId !== undefined)
-          existing.selectModel(init.selectionId, { credits: init.credits });
+        if (init?.selectionId !== undefined) existing.selectModel(init.selectionId);
         recordAcquire("reuse");
         existing.lease();
         return existing;
@@ -779,8 +773,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     const current = sessions.get(k);
     if (current?.closing) await current.closeSettled();
     if (current && !current.closing) {
-      if (init?.selectionId !== undefined)
-        current.selectModel(init.selectionId, { credits: init.credits });
+      if (init?.selectionId !== undefined) current.selectModel(init.selectionId);
       recordAcquire("reuse");
       current.lease();
       return current;
@@ -1591,8 +1584,7 @@ async function openSession(
       ? await deps.sessionSettings?.savedModelSelection(sessionId)
       : undefined;
   const selectionId = init.selectionId ?? persistedSelection?.id;
-  const credits =
-    init.credits ?? (await chatOnCredits(deps, init.threadContext?.romeSessionId))?.credits;
+  const credits = deps.onRomeCredits?.() === true;
   // A cold resume runs at the effort its web chat saved when the open names
   // none, as a message to that chat does; a turn that names one still wins.
   const savedEffort =
@@ -2098,7 +2090,6 @@ async function openSession(
       ? "subagent"
       : (init.kind ?? (init.threadContext ? "conversation" : "action")),
     selectionId,
-    credits,
     sessionPin,
     threadResumed,
     // The row recorded a thread this open does not resume: another provider
@@ -2186,7 +2177,6 @@ interface ImplArgs {
   isSubagent: boolean;
   kind: SessionKind;
   selectionId?: ModelSelectionId;
-  credits?: boolean;
   /** Session model pin from the resumed row, when one exists. */
   sessionPin?: { providerId: ProviderId; model: string };
   /** The opened provider session continues a thread the row recorded. */
@@ -2506,7 +2496,6 @@ class AgentSessionImpl implements AgentSession {
   /** The model the chat ran on before the current thread started. */
   private previousModel?: string;
   private selectionId?: ModelSelectionId;
-  private credits?: boolean;
   /**
    * The session model pin: the concrete model this session's history
    * was produced on. Seeded from the resumed row at open and refreshed after
@@ -2565,7 +2554,6 @@ class AgentSessionImpl implements AgentSession {
     this.kind = args.kind;
     this.spanAttributes = args.spanAttributes ?? {};
     this.selectionId = args.selectionId;
-    this.credits = args.credits;
     this.sessionPin = args.sessionPin;
     this.threadFresh = !args.threadResumed;
     this.continuationPending = args.replacedThread;
@@ -2803,18 +2791,19 @@ class AgentSessionImpl implements AgentSession {
    * ahead of the pin, and its successful turn re-pins the session. Null clears
    * the selection, so the pin decides again.
    */
-  selectModel(selectionId: ModelSelectionId | null, options?: { credits?: boolean }): void {
+  selectModel(selectionId: ModelSelectionId | null): void {
     this.selectionId = selectionId ?? undefined;
-    if (options?.credits !== undefined) this.credits = options.credits;
   }
 
   private async ensureModelSessionForTurn(): Promise<void> {
     if (this.config.codeBacked) return;
-    // Whether the chat runs on Rome credits now: a switch since the open moved it.
-    const onCredits = await chatOnCredits(this.deps, this.threadContext?.romeSessionId);
-    if (onCredits) this.credits = onCredits.credits;
     const resolution = await this.deps.modelResolver.resolve(
-      modelResolutionRequest(this.selectionId, this.sessionPin, this.config, this.credits),
+      modelResolutionRequest(
+        this.selectionId,
+        this.sessionPin,
+        this.config,
+        this.deps.onRomeCredits?.() === true,
+      ),
     );
     if (
       this.modelSessionAvailable &&
@@ -4693,19 +4682,6 @@ function failureFieldsOf(terminal: StreamAgentEvent): AgentTurnFailedBeforeStart
     ...(text("usageLimitUntil") ? { usageLimitUntil: text("usageLimitUntil") } : {}),
   };
   return Object.keys(failure).length > 0 ? failure : undefined;
-}
-
-/** Whether the chat may spend Rome credits, as the deps read it; null when they cannot. */
-async function chatOnCredits(
-  deps: Pick<ManagerDeps, "chatOnCredits">,
-  chatId: string | undefined,
-): Promise<{ credits: boolean | undefined } | null> {
-  if (!chatId || !deps.chatOnCredits) return null;
-  const read = deps.chatOnCredits;
-  return await read(chatId).then(
-    (credits) => ({ credits }),
-    () => null,
-  );
 }
 
 /** When the first of the messages a turn catches up on or answers was said. */

@@ -1,27 +1,18 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ProviderFailureResolution, ProviderOutagePart } from "@rome/api-types/chat";
 import { useProviderName } from "@/components/default-provider";
 import { ChatNotice } from "@/components/chat/ChatNotice";
-import {
-  FailureActions,
-  failureText,
-  resolvedText,
-} from "@/components/chat/entries/ProviderFailureCard";
+import { failureText, resolvedText } from "@/components/chat/entries/ProviderFailureCard";
 import { TaskLink } from "@/components/chat/task-link/TaskLink";
-import {
-  type ProviderSwitch,
-  useProviderOutages,
-  useSwitchOutage,
-} from "@/hooks/use-default-provider";
+import { useProviderOutages } from "@/hooks/use-default-provider";
 import { cn } from "@/lib/utils";
 
 /**
  * The Concierge main chat's notice for unattended chats (task chats, routines)
- * one provider failure stopped: what stopped, the task links, and the same
- * buttons as a failure card, which act on every chat at once. The open
- * outages are read live, so a notice the server has not rewritten yet still
- * reads as settled once its outage is gone.
+ * one provider failure stopped: what stopped and the task links. It informs
+ * only: each task's own card acts. The open outages are read live, so a
+ * notice the server has not rewritten yet still reads as settled once its
+ * outage is gone.
  */
 export function ProviderOutageNotice({
   part,
@@ -33,12 +24,9 @@ export function ProviderOutageNotice({
   const { t, i18n } = useTranslation("chat");
   const providerName = useProviderName();
   const outages = useProviderOutages();
-  const switchOutage = useSwitchOutage();
-  const [switched, setSwitched] = useState<ProviderFailureResolution | null>(null);
   const live = outages.data?.find((outage) => outage.id === part.outageId);
   const resolved: ProviderFailureResolution | null =
     part.resolved ??
-    switched ??
     (part.resolvedAt || (outages.isSuccess && !live)
       ? { at: part.resolvedAt ?? "", by: "recovered" }
       : null);
@@ -57,20 +45,6 @@ export function ProviderOutageNotice({
     until: live?.until ?? part.until,
   };
   const chatIds = live?.chatIds ?? part.chatIds;
-  const onSwitch = (change: ProviderSwitch) =>
-    switchOutage.mutate(
-      { outageId: part.outageId, change },
-      {
-        onSuccess: () =>
-          setSwitched({
-            at: new Date().toISOString(),
-            by: "switched",
-            ...(change.kind === "provider"
-              ? { provider: change.provider }
-              : { model: part.replacement?.model }),
-          }),
-      },
-    );
 
   return (
     <div role="note" data-provider-outage="" className={cn("mb-4 text-center", className)}>
@@ -89,14 +63,6 @@ export function ProviderOutageNotice({
           ))}
         </ul>
       )}
-      <FailureActions
-        facts={facts}
-        affectedTasks={part.chatIds.length}
-        pending={switchOutage.isPending}
-        failed={switchOutage.isError}
-        onSwitch={onSwitch}
-        centered
-      />
     </div>
   );
 }

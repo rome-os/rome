@@ -8,7 +8,6 @@ async function setup(
   options: {
     lastModel?: Record<string, { providerId: string; model: string }>;
     tier?: "large" | "medium" | "small";
-    signedIn?: { anthropic: boolean; openai: boolean };
   } = {},
 ) {
   const testDb = createTestDb();
@@ -33,26 +32,17 @@ async function setup(
   // Never said anything.
   await webchatRepo.createSession("empty", "Empty");
   const selected: Array<[string, string | null]> = [];
-  const credits: Array<[string, boolean | undefined]> = [];
   // The plain chat last ran Opus.
   const lastModel = options.lastModel ?? {
     plain: { providerId: "anthropic", model: "claude-opus-5-5[1m]" },
   };
-  const accountListeners: Array<() => void> = [];
-  const signedIn = options.signedIn ?? { anthropic: false, openai: false };
   const providers = createChatProviders({
     webchatRepo,
     accounts: {
       read: () => ({ openai: reportOf("available"), anthropic: reportOf("available") }),
-      onChanged: (listener) => {
-        accountListeners.push(() => listener("anthropic", "authorization", true));
-        return () => undefined;
-      },
     },
-    signedIn: () => ({ ...signedIn, rome_credits: !signedIn.anthropic && !signedIn.openai }),
-    selectModel: (chatId, _agentName, selection, onCredits) => {
+    selectModel: (chatId, _agentName, selection) => {
       selected.push([chatId, selection]);
-      credits.push([chatId, onCredits]);
     },
     lastModel: async (chatId) => lastModel[chatId] ?? null,
     agentTier: () => options.tier,
@@ -61,21 +51,7 @@ async function setup(
     const chat = await webchatRepo.getSession(id);
     return { selection: chat?.largeModelSelection, by: chat?.largeModelSelectionBy };
   };
-  const onCredits = async (id: string) => (await webchatRepo.getSession(id))?.romeCredits;
-  /** An account changes, as a login does. */
-  const accountsChanged = () => {
-    for (const listener of accountListeners) listener();
-  };
-  return {
-    providers,
-    row,
-    selected,
-    credits,
-    webchatRepo,
-    onCredits,
-    signedIn,
-    accountsChanged,
-  };
+  return { providers, row, selected, webchatRepo };
 }
 
 describe("which provider a chat that follows the default runs on", () => {
@@ -170,63 +146,6 @@ describe("the model a kept chat stays on", () => {
   });
 });
 
-describe("a chat on Rome credits", () => {
-  it("is a flag beside its model: the model and who chose it stay", async () => {
-    const { providers, row, credits, onCredits } = await setup();
-    await providers.keep("fast", "rome_credits");
-    expect(await row("fast")).toEqual({ selection: "claude-sonnet", by: "auto" });
-    expect(await onCredits("fast")).toBe(true);
-    expect(credits.at(-1)).toEqual(["fast", true]);
-    await providers.follow("fast");
-    expect(await row("fast")).toEqual({ selection: "claude-sonnet", by: "auto" });
-    expect(await onCredits("fast")).toBe(false);
-    expect(credits.at(-1)).toEqual(["fast", false]);
-  });
-
-  it("keeps a model its owner picked, which comes back and never follows the default", async () => {
-    const { providers, row, onCredits } = await setup();
-    await providers.keep("picked", "rome_credits");
-    expect(await onCredits("picked")).toBe(true);
-    expect(await row("picked")).toEqual({ selection: "claude-opus-5-5", by: "owner" });
-    expect(await providers.releaseCredits()).toBe(1);
-    expect(await row("picked")).toEqual({ selection: "claude-opus-5-5", by: "owner" });
-    await providers.beforeDefaultChange({
-      from: "anthropic",
-      to: "openai",
-      by: "guardian",
-      moveExisting: true,
-    });
-    expect(await row("picked")).toEqual({ selection: "claude-opus-5-5", by: "owner" });
-  });
-
-  it("ends for every chat once any AI account logs in", async () => {
-    const { providers, onCredits, signedIn, accountsChanged, credits } = await setup();
-    await providers.keep("fast", "rome_credits");
-    await providers.keep("picked", "rome_credits");
-    // An account read while none is logged in leaves them on credits.
-    accountsChanged();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(await onCredits("fast")).toBe(true);
-    signedIn.openai = true;
-    accountsChanged();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(await onCredits("fast")).toBe(false);
-    expect(await onCredits("picked")).toBe(false);
-    expect(credits.slice(-2)).toEqual([
-      ["fast", false],
-      ["picked", false],
-    ]);
-  });
-
-  it("survives a model its owner picks from the composer", async () => {
-    const { providers, webchatRepo, onCredits, row } = await setup();
-    await providers.keep("fast", "rome_credits");
-    await webchatRepo.updateSessionLargeModelSelection("fast", "claude-opus-5-5", "owner");
-    expect(await onCredits("fast")).toBe(true);
-    expect(await row("fast")).toEqual({ selection: "claude-opus-5-5", by: "owner" });
-  });
-});
-
 describe("a card rewritten in place", () => {
   it("rewrites the line in its chat and tells the chat's live view", async () => {
     const { webchatRepo } = await setup();
@@ -264,7 +183,5 @@ describe("a chat that moved on since a request", () => {
     expect(webchatRepo.chatMovedOnSince("plain", before)).toBe(true);
     expect(webchatRepo.chatMovedOnSince("plain", Date.now() + 60_000)).toBe(false);
     expect(webchatRepo.chatMovedOnSince("gone", before)).toBe(true);
-    expect(webchatRepo.chatClosed("plain")).toBe(false);
-    expect(webchatRepo.chatClosed("gone")).toBe(true);
   });
 });

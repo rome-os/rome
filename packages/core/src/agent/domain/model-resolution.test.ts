@@ -367,20 +367,19 @@ describe("resolveModel on the default provider", () => {
     });
   });
 
-  it("spends no Rome credits for a chat kept on another provider when credits become the default", () => {
+  it("runs every chat on Rome credits while they are the default, a kept one too", () => {
     const given = facts({
       reports: reports(unauthorized, unauthorized),
       logins: { openai: credits() },
       defaultProvider: "rome_credits",
     });
     const kept = { kind: "exact", providerId: "openai", model: "gpt-6.1-sol" } as const;
-    // "Move existing chats too" was off: the chat stays where it ran, and shows its card.
-    expect(resolveModel({ ...kept, credits: false }, given)).toMatchObject({
+    expect(resolveModel(kept, given)).toMatchObject({ ok: true, providerId: "openai" });
+    // Once a login replaced them as the default, the same ask reads the guardian's account.
+    expect(resolveModel(kept, { ...given, defaultProvider: "openai" })).toMatchObject({
       ok: false,
       failure: { kind: "provider_unavailable", provider: "openai" },
     });
-    // A chat that follows the default runs on them.
-    expect(resolveModel(kept, given)).toMatchObject({ ok: true, providerId: "openai" });
   });
 
   it("runs a chat on Rome credits on the served model of its strength", () => {

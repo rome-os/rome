@@ -44,7 +44,7 @@ describe("modelResolutionRequest", () => {
     });
   });
 
-  it("runs a selection's strength on Codex for a chat on Rome credits", () => {
+  it("runs a selection's strength on Codex while every chat is on Rome credits", () => {
     expect(modelResolutionRequest("claude-sonnet", undefined, { tier: "large" }, true)).toEqual({
       kind: "exact",
       providerId: "openai",
@@ -53,7 +53,7 @@ describe("modelResolutionRequest", () => {
     });
   });
 
-  it("runs a tier on Codex for a chat on Rome credits, and keeps a kept chat off them", () => {
+  it("runs a tier on Codex while every chat is on Rome credits, and as asked otherwise", () => {
     expect(modelResolutionRequest(undefined, undefined, { tier: "large" }, true)).toEqual({
       kind: "tier",
       tier: "large",
@@ -63,7 +63,6 @@ describe("modelResolutionRequest", () => {
     expect(modelResolutionRequest(undefined, undefined, { tier: "large" }, false)).toEqual({
       kind: "tier",
       tier: "large",
-      credits: false,
     });
   });
 
