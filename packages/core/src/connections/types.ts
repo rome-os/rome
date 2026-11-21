@@ -460,6 +460,11 @@ export interface ConnectionDescriptor {
    *  (webchat, email), leaves it unset. Vocabulary:
    *  docs/domains/chats.md#account. */
   severalAccounts?: boolean;
+  /** True when agents act on the platform with this kind's grant alone,
+   *  through the connector's proxy, though the kind has no actor: `act` is
+   *  then unlocked while every grant is authorized (connections/acts-with-grant.ts).
+   *  Absent means they do not. */
+  actsWithGrant?: boolean;
   /** The platform's own id for the account a grant's profile names (a bot id,
    *  an app id, an inbox address), or null when the profile names none. It reads
    *  the one field rather than parsing the strict profile schema, so a stored

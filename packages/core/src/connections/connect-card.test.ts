@@ -30,7 +30,7 @@ describe("connect_account", () => {
   });
 
   it("asks the model to send the guardian to Settings where no card shows", () => {
-    expect(connectAccountToolOutput("slack", false)).toContain("Settings › Connections");
+    expect(connectAccountToolOutput("github", false)).toContain("Settings › Connections");
   });
 
   it("says why instead of showing a card whose Connect could only fail", () => {

@@ -222,6 +222,10 @@ export type ResumeOpening = Omit<SessionOpening, "resetPolicy">;
  *  session it names by id, if any. */
 type OpenRequest = SessionOpening & { resumeSessionId?: string };
 
+/** The platform threads a model thread was shown, by the chat id a read of
+ *  each takes, each with the id of the last message there it was shown. */
+type ThreadsRead = ReadonlyMap<string, number | undefined>;
+
 export interface AgentTurnInput {
   inputId?: string;
   prompt: string;
@@ -272,6 +276,10 @@ export interface SendTurnOptions {
   romeSessionId?: string;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
+  /** The platform thread the turn's message was said in, by the chat id a
+   *  read of it takes, where the session's chat is the thread's conversation.
+   *  The session reads the thread's earlier messages once. */
+  inThread?: string;
   /** The id of the message `replyTo` names, as Rome holds it where the turn's
    *  session stands, or null when Rome holds none. Read with `promptFacts`
    *  when the turn runs. */
@@ -563,12 +571,20 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
   // reopen that resumes the thread does not send them again. In memory: a
   // restart sends them once more.
   const sentHeaders = new Map<string, SentHeaders>();
+  // Likewise the platform threads each closed session's thread was shown, so
+  // a reopen that resumes it reads a thread only from the last message shown.
+  const threadsRead = new Map<string, ThreadsRead>();
   const writtenHandoffs = new Map<string, string>();
   const onSessionClosed = (sess: AgentSessionImpl) => {
     const k = keyOf(sess.key);
     // A late close must not evict a newer live session under the same key.
     if (sessions.get(k) !== sess) return;
     sessions.delete(k);
+    if (sess.readThreads.size === 0) threadsRead.delete(sess.sessionId);
+    else {
+      if (threadsRead.size >= 1_000) threadsRead.clear();
+      threadsRead.set(sess.sessionId, sess.readThreads);
+    }
     // A thread that read none, such as one just compacted, must send them all
     // on its reopen, so an earlier snapshot of the same session goes too.
     if (sess.readHeaders.size === 0) {
@@ -792,6 +808,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         onClosed: onSessionClosed,
         onContextFull,
         sentHeaders,
+        threadsRead,
         writtenHandoffs,
         isSubagent,
         turns,
@@ -904,6 +921,8 @@ interface OpenOptions {
   onContextFull?: (s: AgentSessionImpl) => void;
   /** The header blocks each session's thread had read when it last closed, by session id. */
   sentHeaders?: ReadonlyMap<string, SentHeaders>;
+  /** The platform threads each session's thread had been shown when it last closed, by session id. */
+  threadsRead?: ReadonlyMap<string, ThreadsRead>;
   /**
    * Handoffs written for a renewal whose fresh session has not opened yet, by
    * the retired session's id, so a retry after a failed open reuses one.
@@ -2128,6 +2147,7 @@ async function openSession(
     onContextFull: opts.onContextFull ? () => opts.onContextFull?.(impl) : undefined,
     // A thread this open resumes already read what it read before the close.
     sentHeaders: threadResumed ? opts.sentHeaders?.get(sessionId) : undefined,
+    threadsRead: threadResumed ? opts.threadsRead?.get(sessionId) : undefined,
   });
 
   impl.startModelSessionEvents();
@@ -2211,6 +2231,8 @@ interface ImplArgs {
   onContextFull?: () => void;
   /** The header blocks the resumed thread already read. */
   sentHeaders?: SentHeaders;
+  /** The platform threads the resumed thread was already shown. */
+  threadsRead?: ThreadsRead;
 }
 
 interface TurnSink {
@@ -2264,6 +2286,7 @@ interface TurnSink {
   sharedContext?: Record<string, unknown>;
   romeSessionId: string;
   replyTo?: MessageReplyReference;
+  inThread?: string;
   quotedId?: number | null;
   currentId?: number | null;
   initiatedBy?: "user" | "system";
@@ -2467,6 +2490,10 @@ class AgentSessionImpl implements AgentSession {
   // turn of a fresh session only. Flipped the first time runOneTurn considers it
   // so it never reappears on later turns of the same session.
   private threadContextInjected = false;
+  /** The platform threads whose earlier messages the model thread has read,
+   *  by the chat id a read of each takes, each with the id of the last
+   *  message there the model was shown. */
+  private threadsRead = new Map<string, number | undefined>();
   /**
    * The current model thread started in this session rather than resuming
    * one, so its first turn carries the `<thread_context>` block.
@@ -2569,6 +2596,7 @@ class AgentSessionImpl implements AgentSession {
     this.contextLimitTokens = args.contextLimitTokens;
     this.onContextFull = args.onContextFull;
     if (args.sentHeaders) this.sentHeaders = args.sentHeaders;
+    if (args.threadsRead) this.threadsRead = new Map(args.threadsRead);
     // A resumed thread is where its row's last turn left it.
     if (args.threadResumed) this.lastContextTokens = args.session.contextTokens ?? undefined;
   }
@@ -2593,6 +2621,11 @@ class AgentSessionImpl implements AgentSession {
 
   get readHeaders(): SentHeaders {
     return this.sentHeaders;
+  }
+
+  /** The platform threads the current model thread was shown. */
+  get readThreads(): ThreadsRead {
+    return this.threadsRead;
   }
 
   /** The chat the session serves, when it serves one. */
@@ -2833,6 +2866,7 @@ class AgentSessionImpl implements AgentSession {
         // Another provider: the new thread has seen nothing of this chat.
         this.threadFresh = true;
         this.threadContextInjected = false;
+        this.threadsRead = new Map();
         this.sentHeaders = new Map();
         this.lastContextTokens = undefined;
         this.lastPosition = undefined;
@@ -3333,6 +3367,7 @@ class AgentSessionImpl implements AgentSession {
       this.modelSession.modelThreadId === undefined
     ) {
       this.threadContextInjected = false;
+      this.threadsRead = new Map();
     }
     this.publishTurnEnd(sink, terminal);
     this.dispatchTurnFinished(sink, terminal);
@@ -4010,6 +4045,7 @@ class AgentSessionImpl implements AgentSession {
       sharedContext: options?.sharedContext,
       romeSessionId: options?.romeSessionId ?? this.sessionId,
       replyTo: options?.replyTo,
+      ...(options?.inThread ? { inThread: options.inThread } : {}),
       quotedId: options?.quotedId ?? null,
       currentId: options?.currentId ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
@@ -4210,6 +4246,9 @@ class AgentSessionImpl implements AgentSession {
         this.sentHeaders = new Map();
       }
       let unseenMessageIds: number[] = [];
+      // The thread this turn shows the model, with the last message shown,
+      // noted as read once the model has taken the input.
+      let threadShown: { thread: string; last: number | undefined } | undefined;
       // The agent catches up on the messages said where its session stands
       // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
       // The prompt facts answer null where it catches up on nothing.
@@ -4240,11 +4279,49 @@ class AgentSessionImpl implements AgentSession {
                 // A read that fails opens the session as if there were none.
                 .catch(() => null)
             : null;
+        // A message in a platform thread inside the session's conversation,
+        // such as a Slack mention in a thread, comes with the thread's
+        // earlier messages. A later one comes with what was said there since
+        // the last message the model was shown, since the app hears only
+        // the messages that mention it.
+        // Without the id of the last message shown, a thread read once is not
+        // read again, so the model is not shown its messages twice.
+        const current = byId(sink.currentId);
+        const thread =
+          !this.isSubagent &&
+          sink.inThread &&
+          (!this.threadsRead.has(sink.inThread) ||
+            this.threadsRead.get(sink.inThread) !== undefined)
+            ? sink.inThread
+            : undefined;
+        const threadRead =
+          thread && promptFacts.thread
+            ? await promptFacts
+                .thread(
+                  sink.threadContext as ThreadContext,
+                  thread,
+                  current?.at ?? new Date(),
+                  current?.id,
+                  this.threadsRead.get(thread),
+                )
+                .catch(() => null)
+            : null;
+        // A read that failed, or a turn stopped before the model took its
+        // input, is tried again from the same point on the thread's next
+        // message.
+        if (thread && threadRead && !threadRead.unread) {
+          threadShown = { thread, last: current?.id };
+        }
         userPrompt = catchUpPrompt(userPrompt, {
           unseen: opening ? [...opening, ...unseen] : unseen,
           quoted: byId(sink.quotedId),
           replyTo: sink.replyTo,
-          current: byId(sink.currentId),
+          current,
+          ...(threadRead?.unread
+            ? { inThreadUnread: true }
+            : threadRead
+              ? { inThread: threadRead.messages, inThreadCut: threadRead.cut }
+              : {}),
         });
       }
       // Every turn, subagents included: the folder is where the work happens.
@@ -4413,6 +4490,7 @@ class AgentSessionImpl implements AgentSession {
             // Taking the input may have replaced a Claude query, and its login kind.
             sink.loginKind = this.modelSession.loginKind;
             this.inputs.ready(turnId);
+            if (threadShown) this.threadsRead.set(threadShown.thread, threadShown.last);
             if (this.deps.promptFacts && unseenMessageIds.length > 0) {
               try {
                 this.deps.promptFacts.seen(unseenMessageIds, sink.romeSessionId, sink.turnId);

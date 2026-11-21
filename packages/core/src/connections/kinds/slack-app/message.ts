@@ -19,6 +19,8 @@ export interface SlackWireMessage {
   text?: string;
   thread_ts?: string;
   subtype?: string;
+  /** Its last edit, when it was edited. */
+  edited?: { ts?: string };
 }
 
 /** The text of a message that was only the app's mention. */

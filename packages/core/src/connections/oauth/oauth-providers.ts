@@ -1,4 +1,4 @@
-export const OAUTH_PROVIDERS = ["google", "github", "slack", "shopify", "microsoft"] as const;
+export const OAUTH_PROVIDERS = ["google", "github", "shopify", "microsoft"] as const;
 
 export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
 
@@ -18,11 +18,6 @@ export const OAUTH_PROVIDER_DESCRIPTORS: Record<OAuthProvider, OAuthProviderDesc
     id: "github",
     label: "GitHub",
     description: "Repositories, pull requests, issues, and GitHub identity.",
-  },
-  slack: {
-    id: "slack",
-    label: "Slack",
-    description: "Read and post messages, channels, reactions, and search.",
   },
   shopify: {
     id: "shopify",

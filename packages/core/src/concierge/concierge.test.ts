@@ -5157,6 +5157,34 @@ describe("Concierge connect_card", () => {
     expect(cards(s)).toEqual([]);
   });
 
+  it("takes the one service labelled with the name it was given", async () => {
+    const s = setup();
+    withServices(s, [
+      { service: "slack_app", label: "Slack", state: "working", connect: null },
+      { service: "mail", label: "Mail", state: null, connect: MAIL_CONNECT },
+    ]);
+
+    const result = await s.tool("connect_card", { service: "slack" });
+
+    expect(result.isError).toBeFalsy();
+    expect(text(result)).toMatchObject({ connected: true });
+    expect(cards(s)).toEqual([]);
+  });
+
+  it("refuses a name several services are labelled with, naming each", async () => {
+    const s = setup();
+    withServices(s, [
+      { service: "slack_app", label: "Slack", state: "working", connect: null },
+      { service: "slack_bot", label: "Slack", state: null, connect: null },
+    ]);
+
+    const result = await s.tool("connect_card", { service: "slack" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("slack_app (working), slack_bot (not connected)");
+    expect(cards(s)).toEqual([]);
+  });
+
   it("refuses a service the list does not have", async () => {
     const s = setup();
     withServices(s, [{ service: "mail", label: "Mail", state: null, connect: MAIL_CONNECT }]);

@@ -3,17 +3,15 @@
 // The guardian adds Rome to their Slack workspace in one sign-in: Connect,
 // Slack's approve screen, done. Nothing is pasted and no Slack app is made by
 // the guardian. The connection's account is the app's bot in that workspace,
-// named by team id and bot user id. It
-// takes an agent like any bot, and a new one starts with the Concierge.
+// named by team id and bot user id. It takes an agent like any bot, and a new
+// one starts with the Concierge. It is Rome's only connection to Slack.
 //
 // Rome Cloud holds the app's secrets, runs the exchange with Slack, and binds
 // the workspace to this instance (one workspace, one instance). The instance
 // holds the bot token, drains the workspace's relay mailbox for its events
 // (`kinds/slack-app/slack-app.ts`) and replies through Slack's Web API.
-//
-// This kind is separate from `slack` (Rome Cloud OAuth that acts for the
-// guardian), which keeps working.
 
+import type { ChatId } from "@rome-os/app-runtime";
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { getInstanceOrigin } from "../../instance/rome-cloud-origin.js";
@@ -24,6 +22,7 @@ import { SlackAppRefused } from "../kinds/slack-app/rome-cloud.js";
 import { type OpenMailbox, SlackAppAdapter } from "../kinds/slack-app/slack-app.js";
 import type { SlackAppWebApi } from "../kinds/slack-app/web-api.js";
 import type { SetupFn } from "../setup/types.js";
+import { directoryPage } from "./talk-features.js";
 import type {
   AuthScheme,
   ConnectionDescriptor,
@@ -354,6 +353,10 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
     startsWithConcierge: true,
     // An official app offers no chat rules: every chat runs at the defaults.
     chatRules: { offers: [] },
+    // A task chat sends, reads and searches Slack through the connector's
+    // proxy, which makes its calls through this connection's talker with the
+    // bot grant.
+    actsWithGrant: true,
     grant: "bot",
     auth: scheme,
     // Revoke the token at Slack, then release the workspace at Rome Cloud.
@@ -398,7 +401,7 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
     },
     capabilities: {
       talker: {
-        // The connection reads a chat from Slack (slack-app/timeline.ts).
+        // Every read asks Slack (slack-app/timeline.ts).
         reads: true,
         build(cred, kit): Talker {
           const material = materialOf(cred.material);
@@ -460,6 +463,38 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
                   }
                   throw error;
                 }
+              },
+            },
+            // The channels the app is a member of, by name, for chat settings
+            // and for an agent that names a channel.
+            directory: {
+              async listConversations(input) {
+                const query = input.query?.replace(/^#/, "").toLocaleLowerCase();
+                let channels: Awaited<ReturnType<typeof adapter.channels>>;
+                try {
+                  channels = await adapter.channels();
+                } catch (error) {
+                  if (isSlackCredentialError(error)) {
+                    throw new CredentialRejected({ grant: "bot", cause: error });
+                  }
+                  throw error;
+                }
+                const page = directoryPage(
+                  channels.filter(
+                    (channel) => !query || channel.name.toLocaleLowerCase().includes(query),
+                  ),
+                  input,
+                );
+                return {
+                  conversations: page.items.map((channel) => ({
+                    ref: { connectionId: kit.connectionId, chatId: channel.id as ChatId },
+                    connectionKind: SLACK_APP_KIND,
+                    service: SLACK_APP_KIND,
+                    kind: "channel" as const,
+                    displayName: `#${channel.name}`,
+                  })),
+                  ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+                };
               },
             },
             directMessaging: {

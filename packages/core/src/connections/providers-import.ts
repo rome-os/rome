@@ -12,7 +12,6 @@ import {
   googleGrantProfileSchema,
   microsoftGrantProfileSchema,
   shopifyGrantProfileSchema,
-  slackGrantProfileSchema,
   type OAuthProviderGrantProfile,
 } from "./integrations/oauth-providers.js";
 import type { ConnectionRegistry } from "./registry.js";
@@ -24,38 +23,22 @@ import type { Credential, SecretRecord } from "./types.js";
  * caller treats it as a no-op).
  *
  * Material shape per provider (flat `SecretRecord`, mirroring the grant table):
- * - `github` / `google` / `shopify` / `microsoft`: `{ accessToken, refreshToken?, expiresAt? }`.
- * - `slack`: `{ botToken, userToken? }` — Slack v2 issues a bot token (`xoxb-`,
- *   the bundle's `accessToken`) plus a user token (`xoxp-`) that rides in `raw`
- *   (the verbatim oauth.v2.access response), same extraction the token-file
- *   serializer does. One OAuth dance, two tokens, ONE grant.
+ * `{ accessToken, refreshToken?, expiresAt? }`, for every provider.
  *
- * Expiry: the credential's `expiresAt` mirrors the bundle's. GitHub and Slack
- * tokens are non-expiring, so an absent expiry becomes `"never"` and the
+ * Expiry: the credential's `expiresAt` mirrors the bundle's. GitHub tokens are
+ * non-expiring, so an absent expiry becomes `"never"` and the
  * credential never reaches `renew()`. Shopify and Google tokens DO expire — the
  * expiry flows through, and `romeCloudOAuth.renew()` refreshes them through Rome
  * Cloud with the material's refresh token. A grant Rome Cloud can't refresh
  * (Google today) degrades once it expires, until the guardian reconnects.
  */
-export function credentialFromBundle(
-  provider: OAuthProvider,
-  bundle: OAuthTokenBundle,
-): Credential | null {
+export function credentialFromBundle(bundle: OAuthTokenBundle): Credential | null {
   const accessToken = bundle.accessToken?.trim();
   if (!accessToken) return null;
 
-  let material: SecretRecord;
-  if (provider === "slack") {
-    const raw = (bundle.raw ?? {}) as { authed_user?: { access_token?: unknown } };
-    material = { botToken: accessToken };
-    if (typeof raw.authed_user?.access_token === "string") {
-      material.userToken = raw.authed_user.access_token;
-    }
-  } else {
-    material = { accessToken };
-    if (bundle.refreshToken) material.refreshToken = bundle.refreshToken;
-    if (bundle.expiresAt) material.expiresAt = bundle.expiresAt;
-  }
+  const material: SecretRecord = { accessToken };
+  if (bundle.refreshToken) material.refreshToken = bundle.refreshToken;
+  if (bundle.expiresAt) material.expiresAt = bundle.expiresAt;
 
   return {
     material,
@@ -87,16 +70,14 @@ const IDENTITY_KEYS = ["subject", "displayName", "email", "avatarUrl"] as const;
  * The profile half of the per-kind parser: Rome Cloud's redeem hands over a
  * RAW JSON object (`account`), and each connection kind parses it against its OWN
  * schema — the parse output is exactly what lands on the grant row. Scopes come
- * from `bundle`, Slack's `teamId` from `bundle.raw.team.id`. This is the
+ * from `bundle`. This is the
  * non-secret grant outcome — deliberately NOT the opaque
  * handoff `metadata` bag, which is dropped here and never reaches the ledger.
  *
  * Fail-closed: a raw value the connection kind's schema rejects throws (ZodError) and
  * fails the grant BEFORE anything is persisted — a partial or unparsed
  * profile is never stored.
- *
- * `teamId` is classified as PROFILE (which workspace the grant belongs to), not
- * material — the credential's material carries only the secret tokens.
+
  */
 export function grantProfileFromBundle(
   provider: OAuthProvider,
@@ -121,13 +102,6 @@ export function grantProfileFromBundle(
       return githubGrantProfileSchema.parse(
         withScopes(pickRawKeys(account, [...IDENTITY_KEYS, "login"])),
       );
-    case "slack": {
-      const candidate = withScopes(pickRawKeys(account, [...IDENTITY_KEYS, "login"]));
-      const raw = (bundle.raw ?? {}) as { team?: { id?: unknown } };
-      // Pass a present-but-wrong-typed team id through so the parse rejects it.
-      if (raw.team?.id != null && raw.team.id !== "") candidate.teamId = raw.team.id;
-      return slackGrantProfileSchema.parse(candidate);
-    }
     case "shopify": {
       // Shopify has no store avatar, so a raw avatar never lands.
       const profile = shopifyGrantProfileSchema.parse(
@@ -161,7 +135,7 @@ export function grantProfileFromBundle(
  *
  * `account` is the redeem side's non-secret identity as a RAW JSON object.
  * When supplied (live grant), the connection kind parses it against its own schema
- * and the grant records the parsed profile (identity + scopes + Slack `teamId`)
+ * and the grant records the parsed profile (identity + scopes)
  * in the SAME write as the credential — a parse rejection throws before
  * anything is persisted. When omitted, no profile is written.
  */
@@ -173,7 +147,7 @@ export async function importProviderBundle(
   opts: { signIn?: boolean; onEnded?: (id: string) => void } = {},
 ): Promise<boolean> {
   if (!registry.isRegistered(provider)) return false;
-  const credential = credentialFromBundle(provider, bundle);
+  const credential = credentialFromBundle(bundle);
   if (!credential) return false;
 
   const profile =

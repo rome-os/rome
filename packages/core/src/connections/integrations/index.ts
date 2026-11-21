@@ -135,7 +135,7 @@ export function registerBuiltinConnections(
           }),
         redeem: async (handoff, state) => {
           const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
-          const credential = credentialFromBundle(redeemed.provider, redeemed.tokens);
+          const credential = credentialFromBundle(redeemed.tokens);
           if (!credential) {
             throw new Error("OAuth redemption produced no usable credential for the grant ledger.");
           }
@@ -151,7 +151,6 @@ export function registerBuiltinConnections(
         refresh: ROME_CLOUD_REFRESHABLE_PROVIDERS.has(provider)
           ? async (refreshToken) => {
               const credential = credentialFromBundle(
-                provider,
                 await refreshRomeCloudOAuthGrant(provider, refreshToken),
               );
               if (!credential) {

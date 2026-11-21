@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { context, ROOT_CONTEXT, trace, type Context, type SpanContext } from "@opentelemetry/api";
 import { IpcRpc, type IpcMessage, type IpcTransport } from "./ipc.js";
+import { actionExecutionContext } from "./context.js";
 import { SendRefused, isSendRefused } from "@rome-os/app-runtime";
 import { installTestSpanHarness, type SpanHarness } from "../../test/helpers.js";
 
@@ -135,5 +136,39 @@ describe("IpcRpc errors", () => {
     const failed = await worker.call("fails", {}).catch((error: unknown) => error);
     expect(isSendRefused(failed)).toBe(false);
     expect(failed).toMatchObject({ message: "boom" });
+  });
+});
+
+describe("IpcRpc caller context", () => {
+  // Main reads a chat call that arrives without its caller as one made outside
+  // any agent turn, which reads every chat. Each gated call must carry it.
+  it("carries the calling action's turn on every chat call main gates by it", async () => {
+    const { main, worker } = linkedPeers(ROOT_CONTEXT);
+    const seen = new Map<string, unknown>();
+    for (const method of ["channels.query", "channels.chats", "channels.send"]) {
+      main.handle(method, async (_params, ctx) => {
+        seen.set(method, ctx.callerActionContext);
+        return null;
+      });
+    }
+    const turn = {
+      actionName: "connector_proxy",
+      executionId: "e1",
+      rootExecutionId: "e1",
+      initiator: "agent",
+      audience: "shared" as const,
+      turnId: "t1",
+      agentName: "concierge",
+    };
+
+    await actionExecutionContext.run(turn, async () => {
+      await worker.call("channels.query", {});
+      await worker.call("channels.chats", {});
+      await worker.call("channels.send", {});
+    });
+
+    for (const method of ["channels.query", "channels.chats", "channels.send"]) {
+      expect(seen.get(method)).toMatchObject({ audience: "shared", turnId: "t1" });
+    }
   });
 });

@@ -1502,10 +1502,22 @@ export async function buildConciergeTools(
           const wanted = requireString(args, "service");
           const { chatId, turnId } = currentTurn();
           const { connectors } = await service.following.list(await ownerHere());
-          const connector = connectors.find((entry) => entry.service === wanted);
+          // An agent may name a service as the guardian reads it: "slack" for
+          // the entry labelled Slack, whose service is slack_app. Only a label
+          // one service carries names it.
+          const named = connectors.filter(
+            (entry) => entry.label.toLowerCase() === wanted.toLowerCase(),
+          );
+          const connector =
+            connectors.find((entry) => entry.service === wanted) ??
+            (named.length === 1 ? named[0] : undefined);
           if (!connector) {
             throw new Error(
-              `No service ${wanted}. Use core:concierge_following_list for the service names.`,
+              named.length > 0
+                ? `No service ${wanted}. Services labelled ${named[0].label}: ${named
+                    .map((entry) => `${entry.service} (${entry.state ?? "not connected"})`)
+                    .join(", ")}. Pass one of those.`
+                : `No service ${wanted}. Use core:concierge_following_list for the service names.`,
             );
           }
           if (connector.state === "working") {

@@ -69,6 +69,8 @@ import type {
   Account,
   ChannelMessage,
   ChannelMessageQuery,
+  ChannelChatsPage,
+  ChannelChatsQuery,
   ChannelSummary,
   ChannelsService,
   MessageReceipt,
@@ -373,6 +375,14 @@ export class ChannelsServiceProxy implements ChannelsService {
         },
         { timeoutMs: CHANNEL_QUERY_RPC_TIMEOUT_MS },
       ),
+    );
+  }
+
+  chats(channel: Account | string, query: ChannelChatsQuery = {}): Promise<ChannelChatsPage> {
+    return callMain<ChannelChatsPage>(
+      "channels.chats",
+      { channel, ...query },
+      { timeoutMs: CHANNEL_QUERY_RPC_TIMEOUT_MS },
     );
   }
 }
