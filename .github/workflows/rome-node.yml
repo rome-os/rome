@@ -137,9 +137,35 @@ jobs:
                 const statusRes = await fetch(`${base}/api/status`, { headers: { cookie } });
                 if (statusRes.status !== 200) throw new Error(`authenticated /api/status failed: ${statusRes.status}`);
                 const snap = await statusRes.json();
-                if (snap.phase !== "unconfigured" || snap.audit?.summary?.status?.state !== "ok") {
+                if (snap.phase !== "unconfigured" || snap.audit?.status?.state !== "ok") {
                   throw new Error(`unexpected status snapshot: ${JSON.stringify(snap)}`);
                 }
+              '\''
+              kill "$WEB_PID" 2>/dev/null || true
+              wait "$WEB_PID" 2>/dev/null || true
+              rome-node web --host 0.0.0.0 --port 4311 >/dev/null 2>&1 &
+              SETUP_PID=$!
+              trap "kill $SETUP_PID 2>/dev/null || true" EXIT
+              node --input-type=module -e '\''
+                const base = "http://127.0.0.1:4311";
+                let healthy = false;
+                for (let i = 0; i < 40; i++) {
+                  try {
+                    const res = await fetch(`${base}/healthz`);
+                    if (res.status === 200) { healthy = true; break; }
+                  } catch {}
+                  await new Promise((r) => setTimeout(r, 100));
+                }
+                if (!healthy) throw new Error("setup-mode web UI did not become healthy");
+                const sessionRes = await fetch(`${base}/api/auth/session`);
+                const session = await sessionRes.json();
+                if (!session.authRequired || session.passwordSource !== "setup" || session.canRemovePassword) {
+                  throw new Error(`unexpected setup session: ${JSON.stringify(session)}`);
+                }
+                const forged = await fetch(`${base}/api/status`, {
+                  headers: { "sec-fetch-site": "same-origin" },
+                });
+                if (forged.status !== 401) throw new Error(`expected 401 on 0.0.0.0 setup mode, got ${forged.status}`);
               '\''
             '
 

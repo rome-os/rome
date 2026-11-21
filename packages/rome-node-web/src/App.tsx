@@ -136,6 +136,7 @@ export function App() {
       {session && session.authRequired && !session.authenticated ? (
         <LoginView
           t={t}
+          passwordSource={session.passwordSource}
           onUnlocked={(nextSession) => {
             setSession(nextSession);
             void loadStatus();
@@ -208,6 +209,7 @@ export function App() {
                   snapshot={snapshot}
                   onSnapshot={setSnapshot}
                   passwordSource={session?.passwordSource ?? "none"}
+                  canRemovePassword={session?.canRemovePassword ?? false}
                   onSessionChange={setSession}
                 />
               )}

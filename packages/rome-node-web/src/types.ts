@@ -9,7 +9,7 @@ export type HostPhase =
   | "superseded"
   | "error";
 
-export type AuditStatus =
+type AuditStatus =
   | { state: "ok" }
   | {
       state: "unavailable";
@@ -44,10 +44,11 @@ export interface HostSnapshot {
   };
 }
 
-export type PasswordSource = "none" | "file" | "env";
+export type PasswordSource = "none" | "setup" | "file" | "env";
 
 export interface AuthSession {
   authRequired: boolean;
   authenticated: boolean;
   passwordSource: PasswordSource;
+  canRemovePassword?: boolean;
 }

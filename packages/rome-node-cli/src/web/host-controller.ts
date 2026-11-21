@@ -18,6 +18,7 @@ import {
 } from "@rome-os/node-core/host";
 import { readPrivateJson, writePrivateJson } from "@rome-os/node-core/storage";
 import { CLI_AUDIT_HINT, cliAuditPath } from "../audit.js";
+import { WEB_CONFIG_FILE } from "../host-config.js";
 
 const DEVICE_TOKEN_PATTERN = /^(?:romedev|romemob)_[A-Za-z0-9_-]{43}$/;
 
@@ -69,6 +70,7 @@ export interface HostSnapshot {
 export type HostControllerEvent = { type: "status"; snapshot: HostSnapshot };
 
 export interface HostControllerDeps {
+  credentials?: CredentialStore<HostCredential>;
   connectHost?: typeof connectHost;
   connectLimitedHost?: typeof connectLimitedHost;
   loginDeviceCode?: typeof loginDeviceCode;
@@ -181,21 +183,23 @@ export class HostController {
   private deviceId: string | null = null;
   private pendingAuth: PendingAuthorization | null = null;
   private lastError: string | null = null;
+  private disposed = false;
 
   private activeAbort: AbortController | null = null;
   private activeRun: Promise<void> | null = null;
   private authAbort: AbortController | null = null;
   private authRun: Promise<void> | null = null;
   private mutationQueue: Promise<void> = Promise.resolve();
+  private configQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: HostControllerOptions) {
     this.now = options.deps?.now ?? (() => Date.now());
     this.since = this.now();
     this.version = options.version ?? null;
-    this.configPath = join(options.configDirectory, "web-config.json");
-    this.credentials = createFileCredentialStore<HostCredential>(
-      join(options.configDirectory, "credential.json"),
-    );
+    this.configPath = join(options.configDirectory, WEB_CONFIG_FILE);
+    this.credentials =
+      options.deps?.credentials ??
+      createFileCredentialStore<HostCredential>(join(options.configDirectory, "credential.json"));
     this.doConnectHost = options.deps?.connectHost ?? connectHost;
     this.doConnectLimitedHost = options.deps?.connectLimitedHost ?? connectLimitedHost;
     this.doLoginDeviceCode = options.deps?.loginDeviceCode ?? loginDeviceCode;
@@ -219,6 +223,10 @@ export class HostController {
   private get audit(): AuditStore {
     if (!this.auditStore) throw new Error("HostController has not been started.");
     return this.auditStore;
+  }
+
+  private isAuthCurrent(controller: AbortController): boolean {
+    return !this.disposed && this.authAbort === controller && !controller.signal.aborted;
   }
 
   subscribe(listener: (event: HostControllerEvent) => void): () => void {
@@ -247,9 +255,17 @@ export class HostController {
     this.emit({ type: "status", snapshot: this.snapshot() });
   }
 
-  private async saveConfig(nextConfig: WebHostConfig = this.config): Promise<void> {
-    await writePrivateJson(this.configPath, nextConfig);
-    this.config = nextConfig;
+  private async updateConfig(updater: (current: WebHostConfig) => WebHostConfig): Promise<void> {
+    const run = this.configQueue.then(async () => {
+      const nextConfig = updater(this.config);
+      await writePrivateJson(this.configPath, nextConfig);
+      this.config = nextConfig;
+    });
+    this.configQueue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   private async enqueue<T>(operation: () => Promise<T>): Promise<T> {
@@ -292,6 +308,11 @@ export class HostController {
 
   async start(): Promise<void> {
     this.auditStore = await this.openAudit(cliAuditPath(this.options.configDirectory));
+    if (this.disposed) {
+      this.auditStore.close();
+      this.auditStore = null;
+      return;
+    }
     const storedConfig = parseWebConfig(await readPrivateJson(this.configPath), this.config);
     this.config = {
       ...storedConfig,
@@ -304,6 +325,7 @@ export class HostController {
     };
 
     const storedCredential = parseStoredCredential(await this.credentials.load());
+    if (this.disposed) return;
     if (storedCredential) {
       this.configured = true;
       this.deviceId = storedCredential.deviceId;
@@ -341,13 +363,14 @@ export class HostController {
   }
 
   private launchConnection(credential: HostCredential): void {
+    if (this.disposed) return;
     const controller = new AbortController();
     const { signal } = controller;
     this.activeAbort = controller;
     this.setPhase("connecting", null);
 
     const onEvent = (event: HostEvent) => {
-      if (signal.aborted || this.activeAbort !== controller) return;
+      if (this.disposed || signal.aborted || this.activeAbort !== controller) return;
       if (event.type === "device") {
         this.deviceId = event.deviceId;
         this.config.name = event.name;
@@ -378,7 +401,6 @@ export class HostController {
       credentials: this.credentials,
       authorize: rejectUnexpectedReauth,
       onEvent,
-      audit: this.audit,
     };
 
     const run = (
@@ -387,7 +409,7 @@ export class HostController {
         : this.doConnectLimitedHost(baseOptions)
     )
       .then(() => {
-        if (this.activeAbort !== controller || signal.aborted) return;
+        if (this.disposed || this.activeAbort !== controller || signal.aborted) return;
         this.activeAbort = null;
         this.activeRun = null;
         if (this.phase !== "revoked" && this.phase !== "superseded") {
@@ -395,7 +417,7 @@ export class HostController {
         }
       })
       .catch((error: unknown) => {
-        if (this.activeAbort !== controller || signal.aborted) return;
+        if (this.disposed || this.activeAbort !== controller || signal.aborted) return;
         this.activeAbort = null;
         this.activeRun = null;
         if (error instanceof CredentialInvalidError) {
@@ -418,6 +440,7 @@ export class HostController {
 
   async authorize(input?: { cloudUrl?: string; name?: string }): Promise<HostSnapshot> {
     return this.enqueue(async () => {
+      if (this.disposed) return this.snapshot();
       let nextCloud = this.config.cloudUrl;
       if (input?.cloudUrl !== undefined) {
         try {
@@ -433,8 +456,14 @@ export class HostController {
 
       await this.stopActiveConnection();
       await this.stopActiveAuthorization();
+      if (this.disposed) return this.snapshot();
 
-      await this.saveConfig({ ...this.config, cloudUrl: nextCloud, name: nextName });
+      await this.updateConfig((current) => ({
+        ...current,
+        cloudUrl: nextCloud,
+        name: nextName,
+      }));
+      if (this.disposed) return this.snapshot();
 
       const controller = new AbortController();
       this.authAbort = controller;
@@ -451,7 +480,7 @@ export class HostController {
         nextName,
         controller.signal,
         (prompt: DeviceAuthorizationPrompt) => {
-          if (this.authAbort !== controller || controller.signal.aborted) return;
+          if (!this.isAuthCurrent(controller)) return;
           this.pendingAuth = {
             verificationUri: prompt.verificationUri,
             verificationUriComplete: prompt.verificationUriComplete,
@@ -463,24 +492,26 @@ export class HostController {
         },
       )
         .then(async (session) => {
-          if (this.authAbort !== controller || controller.signal.aborted) return;
+          if (!this.isAuthCurrent(controller)) return;
           const credential: HostCredential = { ...session, name: nextName };
           await this.credentials.save(credential);
-          this.authAbort = null;
-          this.authRun = null;
-          this.pendingAuth = null;
+          if (!this.isAuthCurrent(controller)) return;
           this.configured = true;
           this.deviceId = credential.deviceId;
-          await this.saveConfig({
-            ...this.config,
+          await this.updateConfig((current) => ({
+            ...current,
             cloudUrl: credential.cloudUrl,
             name: credential.name,
             autoConnect: true,
-          });
+          }));
+          if (!this.isAuthCurrent(controller)) return;
+          this.pendingAuth = null;
           this.launchConnection(credential);
+          this.authAbort = null;
+          this.authRun = null;
         })
         .catch((error: unknown) => {
-          if (this.authAbort !== controller || controller.signal.aborted) return;
+          if (!this.isAuthCurrent(controller)) return;
           this.authAbort = null;
           this.authRun = null;
           this.pendingAuth = null;
@@ -500,7 +531,7 @@ export class HostController {
   async cancelAuthorization(): Promise<HostSnapshot> {
     return this.enqueue(async () => {
       await this.stopActiveAuthorization();
-      if (this.phase === "authorizing") {
+      if (!this.disposed && this.phase === "authorizing") {
         this.setPhase(this.configured ? "disconnected" : "unconfigured", null);
       }
       return this.snapshot();
@@ -509,9 +540,11 @@ export class HostController {
 
   async connect(): Promise<HostSnapshot> {
     return this.enqueue(async () => {
+      if (this.disposed) return this.snapshot();
       await this.stopActiveAuthorization();
       await this.stopActiveConnection();
       const credential = parseStoredCredential(await this.credentials.load());
+      if (this.disposed) return this.snapshot();
       if (!credential) {
         this.configured = false;
         this.deviceId = null;
@@ -520,12 +553,13 @@ export class HostController {
       }
       this.configured = true;
       this.deviceId = credential.deviceId;
-      await this.saveConfig({
-        ...this.config,
+      await this.updateConfig((current) => ({
+        ...current,
         cloudUrl: credential.cloudUrl,
         name: credential.name,
         autoConnect: true,
-      });
+      }));
+      if (this.disposed) return this.snapshot();
       this.launchConnection(credential);
       return this.snapshot();
     });
@@ -533,9 +567,10 @@ export class HostController {
 
   async disconnect(): Promise<HostSnapshot> {
     return this.enqueue(async () => {
+      if (this.disposed) return this.snapshot();
       await this.stopActiveConnection();
-      await this.saveConfig({ ...this.config, autoConnect: false });
-      if (this.phase !== "authorizing") {
+      await this.updateConfig((current) => ({ ...current, autoConnect: false }));
+      if (!this.disposed && this.phase !== "authorizing") {
         this.setPhase(this.configured ? "disconnected" : "unconfigured", null);
       }
       return this.snapshot();
@@ -544,12 +579,15 @@ export class HostController {
 
   async setExecutionEnabled(enabled: boolean): Promise<HostSnapshot> {
     return this.enqueue(async () => {
+      if (this.disposed) return this.snapshot();
       if (this.config.executionEnabled === enabled) return this.snapshot();
-      await this.saveConfig({ ...this.config, executionEnabled: enabled });
+      await this.updateConfig((current) => ({ ...current, executionEnabled: enabled }));
+      if (this.disposed) return this.snapshot();
       const wasActive = this.activeAbort !== null;
       if (wasActive) {
         await this.stopActiveConnection();
         const credential = parseStoredCredential(await this.credentials.load());
+        if (this.disposed) return this.snapshot();
         if (credential) {
           this.launchConnection(credential);
           return this.snapshot();
@@ -562,18 +600,22 @@ export class HostController {
 
   async clearCredentials(): Promise<HostSnapshot> {
     return this.enqueue(async () => {
+      if (this.disposed) return this.snapshot();
       await this.stopActiveAuthorization();
       await this.stopActiveConnection();
       await this.credentials.clear();
       this.configured = false;
       this.deviceId = null;
-      await this.saveConfig({ ...this.config, autoConnect: true });
-      this.setPhase("unconfigured", null);
+      await this.updateConfig((current) => ({ ...current, autoConnect: true }));
+      if (!this.disposed) {
+        this.setPhase("unconfigured", null);
+      }
       return this.snapshot();
     });
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     await Promise.race([
       Promise.all([this.stopActiveAuthorization(), this.stopActiveConnection()]),
       delay(3500, undefined, { ref: false }),

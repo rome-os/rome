@@ -32,6 +32,11 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   session: () => requestJson<AuthSession>("/api/auth/session"),
+  setup: (input: { token: string; newPassword: string }) =>
+    requestJson<AuthSession>("/api/auth/setup", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   login: (password: string) =>
     requestJson<AuthSession>("/api/auth/login", {
       method: "POST",

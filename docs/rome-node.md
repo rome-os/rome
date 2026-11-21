@@ -114,9 +114,13 @@ volumes:
 ```
 
 1. Start the container with `docker compose up -d`.
-2. Open `http://127.0.0.1:4310` in a browser — localhost access is passwordless
-   by default (non-loopback hosts are rejected until you set a custom password
-   in the Web UI or via `ROME_NODE_UI_PASSWORD`).
+2. Open `http://127.0.0.1:4310` in a browser. Because the container listens on
+   `0.0.0.0`, if you did not set `ROME_NODE_UI_PASSWORD`, run
+   `docker compose logs rome-node` to copy the one-time setup token and choose a
+   custom password on the initial setup screen (persisted as an `scrypt` hash in
+   `/var/lib/rome-node/web-auth.json`). When running `rome-node web` directly on
+   a loopback bind (`127.0.0.1`), local loopback access is passwordless until
+   you set a password.
 3. Click **Authorize device**, open the Rome Cloud verification link, confirm
    the user code, and approve the container with your Rome Cloud account.
 
@@ -128,8 +132,9 @@ After approval, the container connects to the account Gateway and appears on
   between full execution and limited mode (`computer_use_off`).
 - Check local audit log health and jump to Rome **Settings → Devices** for full
   device activity and audit history (or run `rome-node audit` inside the container).
-- Optionally set, change, or remove a custom Web UI password (stored as an
-  `scrypt` hash in `/var/lib/rome-node/web-auth.json`).
+- Set or change the custom Web UI password (stored as an `scrypt` hash in
+  `/var/lib/rome-node/web-auth.json`; removing a password is only permitted on
+  loopback-bound local servers).
 - Clear the local credential to re-authorize under another identity.
 
 Recreating the container with the same volume keeps the device identity,
@@ -143,6 +148,10 @@ command:
 ```yaml
 command: ["connect", "--device-code", "--name", "My Container"]
 ```
+
+If **Allow remote execution** (`executionEnabled`) was turned off in the Web UI
+(`web-config.json`), `rome-node connect` honors that setting on the shared
+volume and connects in limited mode (`computer_use_off`).
 
 To revoke access from Rome, choose **Remove** on its device card. If you added
 a restart policy, stop the container with `docker compose down`.

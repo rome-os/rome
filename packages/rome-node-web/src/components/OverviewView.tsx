@@ -51,6 +51,7 @@ export interface OverviewViewProps {
   snapshot: HostSnapshot;
   onSnapshot: (next: HostSnapshot) => void;
   passwordSource: PasswordSource;
+  canRemovePassword: boolean;
   onSessionChange: (next: AuthSession) => void;
 }
 
@@ -76,6 +77,7 @@ export function OverviewView({
   snapshot,
   onSnapshot,
   passwordSource,
+  canRemovePassword,
   onSessionChange,
 }: OverviewViewProps) {
   const [deviceName, setDeviceName] = useState(snapshot.deviceName);
@@ -559,7 +561,7 @@ export function OverviewView({
                   <KeyRound data-icon="inline-start" />
                   {passwordSource === "file" ? t.password.changeButton : t.password.setButton}
                 </Button>
-                {passwordSource === "file" ? (
+                {passwordSource === "file" && canRemovePassword ? (
                   <Button
                     type="button"
                     variant="ghost"

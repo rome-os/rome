@@ -1,4 +1,4 @@
-import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { rm } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
@@ -16,7 +16,7 @@ const SCRYPT_OPTIONS = { N: 16_384, r: 8, p: 1 };
 export const MIN_PASSWORD_LENGTH = 6;
 export const MAX_PASSWORD_LENGTH = 256;
 
-export type PasswordSource = "none" | "file" | "env";
+export type PasswordSource = "none" | "setup" | "file" | "env";
 
 interface StoredPasswordRecord {
   version: 1;
@@ -30,14 +30,22 @@ interface ActivePassword {
 }
 
 export interface WebAuthOptions {
+  host: string;
   configDirectory?: string;
   password?: string;
   now?: () => number;
 }
 
+type SetupResult =
+  | { status: "ok"; sessionId: string }
+  | { status: "invalid_token" }
+  | { status: "conflict" };
+
 export interface WebAuth {
   readonly authRequired: boolean;
   readonly passwordSource: PasswordSource;
+  readonly canRemovePassword: boolean;
+  readonly setupToken: string | null;
   isLoopbackRequest(req: IncomingMessage): boolean;
   isTrustedHost(req: IncomingMessage): boolean;
   isAuthenticated(req: IncomingMessage): boolean;
@@ -48,6 +56,7 @@ export interface WebAuth {
   recordLoginFailure(remoteAddress: string): void;
   clearLoginFailures(remoteAddress: string): void;
   verifyPassword(candidate: string): Promise<boolean>;
+  completeSetup(token: string, newPassword: string): Promise<SetupResult>;
   setPassword(newPassword: string): Promise<string>;
   removePassword(): Promise<void>;
   createSession(): string;
@@ -56,12 +65,13 @@ export interface WebAuth {
   clearSessionCookieHeader(secure: boolean): string;
 }
 
-export function isLoopbackHost(host: string): boolean {
-  const normalized = host
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (typeof address !== "string") return false;
+  const normalized = address
     .trim()
     .toLowerCase()
     .replace(/^\[|\]$/g, "");
-  if (normalized === "localhost" || normalized === "::1" || normalized === "127.0.0.1") {
+  if (normalized === "::1" || normalized === "127.0.0.1") {
     return true;
   }
   if (/^::ffff:127(?:\.\d{1,3}){3}$/.test(normalized)) {
@@ -76,6 +86,15 @@ export function isLoopbackHost(host: string): boolean {
   return false;
 }
 
+export function isLoopbackHost(host: string): boolean {
+  const normalized = host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "");
+  if (normalized === "localhost") return true;
+  return isLoopbackAddress(normalized);
+}
+
 function parseHostHeaderHostname(hostHeader: string | undefined): string | null {
   if (typeof hostHeader !== "string") return null;
   const trimmed = hostHeader.trim();
@@ -87,6 +106,10 @@ function parseHostHeaderHostname(hostHeader: string | undefined): string | null 
   } catch {
     return null;
   }
+}
+
+function sha256(value: string): Buffer {
+  return createHash("sha256").update(value, "utf8").digest();
 }
 
 function deriveKey(password: string, salt: Buffer): Promise<Buffer> {
@@ -152,11 +175,15 @@ export function isSecureRequest(req: IncomingMessage): boolean {
 
 export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
   const now = options.now ?? (() => Date.now());
+  const bindIsLoopback = isLoopbackHost(options.host);
   const authPath = options.configDirectory ? join(options.configDirectory, AUTH_FILE_NAME) : null;
   const envPassword = options.password?.trim() ? options.password : undefined;
 
   let passwordSource: PasswordSource = "none";
   let activePassword: ActivePassword | null = null;
+  let setupToken: string | null = null;
+  let setupTokenDigest: Buffer | null = null;
+  let setupInFlight = false;
 
   if (envPassword !== undefined) {
     activePassword = await hashPassword(envPassword);
@@ -169,8 +196,14 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
         passwordSource = "file";
       }
     } catch {
-      // Missing or unreadable auth file falls back to local passwordless mode.
+      // Missing or unreadable auth file falls through to bind-based default.
     }
+  }
+
+  if (passwordSource === "none" && !bindIsLoopback) {
+    setupToken = randomBytes(18).toString("base64url");
+    setupTokenDigest = sha256(setupToken);
+    passwordSource = "setup";
   }
 
   const sessions = new Map<string, number>();
@@ -188,6 +221,10 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
   }
 
   function isLoopbackRequest(req: IncomingMessage): boolean {
+    if (!bindIsLoopback) return false;
+    if (!isLoopbackAddress(req.socket.localAddress)) return false;
+    if (!isLoopbackAddress(req.socket.remoteAddress)) return false;
+
     const hostname = parseHostHeaderHostname(req.headers.host);
     if (hostname === null || !isLoopbackHost(hostname)) return false;
 
@@ -204,7 +241,7 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
         .split(",")
         .map((part) => part.trim())
         .filter(Boolean);
-      if (hops.length === 0 || !hops.every((hop) => isLoopbackHost(hop))) return false;
+      if (hops.length === 0 || !hops.every((hop) => isLoopbackAddress(hop))) return false;
     }
 
     return true;
@@ -216,14 +253,15 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
   }
 
   async function verifyPassword(candidate: string): Promise<boolean> {
-    if (!activePassword) return true;
-    if (!candidate) return false;
+    if (passwordSource === "none") return true;
+    if (!activePassword || !candidate) return false;
     const derived = await deriveKey(candidate, activePassword.salt);
     return timingSafeEqual(derived, activePassword.hash);
   }
 
   function isAuthenticated(req: IncomingMessage): boolean {
     if (passwordSource === "none") return isTrustedHost(req);
+    if (passwordSource === "setup") return false;
     const sessionId = parseCookies(req.headers.cookie)[SESSION_COOKIE];
     if (!sessionId) return false;
     const currentTime = now();
@@ -298,7 +336,7 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
     return id;
   }
 
-  async function setPassword(newPassword: string): Promise<string> {
+  async function saveFilePassword(newPassword: string): Promise<string> {
     if (!authPath) {
       throw new Error("Configuration directory is not available for password storage.");
     }
@@ -311,13 +349,41 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
     await writePrivateJson(authPath, record);
     activePassword = next;
     passwordSource = "file";
+    setupToken = null;
+    setupTokenDigest = null;
     sessions.clear();
     return createSession();
+  }
+
+  async function completeSetup(token: string, newPassword: string): Promise<SetupResult> {
+    if (passwordSource !== "setup" || !setupTokenDigest || setupInFlight) {
+      return { status: "conflict" };
+    }
+    if (!token || !timingSafeEqual(sha256(token), setupTokenDigest)) {
+      return { status: "invalid_token" };
+    }
+    setupInFlight = true;
+    try {
+      if (passwordSource !== "setup" || !setupTokenDigest) {
+        return { status: "conflict" };
+      }
+      const sessionId = await saveFilePassword(newPassword);
+      return { status: "ok", sessionId };
+    } finally {
+      setupInFlight = false;
+    }
+  }
+
+  async function setPassword(newPassword: string): Promise<string> {
+    return saveFilePassword(newPassword);
   }
 
   async function removePassword(): Promise<void> {
     if (!authPath) {
       throw new Error("Configuration directory is not available for password storage.");
+    }
+    if (!bindIsLoopback) {
+      throw new Error("Password cannot be removed on a non-loopback bind.");
     }
     await rm(authPath, { force: true });
     activePassword = null;
@@ -346,6 +412,12 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
     get passwordSource() {
       return passwordSource;
     },
+    get canRemovePassword() {
+      return bindIsLoopback;
+    },
+    get setupToken() {
+      return setupToken;
+    },
     isLoopbackRequest,
     isTrustedHost,
     isAuthenticated,
@@ -354,6 +426,7 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
     recordLoginFailure,
     clearLoginFailures,
     verifyPassword,
+    completeSetup,
     setPassword,
     removePassword,
     createSession,

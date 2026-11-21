@@ -63,6 +63,7 @@ export interface RunningWebServer {
   readonly port: number;
   readonly authRequired: boolean;
   readonly passwordSource: PasswordSource;
+  readonly setupToken: string | null;
   readonly controller: HostController;
   close(): Promise<void>;
 }
@@ -125,6 +126,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   const assetsDir = resolveWebAssetsDir(options.assetsDir);
   const serveStatic = createStaticHandler(assetsDir);
   const auth = await createWebAuth({
+    host: options.host,
     configDirectory: options.configDirectory,
     password: options.password,
     now: options.deps?.now,
@@ -185,6 +187,15 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     });
   });
 
+  function sessionPayload(authenticated: boolean) {
+    return {
+      authRequired: auth.authRequired,
+      authenticated,
+      passwordSource: auth.passwordSource,
+      canRemovePassword: auth.canRemovePassword,
+    };
+  }
+
   async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     setSecurityHeaders(res);
     const method = req.method ?? "GET";
@@ -225,20 +236,58 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
       }
 
       if (pathname === "/api/auth/session" && method === "GET") {
-        sendJson(res, 200, {
-          authRequired: auth.authRequired,
-          authenticated: auth.isAuthenticated(req),
-          passwordSource: auth.passwordSource,
+        sendJson(res, 200, sessionPayload(auth.isAuthenticated(req)));
+        return;
+      }
+
+      if (pathname === "/api/auth/setup" && method === "POST") {
+        if (auth.passwordSource !== "setup") {
+          sendJson(res, 409, { error: "Initial setup is not active." });
+          return;
+        }
+        const remote = req.socket.remoteAddress ?? "unknown";
+        const limit = auth.checkLoginRateLimit(remote);
+        if (!limit.allowed) {
+          sendJson(
+            res,
+            429,
+            { error: "Too many failed setup attempts. Try again shortly." },
+            { "retry-after": String(limit.retryAfterSeconds) },
+          );
+          return;
+        }
+        const body = await readJsonBody(req);
+        const token = typeof body.token === "string" ? body.token.trim() : "";
+        const newPasswordError = validateNewPassword(body.newPassword);
+        if (newPasswordError) {
+          throw new ControllerInputError(newPasswordError);
+        }
+        const result = await auth.completeSetup(token, body.newPassword as string);
+        if (result.status === "invalid_token") {
+          auth.recordLoginFailure(remote);
+          sendJson(res, 401, { error: "Invalid setup token." });
+          return;
+        }
+        if (result.status === "conflict") {
+          sendJson(res, 409, { error: "Initial setup is already complete." });
+          return;
+        }
+        auth.clearLoginFailures(remote);
+        closeAllSseClients();
+        sendJson(res, 200, sessionPayload(true), {
+          "set-cookie": auth.sessionCookieHeader(result.sessionId, isSecureRequest(req)),
         });
         return;
       }
 
       if (pathname === "/api/auth/login" && method === "POST") {
         if (!auth.authRequired) {
-          sendJson(res, 200, {
-            authRequired: false,
-            authenticated: true,
-            passwordSource: auth.passwordSource,
+          sendJson(res, 200, sessionPayload(true));
+          return;
+        }
+        if (auth.passwordSource === "setup") {
+          sendJson(res, 409, {
+            error: "Initial password setup is required. Use the one-time setup token first.",
           });
           return;
         }
@@ -262,12 +311,9 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
         }
         auth.clearLoginFailures(remote);
         const sessionId = auth.createSession();
-        sendJson(
-          res,
-          200,
-          { authRequired: true, authenticated: true, passwordSource: auth.passwordSource },
-          { "set-cookie": auth.sessionCookieHeader(sessionId, isSecureRequest(req)) },
-        );
+        sendJson(res, 200, sessionPayload(true), {
+          "set-cookie": auth.sessionCookieHeader(sessionId, isSecureRequest(req)),
+        });
         return;
       }
 
@@ -311,12 +357,9 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
         }
         const sessionId = await auth.setPassword(body.newPassword as string);
         closeAllSseClients();
-        sendJson(
-          res,
-          200,
-          { authRequired: true, authenticated: true, passwordSource: auth.passwordSource },
-          { "set-cookie": auth.sessionCookieHeader(sessionId, isSecureRequest(req)) },
-        );
+        sendJson(res, 200, sessionPayload(true), {
+          "set-cookie": auth.sessionCookieHeader(sessionId, isSecureRequest(req)),
+        });
         return;
       }
 
@@ -328,13 +371,15 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           return;
         }
         if (auth.passwordSource === "none") {
-          sendJson(res, 200, { authRequired: false, authenticated: true, passwordSource: "none" });
+          sendJson(res, 200, sessionPayload(true));
           return;
         }
-        if (!auth.isLoopbackRequest(req)) {
-          throw new ControllerInputError(
-            "Password can only be removed when accessing from localhost.",
-          );
+        if (!auth.canRemovePassword || !auth.isLoopbackRequest(req)) {
+          sendJson(res, 403, {
+            error:
+              "Password can only be removed when the server is bound to localhost and accessed from loopback.",
+          });
+          return;
         }
         const remote = req.socket.remoteAddress ?? "unknown";
         const limit = auth.checkLoginRateLimit(remote);
@@ -358,12 +403,9 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
         auth.clearLoginFailures(remote);
         await auth.removePassword();
         closeAllSseClients();
-        sendJson(
-          res,
-          200,
-          { authRequired: false, authenticated: true, passwordSource: "none" },
-          { "set-cookie": auth.clearSessionCookieHeader(isSecureRequest(req)) },
-        );
+        sendJson(res, 200, sessionPayload(true), {
+          "set-cookie": auth.clearSessionCookieHeader(isSecureRequest(req)),
+        });
         return;
       }
 
@@ -479,6 +521,14 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     log("Web UI authentication: enabled (ROME_NODE_UI_PASSWORD).");
   } else if (auth.passwordSource === "file") {
     log("Web UI authentication: enabled (custom password).");
+  } else if (auth.passwordSource === "setup") {
+    log(
+      "Web UI authentication: one-time setup token required (non-loopback bind without password).",
+    );
+    log(`Web UI setup token: ${auth.setupToken}`);
+    log(
+      "Open the Web UI and enter this setup token to set a password, or restart with ROME_NODE_UI_PASSWORD.",
+    );
   } else {
     log(
       "Web UI authentication: passwordless for localhost (set a password in the UI or via ROME_NODE_UI_PASSWORD for remote access).",
@@ -520,6 +570,9 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     },
     get passwordSource() {
       return auth.passwordSource;
+    },
+    get setupToken() {
+      return auth.setupToken;
     },
     controller,
     close,

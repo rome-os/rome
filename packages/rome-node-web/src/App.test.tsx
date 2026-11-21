@@ -195,4 +195,54 @@ describe("Rome Node Web UI", () => {
     const cloudLink = screen.getByRole("link", { name: "Open Rome Cloud" });
     expect(cloudLink.getAttribute("href")).toBe("https://rome.ai/dashboard");
   });
+
+  it("completes one-time setup token initialization and hides Remove password when non-loopback", async () => {
+    let initialized = false;
+    const snapshot = makeSnapshot();
+
+    globalThis.fetch = rstest.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/auth/session") {
+        return jsonResponse({
+          authRequired: true,
+          authenticated: initialized,
+          passwordSource: initialized ? "file" : "setup",
+          canRemovePassword: false,
+        });
+      }
+      if (url === "/api/auth/setup" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { token?: string; newPassword?: string };
+        expect(body).toEqual({ token: "one-time-token-xyz", newPassword: "docker-pass-1" });
+        initialized = true;
+        return jsonResponse({
+          authRequired: true,
+          authenticated: true,
+          passwordSource: "file",
+          canRemovePassword: false,
+        });
+      }
+      if (url === "/api/status") {
+        return jsonResponse(snapshot);
+      }
+      return jsonResponse({ error: "not_found" }, 404);
+    }) as typeof fetch;
+
+    render(<App />);
+
+    expect(await screen.findByText("Set up Rome Node Web UI")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("One-time setup token"), {
+      target: { value: "one-time-token-xyz" },
+    });
+    fireEvent.change(screen.getByLabelText("New password"), {
+      target: { value: "docker-pass-1" },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm password"), {
+      target: { value: "docker-pass-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Set password & unlock" }));
+
+    expect(await screen.findByText("Password set")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Change password" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove password" })).toBeNull();
+  });
 });

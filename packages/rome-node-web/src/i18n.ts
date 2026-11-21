@@ -57,6 +57,14 @@ export const messages = {
       submit: "Unlock",
       submitting: "Verifying…",
       empty: "Enter your password.",
+      setupTitle: "Set up Rome Node Web UI",
+      setupDescription:
+        "Paste the one-time setup token printed to stderr / docker logs and choose a custom password for this Web UI.",
+      setupTokenLabel: "One-time setup token",
+      setupTokenPlaceholder: "Paste setup token from logs",
+      setupTokenEmpty: "Enter the one-time setup token from stderr or docker logs.",
+      setupSubmit: "Set password & unlock",
+      setupSubmitting: "Setting up…",
     },
     password: {
       title: "Web UI access",
@@ -187,6 +195,14 @@ export const messages = {
       submit: "解锁",
       submitting: "验证中…",
       empty: "请输入访问密码。",
+      setupTitle: "初始化 Rome Node Web UI",
+      setupDescription:
+        "请输入启动日志（stderr / docker logs）中的一次性初始化令牌，并设置 Web UI 访问密码。",
+      setupTokenLabel: "一次性初始化令牌",
+      setupTokenPlaceholder: "粘贴日志中的初始化令牌",
+      setupTokenEmpty: "请输入启动日志中的一次性初始化令牌。",
+      setupSubmit: "设置密码并进入",
+      setupSubmitting: "正在初始化…",
     },
     password: {
       title: "Web UI 访问保护",

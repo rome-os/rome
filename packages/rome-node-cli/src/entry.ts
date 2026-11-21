@@ -297,11 +297,14 @@ async function main(): Promise<void> {
     const {
       AuditStore,
       connectHost,
+      connectLimitedHost,
       defaultDeviceName,
       loginDevice,
       loginDeviceCode,
       createFileCredentialStore,
     } = await import("@rome-os/node-core/host");
+    const { readHostExecutionEnabled } = await import("./host-config.js");
+    const executionEnabled = await readHostExecutionEnabled(config.directory);
     const name = values.name ?? defaultDeviceName();
     const audit = await AuditStore.open({
       path: cliAuditPath(config.directory),
@@ -315,18 +318,22 @@ async function main(): Promise<void> {
         `Audit log unavailable: ${audit.state.message}\nRemote requests will be refused until it is fixed. Run rome-node audit status.\n`,
       );
     else process.stderr.write(`Audit log: ${audit.path}\n`);
+    if (!executionEnabled) {
+      process.stderr.write(
+        "Remote execution (Computer Use) is disabled in web-config.json; connecting in limited mode (computer_use_off).\n",
+      );
+    }
     // On a terminal, the status screen replaces the Connection lines once sign-in is over.
     const screen = process.stdout.isTTY ? await loadConnectUi() : undefined;
     let ui: ConnectUi | undefined;
     const cloud = values.cloud ?? "https://romeos.cc";
-    await withShutdown((signal) =>
-      connectHost({
-        audit,
+    await withShutdown((signal) => {
+      const hostOptions = {
         cloudUrl: cloud,
         name,
         signal,
         credentials: createFileCredentialStore(join(config.directory, "credential.json")),
-        authorize: (origin, deviceName, abort) =>
+        authorize: (origin: string, deviceName: string, abort: AbortSignal) =>
           values["device-code"]
             ? loginDeviceCode(origin, deviceName, abort, (prompt) => {
                 process.stderr.write(
@@ -341,10 +348,14 @@ async function main(): Promise<void> {
                   `Open this URL in your browser to authorize ${deviceName}:\n${url}\n`,
                 );
               }),
-        onEvent: (event) => {
+        onEvent: (
+          event: Parameters<NonNullable<Parameters<typeof connectHost>[0]["onEvent"]>>[0],
+        ) => {
           if (event.type === "authorization_required")
             process.stderr.write(
-              "While connect is running, Rome instances in your account can execute programs and read or change files as your OS user.\n",
+              executionEnabled
+                ? "While connect is running, Rome instances in your account can execute programs and read or change files as your OS user.\n"
+                : "Remote execution is disabled in web-config.json; this device will connect in limited mode and refuse remote actions.\n",
             );
           else if (event.type === "retrying")
             process.stderr.write("Rome Cloud is unavailable; keeping credentials and retrying.\n");
@@ -359,8 +370,11 @@ async function main(): Promise<void> {
           else if (ui) ui.setStatus(event.status);
           else process.stderr.write(`Connection: ${event.status}\n`);
         },
-      }),
-    ).finally(() => {
+      };
+      return executionEnabled
+        ? connectHost({ ...hostOptions, audit })
+        : connectLimitedHost(hostOptions);
+    }).finally(() => {
       ui?.stop();
       audit.close();
     });

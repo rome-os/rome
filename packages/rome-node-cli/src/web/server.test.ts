@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { gzipSync } from "node:zlib";
 import { WebSocketServer, type WebSocket } from "ws";
+import type { HostCredential } from "@rome-os/node-core/host";
 import { isLoopbackHost } from "./auth.js";
+import { HostController } from "./host-controller.js";
 import { startWebServer } from "./server.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
@@ -188,11 +190,13 @@ describe("rome-node web server", () => {
       authRequired: boolean;
       authenticated: boolean;
       passwordSource: string;
+      canRemovePassword: boolean;
     };
     expect(initialSession).toEqual({
       authRequired: false,
       authenticated: true,
       passwordSource: "none",
+      canRemovePassword: true,
     });
     expect((await fetch(`${first.url}/api/status`)).status).toBe(200);
 
@@ -593,5 +597,400 @@ describe("rome-node web server", () => {
       cookie,
     });
     expect(remoteRead.status).toBe(200);
+  });
+
+  it("requires one-time setup token on 0.0.0.0 bind even with forged Host header and forbids removing password", async () => {
+    function rawRequest(
+      port: number,
+      method: string,
+      path: string,
+      headers: Record<string, string>,
+      body?: string,
+    ): Promise<{
+      status: number;
+      headers: Record<string, string | string[] | undefined>;
+      body: string;
+    }> {
+      return new Promise((resolve, reject) => {
+        const req = httpRequest({ host: "127.0.0.1", port, method, path, headers }, (res) => {
+          const chunks: Buffer[] = [];
+          res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+          res.on("end", () =>
+            resolve({
+              status: res.statusCode ?? 0,
+              headers: res.headers,
+              body: Buffer.concat(chunks).toString("utf8"),
+            }),
+          );
+        });
+        req.on("error", reject);
+        if (body) req.write(body);
+        req.end();
+      });
+    }
+
+    const configDir = await mkdtemp(join(tmpdir(), "rome-node-web-setup-"));
+    cleanup.push(() => rm(configDir, { recursive: true, force: true }));
+    const assetsDir = await createAssetsFixture();
+    const logs: string[] = [];
+
+    const nonLoopback = await startWebServer({
+      host: "0.0.0.0",
+      port: 0,
+      configDirectory: configDir,
+      assetsDir,
+      log: (line) => logs.push(line),
+    });
+    cleanup.push(() => nonLoopback.close());
+
+    expect(nonLoopback.authRequired).toBe(true);
+    expect(nonLoopback.passwordSource).toBe("setup");
+    expect(nonLoopback.setupToken).toBeTruthy();
+    const printedTokenLine = logs.find((line) => line.startsWith("Web UI setup token: "));
+    expect(printedTokenLine).toBe(`Web UI setup token: ${nonLoopback.setupToken}`);
+    const setupToken = nonLoopback.setupToken!;
+
+    // Forged Host: 127.0.0.1 + Sec-Fetch-Site: same-origin MUST NOT bypass auth on a 0.0.0.0 bind.
+    const forgedHeaders = {
+      host: `127.0.0.1:${nonLoopback.port}`,
+      "sec-fetch-site": "same-origin",
+      "content-type": "application/json",
+    };
+    expect((await rawRequest(nonLoopback.port, "GET", "/api/status", forgedHeaders)).status).toBe(
+      401,
+    );
+    expect(
+      (
+        await rawRequest(
+          nonLoopback.port,
+          "POST",
+          "/api/host/authorize",
+          forgedHeaders,
+          JSON.stringify({ cloudUrl: "https://attacker.example", name: "pwned" }),
+        )
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await rawRequest(
+          nonLoopback.port,
+          "PUT",
+          "/api/auth/password",
+          forgedHeaders,
+          JSON.stringify({ newPassword: "attacker-password" }),
+        )
+      ).status,
+    ).toBe(401);
+
+    // Login before initial setup returns 409; wrong setup token returns 401.
+    expect(
+      (
+        await rawRequest(
+          nonLoopback.port,
+          "POST",
+          "/api/auth/login",
+          forgedHeaders,
+          JSON.stringify({ password: setupToken }),
+        )
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await rawRequest(
+          nonLoopback.port,
+          "POST",
+          "/api/auth/setup",
+          forgedHeaders,
+          JSON.stringify({ token: "wrong-token", newPassword: "owner-password-1" }),
+        )
+      ).status,
+    ).toBe(401);
+
+    // Valid one-time setup token sets the password, issues a session cookie, and burns the token.
+    const setupRes = await rawRequest(
+      nonLoopback.port,
+      "POST",
+      "/api/auth/setup",
+      forgedHeaders,
+      JSON.stringify({ token: setupToken, newPassword: "owner-password-1" }),
+    );
+    expect(setupRes.status).toBe(200);
+    expect(nonLoopback.passwordSource).toBe("file");
+    expect(nonLoopback.setupToken).toBeNull();
+    const setCookieHeader = Array.isArray(setupRes.headers["set-cookie"])
+      ? setupRes.headers["set-cookie"][0]
+      : setupRes.headers["set-cookie"];
+    const cookie = (setCookieHeader ?? "").split(";")[0]!;
+    expect(cookie).toContain("rome_node_session=");
+
+    // Reusing the setup token fails with 409.
+    expect(
+      (
+        await rawRequest(
+          nonLoopback.port,
+          "POST",
+          "/api/auth/setup",
+          forgedHeaders,
+          JSON.stringify({ token: setupToken, newPassword: "owner-password-2" }),
+        )
+      ).status,
+    ).toBe(409);
+
+    // Session works for /api/status, but DELETE /api/auth/password is forbidden on 0.0.0.0 even with forged Host.
+    expect(
+      (await rawRequest(nonLoopback.port, "GET", "/api/status", { ...forgedHeaders, cookie }))
+        .status,
+    ).toBe(200);
+    const deleteAttempt = await rawRequest(
+      nonLoopback.port,
+      "DELETE",
+      "/api/auth/password",
+      { ...forgedHeaders, cookie },
+      JSON.stringify({ currentPassword: "owner-password-1" }),
+    );
+    expect(deleteAttempt.status).toBe(403);
+  });
+
+  it("does not launch host if cancelled or disposed during credential save, reports final config save failures, and preserves concurrent executionEnabled updates", async () => {
+    const validToken = `romedev_${"c".repeat(43)}`;
+
+    // 1. Cancel during credentials.save must NOT launch a host connection.
+    {
+      const configDir = await mkdtemp(join(tmpdir(), "rome-node-cancel-save-"));
+      cleanup.push(() => rm(configDir, { recursive: true, force: true }));
+      let releaseSave!: () => void;
+      const saveEntered = new Promise<void>((resolve) => {
+        // resolved when save starts
+        releaseSave = resolve;
+      });
+      let finishSave!: () => void;
+      const saveGate = new Promise<void>((resolve) => {
+        finishSave = resolve;
+      });
+      let connectCalls = 0;
+
+      const controller = new HostController({
+        configDirectory: configDir,
+        cloudUrl: "https://romeos.cc",
+        name: "Cancel During Save",
+        deps: {
+          credentials: {
+            load: async () => null,
+            save: async () => {
+              releaseSave();
+              await saveGate;
+            },
+            clear: async () => {},
+          },
+          loginDeviceCode: async (_cloud, _name, _signal, onPrompt) => {
+            onPrompt({
+              verificationUri: "https://romeos.cc/device",
+              verificationUriComplete: "https://romeos.cc/device?user_code=TEST-1111",
+              userCode: "TEST-1111",
+              expiresIn: 300,
+            });
+            return { cloudUrl: "https://romeos.cc", token: validToken, deviceId: "dev-cancel-1" };
+          },
+          connectHost: async () => {
+            connectCalls += 1;
+          },
+          connectLimitedHost: async () => {
+            connectCalls += 1;
+          },
+        },
+      });
+      cleanup.push(() => controller.dispose());
+      await controller.start();
+
+      await controller.authorize();
+      await saveEntered;
+      const cancelPromise = controller.cancelAuthorization();
+      finishSave();
+      const afterCancel = await cancelPromise;
+
+      expect(afterCancel.phase).toBe("unconfigured");
+      expect(connectCalls).toBe(0);
+    }
+
+    // 2. dispose() during credentials.save must NOT launch host or use closed audit store.
+    {
+      const configDir = await mkdtemp(join(tmpdir(), "rome-node-dispose-save-"));
+      cleanup.push(() => rm(configDir, { recursive: true, force: true }));
+      let notifySaveEntered!: () => void;
+      const saveEntered = new Promise<void>((resolve) => {
+        notifySaveEntered = resolve;
+      });
+      let finishSave!: () => void;
+      const saveGate = new Promise<void>((resolve) => {
+        finishSave = resolve;
+      });
+      let connectCalls = 0;
+
+      const controller = new HostController({
+        configDirectory: configDir,
+        cloudUrl: "https://romeos.cc",
+        name: "Dispose During Save",
+        deps: {
+          credentials: {
+            load: async () => null,
+            save: async () => {
+              notifySaveEntered();
+              await saveGate;
+            },
+            clear: async () => {},
+          },
+          loginDeviceCode: async (_cloud, _name, _signal, onPrompt) => {
+            onPrompt({
+              verificationUri: "https://romeos.cc/device",
+              verificationUriComplete: "https://romeos.cc/device?user_code=TEST-2222",
+              userCode: "TEST-2222",
+              expiresIn: 300,
+            });
+            return { cloudUrl: "https://romeos.cc", token: validToken, deviceId: "dev-dispose-1" };
+          },
+          connectHost: async () => {
+            connectCalls += 1;
+          },
+          connectLimitedHost: async () => {
+            connectCalls += 1;
+          },
+        },
+      });
+      await controller.start();
+
+      await controller.authorize();
+      await saveEntered;
+      const disposePromise = controller.dispose();
+      finishSave();
+      await disposePromise;
+
+      expect(connectCalls).toBe(0);
+    }
+
+    // 3. Final saveConfig failure after credential save must transition to phase: "error" with lastError.
+    {
+      const configDir = await mkdtemp(join(tmpdir(), "rome-node-save-config-fail-"));
+      cleanup.push(() => rm(configDir, { recursive: true, force: true }));
+      let connectCalls = 0;
+      let stored: HostCredential | null = null;
+
+      const controller = new HostController({
+        configDirectory: configDir,
+        cloudUrl: "https://romeos.cc",
+        name: "Config Fail",
+        deps: {
+          credentials: {
+            load: async () => stored,
+            save: async (cred) => {
+              stored = cred;
+              // Sabotage web-config.json so the final saveConfig fails with EISDIR.
+              const configPath = join(configDir, "web-config.json");
+              await rm(configPath, { force: true });
+              await mkdir(configPath);
+            },
+            clear: async () => {
+              stored = null;
+            },
+          },
+          loginDeviceCode: async (_cloud, _name, _signal, onPrompt) => {
+            onPrompt({
+              verificationUri: "https://romeos.cc/device",
+              verificationUriComplete: "https://romeos.cc/device?user_code=TEST-3333",
+              userCode: "TEST-3333",
+              expiresIn: 300,
+            });
+            return { cloudUrl: "https://romeos.cc", token: validToken, deviceId: "dev-fail-1" };
+          },
+          connectHost: async () => {
+            connectCalls += 1;
+          },
+          connectLimitedHost: async () => {
+            connectCalls += 1;
+          },
+        },
+      });
+      cleanup.push(() => controller.dispose());
+      await controller.start();
+
+      await controller.authorize();
+      await until(() => controller.snapshot().phase === "error");
+
+      const snap = controller.snapshot();
+      expect(snap.phase).toBe("error");
+      expect(snap.pendingAuth).toBeNull();
+      expect(snap.lastError).toBeTruthy();
+      expect(connectCalls).toBe(0);
+    }
+
+    // 4. Concurrent setExecutionEnabled(false) during credentials.save must not be overwritten by authorize completion.
+    {
+      const configDir = await mkdtemp(join(tmpdir(), "rome-node-concurrent-exec-"));
+      cleanup.push(() => rm(configDir, { recursive: true, force: true }));
+      let notifySaveEntered!: () => void;
+      const saveEntered = new Promise<void>((resolve) => {
+        notifySaveEntered = resolve;
+      });
+      let finishSave!: () => void;
+      const saveGate = new Promise<void>((resolve) => {
+        finishSave = resolve;
+      });
+      let fullHostCalls = 0;
+      let limitedHostCalls = 0;
+      let stored: HostCredential | null = null;
+
+      const controller = new HostController({
+        configDirectory: configDir,
+        cloudUrl: "https://romeos.cc",
+        name: "Concurrent Exec",
+        deps: {
+          credentials: {
+            load: async () => stored,
+            save: async (cred) => {
+              stored = cred;
+              notifySaveEntered();
+              await saveGate;
+            },
+            clear: async () => {
+              stored = null;
+            },
+          },
+          loginDeviceCode: async (_cloud, _name, _signal, onPrompt) => {
+            onPrompt({
+              verificationUri: "https://romeos.cc/device",
+              verificationUriComplete: "https://romeos.cc/device?user_code=TEST-4444",
+              userCode: "TEST-4444",
+              expiresIn: 300,
+            });
+            return { cloudUrl: "https://romeos.cc", token: validToken, deviceId: "dev-exec-1" };
+          },
+          connectHost: async () => {
+            fullHostCalls += 1;
+          },
+          connectLimitedHost: async ({ signal, onEvent }) => {
+            limitedHostCalls += 1;
+            onEvent?.({ type: "connection", status: "online" });
+            await new Promise<void>((resolve) => {
+              signal?.addEventListener("abort", () => resolve(), { once: true });
+            });
+          },
+        },
+      });
+      cleanup.push(() => controller.dispose());
+      await controller.start();
+
+      await controller.authorize();
+      await saveEntered;
+      await controller.setExecutionEnabled(false);
+      finishSave();
+
+      await until(() => controller.snapshot().phase === "online");
+      expect(fullHostCalls).toBe(0);
+      expect(limitedHostCalls).toBe(1);
+      expect(controller.snapshot().executionEnabled).toBe(false);
+      const persistedConfig = JSON.parse(
+        await readFile(join(configDir, "web-config.json"), "utf8"),
+      ) as { executionEnabled: boolean };
+      expect(persistedConfig.executionEnabled).toBe(false);
+    }
   });
 });
