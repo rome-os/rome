@@ -10,6 +10,11 @@
 # Compose services override `command:` per process (backend, web, app-build).
 # No ENTRYPOINT so `docker compose exec` runs ad-hoc commands cleanly.
 
+FROM node:24-slim AS agent-tools
+COPY scripts/docker/agent-tools/package.json scripts/docker/agent-tools/package-lock.json /opt/rome-agent-tools/
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefix /opt/rome-agent-tools --omit=dev
+
 FROM node:24-slim
 
 ARG COMPOSIO_CLI_VERSION=@composio/cli@0.2.32
@@ -54,11 +59,14 @@ RUN mkdir -p /opt/corepack \
 # dev-up.sh reconciles volumes created before this.
 RUN mkdir -p /rome-home && chmod 0777 /rome-home
 
-# AI tool CLIs — mirrored from the production Dockerfile so the dashboard's
-# terminal-server (claude /login, codex login, opencli usage) finds them on
-# PATH inside the dev container.
+# Claude uses the production manifest; Codex uses the workspace package once
+# dev-up.sh installs it. Link the package entrypoint, not pnpm's shell shim.
+COPY --from=agent-tools /opt/rome-agent-tools /opt/rome-agent-tools
+RUN ln -sf /opt/rome-agent-tools/node_modules/.bin/claude /usr/local/bin/claude \
+    && ln -sf /workspace/packages/core/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
+    && claude --version
 RUN --mount=type=cache,target=/root/.npm \
-    npm install -g @anthropic-ai/claude-code@2.1.293 @openai/codex@0.160.0 @yunfanye/opencli@1.8.8
+    npm install -g @yunfanye/opencli@1.8.8
 
 # The container's browser is the server-side Chrome (the `chrome` sidecar,
 # which shares this container's network namespace — compose.dev.yml): BROWSER

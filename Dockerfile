@@ -305,9 +305,9 @@ WORKDIR /opt/rome
 COPY --chown=rome:rome --from=builder /build/ ./
 
 # The shell and Core execute the same lockfile-selected Codex package.
-RUN ln -sf /opt/rome/packages/core/node_modules/.bin/codex /usr/local/bin/codex && \
-    test -x /usr/local/bin/codex && \
-    test -x /usr/local/bin/claude
+RUN ln -sf /opt/rome/packages/core/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex && \
+    codex --version && \
+    claude --version
 
 ENV ROME_DOCKER_APP_CODE_MODE=${ROME_DOCKER_APP_CODE_MODE}
 # Where the boot script (scripts/generate-caddyfile.ts) writes the production

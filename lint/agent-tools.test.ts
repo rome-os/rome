@@ -17,7 +17,14 @@ function fixture(): AgentToolInputs {
       "npm ci --prefix /opt/rome-agent-tools --omit=dev",
       "COPY --from=agent-tools /opt/rome-agent-tools /opt/rome-agent-tools",
       "ln -sf /opt/rome-agent-tools/node_modules/.bin/claude /usr/local/bin/claude",
-      "ln -sf /opt/rome/packages/core/node_modules/.bin/codex /usr/local/bin/codex",
+      "ln -sf /opt/rome/packages/core/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex",
+      "codex --version && claude --version",
+    ].join("\n"),
+    devDocker: [
+      "npm ci --prefix /opt/rome-agent-tools --omit=dev",
+      "COPY --from=agent-tools /opt/rome-agent-tools /opt/rome-agent-tools",
+      "ln -sf /opt/rome-agent-tools/node_modules/.bin/claude /usr/local/bin/claude",
+      "ln -sf /workspace/packages/core/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex",
     ].join("\n"),
     dependabot: {
       version: 2,
@@ -57,6 +64,26 @@ describe("agent tool update boundaries", () => {
     const input = fixture();
     input.docker += "\nRUN npm install -g @openai/codex@0.171.0";
     expect(checkAgentTools(input)).toContain("Docker must not duplicate agent tool version pins");
+  });
+  it("rejects duplicate pins in the dev image", () => {
+    const input = fixture();
+    input.devDocker += "\nRUN npm install -g @anthropic-ai/claude-code@2.1.293";
+    expect(checkAgentTools(input)).toContain("Docker must not duplicate agent tool version pins");
+  });
+  it("rejects a link to pnpm's relocatable shell shim", () => {
+    const input = fixture();
+    input.docker = input.docker.replace("@openai/codex/bin/codex.js", ".bin/codex");
+    expect(checkAgentTools(input).length).toBeGreaterThan(0);
+  });
+  it("requires executable command smoke checks", () => {
+    const input = fixture();
+    input.docker = input.docker.replace(
+      "codex --version && claude --version",
+      "test -x /usr/local/bin/codex",
+    );
+    expect(checkAgentTools(input)).toContain(
+      "Production Docker must execute both global agent commands",
+    );
   });
   it("rejects a stale standalone CLI lockfile", () => {
     const input = fixture();

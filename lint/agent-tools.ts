@@ -23,6 +23,7 @@ export type AgentToolInputs = {
   cli: Manifest;
   lock: { packages: Record<string, { version?: string; dependencies?: Record<string, string> }> };
   docker: string;
+  devDocker: string;
   dependabot: { version: number; updates: Update[] };
 };
 
@@ -45,16 +46,27 @@ export function checkAgentTools(input: AgentToolInputs): string[] {
     input.lock.packages["node_modules/" + CLI]?.version !== cliVersion
   )
     findings.push("Claude Code's manifest and lockfile disagree");
-  if (/@(?:openai\/codex|anthropic-ai\/claude-code)@/.test(input.docker)) {
+  if (/@(?:openai\/codex|anthropic-ai\/claude-code)@/.test(input.docker + input.devDocker)) {
     findings.push("Docker must not duplicate agent tool version pins");
   }
   for (const required of [
     "npm ci --prefix /opt/rome-agent-tools --omit=dev",
     "COPY --from=agent-tools /opt/rome-agent-tools /opt/rome-agent-tools",
     "ln -sf /opt/rome-agent-tools/node_modules/.bin/claude /usr/local/bin/claude",
-    "ln -sf /opt/rome/packages/core/node_modules/.bin/codex /usr/local/bin/codex",
+    "ln -sf /opt/rome/packages/core/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex",
   ]) {
     if (!input.docker.includes(required)) findings.push("Docker is missing: " + required);
+  }
+  for (const required of [
+    "npm ci --prefix /opt/rome-agent-tools --omit=dev",
+    "COPY --from=agent-tools /opt/rome-agent-tools /opt/rome-agent-tools",
+    "ln -sf /opt/rome-agent-tools/node_modules/.bin/claude /usr/local/bin/claude",
+    "ln -sf /workspace/packages/core/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex",
+  ]) {
+    if (!input.devDocker.includes(required)) findings.push("Dev Docker is missing: " + required);
+  }
+  if (!input.docker.includes("codex --version") || !input.docker.includes("claude --version")) {
+    findings.push("Production Docker must execute both global agent commands");
   }
   const expected = new Map([
     ["/", [CODEX, SDK].sort()],
@@ -87,6 +99,7 @@ export function readAgentTools(root: string): AgentToolInputs {
     cli: json("scripts/docker/agent-tools/package.json"),
     lock: json("scripts/docker/agent-tools/package-lock.json"),
     docker: readFileSync(path.join(root, "Dockerfile"), "utf8"),
+    devDocker: readFileSync(path.join(root, "infra/rome/Dockerfile"), "utf8"),
     dependabot: parse(
       readFileSync(path.join(root, ".github/dependabot.yml"), "utf8"),
     ) as AgentToolInputs["dependabot"],
