@@ -4,9 +4,10 @@
 // A backlog drained from the Slack app's mailbox, through everything that
 // hears it: the registry, the inbound port, the chat adapter, recording and
 // the hook. What this pins: of a backlog of 250 direct messages that waited in
-// the mailbox while Rome was stopped, the connection's copy keeps every one
-// and the mailbox lets go of each, none is handed over twice, and a slow
-// direct message holds up no other.
+// the mailbox while Rome was stopped, Chats records every one and the mailbox
+// lets go of each only once it is on record, none is heard twice, and a slow
+// turn in one direct message holds up neither the mailbox nor any other
+// direct message.
 //
 // Not every message gets a turn: Rome's queue for a chat lets go of what waits
 // past its capacity while a turn is slow, as it does for every kind, so an
@@ -17,7 +18,7 @@ import type { Account, Channel, SaidInboundEvent } from "@rome-os/app-runtime";
 import { chatsWiring } from "../chats-wiring.js";
 import { connectionPorts } from "../chats/connected-accounts/connection-ports.js";
 import { ChatEvents } from "../chats/storage/events.js";
-import { inboundRecording } from "../connections/inbound-recording.js";
+import { type InboundRecording, inboundRecording } from "../connections/inbound-recording.js";
 import { messagesSaid } from "../sessions/messages-said.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { createTestDb, type TestDb } from "./db.js";
@@ -31,8 +32,7 @@ import {
   FORWARD_TIMESTAMP_HEADER,
   forwardSignature,
 } from "../connections/kinds/slack-app/forward.js";
-import { slackAppMessages } from "../db/schema.js";
-import { SlackMessageCopyRepository } from "../connections/kinds/slack-app/message-copy.js";
+import { chatMessages } from "../db/schema.js";
 import type { MailboxFrame, OpenMailbox } from "../connections/kinds/slack-app/slack-app.js";
 
 const TEAM = "T_A";
@@ -96,6 +96,7 @@ function heldMailbox(frames: MailboxFrame[]) {
       stop: () => {
         open = false;
       },
+      attempts: 4,
     };
   };
   return { open, empty, left: () => queue.length };
@@ -126,12 +127,16 @@ describe("a Slack app backlog, end to end", () => {
         },
         cloud: {} as never,
         openMailbox: mailbox.open,
-        copy: new SlackMessageCopyRepository(testDb.db),
         listens: () => true,
       }),
     );
+    let recording: InboundRecording | undefined;
     const ports = connectionPorts(
-      { registry, channelOf: (connection) => connection.connectionKind },
+      {
+        registry,
+        channelOf: (connection) => connection.connectionKind,
+        accepted: (on, ref) => recording?.accepted(on, ref) ?? Promise.resolve(),
+      },
       SLACK_APP_KIND,
     );
     if (!ports) throw new Error("the Slack app has no talker");
@@ -142,13 +147,24 @@ describe("a Slack app backlog, end to end", () => {
       channelsOn: () => [SLACK_APP_KIND],
     });
     const events = new ChatEvents();
+    recording = inboundRecording(
+      {
+        chats: wiring.chats,
+        messages: wiring.messages,
+        events,
+        adapters: wiring.adapters,
+        hold: (messageId) => {
+          wiring.links.wakeUndecided(messageId);
+          return () => wiring.links.wakeDecided(messageId);
+        },
+      },
+      [channel],
+    );
+    const recorder = recording;
     const said = messagesSaid({
       chats: wiring.chats,
       sessions: new ChatsWebChatRepository(testDb.db),
-      recording: inboundRecording(
-        { chats: wiring.chats, messages: wiring.messages, events, adapters: wiring.adapters },
-        [channel],
-      ),
+      recording: recorder,
       events,
       wakes: wiring.links,
     });
@@ -165,10 +181,10 @@ describe("a Slack app backlog, end to end", () => {
         },
         expiresAt: "never",
       });
-    return { said, grant, settled: () => wiring.adapters.of(channel).settled() };
+    return { said, grant, settled: () => recorder.settled() };
   }
 
-  it("keeps each of 250 direct messages, hands none over twice, and holds up no other direct message", async () => {
+  it("records each of 250 direct messages before the mailbox lets go of it, hears none twice, and lets a slow turn hold up nothing else", async () => {
     const backlog = [
       ...Array.from({ length: 250 }, (_, i) => dm(i, "D_BUSY", "U_BUSY")),
       dm(0, "D_OTHER", "U_OTHER"),
@@ -190,19 +206,22 @@ describe("a Slack app backlog, end to end", () => {
     });
 
     await grant();
+    // The mailbox empties while the busy direct message's first turn still
+    // runs: each frame is let go once its message is on record.
     await mailbox.empty;
+    expect(mailbox.left()).toBe(0);
+    const recorded = testDb.db.select().from(chatMessages).all();
+    expect(
+      recorded.map((row) => row.text).filter((text) => text.startsWith("D_BUSY")),
+    ).toHaveLength(250);
     for (let i = 0; i < 50 && !otherAnswered; i++) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     expect(otherAnswered).toBe(true);
     release();
     await settled();
-    for (let i = 0; i < 50; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const kept = testDb.db.select().from(slackAppMessages).all();
-    expect(kept.filter((row) => row.channelId === "D_BUSY")).toHaveLength(250);
-    expect(kept.filter((row) => row.channelId === "D_OTHER")).toHaveLength(1);
+    expect(testDb.db.select().from(chatMessages).all()).toHaveLength(251);
     expect([...answered.values()].every((times) => times === 1)).toBe(true);
-    expect(mailbox.left()).toBe(0);
   });
 });

@@ -106,8 +106,7 @@ describe("connecting Rome's Slack app (R1)", () => {
     const descriptor = makeSlackAppDescriptor({
       api: {} as never,
       cloud: cloud(),
-      openMailbox: () => ({ stop: () => {} }),
-      copy: {} as never,
+      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
       listens: () => true,
     });
     expect(descriptor.link).toBe("own_account");
@@ -160,12 +159,7 @@ describe("the Slack app talker", () => {
       }),
       openMailbox: (mailbox) => {
         opened.push(mailbox.drainKey);
-        return { stop: () => {} };
-      },
-      copy: {
-        keep: () => true,
-        handedOver: () => {},
-        mayNotHold: () => [],
+        return { stop: () => {}, attempts: 4 };
       },
       listens: () => true,
     });
@@ -197,6 +191,9 @@ describe("the Slack app talker", () => {
     );
     for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 0));
     expect(faults).toEqual([]);
+    // The registry hands `deliver`'s acceptance only to a Talker that declares
+    // it waits, and the mailbox is answered only once Chats has the message.
+    expect(talker?.awaitsAcceptance).toBe(true);
     expect(opened).toEqual(["fresh"]);
     expect(persisted[0]?.drainKey).toBe("fresh");
     // The release still names the connect's claim after a refresh.
@@ -227,12 +224,7 @@ describe("the Slack app's channels in chat settings", () => {
         revoke: async () => {},
       },
       cloud: cloud(),
-      openMailbox: () => ({ stop: () => {} }),
-      copy: {
-        keep: () => true,
-        handedOver: () => {},
-        mayNotHold: () => [],
-      },
+      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
     });
     const talker = descriptor.capabilities.talker?.build(
       {
@@ -318,8 +310,7 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
           await c.release(teamId, signal, generation);
         },
       },
-      openMailbox: () => ({ stop: () => {} }),
-      copy: {} as never,
+      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
     });
     return { descriptor, steps };
   }

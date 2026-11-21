@@ -5,7 +5,6 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "@rstest/core";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system");
-const TAG = "0151_remove_old_slack_connections";
 const NOW = Math.floor(Date.now() / 1000);
 
 function migrationSql(tag: string): string[] {
@@ -22,20 +21,20 @@ function tags(): string[] {
   return journal.entries.map((entry) => entry.tag);
 }
 
-/** A database migrated up to, but not including, this migration. */
-function databaseBeforeMigration(): Database.Database {
+/** A database migrated up to, but not including, migration `tag`. */
+function databaseBefore(tag: string): Database.Database {
   const all = tags();
-  expect(all).toContain(TAG);
+  expect(all).toContain(tag);
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
-  for (const tag of all.slice(0, all.indexOf(TAG))) {
-    for (const statement of migrationSql(tag)) sqlite.exec(statement);
+  for (const earlier of all.slice(0, all.indexOf(tag))) {
+    for (const statement of migrationSql(earlier)) sqlite.exec(statement);
   }
   return sqlite;
 }
 
-function migrate(sqlite: Database.Database): void {
-  for (const statement of migrationSql(TAG)) sqlite.exec(statement);
+function migrate(sqlite: Database.Database, tag: string): void {
+  for (const statement of migrationSql(tag)) sqlite.exec(statement);
 }
 
 /** One connection of `kind` with its grant, its channel and its account. */
@@ -68,9 +67,11 @@ function ids(sqlite: Database.Database, sql: string): unknown[] {
   );
 }
 
-describe("0151 removes the old Slack connections", () => {
-  it("deletes the Slack bot's and the Slack sign-in's connections and grants, and keeps Rome's Slack app", () => {
-    const sqlite = databaseBeforeMigration();
+const SLACK_BOT = "0152_remove_slack_bot_connections";
+
+describe("0152 removes the Slack bot's connections", () => {
+  it("deletes the Slack bot's connections and grants, and keeps the Slack sign-in and Rome's Slack app", () => {
+    const sqlite = databaseBefore(SLACK_BOT);
     connect(sqlite, "conn-bot", "slack_bot", "T1:B1");
     connect(sqlite, "conn-sign-in", "slack", "T1:U1");
     connect(sqlite, "conn-app", "slack_app", "T1:B2");
@@ -78,16 +79,22 @@ describe("0151 removes the old Slack connections", () => {
       .prepare("INSERT INTO connected_accounts_unplaced (connection_id, agent) VALUES (?, 'main')")
       .run("conn-bot");
 
-    migrate(sqlite);
+    migrate(sqlite, SLACK_BOT);
 
-    expect(ids(sqlite, "SELECT id FROM connections")).toEqual(["conn-app"]);
-    expect(ids(sqlite, "SELECT custody FROM connection_grants")).toEqual(["conn-app"]);
+    expect(ids(sqlite, "SELECT id FROM connections ORDER BY id")).toEqual([
+      "conn-app",
+      "conn-sign-in",
+    ]);
+    expect(ids(sqlite, "SELECT custody FROM connection_grants ORDER BY custody")).toEqual([
+      "conn-app",
+      "conn-sign-in",
+    ]);
     expect(ids(sqlite, "SELECT connection_id FROM connected_accounts_unplaced")).toEqual([]);
     // The channels stay, let go of their connection as a disconnect leaves them.
     expect(sqlite.prepare("SELECT id, connection_id FROM channels ORDER BY id").all()).toEqual([
       { id: "channel-conn-app", connection_id: "conn-app" },
       { id: "channel-conn-bot", connection_id: null },
-      { id: "channel-conn-sign-in", connection_id: null },
+      { id: "channel-conn-sign-in", connection_id: "conn-sign-in" },
     ]);
     // Connected accounts, and so their agents, stay.
     expect(ids(sqlite, "SELECT account_id FROM connected_accounts ORDER BY account_id")).toEqual([
@@ -97,12 +104,12 @@ describe("0151 removes the old Slack connections", () => {
     ]);
   });
 
-  it("changes nothing on a database with no old Slack connection", () => {
-    const sqlite = databaseBeforeMigration();
+  it("changes nothing on a database with no Slack bot", () => {
+    const sqlite = databaseBefore(SLACK_BOT);
     connect(sqlite, "conn-app", "slack_app", "T1:B2");
     connect(sqlite, "conn-github", "github", "octocat");
 
-    migrate(sqlite);
+    migrate(sqlite, SLACK_BOT);
 
     expect(ids(sqlite, "SELECT id FROM connections ORDER BY id")).toEqual([
       "conn-app",

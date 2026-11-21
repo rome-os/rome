@@ -152,7 +152,10 @@ import {
   byChannel,
 } from "./chats/connected-accounts/account-agents.js";
 import { romeAccounts } from "./chats/connected-accounts/rome-accounts.js";
-import { recordedChannelOf } from "./chats/connected-accounts/connection-ports.js";
+import {
+  type ConnectionPortsDeps,
+  recordedChannelOf,
+} from "./chats/connected-accounts/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
@@ -394,10 +397,9 @@ import { createOgImageStore } from "./apps/og/store.js";
 import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./app-host/api.js";
-import { RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
+import { DELIVERY_ATTEMPTS, RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
 import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
 import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
-import { SlackMessageCopyRepository } from "./connections/kinds/slack-app/message-copy.js";
 import { SLACK_APP_KIND } from "./connections/integrations/slack-app.js";
 import {
   RELAY_SETTING_KEY,
@@ -414,7 +416,7 @@ import {
 } from "./favors/index.js";
 import { ChatEvents as ChatsEvents } from "./chats/storage/events.js";
 import { chatsWiring } from "./chats-wiring.js";
-import { inboundRecording } from "./connections/inbound-recording.js";
+import { type InboundRecording, inboundRecording } from "./connections/inbound-recording.js";
 import { messagesSaid } from "./sessions/messages-said.js";
 import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
 import type { MessagePageCursor } from "./webchat/repository.js";
@@ -1947,7 +1949,6 @@ async function main() {
     slackApp: {
       api: createSlackAppWebApi(config.slackApiBaseUrl),
       cloud: romeCloudSlackApp(),
-      copy: new SlackMessageCopyRepository(db),
       listens: (connectionId) => accountListening.listens(connectionId),
       openMailbox: (mailbox, onFrame) => {
         const drainer = new RelayDrainer(
@@ -1962,7 +1963,7 @@ async function main() {
           (_drain, event) => onFrame({ headers: event.headers, body: event.body }),
         );
         drainer.start();
-        return { stop: () => drainer.stop() };
+        return { stop: () => drainer.stop(), attempts: DELIVERY_ATTEMPTS };
       },
     },
     settingsRepo,
@@ -2022,6 +2023,13 @@ async function main() {
   for (const kind of connectionKinds) {
     if (kind.descriptor) connectionRegistry.register(kind.descriptor);
   }
+  // A delivery settles once Chats has the message on record (Talker.start).
+  // The recorder is built from the channels below, so the ports reach it
+  // through this late binding; before it exists, nothing is recorded, and a
+  // delivery counts as accepted once handed over.
+  let recorderOfDeliveries: Pick<InboundRecording, "accepted"> | undefined;
+  const accepted: ConnectionPortsDeps["accepted"] = (channel, ref) =>
+    recorderOfDeliveries?.accepted(channel, ref) ?? Promise.resolve();
   // Built after every descriptor is registered: each connection kind with a Talk backs
   // its channel's send and inbound ports.
   const channels = channelList({
@@ -2035,6 +2043,7 @@ async function main() {
       listening: accountListening,
       accountOf: (connectionId) => accounts.accountOf(connectionId),
       heard: (message) => accountProfiles.heard(message),
+      accepted,
     },
     connectionAccounts: {
       [AGENTS_KIND]: agentsAccounts(listedAgents),
@@ -2079,9 +2088,17 @@ async function main() {
       events: chatsEvents,
       adapters: chatsWired.adapters,
       listens: (connectionId) => accountListening.listens(connectionId),
+      // Recorded before its MessageSaid is raised, so held out of catch-up
+      // from its record until Agents, MessageSaid's first listener, has
+      // taken its own hold, which it does synchronously.
+      hold: (messageId) => {
+        chatsWired.links.wakeUndecided(messageId);
+        return () => chatsWired.links.wakeDecided(messageId);
+      },
     },
     hookChannels,
   );
+  recorderOfDeliveries = inboundRecorder;
   // Agents hears each recorded message first, so its wake is held out of
   // catch-up before anything reads it.
   const hookMessagesSaid = messagesSaid({
@@ -2161,6 +2178,7 @@ async function main() {
         listening: accountListening,
         accountOf: (connectionId) => accounts.accountOf(connectionId),
         heard: (message) => accountProfiles.heard(message),
+        accepted,
         channels,
       },
       connection,

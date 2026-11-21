@@ -9,16 +9,33 @@ import {
 } from "./forward.js";
 import { type MailboxFrame, type OpenMailbox, SlackAppAdapter } from "./slack-app.js";
 import { createSlackAppWebApi, type SlackAppWebApi } from "./web-api.js";
-import { createTestDb } from "../../../test/db.js";
-import { SlackMessageCopyRepository } from "./message-copy.js";
 import { slackMessage, type SlackWireMessage } from "./message.js";
 import { SlackApiError } from "../slack/slack.js";
 import { SlackReadGate } from "./read-gate.js";
 import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
+import type { Message } from "../../message.js";
+import { RecordingStopped } from "../../types.js";
 
-/** The connection's copy, in a database of its own. */
-function testCopy(): SlackMessageCopyRepository {
-  return new SlackMessageCopyRepository(createTestDb().db);
+/**
+ * Rome's side of a delivery, as Chats takes it: a message is on record once
+ * by its id, and a delivery settles once it is. `refusing` makes deliveries
+ * reject, as a record that fails or comes too late does.
+ */
+function fakeChats() {
+  const recorded = new Set<string>();
+  const delivered: ChannelMessage[] = [];
+  const chats = {
+    delivered,
+    refusing: false,
+    accept: async (message: Message): Promise<void> => {
+      if (chats.refusing) throw new Error("not recorded within 120000ms");
+      if (recorded.has(message.id)) return;
+      recorded.add(message.id);
+      // What apps receive, so the tests read the fields an app reads.
+      delivered.push(channelMessageOf(message, "slack_app"));
+    },
+  };
+  return chats;
 }
 
 const TEAM = "T_A";
@@ -101,6 +118,7 @@ function fakeMailbox() {
       stop: () => {
         onFrame = null;
       },
+      attempts: 4,
     };
   };
   return {
@@ -123,12 +141,13 @@ function fakeMailbox() {
 function adapter(
   mailbox: ReturnType<typeof fakeMailbox>,
   api = fakeApi(),
-  copy: SlackMessageCopyRepository = testCopy(),
-  now?: () => Date,
-  readGate?: SlackReadGate,
-  listened?: () => boolean,
+  options: {
+    chats?: ReturnType<typeof fakeChats>;
+    listened?: () => boolean;
+    readGate?: SlackReadGate;
+  } = {},
 ) {
-  const delivered: ChannelMessage[] = [];
+  const chats = options.chats ?? fakeChats();
   const faults: string[] = [];
   const a = new SlackAppAdapter({
     channel: "slack_app",
@@ -140,14 +159,11 @@ function adapter(
     api,
     openMailbox: mailbox.open,
     onFault: ({ kind }) => faults.push(kind),
-    copy,
-    ...(now ? { now } : {}),
-    ...(readGate ? { readGate } : {}),
-    ...(listened ? { listened } : {}),
+    ...(options.readGate ? { readGate: options.readGate } : {}),
+    ...(options.listened ? { listened: options.listened } : {}),
   });
-  // What apps receive, so the tests read the fields an app reads.
-  a.onInbound((message) => delivered.push(channelMessageOf(message, "slack_app")));
-  return { adapter: a, delivered, faults, api, copy };
+  a.onInbound(chats.accept);
+  return { adapter: a, delivered: chats.delivered, faults, api, chats };
 }
 
 describe("Slack app direct messages (R4)", () => {
@@ -369,39 +385,22 @@ describe("Slack app mentions in a group (R5)", () => {
     expect(delivered.map((m) => m.text)).toEqual(["@Rome", "@Rome"]);
   });
 
-  it("neither answers nor keeps a group message that does not mention it", async () => {
+  it("does not answer or hand over a group message that does not mention it", async () => {
     const mailbox = fakeMailbox();
-    const { adapter: a, delivered, copy } = adapter(mailbox);
+    const { adapter: a, delivered } = adapter(mailbox);
     await a.start();
     const unmentioned = mentionEvent(3, { type: "message", text: "lunch?" });
     await mailbox.deposit(frame(unmentioned));
 
     expect(mailbox.statuses).toEqual([200]);
     expect(delivered).toHaveLength(0);
-    expect(copy.mayNotHold(TEAM, Number.MAX_SAFE_INTEGER)).toEqual([]);
-  });
-
-  it("hands a mention over again on start when Rome may not hold it", async () => {
-    const mailbox = fakeMailbox();
-    const copy = testCopy();
-    const first = adapter(mailbox, fakeApi(), copy);
-    first.adapter.onInbound(() => {
-      throw new Error("Rome is busy");
-    });
-    await first.adapter.start();
-    await mailbox.deposit(frame(mentionEvent(4)));
-    await first.adapter.stop();
-
-    const second = adapter(mailbox, fakeApi(), copy);
-    await second.adapter.start();
-    expect(second.delivered.map((m) => m.text)).toEqual(["question 4"]);
   });
 });
 
 describe("Slack app events for its own posts", () => {
   it("hands over no event for its own post in a direct message, and sends nothing", async () => {
     const mailbox = fakeMailbox();
-    const { adapter: a, delivered, api, copy } = adapter(mailbox);
+    const { adapter: a, delivered, api } = adapter(mailbox);
     await a.start();
     const own = dmEvent(5, {});
     await mailbox.deposit(
@@ -411,8 +410,6 @@ describe("Slack app events for its own posts", () => {
     expect(mailbox.statuses).toEqual([200]);
     expect(delivered).toHaveLength(0);
     expect(api.postMessage).not.toHaveBeenCalled();
-    // Not kept as a message to hand over: a restart hands over nothing.
-    expect(copy.mayNotHold(TEAM, Number.MAX_SAFE_INTEGER)).toEqual([]);
   });
 
   it("drops its own post in a group, and still hears another bot that mentions it", async () => {
@@ -457,19 +454,12 @@ describe("Slack app while the instance is stopped (R6)", () => {
   });
 });
 
-describe("Slack app's own copy of its direct messages", () => {
-  const at = (minute: number) => () => new Date(Date.UTC(2026, 10, 19, 12, minute));
-
-  it("tells the mailbox a message arrived only once its copy holds it", async () => {
+describe("Slack app acknowledging its mailbox", () => {
+  it("tells the mailbox a message arrived only once Chats has it on record", async () => {
     const mailbox = fakeMailbox();
-    const copy = testCopy();
-    const keep = copy.keep.bind(copy);
-    let failing = true;
-    copy.keep = (kept, when) => {
-      if (failing) throw new Error("disk full");
-      return keep(kept, when);
-    };
-    const { adapter: a, delivered, faults } = adapter(mailbox, fakeApi(), copy);
+    const chats = fakeChats();
+    chats.refusing = true;
+    const { adapter: a, delivered, faults } = adapter(mailbox, fakeApi(), { chats });
     await a.start();
 
     await mailbox.deposit(frame(dmEvent(1)));
@@ -480,115 +470,114 @@ describe("Slack app's own copy of its direct messages", () => {
     expect(faults).toEqual(["transport"]);
 
     // The mailbox kept the frame and delivers it again.
-    failing = false;
+    chats.refusing = false;
     await mailbox.deposit();
     expect(mailbox.statuses).toEqual([500, 200]);
     expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
   });
 
-  it("keeps nothing heard while Rome does not listen to the account, so linking an agent brings none of it back", async () => {
-    const { db } = createTestDb();
-    const copy = new SlackMessageCopyRepository(db);
+  it("lets the mailbox deliver again a message refused while recording stopped, without reporting the connection down", async () => {
+    const mailbox = fakeMailbox();
+    const chats = fakeChats();
+    const { adapter: a, delivered, faults } = adapter(mailbox, fakeApi(), { chats });
+    let swapping = true;
+    a.onInbound(async (message) => {
+      if (swapping) throw new RecordingStopped();
+      await chats.accept(message);
+    });
+    await a.start();
+
+    await mailbox.deposit(frame(dmEvent(1)));
+    expect(mailbox.statuses).toEqual([500]);
+    expect(faults).toEqual([]);
+
+    swapping = false;
+    await mailbox.deposit();
+    expect(mailbox.statuses).toEqual([500, 200]);
+    expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
+  });
+
+  it("reports the connection down when recording stays stopped past the drain's retries", async () => {
+    const mailbox = fakeMailbox();
+    const chats = fakeChats();
+    const { adapter: a, delivered, faults } = adapter(mailbox, fakeApi(), { chats });
+    let swapping = true;
+    a.onInbound(async (message) => {
+      if (swapping) throw new RecordingStopped();
+      await chats.accept(message);
+    });
+    await a.start();
+
+    await mailbox.deposit(frame(dmEvent(1)));
+    await mailbox.deposit();
+    await mailbox.deposit();
+    expect(faults).toEqual([]);
+    // The drain's fourth and last delivery before it would hold the frame.
+    await mailbox.deposit();
+    expect(mailbox.statuses).toEqual([500, 500, 500, 500]);
+    expect(faults).toEqual(["transport"]);
+
+    // The runtime starts the connection again, with a fresh drain.
+    await a.stop();
+    swapping = false;
+    await a.start();
+    await mailbox.settle();
+    expect(mailbox.statuses).toEqual([500, 500, 500, 500, 200]);
+    expect(delivered.map((m) => m.text)).toEqual(["message 1"]);
+  });
+
+  it("answers the mailbox only after the delivery settles", async () => {
+    const mailbox = fakeMailbox();
+    let settle = () => {};
+    const { adapter: a } = adapter(mailbox);
+    a.onInbound(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    await a.start();
+    const answered = a.handleFrame(frame(dmEvent(1)));
+    let status: number | undefined;
+    void answered.then((answer) => {
+      status = answer.status;
+    });
+    await mailbox.settle();
+    expect(status).toBeUndefined();
+    settle();
+    await expect(answered).resolves.toEqual({ status: 200 });
+  });
+
+  it("hands over nothing heard while Rome does not listen to the account", async () => {
     const mailbox = fakeMailbox();
     let listening = false;
-    const first = adapter(mailbox, fakeApi(), copy, at(0), undefined, () => listening);
-    await first.adapter.start();
+    const { adapter: a, delivered } = adapter(mailbox, fakeApi(), {
+      listened: () => listening,
+    });
+    await a.start();
 
     await mailbox.deposit(frame(dmEvent(1)));
     expect(mailbox.statuses).toEqual([200]);
-    expect(first.delivered).toHaveLength(0);
-    expect(copy.mayNotHold(TEAM, 60_000)).toEqual([]);
+    expect(delivered).toHaveLength(0);
 
     listening = true;
     await mailbox.deposit(frame(dmEvent(2)));
-    expect(first.delivered.map((m) => m.text)).toEqual(["message 2"]);
-    await first.adapter.stop();
-
-    const restarted = adapter(fakeMailbox(), fakeApi(), copy, at(30), undefined, () => listening);
-    await restarted.adapter.start();
-    expect(restarted.delivered.map((m) => m.text)).toEqual(["message 2"]);
+    expect(delivered.map((m) => m.text)).toEqual(["message 2"]);
   });
 
-  it("hands Rome on start what it kept but never handed over", async () => {
-    const { db } = createTestDb();
-    // Kept, then stopped before noting it was handed over.
-    const interrupted = new SlackMessageCopyRepository(db);
-    interrupted.handedOver = () => {};
-    const first = adapter(fakeMailbox(), fakeApi(), interrupted, at(0));
-    await first.adapter.start();
-    await first.adapter.handleFrame(frame(dmEvent(1)));
-    await first.adapter.stop();
-
-    const copy = new SlackMessageCopyRepository(db);
-    const restarted = adapter(fakeMailbox(), fakeApi(), copy, at(30));
-    await restarted.adapter.start();
-    expect(restarted.delivered.map((m) => m.text)).toEqual(["message 1"]);
-    expect(restarted.delivered[0]?.timestamp).toEqual(first.delivered[0]?.timestamp);
-
-    // Each start offers the last hand-offs again; Rome ignores what it holds.
-    const again = adapter(fakeMailbox(), fakeApi(), copy, at(50));
-    await again.adapter.start();
-    expect(again.delivered.map((m) => m.text)).toEqual(["message 1"]);
-  });
-
-  it("hands Rome again on start what it handed over just before a stop, however long the stop", async () => {
-    const { db } = createTestDb();
-    const copy = new SlackMessageCopyRepository(db);
-    const first = adapter(fakeMailbox(), fakeApi(), copy, at(0));
-    await first.adapter.start();
-    await first.adapter.handleFrame(frame(dmEvent(1)));
-    await first.adapter.stop();
-
-    // A reload a minute later: Rome may not have recorded it yet.
-    const reloaded = adapter(fakeMailbox(), fakeApi(), copy, at(1));
-    await reloaded.adapter.start();
-    expect(reloaded.delivered.map((m) => m.text)).toEqual(["message 1"]);
-
-    // A restart hours later still hands over what came just before the stop.
-    const late = adapter(
-      fakeMailbox(),
-      fakeApi(),
-      copy,
-      () => new Date(Date.UTC(2026, 10, 19, 15)),
-    );
-    await late.adapter.start();
-    expect(late.delivered.map((m) => m.text)).toEqual(["message 1"]);
-  });
-
-  it("hands Rome again only what came just before the last hand-off", async () => {
-    const { db } = createTestDb();
-    const copy = new SlackMessageCopyRepository(db);
-    const first = adapter(fakeMailbox(), fakeApi(), copy, at(0));
-    await first.adapter.start();
-    await first.adapter.handleFrame(frame(dmEvent(1)));
-    await first.adapter.stop();
-    const second = adapter(fakeMailbox(), fakeApi(), copy, at(40));
-    await second.adapter.start();
-    await second.adapter.handleFrame(frame(dmEvent(2)));
-    await second.adapter.stop();
-
-    // Message 1 was handed over 40 minutes before the last hand-off.
-    const restarted = adapter(fakeMailbox(), fakeApi(), copy, at(50));
-    await restarted.adapter.start();
-    expect(restarted.delivered.map((m) => m.text)).toEqual(["message 2"]);
-  });
-
-  it("hands over a message Slack delivers again after a restart only once", async () => {
+  it("hands a message Slack delivers again to Chats, which has it once", async () => {
     const mailbox = fakeMailbox();
-    const copy = testCopy();
-    const first = adapter(mailbox, fakeApi(), copy, at(0));
+    const chats = fakeChats();
+    const first = adapter(mailbox, fakeApi(), { chats });
     await first.adapter.start();
     await mailbox.deposit(frame(dmEvent(1)));
     await first.adapter.stop();
 
-    const restarted = adapter(mailbox, fakeApi(), copy, at(30));
+    const restarted = adapter(mailbox, fakeApi(), { chats });
     await restarted.adapter.start();
-    // Start offers it again, since a stop may have cut it off before Rome
-    // recorded it; Slack's own redelivery adds nothing on top.
-    expect(restarted.delivered.map((m) => m.text)).toEqual(["message 1"]);
     await mailbox.deposit(frame(dmEvent(1)));
-    expect(first.delivered).toHaveLength(1);
-    expect(restarted.delivered).toHaveLength(1);
+    expect(mailbox.statuses).toEqual([200, 200]);
+    expect(chats.delivered.map((m) => m.text)).toEqual(["message 1"]);
   });
 });
 
@@ -663,7 +652,7 @@ describe("Slack app mailbox key", () => {
     const refreshed: string[] = [];
     const open: OpenMailbox = (mailbox) => {
       opened.push(mailbox.drainKey);
-      return { stop: () => void stopped.push(mailbox.drainKey) };
+      return { stop: () => void stopped.push(mailbox.drainKey), attempts: 4 };
     };
     const a = new SlackAppAdapter({
       channel: "slack_app",
@@ -680,7 +669,6 @@ describe("Slack app mailbox key", () => {
         await persist(mailbox.drainKey);
       },
       onFault: ({ kind }) => faults.push(kind),
-      copy: testCopy(),
     });
     return { adapter: a, opened, stopped, faults, refreshed };
   }
@@ -755,6 +743,7 @@ describe("Slack app mailbox key", () => {
             await inFlight;
             order.push(`stopped ${mailbox.drainKey.split(".")[1]}`);
           },
+          attempts: 4,
         };
       };
       let answer = first;
@@ -773,9 +762,8 @@ describe("Slack app mailbox key", () => {
         }),
         openMailbox: open,
         refreshMailbox: async () => ({ connectUrl: "wss://relay.test/c/mbx", drainKey: answer }),
-        copy: testCopy(),
       });
-      a.onInbound((message) => order.push(`delivered ${message.content.text}`));
+      a.onInbound((message) => void order.push(`delivered ${message.content.text}`));
       await a.start();
       answer = second;
       await rs.advanceTimersByTimeAsync(DAY + 1000);
@@ -909,25 +897,13 @@ function openGate(): SlackReadGate {
 function historyAdapter(
   mailbox: ReturnType<typeof fakeMailbox>,
   slack: ReturnType<typeof fakeSlackHistory>,
-  options: {
-    db?: ReturnType<typeof createTestDb>["db"];
-    gate?: SlackReadGate;
-    listened?: () => boolean;
-  } = {},
+  options: { gate?: SlackReadGate; listened?: () => boolean } = {},
 ) {
-  const db = options.db ?? createTestDb().db;
   const api = fakeApi({ conversationHistory: slack.conversationHistory });
-  return {
-    ...adapter(
-      mailbox,
-      api,
-      new SlackMessageCopyRepository(db),
-      undefined,
-      options.gate ?? openGate(),
-      options.listened,
-    ),
-    db,
-  };
+  return adapter(mailbox, api, {
+    readGate: options.gate ?? openGate(),
+    ...(options.listened ? { listened: options.listened } : {}),
+  });
 }
 
 const texts = (messages: ChannelMessage[]) => messages.map((m) => m.text);
@@ -978,9 +954,7 @@ describe("Slack app reads a direct message (R13)", () => {
       const { adapter: a } = adapter(
         fakeMailbox(),
         fakeApi({ conversationHistory: slack.conversationHistory, userName }),
-        testCopy(),
-        undefined,
-        openGate(),
+        { readGate: openGate() },
       );
       await a.start();
       const reading = a.readHistory("D_GUARDIAN" as never, { limit: 7 });
@@ -1097,7 +1071,7 @@ describe("Slack app reads a direct message (R13)", () => {
         throw new SlackApiError("missing_scope");
       }),
     });
-    const { adapter: a } = adapter(mailbox, api, testCopy(), undefined, openGate());
+    const { adapter: a } = adapter(mailbox, api, { readGate: openGate() });
     await a.start();
     await expect(a.readHistory("D_GONE" as never, { limit: 5 })).rejects.toThrow(
       /may not read chat D_GONE \(missing_scope\)/,
@@ -1245,7 +1219,7 @@ describe("Slack app in the channels it is a member of", () => {
 
   it("sends to a channel by the name people use for it", async () => {
     const api = channelApi();
-    const { adapter: a } = adapter(fakeMailbox(), api, testCopy(), undefined, openGate());
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
     await a.start();
 
     const receipt = await a.send("#news" as never, { text: "hello" });
@@ -1271,7 +1245,7 @@ describe("Slack app in the channels it is a member of", () => {
   it("sends by a name to the channel that holds it now, after a rename gave it to another", async () => {
     let channels = [OPS, NEWS];
     const api = channelApi({ memberChannels: rs.fn(async () => ({ channels })) });
-    const { adapter: a } = adapter(fakeMailbox(), api, testCopy(), undefined, openGate());
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
     await a.start();
     await a.send("#news" as never, { text: "first" });
 
@@ -1292,7 +1266,7 @@ describe("Slack app in the channels it is a member of", () => {
 
   it("refuses a name no channel it is a member of has, saying so", async () => {
     const api = channelApi();
-    const { adapter: a } = adapter(fakeMailbox(), api, testCopy(), undefined, openGate());
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
     await a.start();
 
     await expect(a.send("#random" as never, { text: "hi" })).rejects.toThrow(
@@ -1310,7 +1284,7 @@ describe("Slack app in the channels it is a member of", () => {
     const api = channelApi({
       conversationHistory: rs.fn(async () => ({ messages: [...said].reverse(), hasMore: false })),
     });
-    const { adapter: a } = adapter(fakeMailbox(), api, testCopy(), undefined, openGate());
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
     await a.start();
 
     const byName = await a.readHistory("#news" as never, { limit: 10 });
@@ -1344,7 +1318,7 @@ describe("Slack app in the channels it is a member of", () => {
         ],
       })),
     });
-    const { adapter: a } = adapter(fakeMailbox(), api, testCopy(), undefined, openGate());
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
     await a.start();
 
     const thread = await a.readHistory("C_NEWS:1700000000.000001" as never, { limit: 10 });
@@ -1381,7 +1355,7 @@ describe("Slack app in the channels it is a member of", () => {
       },
     );
     const api = channelApi({ conversationReplies });
-    const { adapter: a } = adapter(fakeMailbox(), api, testCopy(), undefined, openGate());
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
     await a.start();
 
     const first = await a.readHistory(`C_NEWS:${root}` as never, { limit: 100 });
@@ -1439,7 +1413,7 @@ describe("Slack app in the channels it is a member of", () => {
     const api = channelApi({
       conversationReplies: rs.fn(async () => ({ messages: files, nextCursor: "more" })),
     });
-    const { adapter: a } = adapter(fakeMailbox(), api, testCopy(), undefined, openGate());
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
     await a.start();
 
     await expect(
@@ -1468,7 +1442,6 @@ describe("Slack app in the channels it is a member of", () => {
       mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
       api,
       openMailbox: fakeMailbox().open,
-      copy: testCopy(),
       readGate: pace(),
       repliesGate: pace(),
     });
@@ -1492,7 +1465,7 @@ describe("Slack app in the channels it is a member of", () => {
         messages: [{ ts: root, user: "U_MEMBER", text: "root", thread_ts: root }],
       })),
     });
-    const { adapter: a } = adapter(fakeMailbox(), api, testCopy(), undefined, openGate());
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
     await a.start();
 
     const [thread, history] = await Promise.all([
@@ -1511,13 +1484,7 @@ describe("Slack app in the channels it is a member of", () => {
       throw new SlackApiError("missing_scope");
     };
     const api = channelApi({ memberChannels: rs.fn(missing), conversationHistory: rs.fn(missing) });
-    const { adapter: a, delivered } = adapter(
-      fakeMailbox(),
-      api,
-      testCopy(),
-      undefined,
-      openGate(),
-    );
+    const { adapter: a, delivered } = adapter(fakeMailbox(), api, { readGate: openGate() });
     await a.start();
 
     await a.handleFrame(frame(dmEvent(1)));
@@ -1541,7 +1508,7 @@ describe("Slack app in the channels it is a member of", () => {
         throw new SlackApiError("not_in_channel");
       }),
     });
-    const { adapter: a } = adapter(fakeMailbox(), api, testCopy(), undefined, openGate());
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
     await a.start();
 
     await expect(a.readHistory("C_ELSE" as never, { limit: 5 })).rejects.toThrow(
