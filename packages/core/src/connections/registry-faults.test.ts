@@ -27,6 +27,7 @@ import type {
   Credential,
   GrantName,
 } from "./types.js";
+import { RecordingStopped } from "./types.js";
 import {
   CredentialRejected,
   Disconnected,
@@ -691,6 +692,46 @@ describe("registry faults", () => {
       inst1.state.fault?.(new Disconnected());
       await flush();
       expect(sleep.durations).toEqual([100, 100]);
+    });
+
+    it("a refused delivery to a Talker that waits for acceptance keeps the backoff growing; an accepted one resets it", async () => {
+      const ledger = makeLedger();
+      const sleep = makeRecordingSleep();
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        sleep: sleep.fn,
+        backoff: { baseMs: 100, maxMs: 10_000 },
+      });
+      const fx = makePasteTalk({ awaitsAcceptance: true });
+      registry.register(fx.descriptor);
+      const conn = await registry.connect("fake-telegram");
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
+      let refusing = true;
+      conn.hearTalker(async () => {
+        if (refusing) throw new RecordingStopped();
+      });
+
+      // Each rebuild delivers the held message again, and it is refused again.
+      for (let i = 0; i < 3; i++) {
+        const instance = fx.talkerFactory.instances.at(-1);
+        if (!instance) throw new Error("instance not built");
+        await expect(instance.state.deliver?.(makeInboundMessage({ id: "m" }))).rejects.toThrow(
+          RecordingStopped,
+        );
+        instance.state.fault?.(new Disconnected());
+        await flush();
+      }
+      expect(sleep.durations).toEqual([100, 200, 400]);
+
+      // Recording is back: the delivery is accepted, and the next fault
+      // starts the backoff over.
+      refusing = false;
+      const instance = fx.talkerFactory.instances.at(-1);
+      if (!instance) throw new Error("instance not built");
+      await instance.state.deliver?.(makeInboundMessage({ id: "m" }));
+      instance.state.fault?.(new Disconnected());
+      await flush();
+      expect(sleep.durations).toEqual([100, 200, 400, 100]);
     });
 
     // Regression: write-through custody must survive a bare backoff rebuild.
