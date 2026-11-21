@@ -1,0 +1,220 @@
+# The live mode: Rome Cloud and one Rome instance against the real Slack, on
+# the devbox, reached at public romeos.dev names. live.sh writes
+# .state-live/compose.env and starts this file with it; nothing here is meant
+# to be started by hand. It shares no container, volume or port with the
+# scored environment (../compose.yml).
+#
+# Routing: the devbox's tunnel and Caddy shim turn <slug>-pantheon.romeos.dev
+# into Host pantheon.<slug>.rome.localhost and <slug>.romeos.dev into
+# <slug>.rome.localhost, and send both to the singleton rome-traefik on
+# 127.0.0.1:3000. Traefik finds pantheon and rome below by their labels on the
+# shared rome-edge network.
+#
+# Inside the network the public names answer through tls-proxy, so a server
+# call from the instance to Rome Cloud (or back) never goes out through
+# Cloudflare Access.
+
+name: ${SLACKENV_PROJECT}
+
+x-node: &node
+  image: ${SLACKENV_NODE_IMAGE}
+  user: "${HOST_UID}:${HOST_GID}"
+  restart: unless-stopped
+  init: true
+
+x-node-env: &node-env
+  HOME: /state/home
+  COREPACK_HOME: /state/corepack
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+  npm_config_store_dir: /state/pnpm-store
+  NODE_EXTRA_CA_CERTS: /state/trust.pem
+  PATH: /state/bin:/usr/local/bin:/usr/bin:/bin
+  CI: "1"
+
+services:
+  postgres:
+    image: ${SLACKENV_POSTGRES_IMAGE}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pantheon
+      POSTGRES_PASSWORD: pantheon
+      POSTGRES_DB: pantheon
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "pantheon"]
+      interval: 2s
+      retries: 30
+
+  # The public names, inside the network only.
+  edge:
+    <<: *node
+    command:
+      - node
+      - /env/tools/tls-proxy.mjs
+      - /state/tls/tls.crt
+      - /state/tls/tls.key
+      - "443"
+      - "${CLOUD_HOST}=pantheon:3100"
+      - "${ROME_HOST}=rome:8080"
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    volumes:
+      - ${STATE_DIR}:/state
+      - ${ENV_DIR}:/env:ro
+    networks:
+      default:
+        aliases: ["${CLOUD_HOST}", "${ROME_HOST}"]
+
+  relay:
+    <<: *node
+    working_dir: /state/rome-cloud-src/webhook-relay
+    command:
+      - sh
+      - -c
+      - >-
+        corepack enable --install-directory /state/bin &&
+        pnpm install --frozen-lockfile &&
+        exec pnpm exec wrangler dev --ip 0.0.0.0 --port 8787
+        --persist-to /state/relay-data --log-level info
+    environment:
+      <<: *node-env
+      WRANGLER_SEND_METRICS: "false"
+    volumes:
+      - ${STATE_DIR}:/state
+
+  pantheon:
+    <<: *node
+    working_dir: /state/rome-cloud-src
+    command:
+      - sh
+      - -c
+      - >-
+        corepack enable --install-directory /state/bin &&
+        pnpm install --frozen-lockfile &&
+        pnpm db:migrate &&
+        cd packages/pantheon &&
+        exec pnpm exec next dev -H 0.0.0.0 -p 3100
+    env_file:
+      - ${STATE_DIR}/pantheon.env
+    environment:
+      <<: *node-env
+      # Rome's real Slack app. Taken from live.sh's environment when the
+      # container is created, never from a file this environment writes.
+      SLACK_APP_CLIENT_ID: ${SLACK_APP_CLIENT_ID:?}
+      SLACK_APP_CLIENT_SECRET: ${SLACK_APP_CLIENT_SECRET:?}
+      SLACK_APP_SIGNING_SECRET: ${SLACK_APP_SIGNING_SECRET:?}
+    volumes:
+      - ${STATE_DIR}:/state
+    networks: [default, rome-edge]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=rome-edge
+      - traefik.http.routers.${SLACKENV_PROJECT}-pantheon.rule=Host(`pantheon.${SLUG}.rome.localhost`)
+      - traefik.http.routers.${SLACKENV_PROJECT}-pantheon.entrypoints=web
+      - traefik.http.services.${SLACKENV_PROJECT}-pantheon.loadbalancer.server.port=3100
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  model-proxy:
+    <<: *node
+    command: ["node", "/env/tools/model-proxy.mjs"]
+    environment:
+      <<: *node-env
+      MODEL_PROXY_PORT: "8080"
+      MODEL_PROXY_MODEL: ${AGENT_MODEL}
+      MODEL_PROXY_API_KEY: ${MODEL_PROXY_API_KEY:-}
+      MODEL_PROXY_OAUTH_TOKEN: ${MODEL_PROXY_OAUTH_TOKEN:-}
+    volumes:
+      - ${ENV_DIR}:/env:ro
+      - ${STATE_DIR}/trust.pem:/state/trust.pem:ro
+
+  rome:
+    image: ${ROME_IMAGE}
+    restart: "no"
+    cap_add:
+      - SYS_ADMIN
+    shm_size: 1gb
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      NODE_ENV: production
+      WEB_HOST: 0.0.0.0
+      ROME_DOCKER_USER_MODE: multi
+      WECHAT_USER_ENABLED: "false"
+      ROME_ENABLE_CHROME: "0"
+      ROME_SIGNER_SOCKET: /run/rome-signer/signer.sock
+      PANTHEON_BASE_ORIGIN: https://${CLOUD_HOST}
+      PANTHEON_DOMAIN: ${CLOUD_DOMAIN}
+      PANTHEON_INSTANCE_ORIGIN: https://${ROME_HOST}
+      PANTHEON_SLUG: ${SLACKENV_PROJECT}
+      FEATURE_GATE_ROME_CLOUD_AUTH: "on"
+      NODE_EXTRA_CA_CERTS: /slackenv/trust.pem
+      ROME_JWT_SECRET: ${ROME_JWT_SECRET}
+      ANTHROPIC_API_KEY: sk-ant-slackenv-placeholder
+      ANTHROPIC_BASE_URL: http://model-proxy:8080
+    volumes:
+      - rome-app:/app
+      - rome-home:/home/rome
+      - rome-user:/home/user
+      - rome-signer-sock:/run/rome-signer:ro
+      - ${STATE_DIR}/trust.pem:/slackenv/trust.pem:ro
+    networks: [default, rome-edge]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=rome-edge
+      - traefik.http.routers.${SLACKENV_PROJECT}-rome.rule=Host(`${SLUG}.rome.localhost`)
+      - traefik.http.routers.${SLACKENV_PROJECT}-rome.entrypoints=web
+      - traefik.http.services.${SLACKENV_PROJECT}-rome.loadbalancer.server.port=8080
+    depends_on:
+      - rome-signer
+      - edge
+
+  rome-signer:
+    image: ${ROME_IMAGE}
+    entrypoint: ["node", "/opt/rome/packages/signer/dist/main.js"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    network_mode: none
+    restart: unless-stopped
+    environment:
+      SIGNER_AUDIENCE: https://${CLOUD_HOST}
+      SIGNER_KEY_DIR: /keys
+      SIGNER_SOCKET: /run/rome-signer/signer.sock
+    volumes:
+      - rome-signer-key:/keys
+      - rome-signer-sock:/run/rome-signer
+
+  # One run: enrolls the instance in Rome Cloud and signs the guardian in, at
+  # the public names, inside the network.
+  enroll:
+    <<: *node
+    restart: "no"
+    profiles: [setup]
+    environment:
+      <<: *node-env
+    command:
+      - node
+      - /env/tools/enroll.mjs
+      - https://${CLOUD_HOST}
+      - https://${ROME_HOST}
+      - ${GUARDIAN_EMAIL}
+      - /state/rome-cookies.json
+    volumes:
+      - ${STATE_DIR}:/state
+      - ${ENV_DIR}:/env:ro
+
+volumes:
+  postgres:
+  rome-app:
+  rome-home:
+  rome-user:
+  rome-signer-key:
+  rome-signer-sock:
+
+networks:
+  rome-edge:
+    external: true

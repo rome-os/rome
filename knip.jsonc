@@ -23,7 +23,11 @@
     // template, so its imports resolve against the generated app's manifest
     // rather than this workspace.
     "packages/app-template/template/**",
-    "packages/app-template/workflow/**"
+    "packages/app-template/workflow/**",
+    // Test harnesses run by their own shell entry points (up.sh, run.sh), with
+    // no package of their own.
+    "environments/**",
+    "verifiers/**"
   ],
 
   // Host tools the runtime shells out to, installed in the container image or

@@ -1,0 +1,296 @@
+# The Slack app test environment. up.sh writes .state/compose.env and starts
+# this file with it; nothing here is meant to be started by hand.
+#
+# Addresses: every service a person or the verifier reaches is published on
+# 127.0.0.1. Each Rome instance runs inside the network namespace of a small
+# forwarder (rome-a-net, rome-b-net) that maps the same loopback ports to Rome
+# Cloud and the fake Slack, so an address such as http://127.0.0.1:47100 names
+# Rome Cloud both on the host and inside an instance. Inside the network the
+# fake Slack also answers as https://slack.com, with a certificate the
+# containers trust through NODE_EXTRA_CA_CERTS.
+
+name: ${SLACKENV_PROJECT}
+
+x-node: &node
+  image: ${SLACKENV_NODE_IMAGE}
+  user: "${HOST_UID}:${HOST_GID}"
+  restart: unless-stopped
+  init: true
+
+x-node-env: &node-env
+  HOME: /state/home
+  COREPACK_HOME: /state/corepack
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+  npm_config_store_dir: /state/pnpm-store
+  NODE_EXTRA_CA_CERTS: /state/trust.pem
+  PATH: /state/bin:/usr/local/bin:/usr/bin:/bin
+  CI: "1"
+
+x-rome: &rome
+  image: ${ROME_IMAGE}
+  restart: "no"
+  cap_add:
+    - SYS_ADMIN
+  shm_size: 1gb
+  security_opt:
+    - apparmor:unconfined
+
+x-rome-env: &rome-env
+  NODE_ENV: production
+  WEB_HOST: 0.0.0.0
+  ROME_DOCKER_USER_MODE: multi
+  WECHAT_USER_ENABLED: "false"
+  ROME_ENABLE_CHROME: "0"
+  ROME_SIGNER_SOCKET: /run/rome-signer/signer.sock
+  PANTHEON_BASE_ORIGIN: http://127.0.0.1:${PANTHEON_PORT}
+  PANTHEON_DOMAIN: 127.0.0.1
+  FEATURE_GATE_ROME_CLOUD_AUTH: "on"
+  NODE_EXTRA_CA_CERTS: /slackenv/trust.pem
+  # Where the product reads Slack's address, if it reads one (the product
+  # builder names the variable). Without it, https://slack.com still reaches
+  # the fake inside this network.
+  SLACK_API_BASE_URL: http://127.0.0.1:${FAKE_SLACK_PORT}
+  # The instances hold a placeholder; model-proxy adds the real credential
+  # and pins the model (DIFFERENCES.md).
+  ANTHROPIC_API_KEY: sk-ant-slackenv-placeholder
+  ANTHROPIC_BASE_URL: http://model-proxy:8080
+
+services:
+  postgres:
+    image: ${SLACKENV_POSTGRES_IMAGE}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pantheon
+      POSTGRES_PASSWORD: pantheon
+      POSTGRES_DB: pantheon
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "pantheon"]
+      interval: 2s
+      retries: 30
+
+  fake-slack:
+    <<: *node
+    command: ["node", "/env/fake-slack/server.mjs"]
+    environment:
+      <<: *node-env
+      FAKE_SLACK_PORT: "8080"
+      FAKE_SLACK_TLS_PORT: "443"
+      FAKE_SLACK_TLS_CERT: /state/tls/tls.crt
+      FAKE_SLACK_TLS_KEY: /state/tls/tls.key
+      FAKE_SLACK_WORKSPACES: /env/config/workspaces.json
+      FAKE_SLACK_STATE_FILE: /state/fake-slack.json
+      FAKE_SLACK_EVENTS_URL: ${FAKE_SLACK_EVENTS_URL}
+      FAKE_SLACK_RETRY_DELAYS_MS: ${FAKE_SLACK_RETRY_DELAYS_MS}
+      SLACK_APP_ID: ${SLACK_APP_ID}
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET}
+    # Lets the non-root process answer on 443 as slack.com.
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    volumes:
+      - ${STATE_DIR}:/state
+      - ${ENV_DIR}:/env:ro
+    ports:
+      - 127.0.0.1:${FAKE_SLACK_PORT}:8080
+    networks:
+      default:
+        aliases: [slack.com, api.slack.com, wss-primary.slack.com]
+
+  relay:
+    <<: *node
+    working_dir: /state/rome-cloud-src/webhook-relay
+    command:
+      - sh
+      - -c
+      - >-
+        corepack enable --install-directory /state/bin &&
+        pnpm install --frozen-lockfile &&
+        exec pnpm exec wrangler dev --ip 0.0.0.0 --port 8787
+        --persist-to /state/relay-data --log-level info
+    environment:
+      <<: *node-env
+      WRANGLER_SEND_METRICS: "false"
+    volumes:
+      - ${STATE_DIR}:/state
+
+  # Rome Cloud's own forwarder: inside it, 127.0.0.1:${FAKE_SLACK_PORT} is the
+  # fake Slack (the address the browser also uses) and 127.0.0.1:${PANTHEON_PORT}
+  # is Rome Cloud itself.
+  pantheon-net:
+    <<: *node
+    command: ["node", "/env/tools/forward.mjs", "${PANTHEON_PORT}=127.0.0.1:3100", "${FAKE_SLACK_PORT}=fake-slack:8080"]
+    volumes:
+      - ${ENV_DIR}:/env:ro
+    ports:
+      - 127.0.0.1:${PANTHEON_PORT}:3100
+
+  pantheon:
+    <<: *node
+    network_mode: service:pantheon-net
+    working_dir: /state/rome-cloud-src
+    command:
+      - sh
+      - -c
+      - >-
+        corepack enable --install-directory /state/bin &&
+        pnpm install --frozen-lockfile &&
+        pnpm db:migrate &&
+        cd packages/pantheon &&
+        exec pnpm exec next dev -H 0.0.0.0 -p 3100
+    env_file:
+      - ${STATE_DIR}/pantheon.env
+    environment:
+      <<: *node-env
+    volumes:
+      - ${STATE_DIR}:/state
+    depends_on:
+      pantheon-net:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  model-proxy:
+    <<: *node
+    command: ["node", "/env/tools/model-proxy.mjs"]
+    environment:
+      <<: *node-env
+      MODEL_PROXY_PORT: "8080"
+      MODEL_PROXY_MODEL: ${AGENT_MODEL}
+      MODEL_PROXY_API_KEY: ${MODEL_PROXY_API_KEY:-}
+      MODEL_PROXY_OAUTH_TOKEN: ${MODEL_PROXY_OAUTH_TOKEN:-}
+      # ctl.sh port's jobs (tools/port-script.mjs); the host reaches only this.
+      MODEL_PROXY_CONTROL_PORT: "8081"
+    ports:
+      - 127.0.0.1:${MODEL_PROXY_HOST_PORT}:8081
+    volumes:
+      - ${ENV_DIR}:/env:ro
+      # NODE_EXTRA_CA_CERTS names this file, so a host CA reaches upstream calls.
+      - ${STATE_DIR}/trust.pem:/state/trust.pem:ro
+
+  rome-a-net:
+    <<: *node
+    command: ["node", "/env/tools/forward.mjs", "${PANTHEON_PORT}=pantheon-net:3100", "${FAKE_SLACK_PORT}=fake-slack:8080"]
+    volumes:
+      - ${ENV_DIR}:/env:ro
+    ports:
+      - 127.0.0.1:${ROME_A_PORT}:8080
+
+  rome-a:
+    <<: *rome
+    network_mode: service:rome-a-net
+    environment:
+      <<: *rome-env
+      PANTHEON_INSTANCE_ORIGIN: http://127.0.0.1:${ROME_A_PORT}
+      # Rome Cloud sign-in is gated per instance slug; without one a fresh
+      # instance refuses it. The explicit origin above still wins.
+      PANTHEON_SLUG: slackenv-a
+      ROME_JWT_SECRET: ${ROME_A_JWT_SECRET}
+    volumes:
+      - rome-a-app:/app
+      - rome-a-home:/home/rome
+      - rome-a-user:/home/user
+      - rome-a-signer-sock:/run/rome-signer:ro
+      - ${STATE_DIR}/trust.pem:/slackenv/trust.pem:ro
+    depends_on:
+      - rome-a-net
+      - rome-a-signer
+
+  rome-a-signer:
+    image: ${ROME_IMAGE}
+    entrypoint: ["node", "/opt/rome/packages/signer/dist/main.js"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    network_mode: none
+    restart: unless-stopped
+    environment:
+      SIGNER_AUDIENCE: http://127.0.0.1:${PANTHEON_PORT}
+      SIGNER_KEY_DIR: /keys
+      SIGNER_SOCKET: /run/rome-signer/signer.sock
+    volumes:
+      - rome-a-signer-key:/keys
+      - rome-a-signer-sock:/run/rome-signer
+
+  rome-b-net:
+    <<: *node
+    command: ["node", "/env/tools/forward.mjs", "${PANTHEON_PORT}=pantheon-net:3100", "${FAKE_SLACK_PORT}=fake-slack:8080"]
+    volumes:
+      - ${ENV_DIR}:/env:ro
+    ports:
+      - 127.0.0.1:${ROME_B_PORT}:8080
+
+  rome-b:
+    <<: *rome
+    network_mode: service:rome-b-net
+    environment:
+      <<: *rome-env
+      PANTHEON_INSTANCE_ORIGIN: http://127.0.0.1:${ROME_B_PORT}
+      # Rome Cloud sign-in is gated per instance slug; without one a fresh
+      # instance refuses it. The explicit origin above still wins.
+      PANTHEON_SLUG: slackenv-b
+      ROME_JWT_SECRET: ${ROME_B_JWT_SECRET}
+    volumes:
+      - rome-b-app:/app
+      - rome-b-home:/home/rome
+      - rome-b-user:/home/user
+      - rome-b-signer-sock:/run/rome-signer:ro
+      - ${STATE_DIR}/trust.pem:/slackenv/trust.pem:ro
+    depends_on:
+      - rome-b-net
+      - rome-b-signer
+
+  rome-b-signer:
+    image: ${ROME_IMAGE}
+    entrypoint: ["node", "/opt/rome/packages/signer/dist/main.js"]
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    network_mode: none
+    restart: unless-stopped
+    environment:
+      SIGNER_AUDIENCE: http://127.0.0.1:${PANTHEON_PORT}
+      SIGNER_KEY_DIR: /keys
+      SIGNER_SOCKET: /run/rome-signer/signer.sock
+    volumes:
+      - rome-b-signer-key:/keys
+      - rome-b-signer-sock:/run/rome-signer
+
+  # A browser for the verifier to drive (env.json browser): Playwright's own
+  # image, at the version rome pins, serving `playwright run-server`. It shares
+  # the host's network, so the dashboards' own origins (127.0.0.1:<port>) and
+  # the guardians' cookies work as they are.
+  browser:
+    image: ${SLACKENV_PLAYWRIGHT_IMAGE}
+    restart: unless-stopped
+    network_mode: host
+    init: true
+    shm_size: 1gb
+    environment:
+      HOME: /tmp
+    command:
+      - npx
+      - -y
+      - playwright@${SLACKENV_PLAYWRIGHT_VERSION}
+      - run-server
+      - --host
+      - 127.0.0.1
+      - --port
+      - "${BROWSER_PORT}"
+
+volumes:
+  postgres:
+  rome-a-app:
+  rome-a-home:
+  rome-a-user:
+  rome-a-signer-key:
+  rome-a-signer-sock:
+  rome-b-app:
+  rome-b-home:
+  rome-b-user:
+  rome-b-signer-key:
+  rome-b-signer-sock:

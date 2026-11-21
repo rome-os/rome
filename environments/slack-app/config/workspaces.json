@@ -1,0 +1,175 @@
+{
+  "workspaces": [
+    {
+      "id": "TA0000AAAA",
+      "name": "Acme",
+      "domain": "acme",
+      "members": [
+        {
+          "id": "UA0000GUARD",
+          "name": "alice",
+          "real_name": "Alice Guardian",
+          "email": "alice@acme.test",
+          "is_admin": true,
+          "is_owner": true
+        },
+        {
+          "id": "UA0000BOB01",
+          "name": "bob",
+          "real_name": "Bob Member",
+          "email": "bob@acme.test"
+        },
+        {
+          "id": "UA0000CARA1",
+          "name": "cara",
+          "real_name": "Cara Member",
+          "email": "cara@acme.test"
+        },
+        {
+          "id": "UA0000GST01",
+          "name": "gil",
+          "real_name": "Gil Guest",
+          "email": "gil@guest.test",
+          "is_restricted": true
+        }
+      ],
+      "channels": [
+        {
+          "id": "CA0000GENRL",
+          "name": "general",
+          "members": ["UA0000GUARD", "UA0000BOB01", "UA0000CARA1"]
+        },
+        {
+          "id": "CA0000NEWS1",
+          "name": "news",
+          "members": ["UA0000GUARD", "UA0000BOB01", "UA0000CARA1"],
+          "seed_messages": [
+            {
+              "ts": "1700000000.000100",
+              "user": "UA0000BOB01",
+              "text": "The tangerine kiosk opens on Fridays."
+            },
+            {
+              "ts": "1700000000.000300",
+              "user": "UA0000CARA1",
+              "text": "The lighthouse tour moved to the second Sunday."
+            },
+            {
+              "ts": "1700000000.000400",
+              "user": "UA0000CARA1",
+              "text": "Who is bringing lanterns to the harbour fair?"
+            },
+            {
+              "ts": "1700000000.000500",
+              "user": "UA0000BOB01",
+              "thread_ts": "1700000000.000400",
+              "text": "I'll bring six paper lanterns."
+            },
+            {
+              "ts": "1700000000.000600",
+              "user": "UA0000GUARD",
+              "thread_ts": "1700000000.000400",
+              "text": "Then I'll bring the candles."
+            }
+          ]
+        },
+        {
+          "id": "CA0000QUIET",
+          "name": "quiet",
+          "bot_member": false,
+          "members": ["UA0000BOB01", "UA0000CARA1"],
+          "seed_messages": [
+            {
+              "ts": "1700000000.000200",
+              "user": "UA0000CARA1",
+              "text": "The marmalade vault code stays here."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "TB0000BBBB",
+      "name": "Bayside",
+      "domain": "bayside",
+      "members": [
+        {
+          "id": "UB0000GUARD",
+          "name": "dana",
+          "real_name": "Dana Guardian",
+          "email": "dana@bayside.test",
+          "is_admin": true,
+          "is_owner": true
+        },
+        {
+          "id": "UB0000ERIN1",
+          "name": "erin",
+          "real_name": "Erin Member",
+          "email": "erin@bayside.test"
+        },
+        {
+          "id": "UB0000FINN1",
+          "name": "finn",
+          "real_name": "Finn Member",
+          "email": "finn@bayside.test"
+        },
+        {
+          "id": "UB0000GST01",
+          "name": "ivy",
+          "real_name": "Ivy Guest",
+          "email": "ivy@guest.test",
+          "is_restricted": true
+        }
+      ],
+      "channels": [
+        {
+          "id": "CB0000GENRL",
+          "name": "general",
+          "members": ["UB0000GUARD", "UB0000ERIN1", "UB0000FINN1"]
+        }
+      ]
+    },
+    {
+      "id": "TC0000CCCC",
+      "name": "Cobalt",
+      "domain": "cobalt",
+      "members": [
+        {
+          "id": "UC0000OWNR1",
+          "name": "gale",
+          "real_name": "Gale Owner",
+          "email": "gale@cobalt.test",
+          "is_admin": true,
+          "is_owner": true
+        },
+        {
+          "id": "UC0000HANK1",
+          "name": "hank",
+          "real_name": "Hank Member",
+          "email": "hank@cobalt.test"
+        },
+        {
+          "id": "UC0000GST01",
+          "name": "jo",
+          "real_name": "Jo Guest",
+          "email": "jo@guest.test",
+          "is_restricted": true,
+          "is_ultra_restricted": true
+        }
+      ],
+      "channels": [
+        {
+          "id": "CC0000GENRL",
+          "name": "general",
+          "members": ["UC0000OWNR1", "UC0000HANK1"]
+        },
+        {
+          "id": "GC0000BORD1",
+          "name": "board",
+          "is_private": true,
+          "members": ["UC0000OWNR1"]
+        }
+      ]
+    }
+  ]
+}
