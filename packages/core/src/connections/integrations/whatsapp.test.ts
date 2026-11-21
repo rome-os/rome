@@ -318,7 +318,7 @@ describe("whatsapp inbound delivery", () => {
     const { talker, handlers } = realTalker();
     const delivered: unknown[] = [];
     talker.start(
-      (msg) => delivered.push(channelMessageOf(msg, "whatsapp")),
+      (msg) => void delivered.push(channelMessageOf(msg, "whatsapp")),
       () => {},
     );
     await rs.waitFor(() => expect(handlers.has("messages.upsert")).toBe(true));

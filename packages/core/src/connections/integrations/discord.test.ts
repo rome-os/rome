@@ -391,7 +391,7 @@ describe("discord inbound delivery", () => {
     });
     const delivered: connections.Message[] = [];
     talker.start(
-      (msg) => delivered.push(msg),
+      (msg) => void delivered.push(msg),
       () => {},
     );
 

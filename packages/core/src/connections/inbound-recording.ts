@@ -14,6 +14,7 @@ import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn } from "../chats/storage/place.js";
 import { createLogger } from "../logger.js";
 import type { ChannelChatAdapter, ChatAdapters, Inbound } from "./chat-adapter.js";
+import { DELIVERY_ACCEPT_TIMEOUT_MS, NotRecordedInTime, RecordingStopped } from "./types.js";
 
 const log = createLogger("inbound-recording");
 
@@ -33,6 +34,9 @@ export interface InboundRecordingDeps {
    *  loaded is still listened to, so what it receives is recorded and
    *  Participation decides whether anything answers it. */
   listens?: (connectionId: string) => boolean;
+  /** How long a message may wait to be recorded before its acceptance
+   *  rejects. Defaults to {@link DELIVERY_ACCEPT_TIMEOUT_MS}. */
+  acceptTimeoutMs?: number;
 }
 
 export interface InboundRecording {
@@ -47,6 +51,21 @@ export interface InboundRecording {
   heard(channel: string, id: number): InboundEvent | undefined;
   /** Record `channels` too, such as a second bot whose Talk first unlocked. */
   addChannels(channels: readonly Channel[]): void;
+  /**
+   * Settles once message `messageId`, said in `chatId` on `channel` through
+   * Connection `connectionId`, is on record in its chat, whether recorded now
+   * or found there already. Call it before the message is handed to the
+   * channel's subscribers. It resolves at once when recording never covers
+   * `channel`, and when the message reaches an account Rome does not listen
+   * to. It rejects with RecordingStopped when `channel` is covered but
+   * nobody listens now, as during a hook swap, and when recording stops
+   * before the message is on record. It rejects when the message is dropped
+   * or fails before it is on record, or is not on record within the timeout.
+   */
+  accepted(
+    channel: string,
+    ref: { connectionId: string; chatId: string; messageId: string },
+  ): Promise<void>;
 }
 
 /**
@@ -66,6 +85,42 @@ export function inboundRecording(
    *  what the old one still delivers is not recorded under the new one. */
   const recording = new Map<string, { readonly adapter: ChannelChatAdapter }>();
   let listeners = 0;
+  /** The deliveries waiting for their message to be on record, by channel,
+   *  Connection, chat and message id. */
+  const waiting = new Map<
+    string,
+    Array<{
+      resolve: () => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }>
+  >();
+  const waitKey = (
+    channel: string,
+    ref: { connectionId: string; chatId: string; messageId: string },
+  ): string => [channel, ref.connectionId, ref.chatId, ref.messageId].join("\0");
+  const settle = (key: string, error?: Error): void => {
+    const waiters = waiting.get(key);
+    if (!waiters) return;
+    waiting.delete(key);
+    for (const waiter of waiters) {
+      clearTimeout(waiter.timer);
+      if (error) waiter.reject(error);
+      else waiter.resolve();
+    }
+  };
+  const settleInbound = (message: Inbound, error?: Error): void => {
+    const { via } = message;
+    settle(
+      waitKey(via.channel, {
+        connectionId: via.connectionId,
+        chatId: via.address,
+        messageId: via.messageId,
+      }),
+      error,
+    );
+  };
+
   /** The adapter's keys of each message being heard, by channel and recorded
    *  id. */
   const hearing = new Map<string, { chat: string; key: string }>();
@@ -118,10 +173,15 @@ export function inboundRecording(
     const { via } = message;
     // A message still queued when the last listener left is dropped, as it
     // is for any hook swap: nobody is there to hear it, even once a new
-    // hook listens again.
+    // hook listens again. Its delivery was refused when recording stopped;
+    // a waiter now is a redelivery under the new subscription, which records
+    // it.
     if (recording.get(via.channel) !== subscription) return null;
     // What reaches an account Rome does not listen to never forms a chat.
-    if (deps.listens?.(via.connectionId) === false) return null;
+    if (deps.listens?.(via.connectionId) === false) {
+      settleInbound(message);
+      return null;
+    }
     const chat = deps.chats.start(message.chat, message.chatKind, message.chatName);
     // Recorded and raised in one step, with nothing run in between, so
     // MessageSaid's first listener acts before anything reads the message. A
@@ -143,6 +203,8 @@ export function inboundRecording(
     const latelyKey = `${chat.ref.id}\0${message.key}`;
     const hearer = `${via.account.platform}\0${via.account.id}`;
     const recorded = deps.messages.record(said);
+    // On record, now or already: what its delivery waits for.
+    settleInbound(message);
     if (recorded === null) {
       // On record already. Another of Rome's accounts heard it first, and
       // this account decides its own wake, on the same record. A redelivery
@@ -165,9 +227,13 @@ export function inboundRecording(
     subscription: { readonly adapter: ChannelChatAdapter },
   ): Promise<number | null> => {
     const key = `${message.chat.platform}\0${message.chat.externalId}\0${message.thread?.id ?? ""}`;
-    const recorded = (tails.get(key) ?? Promise.resolve(null)).then(() =>
-      recordOne(message, subscription),
-    );
+    const recorded = (tails.get(key) ?? Promise.resolve(null))
+      .then(() => recordOne(message, subscription))
+      .catch((error: unknown) => {
+        // Settles nothing a successful record settled already.
+        settleInbound(message, error instanceof Error ? error : new Error(String(error)));
+        throw error;
+      });
     // A failed recording is the adapter's to report, and does not hold up the
     // place's next message.
     const tail = recorded.catch(() => null);
@@ -209,6 +275,9 @@ export function inboundRecording(
         if (listeners > 0) return;
         for (const { adapter } of recording.values()) void adapter.stop();
         recording.clear();
+        for (const key of [...waiting.keys()]) {
+          settle(key, new RecordingStopped());
+        }
       };
     },
     heard(channel, id) {
@@ -218,6 +287,33 @@ export function inboundRecording(
     addChannels(added) {
       known.push(...added);
       if (listeners > 0) for (const channel of added) subscribe(channel);
+    },
+    accepted(channel, ref) {
+      if (!recording.has(channel)) {
+        // A channel recording covers but nobody listens to now, as between a
+        // hook's swap and its return, records nothing until it is back: the
+        // platform should deliver the message again. Only a channel recording
+        // never covers counts its messages as accepted.
+        const covered = known.some((each) => each.name === channel && each.inbound);
+        return covered ? Promise.reject(new RecordingStopped()) : Promise.resolve();
+      }
+      const key = waitKey(channel, ref);
+      return new Promise<void>((resolve, reject) => {
+        const timeoutMs = deps.acceptTimeoutMs ?? DELIVERY_ACCEPT_TIMEOUT_MS;
+        const timer = setTimeout(() => {
+          const waiters = waiting.get(key);
+          const index = waiters?.findIndex((waiter) => waiter.timer === timer) ?? -1;
+          if (waiters && index >= 0) {
+            waiters.splice(index, 1);
+            if (waiters.length === 0) waiting.delete(key);
+          }
+          log.warn("inbound message not recorded in time", { channel, ...ref, timeoutMs });
+          reject(new NotRecordedInTime(timeoutMs));
+        }, timeoutMs);
+        const waiters = waiting.get(key) ?? [];
+        waiters.push({ resolve, reject, timer });
+        waiting.set(key, waiters);
+      });
     },
   };
 }
