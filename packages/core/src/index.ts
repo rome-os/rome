@@ -1352,6 +1352,10 @@ async function main() {
   const concierge: ConciergeService = new ConciergeService({
     skillCatalog,
     settingsRepo,
+    // Who answers a chat on a connection, as the inbox routes it: the
+    // account's agent (a task started there reports there when it is the
+    // Concierge).
+    channelAgentOf: byChannel(channelRecords, accountAgentResolver(accountAgents, agentLoader)),
     owners: createConciergeOwners({
       settingsRepo,
       visitorProfiles: new VisitorProfilesRepository(db),
