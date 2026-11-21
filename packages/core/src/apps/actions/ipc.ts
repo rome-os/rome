@@ -105,7 +105,6 @@ export function isIpcMessage(message: unknown): message is IpcMessage {
  *  a gated call missing here is open to any turn. */
 const CALLER_GATED_CALLS = new Set([
   "channels.query",
-  "channels.search",
   "channels.chats",
   "channels.send",
   "notify.send",

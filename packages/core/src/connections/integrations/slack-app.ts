@@ -3,16 +3,13 @@
 // The guardian adds Rome to their Slack workspace in one sign-in: Connect,
 // Slack's approve screen, done. Nothing is pasted and no Slack app is made by
 // the guardian. The connection's account is the app's bot in that workspace,
-// named by team id and bot user id. It
-// takes an agent like any bot, and a new one starts with the Concierge.
+// named by team id and bot user id. It takes an agent like any bot, and a new
+// one starts with the Concierge. It is Rome's only connection to Slack.
 //
 // Rome Cloud holds the app's secrets, runs the exchange with Slack, and binds
 // the workspace to this instance (one workspace, one instance). The instance
 // holds the bot token, drains the workspace's relay mailbox for its events
 // (`kinds/slack-app/slack-app.ts`) and replies through Slack's Web API.
-//
-// This kind is separate from `slack` (Rome Cloud OAuth that acts for the
-// guardian), which keeps working.
 
 import type { ChatId } from "@rome-os/app-runtime";
 import { createHash, randomBytes } from "node:crypto";
@@ -410,13 +407,8 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
     },
     capabilities: {
       talker: {
-        // The connection reads a chat from its own copy where that holds the
-        // whole chat, and from Slack where it does not (slack-app/timeline.ts).
+        // Every read asks Slack (slack-app/timeline.ts).
         reads: true,
-        // The account list marks the account searchable by this flag, even
-        // while the connection is locked. That is how the connector finds the
-        // app's connection to search through.
-        searches: true,
         build(cred, kit): Talker {
           const material = materialOf(cred.material);
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
@@ -507,18 +499,6 @@ export function makeSlackAppDescriptor(input: SlackAppDescriptorDeps): Connectio
                   })),
                   ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
                 };
-              },
-            },
-            search: {
-              async search(input) {
-                try {
-                  return await adapter.search(input);
-                } catch (error) {
-                  if (isSlackCredentialError(error)) {
-                    throw new CredentialRejected({ grant: "bot", cause: error });
-                  }
-                  throw error;
-                }
               },
             },
             directMessaging: {

@@ -19,14 +19,10 @@ import {
 } from "../../api/shopify-proxy.js";
 import {
   SLACK_APP_CONNECT_HINT,
-  SLACK_APP_NOT_CONNECTED,
-  SLACK_BOTH_ON_APP,
-  SLACK_NO_SIGN_IN,
   SLACK_APP_NOT_READY,
   slackAppConnection,
   slackAppProxyCall,
 } from "../../api/slack-app-proxy.js";
-import { readSlackOAuthTokens, slackProxyCall } from "../../api/slack-proxy.js";
 import {
   buildProxyEndpoint,
   composioActionError,
@@ -103,12 +99,6 @@ const inputSchema = z.object({
     .record(z.string(), z.string())
     .optional()
     .describe("Extra request headers as { name: value }, e.g. { 'Notion-Version': '2022-06-28' }."),
-  via: z
-    .enum(["app", "sign_in"])
-    .optional()
-    .describe(
-      "Slack only: which Slack connection makes the call. 'app' is Rome's own Slack app; 'sign_in' is the older Slack sign-in. Omit it to take the app when it is connected; the result's `via` names the one taken.",
-    ),
 });
 
 export function createAction(
@@ -118,7 +108,7 @@ export function createAction(
   return defineAction({
     config,
     schema: inputSchema,
-    execute: async ({ toolkit, path, host, method, body, query, headers, via }) => {
+    execute: async ({ toolkit, path, host, method, body, query, headers }) => {
       // Shopify's API host is the connected store's own domain, which only the
       // token file knows, so read it before assembling the endpoint. The store
       // domain isn't secret; the token is not used until the endpoint clears
@@ -173,90 +163,25 @@ export function createAction(
         }
       }
 
-      // Slack is likewise brokered by Rome's own integration (Rome Cloud OAuth),
-      // not Composio: core writes the credential to a token file on connect and
-      // the connector proxies directly with the guardian's Slack OAuth token. The
-      // endpoint has already cleared the host allowlist above, so the token is
-      // only ever sent to a slack.com host.
+      // Slack goes through Rome's own Slack app connection, which keeps its
+      // token to itself, so this app hands it the call. The endpoint has
+      // already cleared the host allowlist above.
       if (toolkit.toLowerCase() === SLACK_TOOLKIT) {
-        // Rome reaches Slack two ways: its own Slack app, which keeps its
-        // token to itself, and the older Slack sign-in, whose token sits in a
-        // file. A call that names neither takes the app when it is connected,
-        // since it replaces the sign-in, and says so when both are. An app
-        // that cannot make the call fails it: only a call naming the sign-in
-        // goes through the sign-in.
-        const tokens = await readSlackOAuthTokens();
         const channels = deps.channelsService;
         const app = channels ? await slackAppConnection(channels) : null;
-        const both = tokens !== null && app !== null;
-        const route = via ?? (app ? "app" : "sign_in");
-        if (route === "app") {
-          if (!channels || !app) {
-            return {
-              status: "error",
-              error: tokens ? SLACK_APP_NOT_CONNECTED : SLACK_APP_CONNECT_HINT,
-            };
-          }
-          const account = app.account;
-          if (!account) {
-            return {
-              status: "error",
-              error: both ? `${SLACK_APP_NOT_READY} ${SLACK_BOTH_ON_APP}` : SLACK_APP_NOT_READY,
-            };
-          }
-          // A parameter can come in the path's query string as well as in
-          // `query`, as the sign-in path takes it; `query` wins a clash.
-          const url = new URL(endpoint);
-          const result = await slackAppProxyCall({
-            channels,
-            account,
-            method,
-            path: url.pathname,
-            body,
-            query: { ...Object.fromEntries(url.searchParams), ...query },
-          });
-          if (result.status === "error") {
-            return both && via === undefined
-              ? { ...result, error: `${result.error} ${SLACK_BOTH_ON_APP}` }
-              : result;
-          }
-          return {
-            ...result,
-            data: { ...result.data, via: "app", ...(both ? { note: SLACK_BOTH_ON_APP } : {}) },
-          };
-        }
-        if (!tokens) {
-          return {
-            status: "error",
-            error: via === "sign_in" ? SLACK_NO_SIGN_IN : SLACK_APP_CONNECT_HINT,
-          };
-        }
-        try {
-          const res = await slackProxyCall({ tokens, endpoint, method, body, query, headers });
-          // Slack returns HTTP 200 even on a logical failure — `ok: false` in the
-          // body is the real signal. Fail closed on it (mirroring the non-2xx
-          // mapping) so a refusal can't be read as success via `.data`.
-          if (res.status >= 200 && res.status < 300) {
-            const okFlag = (res.data as { ok?: unknown } | null)?.ok;
-            if (okFlag === false) {
-              const slackError = (res.data as { error?: unknown } | null)?.error;
-              return {
-                status: "error",
-                error: `slack API returned ok:false for ${method} ${endpoint}: ${
-                  typeof slackError === "string" ? slackError : JSON.stringify(res.data)
-                }`,
-              };
-            }
-          }
-          const mapped = mapProxyResponse(toolkit, method, endpoint, res);
-          return mapped.status === "ok"
-            ? { ...mapped, data: { ...mapped.data, via: "sign_in" } }
-            : mapped;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          log.error("slack proxy call failed", { endpoint, method, error: message });
-          return { status: "error", error: `Slack proxy call failed: ${message}` };
-        }
+        if (!channels || !app) return { status: "error", error: SLACK_APP_CONNECT_HINT };
+        if (!app.account) return { status: "error", error: SLACK_APP_NOT_READY };
+        // A parameter can come in the path's query string as well as in
+        // `query`; `query` wins a clash.
+        const url = new URL(endpoint);
+        return slackAppProxyCall({
+          channels,
+          account: app.account,
+          method,
+          path: url.pathname,
+          body,
+          query: { ...Object.fromEntries(url.searchParams), ...query },
+        });
       }
 
       // Shopify is brokered by Rome's own integration (Rome Cloud OAuth), not

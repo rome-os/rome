@@ -28,7 +28,6 @@ import {
   applyGuardianMappingWithinTx,
   planGuardianMapping,
 } from "../../people/guardian-mapping.js";
-import { NotOfferedError } from "../errors.js";
 import type { GiveGrantOptions } from "../registry.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
 import { SetupAbortError, SetupSession, type SetupInputOutcome } from "./session.js";
@@ -176,9 +175,6 @@ export class SetupManager {
     const descriptor = this.#deps.registry.getDescriptor(target.connectionKind);
     const fn = descriptor?.grant === grant ? descriptor.auth.setup : undefined;
     if (!fn) throw new NoSetupError(target.connectionKind, grant);
-    if (descriptor?.offered === false && target.connectionId === undefined) {
-      throw new NotOfferedError(target.connectionKind);
-    }
 
     const cid = randomUUID();
     const session = new SetupSession({

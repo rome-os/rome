@@ -751,8 +751,6 @@ async function main() {
     registry: connectionRegistry,
     channelOf,
     platformOf: (name: string) => channelRecords.platformOf(name),
-    searches: (connectionKind) =>
-      connectionRegistry.getDescriptor(connectionKind)?.capabilities.talker?.searches === true,
     accounts,
   });
   const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);

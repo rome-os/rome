@@ -28,19 +28,16 @@ function channels(overrides: Partial<ChannelsService> = {}) {
   return {
     list: rs.fn(async () => [
       {
-        name: "slack",
-        account: { platform: "slack", id: "T1/BOLD" },
-        platform: "slack",
+        name: "discord-1",
+        account: { platform: "discord", id: "B9" },
+        platform: "discord",
         sendable: true,
       },
-      { name: "slack_app", account: APP, platform: "slack", sendable: true, searchable: true },
+      // A kind that takes an agent gets an opaque channel id.
+      { name: "3f1c9a52-opaque", account: APP, platform: "slack", sendable: true },
     ]),
     send: rs.fn(async () => ({ chatId: "D1" as ChatId, messageId: "1700000000.000200" })),
     query: rs.fn(async () => [said("1700000000.000300"), said("1700000000.000100")]),
-    search: rs.fn(async () => ({
-      messages: [said("1700000000.000100", { chatId: "C1:1699999999.000001" as ChatId })],
-      coverage: "what Rome kept",
-    })),
     ...overrides,
   } satisfies ChannelsService;
 }
@@ -53,13 +50,12 @@ const call = (
 ) => slackAppProxyCall({ channels: service, account: APP, path, body, query });
 
 describe("Slack's Web API through Rome's Slack app", () => {
-  it("finds the Slack account whose channel searches, not the Slack bot's", async () => {
+  // Rome's Slack app is the one kind of connection on Slack with a talker.
+  it("finds the Slack app as the one channel on Slack, whatever it is named", async () => {
     expect(await slackAppConnection(channels())).toEqual({ account: APP });
     expect(await slackAppConnection(channels({ list: async () => [] }))).toBeNull();
     const locked = channels({
-      list: async () => [
-        { name: "slack_app", platform: "slack", sendable: true, searchable: true },
-      ],
+      list: async () => [{ name: "3f1c9a52-opaque", platform: "slack", sendable: true }],
     });
     expect(await slackAppConnection(locked)).toEqual({ account: null });
   });
@@ -210,39 +206,25 @@ describe("Slack's Web API through Rome's Slack app", () => {
     expect((result.data.data as { messages: unknown[] }).messages).toHaveLength(1);
   });
 
-  it("answers search.messages with its matches and says what the search covered", async () => {
-    const service = channels();
-
-    const result = await call(service, "/api/search.messages", undefined, {
-      query: "launch",
-      count: "5",
-    });
-
-    expect(service.search).toHaveBeenCalledWith(APP, { text: "launch", limit: 5 });
-    if (result.status !== "ok") throw new Error(result.error);
-    expect(result.data.data).toMatchObject({
-      ok: true,
-      query: "launch",
-      coverage: "what Rome kept",
-      messages: { total: 1, matches: [{ ts: "1700000000.000100", channel: { id: "C1" } }] },
-    });
-  });
-
   it("refuses any other method, naming what it offers, and reaches nothing", async () => {
     const service = channels();
 
-    for (const path of ["/api/auth.test", "/api/users.info", "/api/reactions.add"]) {
+    for (const path of [
+      "/api/auth.test",
+      "/api/users.info",
+      "/api/reactions.add",
+      "/api/search.messages",
+    ]) {
       const result = await call(service, path, {});
       expect(result).toEqual({
         status: "error",
         error: expect.stringContaining(
-          `isn't offered on Rome's Slack app connection. It offers chat.postMessage (send), conversations.history and conversations.replies (read), conversations.list`,
+          `isn't offered on Rome's Slack app connection. It offers chat.postMessage (send), conversations.history and conversations.replies (read), and conversations.list`,
         ),
       });
     }
     expect(service.send).not.toHaveBeenCalled();
     expect(service.query).not.toHaveBeenCalled();
-    expect(service.search).not.toHaveBeenCalled();
   });
 
   it("fails closed when the connection refuses, or the call lacks what the method takes", async () => {
@@ -258,7 +240,6 @@ describe("Slack's Web API through Rome's Slack app", () => {
         'Slack "chat.postMessage" through Rome\'s Slack app failed: No connection reaches account',
     });
     expect((await call(service, "/api/chat.postMessage", { channel: "D1" })).status).toBe("error");
-    expect((await call(service, "/api/search.messages", {})).status).toBe("error");
   });
 
   it("reads a thread with conversations.replies, oldest first, and goes on from its cursor until a page is empty", async () => {

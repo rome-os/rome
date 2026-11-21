@@ -188,3 +188,7 @@ Nobody picks an account's agent, and the dashboard has no page for it. An accoun
 ## Amendment (2026-11-21): the Slack bot connection is removed
 
 Rome's Slack app is Slack's only chat connection. Rome does not offer `slack_bot`, a Slack app the guardian made from a manifest link and connected by pasting its bot token and app-level token. Channel records stored for `slack_bot` stay and still map to the `slack` platform. Rome skips their Connections at boot, as it skips any Connection whose kind is not registered. Their grants still hold the pasted tokens, unread, until an operator deletes them.
+
+## Amendment (2026-11-21): the Slack sign-in connection is removed
+
+Rome's Slack app is Rome's only connection to Slack. Rome does not offer `slack`, the Rome Cloud OAuth connection that acted in a workspace with the guardian's own Slack tokens. An agent acts on Slack through the app, which keeps its token to itself. Rome skips a stored `slack` Connection at boot, as it skips any Connection whose kind is not registered, and its grant still holds the tokens, unread, until an operator deletes them.

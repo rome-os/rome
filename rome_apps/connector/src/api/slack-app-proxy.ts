@@ -4,47 +4,35 @@ import type { Account, ChannelMessage, ChannelsService, ChatId } from "@rome-os/
  * Slack's Web API methods, answered through Rome's own Slack app connection
  * instead of a token. The connection keeps its token to itself, so this app
  * never holds one: it hands each call to the channels service, which sends,
- * reads and searches as the connection's account. Only the methods below are
- * offered; any other is refused, naming them.
+ * and reads as the connection's account. Only the methods below are offered;
+ * any other is refused, naming them.
  */
 
-/** What an agent is told when no Slack connection answers. */
+/** What an agent is told when Rome's Slack app is not connected. */
 export const SLACK_APP_CONNECT_HINT =
   "Slack is connected by Rome itself, not by this app. Ask the guardian to connect Rome's Slack app in Settings → Connections, then retry.";
 
-/** What a call that named no Slack connection says when both are connected. */
-export const SLACK_BOTH_ON_APP =
-  'Both Slack connections are connected: this call went through Rome\'s Slack app, which replaces the Slack sign-in. Pass via: "sign_in" to make it through the sign-in instead.';
-
-/** What a call that asked for the Slack app says when only the Slack sign-in
- *  is connected: it names the way that works, and never takes it itself. */
-export const SLACK_APP_NOT_CONNECTED =
-  'Rome\'s Slack app is not connected, but the Slack sign-in is. Omit via, or pass via: "sign_in", to go through the sign-in.';
-
-/** What a call that asked for the Slack sign-in says when there is none. */
-export const SLACK_NO_SIGN_IN =
-  'The Slack sign-in is not connected. Omit via, or pass via: "app", to go through Rome\'s Slack app.';
-
 const OFFERED =
-  "It offers chat.postMessage (send), conversations.history and conversations.replies (read), conversations.list (the channels the app is a member of) and search.messages (a match over one named channel's newest page of up to 15 messages). A channel can be named by its id or as #name.";
+  "It offers chat.postMessage (send), conversations.history and conversations.replies (read), and conversations.list (the channels the app is a member of). A channel can be named by its id or as #name.";
 
-/** What a call that takes the Slack app says while the app's connection
- *  names no account yet, such as while it is locked. */
+/** What a call says while the app's connection names no account yet, such
+ *  as while it is locked. */
 export const SLACK_APP_NOT_READY =
   "Rome's Slack app is connected but cannot make calls now: its connection reports no Slack account yet. Ask the guardian to check it in Settings → Connections, then retry.";
 
 /** Rome's Slack app connection, with the Slack account it is, or null when
- *  none is connected. It is the Slack channel that searches: the Slack bot
- *  connection, also on Slack, does not. A host declares that whether or not
- *  the connection is locked, so a locked app is still found here, with no
- *  account when it names none. */
+ *  it is not connected. A locked connection is listed too, with no account
+ *  when it names none.
+ *
+ *  This takes the one channel on the Slack platform. That holds because
+ *  Rome's Slack app is the only kind of connection on Slack with a talker,
+ *  and one instance connects one workspace. A second such kind would need a
+ *  way to tell the two apart here. */
 export async function slackAppConnection(
   channels: ChannelsService,
 ): Promise<{ account: Account | null } | null> {
   const summaries = await channels.list();
-  const app = summaries.find(
-    (summary) => summary.platform === "slack" && summary.searchable === true,
-  );
+  const app = summaries.find((summary) => summary.platform === "slack");
   return app ? { account: app.account ?? null } : null;
 }
 
@@ -118,13 +106,12 @@ function wireOf(message: ChannelMessage) {
 }
 
 /** The HTTP verbs each offered method takes, as Slack's own Web API takes
- *  them: a send only by POST, a read or a search by GET or POST. */
+ *  them: a send only by POST, a read by GET or POST. */
 const VERBS: Record<string, readonly string[]> = {
   "chat.postMessage": ["POST"],
   "conversations.history": ["GET", "POST"],
   "conversations.replies": ["GET", "POST"],
   "conversations.list": ["GET", "POST"],
-  "search.messages": ["GET", "POST"],
 };
 
 function ok(data: Record<string, unknown>): SlackAppProxyResult {
@@ -268,27 +255,6 @@ export async function slackAppProxyCall(params: {
             is_member: true,
           })),
           response_metadata: { next_cursor: page.nextCursor ?? "" },
-        });
-      }
-      case "search.messages": {
-        const text = stringArg(args, "query");
-        if (!text) return refused('Slack "search.messages" on Rome\'s Slack app takes "query".');
-        if (!channels.search) return refused("This Rome searches no Slack messages.");
-        const count = numberArg(args, "count");
-        const channel = stringArg(args, "channel");
-        const found = await channels.search(account, {
-          text,
-          ...(channel ? { chatId: channel as ChatId } : {}),
-          ...(count ? { limit: count } : {}),
-        });
-        const matches = found.messages.map((message) => ({
-          ...wireOf(message),
-          channel: { id: String(message.chatId).split(":")[0] },
-        }));
-        return ok({
-          query: text,
-          messages: { total: matches.length, matches },
-          coverage: found.coverage,
         });
       }
       default:

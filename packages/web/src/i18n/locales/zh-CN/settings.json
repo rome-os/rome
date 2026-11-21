@@ -258,15 +258,6 @@
           "privacyNote": "你在 Google 上授权访问，随时可以在这里断开。"
         }
       },
-      "slack": {
-        "user": {
-          "title": "你的 Slack 账号",
-          "bullets": {
-            "work": "以你的身份在你的 Slack 工作区收发消息"
-          },
-          "privacyNote": "你在 Slack 上授权访问，随时可以在这里断开。"
-        }
-      },
       "shopify": {
         "user": {
           "title": "你的 Shopify 店铺",

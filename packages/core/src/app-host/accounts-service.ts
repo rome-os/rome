@@ -16,8 +16,6 @@ import type {
   ChannelChatsQuery,
   ChannelMessage,
   ChannelMessageQuery,
-  ChannelMessageSearch,
-  ChannelSearchResult,
   ChannelSummary,
   ChannelsService,
   ChatId,
@@ -66,10 +64,6 @@ export interface ChannelsServiceDeps {
   /** The platform a channel is an account on, or null where no record names
    *  one. A backed channel no record names reads its Connection's. */
   platformOf?: (channel: string) => string | null;
-  /** Whether a connection kind's talker searches its messages, as the kind
-   *  declares it. Absent, a channel is searchable only while its talker is
-   *  live. */
-  searches?: (connectionKind: string) => boolean;
   /** Channels Rome serves itself, which no Connection backs, such as webchat.
    *  Each sends through its own port, before the channel list is built too. */
   own?: readonly Channel[];
@@ -81,10 +75,6 @@ export interface ChannelsServiceDeps {
 /** How many chats a listing answers when it names no limit, and at most. */
 const CHATS_LIMIT = 100;
 const CHATS_LIMIT_MAX = 200;
-
-/** How many matches a search answers when it names no limit, and at most. */
-const SEARCH_LIMIT = 20;
-const SEARCH_LIMIT_MAX = 100;
 
 /** Every Connection that can talk, whether or not it is unlocked now. */
 function talking(registry: Pick<ConnectionRegistry, "all">): Connection[] {
@@ -197,36 +187,6 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     return { channel: target, account: accountOf(connection), connection };
   }
 
-  async function search(
-    target: Account | string,
-    { text, chatId, limit }: ChannelMessageSearch,
-  ): Promise<ChannelSearchResult> {
-    const { channel, account, connection } = backing(target);
-    if (!text.trim()) throw new Error("A search names the text it looks for");
-    const capped = Math.min(Math.max(1, Math.floor(limit ?? SEARCH_LIMIT)), SEARCH_LIMIT_MAX);
-    const found = connection.withTalker((talker) =>
-      talker.search?.search({ text, ...(chatId ? { chatId } : {}), limit: capped }),
-    );
-    if (!found) {
-      const state = connection.status().chat.state;
-      throw new Error(
-        state === "unlocked"
-          ? `Channel "${channel}" searches no messages`
-          : `Channel "${channel}" cannot search now: its connection is ${state}`,
-      );
-    }
-    const { messages, coverage } = await found;
-    return {
-      messages: messages.map((message) => ({
-        ...message,
-        channel,
-        ...(account ? { account } : {}),
-        cursor: channelMessageCursor(message),
-      })),
-      coverage,
-    };
-  }
-
   async function chats(
     target: Account | string,
     { query, limit, cursor }: ChannelChatsQuery = {},
@@ -271,16 +231,11 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
           if (name === null) continue;
           const platform = deps.platformOf?.(name) ?? platformOf(connection.connectionKind);
           const account = accountOf(connection);
-          // Declared, so a locked connection still names what it is.
-          const searchable =
-            deps.searches?.(connection.connectionKind) ??
-            connection.withTalker((talker) => talker.search !== undefined);
           summaries.set(name, {
             name,
             ...(account ? { account } : {}),
             platform,
             sendable: true,
-            ...(searchable ? { searchable } : {}),
           });
         }
         for (const channel of deps.own ?? []) {
@@ -319,7 +274,6 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
       },
 
       query,
-      search,
       chats,
     },
     REMOVED_SERVICE_MEMBERS,

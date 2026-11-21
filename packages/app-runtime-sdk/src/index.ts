@@ -1900,30 +1900,6 @@ export interface ChannelSummary {
    *  through. A send can still fail while that Connection is locked or
    *  offline. */
   sendable: boolean;
-  /** True when the channel's Connection searches its messages, so
-   *  {@link ChannelsService.search} answers for it. Absent means it does not,
-   *  and from a host that predates search. */
-  searchable?: boolean;
-}
-
-/** What {@link ChannelsService.search} looks for. */
-export interface ChannelMessageSearch {
-  /** Words the message's text holds, matched without regard to case. */
-  text: string;
-  /** Only this chat. */
-  chatId?: ChatId;
-  /** At most this many, newest first. Defaults to 20, capped at 100. */
-  limit?: number;
-}
-
-/** What {@link ChannelsService.search} found, and where it looked. */
-export interface ChannelSearchResult {
-  /** The matches, newest first. */
-  messages: ChannelMessage[];
-  /** Which messages the search covered, in words, such as the chats it read
-   *  and how far back. A search never covers more than its account can read,
-   *  so this says what it left out. */
-  coverage: string;
 }
 
 /** What {@link ChannelsService.chats} lists. */
@@ -1981,13 +1957,6 @@ export interface ChannelsService {
    * chat.
    */
   query(account: Account | string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
-  /**
-   * Messages on one of Rome's accounts whose text holds `search.text`, as far
-   * as its Connection can read them: the result's `coverage` says how far
-   * that is. Rejects for an account whose channel is not `searchable`. Absent
-   * on a host that predates search.
-   */
-  search?(account: Account | string, search: ChannelMessageSearch): Promise<ChannelSearchResult>;
   /**
    * The chats one of Rome's accounts is in, as its platform lists them now,
    * a page at a time. Rejects when the platform refuses the listing, with the

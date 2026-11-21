@@ -1,12 +1,9 @@
-// Provider OAuth bundle → grant ledger imports (github/slack/
-// google): the credential mapper and the shared connection import.
+// Provider OAuth bundle → grant ledger imports (github/google): the credential mapper and the shared connection import.
 //
 // Covers:
 //   credentialFromBundle:
 //     github/google — flat { accessToken, refreshToken?, expiresAt? }; expiry
 //       maps to a Date (google's tokens DO expire) or "never"; null on no token
-//     slack — { botToken, userToken? } (user token extracted from
-//       raw.authed_user.access_token; optional), null on no bot token
 //   importProviderBundle: mints a connection + imports on first call, reuses on
 //     re-import (idempotent no-op), no-ops when the descriptor isn't registered
 //     or the bundle carries no token
@@ -33,7 +30,6 @@ import type { DrizzleDb } from "../db/index.js";
 import type { OAuthProvider } from "./oauth/oauth-providers.js";
 import type { OAuthTokenBundle } from "./oauth/oauth-token-bundle.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
-import { NotOfferedError } from "./errors.js";
 import { ConnectionRegistry } from "./registry.js";
 import {
   credentialFromBundle,
@@ -57,32 +53,24 @@ function freshDb(): DrizzleDb {
   return db;
 }
 
-/** A registry declaring every provider in `providers` over the test db's
- *  ledger. Slack's sign-in connection is no longer offered; `offerSlack`
- *  offers it, for tests of the import itself. */
+/** A registry declaring every provider in `providers` over the test db's ledger. */
 function makeRegistry(
   db: DrizzleDb,
-  providers: OAuthProvider[] = ["github", "slack", "google"],
-  { offerSlack = false }: { offerSlack?: boolean } = {},
+  providers: OAuthProvider[] = ["github", "google"],
 ): ConnectionRegistry {
   const registry = new ConnectionRegistry({ repository: new DrizzleConnectionsRepository(db) });
-  for (const provider of providers) {
-    const descriptor = makeOAuthProviderDescriptor(provider);
-    registry.register(
-      offerSlack && provider === "slack" ? { ...descriptor, offered: true } : descriptor,
-    );
-  }
+  for (const provider of providers) registry.register(makeOAuthProviderDescriptor(provider));
   return registry;
 }
 
 describe("credentialFromBundle", () => {
   it("github: flattens accessToken into a non-expiring credential when no expiry", () => {
-    const cred = credentialFromBundle("github", { accessToken: "gho_x" });
+    const cred = credentialFromBundle({ accessToken: "gho_x" });
     expect(cred).toEqual({ material: { accessToken: "gho_x" }, expiresAt: "never" });
   });
 
   it("google: carries refreshToken + expiresAt, and maps the expiry to a Date", () => {
-    const cred = credentialFromBundle("google", {
+    const cred = credentialFromBundle({
       accessToken: "ya29.x",
       refreshToken: "1//r",
       expiresAt: "2030-01-01T00:00:00.000Z",
@@ -96,39 +84,15 @@ describe("credentialFromBundle", () => {
     expect((cred?.expiresAt as Date).toISOString()).toBe("2030-01-01T00:00:00.000Z");
   });
 
-  it("slack: extracts { botToken, userToken } from the bundle + raw authed_user", () => {
-    const cred = credentialFromBundle("slack", {
-      accessToken: "xoxb-bot",
-      raw: { authed_user: { access_token: "xoxp-user" }, team: { id: "T1" } },
-    });
-    expect(cred).toEqual({
-      material: { botToken: "xoxb-bot", userToken: "xoxp-user" },
-      expiresAt: "never",
-    });
-  });
-
-  it("slack: userToken is optional — a bot-only install still yields a credential", () => {
-    const cred = credentialFromBundle("slack", { accessToken: "xoxb-bot" });
-    expect(cred).toEqual({ material: { botToken: "xoxb-bot" }, expiresAt: "never" });
-    // A malformed raw payload is ignored, not crashed on.
-    const malformed = credentialFromBundle("slack", {
-      accessToken: "xoxb-bot",
-      raw: { authed_user: { access_token: 42 } },
-    });
-    expect(malformed?.material).toEqual({ botToken: "xoxb-bot" });
-  });
-
-  it("returns null when the bundle carries no usable token (all providers)", () => {
-    for (const provider of ["github", "slack", "google"] as const) {
-      expect(credentialFromBundle(provider, {})).toBeNull();
-      expect(credentialFromBundle(provider, { accessToken: "   " })).toBeNull();
-      expect(credentialFromBundle(provider, { accessToken: null })).toBeNull();
-    }
+  it("returns null when the bundle carries no usable token", () => {
+    expect(credentialFromBundle({})).toBeNull();
+    expect(credentialFromBundle({ accessToken: "   " })).toBeNull();
+    expect(credentialFromBundle({ accessToken: null })).toBeNull();
   });
 });
 
 describe("grantProfileFromBundle", () => {
-  it("github: identity fields + scopes, no teamId", () => {
+  it("github: identity fields + scopes", () => {
     const profile = grantProfileFromBundle(
       "github",
       { accessToken: "gho", scope: ["repo", "read:user"] },
@@ -147,22 +111,6 @@ describe("grantProfileFromBundle", () => {
       email: "o@example.com",
       avatarUrl: "https://a/o.png",
       scopes: ["repo", "read:user"],
-    });
-    expect("teamId" in profile).toBe(false);
-  });
-
-  it("slack: teamId is classified as profile (workspace identity), not credential material", () => {
-    const bundle: OAuthTokenBundle = {
-      accessToken: "xoxb-bot",
-      scope: ["chat:write"],
-      raw: { authed_user: { access_token: "xoxp-user" }, team: { id: "T123" } },
-    };
-    const profile = grantProfileFromBundle("slack", bundle, { displayName: "Ada" });
-    expect(profile).toEqual({ displayName: "Ada", scopes: ["chat:write"], teamId: "T123" });
-    // The workspace identity lands on the PROFILE, never inside the secret material.
-    expect(credentialFromBundle("slack", bundle)?.material).toEqual({
-      botToken: "xoxb-bot",
-      userToken: "xoxp-user",
     });
   });
 
@@ -188,7 +136,7 @@ describe("grantProfileFromBundle", () => {
       email: "owner@example.com",
       scopes: ["read_products"],
     });
-    expect(credentialFromBundle("shopify", bundle)).toEqual({
+    expect(credentialFromBundle(bundle)).toEqual({
       material: {
         accessToken: "shpat_live",
         refreshToken: "shprt_live",
@@ -230,16 +178,6 @@ describe("grantProfileFromBundle", () => {
       grantProfileFromBundle("google", { accessToken: "ya29" }, { displayName: ["a"] }),
     ).toThrow();
   });
-
-  it("rejects a Slack team id that is not a string — never silently dropped", () => {
-    expect(() =>
-      grantProfileFromBundle(
-        "slack",
-        { accessToken: "xoxb", raw: { team: { id: 123 } } },
-        { displayName: "Ada" },
-      ),
-    ).toThrow();
-  });
 });
 
 describe("a malformed grant fails loudly and stores nothing", () => {
@@ -260,24 +198,19 @@ async function grantProfile(registry: ConnectionRegistry, provider: OAuthProvide
 
 describe("importProviderBundle records the grant profile", () => {
   it("writes the typed profile on the grant in the same import as the credential", async () => {
-    const registry = makeRegistry(freshDb(), undefined, { offerSlack: true });
+    const registry = makeRegistry(freshDb());
     await importProviderBundle(
       registry,
-      "slack",
-      {
-        accessToken: "xoxb-bot",
-        scope: ["chat:write"],
-        raw: { authed_user: { access_token: "xoxp-user" }, team: { id: "T9" } },
-      },
+      "github",
+      { accessToken: "gho_a", scope: ["repo"] },
       { login: "ada", email: "ada@example.com" },
     );
-    const rec = await grantProfile(registry, "slack");
+    const rec = await grantProfile(registry, "github");
     expect(rec?.state).toBe("authorized");
     expect(rec?.profile).toEqual({
       login: "ada",
       email: "ada@example.com",
-      scopes: ["chat:write"],
-      teamId: "T9",
+      scopes: ["repo"],
     });
   });
 
@@ -373,16 +306,11 @@ describe("importProviderBundle records the grant profile", () => {
 const BUNDLES: Array<[OAuthProvider, string, OAuthTokenBundle]> = [
   ["github", "user", { accessToken: "gho_a" }],
   ["google", "user", { accessToken: "ya29.a", refreshToken: "1//r" }],
-  [
-    "slack",
-    "workspace",
-    { accessToken: "xoxb-a", raw: { authed_user: { access_token: "xoxp-a" } } },
-  ],
 ];
 
 describe.each(BUNDLES)("importProviderBundle [%s]", (provider, grant, bundle) => {
   it("mints a connection and imports the grant on first call", async () => {
-    const registry = makeRegistry(freshDb(), undefined, { offerSlack: true });
+    const registry = makeRegistry(freshDb());
     expect(registry.find(provider)).toHaveLength(0);
 
     const imported = await importProviderBundle(registry, provider, bundle);
@@ -394,7 +322,7 @@ describe.each(BUNDLES)("importProviderBundle [%s]", (provider, grant, bundle) =>
   });
 
   it("reuses the existing connection on re-import (idempotent — no duplicate)", async () => {
-    const registry = makeRegistry(freshDb(), undefined, { offerSlack: true });
+    const registry = makeRegistry(freshDb());
     await importProviderBundle(registry, provider, bundle);
     await importProviderBundle(registry, provider, bundle);
     expect(registry.find(provider)).toHaveLength(1);
@@ -412,47 +340,6 @@ describe.each(BUNDLES)("importProviderBundle [%s]", (provider, grant, bundle) =>
     const registry = makeRegistry(freshDb(), []);
     const imported = await importProviderBundle(registry, provider, bundle);
     expect(imported).toBe(false);
-  });
-});
-
-describe("a kind Rome no longer offers", () => {
-  const SLACK = { accessToken: "xoxb-a", raw: { authed_user: { access_token: "xoxp-a" } } };
-
-  it("refuses a connect that would make a new connection, and writes nothing", async () => {
-    const registry = makeRegistry(freshDb());
-
-    await expect(importProviderBundle(registry, "slack", SLACK, {})).rejects.toBeInstanceOf(
-      NotOfferedError,
-    );
-    expect(registry.find("slack")).toEqual([]);
-  });
-
-  it("lets a sign-in to Rome go on without making a connection", async () => {
-    const registry = makeRegistry(freshDb());
-
-    await expect(
-      importProviderBundle(registry, "slack", SLACK, {}, { signIn: true }),
-    ).resolves.toBe(true);
-    expect(registry.find("slack")).toEqual([]);
-  });
-
-  it("still fixes the connection Rome holds", async () => {
-    const db = freshDb();
-    await importProviderBundle(
-      makeRegistry(db, undefined, { offerSlack: true }),
-      "slack",
-      SLACK,
-      {},
-    );
-    const registry = makeRegistry(db);
-    await registry.load();
-    const [held] = registry.find("slack");
-
-    await importProviderBundle(registry, "slack", { ...SLACK, accessToken: "xoxb-b" }, {});
-
-    expect(registry.find("slack").map((connection) => connection.id)).toEqual([held!.id]);
-    const rec = await registry.grantOf(held!.id);
-    expect(rec?.credential?.material).toMatchObject({ record: { botToken: "xoxb-b" } });
   });
 });
 

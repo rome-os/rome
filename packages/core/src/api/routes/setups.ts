@@ -19,7 +19,6 @@
 import { Hono, type Context } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { NoSetupError, type SetupTarget } from "../../connections/setup/manager.js";
-import { NotOfferedError } from "../../connections/errors.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
 import { isUnconnectedAccount } from "../../connections/unconnected-accounts.js";
 import type { ApiDeps } from "../deps.js";
@@ -150,9 +149,6 @@ export function setupsRoutes(deps: ApiDeps): Hono {
     } catch (err) {
       if (err instanceof NoSetupError) {
         return c.json({ error: "No setup for this grant." }, 404);
-      }
-      if (err instanceof NotOfferedError) {
-        return c.json({ error: "Rome no longer connects new accounts of this kind." }, 409);
       }
       throw err;
     }

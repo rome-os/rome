@@ -63,12 +63,6 @@ const HISTORY_INTERVAL_MS = 60 * 1000;
 const HISTORY_PAGE = 15;
 /** The longest a read holds its turn waiting for Slack's next request. */
 const HISTORY_MAX_WAIT_MS = 60 * 1000;
-/** What a search in one chat covers. */
-export const SEARCH_CHAT_COVERAGE =
-  "This chat's newest messages, one page of up to 15 as Slack answers it now. Older messages are not searched: read back with olderThan to look further.";
-/** Why a search across chats is refused. */
-export const SEARCH_ACROSS_CHATS_REFUSED =
-  "Rome's Slack app searches one chat at a time: name the chat to search. Slack gives the app no workspace search, and the connection keeps no copy of what it heard.";
 /** Slack's refusals that mean the app may not read a conversation. */
 const NOT_READABLE = new Set(["channel_not_found", "not_in_channel", "missing_scope"]);
 /** Under setTimeout's 24.8-day ceiling; a longer wait is taken in steps. */
@@ -739,38 +733,6 @@ export class SlackAppAdapter {
     return this.memberChannels.list(this.abort.signal);
   }
 
-  /**
-   * Messages whose text holds `text`, newest first, in one chat's newest page
-   * as Slack answers it now. The connection keeps no copy of what it heard,
-   * and Slack gives the app no workspace search, so a search names its chat.
-   */
-  async search(input: { text: string; chatId?: ChatId; limit: number }): Promise<{
-    messages: ChannelMessage[];
-    coverage: string;
-  }> {
-    if (!input.chatId) throw new Error(SEARCH_ACROSS_CHATS_REFUSED);
-    const resolved = await this.memberChannels.resolve(input.chatId, this.abort.signal);
-    const parsed = parseSlackChatId(resolved);
-    if (parsed.threadTs) {
-      throw new Error(
-        `Slack chat ${input.chatId} is a thread, and a search takes its conversation's id: ${parsed.channelId}`,
-      );
-    }
-    const needle = phraseOf(input.text);
-    let page: ChannelMessage[];
-    try {
-      page = await readTimeline(this.historyPage, parsed.channelId as ChatId, {
-        limit: HISTORY_PAGE,
-      });
-    } catch (error) {
-      throw unreadable(error, input.chatId);
-    }
-    const messages = page
-      .filter((message) => folded(message.text ?? "").includes(needle))
-      .slice(0, input.limit);
-    return { messages, coverage: SEARCH_CHAT_COVERAGE };
-  }
-
   /** The direct-message conversation with a member of this workspace. */
   async directConversationFor(senderId: string): Promise<ChatId | null> {
     const separator = senderId.indexOf("/");
@@ -825,18 +787,4 @@ export class SlackAppAdapter {
       return {};
     }
   }
-}
-
-/** `text` with its case and spacing folded, in any script. */
-function folded(text: string): string {
-  return text.normalize("NFC").toLowerCase().replace(/\s+/g, " ");
-}
-
-/** What a search looks for: its words in that order, without the quotation
- *  marks an agent wraps a phrase in. */
-function phraseOf(text: string): string {
-  return folded(text)
-    .trim()
-    .replace(/^["\u201c\u201d']+(.*?)["\u201c\u201d']+$/s, "$1")
-    .trim();
 }

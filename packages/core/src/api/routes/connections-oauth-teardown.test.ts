@@ -35,14 +35,13 @@ rs.mock("../../connections/integrations/github-shell-integration.js", () => ({
   clearGithubShellIntegrationForProvider,
 }));
 rs.mock("../../connections/oauth/oauth-providers.js", () => ({
-  OAUTH_PROVIDERS: ["google", "github", "slack"],
-  isOAuthProvider: (value: string) => ["google", "github", "slack"].includes(value),
-  getEnabledOAuthProviders: () => ["github", "slack", "google"],
+  OAUTH_PROVIDERS: ["google", "github"],
+  isOAuthProvider: (value: string) => ["google", "github"].includes(value),
+  getEnabledOAuthProviders: () => ["github", "google"],
   isEnabledOAuthProvider: () => true,
   OAUTH_PROVIDER_DESCRIPTORS: {
     google: { label: "Google", description: "" },
     github: { label: "GitHub", description: "" },
-    slack: { label: "Slack", description: "" },
   },
 }));
 
@@ -67,21 +66,12 @@ function makeLedger(): DrizzleConnectionsRepository {
 }
 
 /** A registry with all three providers registered and `provider` authorized. */
-async function makeAuthorizedRegistry(
-  provider: "github" | "slack" | "google",
-): Promise<ConnectionRegistry> {
+async function makeAuthorizedRegistry(provider: "github" | "google"): Promise<ConnectionRegistry> {
   const registry = new ConnectionRegistry({ repository: makeLedger() });
-  for (const p of ["github", "slack", "google"] as const) {
-    // Rome no longer offers new Slack sign-in connections; offer it here to
-    // make the one each test tears down.
-    const descriptor = makeOAuthProviderDescriptor(p);
-    registry.register(p === "slack" ? { ...descriptor, offered: true } : descriptor);
+  for (const p of ["github", "google"] as const) {
+    registry.register(makeOAuthProviderDescriptor(p));
   }
-  const bundle =
-    provider === "slack"
-      ? { accessToken: "xoxb-live", raw: { authed_user: { access_token: "xoxp-live" } } }
-      : { accessToken: "tok_live" };
-  await importProviderBundle(registry, provider, bundle);
+  await importProviderBundle(registry, provider, { accessToken: "tok_live" });
   return registry;
 }
 
@@ -103,7 +93,6 @@ describe("OAuth teardown via /connections DELETE routes", () => {
 
   it.each([
     ["github", "user"],
-    ["slack", "workspace"],
     ["google", "user"],
   ] as const)("disconnecting %s ends the connection, and custody clears off the revoke", async (provider, grant) => {
     const registry = await makeAuthorizedRegistry(provider);

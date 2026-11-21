@@ -30,7 +30,7 @@ describe("connect_account", () => {
   });
 
   it("asks the model to send the guardian to Settings where no card shows", () => {
-    expect(connectAccountToolOutput("slack", false)).toContain("Settings › Connections");
+    expect(connectAccountToolOutput("github", false)).toContain("Settings › Connections");
   });
 
   it("says why instead of showing a card whose Connect could only fail", () => {
@@ -39,17 +39,6 @@ describe("connect_account", () => {
     const output = connectAccountToolOutput("github", true);
     expect(typeof output).toBe("string");
     expect(output).toContain("Settings › Connections");
-  });
-
-  it("sends an agent asked to connect Slack to the Slack app in Settings, and lists no old Slack", () => {
-    const refused = parseConnectAccountInput({ kind: "slack" });
-    expect(refused).toMatchObject({ ok: false });
-    if (refused.ok) throw new Error("expected a refusal");
-    expect(refused.error).toContain("Rome's own Slack app");
-    expect(refused.error).toContain("Settings › Connections");
-    const other = parseConnectAccountInput({ kind: "notion" });
-    if (other.ok) throw new Error("expected a refusal");
-    expect(other.error).not.toContain('"slack"');
   });
 
   it("refuses a kind Rome does not connect itself", () => {

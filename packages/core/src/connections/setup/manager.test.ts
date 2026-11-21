@@ -9,7 +9,6 @@ import type { DrizzleTx } from "../../db/index.js";
 import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
 import { SetupManager, NoSetupError, type SetupRegistry } from "./manager.js";
-import { NotOfferedError } from "../errors.js";
 import type { SetupFn } from "./types.js";
 
 /** A stand-in transaction handle for the fake registry's `giveGrant` participant. */
@@ -243,19 +242,6 @@ describe("SetupManager", () => {
     // Exactly one non-terminal session across all three starts.
     const liveCount = cids.filter((cid) => mgr.state(cid)?.status !== "cancelled").length;
     expect(liveCount).toBe(1);
-  });
-
-  it("refuses a new account of a kind Rome no longer offers, and still fixes an existing one", async () => {
-    const { registry } = fakeRegistry(discordSetup, [mkConn("conn-B")]);
-    const descriptor = registry.getDescriptor("discord") as ConnectionDescriptor;
-    const retired: SetupRegistry = {
-      ...registry,
-      getDescriptor: () => ({ ...descriptor, offered: false }),
-    };
-    const mgr = new SetupManager({ registry: retired, peopleRepo: fakePersonRepo() });
-    await expect(mgr.start(PLACEHOLDER, "bot")).rejects.toBeInstanceOf(NotOfferedError);
-    const fix = await mgr.start({ connectionKind: "discord", connectionId: "conn-B" }, "bot");
-    expect(fix.reattached).toBe(false);
   });
 
   it("throws NoSetupError when the grant declares no setup", async () => {

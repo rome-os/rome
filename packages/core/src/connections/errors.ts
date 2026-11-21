@@ -114,13 +114,3 @@ export class ProviderOperationError extends Error {
     this.name = "ProviderOperationError";
   }
 }
-
-/** A grant or setup for a new account of a connection kind Rome no longer
- *  offers (`offered: false`). Existing connections of the kind are fixed as
- *  before. */
-export class NotOfferedError extends Error {
-  constructor(readonly connectionKind: string) {
-    super(`Rome no longer connects new accounts of connection kind "${connectionKind}".`);
-    this.name = "NotOfferedError";
-  }
-}

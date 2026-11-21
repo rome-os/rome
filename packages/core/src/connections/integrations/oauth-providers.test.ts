@@ -1,9 +1,8 @@
-// The Rome Cloud-OAuth connection-state descriptors (github/slack/
-// google/shopify), exercised over a REAL ConnectionRegistry + drizzle grant ledger. This
+// The Rome Cloud-OAuth connection-state descriptors (github/google/
+// shopify), exercised over a REAL ConnectionRegistry + drizzle grant ledger. This
 // descriptors own grant state and Google's Core-only Gmail Actor. The contracts under test are:
 //
-//   1. Shape: one grant per provider (github/google `user`, slack `workspace`,
-//      shopify `store`),
+//   1. Shape: one grant per provider (github/google `user`, shopify `store`),
 //      Gmail Act for Google, with other providers using their token-file paths.
 //   2. Grant lifecycle: import → authorized; revoke → unauthorized.
 //   3. Boot rehydration: a fresh registry over the same ledger rehydrates the
@@ -61,28 +60,16 @@ function makeLedger(): ConnectionsRepository {
 const CASES: Array<[OAuthProvider, string, Record<string, string>]> = [
   ["github", "user", { accessToken: "gho_live" }],
   ["google", "user", { accessToken: "ya29.live", refreshToken: "1//refresh" }],
-  ["slack", "workspace", { botToken: "xoxb-live", userToken: "xoxp-live" }],
   ["shopify", "store", { accessToken: "shpat_live", refreshToken: "shprt_live" }],
 ];
 
 describe("OAuth connection kinds' display labels", () => {
-  // The Slack sign-in is named apart from Rome's Slack app, labelled Slack.
   it("name each kind as a person reads it, not by its id", () => {
     expect(
-      (["github", "google", "slack", "shopify"] as const).map(
+      (["github", "google", "shopify"] as const).map(
         (provider) => makeOAuthProviderDescriptor(provider).label,
       ),
-    ).toEqual(["GitHub", "Google", "Slack sign-in", "Shopify"]);
-  });
-});
-
-describe("OAuth connection kinds agents act with", () => {
-  it("lets agents act with the Slack sign-in's token through the connector, and only that kind", () => {
-    expect(
-      (["github", "google", "slack", "shopify"] as const).map(
-        (provider) => makeOAuthProviderDescriptor(provider).actsWithGrant === true,
-      ),
-    ).toEqual([false, false, true, false]);
+    ).toEqual(["GitHub", "Google", "Shopify"]);
   });
 });
 
@@ -104,21 +91,6 @@ describe("OAuth profile revival", () => {
     expect(display?.avatarUrl).toBe("https://example.com/octo.png");
     // subject/scopes are owner-side profile data, not display surface.
     expect(display && Object.keys(display)).not.toContain("subject");
-  });
-
-  it("revives Slack's stored schema: workspace name is the handle; teamId stays off the display", () => {
-    const revive = makeOAuthProviderDescriptor("slack").reviveProfile;
-    const display = revive?.({
-      subject: "T123:U456",
-      login: "Acme Corp",
-      displayName: "Ada Lovelace",
-      teamId: "T123",
-      scopes: ["chat:write"],
-    });
-    expect(display?.displayName).toBe("Ada Lovelace");
-    expect(display?.handle).toBe("Acme Corp");
-    // teamId is workspace identity for the token-file custody, not a display field.
-    expect(display && Object.keys(display)).not.toContain("teamId");
   });
 
   it("revives Google's stored schema: OIDC identity with no handle", () => {
@@ -176,7 +148,7 @@ describe("OAuth profile revival", () => {
   it("rejects reviving a stored record carrying keys outside the connectionKind's schema", () => {
     const github = makeOAuthProviderDescriptor("github").reviveProfile;
     expect(() => github?.({ login: "octocat", teamId: "T123" })).toThrow();
-    // `login` is a GitHub/Slack key; Google's schema deliberately has no handle.
+    // `login` is a GitHub/Shopify key; Google's schema deliberately has no handle.
     const google = makeOAuthProviderDescriptor("google").reviveProfile;
     expect(() => google?.({ login: "octocat" })).toThrow();
   });
@@ -259,7 +231,7 @@ describe.each(
     registry.register(makeOAuthProviderDescriptor(provider));
     const conn = await registry.connect(provider);
     // A bundle that carried an explicit expiry, now past (google's tokens
-    // always do; github/slack only if the provider ever sends one).
+    // always do; github only if the provider ever sends one).
     await registry.giveGrant(conn.connectionKind, conn.id, grant, {
       material,
       expiresAt: new Date(Date.now() - 60_000),
@@ -278,11 +250,10 @@ describe.each(
 });
 
 describe("OAUTH_PROVIDER_GRANTS", () => {
-  it("matches the grant table (slack's two tokens live in ONE workspace grant)", () => {
+  it("matches the grant table", () => {
     expect(OAUTH_PROVIDER_GRANTS).toEqual({
       github: "user",
       google: "user",
-      slack: "workspace",
       shopify: "store",
     });
   });

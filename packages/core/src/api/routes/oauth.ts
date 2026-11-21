@@ -1,5 +1,4 @@
 import { type Context, Hono } from "hono";
-import { NotOfferedError } from "../../connections/errors.js";
 import { getCookie } from "hono/cookie";
 import { COOKIE_NAME, issueGuardianSession, verifySession } from "../../access/auth.js";
 import { getGuardianAuthState } from "../../access/guardian-auth-state.js";
@@ -31,28 +30,6 @@ const SHOPIFY_SETTINGS_PATH = "/settings/connections/shopify";
 async function attemptIntentOf(c: Context, db: ApiDeps["db"]): Promise<OAuthAttemptIntent> {
   if (c.req.query("intent") === "sign-in") return "sign-in";
   return (await resolveGuardianSession(c, db)) ? "connect" : "sign-in";
-}
-
-/** Where to connect instead of a connection kind Rome no longer offers. */
-const REPLACED_BY: Record<string, string> = {
-  slack:
-    "Connect Slack in Settings › Connections, under Slack: Rome's own Slack app replaces this connection.",
-};
-
-/**
- * Why a start of `provider` goes nowhere, or null when it may start. Rome
- * starts no new connection of a kind it no longer offers, so the guardian is
- * not sent through the provider's approve screen for nothing. A start fixes
- * the connection of that kind Rome holds, when it holds one, and a start
- * asked for as a sign-in signs in, so both go on. The redeem refuses as well,
- * for a start made before this.
- */
-async function refusedStart(c: Context, deps: ApiDeps, provider: string): Promise<string | null> {
-  if (c.req.query("intent") === "sign-in" || !deps.connectionRegistry) return null;
-  if (await deps.connectionRegistry.takesGrant(provider)) return null;
-  const instead = REPLACED_BY[provider];
-  const refused = new NotOfferedError(provider).message;
-  return instead ? `${refused} ${instead}` : refused;
 }
 
 export function oauthRoutes(deps: ApiDeps): Hono {
@@ -105,8 +82,6 @@ export function oauthRoutes(deps: ApiDeps): Hono {
       }
       shop = shopDomain;
     }
-    const refused = await refusedStart(c, deps, provider);
-    if (refused) return c.json({ error: refused }, 409);
 
     try {
       const reconnect = c.req.query("reconnect") === "1";
@@ -130,8 +105,6 @@ export function oauthRoutes(deps: ApiDeps): Hono {
     if (provider === "shopify") {
       return c.json({ error: `Connect Shopify from Shopify: ${SHOPIFY_INSTALL_URL}` }, 400);
     }
-    const refused = await refusedStart(c, deps, provider);
-    if (refused) return c.json({ error: refused }, 409);
 
     try {
       const reconnect = c.req.query("reconnect") === "1";
@@ -240,7 +213,6 @@ export function oauthRoutes(deps: ApiDeps): Hono {
         ...(ended ? { ended: true } : {}),
       });
     } catch (error) {
-      if (error instanceof NotOfferedError) return c.json({ error: error.message }, 409);
       const message = error instanceof Error ? error.message : "OAuth handoff redemption failed.";
       return c.json({ error: message }, 502);
     }

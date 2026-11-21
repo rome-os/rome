@@ -40,7 +40,6 @@ What the guardian picks when they connect: the kind of access they hand Rome. A 
 - Some kinds have no platform, such as GitHub, since no chats live there.
 - The Rome-managed Google kind reads Gmail without modifying, deleting or labeling mail. Every send needs the guardian's approval of that exact message, including its sender, recipients, subject and body. A schedule or another agent cannot approve a send on the guardian's behalf.
 - The kinds ship with Rome. The guardian picks one, and never makes one.
-- A kind another one replaces is not offered: the guardian cannot connect a new account of it, and its existing connections keep working, and can be fixed, until the guardian disconnects them. Rome's own Slack app replaces the Slack bot and the Slack sign-in, so Connect shows one Slack.
 
 ## Watch
 

@@ -60,24 +60,11 @@ export interface TalkHistory {
   read(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]>;
 }
 
-/** Searching the messages a Connection can read, which it answers its own
- *  way: from the platform, from what it keeps, or both. */
-export interface TalkSearch {
-  /** Messages whose text holds `text`, newest first, at most `limit`, and
-   *  which messages the search covered. `limit` is already defaulted and
-   *  capped. */
-  search(input: { text: string; chatId?: ChatId; limit: number }): Promise<{
-    messages: ChannelMessage[];
-    coverage: string;
-  }>;
-}
-
 export interface TalkFeatureMap {
   inboundMedia: ChannelInboundMedia;
   activity: ChannelActivity;
   directory: TalkDirectory;
   history: TalkHistory;
-  search: TalkSearch;
   /** A talker answers only `chatFor`. The channel port adds the deprecated
    *  `conversationFor` for callers. */
   directMessaging: Pick<ChannelDirectMessaging, "chatFor">;
@@ -425,11 +412,6 @@ export interface ConnectionDescriptor {
    *  then unlocked while every grant is authorized (connections/acts-with-grant.ts).
    *  Absent means they do not. */
   actsWithGrant?: boolean;
-  /** False when the guardian may no longer connect a new account of this
-   *  kind, as for a kind another one replaces. Its connections keep loading,
-   *  sending and being fixed until the guardian disconnects them. Unset, the
-   *  kind is offered. */
-  offered?: boolean;
   /** The platform's own id for the account a grant's profile names (a bot id,
    *  an app id, an inbox address), or null when the profile names none. It reads
    *  the one field rather than parsing the strict profile schema, so a stored
@@ -474,11 +456,6 @@ export interface ConnectionDescriptor {
        *  (`TalkHistory`), so the channel it backs has a `messages` port read
        *  live. Absent means it does not, and the channel reads no messages. */
       reads?: boolean;
-      /** True when the talker searches its messages (`TalkSearch`). It holds
-       *  while the connection is locked, so a caller can tell this channel
-       *  from another on the same platform before it unlocks. Absent means
-       *  it does not. */
-      searches?: boolean;
       /** True when the surface that delivers this channel's next human turn
        *  renders interactive cards, so an agent may pause on one for a reply.
        *  Absent means it does not, and a card falls back to prose. */
