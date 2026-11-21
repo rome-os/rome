@@ -1,10 +1,11 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { FormRows } from "@rome-os/ui/layout-form";
 import i18n from "@/i18n";
-import { SystemUpgradeSection } from "./system-upgrade-section";
+import { SystemVersionRow } from "./system-upgrade-section";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -104,13 +105,15 @@ async function findEnabledButton(name: string): Promise<HTMLButtonElement> {
   return button;
 }
 
-function renderSection() {
+function renderRow() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <SystemUpgradeSection />
+      <FormRows>
+        <SystemVersionRow />
+      </FormRows>
     </QueryClientProvider>,
   );
 }
@@ -124,18 +127,17 @@ const CHECK_AVAILABLE = {
   },
 };
 
-describe("SystemUpgradeSection", () => {
+describe("SystemVersionRow", () => {
   it("shows the current version with its build date", async () => {
     mockBackend({ build: buildInfo() });
-    renderSection();
+    renderRow();
 
-    expect(await screen.findByText("1.1.0")).toBeTruthy();
-    expect(screen.getByText(/Built /)).toBeTruthy();
+    expect(await screen.findByText(/^1\.1\.0 · Built /)).toBeTruthy();
   });
 
   it("explains that upgrades are unsupported on an unversioned build instead of offering a check", async () => {
     mockBackend({ build: buildInfo({ version: null, builtAt: null }) });
-    renderSection();
+    renderRow();
 
     expect(await screen.findByText(/Unknown — source build or pre-versioned image/)).toBeTruthy();
     // Core rejects both upgrade verbs on an unversioned build, so the
@@ -148,7 +150,7 @@ describe("SystemUpgradeSection", () => {
     mockBackend({
       build: buildInfo({ upgradedSinceLastBoot: true, previousVersion: "1.0.0" }),
     });
-    renderSection();
+    renderRow();
 
     expect(
       await screen.findByText("Rome was upgraded from 1.0.0 to 1.1.0 since the last boot."),
@@ -169,7 +171,7 @@ describe("SystemUpgradeSection", () => {
         },
       ],
     });
-    renderSection();
+    renderRow();
     const user = userEvent.setup();
 
     await user.click(await findEnabledButton("Check for updates"));
@@ -179,12 +181,38 @@ describe("SystemUpgradeSection", () => {
     ).toBeTruthy();
   });
 
+  it("offers no downgrade when this build is ahead of the latest release", async () => {
+    // Rome Cloud flags any mismatch as available; the dashboard only offers a newer release.
+    mockBackend({
+      build: buildInfo({ version: "1.3.0" }),
+      check: [
+        {
+          status: 200,
+          body: {
+            current: { version: "1.3.0", sha: "abc1234" },
+            latest: { version: "1.2.0" },
+            upgradeAvailable: true,
+          },
+        },
+      ],
+    });
+    renderRow();
+    const user = userEvent.setup();
+
+    await user.click(await findEnabledButton("Check for updates"));
+
+    expect(
+      await screen.findByText("You're up to date — 1.2.0 is the latest version."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Upgrade to 1.2.0" })).toBeNull();
+  });
+
   it("renders a not-managed message when Rome Cloud is unconfigured, not an error", async () => {
     mockBackend({
       build: buildInfo(),
       check: [{ status: 503, body: { error: "pantheon_unconfigured" } }],
     });
-    renderSection();
+    renderRow();
     const user = userEvent.setup();
 
     await user.click(await findEnabledButton("Check for updates"));
@@ -201,14 +229,18 @@ describe("SystemUpgradeSection", () => {
     mockBackend({
       build: buildInfo(),
       check: [CHECK_AVAILABLE, { status: 502, body: { error: "pantheon_unreachable" } }],
+      upgrade: [{ status: 409, body: { error: "target_not_latest", latest: "1.3.0" } }],
     });
-    renderSection();
+    renderRow();
     const user = userEvent.setup();
 
     await user.click(await findEnabledButton("Check for updates"));
     expect(await screen.findByText("Version 1.2.0 is available.")).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: "Check for updates" }));
+    // The row offers no second check beside an offer, so the 409 recovery
+    // re-check is the one that fails here.
+    await user.click(screen.getByRole("button", { name: "Upgrade to 1.2.0" }));
+    await user.click(await screen.findByRole("button", { name: "Upgrade and restart" }));
 
     // The failed re-check must not leave the stale offer on screen — acting on
     // it would target a version the latest check couldn't validate.
@@ -223,7 +255,7 @@ describe("SystemUpgradeSection", () => {
       check: [CHECK_AVAILABLE],
       upgrade: [{ status: 202, body: { status: "upgrading", target: "1.2.0" } }],
     });
-    renderSection();
+    renderRow();
     const user = userEvent.setup();
 
     await user.click(await findEnabledButton("Check for updates"));
@@ -232,11 +264,19 @@ describe("SystemUpgradeSection", () => {
     // The confirmation states the consequences before anything is sent.
     expect(await screen.findByText(/Rome restarts to apply the upgrade/)).toBeTruthy();
     expect(backend.upgradeRequests).toHaveLength(0);
+    // The confirmation carries the Rome logo, not a lettered placeholder tile.
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector("svg[viewBox='0 0 51 48']")).toBeTruthy();
+    expect(within(dialog).queryByText("R")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Upgrade and restart" }));
 
-    expect(await screen.findByText("Rome is restarting")).toBeTruthy();
+    expect(await screen.findByText("Upgrading to 1.2.0.")).toBeTruthy();
     expect(backend.upgradeRequests).toEqual([{ target: "1.2.0" }]);
+    expect(screen.queryByText(/reload automatically/)).toBeNull();
+    // The accepted upgrade closes the confirmation, so it cannot send twice.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Upgrade and restart" })).toBeNull();
   });
 
   it("reloads only once the backend reports the target version", async () => {
@@ -251,14 +291,14 @@ describe("SystemUpgradeSection", () => {
       check: [CHECK_AVAILABLE],
       upgrade: [{ status: 202, body: { status: "upgrading", target: "1.2.0" } }],
     });
-    renderSection();
+    renderRow();
     const user = userEvent.setup({ advanceTimers: rs.advanceTimersByTime });
 
     try {
       await user.click(await findEnabledButton("Check for updates"));
       await user.click(await screen.findByRole("button", { name: "Upgrade to 1.2.0" }));
       await user.click(await screen.findByRole("button", { name: "Upgrade and restart" }));
-      expect(await screen.findByText("Rome is restarting")).toBeTruthy();
+      expect(await screen.findByText("Upgrading to 1.2.0.")).toBeTruthy();
 
       // The old backend is still serving its version — a reachable backend
       // alone must not trigger the reload.
@@ -285,20 +325,20 @@ describe("SystemUpgradeSection", () => {
       check: [CHECK_AVAILABLE],
       upgrade: [{ status: 202, body: { status: "upgrading", target: "1.2.0" } }],
     });
-    renderSection();
+    renderRow();
     const user = userEvent.setup({ advanceTimers: rs.advanceTimersByTime });
 
     try {
       await user.click(await findEnabledButton("Check for updates"));
       await user.click(await screen.findByRole("button", { name: "Upgrade to 1.2.0" }));
       await user.click(await screen.findByRole("button", { name: "Upgrade and restart" }));
-      expect(await screen.findByText("Rome is restarting")).toBeTruthy();
+      expect(await screen.findByText("Upgrading to 1.2.0.")).toBeTruthy();
 
       // The backend never comes back on the target version.
-      await rs.advanceTimersByTimeAsync(10 * 60_000 + 3_000);
+      await rs.advanceTimersByTimeAsync(40 * 60_000 + 3_000);
 
       await waitFor(() =>
-        expect(screen.getByText("The upgrade is taking longer than expected")).toBeTruthy(),
+        expect(screen.getByText(/Rome hasn't come back on 1\.2\.0 after 40 minutes/)).toBeTruthy(),
       );
       const link = screen.getByRole("link", { name: "Check the instance status in Rome Cloud." });
       expect(link.getAttribute("href")).toBe("https://rome-cloud.test");
@@ -333,7 +373,7 @@ describe("SystemUpgradeSection", () => {
         { status: 202, body: { status: "upgrading", target: "1.3.0" } },
       ],
     });
-    renderSection();
+    renderRow();
     const user = userEvent.setup();
 
     await user.click(await findEnabledButton("Check for updates"));
@@ -345,7 +385,7 @@ describe("SystemUpgradeSection", () => {
 
     await user.click(screen.getByRole("button", { name: "Upgrade and restart" }));
 
-    expect(await screen.findByText("Rome is restarting")).toBeTruthy();
+    expect(await screen.findByText("Upgrading to 1.3.0.")).toBeTruthy();
     expect(backend.upgradeRequests).toEqual([{ target: "1.2.0" }, { target: "1.3.0" }]);
   });
 
@@ -356,21 +396,20 @@ describe("SystemUpgradeSection", () => {
         { status: 200, body: buildInfo() },
       ],
     });
-    renderSection();
+    renderRow();
     const user = userEvent.setup();
 
     expect(await screen.findByText("Couldn't load version info.")).toBeTruthy();
     expect(screen.queryByText("…")).toBeNull();
     // Whether this build supports upgrades is unknown, so the check must not
     // be offered.
-    const check = screen.getByRole("button", { name: "Check for updates" }) as HTMLButtonElement;
-    expect(check.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Check for updates" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
-    expect(await screen.findByText("1.1.0")).toBeTruthy();
+    expect(await screen.findByText(/^1\.1\.0 · Built /)).toBeTruthy();
     expect(screen.queryByText("Couldn't load version info.")).toBeNull();
-    await waitFor(() => expect(check.disabled).toBe(false));
+    await findEnabledButton("Check for updates");
   });
 
   it("keeps the update check disabled until build info has resolved", async () => {
@@ -379,7 +418,7 @@ describe("SystemUpgradeSection", () => {
     mockBackend({
       build: [{ status: 200, body: buildInfo(), wait: buildInFlight }],
     });
-    renderSection();
+    renderRow();
 
     // On an unversioned build a click here would reach the check core is
     // meant to reject — the button must be inert until the gate has data.
@@ -400,7 +439,7 @@ describe("SystemUpgradeSection", () => {
       check: [CHECK_AVAILABLE],
       upgrade: [{ status: 202, body: { status: "upgrading", target: "1.2.0" }, wait: inFlight }],
     });
-    renderSection();
+    renderRow();
     const user = userEvent.setup();
 
     await user.click(await findEnabledButton("Check for updates"));
@@ -416,7 +455,7 @@ describe("SystemUpgradeSection", () => {
     expect(backend.upgradeRequests).toHaveLength(1);
 
     release();
-    expect(await screen.findByText("Rome is restarting")).toBeTruthy();
+    expect(await screen.findByText("Upgrading to 1.2.0.")).toBeTruthy();
     expect(backend.upgradeRequests).toEqual([{ target: "1.2.0" }]);
   });
 
@@ -442,7 +481,7 @@ describe("SystemUpgradeSection", () => {
         { status: 202, body: { status: "upgrading", target: "1.3.0" } },
       ],
     });
-    renderSection();
+    renderRow();
     const user = userEvent.setup();
 
     await user.click(await findEnabledButton("Check for updates"));
@@ -463,7 +502,7 @@ describe("SystemUpgradeSection", () => {
 
     await user.click(confirm);
 
-    expect(await screen.findByText("Rome is restarting")).toBeTruthy();
+    expect(await screen.findByText("Upgrading to 1.3.0.")).toBeTruthy();
     expect(backend.upgradeRequests).toEqual([{ target: "1.2.0" }, { target: "1.3.0" }]);
   });
 });

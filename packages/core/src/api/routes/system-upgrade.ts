@@ -1,19 +1,23 @@
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { getBuildInfo } from "../../build-info.js";
-import { cloudBearer } from "../../lib/instance-identity.js";
-import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
-import type { SystemUpgradeService } from "../../system-upgrade/service.js";
+import { cloudBearer } from "../../instance/instance-identity.js";
+import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
+import { RELEASE_VERSION } from "@rome/api-types/release-notes";
+import { compareVersions, type ReleaseNotes } from "../../instance/system-upgrade/release-notes.js";
+import type { SystemUpgradeService } from "../../instance/system-upgrade/service.js";
 
 export interface SystemUpgradeRoutesDeps {
   systemUpgradeService: SystemUpgradeService;
+  releaseNotes: ReleaseNotes;
 }
 
 // Dashboard-facing forwarders for the Rome Cloud self-upgrade contract. Core
-// never decides upgrade policy itself: it relays the guardian's request to
-// Rome Cloud with the instance token and mirrors Rome Cloud's verdict
-// (status code + body) back to the dashboard unchanged, so the dashboard sees
-// one consistent contract regardless of which side rejected the request.
+// never decides upgrade policy itself: it relays the dashboard's request (from
+// the guardian or a dashboard admin, who may upgrade too) to Rome Cloud with
+// the instance token and mirrors Rome Cloud's verdict (status code + body)
+// back to the dashboard unchanged, so the dashboard sees one consistent
+// contract regardless of which side rejected the request.
 //
 // The one local precondition besides Rome Cloud access: the running build must
 // have a release version. An unversioned build (source run, test image) has no
@@ -92,6 +96,22 @@ export function systemUpgradeRoutes(deps: SystemUpgradeRoutesDeps): Hono {
     const mirrored = await mirrorRomeCloudResponse(response);
     if (!mirrored) return c.json({ error: "pantheon_unreachable" }, 502);
     return c.json(mirrored.body, mirrored.status);
+  });
+
+  // What upgrading from `from` (the running version) to `to` (the offered
+  // one) changes, read from GitHub by the instance, so the dashboard needs no
+  // GitHub access. Without `from`, only `to`'s own release. Always 200 for
+  // valid versions: a missing or unreadable release is a status in the body.
+  app.get("/system/release-notes", async (c) => {
+    const to = c.req.query("to") ?? "";
+    const from = c.req.query("from") || null;
+    if (!RELEASE_VERSION.test(to) || (from !== null && !RELEASE_VERSION.test(from))) {
+      return c.json({ error: "invalid_version" }, 400);
+    }
+    if (from !== null && compareVersions(from, to) >= 0) {
+      return c.json({ error: "invalid_range" }, 400);
+    }
+    return c.json(await deps.releaseNotes.range(from, to));
   });
 
   app.post("/system/upgrade", async (c) => {

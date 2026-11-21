@@ -8,16 +8,14 @@ struct BriefCard: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Image(systemName: "bubble.left")
-                    .romeFont(11, .semibold)
+                    .romeFont(11)
                 Text("Task brief · From Chat")
             }
-            .romeFont(12, .semibold)
+            .romeFont(CardScale.label)
             .foregroundStyle(Palette.sub)
-            MarkdownText(source: text, fontSize: 15, lineSpacing: 7)
+            MarkdownText(source: text, fontSize: CardScale.body, lineSpacing: 7)
         }
-        .padding(.horizontal, 15)
-        .padding(.top, 13)
-        .padding(.bottom, 14)
+        .cardPadding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         .hairline(radius: Metrics.cardRadius)
@@ -64,7 +62,7 @@ struct ToolSummary: View {
                             Button { detail = call } label: {
                                 HStack(spacing: 10) {
                                     Text(call.name)
-                                        .romeFont(12, .semibold, design: .monospaced)
+                                        .romeFont(12, .medium, design: .monospaced)
                                         .foregroundStyle(Palette.fg)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
@@ -194,13 +192,19 @@ struct ApprovalCardView: View {
     let resolvedAt: Date?
     /// A visitor sees the card but cannot answer it.
     var canResolve = true
+    /// Drawn whole and read only, as a folded card opens: what it asked, no controls.
+    var settled = false
+    /// How it ended, in the line above a settled card's title.
+    var settledLabel: String? = nil
     let onResolve: (Bool) -> Void
 
     private var title: String { part.title.flatMap { $0.isEmpty ? nil : $0 } ?? displayActionName(part.actionName) }
 
     var body: some View {
         Group {
-            switch status {
+            switch settled ? .pending : status {
+            case _ where settled:
+                settledCard
             case nil:
                 HStack(spacing: 10) {
                     Spinner(size: 16, color: Palette.sub)
@@ -228,43 +232,80 @@ struct ApprovalCardView: View {
         }
     }
 
+    /// An approval that no longer waits, opened read only: as an answered
+    /// question card draws itself, the outcome, what it asked, then its
+    /// details as a plain list.
+    private var settledCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(verbatim: settledLabel ?? String(localized: "Approval"))
+                .romeFont(CardScale.label)
+                .foregroundStyle(Palette.sub)
+            Text(title)
+                .romeFont(CardScale.title, .semibold)
+                .foregroundStyle(Palette.sub)
+                .lineSpacing(3)
+            let rows: [(label: String?, value: String)] =
+                ((part.summary ?? "").isEmpty ? [] : [(nil, part.summary ?? "")])
+                + part.fields.map { (Optional($0.label), $0.value) }
+            if !rows.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                        if index > 0 { OptionDivider() }
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            if let label = row.label {
+                                Text(label).romeFont(CardScale.caption).foregroundStyle(Palette.sub).frame(width: 44, alignment: .leading)
+                            }
+                            Text(row.value).romeFont(CardScale.body).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(minHeight: CardScale.optionMinHeight, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .fillsBubbleWidth()
+        .cardPadding()
+        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
+        .hairline(radius: Metrics.bigCardRadius)
+        .transition(.opacity)
+    }
+
     private var pendingCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
                 Image(systemName: "envelope")
-                    .romeFont(17, .medium)
-                    .foregroundStyle(Palette.warningText)
-                    .frame(width: 36, height: 36)
-                    .background(Palette.warnSoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .romeFont(CardScale.iconGlyph)
+                    .foregroundStyle(Palette.sub)
+                    .frame(width: CardScale.iconBox, height: CardScale.iconBox)
+                    .background(Palette.fill, in: RoundedRectangle(cornerRadius: CardScale.iconCorner, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Needs approval")
-                        .romeFont(12, .semibold)
-                        .foregroundStyle(Palette.warningText)
+                    (settled ? Text("Approval") : Text("Needs approval"))
+                        .romeFont(CardScale.label)
+                        .foregroundStyle(Palette.sub)
                     Text(title)
-                        .romeFont(17, .semibold)
-                        .tracking(-0.4)
+                        .romeFont(CardScale.title, .semibold)
+                        .tracking(-0.3)
                 }
             }
             if !part.fields.isEmpty || !(part.summary ?? "").isEmpty {
                 VStack(spacing: 0) {
                     if let summary = part.summary, !summary.isEmpty {
                         Text(summary)
-                            .romeFont(15)
+                            .romeFont(CardScale.body)
                             .lineSpacing(4)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 10)
+                            .padding(.vertical, CardScale.fieldRowPadding)
                     }
                     ForEach(Array(part.fields.enumerated()), id: \.offset) { index, field in
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(field.label)
-                                .romeFont(13)
+                                .romeFont(CardScale.caption)
                                 .foregroundStyle(Palette.sub)
                                 .frame(width: 44, alignment: .leading)
                             Text(field.value)
-                                .romeFont(15, .medium)
+                                .romeFont(CardScale.body)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .padding(.vertical, 10)
+                        .padding(.vertical, CardScale.fieldRowPadding)
                         .overlay(alignment: .top) {
                             if index > 0 || !(part.summary ?? "").isEmpty {
                                 Rectangle().fill(Palette.hair).frame(height: 0.5)
@@ -272,9 +313,9 @@ struct ApprovalCardView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, CardScale.paddingH)
                 .padding(.vertical, 2)
-                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(Palette.fill, in: RoundedRectangle(cornerRadius: CardScale.fieldCorner, style: .continuous))
             }
             if let error {
                 HStack(spacing: 8) {
@@ -287,37 +328,41 @@ struct ApprovalCardView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.dangerSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            if canResolve {
-                HStack(spacing: 10) {
+            if settled {
+                EmptyView()
+            } else if canResolve {
+                // Sized to their words at the card's foot: Approve the one
+                // accent button, Reject a quiet one beside it.
+                HStack(spacing: 6) {
+                    Spacer(minLength: 0)
                     Button { onResolve(false) } label: {
                         Group {
                             if submitting == false {
-                                Spinner(size: 18, lineWidth: 2.4, color: Palette.fg, trackOpacity: 0.2)
+                                Spinner(size: 16, lineWidth: 2.2, color: Palette.sub, trackOpacity: 0.2)
                             } else {
                                 Text("Reject")
                             }
                         }
-                        .romeFont(17, .semibold)
-                        .foregroundStyle(Palette.fg)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .background(Palette.fill, in: Capsule())
+                        .romeFont(CardScale.actionFont, .medium)
+                        .foregroundStyle(Palette.sub)
+                        .padding(.horizontal, 14)
+                        .frame(minWidth: 72, minHeight: CardScale.actionHeight)
+                        .contentShape(Capsule())
                     }
                     .opacity(submitting == true ? 0.45 : 1)
                     Button { onResolve(true) } label: {
                         Group {
                             if submitting == true {
-                                Spinner(size: 18, lineWidth: 2.4, color: .white, trackOpacity: 0.35)
+                                Spinner(size: 16, lineWidth: 2.2, color: .white, trackOpacity: 0.35)
                             } else {
                                 Text("Approve")
                             }
                         }
-                        .romeFont(17, .semibold)
+                        .romeFont(CardScale.actionFont, .medium)
                         .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
+                        .padding(.horizontal, 16)
+                        .frame(minWidth: 88, minHeight: CardScale.actionHeight)
                         .background(Palette.primary, in: Capsule())
-                        .shadow(color: Palette.primary.opacity(0.5), radius: 7, x: 0, y: 6)
                     }
                     .opacity(submitting == false ? 0.45 : 1)
                 }
@@ -331,10 +376,10 @@ struct ApprovalCardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(16)
+        .fillsBubbleWidth()
+        .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous).strokeBorder(Palette.warnRing, lineWidth: 1))
-        .shadow(color: Palette.cardShadow, radius: 16, x: 0, y: 12)
+        .hairline(radius: Metrics.bigCardRadius)
         .padding(.top, 4)
     }
 
@@ -349,7 +394,7 @@ struct ApprovalCardView: View {
                         }
                     }
                 }
-            (Text(label).fontWeight(.semibold) + Text(verbatim: " · \(title)").foregroundStyle(Palette.sub))
+            (Text(label).fontWeight(.medium) + Text(verbatim: " · \(title)").foregroundStyle(Palette.sub))
                 .romeFont(15)
             Spacer(minLength: 0)
             if let resolvedAt {
@@ -358,8 +403,7 @@ struct ApprovalCardView: View {
                     .foregroundStyle(Palette.sub)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
+        .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
         .hairline(radius: Metrics.groupRadius)
         .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
@@ -369,7 +413,7 @@ struct ApprovalCardView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 AlertGlyph(size: 15)
-                Text("Approved, but “\(title)” did not finish").romeFont(14, .medium)
+                Text("Approved, but “\(title)” didn't finish").romeFont(14, .medium)
             }
             .foregroundStyle(Palette.destructive)
             .padding(.horizontal, 12)
@@ -377,294 +421,87 @@ struct ApprovalCardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.dangerSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(16)
+        .fillsBubbleWidth()
+        .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
         .hairline(radius: Metrics.bigCardRadius)
     }
 }
 
-/// The agent asked something. Options answer in one tap; "Or type your own…" takes text.
+/// The agent asked something: the card core described from its questions,
+/// drawn as the dashboard draws it. A question stored before cards were
+/// described shows its questions as a line.
 struct QuestionCardView: View {
     let part: MessagePart.QuestionPart
     let answered: JSONValue?
-    let sending: Bool
-    /// The `answers` to send, shaped as the web's QuestionCard sends them.
-    let onAnswer: ([JSONValue]) -> Void
-
-    /// Chosen options per question, in the order they were picked.
-    @State private var choices: [String: [String]]
-    @State private var typed: [String: String]
-    @FocusState private var focusedQuestion: String?
-
-    init(part: MessagePart.QuestionPart, answered: JSONValue?, sending: Bool, onAnswer: @escaping ([JSONValue]) -> Void) {
-        self.part = part
-        self.answered = answered
-        self.sending = sending
-        self.onAnswer = onAnswer
-        // Defaults are chosen before the guardian touches anything, and stay editable.
-        let initial = QuestionAnswers.initial(part.questions)
-        _choices = State(initialValue: initial.choices)
-        _typed = State(initialValue: initial.typed)
-    }
-
-    private func answer(for question: MessagePart.QuestionPart.Question) -> JSONValue? {
-        (answered?["answers"]?.array ?? []).first { $0["questionId"]?.string == question.id }
-    }
+    /// Sends an event the card fired to core, which decides what it means.
+    let press: (String, JSONValue) async throws -> WidgetEventReply
 
     var body: some View {
-        if answered != nil {
-            answeredCard
+        if let card = part.ui {
+            WidgetUICardView(part: card, call: { _, _, _ in throw APIError.notFound }, press: press, waiting: .init(answered: answered))
         } else {
-            pendingCard
-        }
-    }
-
-    private var single: Bool { part.questions.count == 1 && !(part.questions.first?.multi ?? true) }
-
-    private var pendingCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Waiting for your answer")
-                .romeFont(12, .semibold)
-                .foregroundStyle(Palette.warningText)
-            ForEach(part.questions, id: \.id) { question in
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(question.text)
-                        .romeFont(17, .semibold)
-                        .tracking(-0.4)
-                        .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                    VStack(spacing: 8) {
-                        ForEach(question.options, id: \.self) { option in
-                            optionButton(question, option)
-                        }
-                        HStack(spacing: 8) {
-                            TextField(question.options.isEmpty ? "Type your answer…" : "Or type your own…", text: binding(question.id), axis: .vertical)
-                                .romeFont(16)
-                                .lineLimit(1...4)
-                                .focused($focusedQuestion, equals: question.id)
-                                .padding(.vertical, 12)
-                            if single, let answers = QuestionAnswers.inlineSend(question, choices: choices, typed: typed) {
-                                Button {
-                                    focusedQuestion = nil
-                                    onAnswer(answers)
-                                } label: {
-                                    Image(systemName: "arrow.up")
-                                        .romeFont(14, .bold)
-                                        .foregroundStyle(.white)
-                                        .frame(width: 30, height: 30)
-                                        .background(Palette.primary, in: Circle())
-                                }
-                                .buttonStyle(PressScaleStyle(scale: 0.9))
-                                .transition(.scale.combined(with: .opacity))
-                            }
-                        }
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 46)
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.hair, lineWidth: 1))
-                        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: typed[question.id]?.isEmpty ?? true)
-                    }
-                }
-            }
-            if !single {
-                PrimaryButton(title: "Submit", loading: sending, disabled: !complete) { submit() }
-            }
-        }
-        .padding(16)
-        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous).strokeBorder(Palette.warnRing, lineWidth: 1))
-        .shadow(color: Palette.cardShadow, radius: 16, x: 0, y: 12)
-        .padding(.top, 4)
-        .disabled(sending)
-        .opacity(sending ? 0.7 : 1)
-    }
-
-    private func optionButton(_ question: MessagePart.QuestionPart.Question, _ option: String) -> some View {
-        let selected = choices[question.id]?.contains(option) ?? false
-        let description = question.optionDescriptions[option]
-        return Button {
-            if question.multi {
-                var list = choices[question.id] ?? []
-                if let index = list.firstIndex(of: option) { list.remove(at: index) } else { list.append(option) }
-                choices[question.id] = list
-            } else {
-                choices[question.id] = [option]
-                // Choosing replaces what was typed: the choice is the answer.
-                typed[question.id] = nil
-                if single { submit(choices: [question.id: [option]], typed: [:]) }
-            }
-        } label: {
-            HStack(spacing: 12) {
-                ZStack {
-                    if selected {
-                        Circle().fill(Palette.primary)
-                        Image(systemName: "checkmark").romeFont(9, .heavy).foregroundStyle(.white)
-                    } else {
-                        Circle().strokeBorder(Palette.sub, lineWidth: 1.5)
-                    }
-                }
-                .frame(width: 18, height: 18)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(option)
-                        .romeFont(16, .medium)
-                        .foregroundStyle(Palette.fg)
-                        .multilineTextAlignment(.leading)
-                    if let description {
-                        // Shown only: an answer carries the label.
-                        Text(description)
-                            .romeFont(13)
-                            .foregroundStyle(Palette.sub)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, description == nil ? 0 : 10)
-            .frame(minHeight: 46)
-            .background(selected ? Palette.primarySoft : Palette.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay {
-                if selected {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.primary, lineWidth: 1.5)
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .buttonStyle(PressScaleStyle(scale: 0.98))
-        .sensoryFeedback(.selection, trigger: selected)
-    }
-
-    /// Optional questions never block Submit; a required one with a default is answered.
-    private var complete: Bool {
-        QuestionAnswers.complete(part.questions, choices: choices, typed: typed)
-    }
-
-    private func binding(_ id: String) -> Binding<String> {
-        Binding(get: { typed[id] ?? "" }, set: { typed[id] = $0 })
-    }
-
-    private func submit(choices: [String: [String]]? = nil, typed: [String: String]? = nil) {
-        let choices = choices ?? self.choices, typed = typed ?? self.typed
-        // Every required question answered; a card of only optional ones may go blank.
-        guard QuestionAnswers.complete(part.questions, choices: choices, typed: typed) else { return }
-        let answers = QuestionAnswers.answers(part.questions, choices: choices, typed: typed)
-        focusedQuestion = nil
-        onAnswer(answers)
-    }
-
-    private var answeredCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Answered")
-                .romeFont(12, .semibold)
+            Text(verbatim: part.questions.map(\.text).joined(separator: "\n"))
+                .romeFont(CardScale.body)
                 .foregroundStyle(Palette.sub)
-            ForEach(part.questions, id: \.id) { question in
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(question.text)
-                        .romeFont(16, .semibold)
-                        .foregroundStyle(Palette.sub)
-                        .lineSpacing(3)
-                    let stored = QuestionAnswers.picked(answer(for: question), question: question)
-                    let picked = stored.options
-                    ForEach(question.options, id: \.self) { option in
-                        if picked.contains(option) {
-                            HStack(spacing: 12) {
-                                ZStack {
-                                    Circle().fill(Palette.primary)
-                                    Image(systemName: "checkmark").romeFont(9, .heavy).foregroundStyle(.white)
-                                }
-                                .frame(width: 18, height: 18)
-                                Text(option).romeFont(16, .semibold)
-                            }
-                            .padding(.horizontal, 14)
-                            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-                            .background(Palette.primarySoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.primary, lineWidth: 1.5))
-                        } else {
-                            Text(option)
-                                .romeFont(16)
-                                .foregroundStyle(Palette.sub)
-                                .padding(.leading, 44)
-                                .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-                        }
-                    }
-                    let extra = stored.extra
-                    if !extra.isEmpty {
-                        Text(extra.joined(separator: QuestionAnswers.separator))
-                            .romeFont(16, .semibold)
-                            .padding(.horizontal, 14)
-                            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-                            .background(Palette.primarySoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.primary, lineWidth: 1.5))
-                    }
-                }
-            }
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(16)
-        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
-        .hairline(radius: Metrics.bigCardRadius)
-        .transition(.opacity)
     }
 }
 
-/// Parts the phone does not draw: open them on the Web.
+/// A thin rule between the rows of a card's plain list.
+struct OptionDivider: View {
+    var body: some View {
+        Rectangle().fill(Palette.hair).frame(height: 0.5).padding(.leading, 30)
+    }
+}
+
+/// A part the phone does not draw: its name, and a button that opens its
+/// chat on the dashboard, in the app.
 struct WebOnlyCard: View {
+    let kind: MessagePart.WebOnlyKind
+    /// Answered already: it says so, instead of asking to be opened.
+    var done = false
     /// The chat it is in, opened on the dashboard.
     var sessionId: String? = nil
     @Environment(AppModel.self) private var model
-    @Environment(\.openURL) private var openURL
+    @Environment(\.openInstancePage) private var openInstancePage
 
-    /// The web dashboard's page for a chat: `/chat/<id>`. The main chat goes
-    /// by its id on the server; until that is known, `/chat`.
-    static func url(origin: URL, sessionId: String?, mainChatServerID: String? = nil) -> URL {
-        guard let sessionId, !sessionId.isEmpty else { return origin }
-        let chat = origin.appending(path: "chat")
-        guard sessionId == conciergeChatID else { return chat.appending(path: sessionId) }
-        return mainChatServerID.map { chat.appending(path: $0) } ?? chat
+    private var title: String {
+        guard case .app(let id) = kind else { return kind.title() }
+        return kind.title(appName: model.workspace?.apps.first { $0.id == id }?.name)
     }
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "safari")
-                .romeFont(17)
+            Image(systemName: "globe")
+                .romeFont(CardScale.iconGlyph)
                 .foregroundStyle(Palette.fg)
-                .frame(width: 32, height: 32)
-                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            Text("Shown only on the web")
-                .romeFont(15)
+                .frame(width: CardScale.iconBox, height: CardScale.iconBox)
+                .background(Palette.fill, in: RoundedRectangle(cornerRadius: CardScale.iconCorner, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: title)
+                    .romeFont(CardScale.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(done ? "Done" : "Shown only on the web")
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.sub)
+            }
             Spacer(minLength: 0)
             Button("Open") {
                 if let origin = model.webURL {
-                    openURL(Self.url(origin: origin, sessionId: sessionId, mainChatServerID: model.workspace?.mainChatServerID))
+                    openInstancePage(InstancePages.chat(origin: origin, sessionId: sessionId, mainChatServerID: model.workspace?.mainChatServerID))
                 }
             }
-            .romeFont(14, .semibold)
+            .romeFont(CardScale.actionFont, .medium)
             .foregroundStyle(Palette.fg)
             .padding(.horizontal, 13)
-            .frame(height: 32)
+            .frame(height: CardScale.actionHeight)
             .background(Palette.fill, in: Capsule())
             .buttonStyle(PressScaleStyle())
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 12)
-        .padding(.vertical, 12)
+        .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
         .hairline(radius: Metrics.groupRadius)
-    }
-}
-
-struct ErrorLine: View {
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 9) {
-            AlertGlyph(size: 16).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-            Text(text)
-                .romeFont(15)
-                .lineSpacing(5)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .padding(2)
-        .accessibilityElement(children: .combine)
     }
 }

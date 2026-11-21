@@ -193,30 +193,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     git lfs version && \
     printf '%s\n' "$BROWSER_BINARY" > /etc/rome-browser-binary
 
-# Runtime libraries for the WeChat personal-account connection. The client
-# itself is 744 MB and is fetched into a volume when a guardian connects, so it
-# is deliberately not baked in; these are its shared libraries, which are 37 MB
-# and cannot be staged the same way. WeChat resolves EGL through glvnd, and
-# glvnd finds its vendor driver through ldconfig and /usr/share/glvnd — pointing
-# LD_LIBRARY_PATH at a volume leaves eglGetPlatformDisplayEXT unresolved and the
-# client dies before it draws. The browser package already supplies most of the
-# X and GL stack; this is only the remainder.
-#
-# Key recovery launches the client under gdb as the Rome service user.
-# Sending drives the client through its AT-SPI accessibility tree: at-spi2-core
-# runs the accessibility bus beside the client's private session bus, jeepney
-# reads the tree, and xdotool clicks and presses Return where the tree has no
-# action.
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
-      libegl1 libgl1-mesa-dri libglx-mesa0 libgbm1 libatomic1 \
-      libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
-      libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxcb-cursor0 libxcb-xinput0 \
-      libxkbcommon-x11-0 libxtst6 libxss1 libpulse0 \
-      gdb x11-utils imagemagick \
-      at-spi2-core xdotool python3-jeepney
-
 # Install AI tool CLIs globally (early for better layer caching).
 # @yunfanye/opencli is not mirrored on npmmirror, so install it separately from the
 # default registry. A scoped --@yunfanye:registry override on the mirrored install
@@ -375,6 +351,8 @@ COPY scripts/docker/rome-shell-path.sh /usr/local/share/rome/rome-shell-path.sh
 # rome-init.sh; the package launcher always loads its compiled dist entrypoint.
 RUN ln -sf /app/packages/discord-cli/bin/discord.js /usr/local/bin/discord
 RUN ln -sf /app/packages/rome-node-cli/bin/rome-node.js /usr/local/bin/rome-node
+# The vault CLI ships inside the signer package, next to the signer it talks to.
+RUN ln -sf /app/packages/signer/bin/vault.js /usr/local/bin/vault
 
 # Chrome/CDP launcher assets
 RUN chmod +x /opt/rome/scripts/docker/rome-start-chrome-cdp.sh /opt/rome/scripts/docker/rome-apply-cdp-stealth.sh

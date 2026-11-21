@@ -1,0 +1,215 @@
+// What Chats offers apps. An app's action worker runs in its own process, and
+// Rome's accounts, chat settings and agent names live in the main process, so
+// the worker reaches them through these calls.
+
+import type {
+  Account,
+  ChatId,
+  ChatRef,
+  ChatSettingsControl,
+  ChannelsService,
+  ListChatSettingsInput,
+  MessageReceipt,
+  OutgoingMessage,
+  ResetChatSettingsInput,
+  ThreadContext,
+  UpdateChatSettingsInput,
+} from "@rome-os/app-runtime";
+import { z } from "zod";
+import type { SessionActor } from "../access/session-actor.js";
+import { parseWorkerCallParams } from "../lib/worker-call-params.js";
+import type { AgentNamesService } from "../chats/accounts/agent-names.js";
+import { dashboardCallerOf, webchatCaller } from "../webchat/dashboard-account.js";
+
+// An app names one of Rome's accounts, or a channel by its name.
+const AccountOrChannel = z.union([
+  z.string().min(1),
+  z.object({ platform: z.string().min(1), id: z.string().min(1) }).strict(),
+]);
+
+const SendParams = z.object({
+  channel: AccountOrChannel,
+  chatId: z.string(),
+  message: z.custom<OutgoingMessage>((val) => typeof val === "object" && val !== null, {
+    message: "message must be an object",
+  }),
+});
+
+// `query` reads the channel's own `messages`, which names no Connection, so a
+// request naming one is refused rather than answered from another account.
+const QueryParams = z
+  .object({
+    channel: AccountOrChannel,
+    chatId: z.string().optional(),
+    since: z.string().datetime().optional(),
+    after: z.string().optional(),
+    limit: z.number().int().positive().optional(),
+  })
+  .strict();
+
+const AgentNamesResolveParams = z.object({ name: z.string().min(1) }).strict();
+
+const ChatRefParams = z.object({
+  ref: z.object({ connectionId: z.string().min(1), chatId: z.string() }),
+});
+const ChatSettingsInput = z.custom<
+  UpdateChatSettingsInput | ResetChatSettingsInput | ListChatSettingsInput
+>((value) => typeof value === "object" && value !== null);
+
+/** The action behind a worker's call, as the worker boundary captured it. */
+export interface WorkerCaller {
+  callerActionContext?: {
+    actor?: SessionActor;
+    /** Who reads the calling turn's answer, as the host read it when the
+     *  turn started. Absent for an action that is not the host's own. */
+    audience?: "private" | "shared";
+    channelContext?: ThreadContext;
+    /** The agent turn the action runs in. Absent outside any agent turn, as
+     *  for a routine's fire. */
+    turnId?: string;
+    agentName?: string;
+  };
+}
+
+export interface ChatWorkerCallsDeps {
+  /** How a worker's actions send and read on Rome's accounts. */
+  channelsService: ChannelsService;
+  chatSettings: ChatSettingsControl;
+  /** How `system:send_message` turns an agent's name into its id. */
+  agentNames: AgentNamesService;
+  /**
+   * Takes a send into a Concierge chat that the Concierge did not make, and
+   * answers its receipt; null lets the send go on. Absent, every send goes on.
+   */
+  intoConciergeChat?: (
+    target: Account | string,
+    chatId: string,
+    message: OutgoingMessage,
+    agentName: string | undefined,
+  ) => Promise<MessageReceipt | null>;
+}
+
+/**
+ * Whether the calling action may read any chat: it runs in a turn whose
+ * audience is private, so nobody but the guardian reads what it says, or
+ * outside any agent turn. A turn others read, such as one for a visitor, in a
+ * group or in an email thread, could pass on what another chat holds, so it
+ * reads only the chat it is in. An agent turn with no chat of its own, such
+ * as a summoned agent's, reads any chat only when its audience is private,
+ * and otherwise none. A turn in a chat with no audience reads as shared, and
+ * so does one acting for anyone but the guardian. A routine's fire runs
+ * outside any agent turn, so a routine made for a shared chat still reads any
+ * chat (#2437). Domain: docs/domains/participation.md#audience.
+ */
+function readsAnyChat(context: WorkerCaller["callerActionContext"]): boolean {
+  if (context?.actor && context.actor.kind !== "guardian") return false;
+  if (!context?.channelContext && !context?.turnId) return true;
+  return context.audience === "private";
+}
+
+/** Whether `chatId` is the chat a turn is in: its own, or, in a native
+ *  thread, the chat the thread hangs off, which the same people read. */
+function isOwnChat(chatId: string | undefined, place: ThreadContext | undefined): boolean {
+  if (chatId === undefined || !place) return false;
+  return chatId === place.threadId || chatId === place.parentThreadId;
+}
+
+/** The channel a query names: its name, or the channel holding the account. */
+async function channelNamed(
+  channelsService: ChannelsService,
+  target: Account | string,
+): Promise<string | null> {
+  if (typeof target === "string") return target;
+  const summaries = await channelsService.list();
+  const held = summaries.find(
+    (summary) => summary.account?.platform === target.platform && summary.account?.id === target.id,
+  );
+  return held?.name ?? null;
+}
+
+/** The chat calls an app's worker makes, keyed by method name. */
+export function chatWorkerCalls(
+  deps: ChatWorkerCallsDeps,
+): Record<string, (params: unknown, caller?: WorkerCaller) => Promise<unknown>> {
+  const { channelsService, chatSettings } = deps;
+  return {
+    "channels.list": async () => channelsService.list(),
+    "channels.send": async (params, caller) => {
+      const { channel, chatId, message } = parseWorkerCallParams(
+        "channels.send",
+        SendParams,
+        params,
+      );
+      // The dashboard chat writes only where the calling action's person may.
+      return await webchatCaller.run(dashboardCallerOf(caller?.callerActionContext), async () => {
+        // Only the Concierge writes in a Concierge chat: another agent's or an
+        // app's send there wakes it instead, once the caller may write there.
+        const taken = await deps.intoConciergeChat?.(
+          channel,
+          chatId,
+          message,
+          caller?.callerActionContext?.agentName,
+        );
+        return taken ?? (await channelsService.send(channel, chatId as ChatId, message));
+      });
+    },
+    "channels.query": async (params, caller) => {
+      const { channel, chatId, since, after, limit } = parseWorkerCallParams(
+        "channels.query",
+        QueryParams,
+        params,
+      );
+      const context = caller?.callerActionContext;
+      const place = context?.channelContext;
+      if (
+        !readsAnyChat(context) &&
+        (!isOwnChat(chatId, place) ||
+          (await channelNamed(channelsService, channel)) !== place?.channel)
+      ) {
+        throw new Error("A turn others read reads only the chat it is in");
+      }
+      // The dashboard chat reads as the person accountable for the calling
+      // action's turn, in the chat it runs in.
+      return await webchatCaller.run(dashboardCallerOf(caller?.callerActionContext), () =>
+        channelsService.query(channel, {
+          ...(chatId ? { chatId: chatId as ChatId } : {}),
+          ...(since ? { since: new Date(since) } : {}),
+          ...(after ? { after } : {}),
+          ...(limit ? { limit } : {}),
+        }),
+      );
+    },
+    "agentNames.resolve": async (params) => {
+      const { name } = parseWorkerCallParams("agentNames.resolve", AgentNamesResolveParams, params);
+      return deps.agentNames.resolve(name);
+    },
+    "chatSettings.list": async (params) =>
+      chatSettings.list(
+        parseWorkerCallParams(
+          "chatSettings.list",
+          ChatSettingsInput,
+          params,
+        ) as ListChatSettingsInput,
+      ),
+    "chatSettings.get": async (params) => {
+      const { ref } = parseWorkerCallParams("chatSettings.get", ChatRefParams, params);
+      return chatSettings.get(ref as ChatRef);
+    },
+    "chatSettings.update": async (params) =>
+      chatSettings.update(
+        parseWorkerCallParams(
+          "chatSettings.update",
+          ChatSettingsInput,
+          params,
+        ) as UpdateChatSettingsInput,
+      ),
+    "chatSettings.reset": async (params) =>
+      chatSettings.reset(
+        parseWorkerCallParams(
+          "chatSettings.reset",
+          ChatSettingsInput,
+          params,
+        ) as ResetChatSettingsInput,
+      ),
+  };
+}

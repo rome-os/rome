@@ -21,7 +21,7 @@ export function Dialogs() {
         <RomeInputDialog
           open
           title={nameDialog.title}
-          description={nameDialog.description}
+          description={nameDialog.mode === "create" ? nameDialog.description : undefined}
           inputLabel={nameDialog.inputLabel}
           initialValue={nameDialog.initialValue}
           confirmLabel={nameDialog.confirmLabel}

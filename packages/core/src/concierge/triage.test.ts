@@ -101,10 +101,7 @@ describe("the triage agent", () => {
     expect(concierge.systemPromptPrefix).toContain('`delivery="digest"`');
     expect(concierge.systemPromptPrefix).not.toMatch(/maxTurnsPerHour|minSpacing/);
     expect(concierge.systemPromptPrefix).toContain(
-      "`kind` on `<item>` and `<more>` is a catalog label, or an id when unknown",
-    );
-    expect(concierge.systemPromptPrefix).toContain(
-      "It names the event's shape, not whom it concerns",
+      "`kind` on `<item>` and `<more>` is a catalog label, or an id when unknown: it names the event's shape, not whom it concerns",
     );
   });
 
@@ -112,10 +109,10 @@ describe("the triage agent", () => {
     expect(agent.systemPromptPrefix).toContain("not whether to interrupt them");
     expect(agent.systemPromptPrefix).not.toMatch(/\bnotify\b/);
     const prompt = concierge.systemPromptPrefix;
-    expect(prompt).toContain("Whether to tell them now is your call");
-    expect(prompt).toContain("Every item also comes again in the next digest");
-    expect(prompt).toContain("What you already told them is not news");
-    expect(prompt).toContain("Never quote it or pass it on");
+    expect(prompt).toContain("whether to tell them now is your call");
+    expect(prompt).toContain("every item comes again in the digest");
+    expect(prompt).toContain("leave out what you already told");
+    expect(prompt).toContain("never quote them; say it in your own words");
     expect(prompt).not.toContain("untold");
     expect(prompt).not.toMatch(/\bnotify\b/);
   });
@@ -124,38 +121,42 @@ describe("the triage agent", () => {
 describe("the Concierge's rules for what cannot be followed", () => {
   const section = () => {
     const prompt = concierge.systemPromptPrefix;
-    const start = prompt.indexOf(
-      "- When the guardian asks you to follow something the list cannot follow:",
-    );
-    expect(start).toBeGreaterThan(-1);
-    return prompt.slice(start, prompt.indexOf("\n  - Once a follow succeeds", start));
+    const rule =
+      prompt
+        .split("\n")
+        .find((line) =>
+          line.startsWith("- When asked to follow something the list cannot follow:"),
+        ) ?? "";
+    expect(rule).not.toBe("");
+    return rule;
   };
 
   it("says the limit first, telling apart not connected, connected but not followable, and unsupported", () => {
     const rules = section();
-    expect(rules).toContain("Say the limit first, in one bubble, before any question");
-    expect(rules).toContain("The service is not connected");
+    expect(rules).toContain("first say in one bubble that it cannot, and why");
+    expect(rules).toContain("not connected: name it and show `connect_card`");
     expect(rules).toContain(
-      "it is connected but has nothing to follow (say whether you can still act through it)",
+      "connected but nothing to follow: say whether you can still act through it",
     );
-    expect(rules).toContain("Rome does not support it at all");
+    expect(rules).toContain("or not supported");
   });
 
   it("offers at most two ways, and asks for details only after one is picked", () => {
     const rules = section();
     expect(rules).toContain("offer at most two concrete ways");
-    expect(rules).toContain("Ask for details, such as how long before, only after they pick one");
+    expect(rules).toContain("ask details only after they pick");
   });
 
   it("prefers Rome's own means, and asks before a change to many outside items", () => {
     const rules = section();
-    expect(rules).toContain("Prefer Rome's own means over changing the outside service's settings");
-    expect(rules).toContain("a one-off with `defer`");
-    expect(rules).toContain("through a task chat that sets up a routine");
     expect(rules).toContain(
-      "Change the outside service's settings only when the guardian asks for that, or when Rome cannot do it",
+      "preferring Rome's own (a `defer` check, a scheduled task) over changing the outside service",
     );
-    expect(rules).toContain("say how many and which ones, and wait for their yes");
+    expect(rules).toContain("say how many and which, and wait for their yes");
+    // A generic routine never posts into a Concierge chat.
+    expect(concierge.systemPromptPrefix).toContain(
+      "Never set up a generic routine that posts into this chat",
+    );
     // Service-neutral: a calendar appears only as an example.
     expect(rules.match(/calendar/gi)?.length ?? 0).toBeLessThanOrEqual(1);
   });

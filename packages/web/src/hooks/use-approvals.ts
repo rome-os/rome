@@ -7,14 +7,17 @@ import { emitSessionsChanged } from "@/lib/session-events";
 
 const APPROVALS_QUERY_KEY = ["approvals"] as const;
 
-export function useApprovals() {
+export function useApprovals({ status }: { status?: "pending" } = {}) {
   const { t } = useTranslation("activity");
   return useQuery({
-    queryKey: APPROVALS_QUERY_KEY,
+    queryKey: status ? [...APPROVALS_QUERY_KEY, status] : APPROVALS_QUERY_KEY,
     queryFn: async () => {
-      const rows = await fetchJson<Approval[]>("/api/approvals", {
-        fallback: t("approvals.loadFailed"),
-      });
+      const rows = await fetchJson<Approval[]>(
+        status ? `/api/approvals?status=${status}` : "/api/approvals",
+        {
+          fallback: t("approvals.loadFailed"),
+        },
+      );
       if (!Array.isArray(rows)) throw new Error(t("approvals.loadFailed"));
       return rows;
     },

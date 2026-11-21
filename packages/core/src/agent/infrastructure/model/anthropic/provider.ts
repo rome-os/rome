@@ -28,7 +28,7 @@ import type { ModelLoginKind } from "../../../domain/model-login.js";
 import { ROME_TOOL_GROUPS, type RomeTools } from "../../../domain/rome-tools.js";
 import { buildAgentAccounting } from "../provider-accounting.js";
 import type { LearnsRefusedTurns } from "../refused-turn.js";
-import { anthropicStop } from "./stop.js";
+import { anthropicStop, claudeStoppedTurnResult } from "./stop.js";
 import { AsyncMessageQueue } from "./async-message-queue.js";
 import { createReopeningSession, type ClaudeQuerySession } from "./reopening-session.js";
 import { createLogger } from "../../../../logger.js";
@@ -37,7 +37,7 @@ import { parseTimeZone } from "../../../../lib/timezone.js";
 import {
   buildAnthropicCompatibleProviderEnv,
   getStoredAnthropicCompatibleCredentials,
-} from "../../../../lib/anthropic-compatible-providers.js";
+} from "./anthropic-compatible-providers.js";
 import { CUSTOM_ANTHROPIC_PROVIDER_ID } from "@rome/api-types/anthropic-compatible-providers";
 import {
   clearAnthropicAuthRevoked,
@@ -49,11 +49,12 @@ import { ANTHROPIC_AUTH_REVOKED_CODE, isAnthropicAuthRevokedError } from "./auth
 import { anthropicToolName, buildAnthropicMcpServers } from "./mcp-servers.js";
 import { anthropicUsageLimitReset, isAnthropicUsageLimitError } from "./usage-limit.js";
 import { createClaudeQueryProcess } from "./query-process.js";
+import { RunningCost } from "./running-cost.js";
 import { claudeLoginFrom } from "./login.js";
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,
-} from "../../../../apps/packaging/output-schema-validator.js";
+} from "../../../../lib/output-schema-validator.js";
 
 // Beta content block types are not re-exported from the agent SDK and
 // `@anthropic-ai/sdk` is not a direct dependency, so we derive the shapes
@@ -249,7 +250,17 @@ function buildRawUsage(usage: BetaUsageShape): Record<string, unknown> | undefin
 function buildContextUsageFromSdk(
   contextUsage: SDKControlGetContextUsageResponse,
 ): AgentContextUsage | undefined {
-  const usedTokens = readPositiveNumber(contextUsage.totalTokens);
+  // Only the rows that occupy the window: the compaction reserve (`buffer`),
+  // the free space and deferred tool schemas are not context the model read.
+  const kinded = (contextUsage.categories ?? []).filter((row) => row.kind !== undefined);
+  const usedTokens =
+    kinded.length > 0
+      ? readPositiveNumber(
+          kinded
+            .filter((row) => row.kind === "used" && !row.isDeferred)
+            .reduce((sum, row) => sum + row.tokens, 0),
+        )
+      : readPositiveNumber(contextUsage.totalTokens);
   if (usedTokens === undefined) {
     return undefined;
   }
@@ -294,6 +305,7 @@ function buildAnthropicAccounting(
   result: SDKResultMessage,
   model: string,
   providerId: string,
+  costUsd: number | undefined,
   context?: AgentContextUsage,
   aborted = false,
 ) {
@@ -315,7 +327,7 @@ function buildAnthropicAccounting(
       cacheWriteTokens: readPositiveNumber(usage.cache_creation_input_tokens) ?? 0,
       ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
     },
-    reportedCostUsd: readPositiveNumber(result.total_cost_usd),
+    reportedCostUsd: costUsd,
     numTurns: readPositiveNumber(result.num_turns),
     stop: anthropicStop(result, aborted),
     stopReason: result.stop_reason ?? undefined,
@@ -506,6 +518,7 @@ export class AnthropicProvider implements ModelProvider {
       params,
       first: await open(params),
       open,
+      provider: this.id,
       reasoningEffort: toAnthropicEffort(params.config.reasoningEffort),
     });
   }
@@ -544,12 +557,21 @@ export class AnthropicProvider implements ModelProvider {
     const effectiveModel = queryEnv.ANTHROPIC_MODEL ?? model;
     const authRevokedSource = queryContext.authRevokedSource;
     const providerId = this.id;
+    // An abort that reached no SDK result still ends as a stopped turn.
+    const stoppedTurnResult = (content: string) =>
+      claudeStoppedTurnResult({
+        provider: providerId,
+        model: effectiveModel,
+        content,
+        reasoningEffort: effort,
+      });
     // Captured for the events generator below (a plain `async function*` with no
     // `this`): update runtime state before classified terminals become observable.
     const account = this.options.account;
 
     const inputQueue = new AsyncMessageQueue<SDKUserMessage>();
     const queryProcess = createClaudeQueryProcess();
+    const runningCost = new RunningCost(params.thread.kind === "new");
     const { abortController } = queryProcess;
     const pendingSteers = new Set<string>();
     const deferredInputs = new Set<string>();
@@ -718,6 +740,11 @@ export class AnthropicProvider implements ModelProvider {
             isAssistantMessage(message) ||
             isUserMessage(message);
           if (sdkTurnOwner === "sdk" && turnFrame && !romeReplay) continue;
+          if (message.type === "system" && message.subtype === "compact_boundary") {
+            // The SDK compacted the thread: what it read before may be gone.
+            yield { type: "model_context_compacted" };
+            continue;
+          }
           if (isPartialAssistantMessage(message)) {
             // Deltas of in-flight blocks. Each complete block still arrives
             // on its own assistant message, so this is purely additive for
@@ -905,6 +932,10 @@ export class AnthropicProvider implements ModelProvider {
               message,
               effectiveModel,
               providerId,
+              // An SDK-owned result ends no Rome turn, so nothing records its
+              // accounting. Leaving the tracker where it was puts its spend in
+              // the next Rome turn's difference.
+              sdkOwned ? undefined : runningCost.next(readPositiveNumber(message.total_cost_usd)),
               contextUsage,
               abortController.signal.aborted,
             );
@@ -1031,11 +1062,7 @@ export class AnthropicProvider implements ModelProvider {
           running = false;
           yield params.config.outputSchema
             ? { type: "error", error: "Claude structured-output turn was interrupted" }
-            : {
-                type: "result",
-                content: partialText || pendingText || "",
-                reasoningEffort: effort,
-              };
+            : stoppedTurnResult(partialText || pendingText || "");
         }
       } catch (err) {
         // The stream threw without delivering a terminal `result` (raw abort,
@@ -1055,11 +1082,7 @@ export class AnthropicProvider implements ModelProvider {
             running = false;
             yield params.config.outputSchema
               ? { type: "error", error: "Claude structured-output turn was interrupted" }
-              : {
-                  type: "result",
-                  content: partialText || pendingText || "",
-                  reasoningEffort: effort,
-                };
+              : stoppedTurnResult(partialText || pendingText || "");
           }
           return;
         }

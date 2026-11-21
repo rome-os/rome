@@ -23,9 +23,9 @@ cases:
           1. Find and click the "Sign in" button with both fields empty.
 
           2. Before continuing, confirm these visible checkpoints: The sign-in page is shown in
-          English with the heading "Sign In" and the description "Use your guardian account to
-          access Rome." It has "Username" and "Password" fields and a "Sign in" submit button. A
-          language switcher is visible in the top-right corner.
+          English with the Rome logo and the heading "Sign in to Rome". It has "Username" and
+          "Password" fields and a "Sign in" submit button. A language switcher is visible at the
+          bottom of the page.
       - aiAssert: >-
           Inline validation messages "Username is required." and "Password is required." appear and
           no navigation happens.

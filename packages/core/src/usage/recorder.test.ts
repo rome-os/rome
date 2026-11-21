@@ -9,7 +9,7 @@ function facts(overrides: Partial<TurnUsageFacts> = {}): TurnUsageFacts {
   return {
     turnId: "turn-1",
     romeSessionId: "chat-1",
-    romeSessionType: "webchat",
+    sessionKind: "conversation",
     agentName: "main",
     status: "completed",
     provider: "openai",
@@ -121,6 +121,33 @@ describe("UsageRecorder", () => {
     expect(() => recorder.recordTurn(facts())).not.toThrow();
     expect(() => recorder.recordLogin("password")).not.toThrow();
     await recorder.flush();
+  });
+
+  it("queues one event per Rome Cloud listening session, keyed by its session id", async () => {
+    const { recorder, queued } = setup();
+    recorder.recordTranscription({
+      sessionId: "session-1",
+      provider: "soniox",
+      model: "stt-rt-v6",
+      seconds: 12.4,
+      status: "ended",
+      durationMs: 13_000,
+    });
+    await recorder.flush();
+    expect(queued).toEqual([
+      {
+        type: "transcription",
+        eventId: "session-1",
+        kind: "voice_input",
+        sessionId: "session-1",
+        provider: "soniox",
+        model: "stt-rt-v6",
+        seconds: 12.4,
+        status: "ended",
+        durationMs: 13_000,
+        occurredAt: expect.any(String),
+      },
+    ]);
   });
 
   it("queues one login event per sign-in, carrying the method as its kind", async () => {

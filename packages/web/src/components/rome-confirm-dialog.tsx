@@ -2,18 +2,22 @@
 
 import { useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { RomeLogo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
 interface RomeConfirmDialogProps {
   cancelLabel?: string;
+  // Content between the description and the buttons, such as a choice the
+  // confirmed action takes.
+  children?: ReactNode;
   // Disables the confirm button, e.g. while the confirmed action is in flight
   // and a second activation would resubmit it.
   confirmDisabled?: boolean;
   confirmLabel: string;
   description?: string;
   destructive?: boolean;
-  // Overrides the default "R" brand badge above the title — e.g. a paired
+  // Overrides the default Rome logo above the title — e.g. a paired
   // Rome + integration lockup for a connect/disconnect dialog.
   icon?: ReactNode;
   onCancel: () => void;
@@ -24,6 +28,7 @@ interface RomeConfirmDialogProps {
 
 export function RomeConfirmDialog({
   cancelLabel,
+  children,
   confirmDisabled = false,
   confirmLabel,
   description,
@@ -51,11 +56,7 @@ export function RomeConfirmDialog({
     >
       <div>
         <div className="mb-2">
-          {icon ?? (
-            <div className="inline-flex h-8 w-8 items-center justify-center rounded-8 bg-primary text-badge text-primary-foreground">
-              R
-            </div>
-          )}
+          {icon ?? <RomeLogo className="block h-8 w-8 text-foreground" aria-hidden />}
         </div>
         <DialogTitle>{title}</DialogTitle>
         {description ? (
@@ -64,6 +65,8 @@ export function RomeConfirmDialog({
           <DialogDescription className="sr-only">{title}</DialogDescription>
         )}
       </div>
+
+      {children ? <div className="mt-4">{children}</div> : null}
 
       <div className="mt-6 flex justify-end gap-2">
         <Button ref={cancelButtonRef} variant="outline" onClick={onCancel}>

@@ -4,21 +4,13 @@ import { Button } from "@rome-os/ui/button";
 import { Card } from "@rome-os/ui/card";
 import { cn } from "@rome-os/ui/cn";
 import {
-  Dialog,
-  DialogBody,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@rome-os/ui/dialog";
-import {
   Section,
   SectionActions,
   SectionHeader,
   SectionHeading,
   SectionTitle,
 } from "@rome-os/ui/page";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { DeviceMenu } from "./device-manage.js";
 import { platformOf } from "./format.js";
 import { messagesFor, plural, type NodeUiMessages } from "./messages.js";
@@ -27,8 +19,6 @@ import { Sparkline } from "./sparkline.js";
 import { BUCKET_MS, BUCKETS, statsByPeer, windowStart, type DeviceStats } from "./stats.js";
 import type { NodeDevice, NodeDeviceManage, NodeNavigation, NodeThisDevice } from "./types.js";
 import { useNodeSocket, useStats, type NodeSocket } from "./use-node-socket.js";
-
-const SETUP_GUIDE = "https://github.com/rome-os/rome/blob/main/packages/rome-node-cli/README.md";
 
 export interface NodeDevicesProps {
   /**
@@ -47,6 +37,8 @@ export interface NodeDevicesProps {
   manage?: NodeDeviceManage;
   /** True while the host reads `devices`. */
   loading?: boolean;
+  /** The host's link action and setup content when there are no devices. */
+  setup?: { action: ReactNode; empty: ReactNode };
 }
 
 /**
@@ -68,38 +60,6 @@ function ServiceProblem({ socket, m }: { socket: NodeSocket; m: NodeUiMessages }
     <p role="status" className="text-aux text-muted-foreground">
       {text}
     </p>
-  );
-}
-
-function LinkDeviceDialog({
-  open,
-  onClose,
-  m,
-}: {
-  open: boolean;
-  onClose(): void;
-  m: NodeUiMessages;
-}) {
-  return (
-    <Dialog open={open} onClose={onClose} size="md">
-      <DialogHeader onClose={onClose} closeLabel={m.linkDialog.close}>
-        <DialogTitle>{m.linkDialog.title}</DialogTitle>
-      </DialogHeader>
-      <DialogBody className="space-y-4">
-        <DialogDescription>{m.linkDialog.commandHelp}</DialogDescription>
-        <pre className="overflow-x-auto rounded-8 bg-muted p-4 font-mono text-ui">
-          <code>rome-node connect</code>
-        </pre>
-        <p className="text-ui text-muted-foreground">{m.linkDialog.access}</p>
-      </DialogBody>
-      <DialogFooter>
-        <Button variant="outline" size="sm" asChild>
-          <a href={SETUP_GUIDE} target="_blank" rel="noopener noreferrer">
-            {m.linkDialog.instructions}
-          </a>
-        </Button>
-      </DialogFooter>
-    </Dialog>
   );
 }
 
@@ -238,13 +198,8 @@ function DeviceCard({
   );
 }
 
-/** The start of the latest bucket with a command, or -1 without one. */
-function lastActive(stats: DeviceStats | undefined): number {
-  const buckets = stats?.buckets ?? [];
-  for (let index = buckets.length - 1; index >= 0; index -= 1)
-    if (buckets[index]!.counts.all) return buckets[index]!.start;
-  return -1;
-}
+/** Holds the curve's place while the counts load, so the card does not shift when it arrives. */
+const CHART_SLOT = <span aria-hidden className="h-8 w-24 shrink-0" />;
 
 /** The device's curve. A device without commands draws an empty one. */
 function chartOf(
@@ -286,9 +241,10 @@ function useFirstOrder(
 /**
  * The devices linked to the account, one card each with a curve of its commands over the last
  * 24 hours.
- * The cards keep the order they had when the page drew them: this computer, the connected
- * devices, then the rest, each by its latest command. Each card links to the device's activity
- * page through `navigation`. Needs `@rome-os/node-ui/styles.css` in the host's Tailwind build.
+ * The cards draw with the devices, and each curve follows once the counts arrive. The cards keep
+ * the order they had when the page drew them: this computer, the connected devices, then the
+ * rest, each by name. Each card links to the device's activity page through `navigation`.
+ * Needs `@rome-os/node-ui/styles.css` in the host's Tailwind build.
  */
 export function NodeDevices({
   url,
@@ -298,6 +254,7 @@ export function NodeDevices({
   thisDevice,
   manage,
   loading = false,
+  setup,
 }: NodeDevicesProps) {
   const m = messagesFor(locale);
   const socket = useNodeSocket(url);
@@ -305,11 +262,11 @@ export function NodeDevices({
   const since = windowStart(now);
   const query = useMemo(() => ({ since, bucketMs: BUCKET_MS }), [since]);
   const { stats, supported, settled } = useStats(socket, query);
-  // The cards wait for the devices and their counts, so the page draws them once.
-  const ready = !loading && settled;
+  // The cards wait only for the devices. The counts come over the socket, which can take
+  // seconds to open on a slow network.
+  const ready = !loading;
   const byPeer = useMemo(() => (stats ? statsByPeer(stats) : new Map()), [stats]);
   const [showRevoked, setShowRevoked] = useState(false);
-  const [linkOpen, setLinkOpen] = useState(false);
 
   // Only the account's devices show, so a removed device leaves even with recent activity.
   // This computer shows before Rome Cloud lists it, under the name the app knows.
@@ -318,6 +275,7 @@ export function NodeDevices({
     thisDevice && !devices.some((device) => device.id.toLowerCase() === self)
       ? [...devices, { id: thisDevice.id, name: thisDevice.name, platform: thisDevice.platform }]
       : devices;
+  const showSetup = setup && ready && listed.length === 0;
   const statsOf = (device: NodeDevice): DeviceStats | undefined =>
     byPeer.get(device.id.toLowerCase());
   const selfOf = (device: NodeDevice) =>
@@ -329,22 +287,18 @@ export function NodeDevices({
     listed.filter((device) => device.status !== "revoked"),
     ready,
     (list) =>
-      list
-        .map((device) => ({ device, last: lastActive(statsOf(device)) }))
-        .sort(
-          (a, b) =>
-            Number(!selfOf(a.device)) - Number(!selfOf(b.device)) ||
-            Number(!connected(a.device)) - Number(!connected(b.device)) ||
-            b.last - a.last ||
-            a.device.name.localeCompare(b.device.name, locale),
-        )
-        .map(({ device }) => device),
+      [...list].sort(
+        (a, b) =>
+          Number(!selfOf(a)) - Number(!selfOf(b)) ||
+          Number(!connected(a)) - Number(!connected(b)) ||
+          a.name.localeCompare(b.name, locale),
+      ),
   );
 
   return (
     <Section
       aria-labelledby="node-devices-title"
-      aria-busy={!ready || undefined}
+      aria-busy={!(ready && settled) || undefined}
       className="@container gap-6"
     >
       <SectionHeader>
@@ -355,21 +309,14 @@ export function NodeDevices({
           </SectionTitle>
           <ServiceProblem socket={socket} m={m} />
         </SectionHeading>
-        <SectionActions>
-          <Button size="sm" onClick={() => setLinkOpen(true)}>
-            <Plus data-icon="inline-start" aria-hidden />
-            {m.linkDevice}
-          </Button>
-        </SectionActions>
+        {!showSetup && setup && <SectionActions>{setup.action}</SectionActions>}
       </SectionHeader>
 
       {ready && !supported && (
         <p className="text-aux text-muted-foreground">{m.statsUnavailable}</p>
       )}
 
-      {ready && listed.length === 0 && (
-        <p className="text-ui text-muted-foreground">{m.noDevices}</p>
-      )}
+      {ready && listed.length === 0 && setup?.empty}
 
       {current.length > 0 && (
         <ul aria-label={m.title} className="grid gap-2 @xl:grid-cols-2 @6xl:grid-cols-3">
@@ -381,7 +328,9 @@ export function NodeDevices({
                 navigation={navigation}
                 manage={manage}
                 m={m}
-                chart={supported && chartOf(statsOf(device), since, m, locale)}
+                chart={
+                  settled ? supported && chartOf(statsOf(device), since, m, locale) : CHART_SLOT
+                }
               />
             </li>
           ))}
@@ -419,8 +368,6 @@ export function NodeDevices({
           )}
         </section>
       )}
-
-      <LinkDeviceDialog open={linkOpen} onClose={() => setLinkOpen(false)} m={m} />
     </Section>
   );
 }

@@ -1,39 +1,69 @@
 import {
   type ConciergeChatsResponse,
+  type ConciergeChatWorkResponse,
   type ConciergeChatStartRequest,
-  CONCIERGE_DONE_DAYS,
   type ConciergeConnectorsResponse,
-  type ConciergeTasksResponse,
 } from "@rome/api-types/concierge";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
+import { currentSessionActor, sessionOwnerKey } from "../../access/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 
 /** The most unread messages the Concierge entry counts; the badge reads 99+ at this. */
 export const CONCIERGE_UNREAD_CAP = 100;
 
-/** The most days of finished rows a caller can ask the task list for. */
-const MAX_DONE_DAYS = 3650;
+/** An SSE stream of what `subscribe` emits, with a heartbeat, until the client goes. */
+export function streamEvents(
+  c: Context,
+  subscribe: (emit: (event: string, data: unknown) => void) => () => void,
+): Response {
+  return streamSSE(c, async (sse) => {
+    let close!: () => void;
+    let finished = false;
+    const closed = new Promise<void>((resolve) => {
+      close = resolve;
+    });
+    let unsubscribe = () => {};
+    const heartbeat = setInterval(() => {
+      sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
+    }, 20_000);
+    function finish() {
+      if (finished) return;
+      finished = true;
+      clearInterval(heartbeat);
+      unsubscribe();
+      close();
+    }
+    unsubscribe = subscribe((event, data) => {
+      sse.writeSSE({ event, data: JSON.stringify(data) }).catch(finish);
+    });
+    sse.onAbort(finish);
+    await closed;
+  });
+}
+
+/**
+ * Whose Concierge the caller reaches: the guardian's, or a dashboard
+ * visitor's own. Null for anyone else, app users included.
+ */
+export async function conciergeCallerOwner(
+  dashboardAccessState: Pick<ApiDeps["dashboardAccessState"], "isCloudEmailAllowed">,
+): Promise<string | null> {
+  const actor = await currentSessionActor();
+  if (actor?.kind === "guardian") return sessionOwnerKey(actor);
+  if (actor?.kind === "visitor" && dashboardAccessState.isCloudEmailAllowed(actor.email)) {
+    return sessionOwnerKey(actor);
+  }
+  return null;
+}
 
 export function conciergeRoutes(
   deps: Pick<ApiDeps, "concierge" | "dashboardAccessState" | "webchatRepo">,
 ): Hono {
   const app = new Hono();
 
-  /**
-   * Whose Concierge the caller reaches: the guardian's, or a dashboard
-   * visitor's own. Null for anyone else, app users included.
-   */
-  const callerOwner = async (): Promise<string | null> => {
-    const actor = await currentSessionActor();
-    if (actor?.kind === "guardian") return sessionOwnerKey(actor);
-    if (actor?.kind === "visitor" && deps.dashboardAccessState.isCloudEmailAllowed(actor.email)) {
-      return sessionOwnerKey(actor);
-    }
-    return null;
-  };
+  const callerOwner = () => conciergeCallerOwner(deps.dashboardAccessState);
 
   // The caller's main Concierge chat, created on first use, and how many
   // agent messages it got since it was last read. 404 without the Concierge service.
@@ -59,12 +89,38 @@ export function conciergeRoutes(
       return c.json({ error: "Concierge is not available" }, 404);
     }
     const chats = await Promise.all(
-      (await concierge.listChats(owner)).map(async (chat) => ({
-        ...chat,
-        unread: await deps.webchatRepo.countUnreadAgentMessages(chat.id, CONCIERGE_UNREAD_CAP),
-      })),
+      (await concierge.listChats(owner)).map(async (chat) => {
+        const activity = await concierge.activity?.current(chat.id);
+        return {
+          ...chat,
+          unread: await deps.webchatRepo.countUnreadAgentMessages(chat.id, CONCIERGE_UNREAD_CAP),
+          ...(activity ? { activity } : {}),
+        };
+      }),
     );
     return c.json({ chats } satisfies ConciergeChatsResponse);
+  });
+
+  // What archiving or deleting one of the caller's topic chats moves to the
+  // main chat: its follows and open tasks, and, while it is archived, the
+  // follows its archive moved. An archived topic chat answers too, for its
+  // unarchive. 404 for the main chat, another person's chat and without the
+  // Concierge service.
+  app.get("/concierge/chats/:chatId/follows-and-tasks", async (c) => {
+    const owner = await callerOwner();
+    if (!owner) return c.json({ error: "Not authenticated" }, 401);
+    const concierge = deps.concierge;
+    if (!concierge) return c.json({ error: "Concierge is not available" }, 404);
+    const chatId = c.req.param("chatId");
+    if (!(await concierge.isTopicChatOf(chatId, owner))) {
+      return c.json({ error: "No such topic chat" }, 404);
+    }
+    const { follows, openTasks, movedFollows } = await concierge.followsAndTasksOf(chatId, owner);
+    return c.json({
+      follows,
+      openTasks: openTasks.map(({ id, title }) => ({ id, title })),
+      movedFollows,
+    } satisfies ConciergeChatWorkResponse);
   });
 
   // Starts a topic chat for the caller on their main chat's model. 404 without the Concierge service.
@@ -86,55 +142,17 @@ export function conciergeRoutes(
     return c.json({ ...chat, unread: 0 }, 201);
   });
 
-  // The caller's Concierge todo list: every open row whatever its age, and
-  // the finished ones of the last `doneDays` days. 404 without the Concierge service.
-  app.get("/concierge/tasks", async (c) => {
+  // The same `concierge_activity` events as the `concierge.activity` topic
+  // of the live events socket, for a tab that cannot open the socket: the
+  // caller's chats only, and the gate runs before the stream opens.
+  app.get("/concierge/activity/events", async (c) => {
     const owner = await callerOwner();
     if (!owner) return c.json({ error: "Not authenticated" }, 401);
-    const concierge = deps.concierge;
-    if (!concierge) {
+    const activity = deps.concierge?.activity;
+    if (!activity) {
       return c.json({ error: "Concierge is not available" }, 404);
     }
-    const asked = Number(c.req.query("doneDays") ?? CONCIERGE_DONE_DAYS);
-    const doneDays =
-      Number.isFinite(asked) && asked >= 0 ? Math.min(asked, MAX_DONE_DAYS) : CONCIERGE_DONE_DAYS;
-    const tasks = await concierge.deps.tasks.listForPanel(owner, doneDays);
-    return c.json({ tasks } satisfies ConciergeTasksResponse);
-  });
-
-  // The same `task_upsert` events as the `concierge.tasks` topic of the live
-  // events socket, for a tab that cannot open the socket: the caller's rows
-  // only, and the gate runs before the stream opens.
-  app.get("/concierge/tasks/events", async (c) => {
-    const owner = await callerOwner();
-    if (!owner) return c.json({ error: "Not authenticated" }, 401);
-    const concierge = deps.concierge;
-    if (!concierge) {
-      return c.json({ error: "Concierge is not available" }, 404);
-    }
-    return streamSSE(c, async (sse) => {
-      let close!: () => void;
-      let finished = false;
-      const closed = new Promise<void>((resolve) => {
-        close = resolve;
-      });
-      let unsubscribe = () => {};
-      const heartbeat = setInterval(() => {
-        sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
-      }, 20_000);
-      function finish() {
-        if (finished) return;
-        finished = true;
-        clearInterval(heartbeat);
-        unsubscribe();
-        close();
-      }
-      unsubscribe = concierge.deps.tasks.subscribe((event, data) => {
-        sse.writeSSE({ event, data: JSON.stringify(data) }).catch(finish);
-      }, owner);
-      sse.onAbort(finish);
-      await closed;
-    });
+    return streamEvents(c, (emit) => activity.subscribe(owner, emit));
   });
 
   // The Concierge's connectors: every tool it can act through or watch, with

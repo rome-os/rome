@@ -86,7 +86,6 @@ function renderChat(rows: ChatRow[]) {
     const draft = useReplyDraftState({
       chatId: "concierge",
       sessionId: "concierge",
-      messageIds: new Set(["m1"]),
       jump: () => {},
       focusComposer: () => {},
     });
@@ -136,7 +135,30 @@ describe("the reply the toolbar and the tap row send", () => {
     expect(sent()).toEqual({ replyToMessageId: "m1", replyQuote: LEAD });
   });
 
-  it("keeps the toolbar outside the clipped text and clear of the chip's row", () => {
+  it("leaves the tap row closed when a tap on a phone lands on a picture", () => {
+    rs.stubGlobal(
+      "matchMedia",
+      rs.fn((query: string) => ({
+        matches: query === "(hover: none)",
+        media: query,
+        addEventListener: rs.fn(),
+        removeEventListener: rs.fn(),
+      })),
+    );
+    renderChat([
+      agentRow("m1", [
+        { type: "text", content: "A note\n\n![A chart](https://example.com/chart.png)" },
+      ]),
+    ]);
+
+    fireEvent.click(screen.getByAltText("A chart"));
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+
+    fireEvent.click(screen.getByText("A note"));
+    expect(screen.getByRole("button", { name: "Reply" })).toBeTruthy();
+  });
+
+  it("keeps the toolbar outside the clipped text, over the bubble's top edge", () => {
     renderChat([agentRow("m1", forward)]);
 
     const toolbars = document.querySelectorAll("[data-bubble-toolbar]");
@@ -147,10 +169,8 @@ describe("the reply the toolbar and the tap row send", () => {
       expect(toolbar.className).toContain("bottom-full");
       expect(toolbar.closest("[data-concierge-bubble]")).toBeNull();
     }
-    // The toolbar overlaps 12px of the bubble: the border and padding take 9px, so the chip adds 4.
-    expect(screen.getByRole("link", { name: "Open task chat Flights" }).className).toContain(
-      "mt-1",
-    );
+    // The toolbar overlaps 8px of the bubble, inside its 9px of border and padding.
+    for (const toolbar of toolbars) expect(toolbar.className).toContain("translate-y-2");
   });
 });
 
@@ -190,7 +210,7 @@ describe("the reply a Concierge bubble sends", () => {
   });
 });
 
-it("keeps an on-behalf source with the guardian's messages and names the source in a reply", () => {
+it("draws no owner bubble for an on-behalf message from before, which its turn's reply names instead", () => {
   const message: ChatMessage = {
     id: "m1",
     sessionId: "concierge",
@@ -205,40 +225,8 @@ it("keeps an on-behalf source with the guardian's messages and names the source 
       onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
     },
   };
-  const sent = renderChat([{ kind: "user", key: message.id, message }]);
-  expect(screen.getByText("Find flights").closest(".justify-end")).not.toBeNull();
-  expect(screen.getByText("Sent by Concierge")).toBeTruthy();
-  expect(screen.getByTitle("Ray")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Reply" }));
-  expect(sent()).toEqual({ replyToMessageId: "m1" });
-  expect(sent.target()).toMatchObject({
-    author: "automated",
-    name: "Concierge",
-    preview: "Find flights",
-  });
-});
-
-it("anchors an automated message, so a selection quotes it and a jump can find it", () => {
-  const message: ChatMessage = {
-    id: "m1",
-    sessionId: "concierge",
-    role: "user",
-    createdAt: at,
-    content: JSON.stringify([{ type: "text", content: "Find flights\n\nBook the cheapest" }]),
-    sender: {
-      kind: "automated",
-      sourceType: "agent",
-      name: "Concierge",
-      iconUrl: null,
-      onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
-    },
-  };
-  const sent = renderChat([{ kind: "user", key: message.id, message }]);
-  const line = screen.getByText("Book the cheapest");
-  expect(findMessageAnchor(document, "m1")?.contains(line)).toBe(true);
-
-  window.getSelection()?.selectAllChildren(line);
-  fireEvent.click(screen.getByRole("button", { name: "Reply" }));
-
-  expect(sent()).toEqual({ replyToMessageId: "m1", replyQuote: "Book the cheapest" });
+  renderChat([{ kind: "user", key: message.id, message }]);
+  expect(screen.queryByText("Find flights")).toBeNull();
+  expect(screen.queryByText("Sent by Concierge")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
 });

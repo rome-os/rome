@@ -2,14 +2,14 @@ import { describe, expect, it } from "@rstest/core";
 import { isEntryActive } from "./sidebar-shared";
 
 describe("isEntryActive", () => {
-  it("lights Chat on a new chat and on an open one", () => {
-    expect(isEntryActive("/chat", "/chat")).toBe(true);
-    expect(isEntryActive("/chat/7b08b9bb", "/chat")).toBe(true);
+  it("lights Chat on the main chat's page", () => {
+    expect(isEntryActive("/message", "/message")).toBe(true);
+    expect(isEntryActive("/message", "/memory")).toBe(false);
   });
 
-  it("lights Chat on the main Concierge chat's page", () => {
-    expect(isEntryActive("/message", "/chat")).toBe(true);
-    expect(isEntryActive("/message", "/memory")).toBe(false);
+  it("lights Chat on a new chat and on an open one", () => {
+    expect(isEntryActive("/chat", "/message")).toBe(true);
+    expect(isEntryActive("/chat/7b08b9bb", "/message")).toBe(true);
   });
 
   it("lights Apps on the launcher only, not on an app's own page", () => {
@@ -18,7 +18,7 @@ describe("isEntryActive", () => {
   });
 
   it("does not light a tile for a path that merely shares its prefix", () => {
-    expect(isEntryActive("/chatter", "/chat")).toBe(false);
+    expect(isEntryActive("/messages", "/message")).toBe(false);
     expect(isEntryActive("/memory/journal", "/memory")).toBe(true);
   });
 });

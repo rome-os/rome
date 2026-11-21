@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Loader2, LogIn, PlugZap } from "lucide-react";
 import { defineComponent, type AppComponentContext } from "@rome-os/app-web-sdk";
+import { Button } from "@rome-os/ui/button";
 import { useComposioLogin } from "@/lib/use-composio-login";
 import { wasDismissed } from "@/lib/interaction";
 
@@ -36,7 +37,7 @@ function LoginCard({ ctx }: { ctx: AppComponentContext }) {
       {
         status: "signed_in",
         nextStep:
-          "Signed in to Composio. No toolkit is connected yet — call connector_connect for each toolkit you want to connect to start its authorization.",
+          "Signed in to Composio. No toolkit is connected yet — call connector:connector_connect for each toolkit you want to connect to start its authorization.",
       },
       "Signed in to Composio",
     );
@@ -59,13 +60,16 @@ function LoginCard({ ctx }: { ctx: AppComponentContext }) {
   }
 
   return (
-    <div className="rounded-12 border border-border bg-surface p-4">
+    <div
+      data-ui-typography="inline-card"
+      className="rounded-12 border border-border bg-surface p-4"
+    >
       <div className="flex items-start gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
           <PlugZap size={18} strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1">
-          <span className="text-sm font-medium text-foreground">Sign in to Composio</span>
+          <span className="text-ui font-medium text-foreground">Sign in to Composio</span>
           <p className="mt-0.5 text-xs text-muted-foreground">
             One sign-in lets Rome connect apps on your behalf.
           </p>
@@ -73,52 +77,53 @@ function LoginCard({ ctx }: { ctx: AppComponentContext }) {
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-3">
+      <div className="mt-4 flex flex-wrap items-center gap-3">
         <span className="text-xs text-muted-foreground">
           {phase === "awaiting" ? "Waiting for you to authorize in the opened tab…" : ""}
         </span>
-        <div className="flex gap-2">
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
           {phase === "awaiting" ? (
             <>
               {loginUrl ? (
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
+                  compact
                   onClick={() => window.open(loginUrl, "_blank", "noopener,noreferrer")}
-                  className="rounded-8 border border-border px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/50"
                 >
                   Reopen tab
-                </button>
+                </Button>
               ) : null}
-              <button
-                type="button"
-                onClick={cancel}
-                className="rounded-8 border border-border px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/50"
-              >
+              <Button type="button" variant="outline" size="sm" compact onClick={cancel}>
                 Cancel
-              </button>
+              </Button>
             </>
           ) : (
             <>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
+                compact
                 onClick={() => ctx.host.dismiss()}
-                className="rounded-8 border border-border px-3 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/50"
               >
                 Dismiss
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                size="sm"
+                compact
                 onClick={start}
                 disabled={phase === "starting"}
-                className="inline-flex items-center gap-1.5 rounded-8 bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
               >
                 {phase === "starting" ? (
-                  <Loader2 size={14} className="animate-spin" />
+                  <Loader2 size={14} data-icon="inline-start" className="animate-spin" />
                 ) : (
-                  <LogIn size={14} />
+                  <LogIn size={14} data-icon="inline-start" />
                 )}
                 {phase === "starting" ? "Starting…" : "Sign in"}
-              </button>
+              </Button>
             </>
           )}
         </div>

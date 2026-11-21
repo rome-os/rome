@@ -1,3 +1,5 @@
+import { createContext, lazy, Suspense, useContext } from "react";
+import { useLiveTaskCard } from "./live-task-cards";
 import type { ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
@@ -9,8 +11,11 @@ import { SystemInputView } from "./SystemInputView";
 import { AiToolsCard } from "./AiToolsCard";
 import { AppComponentView } from "./AppComponentView";
 import { ConnectCard } from "./ConnectCard";
+import { DeviceConnectSettled, isDeviceConnectCard } from "./DeviceConnectSettled";
 import { ErrorRunView } from "./ErrorEventView";
 import { QuestionCard } from "./QuestionCard";
+import { CardBoundary } from "./widget-ui/CardBoundary";
+import { isDrawableCard } from "./widget-ui/drawable";
 import { RoutineDraftCard } from "./RoutineDraftCard";
 import { SubagentCallView } from "./SubagentCallView";
 import { TaskChatCard } from "./TaskChatCard";
@@ -22,6 +27,30 @@ import { ToolUseBlock } from "./ToolUseBlock";
 import { TurnRecapView } from "./TurnRecapView";
 import { UsageSummaryView } from "./UsageSummaryView";
 
+// Cards described as data bring in the A2UI renderer, which most chats never
+// need, so it loads with the first such card.
+const WidgetUiCard = lazy(() =>
+  import("./widget-ui/WidgetUiCard").then((m) => ({ default: m.WidgetUiCard })),
+);
+
+/** Latest parsed task_chat block per task in the Concierge transcript. */
+export const LatestTaskChatsContext = createContext<ReadonlyMap<string, ChatEntry> | null>(null);
+
+function TaskChatEntry({ block }: { block: Extract<ChatEntry, { type: "task_chat" }> }) {
+  const latest = useContext(LatestTaskChatsContext);
+  // As a live event settled it since the message loaded.
+  const card = useLiveTaskCard(block.card);
+  return (
+    <TaskChatCard
+      chatId={block.chatId}
+      title={block.title}
+      isLatestForChat={!latest || latest.get(block.chatId) === block}
+      show={block.show}
+      card={card}
+    />
+  );
+}
+
 export interface RenderEntryOptions {
   onApprovalResolved?: () => void;
   compact?: boolean;
@@ -31,6 +60,9 @@ export interface RenderEntryOptions {
    * interaction state and routes submissions to the right session in the merged
    * (multi-session) transcript. */
   sessionId?: string;
+  /** The message these blocks belong to. A widget is a message of its own, so
+   * this is the id a widget's events go to core by. */
+  messageId?: string;
   /** Turn that owns the rendered text blocks, used to preserve disclosure state
    * when a live block is replaced by its persisted transcript representation. */
   turnId?: string;
@@ -59,6 +91,7 @@ export function renderSingleEntry(
     onApprovalResolved,
     compact = false,
     sessionId,
+    messageId,
     turnId,
     interactionResults,
     onSubmitAppComponent,
@@ -73,6 +106,8 @@ export function renderSingleEntry(
     ? (toolUseId: string, output: Record<string, unknown>, summary?: string) =>
         onSubmitAppComponent(sid, toolUseId, output, summary)
     : () => {};
+  // A widget is a message of its own, so the message's id is the widget's.
+  const widgetId = messageId ?? "";
   const dismiss = onDismissAppComponent
     ? (toolUseId: string) => onDismissAppComponent(sid, toolUseId)
     : () => {};
@@ -177,6 +212,7 @@ export function renderSingleEntry(
           // Parts can arrive unvalidated (e.g. via channels.send); a malformed
           // key falls back to the keyless card rather than failing every create.
           routineKey={typeof block.routineKey === "string" ? block.routineKey : undefined}
+          chatId={sessionId}
         />
       );
     case "pending_interaction": {
@@ -197,12 +233,46 @@ export function renderSingleEntry(
         return (
           <QuestionCard
             key={`question-card-${block.toolUseId}`}
+            widgetId={widgetId}
             toolUseId={block.toolUseId}
+            appId={block.appId}
+            ui={block.render.ui}
             props={block.render.props}
             result={resultFor(block.toolUseId)}
-            onSubmit={submit}
-            onDismiss={dismiss}
           />
+        );
+      }
+      // A device's connect card, once answered, is one line: the device's app
+      // ran the flow, so nothing is left to press.
+      const deviceResult = isDeviceConnectCard(block) ? resultFor(block.toolUseId) : undefined;
+      if (deviceResult) {
+        return (
+          <DeviceConnectSettled key={`device-connect-${block.toolUseId}`} result={deviceResult} />
+        );
+      }
+      // A card described as data, which the agent waits on, whether an app's
+      // or core's own: drawn like any widget, and answered by one of its
+      // events, which core routes to its owner.
+      if (block.render.ui) {
+        return (
+          <CardBoundary
+            key={`app-widget-${block.toolUseId}`}
+            fallback={
+              block.text ? <p className="text-ui text-muted-foreground">{block.text}</p> : null
+            }
+          >
+            <Suspense fallback={null}>
+              <WidgetUiCard
+                widgetId={widgetId}
+                toolUseId={block.toolUseId}
+                appId={block.appId}
+                ui={block.render.ui}
+                bind={block.render.bind}
+                text={block.text ?? ""}
+                waiting={{ result: resultFor(block.toolUseId) }}
+              />
+            </Suspense>
+          </CardBoundary>
         );
       }
       return (
@@ -210,7 +280,7 @@ export function renderSingleEntry(
           key={`app-component-${block.toolUseId}`}
           toolUseId={block.toolUseId}
           appId={block.appId}
-          componentId={block.render.componentId}
+          componentId={block.render.componentId ?? ""}
           props={block.render.props}
           result={resultFor(block.toolUseId)}
           onSubmit={submit}
@@ -218,6 +288,36 @@ export function renderSingleEntry(
         />
       );
     }
+    case "widget":
+      if ("ui" in block) {
+        return (
+          <CardBoundary
+            key={`app-widget-${block.toolUseId}`}
+            fallback={<p className="text-ui text-muted-foreground">{block.text}</p>}
+          >
+            <Suspense fallback={null}>
+              <WidgetUiCard
+                widgetId={widgetId}
+                toolUseId={block.toolUseId}
+                appId={block.appId}
+                ui={block.ui}
+                bind={block.bind}
+                text={block.text}
+              />
+            </Suspense>
+          </CardBoundary>
+        );
+      }
+      // Nothing answers a widget, so the card gets no submit or dismiss.
+      return (
+        <AppComponentView
+          key={`app-widget-${block.toolUseId}`}
+          toolUseId={block.toolUseId}
+          appId={block.appId}
+          componentId={block.componentId}
+          props={block.props}
+        />
+      );
     case "interaction_result":
       // The resolution turn's user-side part adds nothing to the bubble — an
       // inline component re-renders read-only from its stored result.
@@ -237,7 +337,7 @@ export function renderSingleEntry(
         />
       );
     case "task_chat":
-      return <TaskChatCard key={key} chatId={block.chatId} title={block.title} />;
+      return <TaskChatEntry key={key} block={block} />;
     case "connect_card":
       return (
         <ConnectCard

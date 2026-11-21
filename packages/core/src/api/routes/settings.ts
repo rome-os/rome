@@ -1,26 +1,26 @@
-import { AGENT_REPORTS_ENABLED_KEY } from "../../lib/feedback-client.js";
+import { AGENT_REPORTS_ENABLED_KEY } from "../../instance/feedback-client.js";
 import { Hono } from "hono";
 import type { ApiDeps } from "../deps.js";
 import {
   ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING,
   redactAnthropicCompatibleCredentialsSetting,
-} from "../../lib/anthropic-compatible-providers.js";
+} from "../../agent/index.js";
 import { RELAY_SETTING_KEY, redactRelaySetting } from "../../relay/settings.js";
 import {
   GUARDIAN_TIMEZONE_SETTING_KEY,
   applyGuardianTimezoneWrite,
-} from "../../routines/guardian-timezone.js";
-import { resolveGuardianSession } from "../../lib/guardian-session.js";
+} from "../../instance/timezone.js";
+import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { parseTimeZone } from "../../lib/timezone.js";
-import { PUBLIC_ACCESS_SETTING_KEY } from "../../lib/public-access-config.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
+import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";
+import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { CONCIERGE_FOLLOWING_SETTING_KEY } from "../../concierge/following.js";
 
 // Keys enforced from an in-memory snapshot that only their dedicated route
 // refreshes. Persisting one here would leave the stored and enforced policies
 // disagreeing until restart.
 const DEDICATED_ROUTE_KEYS: Record<string, string> = {
-  [PUBLIC_ACCESS_SETTING_KEY]: "/api/public-access",
+  [APP_PERMISSIONS_SETTING_KEY]: "/api/public-access",
   [DASHBOARD_ACCESS_SETTING_KEY]: "/api/dashboard-access",
 };
 
@@ -61,6 +61,13 @@ export function settingsRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "feedback.agentReportsEnabled must be a boolean" }, 400);
     }
 
+    if (
+      "aiTools.codex.allowCredits" in body &&
+      typeof body["aiTools.codex.allowCredits"] !== "boolean"
+    ) {
+      return c.json({ error: "aiTools.codex.allowCredits must be a boolean" }, 400);
+    }
+
     for (const [key, route] of Object.entries(DEDICATED_ROUTE_KEYS)) {
       if (key in body) {
         return c.json({ error: `${key} is managed by PUT ${route}, not /api/settings.` }, 400);
@@ -91,6 +98,7 @@ export function settingsRoutes(deps: ApiDeps): Hono {
       await deps.settingsRepo.set(key, value);
     }
 
+    if ("aiTools.codex.allowCredits" in body) await deps.modelAccounts.refresh("openai");
     return c.json({ ok: true });
   });
 

@@ -157,13 +157,58 @@ describe("Markdown", () => {
     expect(external.rel).toContain("noopener");
   });
 
-  it("lets prose links lead by color and underline without added weight", () => {
+  it("underlines prose links faintly at rest and fully on hover and focus, without added weight", () => {
     renderMd("Read the [guide](./guide.md).");
 
     const classes = screen.getByRole("link", { name: "guide" }).className.split(/\s+/);
     expect(classes).toContain("text-primary");
     expect(classes).toContain("underline");
+    expect(classes).not.toContain("no-underline");
+    expect(classes).toContain("decoration-primary/40");
+    expect(classes).toContain("hover:decoration-primary");
+    expect(classes).toContain("focus-visible:decoration-primary");
     expect(classes).not.toContain("font-medium");
+  });
+
+  it("leaves no blank text beside a nested list, which soft-break prose would draw as an empty line", () => {
+    const { container } = render(
+      <Markdown preserveSoftBreaks>
+        {"1. **First**\n   - a\n   - b\n2. **Second**\n   - c"}
+      </Markdown>,
+    );
+
+    const items = container.querySelectorAll("ol > li");
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      const blank = [...item.childNodes].filter(
+        (node) => node.nodeType === Node.TEXT_NODE && !node.textContent?.trim(),
+      );
+      expect(blank).toHaveLength(0);
+    }
+    // A soft break inside an item's own text is kept.
+    cleanup();
+    const soft = render(<Markdown preserveSoftBreaks>{"- one\n  two"}</Markdown>);
+    expect(soft.container.querySelector("li")?.textContent).toBe("one\ntwo");
+  });
+
+  it("shortens a link whose text is a long hash, and keeps the whole hash in its tooltip", () => {
+    const sha = "d37eb0f1c4a9e2b7f3d1a6c8e0b5f9a2d4c7e1b3";
+    renderMd(`Merged as [${sha}](https://example.com/commit/${sha}).`);
+
+    const link = screen.getByRole("link", { name: "d37eb0f" });
+    expect(link.getAttribute("title")).toBe(sha);
+    expect(link.getAttribute("href")).toBe(`https://example.com/commit/${sha}`);
+  });
+
+  it("leaves link text that is not a hash as it is", () => {
+    renderMd(
+      "[deadbeefcafe0](https://a.example) [1234567890123](https://b.example) [abc123](https://c.example)",
+    );
+
+    // Hex with a digit and 12 characters or more is a hash; all digits, or short, is not.
+    expect(screen.getByRole("link", { name: "deadbee" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "1234567890123" }).getAttribute("title")).toBeNull();
+    expect(screen.getByRole("link", { name: "abc123" }).getAttribute("title")).toBeNull();
   });
 
   it("routes ```mermaid fences to the mermaid plugin, not the shiki code highlighter", () => {
@@ -242,6 +287,23 @@ describe("Markdown", () => {
     expect(container.querySelector("li li")?.textContent).toBe("b");
   });
 
+  it("shows a message that is only an empty list item as its text", () => {
+    for (const md of ["408.", "391.", "1.", "-", "* "]) {
+      const { container, unmount } = renderMd(md);
+      expect(container.querySelector("li")).toBeNull();
+      expect(container.textContent?.trim()).toBe(md.trim());
+      unmount();
+    }
+  });
+
+  it("shows a list of only empty items as its text, and keeps the text around it", () => {
+    const { container } = renderMd("Done.\n\n1.\n2.");
+
+    expect(container.querySelector("ol")).toBeNull();
+    expect(container.textContent).toContain("Done.");
+    expect(container.textContent).toContain("1.\n2.");
+  });
+
   it("keeps an empty item inside a list", () => {
     const { container } = renderMd("- a\n-\n- b");
 
@@ -269,6 +331,26 @@ describe("Markdown", () => {
     expect(screen.getByRole("heading", { level: 1 }).getAttribute("data-streamdown")).toBe(
       "heading-1",
     );
+  });
+});
+
+describe("Markdown images", () => {
+  it("renders the default Streamdown image without an imageComponent", () => {
+    const { container } = renderMd("![Sky](https://example.com/sky.png)");
+    const image = container.querySelector('[data-streamdown="image"]');
+    expect(image?.getAttribute("src")).toBe("https://example.com/sky.png");
+    expect(container.querySelector('[data-streamdown="image-wrapper"]')).not.toBeNull();
+    expect(container.querySelector("[data-custom-image]")).toBeNull();
+  });
+
+  it("renders an image through imageComponent when given", () => {
+    const { container } = render(
+      <Markdown
+        imageComponent={({ src, alt }) => <b data-custom-image={String(src)}>{alt}</b>}
+      >{`![Sky](https://example.com/sky.png)`}</Markdown>,
+    );
+    expect(container.querySelector("[data-custom-image]")?.textContent).toBe("Sky");
+    expect(container.querySelector('[data-streamdown="image"]')).toBeNull();
   });
 });
 

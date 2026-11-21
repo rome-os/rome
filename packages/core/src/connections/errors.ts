@@ -97,3 +97,20 @@ export class Disconnected extends Error {
     this.name = "Disconnected";
   }
 }
+
+/** A non-secret provider failure that the App gateway may expose verbatim. */
+export class ProviderOperationError extends Error {
+  constructor(
+    readonly reason:
+      | "provider_scope_required"
+      | "provider_resource_denied"
+      | "provider_not_found"
+      | "provider_response_too_large"
+      | "provider_response_invalid"
+      | "provider_unavailable",
+    readonly retryable = false,
+  ) {
+    super(reason);
+    this.name = "ProviderOperationError";
+  }
+}

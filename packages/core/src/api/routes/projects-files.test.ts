@@ -17,12 +17,12 @@ import type {
   ProjectDashboardResponse,
 } from "@rome/api-types/projects";
 import { projectsFilesRoutes } from "./projects-files.js";
-import { WebChatRepository } from "../../db/repositories/webchat.js";
+import { WebChatRepository } from "../../webchat/repository.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { eq } from "drizzle-orm";
 import { romeSessions } from "../../db/schema.js";
-import { runWithSessionActor } from "../../lib/session-actor.js";
+import { runWithSessionActor } from "../../access/session-actor.js";
 import { readArchivePaths } from "../../test/file-browser.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 
@@ -1621,10 +1621,10 @@ describe("Projects files API", () => {
       const closeMain = rs.fn(async () => undefined);
       const closeChild = rs.fn(async () => undefined);
       type LiveAgentSession = NonNullable<
-        ReturnType<NonNullable<RouteDeps["agentSessionManager"]>["peek"]>
+        ReturnType<NonNullable<RouteDeps["agentSessionManager"]>["find"]>
       >;
       const agentSessionManager: RouteDeps["agentSessionManager"] = {
-        peek: ({ agentName, channelThreadKey }) => {
+        find: ({ agentName, channelThreadKey }) => {
           if (agentName === "main" && channelThreadKey === "webchat:sess-demo") {
             return { close: closeMain } as unknown as LiveAgentSession;
           }

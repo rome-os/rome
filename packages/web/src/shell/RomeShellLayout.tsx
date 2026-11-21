@@ -19,7 +19,13 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { UpgradeCountdownBanner } from "../components/upgrade-countdown-banner";
 import { IconButton } from "../components/ui/icon-button";
 import { MobileBackdrop } from "../components/ui/mobile-backdrop";
-import { SlotOutlet } from "../components/slot";
+import { Separator } from "../components/ui/separator";
+import { SlotContent, SlotOutlet, useSlotOutlet } from "../components/slot";
+import { cn } from "@/lib/utils";
+import {
+  CONCIERGE_LEADING_SLOT,
+  FLOATING_SURFACE,
+} from "@/components/concierge/ConciergeHeaderStatus";
 import { SLIDE_MS, useSwipeSidebar } from "./use-swipe-sidebar";
 import { AppGrid } from "./AppGrid";
 import { APP_NAV } from "./builtin-nav";
@@ -28,18 +34,28 @@ import { DesktopTitlebar } from "./DesktopTitlebar";
 import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
 import { RailLabelsContext } from "./sidebar-shared";
+import { ThisComputerButton } from "./ThisComputerButton";
+import { UpgradeIndicator } from "./UpgradeIndicator";
 import { useChatPeek } from "./use-chat-peek";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { saveSetting } from "@/lib/chat-api";
 import { openChatSearch } from "@/lib/chat-search-events";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
+import { useDashboardActivity } from "@/hooks/use-dashboard-activity";
+import { hasSession, useAuthStateSnapshot } from "@/lib/auth-state";
 import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { useSettings } from "@/hooks/use-settings";
-import { isChatPath } from "@/lib/chat-session";
+import { useSettings, useInvalidateSettings } from "@/hooks/use-settings";
+import { agentNameChangedSchema } from "@rome/api-types/live-events";
+import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
+import { isChatPath, MAIN_CHAT_PATH } from "@/lib/chat-session";
+import { useConciergeChat } from "@/hooks/use-concierge";
+import { useChatListFollowsRoute, useChatListModeForShell } from "@/hooks/use-chat-list-mode";
+import { newChatTarget } from "@/lib/chat-list-mode";
 import { isElectronShell } from "@/lib/electron-shell";
 import { routeTitle } from "@/lib/page-title";
 import { isApplePlatform } from "@/lib/platform";
+import { readStored, writeStored } from "@/lib/stored-preference";
 
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
 const SIDEBAR_COLLAPSED_KEY = "rome-sidebar-collapsed";
@@ -59,21 +75,13 @@ const isSupportedLanguage = (lng: string | undefined): lng is string =>
   !!lng && (SUPPORTED_LANGUAGES as readonly string[]).includes(lng);
 
 function readSidebarCollapsed(): boolean {
-  try {
-    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-  } catch {
-    return false;
-  }
+  return readStored(SIDEBAR_COLLAPSED_KEY) === "1";
 }
 
 // Names show until the guardian hides them, so a first visit reads the rail
 // instead of guessing at its icons.
 function readRailNames(): boolean {
-  try {
-    return localStorage.getItem(RAIL_NAMES_KEY) !== "0";
-  } catch {
-    return true;
-  }
+  return readStored(RAIL_NAMES_KEY) !== "0";
 }
 
 function sidebarShortcutForPlatform(): string {
@@ -83,6 +91,25 @@ function sidebarShortcutForPlatform(): string {
 
 export function RomeShellLayout() {
   const { t, i18n } = useTranslation("common");
+  // The chat list can be unmounted on phones and collapsed desktops.
+  // Keep identity updates subscribed even when that list is absent.
+  const invalidateSettings = useInvalidateSettings();
+  useLiveEvents(
+    chatStatusTopic,
+    {
+      agent_name_changed: {
+        schema: agentNameChangedSchema,
+        fn: () => {
+          void invalidateSettings();
+        },
+      },
+    },
+    {
+      onReconnect: () => {
+        void invalidateSettings();
+      },
+    },
+  );
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -94,6 +121,13 @@ export function RomeShellLayout() {
   const [railNames, setRailNames] = useState(readRailNames);
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const isDesktop = useDesktop();
+  // The sidebar's upgrade arrow stays out of the way while the nightly upgrade
+  // banner is up; the banner owns the poll and reports only that it is shown.
+  const [upgradeBannerUp, setUpgradeBannerUp] = useState(false);
+  // Every shell page reports whether the person signed in is here, sidebar
+  // shown or not, so their phone pushes wait while they are.
+  const { bootstrap } = useAuthStateSnapshot();
+  useDashboardActivity(hasSession(bootstrap));
   // The fallback title for whatever the shell is showing. A routed page that
   // can name its own subject claims the page slot, which outranks this.
   // Sourced from the sidebar's own destinations: the nav already has to know
@@ -105,6 +139,47 @@ export function RomeShellLayout() {
   // hides the chat list. That is a desktop arrangement: below `md` the sidebar
   // is a slide-over, so a collapse saved on desktop must not empty the drawer.
   const onChat = isChatPath(location.pathname);
+  // Whether the open page is a Concierge chat, whose header floats over it.
+  // The chat says so by mounting the header's leading slot, and takes it away
+  // when its tool pane covers it, which gives this bar back as the way out.
+  // On a visit to the main chat, its path says so first, until the chat
+  // claims its header, so a reload never shows this bar before the header. A
+  // main chat that failed to load shows a page of its own, which keeps the bar.
+  const onMainChat = location.pathname === MAIN_CHAT_PATH;
+  const mainChat = useConciergeChat(onMainChat);
+  // The chat list comes and goes, so the shell, which stays, is the one place
+  // that keeps the list's mode with the open chat. The new-chat shortcut and
+  // the rail read that mode.
+  useChatListFollowsRoute(mainChat.chatId);
+  const chatListMode = useChatListModeForShell(!mainChat.failed);
+  const leadingSlot = useSlotOutlet(CONCIERGE_LEADING_SLOT);
+  const [headerClaimed, setHeaderClaimed] = useState(false);
+  useEffect(() => {
+    if (!onMainChat) setHeaderClaimed(false);
+    else if (leadingSlot) setHeaderClaimed(true);
+  }, [onMainChat, leadingSlot]);
+  const conciergeHeader = leadingSlot || (onMainChat && !mainChat.failed && !headerClaimed);
+  const leadingButtons = (className?: string) => (
+    <>
+      {onChat ? (
+        // A chat is the detail of the chat list: this goes up to it.
+        <IconButton
+          size="md"
+          label={t("nav.chatList")}
+          icon={<ChevronLeft aria-hidden />}
+          onClick={() => setChatListOpen(true)}
+          className={className}
+        />
+      ) : null}
+      <IconButton
+        size="md"
+        label={t("nav.openSidebar")}
+        icon={<HamburgerMenuIcon aria-hidden />}
+        onClick={() => setSidebarOpen(true)}
+        className={className}
+      />
+    </>
+  );
   const showChats = isDesktop && onChat && !collapsed;
   const phoneChatList = !isDesktop && onChat && chatListOpen && !hideSidebar;
   const sidebarShortcut = sidebarShortcutForPlatform();
@@ -122,18 +197,14 @@ export function RomeShellLayout() {
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
       const next = !prev;
-      try {
-        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
-      } catch {}
+      writeStored(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0");
       return next;
     });
   }, []);
 
   const setRailNamesPersisted = useCallback((next: boolean) => {
     setRailNames(next);
-    try {
-      localStorage.setItem(RAIL_NAMES_KEY, next ? "1" : "0");
-    } catch {}
+    writeStored(RAIL_NAMES_KEY, next ? "1" : "0");
   }, []);
 
   // The rail's right edge switches the names. A click flips them; a drag
@@ -224,7 +295,8 @@ export function RomeShellLayout() {
       const modifier = isMac ? event.metaKey : event.ctrlKey;
       if (modifier && event.shiftKey && event.key.toLowerCase() === "o") {
         event.preventDefault();
-        navigate(hideSidebar ? "/chat?hideSidebar=1" : "/chat");
+        const { to, state } = newChatTarget(chatListMode, hideSidebar ? "?hideSidebar=1" : "");
+        navigate(to, { state });
       }
       if (
         modifier &&
@@ -242,7 +314,7 @@ export function RomeShellLayout() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [hideSidebar, navigate, toggleCollapsed]);
+  }, [chatListMode, hideSidebar, navigate, toggleCollapsed]);
 
   // On a phone a swipe right anywhere opens the sidebar and a swipe left closes
   // it. The menu button in the mobile header stays as the visible way in.
@@ -282,7 +354,7 @@ export function RomeShellLayout() {
       data-rail-labelled={railNames ? "" : undefined}
     >
       <div
-        className={`flex shrink-0 items-center gap-1 pb-4 ${railNames ? "justify-start px-3" : "justify-center"} ${titlebar ? "pt-2" : "pt-5"}`}
+        className={`flex shrink-0 items-center ${railNames ? (titlebar ? "justify-start px-2 pt-2" : "h-14 justify-start px-2") : `flex-col gap-1 pb-4 ${titlebar ? "pt-2" : "pt-5"}`}`}
       >
         {/* A fixed slot, so swapping the logo link for the 32px expand
             button does not move every tile below it. */}
@@ -324,15 +396,21 @@ export function RomeShellLayout() {
           )}
         </div>
         {railNames ? (
-          <span className="min-w-0 truncate text-ui font-medium text-foreground">
+          <span className="min-w-0 flex-1 truncate text-ui font-medium text-foreground">
             {t("appName")}
           </span>
         ) : null}
       </div>
+      {/* One instance in one place for both rail widths: the upgrade under
+          way lives in it, and switching names must not drop it. */}
+      <UpgradeIndicator suppressed={upgradeBannerUp} labelled={railNames} />
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-idle-hidden">
         <RailLabelsContext.Provider value={railNames}>
           <AppGrid onSearch={openChatSearch} chatPeek={canPeek ? chatPeek.tile : undefined} />
         </RailLabelsContext.Provider>
+      </div>
+      <div className={`shrink-0 ${railNames ? "px-3" : "px-5"}`}>
+        <Separator className="bg-border-strong" />
       </div>
       <div
         className={`flex shrink-0 py-3 ${railNames ? "items-center justify-between px-3" : "flex-col items-center gap-2"}`}
@@ -345,7 +423,11 @@ export function RomeShellLayout() {
           onClick={() => setRailNamesPersisted(!railNames)}
           className={`text-subtle-foreground hover:text-foreground ${railNames ? "order-last" : ""}`}
         />
-        <ProfileMenu />
+        {/* Collapsed, the stack reads collapse, computer, avatar, so the computer sits directly above the avatar. */}
+        <div className={`flex items-center ${railNames ? "gap-1" : "flex-col-reverse gap-2"}`}>
+          <ProfileMenu />
+          <ThisComputerButton tooltipSide={railNames ? "top" : "right"} />
+        </div>
       </div>
       {isDesktop ? (
         // The edge itself, a few pixels either side of the rail's last one.
@@ -421,7 +503,7 @@ export function RomeShellLayout() {
     const contentLeft = hideSidebar ? "0px" : `calc(${sidebarWidth} + 1px)`;
     return (
       <div className="flex h-dvh flex-col overflow-hidden bg-background">
-        <UpgradeCountdownBanner />
+        <UpgradeCountdownBanner onVisibleChange={setUpgradeBannerUp} />
         <DesktopTitlebar
           leadingWidth={contentLeft}
           sidebarToggle={
@@ -442,10 +524,10 @@ export function RomeShellLayout() {
         <div className="flex min-h-0 flex-1">
           {hideSidebar ? null : <aside className="flex min-h-0 shrink-0">{rail}</aside>}
           <div
-            className={`relative flex min-h-0 min-w-0 flex-1 overflow-hidden border-t border-border ${hideSidebar ? "" : "rounded-tl-12 border-l"}`}
+            className={`relative flex min-h-0 min-w-0 flex-1 overflow-hidden border-t border-border-strong ${hideSidebar ? "" : "rounded-tl-12 border-l"}`}
           >
             {showChats ? (
-              <div className="flex w-64 min-w-0 shrink-0 flex-col border-r border-border">
+              <div className="flex w-64 min-w-0 shrink-0 flex-col border-r border-border-strong">
                 {chatList}
               </div>
             ) : null}
@@ -455,7 +537,7 @@ export function RomeShellLayout() {
               <div
                 ref={peekRef}
                 data-chat-peek
-                className="absolute inset-y-0 left-0 z-30 flex w-64 min-w-0 flex-col border-r border-border bg-background shadow-10"
+                className="absolute inset-y-0 left-0 z-30 flex w-64 min-w-0 flex-col border-r border-border-strong bg-background shadow-10"
               >
                 {peekList}
               </div>
@@ -483,7 +565,7 @@ export function RomeShellLayout() {
 
   return (
     <div className="flex min-h-[var(--rome-viewport-height)] flex-col bg-background">
-      <UpgradeCountdownBanner />
+      <UpgradeCountdownBanner onVisibleChange={setUpgradeBannerUp} />
       <div
         ref={frameRef}
         className={`relative flex flex-1 ${clipped ? "max-md:overflow-x-clip" : ""}`}
@@ -499,7 +581,7 @@ export function RomeShellLayout() {
         {!hideSidebar ? (
           <aside
             ref={sidebarRef}
-            className={`fixed inset-y-0 left-0 z-40 flex shrink-0 bg-background after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border pb-safe pt-safe transition-[translate] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
+            className={`fixed inset-y-0 left-0 z-40 flex shrink-0 bg-background after:pointer-events-none after:absolute after:inset-y-0 after:right-0 after:w-px after:bg-border-strong pb-safe pt-safe transition-[translate] duration-200 ease-out motion-reduce:transition-none md:sticky md:top-0 md:h-[var(--rome-viewport-height)] md:translate-x-0 md:pb-0 md:pt-0 ${
               sidebarOpen ? "translate-x-0" : "-translate-x-full"
             }`}
           >
@@ -511,7 +593,7 @@ export function RomeShellLayout() {
                 centered tile by half of it as the list opens and closes. */}
             {rail}
             {showChats ? (
-              <div className="flex w-64 min-w-0 flex-col border-l border-border-subtle">
+              <div className="flex w-64 min-w-0 flex-col border-l border-border-strong">
                 {chatList}
               </div>
             ) : null}
@@ -521,7 +603,7 @@ export function RomeShellLayout() {
               <div
                 ref={peekRef}
                 data-chat-peek
-                className="absolute inset-y-0 flex w-64 min-w-0 flex-col border-x border-border bg-background shadow-10"
+                className="absolute inset-y-0 flex w-64 min-w-0 flex-col border-x border-border-strong bg-background shadow-10"
                 style={{ left: `${railRem}rem` }}
               >
                 {peekList}
@@ -548,31 +630,28 @@ export function RomeShellLayout() {
           style={
             {
               "--rome-chat-left": sidebarWidth,
+              // With no bar above it, the page runs to the top of the screen.
+              ...(conciergeHeader && !hideSidebar
+                ? {
+                    "--rome-mobile-header-height": "0px",
+                    "--rome-mobile-content-height": "var(--rome-viewport-height)",
+                  }
+                : {}),
             } as CSSProperties
           }
         >
-          {!hideSidebar ? (
+          {!hideSidebar && conciergeHeader ? (
+            // A Concierge chat floats its own header over its messages, so
+            // the bar steps aside and its buttons move into that header.
+            <SlotContent name={CONCIERGE_LEADING_SLOT}>
+              {leadingButtons(cn("rounded-full", FLOATING_SURFACE))}
+            </SlotContent>
+          ) : !hideSidebar ? (
             <header
               data-mobile-header
-              className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border bg-background px-2 pt-safe md:hidden"
+              className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border-strong bg-background px-2 pt-safe md:hidden"
             >
-              <div className="flex shrink-0 items-center">
-                {onChat ? (
-                  // A chat is the detail of the chat list: this goes up to it.
-                  <IconButton
-                    size="md"
-                    label={t("nav.chatList")}
-                    icon={<ChevronLeft aria-hidden />}
-                    onClick={() => setChatListOpen(true)}
-                  />
-                ) : null}
-                <IconButton
-                  size="md"
-                  label={t("nav.openSidebar")}
-                  icon={<HamburgerMenuIcon aria-hidden />}
-                  onClick={() => setSidebarOpen(true)}
-                />
-              </div>
+              <div className="flex shrink-0 items-center">{leadingButtons()}</div>
               {/* The chat page fills this with the session's identity + app
                   tabs + actions, mirroring the desktop chat navbar. Other routes
                   leave it empty, so the Rome wordmark fallback shows. */}

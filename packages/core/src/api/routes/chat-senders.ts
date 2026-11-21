@@ -4,9 +4,10 @@ import {
   type ChatMessageSender,
 } from "@rome/api-types/chat";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { isConciergeAgent } from "../../webchat/privacy.js";
 import { guardianAuth } from "../../db/schema.js";
-import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
-import type { SessionActor } from "../../lib/session-actor.js";
+import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
+import type { SessionActor } from "../../access/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import {
@@ -89,11 +90,13 @@ export async function resolveAutomatedSender(
   let appId: string | undefined;
   if (source.type === "agent" && source.id) {
     const agent = deps.agentLoader.list().find((candidate) => candidate.name === source.id);
-    name = isCoreMainAgentId(source.id)
-      ? mainAgentDisplayName(await deps.settingsRepo.get("agentName"))
-      : agent
-        ? prettyAgentName(source.id)
-        : source.id;
+    // The main agent and the Concierge go by the name the guardian gave the
+    // agent, else by the same default.
+    if (isCoreMainAgentId(source.id) || isConciergeAgent(source.id)) {
+      name = mainAgentDisplayName(await deps.settingsRepo.get("agentName"));
+    } else {
+      name = agent ? prettyAgentName(source.id) : source.id;
+    }
     appId = agent?.ownerId;
   } else if (source.type === "app" && source.id) {
     appId = source.id;

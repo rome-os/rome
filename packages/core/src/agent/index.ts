@@ -10,6 +10,7 @@ export {
   type ReplaceSessionOptions,
   type SessionChange,
   type SessionId,
+  type SessionKind,
   type SessionState,
   type SessionStatus,
   type TurnCheckpoint,
@@ -44,6 +45,13 @@ export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export { turnStatus, turnStop, type TurnEnding } from "./domain/turn-end.js";
 export { shapedResult, type AnswerShape, type ReadAnswerShape } from "./domain/answer-shape.js";
 export { catchUpPrompt } from "./domain/catch-up.js";
+export {
+  HANDOFF_RECENT_TOKENS,
+  recentWithin,
+  type HandoffContext,
+  type RecentMessage,
+  type RenewalHandoffs,
+} from "./domain/session-handoff.js";
 export { restoresSavedSelection, type SessionSettings } from "./domain/session-settings.js";
 export {
   evaluateProviderSessionReset,
@@ -51,6 +59,15 @@ export {
   type ProviderSessionResetDecision,
 } from "./domain/session-reset.js";
 export { projectPath, type AgentFolders } from "./domain/agent-folders.js";
+export {
+  answersFromQuestionCard,
+  askQuestionToolOutput,
+  parseAskQuestionInput,
+  type Question,
+  questionCardFromAnswers,
+  questionCardUi,
+  REPLY_TO_PARAMETER,
+} from "./domain/ask-question.js";
 export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
 export {
   currentMessageSection,
@@ -68,6 +85,7 @@ export type {
 export {
   endedTurn,
   type AgentTurnFailedBeforeStart,
+  type EndedAgentTurn,
   type TurnLifecycle,
   type TurnLifecycleListener,
 } from "./domain/turn-lifecycle.js";
@@ -84,6 +102,7 @@ export {
 } from "./domain/turn-events.js";
 export {
   requireAgent,
+  resolveSubagents,
   type Agent,
   type AgentCatalog,
   type AgentDefinition,
@@ -92,10 +111,14 @@ export type { Skill, SkillCatalog } from "./domain/skill.js";
 export type { AgentAction, AgentActions } from "./domain/agent-action.js";
 export type { AgentLog } from "./domain/agent-log.js";
 export type { WakeUp } from "./domain/defer.js";
-export type { PromptAgent, PromptSources } from "./domain/system-prompt.js";
+export {
+  projectSummary,
+  type PromptAgent,
+  type PromptMemory,
+  type PromptSources,
+} from "./domain/system-prompt.js";
 export { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "./domain/widget-drawing.js";
 export { createSystemPrompts, type SystemPrompts } from "./application/system-prompts.js";
-export { createPromptSources } from "./infrastructure/prompt-sources.js";
 export {
   buildContinuationBlock,
   buildDeviceFolderBlock,
@@ -103,6 +126,7 @@ export {
   buildWorkspaceContextSection,
   FETCH_CHANNEL_HISTORY_ACTION,
   type WorkspaceContextSnapshot,
+  withoutRepeatedHeaders,
 } from "./domain/prompt.js";
 export {
   buildSlashSkillPrompt,
@@ -131,6 +155,11 @@ export {
   type ProviderAvailabilityState,
 } from "./domain/model-account-report.js";
 export {
+  codexStrongSelection,
+  selectionOfStrength,
+  type ModelStrength,
+} from "./domain/model-strength.js";
+export {
   sameProviderTarget,
   soleProviderAtUsageLimit,
   usageSwitchTarget,
@@ -158,6 +187,7 @@ export type {
   ModelSession,
   ModelSessionEvent,
   ModelSessionParams,
+  ModelContextCompactedEvent,
   ModelTurnStartedEvent,
   ModelUserInput,
   ProviderId,
@@ -175,17 +205,23 @@ export type {
 export {
   subagentRequest,
   subagentToolName,
+  type SessionRecordId,
   type Subagent,
   type Subagents,
 } from "./domain/subagent.js";
-export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
-export { forkSessionTools, type SessionTools } from "./domain/session-tools.js";
+export { NO_ROME_TOOLS, ROME_TOOL_GROUPS } from "./domain/rome-tools.js";
 export {
-  createAgentSessionManager,
+  forkSessionTools,
+  ROUTINE_PROPOSAL_TOOL,
+  type SessionTools,
+} from "./domain/session-tools.js";
+export {
+  createSessions,
   type AgentSession,
-  type AgentSessionInit,
+  type ResumeOpening,
+  type SessionOpening,
   type AgentSessionKey,
-  type AgentSessionManager,
+  type Sessions,
   type AgentTurnHandle,
   type AgentTurnInput,
   type SendTurnOptions,
@@ -193,9 +229,16 @@ export {
 export {
   AgentInputQueue,
   type AgentInputReceipt,
-  type SubmitInputOptions,
+  type SubmitOptions,
 } from "./application/agent-input-queue.js";
-export type { PushLevel, TurnFacts } from "./domain/turn-facts.js";
+export type { PushLevel, TurnActor, TurnFacts } from "./domain/turn-facts.js";
+export { sameActor } from "./domain/turn-facts.js";
+export {
+  type Audience,
+  messagingAudience,
+  narrowerAudience,
+  turnAudience,
+} from "./domain/turn-audience.js";
 export type { DeferTool } from "./application/ask-user-tools.js";
 export {
   parentTurnSession,
@@ -205,7 +248,11 @@ export {
   walkToRoot,
   type StoredRoot,
 } from "./domain/session-parent.js";
-export { WebChatDashboardSessions } from "./infrastructure/webchat-dashboard-sessions.js";
+export type {
+  RecordedSession,
+  RecordedSessions,
+  NewSubagentSession,
+} from "./domain/recorded-sessions.js";
 export {
   createSubagentCalls,
   type LiveTurns,
@@ -220,32 +267,17 @@ export { romeToolRunner } from "./application/rome-tool-runner.js";
 export type { SessionTracing } from "./application/session-tracing.js";
 export { translateTurnSpans, type CapturedEvent } from "./application/turn-spans.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
-export { SkillLoader } from "./infrastructure/skill-loader.js";
-export { AgentLoader } from "./infrastructure/agent-loader.js";
 export { readAnswerShape } from "./infrastructure/answer-shape.js";
-export {
-  ChatSessionSettings,
-  type ChatSessionSettingsDeps,
-} from "./infrastructure/chat-session-settings.js";
-export {
-  TurnUsageReporter,
-  type TurnUsageReporterDeps,
-} from "./infrastructure/turn-usage-reporter.js";
 export { romeSessionTracing } from "./infrastructure/session-tracing.js";
-export {
-  AppTurnHooks,
-  type TurnLifecycleHookLoadFailure,
-} from "./infrastructure/app-turn-hooks.js";
-export {
-  AppTurnMiddleware,
-  type TurnMiddlewareLoadFailure,
-} from "./infrastructure/app-turn-middleware.js";
 export { TurnListeners } from "./infrastructure/turn-listeners.js";
 
 // The model port's adapters, for the composition root alone. Everything else
 // reaches the context through the ports above.
 export { AnthropicProvider } from "./infrastructure/model/anthropic/provider.js";
+export { claudeStoppedTurnResult } from "./infrastructure/model/anthropic/stop.js";
 export { ClaudeAccount } from "./infrastructure/model/anthropic/account.js";
+// How Claude words an exhausted subscription, for a stored error that carries no code.
+export { isAnthropicUsageLimitError } from "./infrastructure/model/anthropic/usage-limit.js";
 export { CodexAppServerProvider } from "./infrastructure/model/codex/app-server-provider.js";
 export { CodexAppServerManager } from "./infrastructure/model/codex/app-server-manager.js";
 export { SharedCodexAccountService } from "./infrastructure/model/codex/account-service.js";
@@ -254,3 +286,23 @@ export {
   createTierModelsSetting,
   TIER_MODEL_MAPPINGS_SETTING_KEY,
 } from "./infrastructure/settings/tier-models-setting.js";
+
+// What the dashboard's login and settings routes and Rome Cloud's Codex
+// login use from the model adapters.
+export {
+  ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING,
+  redactAnthropicCompatibleCredentialsSetting,
+  summarizeAnthropicCompatibleCredentials,
+  summarizeAnthropicCompatibleCredentialsForEditing,
+} from "./infrastructure/model/anthropic/anthropic-compatible-providers.js";
+export {
+  ClaudeLoginCodeValidationError,
+  formatClaudeLoginCodeInput,
+} from "./infrastructure/model/anthropic/claude-login-code.js";
+export { createClaudeLoginWatcher } from "./infrastructure/model/anthropic/claude-login-watch.js";
+export { fetchRomeCredits } from "./infrastructure/model/codex/rome-credits.js";
+export {
+  ambiguousQuota,
+  failoverReason,
+  type FailoverReason,
+} from "./domain/failover-reason.js";

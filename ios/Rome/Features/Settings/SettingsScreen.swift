@@ -26,7 +26,7 @@ struct PageHeader: View {
             } else {
                 Color.clear.frame(width: 44, height: 44)
             }
-            PlainHeaderTitle(title: Text(title))
+            PlainHeaderTitle(title: Text(title), size: inSheet ? PlainHeaderTitle.secondarySize : 15)
             if let onClose {
                 GlassCircleButton(accessibilityLabel: "Close", action: onClose) {
                     Image(systemName: "xmark").romeFont(16, .semibold)
@@ -55,19 +55,24 @@ enum AppLanguage {
 
 /// An inset group: a white rounded card with hairline rows.
 struct SettingsGroup<Content: View>: View {
+    /// Text around a card (its header, a status line, a footer) starts where
+    /// the card's row text does, as in iOS inset-grouped lists.
+    static var textInset: CGFloat { 16 }
+
     var header: LocalizedStringKey? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let header {
-                // At the card's edge, like every section title.
+                // In line with the rows' text, like every section header.
                 Text(header)
                     .romeFont(13, .medium)
                     .foregroundStyle(Palette.sub)
+                    .padding(.horizontal, SettingsGroup<EmptyView>.textInset)
             }
             VStack(spacing: 0, content: content)
-                .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+                .background(Palette.secondaryCard, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                 .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                 .hairline(radius: Metrics.groupRadius)
         }
@@ -87,7 +92,7 @@ struct SettingsRow<Trailing: View>: View {
                 .romeFont(15)
                 .foregroundStyle(Palette.fg)
                 .frame(width: 30, height: 30)
-                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Palette.secondaryFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             HStack {
                 Text(title).romeFont(17).foregroundStyle(Palette.fg)
                 Spacer(minLength: 8)
@@ -104,14 +109,17 @@ struct SettingsRow<Trailing: View>: View {
     }
 }
 
-/// Board 3: account, AI tool usage, links, sign out.
+/// Board 3: account, AI tool usage, Connections, the app's
+/// own settings and links, sign out. Groups carry no titles.
 struct SettingsScreen: View {
     let workspace: Workspace
     let onInstances: () -> Void
+    let onConnections: () -> Void
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+    @Environment(\.openInstancePage) private var openInstancePage
     @State private var usage: AIToolsStatus?
     @State private var confirmSignOut = false
     @State private var showFeedback = false
@@ -125,13 +133,15 @@ struct SettingsScreen: View {
                     .padding(.top, 8)
                 // The guardian's own subscriptions: not a visitor's to see.
                 if !workspace.isVisitor {
-                    SettingsGroup(header: "AI tool usage") {
+                    SettingsGroup {
                         UsageRow(name: "Claude", provider: usage?.claude, last: false)
                         UsageRow(name: "Codex", provider: usage?.codex, last: true)
                     }
                     .padding(.horizontal, 16)
                 }
-                SettingsGroup(header: "Other") {
+                SettingsGroup { ConnectionsRow(action: onConnections) }
+                    .padding(.horizontal, 16)
+                SettingsGroup {
                     SettingsRow(systemImage: "circle.lefthalf.filled", title: "Appearance") {
                         Menu {
                             Picker("Appearance", selection: Binding(get: { model.appearance.current }, set: { model.appearance.set($0) })) {
@@ -193,11 +203,25 @@ struct SettingsScreen: View {
                         }
                         .transition(.opacity)
                     }
+                    // The main Chat's links: its header has no "…" menu. A
+                    // visitor's own links too, as a message's Share makes them.
+                    if workspace.mainChatShare != nil {
+                        Button {
+                            Task { await workspace.openMainChatLinks() }
+                        } label: {
+                            SettingsRow(systemImage: "link", title: "Shared links") {
+                                Image(systemName: "chevron.right")
+                                    .romeFont(13, .semibold)
+                                    .foregroundStyle(Palette.sub)
+                            }
+                        }
+                        .buttonStyle(RowPressStyle())
+                    }
                     Button {
-                        if let url = model.webURL { openURL(url) }
+                        if let url = model.webURL { openInstancePage(url) }
                     } label: {
-                        SettingsRow(systemImage: "safari", title: "Manage on the web") {
-                            Image(systemName: "arrow.up.right")
+                        SettingsRow(systemImage: "macwindow", title: "Manage on the web") {
+                            Image(systemName: "chevron.right")
                                 .romeFont(13, .semibold)
                                 .foregroundStyle(Palette.sub)
                         }
@@ -214,6 +238,23 @@ struct SettingsScreen: View {
                         }
                         .buttonStyle(RowPressStyle())
                     }
+                    if workspace.voiceInput.available {
+                        // Only while Rome Cloud cannot serve voice input: why.
+                        if let problem = workspace.voiceInput.info?.problemText {
+                            SettingsRow(systemImage: "mic", title: "Voice input") {
+                                Text(verbatim: problem)
+                                    .romeFont(15)
+                                    .foregroundStyle(Palette.sub)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Voice input")
+                            .accessibilityValue(Text(verbatim: problem))
+                            .accessibilityIdentifier("voice-input-place")
+                        }
+                        MicrophoneRow()
+                    }
                     SettingsRow(systemImage: "info.circle", title: "Version", last: true) {
                         Text(appVersion)
                             .romeFont(17, monospacedDigits: true)
@@ -221,14 +262,6 @@ struct SettingsScreen: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                if model.update.cannotCheck {
-                    // Quiet: the app works as usual when the check cannot decide.
-                    Text("Can't check for updates")
-                        .romeFont(13)
-                        .foregroundStyle(Palette.sub)
-                        .padding(.horizontal, 32)
-                        .padding(.top, -18)
-                }
                 SettingsGroup {
                     Button { confirmSignOut = true } label: {
                         Text("Sign out")
@@ -246,9 +279,10 @@ struct SettingsScreen: View {
         }
         .softTopScrollEdge()
         .floatingTopBar { PageHeader(title: "Settings", onClose: onClose, inSheet: true) }
-        .background(Palette.bg.ignoresSafeArea())
+        .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .task { if !workspace.isVisitor { usage = try? await workspace.backend.aiTools() } }
+        .task { await workspace.voiceInput.refresh(now: true) }
         .task {
             await model.push.refresh()
             notificationsOn = model.push.isOn
@@ -268,25 +302,36 @@ struct SettingsScreen: View {
                 .presentationBackground(Palette.sheet)
                 .presentationCornerRadius(22)
         }
+        .sharedLinksSheet(workspace.concierge.share, isPresented: Binding(get: { workspace.showsMainChatLinks }, set: { workspace.showsMainChatLinks = $0 }))
+        // Closed with Settings, so it never comes back with it.
+        .onDisappear { workspace.showsMainChatLinks = false }
     }
 
     private var accountCard: some View {
         Button(action: onInstances) {
             HStack(spacing: 14) {
-                InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, account: workspace.backend.account, size: 48)
-                VStack(alignment: .leading, spacing: 1) {
+                InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, account: workspace.backend.account, size: 44)
+                // Centered on the avatar as a pair, with room between the lines.
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
+                        // An email keeps its start and its domain; the name is
+                        // cut, never the badge.
                         Text(workspace.accountLabel)
-                            .romeFont(17, .semibold)
+                            .romeFont(16, .semibold)
                             .foregroundStyle(Palette.fg)
                             .lineLimit(1)
-                        if model.currentInstance?.isVisitor == true { VisitorBadge() }
+                            .truncationMode(workspace.accountLabel.contains("@") ? .middle : .tail)
+                        if model.currentInstance?.isVisitor == true { VisitorBadge(fill: Palette.secondaryFill).fixedSize() }
                     }
                     HStack(spacing: 6) {
                         Circle().fill(Palette.success).frame(width: 7, height: 7)
-                        Text(verbatim: "\(workspace.instanceName) · \(workspace.host)").lineLimit(1)
+                        // The version before the host: a long domain is cut, never the version.
+                        if let version = InstanceLine.version(model.update.runningVersion) {
+                            Text(verbatim: "\(version) ·").fixedSize()
+                        }
+                        Text(verbatim: workspace.host).lineLimit(1).truncationMode(.middle)
                     }
-                    .romeFont(14)
+                    .romeFont(13)
                     .foregroundStyle(Palette.sub)
                 }
                 Spacer(minLength: 0)
@@ -296,7 +341,7 @@ struct SettingsScreen: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
-            .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+            .background(Palette.secondaryCard, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
             .softElevation(radius: Metrics.cardRadius)
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
@@ -371,7 +416,7 @@ struct UsageRow: View {
             if provider?.loggedIn == true {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(Palette.fill)
+                        Capsule().fill(Palette.secondaryFill)
                         Capsule()
                             .fill(percent >= 100 || provider?.quotaExhausted == true ? Palette.destructive : Palette.fg)
                             .frame(width: geometry.size.width * percent / 100)
@@ -472,5 +517,20 @@ struct FeedbackSheet: View {
             }
             sending = false
         }
+    }
+}
+
+/// The second line of the Settings header: the release the instance runs,
+/// once the update check has said, then its domain. No placeholder before.
+enum InstanceLine {
+    /// "v1.1.190", or nil before the check says.
+    static func version(_ version: String?) -> String? {
+        guard let version = version?.trimmingCharacters(in: .whitespaces), !version.isEmpty else { return nil }
+        return version.hasPrefix("v") ? version : "v" + version
+    }
+
+    static func text(host: String, version: String?) -> String {
+        guard let version = self.version(version) else { return host }
+        return "\(version) · \(host)"
     }
 }

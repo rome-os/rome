@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORT_VALUES } from "@rome-os/app-runtime";
 import { ArtifactLocalNameSchema } from "./artifact-name.js";
-import { compileOutputSchema, validatePortableOutputSchema } from "./output-schema-validator.js";
+import {
+  compileOutputSchema,
+  validatePortableOutputSchema,
+} from "../../lib/output-schema-validator.js";
 
 const FavorRequirementSchema = z
   .object({
@@ -33,7 +36,7 @@ const FavorRequirementSchema = z
  * (`action.yaml`, agent yamls). Unknown fields are rejected, not stripped:
  * packed bundles are immutable once published, so a field tolerated here
  * would have to be tolerated forever. One schema serves both gates — the
- * runtime loaders (`actions/loader.ts`, `agent/infrastructure/agent-loader.ts`) and
+ * runtime loaders (`apps/actions/loader.ts`, `app-host/agent-loader.ts`) and
  * pack/install validation (`validate.ts`) — and the bundle's
  * `formatVersion` (in app.yaml) governs it.
  */
@@ -122,6 +125,14 @@ export const AgentConfigSchema = z
     // A code-backed agent. Its turns are always produced by a
     // turn-middleware, never a model, so the session opens no provider query.
     codeBacked: z.boolean().optional(),
+    // Deprecated, slated for removal (ZHA-231): the agent's own app runs its
+    // turns. Read as `deprecatedRunsOwnTurns`, which Rome honours only for the
+    // apps in DEPRECATED_RUNS_OWN_TURNS_APPS
+    // (app-host/deprecated-runs-own-turns.ts). The key keeps its name, so an
+    // app still loads on hosts built before the rename.
+    runsOwnTurns: z.boolean().optional(),
+    // The key's earlier name, which apps built before it still send.
+    unsafeTestOnlyBypassInbox: z.boolean().optional(),
     // Overrides of the agent policy (agent/domain/agent-policy.ts). Each omitted
     // field keeps the default chat behavior.
     policy: z
@@ -129,6 +140,10 @@ export const AgentConfigSchema = z
         finalText: z.enum(["deliver", "private"]).optional(),
         autoTitle: z.boolean().optional(),
         loadMemory: z.boolean().optional(),
+        freshSessionOnSetupChange: z.boolean().optional(),
+        handoffOnRenewal: z.boolean().optional(),
+        taskChecks: z.boolean().optional(),
+        delegatesWork: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -185,6 +200,19 @@ export const AgentConfigSchema = z
       });
       return z.NEVER;
     }
-    const { model: _legacy, tier: _tier, provider, ...rest } = raw;
-    return { ...rest, ...(tier ? { tier } : {}), ...(provider ? { providerId: provider } : {}) };
+    const {
+      model: _legacy,
+      tier: _tier,
+      provider,
+      unsafeTestOnlyBypassInbox,
+      runsOwnTurns,
+      ...rest
+    } = raw;
+    const ownTurns = runsOwnTurns ?? unsafeTestOnlyBypassInbox;
+    return {
+      ...rest,
+      ...(tier ? { tier } : {}),
+      ...(provider ? { providerId: provider } : {}),
+      ...(ownTurns === undefined ? {} : { deprecatedRunsOwnTurns: ownTurns }),
+    };
   });

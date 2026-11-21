@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   getAnthropicCompatibleCredentialSecret,
   getStoredAnthropicCompatibleCredentials,
-} from "../../../../lib/anthropic-compatible-providers.js";
+} from "./anthropic-compatible-providers.js";
 import {
   isAnthropicCompatibleConfigurationId,
   type AnthropicCompatibleConfigurationId,

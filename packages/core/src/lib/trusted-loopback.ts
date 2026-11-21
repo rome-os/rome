@@ -15,7 +15,7 @@
 //    from 127.0.0.1 on behalf of an external user" from a genuine
 //    in-container caller.
 //
-// `isLoopbackAddress` is signal 1; callers such as lib/guardian-session.ts
+// `isLoopbackAddress` is signal 1; callers such as access/guardian-session.ts
 // check signal 2 themselves.
 //
 // INVARIANT: every proxy that fronts the Hono listener must set

@@ -55,7 +55,7 @@ export {
   formatOutputSchemaErrors,
   validatePortableOutputSchema,
   type CompiledOutputSchema,
-} from "./output-schema-validator.js";
+} from "../../lib/output-schema-validator.js";
 export {
   parseSkillFrontmatter,
   parseSkillFrontmatterResult,

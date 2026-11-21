@@ -8,7 +8,7 @@ import SettingsPage from "./SettingsTabPage";
 
 // Rendered for real — this suite is about whether it mounts at all.
 rs.mock("@/components/system-diagnosis-section", () => ({
-  SystemDiagnosisSection: () => null,
+  SystemDiagnosisRow: () => null,
 }));
 
 beforeAll(async () => {
@@ -45,22 +45,18 @@ function renderAdvanced() {
   );
 }
 
-describe("Advanced settings inside the Mac app", () => {
-  it("shows the version and upgrade card in a browser", async () => {
+describe("Advanced settings version row", () => {
+  it("shows the version row in a browser", async () => {
     renderAdvanced();
     expect(await screen.findByText("Current version")).toBeDefined();
   });
 
-  it("omits the card when the desktop preload has exposed its bridge", async () => {
-    // The section relays to Rome Cloud, which answers for the account's hosted
-    // instance rather than the Mac showing the page.
+  it("shows it in the Mac app too, whose window is the hosted instance itself", async () => {
+    // The Mac app opens the hosted Rome's own origin, so the row's relay to
+    // Rome Cloud acts on the instance rendering this page.
     window.rome = {};
     renderAdvanced();
 
-    // Wait for a sibling that is not gated, so the assertion cannot pass just
-    // because the tab has not rendered yet.
-    expect(await screen.findByRole("heading", { name: "Features" })).toBeDefined();
-    expect(screen.getByRole("heading", { name: "System" })).toBeDefined();
-    expect(screen.queryByText("Current version")).toBeNull();
+    expect(await screen.findByText("Current version")).toBeDefined();
   });
 });

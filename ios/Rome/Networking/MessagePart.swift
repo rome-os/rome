@@ -1,27 +1,134 @@
 import Foundation
 
-/// One part of a stored message, sorted into what the app draws. Unknown part
-/// types fall into `.other`, so a newer server never breaks the transcript.
+/// One part of a stored message, sorted into what the app draws. A part type
+/// this build does not know becomes a `.webOnly` row, so a newer server's card
+/// never vanishes from the transcript.
 enum MessagePart: Hashable, Sendable {
     /// Markdown text. `long` messages read as a document; `forwardedFrom` marks a
     /// report forwarded word for word from a task chat.
     case text(String, long: Bool, forwardedFrom: ForwardedFrom?)
-    /// A card for a task chat the Concierge started.
-    case taskChat(chatId: String, title: String)
+    /// A card for a task chat the Concierge started. `show` says what it
+    /// draws: the task card, or the task's question or approval alone; nil
+    /// on a part from before, which draws the task card with its wait inside.
+    /// `card` is the question or approval, filled in by the instance for a
+    /// part that shows one.
+    case taskChat(chatId: String, title: String, show: TaskChatShow? = nil, card: TaskAskCard? = nil)
     /// An action paused for the guardian's approval.
     case approval(ApprovalPart)
     /// The agent asked the guardian a question (`ask_question`).
     case question(QuestionPart)
     /// Chat asks the guardian to connect a service.
     case connectCard(ConnectCardPart)
-    /// Another kind of interactive card (an app component). Shown as a Web placeholder.
-    case webOnly(kind: String)
+    /// An app's card described as data (a `widget` part with `ui`), drawn here.
+    case widgetUI(WidgetUIPart)
+    /// A routine Chat proposed (`propose_routine`), shown read-only.
+    case routineDraft(RoutineDraftPart)
+    /// A part the web dashboard draws and this app does not: a row that opens
+    /// the chat there. `toolUseId` names an interactive card, whose answer
+    /// marks it done.
+    case webOnly(WebOnlyKind, toolUseId: String? = nil)
     /// The guardian's answer to an interactive card.
-    case interactionResult(toolUseId: String, output: JSONValue)
+    /// `messageId`: the message that holds the card it answers, when core
+    /// wrote it.
+    case interactionResult(toolUseId: String, output: JSONValue, messageId: String? = nil)
     /// A turn that failed before it ran.
-    case error(String)
-    /// Parts the app does not draw on its own (tool calls, thinking, usage).
+    case error(TurnError)
+    /// A quiet line, such as the chat moving to another model (`quota_switch`).
+    case notice(String)
+    /// The message a reply quotes (`reply_to`), drawn inside the reply's bubble.
+    case replyTo(ReplyQuote)
+    /// Parts the web dashboard does not show in a transcript either (tool
+    /// calls, thinking, usage, a reply's quote).
     case other(type: String)
+
+    /// What a `task_chat` part draws (`show` on the wire).
+    enum TaskChatShow: String, Hashable, Sendable {
+        /// The task card: its title, opening the task chat.
+        case task
+        /// The task's question or approval on its own.
+        case ask
+    }
+
+    /// What a `.webOnly` row names, after the web component's own title.
+    enum WebOnlyKind: Hashable, Sendable {
+        /// The built-in card that connects Claude or ChatGPT.
+        case aiTools
+        /// The connector app's card that connects a service.
+        case connectService
+        /// The connector app's sign-in card.
+        case connectorSignIn
+        /// Another app's card, by app id.
+        case app(String)
+        /// A turn's recap (`turn_recap`).
+        case turnSummary
+        /// A part type this build does not know.
+        case unknown
+
+        /// The row's text. `appName` names an app card's app when it is known.
+        func title(appName: String? = nil) -> String {
+            switch self {
+            case .aiTools: return String(localized: "Connect Claude or ChatGPT")
+            case .connectService: return String(localized: "A card to connect a service")
+            case .connectorSignIn: return String(localized: "A sign-in card")
+            case .app:
+                if let appName, !appName.isEmpty { return String(localized: "A card from \(appName)") }
+                return String(localized: "An app card")
+            case .turnSummary: return String(localized: "A turn summary")
+            case .unknown: return String(localized: "A card")
+            }
+        }
+    }
+
+    /// Part types the web dashboard hides from a transcript, or draws only as
+    /// part of another one (a reply's quote in its bubble). The rest of the
+    /// trace kinds are listed too, so a stored one never shows as a card.
+    /// `handoff` and `submission_card` are legacy kinds the web drops.
+    static let hiddenTypes: Set<String> = [
+        "tool_use", "tool_result", "thinking", "result", "usage", "session_init",
+        "turn_start", "turn_end", "structured_output", "system_input", "plan_update",
+        "subagent_start", "subagent_result", "reply_to", "handoff", "submission_card",
+    ]
+
+    /// `reply_to`: what a reply quotes, as the server snapshotted it.
+    struct ReplyQuote: Hashable, Sendable {
+        let messageId: String
+        /// `guardian`, `agent` or `automated`.
+        let author: String?
+        /// An automated sender's name.
+        let name: String?
+        let text: String
+
+        /// The line a quote shows: the first line of the quoted message with
+        /// words in it, as plain reading text. A fence line holds none, so the
+        /// first line inside it counts. The rest of the message is not quoted.
+        var line: String {
+            for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
+                let trimmed = raw.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty || trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") { continue }
+                let plain = MarkdownParser.plain(String(raw)).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !plain.isEmpty { return plain }
+            }
+            return ""
+        }
+    }
+
+    /// `routine_draft_card`: a routine Chat proposed, and the key it is created with.
+    struct RoutineDraftPart: Hashable, Sendable {
+        enum Trigger: Hashable, Sendable { case schedule, event, manual }
+
+        let toolUseId: String
+        let name: String
+        /// One-line headline, such as "When you get an email from Dana, Rome will text you."
+        let sentence: String
+        /// When it runs, in words: "Every Friday at 9:00 AM" or "Gmail · new email".
+        let watchLabel: String
+        let filterSummary: String?
+        /// What it does: the action's own preview title when it has one, else Chat's summary.
+        let thenSummary: String
+        let trigger: Trigger
+        /// The key the routine is created with; nil on a card written before keys.
+        let routineKey: String?
+    }
 
     struct ForwardedFrom: Hashable, Sendable {
         let chatId: String
@@ -45,21 +152,14 @@ enum MessagePart: Hashable, Sendable {
     struct QuestionPart: Hashable, Sendable {
         let toolUseId: String
         let questions: [Question]
+        /// The card core described from the questions, which both apps draw.
+        var ui: WidgetUIPart? = nil
 
+        /// A question as the agent asked it; a card stored before cards were
+        /// described shows these as a line.
         struct Question: Hashable, Sendable {
             let id: String
             let text: String
-            let multi: Bool
-            let freeTextOnly: Bool
-            let options: [String]
-            /// Options chosen before the guardian touches anything; still editable.
-            var defaults: [String] = []
-            /// A text question's prefilled answer; still editable.
-            var defaultText: String? = nil
-            /// A muted line under an option's label, by label. Answers send labels only.
-            var optionDescriptions: [String: String] = [:]
-            /// May be left blank without blocking Submit.
-            var optional = false
         }
     }
 
@@ -117,8 +217,14 @@ enum MessagePart: Hashable, Sendable {
         }
     }
 
+    private static let parsed = ParseCache<[MessagePart]>()
+
     /// Parses a message's stored content.
     static func parse(_ content: String) -> [MessagePart] {
+        parsed.value(for: content, decode)
+    }
+
+    private static func decode(_ content: String) -> [MessagePart] {
         guard let data = content.data(using: .utf8),
               let value = try? JSONDecoder().decode(JSONValue.self, from: data),
               case .array(let items) = value
@@ -150,7 +256,7 @@ enum MessagePart: Hashable, Sendable {
             ))
         case "task_chat":
             guard let chatId = value["chatId"]?.string else { return nil }
-            return .taskChat(chatId: chatId, title: value["title"]?.string ?? "")
+            return .taskChat(chatId: chatId, title: value["title"]?.string ?? "", show: value["show"]?.string.flatMap(TaskChatShow.init), card: TaskAskCard(json: value["card"]))
         case "approval_card":
             guard let approvalId = value["approvalId"]?.string else { return nil }
             return .approval(approval(value, id: approvalId))
@@ -158,28 +264,95 @@ enum MessagePart: Hashable, Sendable {
             let render = value["render"]
             if render?["componentId"]?.string == "question-card",
                let toolUseId = value["toolUseId"]?.string {
-                return .question(question(render?["props"], toolUseId: toolUseId))
+                var part = question(render?["props"], toolUseId: toolUseId)
+                part.ui = WidgetUIPart(interaction: value)
+                return .question(part)
             }
-            return .webOnly(kind: render?["componentId"]?.string ?? type)
+            // A card described as data, which the agent waits on, whether an
+            // app's or core's own.
+            if render?["ui"] != nil, let card = WidgetUIPart(interaction: value) {
+                return .widgetUI(card)
+            }
+            return .webOnly(webOnlyKind(componentId: render?["componentId"]?.string, appId: value["appId"]?.string), toolUseId: value["toolUseId"]?.string)
+        case "widget":
+            // A widget that names a web component is drawn only on the web.
+            if let card = WidgetUIPart(json: value) { return .widgetUI(card) }
+            return .webOnly(value["appId"]?.string.map(WebOnlyKind.app) ?? .unknown)
         case "interaction_result":
             guard let toolUseId = value["toolUseId"]?.string else { return nil }
-            return .interactionResult(toolUseId: toolUseId, output: value["output"] ?? .null)
-        case "handoff", "routine_draft_card", "submission_card":
-            return .webOnly(kind: type)
+            return .interactionResult(toolUseId: toolUseId, output: value["output"] ?? .null, messageId: value["messageId"]?.string)
+        case "routine_draft_card":
+            guard let draft = value["draft"], let name = draft["name"]?.string else { return .webOnly(.unknown) }
+            return .routineDraft(routineDraft(draft, name: name, toolUseId: value["toolUseId"]?.string ?? "", key: value["routineKey"]?.string))
+        case "turn_recap":
+            return .webOnly(.turnSummary)
+        case "quota_switch":
+            guard let text = Self.modelSwitchText(value) else { return .webOnly(.unknown) }
+            return .notice(text)
         case "error":
-            return .error(value["error"]?.string ?? "")
+            return .error(TurnError(
+                text: value["error"]?.string ?? "",
+                code: value["code"]?.string,
+                provider: value["provider"]?.string,
+                reason: value["reason"]?.string
+            ))
+        case "reply_to":
+            guard let messageId = value["messageId"]?.string else { return .other(type: type) }
+            return .replyTo(ReplyQuote(messageId: messageId, author: value["author"]?.string, name: value["name"]?.string, text: value["text"]?.string ?? ""))
         default:
-            return .other(type: type)
+            return hiddenTypes.contains(type) ? .other(type: type) : .webOnly(.unknown)
         }
     }
 
-    private static func approval(_ value: JSONValue, id: String) -> ApprovalPart {
+    private static func webOnlyKind(componentId: String?, appId: String?) -> WebOnlyKind {
+        switch componentId {
+        case "ai-tools-card": return .aiTools
+        case "connect-card" where appId == "connector": return .connectService
+        case "login-card" where appId == "connector": return .connectorSignIn
+        default: return appId.map(WebOnlyKind.app) ?? .unknown
+        }
+    }
+
+    private static func routineDraft(_ draft: JSONValue, name: String, toolUseId: String, key: String?) -> RoutineDraftPart {
+        let trigger: RoutineDraftPart.Trigger
+        switch draft["trigger"]?["type"]?.string {
+        case "schedule": trigger = .schedule
+        case "manual": trigger = .manual
+        default: trigger = .event
+        }
+        // The action's own preview says what really fires; Chat's prose is the fallback.
+        let preview = draft["preview"]
+        var then = draft["thenSummary"]?.string ?? ""
+        switch preview?["kind"]?.string {
+        case "generic":
+            if let title = preview?["title"]?.string, !title.isEmpty { then = title }
+        case "sensitive_message":
+            then = String(localized: "Send a message")
+        default:
+            break
+        }
+        let filter = draft["filterSummary"]?.string
+        return RoutineDraftPart(
+            toolUseId: toolUseId,
+            name: name,
+            sentence: draft["sentence"]?.string ?? "",
+            watchLabel: draft["watchLabel"]?.string ?? "",
+            filterSummary: filter?.isEmpty == false ? filter : nil,
+            thenSummary: then,
+            trigger: trigger,
+            routineKey: key
+        )
+    }
+
+    /// An approval as a card shows it, from a stored `approval_card` part or
+    /// an approval row's payload (`actionName`, `preview`, `status`).
+    static func approval(_ value: JSONValue, id: String) -> ApprovalPart {
         let preview = value["preview"]
         var fields: [ApprovalPart.Field] = []
         var title: String?
         var summary: String?
         switch preview?["kind"]?.string {
-        case "generic":
+        case "generic", "secret_access":
             title = preview?["title"]?.string
             summary = preview?["summary"]?.string
             fields = (preview?["fields"]?.array ?? []).compactMap { field in
@@ -207,44 +380,64 @@ enum MessagePart: Hashable, Sendable {
     private static func question(_ props: JSONValue?, toolUseId: String) -> QuestionPart {
         let questions: [QuestionPart.Question] = (props?["questions"]?.array ?? []).compactMap { item in
             guard let id = item["id"]?.string, let text = item["question"]?.string else { return nil }
-            let type = item["type"]?.string
-            let options = (item["options"]?.array ?? []).compactMap(\.string)
-            // Every field from #1793 is optional, and only what names a real option counts.
-            var defaults: [String] = []
-            for value in item["defaults"]?.array?.compactMap(\.string) ?? [] where options.contains(value) && !defaults.contains(value) {
-                defaults.append(value)
-            }
-            if type != "multi" { defaults = Array(defaults.prefix(1)) }
-            var descriptions: [String: String] = [:]
-            if case .object(let map) = item["optionDescriptions"] {
-                for (label, text) in map where options.contains(label) {
-                    if let text = text.string, !text.isEmpty { descriptions[label] = text }
-                }
-            }
-            return .init(
-                id: id,
-                text: text,
-                multi: type == "multi",
-                freeTextOnly: type == "text",
-                options: options,
-                defaults: type == "text" ? [] : defaults,
-                defaultText: type == "text" ? item["defaultText"]?.string : nil,
-                optionDescriptions: type == "text" ? [:] : descriptions,
-                optional: item["optional"]?.bool ?? false
-            )
+            return .init(id: id, text: text)
         }
         return QuestionPart(toolUseId: toolUseId, questions: questions)
     }
 }
 
 extension MessagePart {
+    /// The words for a chat that moved to another model: why, and to what,
+    /// as the dashboard's `ModelSwitchNotice` says them.
+    static func modelSwitchText(_ value: JSONValue) -> String? {
+        guard let model = value["model"]?.string, !model.isEmpty else { return nil }
+        func name(_ provider: String?) -> String? {
+            switch provider {
+            case "openai": return "Codex"
+            case "anthropic": return "Claude"
+            default: return nil
+            }
+        }
+        let fromProvider = value["from"]?.string, toProvider = value["to"]?.string
+        let reason = value["reason"]?.string
+        let toModel = ModelNames.display(model)
+        // Within one provider, or with no provider named, the model limit is what ran out.
+        if fromProvider != nil, fromProvider == toProvider || reason == "model_limit" {
+            let fromModel = ModelNames.display(value["fromModel"]?.string ?? "")
+            if !fromModel.isEmpty { return String(localized: "\(fromModel) limit reached, switched to \(toModel)") }
+        }
+        if let from = name(fromProvider), let to = name(toProvider) {
+            switch reason {
+            case "login": return String(localized: "\(from) sign-in failed, switched to \(to)")
+            case "temporary": return String(localized: "\(from) is temporarily unavailable, switched to \(to)")
+            case "model_limit":
+                let fromModel = ModelNames.display(value["fromModel"]?.string ?? "")
+                return String(localized: "\(fromModel) limit reached, switched to \(toModel)")
+            default: return String(localized: "\(from) quota ran out, switched to \(to)")
+            }
+        }
+        return String(localized: "Switched to \(toModel)")
+    }
+
     /// Whether the part shows something in a transcript.
     var isVisible: Bool {
         switch self {
         case .text(let text, _, _): return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .other, .interactionResult: return false
+        case .other, .interactionResult, .replyTo: return false
         default: return true
         }
+    }
+
+    /// The quote of a reply part.
+    var replyQuote: ReplyQuote? {
+        if case .replyTo(let quote) = self { return quote }
+        return nil
+    }
+
+    /// Whether this is a task card.
+    var isTaskChat: Bool {
+        if case .taskChat = self { return true }
+        return false
     }
 
     /// The text of a text part.
@@ -261,79 +454,13 @@ func displayActionName(_ name: String?) -> String {
     return local.replacingOccurrences(of: "_", with: " ")
 }
 
-/// A question card's answers, as the web's QuestionCard builds them. A multi
-/// answer joins its chosen options, then any typed extra, with `", "`, and
-/// keeps the parts as `values` when a label holds that separator, so nothing
-/// is lost splitting it back. Answers carry labels, never descriptions.
-enum QuestionAnswers {
-    static let separator = ", "
-
-    typealias Question = MessagePart.QuestionPart.Question
-
-    /// The card before the guardian touches it: defaults chosen, default text typed.
-    static func initial(_ questions: [Question]) -> (choices: [String: [String]], typed: [String: String]) {
-        var choices: [String: [String]] = [:]
-        var typed: [String: String] = [:]
-        for question in questions {
-            if !question.defaults.isEmpty { choices[question.id] = question.multi ? question.defaults : [question.defaults[0]] }
-            if let text = question.defaultText { typed[question.id] = text }
-        }
-        return (choices, typed)
-    }
-
-    /// A required question needs an option chosen or something typed; a default counts.
-    static func isAnswered(_ question: Question, choices: [String: [String]], typed: [String: String]) -> Bool {
-        let text = (typed[question.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return !(choices[question.id] ?? []).isEmpty || !text.isEmpty
-    }
-
-    static func complete(_ questions: [Question], choices: [String: [String]], typed: [String: String]) -> Bool {
-        questions.allSatisfy { $0.optional || isAnswered($0, choices: choices, typed: typed) }
-    }
-
-    /// What the send arrow beside a lone single-answer question sends, or nil
-    /// when it does not show: once something is typed, or at once for an
-    /// optional question, which may go blank (`[]`).
-    static func inlineSend(_ question: Question, choices: [String: [String]], typed: [String: String]) -> [JSONValue]? {
-        let text = (typed[question.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || question.optional else { return nil }
-        return answers([question], choices: choices, typed: typed)
-    }
-
-    /// The `answers` the card sends; blank ones (optional questions) are left out.
-    static func answers(_ questions: [Question], choices: [String: [String]], typed: [String: String]) -> [JSONValue] {
-        questions.compactMap { question in
-            let text = (typed[question.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if question.multi {
-                let picked = question.options.filter { (choices[question.id] ?? []).contains($0) }
-                let parts = picked + (text.isEmpty ? [] : [text])
-                guard !parts.isEmpty else { return nil }
-                var answer: [String: JSONValue] = [
-                    "questionId": .string(question.id),
-                    "value": .string(parts.joined(separator: separator)),
-                ]
-                if parts.contains(where: { $0.contains(separator) }) { answer["values"] = .array(parts.map(JSONValue.string)) }
-                return .object(answer)
-            }
-            // A single choice or a text answer: what was typed wins over a choice.
-            let value = text.isEmpty ? (choices[question.id]?.first ?? "") : text
-            guard !value.isEmpty else { return nil }
-            return .object(["questionId": .string(question.id), "value": .string(value)])
-        }
-    }
-
-    /// A stored answer read back: the options it chose and any typed extra.
-    static func picked(_ answer: JSONValue?, question: Question) -> (options: Set<String>, extra: [String]) {
-        guard let answer else { return ([], []) }
-        let parts: [String]
-        if let values = answer["values"]?.array?.compactMap(\.string) {
-            parts = values
-        } else {
-            let value = answer["value"]?.string ?? ""
-            parts = question.multi
-                ? value.components(separatedBy: separator).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-                : (value.isEmpty ? [] : [value])
-        }
-        return (Set(parts.filter(question.options.contains)), parts.filter { !question.options.contains($0) })
+extension MessagePart.ReplyQuote {
+    /// The quote of a held message, as the server snapshots it when a reply to
+    /// it is stored; nil when it has no text.
+    init?(of message: ChatMessage) {
+        let text = message.parts.compactMap(\.textContent).joined(separator: "\n\n")
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let automated = message.isUser && message.sender?.kind == "automated"
+        self.init(messageId: message.id, author: message.isUser ? (automated ? "automated" : "guardian") : "agent", name: automated ? message.sender?.name : nil, text: text)
     }
 }

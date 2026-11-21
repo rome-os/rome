@@ -4,6 +4,9 @@
 import type { RomeTool, RomeToolDefinition } from "./rome-tools.js";
 import type { TurnFacts } from "./turn-facts.js";
 
+/** The session tool that offers the guardian a routine on a card. */
+export const ROUTINE_PROPOSAL_TOOL = "propose_routine";
+
 /** Port. Where a session's tools come from: `propose_routine` and the tools Rome adds for an agent. */
 export interface SessionTools {
   /**

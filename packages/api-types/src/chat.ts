@@ -12,6 +12,18 @@ export type {
   RoutineDraftSpec,
 } from "@rome-os/app-runtime";
 
+// The check core runs before it stores a described card, so a reader can run
+// it again on the stored part before drawing it or calling the app, and the
+// rules every reader draws a card by.
+export {
+  checkWidgetUi,
+  isWidgetAppPath,
+  isWidgetHref,
+  WIDGET_UI_CHART_MAX_POINTS,
+  type WidgetUiIcon,
+  widgetStatTone,
+} from "@rome-os/app-runtime";
+
 /** Error core stores as a turn's assistant content when model resolution fails
  * before the turn runs. It carries the trace error event's fields. */
 export type StoredErrorPart = Pick<
@@ -28,10 +40,19 @@ export interface ForwardedFrom {
 
 /** A text part as WebChat stores it. `format` is a display hint only the
  * `say` tool sets: `long` shows the text as one long message, `bubble` or
- * absent as a chat bubble where the chat shows bubbles. `forwardedFrom` is set
- * only on text forwarded word for word from a task chat. */
+ * absent as a chat bubble where the chat shows bubbles. `forwardedFrom` marks
+ * text forwarded word for word from a task chat. Stored messages carry it and
+ * older clients read it, but Rome writes it on no new text message: a
+ * forwarded card carries it on its widget part. */
 export type WebchatTextPart = Extract<MessagePart, { type: "text" }> & {
   format?: "bubble" | "long";
+  forwardedFrom?: ForwardedFrom;
+};
+
+/** A widget part as WebChat stores it. `forwardedFrom` is set only on an
+ * agent card forwarded as it is from a task chat, the card that chat's final
+ * answer showed (docs/domains/chats.md#agent-card). */
+export type WebchatWidgetPart = Extract<MessagePart, { type: "widget" }> & {
   forwardedFrom?: ForwardedFrom;
 };
 
@@ -41,6 +62,113 @@ export interface TaskChatPart {
   type: "task_chat";
   chatId: string;
   title: string;
+  /**
+   * What the card shows: `task`, the task card (its title, status, Stop and
+   * Open), or `ask`, the task's question or approval alone. A card from
+   * before has none, and shows the task card with its waiting question or
+   * approval inside.
+   */
+  show?: "task" | "ask";
+  /**
+   * The question or approval an `ask` card shows: what its task waited on
+   * when the card was said. An `ask` card from before has none, and shows
+   * the newest one its task chat had asked by then.
+   */
+  waitedOn?: TaskChatWaitedOn;
+  /**
+   * The question or approval the card shows and how it ended, filled in by
+   * Rome when it hands the message out: never stored, so it is always
+   * current. Absent from a stored part, from a `task` card, and from servers
+   * before it.
+   */
+  card?: TaskCard;
+}
+
+/** A question by its tool use id and the message that holds it, or an approval by its id. */
+export type TaskChatWaitedOn =
+  | { kind: "question"; id: string; messageId: string }
+  | { kind: "approval"; id: string };
+
+/** How a card is drawn: the component a pending interaction names, with its props. */
+export interface TaskCardRender {
+  builtin?: boolean;
+  componentId: string;
+  props?: Record<string, unknown>;
+  /** The card described as data, which readers that know it draw. */
+  ui?: unknown;
+}
+
+/** How a task's question ended, once it did. */
+export type TaskQuestionOutcome =
+  | {
+      kind: "answered";
+      /** The answer as one line, such as "Warm, Plain", and what the card sent. */
+      answer: { text: string; output: Record<string, unknown> };
+    }
+  | { kind: "dismissed" };
+
+/** How a task's approval was decided, once it was. */
+export type TaskApprovalOutcome =
+  | { kind: "approved" }
+  | { kind: "rejected" }
+  | { kind: "turned_down"; reason: "no_response" | "task_stopped" };
+
+/**
+ * The question or approval a task card in a Concierge chat shows: the one its
+ * task chat waited on when the card was said (docs/domains/chats.md#task).
+ * `since` is when it was asked, epoch milliseconds. `unavailable` is a card
+ * Rome could not find, as when its task chat is gone.
+ */
+export type TaskCard =
+  | {
+      kind: "question";
+      /** The tool use id the answer is sent to. */
+      id: string;
+      messageId: string;
+      render: TaskCardRender | null;
+      since: number;
+      /** Nobody answered it in time: its wait ran out. It takes no answer; read-only, it says it expired. */
+      expired: boolean;
+      outcome?: TaskQuestionOutcome;
+      /** See {@link TaskCardClosed}. */
+      closed?: TaskCardClosed;
+    }
+  | {
+      kind: "approval";
+      id: string;
+      /** What it asks, as its preview's title or its description. */
+      title: string;
+      actionName?: string;
+      /** The approval's own preview, as the approval card draws it. */
+      preview?: unknown;
+      since: number;
+      outcome?: TaskApprovalOutcome;
+      /** See {@link TaskCardClosed}. */
+      closed?: TaskCardClosed;
+    }
+  | { kind: "unavailable" };
+
+/**
+ * `closed` on a question or approval card: true when its task ended (done,
+ * failed, stopped, or no response) while the card had no `outcome`, an
+ * expired question included, so it waits on no one and takes no answer.
+ * False while the task runs, and once the card has an outcome, which says how
+ * it ended. A task that starts again sets it false again. Absent from servers
+ * before it. A card waits for its owner when it has no `outcome`, is not
+ * `expired`, and is not `closed`; any other card is read-only.
+ */
+export type TaskCardClosed = boolean;
+
+/**
+ * Live event `chat_card_settled`: a task's question or approval that a card
+ * shows was answered, dismissed, decided or turned down, or ran out of time.
+ * A client replaces the `card` of every `task_chat` part whose card has this
+ * kind and id.
+ */
+export interface ChatCardSettledEvent {
+  /** The Concierge chat the event is for. */
+  sessionId: string;
+  card: Exclude<TaskCard, { kind: "unavailable" }>;
 }
 
 /** A card that connects a service for the guardian. `connect` is the service's
@@ -59,9 +187,10 @@ export interface ConnectCardPart {
 /** Longest `text` a {@link ReplyToPart} keeps; core truncates longer snapshots with an ellipsis. */
 export const REPLY_TO_TEXT_MAX_LENGTH = 1000;
 
-/** The message a user message replies to, snapshotted when it was sent. It is
- * the first part of the reply, so the quote stays whole after the original
- * leaves the transcript. `text` is the quoted selection or the whole message. */
+/** The message a message replies to, the owner's or the agent's, snapshotted
+ * when it was sent. It is the first part of the reply, so the quote stays whole
+ * after the original leaves the transcript. `text` is the quoted selection or
+ * the whole message. */
 export interface ReplyToPart {
   type: "reply_to";
   messageId: string;
@@ -82,8 +211,9 @@ export interface QuotaSwitchPart {
 
 /** One part of a stored WebChat message's content. */
 export type TranscriptPart =
-  | Exclude<MessagePart, { type: "text" }>
+  | Exclude<MessagePart, { type: "text" | "widget" }>
   | WebchatTextPart
+  | WebchatWidgetPart
   | StoredErrorPart
   | TaskChatPart
   | ConnectCardPart
@@ -121,4 +251,15 @@ export function prettyAgentName(name: string): string {
 /** The configured main-agent name, or the dashboard's role label when empty. */
 export function mainAgentDisplayName(configuredName: unknown, fallback = "Rome"): string {
   return (typeof configuredName === "string" ? configuredName.trim() : "") || fallback;
+}
+
+/**
+ * Live event `inputs_settled`, on the chat status topic: the Concierge turn
+ * that took the owner's messages `inputIds` of chat `sessionId` in ended,
+ * and no newer turn carries them on. A task panel press reads from it that
+ * the turn it sent is over.
+ */
+export interface InputsSettledEvent {
+  sessionId: string;
+  inputIds: string[];
 }

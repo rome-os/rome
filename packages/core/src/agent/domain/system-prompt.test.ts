@@ -1,4 +1,8 @@
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
+import { parse as parseYaml } from "yaml";
 import {
   buildPromptPrefix,
   buildSystemPrompt,
@@ -59,6 +63,24 @@ describe("buildPromptPrefix", () => {
     const prefix = buildPromptPrefix({ ...agent, name: "envoy" }, material);
     expect(prefix).not.toContain("# Runtime Context");
     expect(prefix).toContain("# Installed Apps");
+  });
+
+  it("gives an agent that delegates its work only where memory and the docs are", () => {
+    const prefix = buildPromptPrefix(
+      { ...agent, name: "concierge", policy: { loadMemory: true, delegatesWork: true } },
+      { ...material, runtime: { ...material.runtime, docsDir: "/docs" } },
+    );
+    expect(prefix).not.toContain("# Command Line Tools");
+    expect(prefix).not.toContain("# Installed Apps");
+    const runtime = prefix.split("\n\n---\n\n").find((s) => s.startsWith("# Runtime Context"));
+    expect(runtime).toBe(
+      [
+        "# Runtime Context",
+        "",
+        "- Profile memory directory: `/profile/memory`",
+        "- Rome's docs are in `/docs`. Search them before answering whether Rome supports something.",
+      ].join("\n"),
+    );
   });
 
   it("leaves a heading the identity already has", () => {
@@ -129,10 +151,13 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("```mermaid");
   });
 
-  it("gives diagrams to no app's agent and to nothing that draws plain text", () => {
+  it("gives diagrams to no app's agent, no agent that delegates, and nothing that draws plain text", () => {
     const input = { prefix: "Fixed.", memory: null };
     expect(buildSystemPrompt({ ...input, owner: "app", widgets: "card" })).toBe("Fixed.");
     expect(buildSystemPrompt({ ...input, owner: "core", widgets: "plain_text" })).toBe("Fixed.");
+    expect(
+      buildSystemPrompt({ ...input, owner: "core", widgets: "card", delegatesWork: true }),
+    ).toBe("Fixed.");
   });
 });
 
@@ -175,5 +200,52 @@ describe("projectSummary", () => {
 
   it("is null when the file has only headings", () => {
     expect(projectSummary("# Alpha\n\n## Notes")).toBeNull();
+  });
+});
+
+describe("the prompts and device connections", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const definition = (name: string) =>
+    parseYaml(readFileSync(resolve(here, `../../../agents/${name}.yaml`), "utf8")) as {
+      systemPromptPrefix: string;
+      actions?: string[];
+      policy?: PromptAgent["policy"];
+    };
+
+  // How a device capability is used comes from the device's report, through
+  // core:device_describe and core:device_run, so a new capability changes no prompt.
+  it("hold no device- or Health-specific text", () => {
+    for (const name of ["main", "concierge"]) {
+      const { systemPromptPrefix, actions, policy } = definition(name);
+      const prompt = buildPromptPrefix(
+        { name, owner: "core", systemPromptPrefix, actions, policy },
+        { ...material, charter: "", identity: "" },
+      );
+      for (const word of [
+        /health/i,
+        /battery/i,
+        /iphone/i,
+        /device\.status/,
+        /rome-node device run <device id>/,
+        /live read to a task chat/,
+        /reads a device live/,
+      ]) {
+        expect({ name, found: word.test(prompt) }).toEqual({ name, found: false });
+      }
+    }
+  });
+
+  it("sends every live device read through the device actions, and keeps rome-node for computers", () => {
+    const { systemPromptPrefix, actions, policy } = definition("main");
+    const prompt = buildPromptPrefix(
+      { name: "main", owner: "core", systemPromptPrefix, actions, policy },
+      { ...material, charter: "", identity: "" },
+    );
+    expect(prompt).toContain(
+      "goes through `core:device_describe` and `core:device_run`, never `rome-node`",
+    );
+    expect(prompt).toContain(
+      "`rome-node` runs programs and reads files on the guardian's computers",
+    );
   });
 });

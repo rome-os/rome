@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { AppComponentView } from "./AppComponentView";
@@ -47,6 +47,53 @@ describe("AppComponentView", () => {
 
   it("offers no dismiss once the card has an answer", async () => {
     renderFailingCard({ dismissed: true });
+
+    await screen.findByText(/App is disabled/);
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    expect(screen.getByRole("alert").dataset.chatPendingCard).toBeUndefined();
+  });
+
+  it("never marks a widget as waiting", () => {
+    rs.spyOn(globalThis, "fetch").mockReturnValue(new Promise<Response>(() => {}));
+    const { container } = render(
+      <ThemeProvider>
+        <AppComponentView toolUseId="w1" appId="meals" componentId="today" />
+      </ThemeProvider>,
+    );
+
+    const card = container.querySelector("[data-ui-scale]") as HTMLElement;
+    expect(card.dataset.chatPendingCard).toBeUndefined();
+  });
+
+  it("mounts a widget live, so its own buttons still work", async () => {
+    const entry = `data:text/javascript,${encodeURIComponent(
+      "export function mountComponent(_root, _id, ctx) { globalThis.__widgetCtx = ctx; }",
+    )}`;
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ entryUrl: entry, styleUrls: [], bootstrap: { shell: {} } }), {
+        status: 200,
+      }),
+    );
+    render(
+      <ThemeProvider>
+        <AppComponentView toolUseId="w1" appId="meals" componentId="today" />
+      </ThemeProvider>,
+    );
+
+    const g = globalThis as { __widgetCtx?: { host: { resolved: boolean } } };
+    await waitFor(() => expect(g.__widgetCtx).toBeDefined());
+    expect(g.__widgetCtx?.host.resolved).toBe(false);
+  });
+
+  it("offers no dismiss on a widget that cannot load", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "App is disabled" }), { status: 404 }),
+    );
+    render(
+      <ThemeProvider>
+        <AppComponentView toolUseId="w1" appId="meals" componentId="today" />
+      </ThemeProvider>,
+    );
 
     await screen.findByText(/App is disabled/);
     expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();

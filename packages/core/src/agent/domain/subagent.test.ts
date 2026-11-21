@@ -92,7 +92,7 @@ describe("a subagent session's record", () => {
   });
 
   it("is added under the calling turn, in its parent's project", () => {
-    const from = { dashboardSessionId: "chat", turnId: "turn-1", agentName: "core:main" };
+    const from = { chat: "chat", turnId: "turn-1", agentName: "core:main" };
     expect(
       newSubagentSession(
         "sub",

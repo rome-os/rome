@@ -8,6 +8,7 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentPropsWithoutRef,
+  type ReactNode,
 } from "react";
 import {
   defaultRehypePlugins,
@@ -15,6 +16,7 @@ import {
   Streamdown,
   type Components,
   type MermaidOptions,
+  type PluginConfig,
   type StreamdownProps,
 } from "streamdown";
 import { cn } from "./cn.js";
@@ -30,7 +32,31 @@ export type MermaidConfig = NonNullable<MermaidOptions["config"]>;
 export type { Components, MermaidOptions, StreamdownProps };
 export { defaultUrlTransform } from "streamdown";
 
-export const MARKDOWN_LINK_CLASS = "wrap-anywhere text-primary underline";
+/**
+ * A prose link keeps a faint underline at rest, because on a theme whose
+ * `--primary` is near-black the color alone does not mark it, and touch has no
+ * hover. The underline goes to full strength on hover and on keyboard focus,
+ * which also keeps the browser's focus outline.
+ */
+export const MARKDOWN_LINK_CLASS =
+  "wrap-anywhere text-primary underline decoration-1 decoration-primary/40 underline-offset-2 hover:decoration-primary focus-visible:decoration-primary";
+
+// A commit SHA or a similar digest: hex, with both a letter and a digit.
+const HASH_LABEL = /^(?=.*[a-f])(?=.*\d)[0-9a-f]{12,64}$/i;
+
+/** How many characters of a hash a link shows, as `git log --oneline` does. */
+const SHORT_HASH_LENGTH = 7;
+
+/**
+ * The text a link shows for `children`: a link whose whole text is a long hash
+ * shows its first {@link SHORT_HASH_LENGTH} characters, and `full` is the whole
+ * hash for the link's tooltip. Any other text shows as it is.
+ */
+export function markdownLinkLabel(children: ReactNode): { label: ReactNode; full?: string } {
+  const text = typeof children === "string" ? children : null;
+  if (text === null || !HASH_LABEL.test(text)) return { label: children };
+  return { label: text.slice(0, SHORT_HASH_LENGTH), full: text };
+}
 
 export type MarkdownLinkProps = ComponentPropsWithoutRef<"a"> & {
   node?: unknown;
@@ -48,15 +74,17 @@ export function MarkdownLink({
   ...rest
 }: MarkdownLinkProps) {
   const external = shouldOpenInNewTab(href);
+  const { label, full } = markdownLinkLabel(children);
   return (
     <a
       href={href}
       target={external ? "_blank" : undefined}
       rel={external ? "noopener noreferrer" : undefined}
       className={MARKDOWN_LINK_CLASS}
+      title={full}
       {...rest}
     >
-      {children}
+      {label}
     </a>
   );
 }
@@ -142,27 +170,44 @@ export interface MarkdownProps {
   preserveSoftBreaks?: boolean;
   inlineCodeComponent?: Components["inlineCode"];
   linkComponent?: Components["a"];
+  imageComponent?: Components["img"];
   preComponent?: Components["pre"];
   theme?: MarkdownTheme;
   controls?: StreamdownProps["controls"];
   lineNumbers?: StreamdownProps["lineNumbers"];
   urlTransform?: StreamdownProps["urlTransform"];
+  /**
+   * Draws only what never opens or loads anything: text, lists, quotes,
+   * tables and code. A link shows as its text and an image as its alt text,
+   * raw HTML shows as its source, math and diagram fences stay code, and tables and
+   * code get no copy, download or fullscreen buttons. Overrides
+   * `linkComponent`, `imageComponent` and `controls`.
+   */
+  inert?: boolean;
 }
 
 interface MdastNode {
   type: string;
+  value?: string;
   children?: MdastNode[];
+  position?: { start: { offset?: number }; end: { offset?: number } };
 }
 
 /**
  * CommonMark reads a closing bare marker (`-`, `* `, `3. `) as an empty list
  * item, which renders as a lone bullet under the list. Nobody means that, so
- * trailing empty items are dropped, along with a list they leave empty.
- * Empty items between filled ones are kept.
+ * trailing empty items are dropped. Empty items between filled ones are
+ * kept. A list whose items are all empty was never a list: a message that is
+ * only "391." or "-" shows as that text.
  */
-function dropTrailingEmptyListItems(node: MdastNode): void {
+function dropTrailingEmptyListItems(node: MdastNode, source: string): void {
   if (!node.children) return;
-  for (const child of node.children) dropTrailingEmptyListItems(child);
+  for (const child of node.children) dropTrailingEmptyListItems(child, source);
+  node.children = node.children.map((child) =>
+    child.type === "list" && child.children?.every((item) => !item.children?.length)
+      ? sourceText(child, source)
+      : child,
+  );
   if (node.type === "list") {
     while (node.children.at(-1)?.children?.length === 0) node.children.pop();
   }
@@ -171,9 +216,21 @@ function dropTrailingEmptyListItems(node: MdastNode): void {
   );
 }
 
+/** A paragraph holding `node`'s Markdown source as plain text. */
+function sourceText(node: MdastNode, source: string): MdastNode {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  const value = start === undefined || end === undefined ? "" : source.slice(start, end).trim();
+  return { type: "paragraph", children: value ? [{ type: "text", value }] : [] };
+}
+
 // Named, since Streamdown keys its shared processor cache by plugin name.
 function remarkDropTrailingEmptyListItems() {
-  return dropTrailingEmptyListItems;
+  return (tree: MdastNode, file: { value?: unknown }) =>
+    dropTrailingEmptyListItems(
+      tree,
+      typeof file.value === "string" ? file.value : String(file.value ?? ""),
+    );
 }
 
 const REMARK_PLUGINS: NonNullable<StreamdownProps["remarkPlugins"]> = [
@@ -185,6 +242,7 @@ interface HastNode {
   type: string;
   tagName?: string;
   properties?: Record<string, unknown>;
+  value?: string;
   children?: HastNode[];
 }
 
@@ -202,11 +260,66 @@ function rehypeDeferImages() {
   return deferImages;
 }
 
-// Last, so the sanitizer that runs before it cannot strip what it adds.
+const LIST_ITEM_BLOCKS = new Set(["ul", "ol", "p", "pre", "blockquote", "table", "div"]);
+
+const isBlock = (node: HastNode | undefined) =>
+  node?.type === "element" && LIST_ITEM_BLOCKS.has(node.tagName ?? "");
+
+function trimListItemWhitespace(node: HastNode): void {
+  if (node.type === "element" && node.tagName === "li" && node.children) {
+    const children = node.children;
+    node.children = children.filter(
+      (child, index) =>
+        !(
+          child.type === "text" &&
+          !child.value?.trim() &&
+          (isBlock(children[index - 1]) || isBlock(children[index + 1]))
+        ),
+    );
+  }
+  for (const child of node.children ?? []) trimListItemWhitespace(child);
+}
+
+// The newlines Markdown leaves between a list item's text and a nested list
+// carry nothing, but prose that keeps soft breaks sets list items to
+// pre-wrap, where each one draws an empty line under the nested list. Named,
+// since Streamdown keys its shared processor cache by plugin name.
+function rehypeTrimListItemWhitespace() {
+  return trimListItemWhitespace;
+}
+
+// Last, so the sanitizer that runs before them cannot strip what they change.
 const REHYPE_PLUGINS: NonNullable<StreamdownProps["rehypePlugins"]> = [
   ...Object.values(defaultRehypePlugins),
   rehypeDeferImages,
+  rehypeTrimListItemWhitespace,
 ];
+
+// Inert Markdown shows raw HTML as its source rather than trusting the
+// sanitizer with it, so the only elements that could load or open something are the `a`
+// and `img` that Markdown itself makes.
+const INERT_REHYPE_PLUGINS: NonNullable<StreamdownProps["rehypePlugins"]> = [
+  ...Object.entries(defaultRehypePlugins)
+    .filter(([name]) => name !== "raw")
+    .map(([, plugin]) => plugin),
+  rehypeTrimListItemWhitespace,
+];
+
+function InertLink({ children }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
+  return <span>{children}</span>;
+}
+
+function InertImage({ alt }: ComponentPropsWithoutRef<"img"> & { node?: unknown }) {
+  return alt ? <span>{alt}</span> : null;
+}
+
+// Diagrams draw their own SVG, links and images included, out of reach of the
+// `a` and `img` overrides, and math can link too, so inert Markdown keeps
+// neither plugin.
+function inertPlugins(plugins: PluginConfig): PluginConfig {
+  const { mermaid: _mermaid, math: _math, ...rest } = plugins;
+  return rest;
+}
 
 const DEFAULT_TOKENS: MarkdownThemeTokens = {
   fontFamily: ["--font-sans"],
@@ -452,23 +565,29 @@ function MarkdownImpl({
   preserveSoftBreaks = false,
   inlineCodeComponent,
   linkComponent,
+  imageComponent,
   preComponent,
   theme,
   controls,
   lineNumbers,
   urlTransform,
+  inert = false,
 }: MarkdownProps) {
   // Keep the check conservative so nested and still-streaming fences are included.
-  const hasMermaidFence = /(?:```|~~~)[ \t]*mermaid\b/.test(children);
+  const hasMermaidFence = !inert && /(?:```|~~~)[ \t]*mermaid\b/.test(children);
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const setRootFromMarker = useCallback((marker: HTMLSpanElement | null) => {
     setRoot(marker?.previousElementSibling as HTMLDivElement | null);
   }, []);
   useEffect(() => requestMarkdownPlugins(children), [children]);
-  const plugins = useSyncExternalStore(
+  const allPlugins = useSyncExternalStore(
     subscribeToMarkdownPlugins,
     getMarkdownPlugins,
     getMarkdownPlugins,
+  );
+  const plugins = useMemo(
+    () => (inert ? inertPlugins(allPlugins) : allPlugins),
+    [allPlugins, inert],
   );
   const { fontFamily, themeVariables } = useMarkdownMermaidTheme(theme, hasMermaidFence);
   const mermaidOptions = useMemo<MermaidOptions>(() => {
@@ -487,7 +606,7 @@ function MarkdownImpl({
 
   const components = useMemo<Components>(
     () => ({
-      a: linkComponent ?? MarkdownLink,
+      a: inert ? InertLink : (linkComponent ?? MarkdownLink),
       h1: MarkdownHeading1,
       h2: MarkdownHeading2,
       h3: MarkdownHeading3,
@@ -495,9 +614,10 @@ function MarkdownImpl({
       h5: MarkdownHeading5,
       h6: MarkdownHeading6,
       ...(inlineCodeComponent ? { inlineCode: inlineCodeComponent } : {}),
+      ...(inert ? { img: InertImage } : imageComponent ? { img: imageComponent } : {}),
       ...(preComponent ? { pre: preComponent } : {}),
     }),
-    [inlineCodeComponent, linkComponent, preComponent],
+    [imageComponent, inert, inlineCodeComponent, linkComponent, preComponent],
   );
 
   const wrapperClass = cn(
@@ -513,11 +633,11 @@ function MarkdownImpl({
       <Streamdown
         className={wrapperClass}
         components={components}
-        controls={controls}
+        controls={inert ? false : controls}
         lineNumbers={lineNumbers}
         mermaid={mermaidOptions}
         plugins={plugins}
-        rehypePlugins={REHYPE_PLUGINS}
+        rehypePlugins={inert ? INERT_REHYPE_PLUGINS : REHYPE_PLUGINS}
         remarkPlugins={REMARK_PLUGINS}
         // Streamdown caps a table at 300px by default and scrolls the rest
         // inside the table. Rome sets a table as text in the column, so it

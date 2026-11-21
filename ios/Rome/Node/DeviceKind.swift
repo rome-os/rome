@@ -1,0 +1,45 @@
+import SwiftUI
+
+/// What this device is called, in Settings and in what an agent reads. An iPad
+/// works exactly as an iPhone does; only the word changes. Every screen and
+/// message takes the word from here, never from a literal of its own.
+enum DeviceKind: Sendable, Equatable {
+    case iPhone
+    case iPad
+
+    /// From the interface idiom: an iPad says iPad, anything else iPhone.
+    @MainActor static var current: DeviceKind {
+        UIDevice.current.userInterfaceIdiom == .pad ? .iPad : .iPhone
+    }
+
+    /// The product name, the same in every language: for messages an agent reads.
+    var name: String {
+        switch self {
+        case .iPhone: return "iPhone"
+        case .iPad: return "iPad"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .iPhone: return "iphone"
+        case .iPad: return "ipad"
+        }
+    }
+
+    /// Settings → Connections' group for this device's connections.
+    var thisDevice: LocalizedStringKey {
+        switch self {
+        case .iPhone: return "This iPhone"
+        case .iPad: return "This iPad"
+        }
+    }
+
+    /// The data-flow row, read out as one line.
+    var dataFlowLabel: LocalizedStringKey {
+        switch self {
+        case .iPhone: return "This iPhone, then your Rome, then your AI model"
+        case .iPad: return "This iPad, then your Rome, then your AI model"
+        }
+    }
+}

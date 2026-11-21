@@ -39,7 +39,7 @@ export function fakeAccounts(
   state: ModelAccountReports | (() => ModelAccountReports),
 ): Pick<ModelAccounts, "read" | "refresh"> {
   const read = typeof state === "function" ? state : () => state;
-  return { read, refresh: async () => {} };
+  return { read, refresh: async () => true };
 }
 
 /** A ChatGPT plan that withholds the frontier models, so a tier resolves to Terra. */

@@ -8,12 +8,12 @@ import {
   createVisitorSessionEnvelope,
   issueVisitorSession,
   shouldSecureCookie,
-} from "../../lib/auth.js";
-import { normalizePublicAccessEmail } from "../../lib/public-access-config.js";
+} from "../../access/auth.js";
+import { normalizeVisitorEmail } from "../../access/visitor-email.js";
 import { isValidAppId } from "../../apps/packaging/app-id.js";
-import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
+import { getInstanceOrigin, getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { createLogger } from "../../logger.js";
-import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
+import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
 import type { ApiDeps } from "../deps.js";
 
 const log = createLogger("api:visitor-auth");
@@ -170,7 +170,7 @@ function beginVisitorFlow(entry: PendingVisitorLoginDraft): string | null {
 // Start a dashboard-scoped visitor attempt outside the POST route. Used by the
 // cloud-login callback's not-owner dispatch: a Rome Cloud account that isn't
 // the guardian gets re-routed here so an invited email still lands a visitor
-// session from the single "Sign in with Rome Cloud" button. The caller gates
+// session from the single "Continue with Rome Cloud" button. The caller gates
 // on the dashboard allow-list; the visitor callback re-checks it regardless.
 export function beginDashboardVisitorFlow(next?: string): string | null {
   return beginVisitorFlow({ scope: "dashboard", next: normalizeDashboardNext(next) });
@@ -212,7 +212,7 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
 
     const data = (await response.json().catch(() => null)) as AccountSessionResponse | null;
     const accountId = typeof data?.accountId === "string" ? data.accountId : null;
-    const email = normalizePublicAccessEmail(data?.email);
+    const email = normalizeVisitorEmail(data?.email);
     const favorViewerToken =
       typeof data?.favorViewerToken === "string" && data.favorViewerToken.trim()
         ? data.favorViewerToken
@@ -278,10 +278,8 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
       // session. Without this, `ctx.favors.requestAction` on a public app
       // always fails with `visitor_auth_required` because no flow ever sets
       // the visitor cookie on the instance origin.
-      if (
-        !deps.publicAccessState.isCloudEmailApp(appId) &&
-        !deps.publicAccessState.isPublicApp(appId)
-      ) {
+      const permission = deps.permissions.get(appId);
+      if (!permission.anyoneWithLink && permission.listedEmails.size === 0) {
         return c.json({ error: "app_not_publicly_accessible" }, 404);
       }
       pendingEntry = {
@@ -361,7 +359,7 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
     }
   });
 
-  // The phone's dashboard visitor sign-in. It asks for the same PKCE-bound
+  // The phone's dashboard admin sign-in. It asks for the same PKCE-bound
   // request the browser flow sends to Rome Cloud, has Rome Cloud issue the code
   // for it, and brings the code back to `/auth/visitor/native/complete`.
   app.post("/auth/visitor/native/start", (c) => {

@@ -9,6 +9,8 @@ enum InteractionCard: Equatable {
     case tools
     /// Drawn only on the web dashboard; "Open" goes to this chat there.
     case webOnly
+    case routineDraft
+    case widget
 
     init?(_ row: TranscriptRow) {
         switch row {
@@ -17,6 +19,8 @@ enum InteractionCard: Equatable {
         case .connect: self = .connect
         case .tools: self = .tools
         case .webOnly: self = .webOnly
+        case .routineDraft: self = .routineDraft
+        case .widgetUI: self = .widget
         default: return nil
         }
     }
@@ -33,6 +37,14 @@ struct InteractionRow: View {
         switch row {
         case .tools(_, let traceID, let count):
             ToolSummary(count: count, calls: store.toolCalls[traceID]) { store.loadToolCalls(traceID) }
+        case .approval(_, let part, _) where store.approvals[part.approvalId] != nil && SettledOutcome.folds(store.approvalStatus(part)):
+            // Decided: folded to what it asked and how it ended, opening read only.
+            let outcome = SettledOutcome.approval(store.approvalStatus(part), resolvedBy: store.approvals[part.approvalId]?.resolvedBy)
+            SettledCard(title: SettledOutcome.title(part), outcome: outcome) {
+                ApprovalCardView(part: part, status: .pending, submitting: nil, error: nil, resolvedAt: nil, canResolve: false, settled: true, settledLabel: outcome) { _ in }
+            }
+            // Decided is not done: an approved one may still fail and unfold, so its record stays watched.
+            .onAppear { if !isVisitor { store.watchApproval(part.approvalId) } }
         case .approval(_, let part, _):
             ApprovalCardView(
                 part: part,
@@ -46,17 +58,39 @@ struct InteractionRow: View {
             }
             // The record is the guardian's to read: a visitor would only get 403s.
             .onAppear { if !isVisitor { store.watchApproval(part.approvalId) } }
-        case .question(_, let part, let sessionId, let answered):
-            QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { answers in
-                store.answer(part, answers: answers, sessionId: sessionId)
+            .bubbleWidth()
+        case .question(_, let part, _, let answered?):
+            SettledCard(title: SettledOutcome.title(part), outcome: SettledOutcome.answer(answered)) {
+                QuestionCardView(part: part, answered: answered) { _, _ in WidgetEventReply() }
             }
+        case .question(_, let part, _, let answered):
+            QuestionCardView(part: part, answered: answered) { name, context in
+                try await store.answerWidget(widgetId: part.ui?.widgetId ?? "", name: name, context: context)
+            }
+            .bubbleWidth()
         case .connect(let id, let part, let sessionId):
             ConnectCardView(part: part, phase: store.connectPhases[id] ?? TranscriptStore.previewPhase(part.service) ?? .idle) {
                 store.connect(part, rowId: id, chatId: sessionId)
             }
             .task(id: id) { await store.checkConnected(part, rowId: id) }
-        case .webOnly:
-            WebOnlyCard(sessionId: store.sessionId)
+            .bubbleWidth()
+        case .widgetUI(_, let part, _, let answered):
+            WidgetUICardView(part: part, call: { method, path, body in
+                try await store.appCall(appId: part.appId, method: method, path: path, body: body)
+            }, press: { name, context in
+                try await store.answerWidget(widgetId: part.widgetId, name: name, context: context)
+            }, waiting: part.waits ? .init(answered: answered) : nil)
+            // An agent card, Rome's own card the agent composed, takes the
+            // chat's width as on the web; an app's card and a card the agent
+            // waits on keep a bubble's (docs/domains/chats.md#agent-card).
+            .bubbleWidth(full: part.appId == "core" && !part.waits)
+        case .webOnly(_, let kind, let done):
+            WebOnlyCard(kind: kind, done: done, sessionId: store.sessionId)
+                .bubbleWidth()
+        case .routineDraft(_, let part):
+            RoutineDraftCardView(part: part, status: store.routineStatus(part), canTurnOn: !isVisitor, sessionId: store.sessionId)
+                .task { if !isVisitor { await store.loadRoutines() } }
+                .bubbleWidth()
         default:
             EmptyView()
         }

@@ -28,13 +28,21 @@ export interface ReplyTarget {
 export interface ReplyDraft {
   /** The session the composer sends to. Only its messages can be replied to. */
   sessionId: string | null;
+  /** The message the reply quotes. */
   target: ReplyTarget | null;
+  /** Picks the reply and opens the reply bar with its quote. */
   set: (target: ReplyTarget) => void;
-  clear: () => void;
-  /** Puts a target back after a failed send, unless the guardian has picked another meanwhile. */
-  restore: (target: ReplyTarget) => void;
-  /** Whether the loaded transcript holds the message, so a quote can link to it. */
-  has: (messageId: string) => boolean;
+  /** Drops the reply. Answers the draft's change count after it, for `restore`. */
+  clear: () => number;
+  /**
+   * Puts a reply back after a failed send. With `since`, the count `clear`
+   * answered when the send cleared the draft, it does so only when nothing
+   * changed the draft since: a reply picked, or picked and dropped again,
+   * meanwhile stays as the guardian left it. Without it, only when nothing is
+   * picked.
+   */
+  restore: (target: ReplyTarget, since?: number) => void;
+  /** Goes to a quoted message: scrolls to it, loading older pages when it is not loaded yet. */
   jump: (messageId: string) => void;
 }
 
@@ -55,38 +63,61 @@ export function useReplyDraft(): ReplyDraft | null {
 }
 
 /**
- * The draft state for one chat. The reply is dropped when `chatId` changes.
- * Picking a reply focuses the composer through `focusComposer`.
+ * The draft state for one composer. The reply is dropped when `chatId`
+ * changes. Picking a reply focuses the composer through `focusComposer`.
  */
 export function useReplyDraftState({
   chatId,
   sessionId,
-  messageIds,
   jump,
   focusComposer,
 }: {
   chatId: string | undefined;
   sessionId: string | null;
-  messageIds: ReadonlySet<string>;
   jump: (messageId: string) => void;
   focusComposer: () => void;
 }): ReplyDraft {
   const [target, setTarget] = useState<ReplyTarget | null>(null);
   const focusRef = useRef(focusComposer);
   focusRef.current = focusComposer;
+  // Counts every change to the draft, so a late restore can tell whether the
+  // guardian changed it after the send.
+  const changes = useRef(0);
 
-  useEffect(() => setTarget(null), [chatId]);
+  useEffect(() => {
+    changes.current += 1;
+    setTarget(null);
+  }, [chatId]);
 
-  const set = useCallback((next: ReplyTarget) => {
-    setTarget(next);
-    requestAnimationFrame(() => focusRef.current());
+  const focus = useCallback(() => requestAnimationFrame(() => focusRef.current()), []);
+  const set = useCallback(
+    (next: ReplyTarget) => {
+      changes.current += 1;
+      setTarget(next);
+      focus();
+    },
+    [focus],
+  );
+  const clear = useCallback(() => {
+    changes.current += 1;
+    setTarget(null);
+    return changes.current;
   }, []);
-  const clear = useCallback(() => setTarget(null), []);
-  const restore = useCallback((next: ReplyTarget) => setTarget((current) => current ?? next), []);
-  const has = useCallback((messageId: string) => messageIds.has(messageId), [messageIds]);
+  const restore = useCallback((next: ReplyTarget, since?: number) => {
+    if (since !== undefined && since !== changes.current) return;
+    changes.current += 1;
+    setTarget((current) => current ?? next);
+  }, []);
 
   return useMemo(
-    () => ({ sessionId, target, set, clear, restore, has, jump }),
-    [sessionId, target, set, clear, restore, has, jump],
+    () => ({
+      sessionId,
+      target,
+      set,
+      clear,
+      restore,
+      jump,
+    }),
+    [sessionId, target, set, clear, restore, jump],
   );
 }

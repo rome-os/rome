@@ -21,6 +21,24 @@ function resolvedApp(overrides: Partial<ResolvedApp> = {}): ResolvedApp {
 
 const tick = () => new Promise((r) => setTimeout(r, 20));
 
+/**
+ * `store`, and a promise of its next finished write. The subscriber writes
+ * after its own queue, so a slow run (coverage) can take longer than a tick.
+ */
+function watchWrites<T extends { write: (...args: never[]) => Promise<unknown> }>(store: T) {
+  let written!: () => void;
+  const next = new Promise<void>((resolve) => {
+    written = resolve;
+  });
+  const write = store.write.bind(store);
+  store.write = (async (...args: Parameters<T["write"]>) => {
+    const result = await write(...args);
+    written();
+    return result;
+  }) as T["write"];
+  return { store, written: next };
+}
+
 describe("cardDescription", () => {
   it("returns the tagline when present", () => {
     expect(cardDescription({ tagline: "Never miss a good thread" })).toBe(
@@ -45,18 +63,20 @@ describe("createAppOgImageSubscriber", () => {
   it("generates an image for an installed web app and passes the full-route link", async () => {
     // Store and subscriber share one host getter, as index.ts wires them.
     const host = () => "jessie.romeos.cc";
-    const store = createOgImageStore(root, host);
+    const { store, written } = watchWrites(createOgImageStore(root, host));
     const calls: Array<string | null> = [];
     const handler = createAppOgImageSubscriber({
       store,
       host,
       generate: async (_app, link) => {
         calls.push(link);
+        // Slower than a tick, as a run under coverage can be.
+        await new Promise((resolve) => setTimeout(resolve, 50));
         return Buffer.from("png");
       },
     });
     await handler({ appId: "reddit", change: "added", current: resolvedApp() });
-    await tick();
+    await written;
     expect(calls).toEqual(["jessie.romeos.cc/full/apps/reddit"]);
     expect(await store.read("reddit")).not.toBeNull();
   });

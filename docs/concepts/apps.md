@@ -64,7 +64,8 @@ and use qualified references.
 - The Agent local name `main` is reserved for Rome Core. Apps must choose another Agent name. This restriction does not apply to Action or Skill local names.
 - Every format version 2 reference uses `<app-id>:<local-name>`, including references to another artifact in the same app.
 - Runtime registries, authorization checks, and new durable references use canonical artifact ids.
-- A bare name is a legacy input. The compatibility resolver maps it to one stable canonical artifact id. New app definitions and references do not create bare-name behavior.
+- An action is referenced by its canonical artifact id only. A bare action name finds no action, and the error names the canonical id when exactly one installed action has that local name. An app manifest field that names the app's own action, such as the action an event source subscribes with, takes the local name, and Rome qualifies it with the app id.
+- A bare agent or skill name is a legacy input. The compatibility resolver maps it to one stable canonical artifact id. New app definitions and references do not create bare-name behavior.
 - The complete manifest app id owns the namespace. For a scoped Store app, that includes its `@handle/slug` scope.
 
 **Not to be confused with:**
@@ -79,6 +80,7 @@ Apps consume three supported packages published under the `@rome-os/` scope: `@r
 **Contracts:**
 
 - These three packages are the entire supported app-author surface. Rome also publishes internal packages for its own cross-repository use. Apps must not depend on them.
+- Apps defines what an app receives from `@rome-os/app-runtime` and runs the app, without depending on the contexts that supply it. The app host builds each part of that surface from Chats, People, Routines, Connections and the other contexts. It may depend on any of them, and none of them depends on it.
 
 **Not to be confused with:**
 
@@ -168,6 +170,55 @@ identity for one operation.
   identity. App access neither duplicates nor owns that credential.
 - **Connection setup** — the guardian flow that creates or repairs a provider grant.
   Apps cannot start setup through `ctx.connections`.
+
+### Feishu document reads
+
+A Feishu connection exposes `feishu.document.read` with identity `app`: the
+connected bot, not a user's OAuth identity. The input is `{ documentId }`, a
+Docx ID of at most 128 ASCII letters and digits. URLs, Wiki references, arbitrary
+HTTP paths and CLI arguments are not accepted. The output contains the ID,
+`content`, `format: "plain_text"` and `complete: true`. Content above 128 KiB is
+rejected rather than silently clipped. The transport has a 15-second deadline
+and a 256 KiB response limit.
+
+The guardian grants an installed app access in Settings → Connections → App
+document access. The screen grants one document for 24 hours and states that it
+replaces the app's document-read rule on that connection. It also lists and
+revokes existing rules. Each app needs its own policy. The backend policy API
+continues to support explicit expiry and resource constraints. The screen does
+not create a parallel permission store.
+
+The bot separately needs `docx:document:readonly` (or a provider permission that
+includes it) and permission to open that document. Core shows the requirement and
+the corresponding developer-console link, but does not query the scope inventory
+or submit a provider permission request. The administrator must configure,
+approve and publish permissions as needed, then give the bot document access.
+The directory says `scopeStatus: "not_checked"`. An authorized connection does
+not prove that its bot has a document scope or a document's ACL.
+
+Any independently authorized app uses the same SDK operation:
+
+```typescript
+const result = await ctx.connections.invoke({
+  connectionId,
+  identity: "app",
+  operation: "feishu.document.read",
+  input: { documentId },
+});
+```
+
+The gateway compares the canonical ID against the app's resource constraint.
+Read results are discarded when app access expires or is revoked during provider
+I/O, or when the provider grant changes. Provider failures expose only fixed
+reasons such as `provider_scope_required`, `provider_resource_denied` and
+`provider_not_found` in the optional SDK error `reason`, with code `provider_error`.
+Apps branch on `reason`, not the human-readable `message`. Provider messages,
+headers and credentials are not forwarded. The audit keeps no document content.
+
+This does not add user OAuth, managed writes, a raw HTTP broker, or automatic
+scope escalation. The local Lark app uses this operation for its explicit managed
+`docs.fetch` path. Its separate independent CLI mode never serves as a fallback
+for a rejected managed connection.
 
 ## Lockfile
 
@@ -275,6 +326,7 @@ Each app gets a persistent data directory for files outside the database, plus d
 **Contracts:**
 
 - Both the data directory and the app's tables survive an install→uninstall→re-install round-trip. Only an explicit purge at uninstall wipes them.
+- The routines an app manages do not survive an uninstall. Uninstall deletes them with their run history, and the app recreates them after a reinstall. See [Routines](data.md#routines).
 - A database-backed scoped app must declare `db.tablePrefix`. The scoped app id itself is not a SQL identifier.
 
 **Not to be confused with:**
@@ -287,12 +339,13 @@ Hooks are event handlers that trigger behavior in response to system events. An 
 
 The primary hook type is **channel-message**, the entry point for all incoming messages. It fires when a message arrives through any of Rome's [accounts](../domains/chats.md#account) and triggers the message-handling [action](actions.md), which runs the [policy engine](messaging.md#policies) to decide routing. Its `createHook(deps)` receives `ChannelMessageHookDeps` from `@rome-os/app-runtime`, and the hook hears messages through `deps.channels`, one subscription per channel that can receive.
 
-Apps can also observe the agent turn lifecycle with the **agent-turn-started** and **agent-turn-finished** hooks. Lifecycle payloads carry stable session and turn ids, agent name, channel thread context, timing, metrics, status, and final output text where available. The agent context tells Rome a turn started or ended through the `TurnLifecycle` port in [`packages/core/src/agent/domain/turn-lifecycle.ts`](../../packages/core/src/agent/domain/turn-lifecycle.ts), and `AppTurnHooks` delivers it to these hooks.
+Apps can also observe the agent turn lifecycle with the **agent-turn-started** and **agent-turn-finished** hooks. Lifecycle payloads carry stable session and turn ids, agent name, channel thread context, timing, metrics, status, and final output text where available. The agent context tells Rome a turn started or ended through the `TurnLifecycle` port in [`packages/core/src/agent/domain/turn-lifecycle.ts`](../../packages/core/src/agent/domain/turn-lifecycle.ts), and `AppTurnHooks` in [`packages/core/src/app-host/app-turn-hooks.ts`](../../packages/core/src/app-host/app-turn-hooks.ts) delivers it to these hooks.
 
 An app sets up the state it depends on, such as a routine it must always have, with the **app-started** hook. An *app start* is one installed bundle of one enabled app becoming active in the daemon. Boot starts every enabled app, and an install, an upgrade, or a re-enable starts that app again. A re-install of identical content is not a new start. Rome calls the hook's `onAppStarted(event)` once per app start, and `event` carries the app id and its manifest version.
 
 **Contracts:**
 
+- Every app that declares a channel-message hook gets its own, created with the same deps, and each hears every message. One app's hook that fails to load or to register marks that app failed and leaves the others live. Installing, removing, enabling or disabling an app starts or stops that app's hook alone. The Inbox app's hook loads only while its `message_handler` action is registered, since its hook dispatches turns to it. Each subscriber hears a chat's messages one at a time, so a handler that never settles stops that chat for every hook.
 - A channel-message hook subscribes in `register`, through `deps.channels`. The host calls `register` once per activation, and again only after `unregister`, so a hook handles `register`, `unregister`, then `register` again. When the host adds a channel to `deps.channels` while the hook is active, it calls the hook's optional `addChannels` with the new channels. On a hook without one, the host calls `unregister` then `register` at once, which drops events still waiting on the hook's existing subscriptions. A hook with neither hears them only after the next restart. It never calls the hook per Connection, because a channel's subscription follows whatever backs it. A hook written against the removed `registerConnection` hears nothing until it subscribes this way. Its deps carry no `talkRouter`: a hook hears through `channel.inbound` and answers through `channel.send`. Through the 0.7 release, reading `deps.talkRouter` throws an error that says so.
 - Lifecycle hooks are best-effort and non-blocking: Rome schedules every loaded app hook for the event, logs failures, and does not delay or fail the agent turn when a hook throws.
 - Lifecycle payloads never include the prompt text (start metrics carry only its length).

@@ -1,12 +1,9 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
+import { ChatSessionSettings } from "../webchat/chat-session-settings.js";
 import { createLogger } from "../logger.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
-import {
-  ChatSessionSettings,
-  readAnswerShape,
-  romeSessionTracing,
-  TurnUsageReporter,
-} from "../agent/index.js";
+import { MODEL_SELECTIONS, readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { ConciergeService, type ConciergeDeps } from "../concierge/service.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -14,9 +11,9 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ActionEngine } from "../actions/engine.js";
-import { ActionRegistryImpl } from "../actions/registry.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { ActionEngine } from "../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import {
   createEmptyLegacyArtifactBindings,
   type ArtifactIdentityContext,
@@ -24,8 +21,9 @@ import {
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
 import type { ModelSessionEvent } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
-import { AgentLoader } from "../agent/index.js";
-import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { AgentLoader } from "../app-host/agent-loader.js";
+import { TurnListeners } from "../agent/index.js";
+import { AppTurnHooks } from "../app-host/app-turn-hooks.js";
 import {
   AgentRunner,
   createSessionFromRun,
@@ -34,19 +32,16 @@ import {
   type ModelSessionParams,
   type ProviderId,
 } from "./agent-runner.js";
-import {
-  createAgentSessionManager,
-  type AgentSession,
-  type AgentSessionManager,
-} from "../agent/index.js";
+import { createSessions, type AgentSession, type Sessions } from "../agent/index.js";
 import type { ModelSelectionId } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
-import { SkillLoader } from "../agent/index.js";
+import { SkillLoader } from "../app-host/skill-loader.js";
 import type { ThreadContext } from "./types.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { reportOf, fakeAccounts, loginsOn } from "../test/kit/model-accounts.js";
+import { startAfter } from "../test/turn-handle.js";
 
 const AGENT = "continuation_agent";
 const CHAT = "chat-continuation";
@@ -120,7 +115,7 @@ function continuationOf(prompt: string | undefined): string | null {
   return prompt?.match(/<continuation[\s\S]*?<\/continuation>/)?.[0] ?? null;
 }
 
-describe("continuation notice through AgentSessionManager", () => {
+describe("continuation notice through Sessions", () => {
   let directory: string;
   let testDb: TestDb;
   let loader: AgentLoader;
@@ -130,14 +125,14 @@ describe("continuation notice through AgentSessionManager", () => {
   let anthropic: ReturnType<typeof createProvider>;
   let artifactIdentity: ArtifactIdentityContext;
   let now: number;
-  const managers: AgentSessionManager[] = [];
+  const managers: Sessions[] = [];
 
   function at(seconds: number) {
     now = START + seconds * 1000;
     rs.setSystemTime(new Date(now));
   }
 
-  function createManager(): AgentSessionManager {
+  function createManager(): Sessions {
     const actionRegistry = new ActionRegistryImpl();
     actionRegistry.register({
       config: {
@@ -150,7 +145,7 @@ describe("continuation notice through AgentSessionManager", () => {
     const systemPrompts = createTestSystemPrompts();
     rs.spyOn(systemPrompts, "build").mockReturnValue("Continuation test prompt");
     const state = healthyState();
-    const manager = createAgentSessionManager(
+    const manager = createSessions(
       {
         agentLoader: loader,
         sessionRepository,
@@ -181,8 +176,8 @@ describe("continuation notice through AgentSessionManager", () => {
     return manager;
   }
 
-  function acquire(manager: AgentSessionManager, selectionId?: ModelSelectionId | null) {
-    return manager.acquire(key, {
+  function acquire(manager: Sessions, selectionId?: ModelSelectionId | null) {
+    return manager.open(key, {
       workingDir: directory,
       threadContext,
       ...(selectionId !== undefined ? { selectionId } : {}),
@@ -199,9 +194,10 @@ describe("continuation notice through AgentSessionManager", () => {
       JSON.stringify([{ type: "text", content: text }]),
     );
     at((now - START) / 1000 + 1);
-    const handle = session.sendTurn(
+    const handle = await startAfter(
+      session,
       { prompt: text, inputId },
-      { threadContext, romeSessionId: CHAT, romeSessionType: "webchat" },
+      { threadContext, romeSessionId: CHAT },
     );
     for await (const _event of handle.events()) {
       // drain
@@ -223,7 +219,7 @@ describe("continuation notice through AgentSessionManager", () => {
     testDb = createTestDb();
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
     loader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
-    sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
+    sessionRepository = new DrizzleSessionRepository(testDb.db);
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession(CHAT, "Continuation");
     openai = createProvider("openai");
@@ -291,7 +287,7 @@ describe("continuation notice through AgentSessionManager", () => {
     await acquire(manager, "gpt-6-luna");
 
     const events: AgentEvent[] = [];
-    for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
+    for await (const event of session.fork!({ prompt: "side question" })) {
       events.push(event);
     }
 
@@ -314,7 +310,7 @@ describe("continuation notice through AgentSessionManager", () => {
     await chatTurn(session, "second");
 
     const events: AgentEvent[] = [];
-    for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
+    for await (const event of session.fork!({ prompt: "side question" })) {
       events.push(event);
     }
 
@@ -399,7 +395,7 @@ describe("continuation notice through AgentSessionManager", () => {
     await chatTurn(session, "first");
     await first.shutdown();
 
-    const retired = (await sessionRepository.current(key.channelThreadKey, AGENT))!;
+    const retired = (await sessionRepository.current(key.channelThreadKey, `core:${AGENT}`))!;
     await sessionRepository.replace(retired, retired.replace());
     await chatTurn(await acquire(createManager(), "gpt-6-luna"), "after reset");
     expect(continuationOf(openai.calls[0]?.prompt)).toBeNull();
@@ -412,10 +408,10 @@ describe("continuation notice through AgentSessionManager", () => {
   });
 
   it.each([
-    [true, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", "concierge"],
-    [true, "gpt-6-luna", "claude-sonnet", "openai", "anthropic", "concierge"],
+    [true, "claude-opus-5-5", "gpt-6-1-sol", "anthropic", "openai", "concierge"],
+    [true, "gpt-6-1-sol", "claude-opus-5-5", "openai", "anthropic", "concierge"],
     // A topic chat is a Concierge chat like the main one.
-    [true, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", "topic-1"],
+    [true, "claude-opus-5-5", "gpt-6-1-sol", "anthropic", "openai", "topic-1"],
     [false, "claude-sonnet", "gpt-6-luna", "anthropic", "openai", CHAT],
     [false, "gpt-6-luna", "claude-sonnet", "openai", "anthropic", CHAT],
   ] as const)("cold background resume concierge=%s %s to %s (%s to %s) in %s", async (concierge, from, to, source, target, chatId) => {
@@ -446,18 +442,22 @@ describe("continuation notice through AgentSessionManager", () => {
     }
     const manager = createManager();
     const context = { ...threadContext, threadId: chatId, romeSessionId: chatId };
-    const session = await manager.acquire(
+    const session = await manager.open(
       { agentName, channelThreadKey: `webchat:${chatId}` },
       { workingDir: directory, threadContext: context, selectionId: from },
     );
-    for await (const _ of session
-      .sendTurn({ prompt: "first" }, { threadContext: context, romeSessionId: chatId })
-      .events()) {
+    for await (const _ of (
+      await startAfter(
+        session,
+        { prompt: "first" },
+        { threadContext: context, romeSessionId: chatId },
+      )
+    ).events()) {
     }
     if (concierge) {
       const raw = healthyState();
       raw[source] = reportOf("usage_limit_reached");
-      await webchatRepo.updateSessionLargeModelSelection(chatId, from);
+      await webchatRepo.updateSessionLargeModelSelection(chatId, from, "owner");
       const service = new ConciergeService({
         webchatRepo,
         sessionRepository,
@@ -465,7 +465,7 @@ describe("continuation notice through AgentSessionManager", () => {
         accounts: fakeAccounts(() => raw),
       } as unknown as ConciergeDeps);
       expect(await service.switchIfExhausted(chatId)).toMatchObject({ selectionId: to });
-    } else await webchatRepo.updateSessionLargeModelSelection(chatId, to);
+    } else await webchatRepo.updateSessionLargeModelSelection(chatId, to, "owner");
     await manager.shutdown();
     const runner = new AgentRunner(createManager(), loader);
     for await (const _ of runner.run({
@@ -483,9 +483,7 @@ describe("continuation notice through AgentSessionManager", () => {
     expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: concierge ? target : source,
       model: concierge
-        ? to === "claude-sonnet"
-          ? "claude-sonnet-5-5"
-          : to
+        ? MODEL_SELECTIONS[to].model
         : from === "claude-sonnet"
           ? "claude-sonnet-5-5"
           : from,

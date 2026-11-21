@@ -1,9 +1,12 @@
 import { CircleAlert, CircleHelp, CircleSlash } from "lucide-react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { QuotedReply } from "@/components/chat/reply/QuotedReply";
+import { UploadFiles } from "@/components/chat/UploadFiles";
+import { splitUploadLines } from "@/lib/asset-links";
 import type { ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 
@@ -18,17 +21,21 @@ export function UserMessageBubble({
   text,
   own,
   className,
+  badge,
 }: {
   msg: ChatMessage;
   text: string;
   own: boolean;
   className?: string;
+  /** Sits on the bubble's own surface, positioned against it, as a reaction does. Pass it, null included, to keep the bubble its anchor. */
+  badge?: ReactNode;
 }) {
   const { t } = useTranslation("chat");
   const undelivered =
     msg.inputState === "failed" || msg.inputState === "unknown" || msg.inputState === "cancelled";
   const pending =
     msg.inputState === "queued" || msg.inputState === "submitted" || msg.inputState === "accepted";
+  const { text: body, uploads } = splitUploadLines(text);
   const quote = parseMessageEntries(msg).find((part) => part.type === "reply_to");
   const statusLabel =
     msg.inputState && msg.inputState !== "consumed" ? t(`inputState.${msg.inputState}`) : undefined;
@@ -41,6 +48,8 @@ export function UserMessageBubble({
         tone={undelivered ? "muted" : own ? "sent" : "received"}
         className={cn(
           "transition-colors motion-reduce:transition-none",
+          // The badge is placed against the bubble, and takes no room of its own.
+          badge !== undefined && "relative",
           undelivered && "flex items-start gap-2",
           // A pending bubble is the normal bubble, breathing until the agent
           // takes the input in (see `.rome-bubble-pending` in globals.css).
@@ -62,10 +71,18 @@ export function UserMessageBubble({
         ) : null}
         <div className="min-w-0">
           {quote ? <QuotedReply part={quote} /> : null}
-          <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
-            {text}
-          </Markdown>
+          {body ? (
+            <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
+              {body}
+            </Markdown>
+          ) : null}
+          {uploads.length > 0 ? (
+            <div className={body ? "mt-2" : undefined}>
+              <UploadFiles uploads={uploads} />
+            </div>
+          ) : null}
         </div>
+        {badge}
       </ChatBubble>
       <span className="sr-only" role="status">
         {statusLabel}

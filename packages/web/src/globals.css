@@ -109,6 +109,136 @@
   display: none;
 }
 
+/* The Concierge header's mascot (RomeMascot): a blink now and then at rest,
+   a soft bob and a glance while something is being done. */
+.rome-mascot-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: rome-mascot-blink 4.5s ease-in-out infinite;
+}
+
+.rome-mascot[data-alive] .rome-mascot-figure {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: rome-mascot-bob 1.4s ease-in-out infinite;
+}
+
+.rome-mascot[data-alive] .rome-mascot-eyes {
+  animation:
+    rome-mascot-blink 2.2s ease-in-out infinite,
+    rome-mascot-glance 3.6s ease-in-out infinite;
+}
+
+/* A press: a squash and one blink, over whatever it was doing. */
+.rome-mascot[data-poked] {
+  transform-origin: 50% 100%;
+  animation: rome-mascot-squash 420ms ease-out;
+}
+
+.rome-mascot[data-poked] .rome-mascot-eyes {
+  animation: rome-mascot-poke-blink 420ms ease-out;
+}
+
+/* A spoken character arriving in the message field (VoiceInputSpokenText). */
+@keyframes voice-input-char-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.voice-input-char-in {
+  animation: voice-input-char-in 280ms ease-out both;
+}
+/* The copy drawn over the field shows its text while voice input is on. */
+.voice-input-previewing::placeholder {
+  color: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-input-char-in {
+    animation: none;
+  }
+}
+
+@keyframes rome-mascot-squash {
+  0%,
+  100% {
+    transform: scale(1, 1);
+  }
+
+  30% {
+    transform: scale(1.12, 0.82);
+  }
+
+  60% {
+    transform: scale(0.95, 1.06);
+  }
+}
+
+@keyframes rome-mascot-poke-blink {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+
+  25%,
+  55% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes rome-mascot-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+
+  96% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes rome-mascot-bob {
+  0%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+
+  50% {
+    transform: translateY(-4%) scaleY(1.02);
+  }
+}
+
+@keyframes rome-mascot-glance {
+  0%,
+  35%,
+  100% {
+    translate: 0 0;
+  }
+
+  45%,
+  60% {
+    translate: -8% 0;
+  }
+
+  70%,
+  85% {
+    translate: 6% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rome-mascot-eyes,
+  .rome-mascot[data-alive] .rome-mascot-figure,
+  .rome-mascot[data-alive] .rome-mascot-eyes,
+  .rome-mascot[data-poked],
+  .rome-mascot[data-poked] .rome-mascot-eyes {
+    animation: none;
+  }
+}
+
 @keyframes rome-activity-pulse {
 
   0%,
@@ -171,19 +301,15 @@
   }
 }
 
-
-@keyframes rome-sidebar-apps-hover {
-  0% {
-    transform: rotate(0deg) scale(1);
-  }
-
-  45% {
-    transform: rotate(-7deg) scale(1.12);
-  }
-
-  100% {
-    transform: rotate(0deg) scale(1);
-  }
+/* The sidebar's unread count on a row icon's corner, in the `unread` pair. */
+[data-concierge-unread] {
+  --row-count-font-size: 0.5rem;
+  --row-count-line-height: calc(11 / 8);
+  --row-count-px: 0.125rem;
+  --row-count-fg: var(--unread-foreground);
+  font-size: var(--row-count-font-size);
+  line-height: var(--row-count-line-height);
+  color: var(--row-count-fg);
 }
 
 .rome-sidebar-icon {
@@ -191,26 +317,39 @@
   will-change: transform;
 }
 
-.rome-sidebar-icon[data-motion="chat"] {
-  transition: transform 150ms ease-out;
+@media (prefers-reduced-motion: no-preference) {
+  .rome-sidebar-icon[data-motion="tilt"] {
+    transition: transform 150ms ease-out;
+  }
+
+  .rome-sidebar-link:is(:hover, :focus-visible) .rome-sidebar-icon[data-motion="tilt"] {
+    transform: rotate(-8deg);
+  }
 }
 
-.rome-sidebar-link:is(:hover, :focus-visible) .rome-sidebar-icon[data-motion="apps"] {
-  animation: rome-sidebar-apps-hover 420ms cubic-bezier(0.16, 1, 0.3, 1);
+/* The sidebar's upgrade row: a light tint of the theme's success green, with
+   ink from the same hue taken most of the way to the text color, so it clears
+   AA on the tint in every theme and mode (themes-contrast.test.ts measures it). */
+.rome-upgrade-row {
+  background-color: color-mix(in oklab, var(--success) 15%, transparent);
+  color: color-mix(in oklab, var(--success) 60%, var(--foreground));
 }
 
-.rome-sidebar-link:is(:hover, :focus-visible) .rome-sidebar-icon[data-motion="chat"] {
-  transform: rotate(-8deg);
+.dark .rome-upgrade-row {
+  background-color: color-mix(in oklab, var(--success) 20%, transparent);
+}
+
+button.rome-upgrade-row:hover {
+  background-color: color-mix(in oklab, var(--success) 22%, transparent);
+}
+
+.dark button.rome-upgrade-row:hover {
+  background-color: color-mix(in oklab, var(--success) 28%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .rome-sidebar-icon {
     will-change: auto;
-  }
-
-  .rome-sidebar-link:is(:hover, :focus-visible) .rome-sidebar-icon[data-motion] {
-    animation: none;
-    transform: none;
   }
 }
 
@@ -240,6 +379,24 @@
   }
 }
 
+/* Rich message (chat ChatBubble): text with a heading, a list, a table or a
+   code block reads as structured content, and gets more room inside its
+   bubble than a one-line reply does. Keyed on the rendered content, so every
+   bubble decides it the same way, wherever it renders. */
+[data-chat-bubble]:has(
+    .rome-markdown
+      :is(
+        [data-streamdown^="heading-"],
+        [data-streamdown="ordered-list"],
+        [data-streamdown="unordered-list"],
+        [data-streamdown="table-wrapper"],
+        [data-streamdown="code-block"],
+        [data-chat-code-block]
+      )
+  ) {
+  padding: var(--rome-space-4) var(--rome-space-5);
+}
+
 /* Sent bubble (chat ChatBubble): the content sits on the primary fill, so the
    color tokens markdown reads are re-mapped onto the primary foreground for
    the bubble's children. The bubble itself keeps the real `--primary` for its
@@ -251,6 +408,14 @@
   --muted: color-mix(in oklab, var(--primary-foreground) 18%, transparent);
   --border: color-mix(in oklab, var(--primary-foreground) 30%, transparent);
   --border-strong: color-mix(in oklab, var(--primary-foreground) 45%, transparent);
+}
+
+/* The remap gives a link the text's own color on the primary fill, so there
+   the underline is what marks it, at full strength in the text's color rather
+   than the faint prose-link underline. */
+.rome-bubble-on-primary a {
+  text-decoration-line: underline;
+  text-decoration-color: currentColor;
 }
 
 /* A fenced block inside the sent bubble keeps the page's light `--surface` for
@@ -325,6 +490,11 @@
 .rome-status-spin {
   animation: rome-status-spin 1s linear infinite;
 }
+@media (prefers-reduced-motion: reduce) {
+  .rome-status-spin {
+    animation: none;
+  }
+}
 
 @keyframes rome-status-spin {
   to {
@@ -337,6 +507,60 @@
   .rome-typing-dot,
   .rome-status-fade,
   .rome-status-spin {
+    animation: none;
+  }
+}
+
+/* A task link in the Concierge's message (TaskLink.tsx): the inline code's
+   tint, so it reads as a word in the sentence. The fill sits on the whole
+   link, behind its mark and name, as on iOS. The link is an inline box with
+   horizontal padding only, so it never makes the line taller, and a chip that
+   starts a line has its fill start flush with the text under it; the mark sits
+   inside the padding. Only the 14px mark carries colour. A status change
+   flashes the tint once. */
+[data-task-link] {
+  display: inline;
+  color: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+  background-color: color-mix(in oklab, var(--foreground) 7%, transparent);
+  @apply px-1;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  @apply rounded-4;
+  transition: background-color 120ms ease;
+}
+
+[data-task-link]:hover {
+  background-color: color-mix(in oklab, var(--foreground) 12%, transparent);
+}
+
+[data-task-link-mark] {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+
+[data-task-link-mark] > * {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+[data-task-link][data-flash] {
+  animation: rome-task-link-flash 700ms ease-out;
+}
+
+@keyframes rome-task-link-flash {
+  from {
+    background-color: color-mix(in oklab, var(--foreground) 22%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-task-link][data-flash] {
     animation: none;
   }
 }
@@ -531,7 +755,7 @@
 @layer base {
   :root {
     /* Mobile shell geometry when the page is rendered edge-to-edge (for
-       example inside the Expo WKWebView). Indirect the system env() values so
+       example inside the iOS app's WKWebView). Indirect the system env() values so
        layout tests can exercise real, non-zero safe-area geometry. */
     --rome-safe-area-top: env(safe-area-inset-top);
     --rome-safe-area-inset-bottom: env(safe-area-inset-bottom);
@@ -544,6 +768,39 @@
       var(--rome-safe-area-inset-bottom) - var(--rome-keyboard-height)
     );
     --rome-mobile-header-height: calc(3rem + var(--rome-safe-area-top));
+    /* Equal insets around the icon keep both text columns at x=48. A link
+       subtracts its transparent border from the same content inset. */
+    --row-px: var(--row-px-md);
+    --row-link-px: calc(var(--row-px) - 1px);
+    --row-icon-gap: var(--row-px);
+    --row-text-offset: calc(var(--row-px) + var(--rome-size-16) + var(--row-icon-gap));
+    /* The gap between rows. */
+    --row-gap: 0.125rem;
+    /* Child rows clear the folder's guide while their text keeps the parent
+       column. */
+    --row-child-ml: calc(var(--row-px) + var(--rome-space-3));
+    --row-child-pl: calc(var(--row-text-offset) - var(--row-child-ml) - 1px);
+    --row-load-ml: calc(var(--row-text-offset) - 1px);
+    --row-child-rename-ml: calc(var(--row-child-pl) - var(--rome-space-1));
+    /* The selected child's marker on the guide: 3px wide, inset from the row's
+       top and bottom, centred on the guide. */
+    --row-indicator-inset: var(--row-py-md);
+    --row-indicator-mr: 0.125rem;
+    /* The trailing glyph keeps the same inset as the leading icon. */
+    --row-trail-mr: var(--row-px-sm);
+    /* One knob for every sidebar row's height: 2.25rem (36px). A compact list
+       would set 2rem (32px) here. */
+    --row-h: var(--rome-size-36);
+    /* A Concierge chat's floating header, centred on the sidebar's 56px top bar. */
+    --control-header-pt: 0.375rem;
+    /* A Concierge chat's floating header: the mascot's badge, the name tag
+       under it, the status capsule under that, and the gaps around them. The
+       messages start below it. */
+    --rome-concierge-header-height: 6.25rem;
+    /* How far a Concierge chat's messages start below the top of their
+       column: the header, plus the phone's safe area, where the header
+       reaches the top of the screen. */
+    --rome-concierge-header-offset: var(--rome-concierge-header-height);
     /* The screen height not covered by an on-screen keyboard. lib/visual-viewport.ts
        overrides this inline on <html>; the fallback serves browsers without
        `visualViewport`. A page sized to the screen reads this rather than
@@ -557,15 +814,12 @@
   html,
   body {
     /* Stop the document from rubber-banding past its own ends. Inner scrollers
-       already set `overscroll-contain`, and the native shell passes
-       `bounces={false}`, but the page's own viewport scroller still bounced on
-       iOS because nothing constrained it. Both elements carry the rule: which
+       already set `overscroll-contain`, but the page's own viewport scroller
+       still bounced on iOS because nothing constrained it. Both elements carry the rule: which
        one defines the viewport scroller depends on the route's overflow.
 
-       Deliberately ungated. The Expo shell sets no marker on the document the
-       way Electron sets `.is-electron`, so there is nothing to scope this to —
-       and scoping it there would leave mobile Safari, which has the same bug,
-       still bouncing. The cost is that ordinary mobile browsers lose native
+       Deliberately ungated: scoping it to an app shell would leave mobile
+       Safari, which has the same bug, still bouncing. The cost is that ordinary mobile browsers lose native
        pull-to-refresh and desktop loses its rubber-band. Both are the app-like
        tradeoff we want: the dashboard refetches on its own, so a gesture whose
        only effect is reloading the bundle is not worth preserving. */
@@ -578,6 +832,13 @@
        need one. Without it a tall route and a short route offer different
        usable widths, so navigating between them shifts the content column. */
     scrollbar-gutter: stable;
+  }
+
+  /* A page that fills the viewport and scrolls inside itself, such as a chat,
+     never scrolls the document, so the reserved track would only stand as an
+     empty strip down its right edge wherever scrollbars take space. */
+  html:has([data-fills-viewport]) {
+    scrollbar-gutter: auto;
   }
 
   /* react-remove-scroll, under every Radix overlay, hides the body's overflow
@@ -604,6 +865,21 @@
   padding-top: var(--rome-safe-area-top);
 }
 
+/* A scroller under a Concierge chat's floating header: its content starts
+   below the header, and a scroll to an element stops below it too. */
+@utility concierge-header-clear {
+  padding-top: var(--rome-concierge-header-offset);
+  scroll-padding-top: var(--rome-concierge-header-offset);
+}
+
+@media (width < 48rem) {
+  :root {
+    --rome-concierge-header-offset: calc(
+      var(--rome-concierge-header-height) + var(--rome-safe-area-top)
+    );
+  }
+}
+
 /* Overlay-style scrollbar for inner panes. The track keeps its width at all
    times, so revealing the thumb never reflows the content beside it: only the
    thumb's color changes, and only while the pointer or keyboard focus is
@@ -622,6 +898,18 @@
 
   &:hover,
   &:focus-within {
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+}
+
+/* `scrollbar-idle-hidden` for a scroller that holds a field of its own, such
+   as a chat transcript with its composer: focus in that field is typing, not
+   scrolling, so only the pointer shows the thumb. */
+@utility scrollbar-hover-shown {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+
+  &:hover {
     scrollbar-color: var(--color-border-strong) transparent;
   }
 }
@@ -675,6 +963,10 @@
   /* Status colour for a running chat (the sidebar spinner). Only the host
      gets the utility: `--running` is not in the app token contract. */
   --color-running: var(--running);
+  /* The sidebar's unread count, one red in every theme. Host-only, like
+     `--running`. */
+  --color-unread: var(--unread);
+  --color-unread-foreground: var(--unread-foreground);
 
   @keyframes tw-shimmer {
     from {
@@ -741,15 +1033,19 @@
    in the browser build (functions like a media query for "running inside
    the Mac app").
 
-   Drag-region model: `-webkit-app-region` resolves to a flat geometric
-   mask (drag minus no-drag), independent of z-index / paint order. So
-   any interactive element that lives inside a drag region would otherwise
-   be eaten by window-drag. We pre-emptively mark every interactive
-   primitive `no-drag` site-wide; the titlebar rule below then re-adds the
-   background of the title bar (shell/DesktopTitlebar.tsx) as drag, which
-   leaves clickable children punched out. `[data-no-drag]` is an escape
-   hatch for non-semantic clickable wrappers (e.g. Radix `asChild`
-   rendering a `<div>`). */
+   Drag-region model: `-webkit-app-region` is inherited (Chromium 152+,
+   Electron 44+), and every element whose value is not `none` adds its own
+   box to the window's drag mask, in document order, a later box winning
+   over an earlier one. z-index and pointer-events play no part. So any
+   interactive element that lives inside a drag region would otherwise be
+   eaten by window-drag. We pre-emptively mark every interactive primitive
+   `no-drag` site-wide; the titlebar rule below then makes the title bar
+   (shell/DesktopTitlebar.tsx) drag, which leaves clickable children punched
+   out. A layer placed over the bar after its buttons inherits drag and
+   covers them again, so it opts out with `initial`: an explicit `none`
+   acts as `no-drag` (a Chromium legacy quirk) and would cut the bar's drag
+   area instead. `[data-no-drag]` is an escape hatch for non-semantic
+   clickable wrappers (e.g. Radix `asChild` rendering a `<div>`). */
 html.is-electron
   :where(
     button,
@@ -773,6 +1069,22 @@ html.is-electron
 html.is-electron [data-app-titlebar] {
   -webkit-app-region: drag;
 }
+/* A Concierge chat's mascot hangs from the title bar and drags the window like
+   it, below the bar too. The layer it hangs in spans the page's bar and comes
+   after its buttons, so it takes no part, or it would cover them; only the
+   badge drags. Its messages start under the status capsule, which
+   reaches less far below the bar than the floating header does. */
+html.is-electron [data-titlebar-mascot] {
+  -webkit-app-region: initial;
+}
+html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
+  -webkit-app-region: drag;
+}
+@media (width >= 48rem) {
+  html.is-electron {
+    --rome-concierge-header-offset: 5rem;
+  }
+}
 
 /* Set for ~900ms on the question a timeline dot jumped to. Every user bubble
    carries the same tint, so without a confirmation you cannot tell whether the
@@ -785,16 +1097,62 @@ html.is-electron [data-app-titlebar] {
 [data-timeline-landed] {
   background: color-mix(in srgb, var(--primary) 6%, transparent);
 }
-/* A Concierge bubble is as wide as its anchor, so the tint alone hides behind
-   it. The ring shows around the bubble. */
-[data-concierge-transcript] [data-timeline-anchor] {
-  transition:
-    background 300ms ease-out,
-    box-shadow 300ms ease-out;
-}
+/* A Concierge bubble's anchor is not as wide as the bubble: it takes up to 90%
+   of the column, where the bubble stops at its reading width, and a touch
+   device's details row sits in it. So the anchor draws nothing of its own, and
+   the tint alone would hide behind the bubble. The ring shows around the
+   bubble or card itself, the first thing in its box, so it is exactly as wide. */
 [data-concierge-transcript] [data-timeline-landed] {
+  background: none;
+}
+[data-concierge-transcript] [data-bubble-box] > :first-child {
+  transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: 300ms;
+  transition-timing-function: ease-out;
+}
+[data-concierge-transcript] [data-timeline-landed] > [data-bubble-box] > :first-child {
+  border-radius: var(--rome-radius-16);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
 }
+/* A run of the Concierge's replies to one message sits close: 2px between the
+   bubbles instead of the group's 8px (a quarter of the gap), and the corners
+   where they meet are 4px (ConciergeGroup, reply-drawing.ts). */
+[data-concierge-transcript] [data-join="mid"],
+[data-concierge-transcript] [data-join="last"] {
+  margin-top: calc(var(--rome-space-2) * -0.75);
+}
+[data-concierge-transcript] [data-join="first"] [data-chat-bubble] {
+  border-bottom-left-radius: var(--rome-radius-4);
+}
+[data-concierge-transcript] [data-join="mid"] [data-chat-bubble] {
+  border-top-left-radius: var(--rome-radius-4);
+  border-bottom-left-radius: var(--rome-radius-4);
+}
+[data-concierge-transcript] [data-join="last"] [data-chat-bubble] {
+  border-top-left-radius: var(--rome-radius-4);
+}
+/* A reaction grows in from 0.6, as a tapback does, and fades out
+   (reaction.tsx, MARK_FADE_MS). */
+@keyframes rome-mark-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+[data-reaction] {
+  animation: rome-mark-pop-in 150ms ease-out;
+  transition: opacity 150ms ease-in;
+}
+[data-reaction][data-leaving] {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-reaction] {
+    animation: none;
+    transition: none;
+  }
+}
+
 [data-chat-pending-card]:focus-visible {
   outline: 1px solid color-mix(in srgb, var(--ring) 50%, transparent);
   outline-offset: -1px;

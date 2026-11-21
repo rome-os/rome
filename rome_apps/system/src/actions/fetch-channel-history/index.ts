@@ -38,6 +38,8 @@ interface StructuredMessage {
   timestamp: string;
   threadId: string;
   threadName?: string;
+  /** The root of the chat thread the message is in, where its chat keeps them. */
+  chatThread?: string;
   text: string;
   attachments: StructuredAttachment[];
 }
@@ -65,6 +67,7 @@ function toStructuredMessages(channel: string, messages: ChannelMessage[]): Stru
     timestamp: m.timestamp.toISOString(),
     threadId: m.chatId,
     threadName: m.thread?.name,
+    ...(m.chatThread ? { chatThread: m.chatThread } : {}),
     text: m.text,
     attachments: m.attachments.map((a) => ({
       type: a.type,
@@ -111,7 +114,14 @@ function formatMessages(
           text = text ? `${text} [attachments: ${names}]` : `[attachments: ${names}]`;
         }
         if (!text) return null;
-        return `[${time}] **${senderLabel(channel, m)}**: ${text}`;
+        // A chat that keeps chat threads names each message, which a reply
+        // can point to, and the root of its thread when that is another message.
+        const placed = m.chatThread
+          ? m.chatThread === m.messageId
+            ? ` (message ${m.messageId})`
+            : ` (message ${m.messageId}, chat thread ${m.chatThread})`
+          : "";
+        return `[${time}] **${senderLabel(channel, m)}**${placed}: ${text}`;
       })
       .filter(Boolean);
 
@@ -264,7 +274,7 @@ export function createAction(
       };
 
       // Opt-in: only add the structured array when explicitly requested, so
-      // existing callers (LLM agents, the `dream` action) keep the exact same
+      // existing callers (LLM agents, the `dream:dream` action) keep the exact same
       // payload and token footprint they have today.
       if (includeMessages) {
         data.messages = toStructuredMessages(channel, messages);

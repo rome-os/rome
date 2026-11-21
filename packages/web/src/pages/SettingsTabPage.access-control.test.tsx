@@ -86,7 +86,7 @@ function renderAdvancedSettings() {
 }
 
 describe("SettingsPage Access Control section", () => {
-  it("renders Access and privacy as the section title with Allowed emails beneath it", async () => {
+  it("renders Admins as a row under the Access and privacy title", async () => {
     mockSettingsBackend();
     renderAdvancedSettings();
 
@@ -94,9 +94,8 @@ describe("SettingsPage Access Control section", () => {
       level: 2,
       name: "Access and privacy",
     });
-    const emailsTitle = await screen.findByRole("heading", {
-      level: 3,
-      name: "Allowed emails",
+    const emailsTitle = await screen.findByText("Admins", {
+      selector: "[data-slot=form-row-label]",
     });
 
     expect(
@@ -104,7 +103,7 @@ describe("SettingsPage Access Control section", () => {
     ).toBeTruthy();
   });
 
-  it("lists the saved allowed emails with an account count and no save button", async () => {
+  it("lists the saved admins with an account count and no save button", async () => {
     mockSettingsBackend({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] });
     renderAdvancedSettings();
 

@@ -1,9 +1,9 @@
 import SwiftUI
 import WebKit
 
-/// One app full screen: the instance's own full-screen page for it, in a
-/// web view that holds only the instance's session and follows the app's
-/// look and language.
+/// One app or a dashboard page, in a sheet over Chat or Apps: the
+/// instance's own page, in a web view that holds only the instance's session
+/// and follows the app's look and language.
 struct AppWebScreen: View {
     let workspace: Workspace
     let app: InstalledApp
@@ -25,7 +25,8 @@ struct AppWebScreen: View {
             header
             ZStack(alignment: .top) {
                 AppWebView(
-                    url: pageURL ?? origin.flatMap { AppLinks.fullURL(origin: $0, app: app) },
+                    url: origin.flatMap { pageURL ?? AppLinks.fullURL(origin: $0, app: app) },
+                    demoHTML: pageURL == nil ? DemoApp.html : DemoApp.dashboardHTML,
                     origin: origin,
                     cookie: workspace.backend.webSessionCookie(),
                     theme: AppWebView.themeValue(model.appearance.current),
@@ -55,29 +56,30 @@ struct AppWebScreen: View {
                 }
             }
         }
-        .background(Palette.bg.ignoresSafeArea())
+        .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .background(SwipeBackEnabler())
-        // Apps keeps the apps last opened from this phone at its top.
+        // Apps keeps the apps last opened from this phone at its top, and
+        // the widget fills its spare spots with them.
         .task(id: app.id) {
             guard pageURL == nil else { return }
             RecentApps(host: workspace.host, account: workspace.backend.account).record(app.id)
+            WidgetShelf.shared.recordOpen(appId: app.id, instanceId: workspace.instanceID)
         }
     }
 
     private var header: some View {
         HStack {
-            GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
-                Image(systemName: "chevron.left").romeFont(17, .semibold)
+            GlassCircleButton(accessibilityLabel: "Close", action: { dismiss() }) {
+                Image(systemName: "xmark").romeFont(15, .semibold)
             }
-            PlainHeaderTitle(title: Text(verbatim: app.name))
+            PlainHeaderTitle(title: Text(verbatim: app.name), size: PlainHeaderTitle.secondarySize)
             Menu {
                 Button { failed = false; reloads += 1 } label: {
                     Label("Reload", systemImage: "arrow.clockwise")
                 }
                 if let web = model.webURL, let url = pageURL ?? AppLinks.fullURL(origin: web, app: app) {
                     Button { openURL(url) } label: {
-                        Label("Open on the web", systemImage: "safari")
+                        Label("Open in Safari", systemImage: "safari")
                     }
                 }
             } label: {
@@ -90,16 +92,126 @@ struct AppWebScreen: View {
             .accessibilityLabel("More")
         }
         .padding(.horizontal, 12)
-        .padding(.top, 4)
+        // Clear of the sheet's round top corners.
+        .padding(.top, 14)
         .padding(.bottom, 6)
     }
 }
+
+/// A page of the instance, as its sheet shows it.
+struct InstancePageScreen: View {
+    let workspace: Workspace
+    let url: URL
+
+    var body: some View {
+        AppWebScreen(workspace: workspace, app: InstalledApp(id: url.absoluteString, displayName: workspace.instanceName), pageURL: url)
+            .id(url)
+    }
+}
+
+/// Opens the instance's pages from inside `content` in a sheet: the large
+/// detent only, since a web page is too cramped at half height, with the
+/// grabber. A drag down closes it once the page is scrolled to its top;
+/// before that it scrolls the page. On iPad it is the system's page sheet.
+private struct InstancePageSheet: ViewModifier {
+    let workspace: Workspace
+    @Binding var url: URL?
+
+    private struct Page: Identifiable {
+        let url: URL
+        var id: URL { url }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.openInstancePage, OpenInstancePageAction { url = $0 })
+            .sheet(item: Binding(get: { url.map(Page.init) }, set: { url = $0?.url })) { page in
+                InstancePageScreen(workspace: workspace, url: page.url)
+                    .modifier(WebSheetPresentation())
+            }
+    }
+}
+
+/// Opens an app of the instance in a sheet from the bottom, as every
+/// second-level page opens (DESIGN.md 12). Only its close button closes it:
+/// an app may use a vertical drag itself, so a drag down never does, and the
+/// sheet shows no grabber.
+private struct AppSheet: ViewModifier {
+    let workspace: Workspace
+    @Binding var app: InstalledApp?
+
+    func body(content: Content) -> some View {
+        content.sheet(item: $app) { app in
+            AppWebScreen(workspace: workspace, app: app)
+                .id(app.id)
+                .modifier(WebSheetPresentation(dragToClose: false))
+        }
+    }
+}
+
+/// An app's or a dashboard page's sheet: the large detent only, with the
+/// grabber where a drag down closes it.
+private struct WebSheetPresentation: ViewModifier {
+    var dragToClose = true
+
+    func body(content: Content) -> some View {
+        content
+            .presentationDetents([.large])
+            .presentationDragIndicator(dragToClose ? .visible : .hidden)
+            .interactiveDismissDisabled(!dragToClose)
+            .presentationBackground(Palette.secondaryPage)
+            .modifier(PageSizing())
+    }
+}
+
+/// A page sheet on iPad, with room for the dashboard's layout.
+private struct PageSizing: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content.presentationSizing(.page)
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// The instance's pages opened from inside this view rise in a sheet.
+    func instancePageSheet(workspace: Workspace, url: Binding<URL?>) -> some View {
+        modifier(InstancePageSheet(workspace: workspace, url: url))
+    }
+
+    /// The app set in `app` rises in a sheet over this view.
+    func appSheet(workspace: Workspace, app: Binding<InstalledApp?>) -> some View {
+        modifier(AppSheet(workspace: workspace, app: app))
+    }
+}
+
+#if DEBUG
+/// Snapshot runs only: a sheet drawn in place, since Mac Catalyst cannot
+/// capture a system sheet. The page behind is black, as under a large sheet.
+struct SheetStandIn<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Color.black.ignoresSafeArea()
+            content()
+                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
+                .padding(.top, 64)
+        }
+        .ignoresSafeArea()
+    }
+}
+#endif
 
 /// The web view itself. Its store is its own and kept in memory only, with
 /// the instance's session cookie and nothing else; a link to any other site
 /// opens in Safari.
 struct AppWebView: UIViewRepresentable {
+    /// Nil for demo data, which shows `demoHTML` instead.
     let url: URL?
+    var demoHTML = DemoApp.html
     let origin: URL?
     let cookie: HTTPCookie?
     /// `light`, `dark` or `system`, as the dashboard stores it.
@@ -134,6 +246,10 @@ struct AppWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        configuration.applicationNameForUserAgent = InstancePages.applicationName(
+            webKitDefault: configuration.applicationNameForUserAgent,
+            version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        )
         configuration.userContentController.addUserScript(WKUserScript(
             source: Self.settingsScript(theme: theme, language: language),
             injectionTime: .atDocumentStart,
@@ -163,10 +279,11 @@ struct AppWebView: UIViewRepresentable {
 
     private func load(_ view: WKWebView) {
         guard let url else {
-            view.loadHTMLString(DemoApp.html, baseURL: nil)
+            view.loadHTMLString(demoHTML, baseURL: nil)
             return
         }
         var request = URLRequest(url: url)
+        DevAccess.stamp(&request)
         request.setValue(language == "zh-CN" ? "zh-CN,zh;q=0.9" : "en", forHTTPHeaderField: "Accept-Language")
         if let cookie {
             view.configuration.websiteDataStore.httpCookieStore.setCookie(cookie) { view.load(request) }
@@ -249,6 +366,21 @@ enum DemoApp {
     <div class="row done"><div class="dot"></div>Read 20 pages<span class="days">5 days</span></div>
     <div class="row done"><div class="dot"></div>Walk 6,000 steps<span class="days">3 days</span></div>
     <div class="row"><div class="dot"></div>No phone after 23:00<span class="days">1 day</span></div>
+    </body></html>
+    """
+
+    /// Demo data's stand-in for a dashboard page.
+    static let dashboardHTML = """
+    <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>
+    :root { color-scheme: light dark; --bg:#F4F3EF; --card:#fff; --fg:#1A130F; --sub:#7A6857; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#0B0907; --card:#191513; --fg:#F4F3EF; --sub:#B0A294; } }
+    body { margin:0; padding:20px; background:var(--bg); color:var(--fg); font:16px -apple-system, system-ui; }
+    h1 { font-size:24px; margin:8px 0 4px; } p { color:var(--sub); margin:0 0 18px; }
+    .card { background:var(--card); border-radius:14px; padding:14px 16px; margin-bottom:10px; }
+    </style></head><body>
+    <h1>Rome</h1><p>The dashboard opens here, signed in.</p>
+    <div class="card">Chat</div><div class="card">Routines</div><div class="card">Connections</div>
     </body></html>
     """
 }

@@ -2,11 +2,11 @@
 //
 // The agent calls `defer` mid-turn with a delay, an absolute time, or an event
 // to wait for, plus a note-to-self. We create a one-off routine that, when it
-// fires, resumes the *same* session through `resume_session` — so the agent
+// fires, resumes the *same* session through `system:resume_session` — so the agent
 // wakes in its own conversation with full context. A time wakeup is a dated
 // schedule routine; an event wakeup is a `once` event-bus routine.
 //
-// This module shapes the `create_routine` args from the parsed wake-up. The side
+// This module shapes the `system:create_routine` args from the parsed wake-up. The side
 // effects (reading the live thread context, subscribing to the event's source,
 // calling create_routine through the action engine) are injected by the
 // caller (`agent-session.ts`) so this stays testable without a running engine.
@@ -14,11 +14,11 @@
 import type { WakeUp } from "../agent/index.js";
 import type { ThreadContext } from "../core/types.js";
 
-/** The action the one-off routine fires: `resume_session` continues this
+/** The action the one-off routine fires: `system:resume_session` continues this
  * thread's conversation on any channel. It's a thin shim over the
  * main-process backend-turn orchestrator — defer needs only name the session to
  * resume; the orchestrator owns running the turn and delivering the reply. */
-export const RESUME_SESSION_ACTION = "resume_session";
+export const RESUME_SESSION_ACTION = "system:resume_session";
 
 /** The thread the `defer` call is running in, captured from the live session. */
 export interface DeferContext {
@@ -29,6 +29,10 @@ export interface DeferContext {
   /** Whose the thread's chat is, so the wake-up reaches that person even
    *  after the chat is gone. */
   ownerKey?: string;
+  /** The turn that called `defer`, so the woken turn can find its context. */
+  turnId?: string;
+  /** When `defer` was called. */
+  scheduledAt: Date;
 }
 
 export interface DeferDeps {
@@ -64,6 +68,8 @@ export type DeferResult =
       name: string;
       /** The event type the wakeup waits for. */
       waitingFor: string;
+      /** When the wait ends without the event (ISO 8601), when it has a deadline. */
+      deadline?: string;
       /** For an app-declared event: whether the provider subscription was
        * already there or was created for this wait. */
       subscription?: "existing" | "created";
@@ -73,16 +79,20 @@ export type DeferResult =
       routineId?: string;
     };
 
-/** Build the args `resume_session` fires with: which runtime session to continue,
+/** Build the args `system:resume_session` fires with: which runtime session to continue,
  * where its reply is delivered, and the prompt the woken turn receives.
  * No trust fields — a continuation skips the inbound trust pipeline. */
 function buildResumeArgs(
   context: DeferContext,
   prompt: Record<string, unknown>,
+  wakeUp: WakeUp,
 ): Record<string, unknown> {
   const channelContext = context.channelContext;
   return {
     sessionId: context.sessionId,
+    // The task chat the check is for: the task's "later" time is read from
+    // here, and stopping the task cancels it.
+    ...(wakeUp.chatId ? { chatId: wakeUp.chatId } : {}),
     channel: channelContext?.channel,
     threadId: channelContext?.threadId,
     channelUserId: channelContext?.channelUserId,
@@ -90,6 +100,32 @@ function buildResumeArgs(
     ...(context.ownerKey ? { ownerKey: context.ownerKey } : {}),
     ...prompt,
   };
+}
+
+/**
+ * The prompt the woken turn receives: what fired, then the agent's
+ * note-to-self and where it was written, since the session that wakes may be
+ * a newer one with none of that turn in its context.
+ */
+function wakePrompt(headline: string, wakeUp: WakeUp, context: DeferContext): string {
+  const attrs = [
+    `scheduled_at="${context.scheduledAt.toISOString()}"`,
+    ...(context.turnId ? [`turn_id="${xmlAttr(context.turnId)}"`] : []),
+    ...(wakeUp.chatId ? [`chat_id="${xmlAttr(wakeUp.chatId)}"`] : []),
+  ].join(" ");
+  return `${headline}\n<defer_note ${attrs}>\n${wakeUp.note}\n</defer_note>`;
+}
+
+/**
+ * The check's name as its headline shows it, on one line, so no line of a
+ * name can pass for the `<defer_note>` header under it.
+ */
+function headlineName(name: string): string {
+  return name.replace(/\s+/g, " ").trim();
+}
+
+function xmlAttr(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
 }
 
 /** Schedule the deferred wakeup. Throws (for the tool to relay as an error)
@@ -117,17 +153,32 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
         once: true,
       },
       actionName: RESUME_SESSION_ACTION,
-      // `resume_session` appends a summary of the event payload to `text`.
-      args: buildResumeArgs(deps.context, {
-        text: `📨 Event arrived: ${parsed.name}`,
-        attachEvent: true,
-      }),
+      // `system:resume_session` appends a summary of the event payload to `text`.
+      args: buildResumeArgs(
+        deps.context,
+        {
+          text: wakePrompt(`📨 Event arrived: ${headlineName(parsed.name)}`, parsed, deps.context),
+          attachEvent: true,
+          // What the chat shows while it waits, and when the wait ends without
+          // the event: the trigger wakes the session then with a payload that
+          // says so (event-bus-trigger-provider.ts). Only an agent whose
+          // policy asks for them gives them.
+          ...(parsed.waitingFor ? { waitingFor: parsed.waitingFor } : {}),
+          ...(parsed.deadlineMs !== undefined
+            ? { deadline: new Date(parsed.deadlineMs).toISOString() }
+            : {}),
+        },
+        parsed,
+      ),
     });
     const routineId = (data as { routineId?: string } | null | undefined)?.routineId;
     return {
       ok: true,
       name: parsed.name,
       waitingFor: eventName,
+      ...(parsed.deadlineMs !== undefined
+        ? { deadline: new Date(parsed.deadlineMs).toISOString() }
+        : {}),
       ...(prepared.subscription ? { subscription: prepared.subscription } : {}),
       ...(prepared.warning ? { warning: prepared.warning } : {}),
       ...(routineId ? { routineId } : {}),
@@ -151,10 +202,12 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
       localTime: iso.slice(11, 16),
     },
     actionName: RESUME_SESSION_ACTION,
-    // The woken agent resumes the same session with full context, so the wakeup
-    // needs no instructions — just a simple time's-up nudge naming what it was
-    // watching. The ⏰ prefix marks it in the thread.
-    args: buildResumeArgs(deps.context, { text: `⏰ Time's up: ${parsed.name}` }),
+    // The ⏰ prefix marks it in the thread, and the note says what to do.
+    args: buildResumeArgs(
+      deps.context,
+      { text: wakePrompt(`⏰ Time's up: ${headlineName(parsed.name)}`, parsed, deps.context) },
+      parsed,
+    ),
   };
 
   const data = await deps.createRoutine(createArgs);

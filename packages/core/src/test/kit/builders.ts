@@ -1,4 +1,4 @@
-import type { Action, ActionConfig, ActionResult } from "../../actions/types.js";
+import type { Action, ActionConfig, ActionResult } from "../../apps/actions/types.js";
 
 // buildAction — Action factory with defaults, for registering real actions
 // into the testkit's real ActionRegistry/ActionEngine.

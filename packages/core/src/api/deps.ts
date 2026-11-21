@@ -1,30 +1,36 @@
-import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
+import type { AgentNameEvents } from "../people/guardian-profile/index.js";
+import type { VoiceInputSource } from "../voice-input/index.js";
+import type { PersonalDataRepository } from "../personal-data/repository.js";
+import type { DeviceConnectionsRepository } from "../connections/device/repository.js";
+import type { PlaceAudience } from "../core/place-audience.js";
+import type { GuardianLinkCodes } from "../people/link-code/index.js";
 import type { SessionOpeningFor } from "../core/session-opening.js";
-import type { LoginUsageSink } from "../usage/recorder.js";
-import type { CloudProfileService } from "../lib/cloud-profile.js";
-import type { createNodeDevicesService } from "../lib/node-devices.js";
-import type { ActionEngine } from "../actions/engine.js";
+import type { LoginUsageSink, TranscriptionUsageSink } from "../usage/recorder.js";
+import type { CloudProfileService } from "../instance/cloud-profile.js";
+import type { createNodeDevicesService } from "../desktops/node-devices.js";
+import type { ActionEngine } from "../apps/actions/engine.js";
 import type { ConciergeService } from "../concierge/service.js";
-import type { ActionLoader } from "../actions/loader.js";
+import type { ActionLoader } from "../apps/actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
-import type { PeopleRepository } from "../db/repositories/people.js";
+import type { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
+import type { PeopleRepository } from "../people/model/people-repository.js";
 import type {
   Channels,
   PlatformOfChannel,
   RecordedOn,
 } from "../chats/connected-accounts/connected-account.js";
+import type { PlatformSend } from "../chats/send.js";
 import type { SendRecording } from "../connections/send.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { MessageRepository as ChatLines } from "../chats/storage/message-repository.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { AccountNames } from "../chats/accounts/account-names.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
-import type { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
-import type { ApprovalsRepository } from "../db/repositories/approvals.js";
-import type { ApprovalHandler } from "../actions/approval-handler.js";
-import type { MainBackendTurnRunner } from "../actions/backend-turn.js";
+import type { WebChatRepository } from "../webchat/repository.js";
+import type { WebhookInvocationsRepository } from "../apps/repositories/webhook-invocations.js";
+import type { ApprovalsRepository } from "../apps/repositories/approvals.js";
+import type { ApprovalHandler } from "../apps/actions/approval-handler.js";
+import type { MainBackendTurnRunner } from "../app-host/backend-turn.js";
 import type { RoutineEngine } from "../routines/engine.js";
 import type { EventCatalog } from "../event-catalog.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
@@ -35,42 +41,48 @@ import type { OgImageStore } from "../apps/og/store.js";
 import type { AppManager } from "../apps/manager.js";
 import type { RomeCloudListingClient } from "../apps/rome-cloud-listing-client.js";
 import type { AppStoreReader } from "../apps/store-service.js";
-import type { ActionRegistryImpl } from "../actions/registry.js";
-import type { Agent, AgentCatalog, AgentLoader } from "../agent/index.js";
+import type { ActionRegistryImpl } from "../apps/actions/registry.js";
+import type { Agent, AgentCatalog } from "../agent/index.js";
+import type { AgentLoader } from "../app-host/agent-loader.js";
 import type { SkillCatalog, SubagentCalls } from "../agent/index.js";
-import type { FeedbackRelay } from "../lib/feedback-client.js";
+import type { FeedbackRelay } from "../instance/feedback-client.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { AppKeysRepository } from "../db/repositories/app-keys.js";
-import type { AppKeyInjector } from "../app-keys/injector.js";
+import type { AppKeysRepository } from "../apps/repositories/app-keys.js";
+import type { AppKeyInjector } from "../apps/app-keys/injector.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
-import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
+import type { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
 import type { SessionRepository } from "../agent/index.js";
-import type { AgentSessionManager } from "../agent/index.js";
+import type { Sessions } from "../agent/index.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
+import type { Action } from "@rome-os/app-runtime";
 import type { Hono } from "hono";
 import type { ClaudeLogins, CodexLogins, ModelAccount, ModelAccounts } from "../agent/index.js";
-import type { PublicAccessState } from "../lib/public-access-state.js";
-import type { DashboardAccessState } from "../lib/dashboard-access-state.js";
-import type { DashboardAccessStore } from "../lib/dashboard-access-store.js";
-import type { VisitorAllowListSync } from "../lib/visitor-allowlist-sync.js";
+import type { Permissions } from "../access/permissions.js";
+import type { DashboardAccessState } from "../access/dashboard-access-state.js";
+import type { DashboardAccessStore } from "../access/dashboard-access-store.js";
+import type { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
 import type { PhoneWatching } from "../lib/phone-watching.js";
+import type { DashboardActivity } from "../lib/dashboard-activity.js";
 import type { RelayDrainer } from "../relay/drainer.js";
-import type { BootVersionReport } from "../lib/boot-version-report.js";
-import type { SystemUpgradeService } from "../system-upgrade/service.js";
+import type { BootVersionReport } from "../instance/boot-version-report.js";
+import type { ReleaseNotes } from "../instance/system-upgrade/release-notes.js";
+import type { SystemUpgradeService } from "../instance/system-upgrade/service.js";
 import type {
   AppRuntimeRepositories,
   ChatSettingsControl,
+  ChatSettingsPage,
   ChannelsService,
+  ListChatSettingsInput,
 } from "@rome-os/app-runtime";
-import type { FavorService } from "../favors/types.js";
+import type { FavorService } from "../favors/index.js";
 import type { ConnectionRegistry } from "../connections/index.js";
 import type { AccountListening } from "../chats/connected-accounts/account-agents.js";
 import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
-import type { ComputerUseService } from "../computer-use/service.js";
-import type { WechatApp } from "../desktop-apps/wechat-app.js";
-import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
+import type { ComputerUseService } from "../desktops/computer-use.js";
+import type { KindMount } from "../connections/kind-mount.js";
+import type { AppConnectionsContextFactory } from "../apps/app-connections-port.js";
 
 export interface ApiConfig {
   port: number;
@@ -90,18 +102,19 @@ export interface ApiConfig {
  * exception is `appsRoot`, a genuine config override rather than a service.
  */
 export interface ApiDeps {
+  agentNameEvents?: AgentNameEvents;
   /** The Concierge feature. Absent ⇒ its routes answer 404. */
   concierge?: ConciergeService;
   /** The channels this Rome has, by name. */
   channelsService: ChannelsService;
-  chatSettings: ChatSettingsControl;
+  chatSettings: DashboardChatSettings;
   actionEngine: ActionEngine;
-  actionLoader: Pick<ActionLoader, "get" | "getRegistryLoadFailures">;
+  actionLoader: Pick<ActionLoader, "get" | "getAllRecords" | "getRegistryLoadFailures">;
   db: DrizzleDb;
   /** Shared with App lifecycle handling so access writes serialize with disable and removal. */
   appConnectionAccessRepo: AppConnectionAccessRepository;
   peopleRepo: PeopleRepository;
-  /** The guardian's link code, shown in People (people/guardian-link-code.ts). */
+  /** The guardian's link code, shown in People (people/link-code/application/guardian-link-code.ts). */
   guardianLinkCodes: GuardianLinkCodes;
   /** Every channel Rome reads, each carrying its address book and what was said
    *  on it. WhatsApp and LinkedIn reach the API only through here — no route
@@ -128,6 +141,9 @@ export interface ApiDeps {
   webchatRepo: WebChatRepository;
   /** Where a send into a place is said and put on record in Chats. */
   recording: SendRecording;
+  /** The platforms Rome serves itself, each with its side of a send. The
+   *  dashboard's takes no sends here: only Concierge's send reaches it. */
+  ownPlatforms: ReadonlyMap<string, PlatformSend>;
   /** The chats Rome takes part in, by their adapter's keys. */
   chats: Pick<ChatRepository, "byKey">;
   /** What was said in each chat, as Chats records it. */
@@ -145,6 +161,12 @@ export interface ApiDeps {
   eventCatalog: EventCatalog;
   routinesRepo: RoutinesRepository;
   routineRunsRepo: RoutineRunsRepository;
+  /** The personal-data store the guardian's devices push to. */
+  personalData: PersonalDataRepository;
+  /** What each of the guardian's devices lets Agents reach live. */
+  deviceConnections: DeviceConnectionsRepository;
+  /** Who can read a place now, for checks made when an answer arrives. */
+  placeAudience: PlaceAudience;
   /** AppCatalog — sole read surface for app artifacts. */
   appCatalog: AppCatalog;
   /** The agents under every name they have had, for reading names stored before ids were canonical. */
@@ -157,6 +179,9 @@ export interface ApiDeps {
   /** Rome App Store read surface used by the dashboard and agent-facing actions. */
   appStore: AppStoreReader;
   actionRegistry: ActionRegistryImpl;
+  /** Each feature's routes and actions, built once by the wiring. A feature
+   *  left out of the list is left out of Rome. */
+  features?: readonly Feature[];
   agentLoader: AgentCatalog & Pick<AgentLoader, "getRegistryLoadFailures">;
   /** Told of each write to an account's agent, so the account's inbound port
    *  starts or stops listening. */
@@ -182,8 +207,9 @@ export interface ApiDeps {
    *  Never rejects. */
   autoConnectEmail?: () => Promise<void>;
   computerUse: Pick<ComputerUseService, "getStatus">;
-  /** The WeChat app on WeChat's own desktop. Null while WeChat is disabled. */
-  wechatApp: Pick<WechatApp, "status" | "install" | "start"> | null;
+  /** The kinds of connection the wiring mounts. A kind left out of the list
+   *  is left out of Rome. */
+  connectionKinds: readonly KindMount[];
   appKeysRepo: AppKeysRepository;
   appKeyInjector: AppKeyInjector;
   /** Makes an app-keys environment change reach already-running app code:
@@ -195,7 +221,7 @@ export interface ApiDeps {
   sentinelLogRepo: SentinelLogRepository;
   actionExecutionsRepo: ActionExecutionsRepository;
   sessionRepository: SessionRepository;
-  agentSessionManager: AgentSessionManager;
+  agentSessionManager: Sessions;
   /** What a route states for a session it opens. */
   sessionOpeningFor: SessionOpeningFor;
   /** Lightweight, tool-free small-model request used to name a new chat. */
@@ -217,7 +243,7 @@ export interface ApiDeps {
    * In-memory snapshot of app access policy, read by `/api/auth/verify` on
    * every proxied request. Kept in sync by the `/api/public-access` PUT handler.
    */
-  publicAccessState: PublicAccessState;
+  permissions: Permissions;
   /**
    * In-memory snapshot of shared dashboard access policy, read by
    * `/api/auth/verify` on every proxied request. Kept in sync by
@@ -230,6 +256,10 @@ export interface ApiDeps {
   visitorAllowListSync: VisitorAllowListSync;
   /** The chats the guardian's phone app holds open on the live-events socket. */
   phoneWatching?: PhoneWatching;
+  /** Where each listening session's speech becomes text, as Rome Cloud grants it. */
+  voiceInput?: VoiceInputSource;
+  /** Whether the guardian is at a web dashboard, from its signals on the live-events socket. */
+  dashboardActivity?: DashboardActivity;
   /** Webhook relay drainer — present so the Integrations settings route can
    * hot-reload the live connection when the guardian edits relay credentials. */
   relayDrainer: RelayDrainer;
@@ -243,6 +273,8 @@ export interface ApiDeps {
    * `GET /api/system/upgrade/status/snapshot` and the `/now` `/defer` verbs,
    * and runs the nightly probe + Rome Cloud-relayed cutover. */
   systemUpgradeService: SystemUpgradeService;
+  /** Reads what an upgrade changes, behind `GET /api/system/release-notes`. */
+  releaseNotes: ReleaseNotes;
   /** Live cloud-auth decision, re-evaluated per call via `resolveCloudAuthEnabled`
    * (the `rome_cloud_auth` Statsig rollout gate). The login-flow
    * routes call this on each sign-in entry — the bootstrap phase
@@ -251,6 +283,8 @@ export interface ApiDeps {
   isCloudAuthEnabled: () => Promise<boolean>;
   /** Reports each guardian sign-in to Rome Cloud as a usage event. */
   loginUsage: LoginUsageSink;
+  /** Reports each listening session on a Rome Cloud transcription session. */
+  transcriptionUsage?: TranscriptionUsageSink;
   /** Use-side registry. Present but with zero registered descriptors in
    *  this phase — later phases register real integrations and route through it. */
   connectionRegistry?: ConnectionRegistry;
@@ -263,4 +297,16 @@ export interface ApiDeps {
 export interface ApiHandle {
   port: number;
   close(): Promise<void>;
+}
+
+/** A feature's two interfaces: routes for the dashboard and apps, actions for agents. */
+export interface Feature {
+  routes: Hono;
+  actions: readonly Action[];
+}
+
+/** The chat settings as the dashboard reads them: an app's, and a list that
+ *  can keep only the chats a guardian set a value on. */
+export interface DashboardChatSettings extends Omit<ChatSettingsControl, "list"> {
+  list(input: ListChatSettingsInput & { changed?: boolean }): Promise<ChatSettingsPage>;
 }

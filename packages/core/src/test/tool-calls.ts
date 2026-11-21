@@ -33,6 +33,9 @@ export const TEST_TURN: TurnFacts = {
   threadContext: () => undefined,
   sharedContext: () => undefined,
   pushLevel: () => undefined,
+  actor: () => undefined,
+  audience: () => "shared",
+  reportedTask: () => undefined,
   inTurn: (fn) => fn(),
 };
 
@@ -44,6 +47,8 @@ export function testRomeTools(options: TestRomeToolsOptions = {}): RomeTools {
     actions: {
       list: () => [],
       permits: () => true,
+      appOf: () => undefined,
+      find: () => undefined,
       run: async () => ({ status: "ok", data: { ok: true } }),
     },
     skills: { list: () => [] },

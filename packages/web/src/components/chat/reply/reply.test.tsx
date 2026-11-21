@@ -30,7 +30,6 @@ function draftOf(overrides: Partial<ReplyDraft> = {}): ReplyDraft {
     set: rs.fn(),
     clear: rs.fn(),
     restore: rs.fn(),
-    has: () => true,
     jump: rs.fn(),
     ...overrides,
   };
@@ -50,20 +49,16 @@ const source = {
 describe("ReplyBar", () => {
   const target: ReplyTarget = { messageId: "m1", author: "agent", preview: "Fly to Lisbon." };
 
-  it("spans the composer with an arrow, the muted quote, and × at the end", () => {
+  it("spans the composer with an arrow, one muted line, and × at the end, in no box", () => {
     const { container } = render(withDraft(draftOf({ target }), <ReplyBar />));
 
     const bar = container.querySelector("[data-reply-bar]") as HTMLElement;
     expect(bar.className).toContain("w-full");
     expect(bar.className).toContain("text-muted-foreground");
-    expect(bar.className).toContain("rounded-8");
-    expect(bar.className).toContain("border-l-3");
-    expect(bar.className).toContain("border-muted-foreground");
-    expect(bar.className).not.toContain("primary");
-    expect(bar.querySelector("[data-reply-accent]")).toBeNull();
-    expect(screen.getByRole("img", { name: "Reply" })).toBeTruthy();
+    expect(bar.className).not.toMatch(/rounded|border|bg-|primary/);
+    expect(bar.querySelector("svg.lucide-reply")).not.toBeNull();
     expect(bar.lastElementChild?.getAttribute("aria-label")).toBe("Cancel reply");
-    expect(screen.getByText("Fly to Lisbon.").className).toContain("line-clamp-2");
+    expect(screen.getByText("Fly to Lisbon.").className).toContain("truncate");
     expect(screen.queryByText(/Replying to|Rome/)).toBeNull();
   });
 
@@ -227,7 +222,7 @@ describe("QuotedReply", () => {
     text: "Fly to Lisbon.",
   };
 
-  it("jumps to the original when the transcript holds it", () => {
+  it("goes to the original when pressed, which the chat loads when it must", () => {
     const draft = draftOf();
     render(withDraft(draft, <QuotedReply part={part} />));
 
@@ -246,24 +241,19 @@ describe("QuotedReply", () => {
       ),
     );
 
-    expect(screen.getByText("Day 1: Alfama Morning: the Sé")).toBeTruthy();
+    // One line: the first line of the quoted message, as plain text.
+    expect(screen.getByText("Day 1: Alfama")).toBeTruthy();
+    expect(screen.queryByText(/Morning/)).toBeNull();
   });
 
-  it("edges the quote in the same rounded gray as the composer bar", () => {
+  it("is a reply arrow and one muted line, with no bar and no box", () => {
     render(withDraft(draftOf(), <QuotedReply part={part} />));
 
     const quote = screen.getByRole("button", { name: "Go to the original message" });
-    expect(quote.className).toContain("rounded-8");
-    expect(quote.className).toContain("border-l-3");
-    expect(quote.className).toContain("border-muted-foreground");
-    expect(quote.querySelector("[data-reply-accent]")).toBeNull();
-  });
-
-  it("shows the snapshot without a button when the original is not loaded", () => {
-    render(withDraft(draftOf({ has: () => false }), <QuotedReply part={part} />));
-
-    expect(screen.queryByRole("button")).toBeNull();
-    expect(screen.getByText("Fly to Lisbon.")).toBeTruthy();
+    expect(quote.className).toContain("text-muted-foreground");
+    expect(quote.className).not.toMatch(/rounded|border-l|bg-/);
+    expect(quote.querySelector("svg.lucide-reply")).not.toBeNull();
+    expect(quote.getAttribute("title")).toBe("Fly to Lisbon.");
   });
 
   it("shows the snapshot without a button where the chat has no reply state", () => {
@@ -275,40 +265,9 @@ describe("QuotedReply", () => {
   });
 });
 
-// History may load only a window of the chat. A quote keeps working from its
-// own snapshot and links to the original only while the window holds it.
-describe("a quote whose original is outside the loaded history", () => {
-  const part = {
-    type: "reply_to" as const,
-    messageId: "older",
-    author: "agent" as const,
-    text: "Fly to Lisbon.",
-  };
-
-  function Window({ loaded, jump }: { loaded: string[]; jump: (id: string) => void }) {
-    const draft = useReplyDraftState({
-      chatId: "chat-1",
-      sessionId: "s1",
-      messageIds: new Set(loaded),
-      jump,
-      focusComposer: () => {},
-    });
-    return withDraft(draft, <QuotedReply part={part} />);
-  }
-
-  it("shows the snapshot inertly, then links once older history loads", () => {
-    const jump = rs.fn();
-    const { rerender } = render(<Window loaded={["newer"]} jump={jump} />);
-
-    expect(screen.queryByRole("button")).toBeNull();
-    fireEvent.click(screen.getByText("Fly to Lisbon."));
-    expect(jump).not.toHaveBeenCalled();
-
-    rerender(<Window loaded={["older", "newer"]} jump={jump} />);
-    fireEvent.click(screen.getByRole("button", { name: "Go to the original message" }));
-    expect(jump).toHaveBeenCalledWith("older");
-  });
-
+// History may load only a window of the chat, so a quote may name a message
+// the transcript does not draw yet.
+describe("the anchor of a quoted message", () => {
   it("finds no anchor for a message the transcript does not draw", () => {
     const root = document.createElement("div");
     root.innerHTML = '<div data-timeline-anchor="newer a2 a3"></div>';

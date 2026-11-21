@@ -2,6 +2,7 @@
 // ended is the agent's rule, in agent/domain/turn-end.ts.
 
 import type { AgentStop, AgentStopReason } from "@rome-os/app-runtime";
+import { buildAgentAccounting } from "../provider-accounting.js";
 
 /** The fields of a Claude Agent SDK result message that decide its stop. */
 export interface AnthropicResultStopInput {
@@ -55,4 +56,29 @@ export function anthropicStop(result: AnthropicResultStopInput, aborted: boolean
     return withRaw("completed");
   }
   return withRaw("other");
+}
+
+/**
+ * The result Rome closes a Claude turn with when it stopped the turn before
+ * the SDK sent one. It says the turn was stopped, not completed, so the
+ * session hands the turn's read inputs on. Its usage is zero: the SDK reported
+ * none, and nothing is counted for it.
+ */
+export function claudeStoppedTurnResult(turn: {
+  provider: string;
+  model: string;
+  content: string;
+  reasoningEffort: string;
+}) {
+  return {
+    type: "result" as const,
+    content: turn.content,
+    reasoningEffort: turn.reasoningEffort,
+    accounting: buildAgentAccounting({
+      provider: turn.provider,
+      model: turn.model,
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      stop: { reason: "interrupted" },
+    }),
+  };
 }

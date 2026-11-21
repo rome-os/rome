@@ -351,22 +351,15 @@ describe("renderImportantTurn and renderDigestTurn", () => {
     expect(row).toEqual(stored);
   });
 
-  it("uses catalog kind labels in digest items and overflow counts, with or without chats", () => {
+  it("uses catalog kind labels in digest items and overflow counts", () => {
     const rows = Array.from({ length: 41 }, () =>
       item({ kind: "your_pr_closed", decision: "digest" }),
     );
-    for (const chatOf of [undefined, () => ({ id: "concierge", name: "Concierge", main: true })]) {
-      const turn = renderDigestTurn(rows, NOW, chatOf, kindLabel);
-      expect(turn).toContain(`<item source="github" target="acme/widgets" kind="${closedLabel}"`);
-      expect(turn).toContain(`<more source="github" kind="${closedLabel}" count="36"/>`);
-      expect(turn).not.toContain("your_pr_closed");
-    }
-    const important = renderDigestTurn(
-      [item({ kind: "your_pr_closed" })],
-      NOW,
-      undefined,
-      kindLabel,
-    );
+    const turn = renderDigestTurn(rows, NOW, kindLabel);
+    expect(turn).toContain(`<item source="github" target="acme/widgets" kind="${closedLabel}"`);
+    expect(turn).toContain(`<more source="github" kind="${closedLabel}" count="36"/>`);
+    expect(turn).not.toContain("your_pr_closed");
+    const important = renderDigestTurn([item({ kind: "your_pr_closed" })], NOW, kindLabel);
     expect(important).toContain(`kind="${closedLabel}" important="true"`);
     expect(rows.every((row) => row.kind === "your_pr_closed")).toBe(true);
   });
@@ -377,7 +370,7 @@ describe("renderImportantTurn and renderDigestTurn", () => {
   ])("falls back to the id for an unknown kind or source: %s, %s", (source, kind) => {
     const row = item({ source, kind, decision: "digest" });
     expect(renderImportantTurn([row], false, NOW, kindLabel)).toContain(`kind="${kind}"`);
-    const turn = renderDigestTurn(Array(41).fill(row), NOW, undefined, kindLabel);
+    const turn = renderDigestTurn(Array(41).fill(row), NOW, kindLabel);
     expect(turn).toContain(`<more source="${source}" kind="${kind}" count="36"/>`);
   });
 
@@ -388,7 +381,6 @@ describe("renderImportantTurn and renderDigestTurn", () => {
     const turn = renderDigestTurn(
       Array.from({ length: 41 }, () => item({ decision: "digest" })),
       NOW,
-      undefined,
       label,
     );
     expect(turn).toContain(`<more source="github" kind="${escaped}" count="36"/>`);
@@ -398,7 +390,7 @@ describe("renderImportantTurn and renderDigestTurn", () => {
     const rows = ["first_kind", "second_kind"].flatMap((kind) =>
       Array.from({ length: 21 }, () => item({ kind, decision: "digest" })),
     );
-    const turn = renderDigestTurn(rows, NOW, undefined, () => "Shared label");
+    const turn = renderDigestTurn(rows, NOW, () => "Shared label");
     expect(turn.match(/<more source="github" kind="Shared label" count="16"\//g)).toHaveLength(2);
     expect(turn.match(/<item /g)).toHaveLength(10);
   });
@@ -414,26 +406,6 @@ describe("renderImportantTurn and renderDigestTurn", () => {
     expect(turn.indexOf("bob asked you")).toBeLessThan(turn.indexOf('kind="new_mail"'));
     expect(turn).toMatch(/important="true"[^>]*>bob asked you about the release</);
     expect(turn.match(/important="true"/g)).toHaveLength(1);
-  });
-
-  it("groups a digest by the Concierge chat each item reports to, the main chat first", () => {
-    const chats = {
-      "": { id: "concierge", name: "Concierge", main: true },
-      "topic-1": { id: "topic-1", name: "Cal <x>", main: false },
-    } as const;
-    const turn = renderDigestTurn(
-      [
-        item({ decision: "digest", chatId: "topic-1", line: "standup moved" }),
-        item({ decision: "digest", line: "mail from bob" }),
-      ],
-      NOW,
-      (i) => chats[(i.chatId ?? "") as keyof typeof chats],
-    );
-    expect(turn).toContain('<chat id="concierge" name="Concierge" main="true">');
-    expect(turn).toContain('<chat id="topic-1" name="Cal &lt;x&gt;" main="false">');
-    expect(turn.indexOf("mail from bob")).toBeLessThan(turn.indexOf("standup moved"));
-    expect(turn.indexOf('name="Cal')).toBeLessThan(turn.indexOf("standup moved"));
-    expect(turn).toContain('count="2"');
   });
 
   it("shows a small digest whole, and a large one as a few lines per kind plus counts", () => {

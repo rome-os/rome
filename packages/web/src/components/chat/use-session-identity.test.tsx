@@ -44,6 +44,40 @@ afterEach(() => {
   rs.clearAllMocks();
 });
 
+describe("useSessionIdentity forkable", () => {
+  it.each([
+    ["a common chat", {}, true],
+    ["a fork chat", { parentSessionId: "s0" }, true],
+    ["a task chat", { triggerKind: "concierge" }, false],
+    ["a fork of a Concierge chat", { agentName: "core:concierge", parentSessionId: "t1" }, false],
+  ])("reports whether %s can be forked", async (_label, fields, forkable) => {
+    rs.mocked(getSession).mockResolvedValue({ ...session, ...fields });
+    rs.mocked(listChatAgents).mockResolvedValue(groups);
+    const { result } = renderHook(() => useSessionIdentity("s1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.forkable).toBe(forkable);
+  });
+});
+
+describe("useSessionIdentity Concierge session", () => {
+  it.each([
+    ["a topic chat", { agentName: "core:concierge" }, true],
+    [
+      "an archived topic chat",
+      { agentName: "core:concierge", archivedAt: "2026-11-01T00:00:00.000Z" },
+      true,
+    ],
+    ["a task chat", { agentName: "core:concierge", triggerKind: "concierge" }, false],
+    ["a common chat", {}, false],
+  ])("reads from the session itself whether %s is a Concierge chat", async (_label, fields, topic) => {
+    rs.mocked(getSession).mockResolvedValue({ ...session, ...fields });
+    rs.mocked(listChatAgents).mockResolvedValue(groups);
+    const { result } = renderHook(() => useSessionIdentity("s1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.isConciergeSession).toBe(topic);
+  });
+});
+
 describe("useSessionIdentity presentation mode", () => {
   it("masks the pinned-agent mention while presentation mode is on, and restores it when off", async () => {
     rs.mocked(getSession).mockResolvedValue(session);

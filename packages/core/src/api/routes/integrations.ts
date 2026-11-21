@@ -1,7 +1,11 @@
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { isEnabledOAuthProvider } from "../../lib/oauth-providers.js";
-import { getComposioStatus, logoutComposio, startComposioLogin } from "../../lib/composio-cli.js";
+import { isEnabledOAuthProvider } from "../../connections/oauth/oauth-providers.js";
+import {
+  getComposioStatus,
+  logoutComposio,
+  startComposioLogin,
+} from "../../connections/integrations/composio-cli.js";
 import {
   RELAY_SETTING_KEY,
   buildRelayStatus,

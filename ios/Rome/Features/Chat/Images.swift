@@ -108,8 +108,29 @@ enum ImageSource: Hashable, Sendable {
     }
 }
 
+extension ImageSource {
+    /// A file of the instance's asset store (`/api/assets/<id>.<ext>`): it
+    /// never changes at its name, so it may be kept on disk.
+    var isStoredAsset: Bool {
+        if case .instance(let path, _) = self { return path.hasPrefix("/assets/") }
+        return false
+    }
+}
+
 /// Bytes of an image, from the instance or the open web.
 enum ImageFetch {
+    /// The query of an instance asset URL with `w=width` added; any other URL, or
+    /// one that already names a width, keeps its query.
+    static func assetQuery(_ query: String?, path: String, width: Int?) -> String? {
+        // A stored upload's URL has no query: its thumbnail is just `w=width`.
+        if let width, query == nil || query == "", path.hasPrefix("/assets/") { return "w=\(width)" }
+        guard let width, let query, !query.isEmpty,
+              path == "/projects/asset" || path.hasPrefix("/projects/asset/") || path == "/memory/asset" || path.hasPrefix("/memory/asset/") || path.hasPrefix("/assets/"),
+              !query.split(separator: "&").contains(where: { $0.hasPrefix("w=") })
+        else { return query }
+        return "\(query)&w=\(width)"
+    }
+
     /// No cookies, no cache on disk: an outside host never sees the session.
     static let publicSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -120,14 +141,16 @@ enum ImageFetch {
     }()
 
     @MainActor
-    static func data(_ source: ImageSource, assetLoader: (@MainActor (String) async throws -> Data)?, apiLoader: (@MainActor (String, String?) async throws -> Data)? = nil) async throws -> Data {
+    /// `width`: ask the instance for a thumbnail this wide (600 or 900) of one of
+    /// its own pictures. An external image ignores it, and nil is the original.
+    static func data(_ source: ImageSource, assetLoader: (@MainActor (String, Int?) async throws -> Data)?, apiLoader: (@MainActor (String, String?) async throws -> Data)? = nil, width: Int? = nil) async throws -> Data {
         switch source {
         case .asset(let path):
             guard let assetLoader else { throw APIError.network }
-            return try await assetLoader(path)
+            return try await assetLoader(path, width)
         case .instance(let path, let query):
             guard let apiLoader else { throw APIError.network }
-            return try await apiLoader(path, query)
+            return try await apiLoader(path, assetQuery(query, path: path, width: width))
         case .external(let url):
             let (data, response) = try await APIClient.cappedData(for: URLRequest(url: url), in: publicSession, limit: APIClient.imageLimit)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw APIError.network }
@@ -174,10 +197,10 @@ enum ViewerImage: Identifiable, Hashable {
     }
 
     @MainActor
-    func data(assetLoader: (@MainActor (String) async throws -> Data)?, apiLoader: (@MainActor (String, String?) async throws -> Data)? = nil) async throws -> Data {
+    func data(assetLoader: (@MainActor (String, Int?) async throws -> Data)?, apiLoader: (@MainActor (String, String?) async throws -> Data)? = nil) async throws -> Data {
         switch self {
         case .local(let photo): return photo.jpeg
-        case .stored(let upload): return try await ImageFetch.data(.asset(path: upload.assetPath), assetLoader: assetLoader)
+        case .stored(let upload): return try await ImageFetch.data(upload.source, assetLoader: assetLoader, apiLoader: apiLoader)
         case .markdown(let source, _, _, _): return try await ImageFetch.data(source, assetLoader: assetLoader, apiLoader: apiLoader)
         }
     }
@@ -197,8 +220,18 @@ struct MarkdownImageView: View {
     @State private var failed = false
 
     nonisolated static let maxHeight: CGFloat = 240
-    /// Big enough for a bubble's width at 3x.
+    /// Big enough for a bubble's width at 3x. It is also a width the server
+    /// offers (`?w=900`), so keep the two in step.
     nonisolated static let pixels: CGFloat = 900
+
+    init(source: ImageSource, alt: String, src: String = "", onOpen: @escaping () -> Void) {
+        self.source = source
+        self.alt = alt
+        self.src = src
+        self.onOpen = onOpen
+        // Already in memory, it shows in the first frame, with no spinner.
+        _image = State(initialValue: StoredImageCache.shared.image(StoredImageCache.shared.key("md|\(source)")))
+    }
 
     var body: some View {
         Group {
@@ -240,27 +273,25 @@ struct MarkdownImageView: View {
     }
 
     private func load() async {
-        let key = StoredImageCache.key("md|\(source)")
-        if let cached = StoredImageCache.image(key) {
-            image = cached
-            return
-        }
         do {
-            let data = try await ImageFetch.data(source, assetLoader: assetLoader, apiLoader: apiLoader)
-            let decoded = await Task.detached(priority: .userInitiated) {
-                ImageCompressor.thumbnail(from: data, maxPixel: Self.pixels)
-            }.value
-            guard let decoded else {
-                // Not an image, such as a page or an error in JSON.
-                imageLog.error("reply image is not an image: \(src, privacy: .public) as \(String(describing: source), privacy: .public), \(data.count) bytes")
-                throw APIError.decoding
+            // A thumbnail of the size it shows at, not the original. The viewer fetches the original.
+            image = try await StoredImageCache.shared.load(
+                "md|\(source)", maxPixel: Self.pixels, onDisk: source.isStoredAsset
+            ) {
+                try await ImageFetch.data(
+                    source, assetLoader: assetLoader, apiLoader: apiLoader, width: Int(Self.pixels)
+                )
             }
-            StoredImageCache.store(decoded, for: key)
-            image = decoded
         } catch is CancellationError {
         } catch {
             if !Task.isCancelled {
-                if (error as? APIError) != .decoding {
+                if (error as? APIError) == .decoding {
+                    // Not an image, such as a page or an error in JSON.
+                    let described = String(describing: source)
+                    imageLog.error(
+                        "reply image is not an image: \(src, privacy: .public) as \(described, privacy: .public)"
+                    )
+                } else {
                     imageLog.error("reply image failed: \(src, privacy: .public) as \(String(describing: source), privacy: .public): \(String(describing: error), privacy: .public)")
                 }
                 failed = true

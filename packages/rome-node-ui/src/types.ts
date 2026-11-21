@@ -42,6 +42,13 @@ export interface NodeThisDevice {
    */
   openAuditLog?: () => void;
   onEnabledChange(enabled: boolean): void;
+  /**
+   * The app's real Gateway connection, which stays up while `state` is `disabled`. Absent from an
+   * app that predates the split, where `state` says it all.
+   */
+  connection?: "connected" | "connecting" | "offline";
+  /** Whether Rome may run programs on this computer. Absent from an app that predates it. */
+  computerUse?: boolean;
 }
 
 /** Why the host could not rename or remove a device. */

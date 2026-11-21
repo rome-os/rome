@@ -1,15 +1,17 @@
 import { Hono } from "hono";
-import { v4 as uuid } from "uuid";
 import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
-import { toRoutine } from "../../db/repositories/routines.js";
+import { publicRoutineRow, toRoutine } from "../../db/repositories/routines.js";
+import { ownerOfChat } from "../../webchat/owner.js";
+import { didYouMean } from "../../apps/actions/registry.js";
+import { conciergeCallerOwner } from "./concierge.js";
 import {
   parseDateAndLocalTime,
   resolveOneOffDate,
 } from "../../routines/schedule-trigger-provider.js";
-import { resolveGuardianTimezone } from "../../routines/guardian-timezone.js";
+import { resolveGuardianTimezone } from "../../instance/timezone.js";
 import type { ApiDeps } from "../deps.js";
-import { validateActionArgs } from "../../actions/validate-action-args.js";
+import { validateActionArgs } from "../../apps/actions/validate-action-args.js";
 import { CHAT_ROUTINE_KEY_PREFIX } from "../../routines/chat-routine-key.js";
 import type { Trigger } from "../../routines/types.js";
 
@@ -23,13 +25,13 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** Error when a routine names an action that isn't registered. Names the remedy
  * so the agent routes to building a workflow instead of guessing again. Kept in
  * sync with the create_routine action's copy (core can't import from rome_apps). */
-function unknownActionError(actionName: string): string {
+function unknownActionError(actionName: string, hint: string): string {
   return (
-    `actionName "${actionName}" is not a registered action. ` +
+    `actionName "${actionName}" is not a registered action${hint} ` +
     `To run multi-step work that doesn't exist yet, build it first with the ` +
     `workflow_creation skill (it registers a "<appId>_run" action), then bind the ` +
     `routine to that action. For one-shot judgement or a notification, use the ` +
-    `built-in "summon" or "send_message".`
+    `built-in "system:summon" or "system:send_message".`
   );
 }
 
@@ -113,7 +115,7 @@ function datedOneOffError(trigger: {
 
 /** Whether a dated one-off can still fire. A stored tzid Intl rejects makes the
  * parse throw rather than return NaN, so that counts as unparseable too. */
-function datedOneOffState(trigger: {
+export function datedOneOffState(trigger: {
   date?: string;
   localTime: string;
   tzid: string;
@@ -139,13 +141,15 @@ interface CreateRoutineBody {
    * routine card sends the key minted with it, so retries and reloads find the
    * routine it created instead of matching by name. */
   key?: string;
+  /** The chat whose card turns it on: the caller's own, where it was made. */
+  chatId?: string;
 }
 
 const MAX_ROUTINE_KEY_LENGTH = 200;
-// Keys this route may assign start with CHAT_ROUTINE_KEY_PREFIX. Apps key their
-// own managed routines (briefing uses `briefing-*`) through create_routine;
-// keeping this route to its own prefix stops a chat card from claiming, or
-// being answered with, one of those.
+// Keys this route may assign start with CHAT_ROUTINE_KEY_PREFIX. Apps may key
+// their own managed routines through create_routine; keeping this route to its
+// own prefix stops a chat card from claiming, or being answered with, one of
+// those.
 
 interface UpdateRoutineBody {
   name?: string;
@@ -239,9 +243,9 @@ export function routinesRoutes(deps: ApiDeps): Hono {
   // Reject binding a routine to an action that isn't registered, so POST can't
   // persist a routine that errors on every fire.
   const unregisteredActionError = (actionName: string): string | null =>
-    !deps.actionRegistry.has(actionName) ? unknownActionError(actionName) : null;
-  const canonicalActionName = (actionName: string): string =>
-    deps.actionRegistry.getCanonicalName(actionName) ?? actionName;
+    !deps.actionRegistry.has(actionName)
+      ? unknownActionError(actionName, didYouMean(deps.actionRegistry, actionName) || ".")
+      : null;
 
   // Enriches each routine with its latest run so the dashboard can render the
   // status badge (Active / Running / Failed) and the "last run failed" line
@@ -252,7 +256,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     const enriched = rows.map((row) => {
       const lr = latest.get(row.id);
       return {
-        ...row,
+        ...publicRoutineRow(row),
         lastRun: lr ? { status: lr.status, firedAt: lr.firedAt } : null,
       };
     });
@@ -310,7 +314,17 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     if (body.args && RESERVED_ARG_KEY in body.args) {
       return c.json({ error: `args may not contain reserved key "${RESERVED_ARG_KEY}"` }, 400);
     }
-    const resolvedActionName = canonicalActionName(body.actionName);
+    if (body.chatId !== undefined) {
+      const owner = await conciergeCallerOwner(deps.dashboardAccessState);
+      const chatOwner =
+        typeof body.chatId === "string" && body.chatId
+          ? await (deps.concierge
+              ? deps.concierge.ownerOfChat(body.chatId)
+              : ownerOfChat((id) => deps.webchatRepo.getSession(id), body.chatId))
+          : null;
+      if (!owner || chatOwner !== owner) return c.json({ error: "No such chat" }, 404);
+    }
+    const resolvedActionName = body.actionName;
     const argsError = validateActionArgs(
       resolvedActionName,
       body.args ?? {},
@@ -334,22 +348,20 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       }
     }
 
-    const now = new Date();
-    const record = {
-      id: uuid(),
-      key: body.key ?? null,
-      name: body.name ?? "",
-      enabled: body.enabled ?? true,
-      trigger: body.trigger as unknown,
-      actionName: resolvedActionName,
-      args: (body.args ?? {}) as unknown,
-      createdAt: now,
-      lastFiredAt: null,
-      nextRunAt: null,
-    };
-
+    let id: string;
     try {
-      await deps.db.insert(routines).values(record);
+      // The one creation path, so the routine works for the right chat
+      // (routineChatOf) and acts for the person turning it on, from Settings
+      // or a chat's card.
+      id = await deps.routinesRepo.create({
+        name: body.name ?? "",
+        ...(body.key !== undefined ? { key: body.key } : {}),
+        enabled: body.enabled ?? true,
+        trigger: body.trigger,
+        actionName: resolvedActionName,
+        args: body.args ?? {},
+        ...(body.chatId ? { madeIn: body.chatId } : {}),
+      });
     } catch (err) {
       // Lost a race with a concurrent create of the same key: the UNIQUE
       // constraint is the backstop for the check above.
@@ -357,13 +369,13 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       if (existingId) return keyTaken(existingId);
       throw err;
     }
-    const [inserted] = await deps.db.select().from(routines).where(eq(routines.id, record.id));
+    const [inserted] = await deps.db.select().from(routines).where(eq(routines.id, id));
 
     if (inserted?.enabled) {
       await deps.routineEngine.activate(toRoutine(inserted));
     }
 
-    return c.json(inserted, 201);
+    return c.json(inserted ? publicRoutineRow(inserted) : inserted, 201);
   });
 
   // The dashboard only toggles and renames, so PATCH accepts just those two
@@ -431,7 +443,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       }
     }
 
-    return c.json(updated);
+    return c.json(updated ? publicRoutineRow(updated) : updated);
   });
 
   // This is the guardian/dashboard path, so it never authorizes a managed

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { ProviderOperationError } from "./errors.js";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import type {
   Action,
@@ -12,15 +13,16 @@ import type {
   AppConnectionsCapability,
 } from "@rome-os/app-runtime";
 import { AppConnectionError } from "@rome-os/app-runtime";
-import type { ActionEngine, ActionRunContext } from "../actions/engine.js";
-import type { ActionRegistryImpl } from "../actions/registry.js";
-import { actionExecutionContext } from "../actions/context.js";
+import type { ActionEngine, ActionRunContext } from "../apps/actions/engine.js";
+import type { ActionRegistryImpl } from "../apps/actions/registry.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
 import type { CatalogEvent } from "../apps/state.js";
+import type { AppConnectionsContextFactory } from "../apps/app-connections-port.js";
 import type {
   AppConnectionAccessRecord,
   AppConnectionAccessRepository,
   AppConnectionInvocationRecord,
-} from "../db/repositories/app-connection-access.js";
+} from "./app-connection-access.js";
 import type { GrantValue } from "./grant.js";
 import type { ConnectionRegistry } from "./registry.js";
 import type { Connection, OperationDescriptor, ProfileDisplay } from "./types.js";
@@ -79,16 +81,13 @@ export interface AppConnectionBrokerPort {
   ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>>;
 }
 
-export interface AppConnectionsContextFactory {
-  forApp(appId: string): AppConnectionsCapability;
-}
-
 function failure(
   code: AppConnectionErrorBody["code"],
   message: string,
   retryable = false,
+  reason?: string,
 ): AppConnectionBrokerResult<never> {
-  return { ok: false, error: { code, message, retryable } };
+  return { ok: false, error: { code, message, retryable, ...(reason ? { reason } : {}) } };
 }
 
 function brokerUnavailable(): AppConnectionBrokerResult<never> {
@@ -157,29 +156,6 @@ export class BoundAppConnections implements AppConnectionsCapability {
     requestId?: string;
   }): Promise<AppConnectionInvokeResult<T>> {
     return expose(await this.broker.invoke(this.appId, input)) as AppConnectionInvokeResult<T>;
-  }
-}
-
-export class DeniedAppConnections implements AppConnectionsCapability {
-  private denied(): never {
-    throw new AppConnectionError({
-      code: "access_denied",
-      message: "This App has no connection access.",
-      retryable: false,
-    });
-  }
-
-  async list(): Promise<AppConnectionPage> {
-    return this.denied();
-  }
-  async describe(): Promise<AppConnectionDescription> {
-    return this.denied();
-  }
-  async operations(): Promise<AppConnectionOperationsPage> {
-    return this.denied();
-  }
-  async invoke<T = unknown>(): Promise<AppConnectionInvokeResult<T>> {
-    return this.denied();
   }
 }
 
@@ -678,6 +654,17 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         input: invocation.input,
         ...(expectedEffect === "write" ? { requestId: invocation.id } : {}),
       });
+      if (expectedEffect === "read-only") {
+        const currentGrant = await this.registry.grantOf(connection.id);
+        if (
+          !currentGrant ||
+          currentGrant.state !== "authorized" ||
+          currentGrant.grantEpoch !== grant.grantEpoch ||
+          !this.access.isInvocationPolicyCurrent(invocation, "not_required")
+        ) {
+          return await fail("access_denied");
+        }
+      }
       const output = serializeBounded(data ?? null, MAX_OUTPUT_BYTES);
       if (!output.ok) {
         if (expectedEffect === "read-only") return await fail("provider_error");
@@ -695,7 +682,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
           ...(data === undefined || expectedApproval ? {} : { data: JSON.parse(output.value) }),
         },
       };
-    } catch {
+    } catch (error) {
       if (expectedEffect === "write") {
         await this.access.updateInvocation(
           invocation.id,
@@ -706,6 +693,16 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         await this.audit(invocation, executionApproval, "outcome_unknown");
         return { ok: true, value: { status: "outcome_unknown", executionId: invocation.id } };
       }
+      if (error instanceof ProviderOperationError) {
+        return await this.failInvocation(
+          invocation,
+          "provider_error",
+          error.retryable,
+          executionApproval,
+          messageFor("provider_error"),
+          error.reason,
+        );
+      }
       return await fail("provider_error", true);
     }
   }
@@ -715,10 +712,12 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     code: AppConnectionErrorBody["code"],
     retryable = false,
     approval: "not_required" | "approved" = "not_required",
+    message = messageFor(code),
+    reason?: string,
   ): Promise<AppConnectionBrokerResult<never>> {
     await this.access.updateInvocation(invocation.id, "failed", code, true);
     await this.audit(invocation, approval, code);
-    return failure(code, messageFor(code), retryable);
+    return failure(code, message, retryable, reason);
   }
 
   private async failUnclaimedInvocation(

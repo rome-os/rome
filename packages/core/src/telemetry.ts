@@ -1,3 +1,4 @@
+import { monitorEventLoopDelay, type IntervalHistogram } from "node:perf_hooks";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 // OTLP/HTTP with protobuf body — more compact than JSON and universally
@@ -29,7 +30,7 @@ import {
   type ChannelInbound,
 } from "@rome-os/app-runtime";
 import { currentSessionId, runWithSession } from "./telemetry-context.js";
-import { resolveInstanceSlug, runningInsideDocker } from "./lib/runtime.js";
+import { resolveInstanceSlug, runningInsideDocker } from "./instance/runtime.js";
 import { createLogger } from "./logger.js";
 
 const SERVICE_NAME = "rome";
@@ -135,6 +136,32 @@ export function initTelemetry(): void {
   });
 
   sdk.start();
+}
+
+let eventLoopDelay: IntervalHistogram | undefined;
+
+/**
+ * Export the main process's worst event-loop delay in each metric export
+ * window as `rome.eventloop.delay.max`. A synchronous handler that holds the
+ * loop for seconds shows up here even when no span or log names it (#2144).
+ * One series, unlike the runtime-node instrumentation disabled above. Call
+ * once from main after `initTelemetry()`; a no-op when telemetry is off.
+ */
+export function startEventLoopDelayMetric(): void {
+  if (!sdk || eventLoopDelay) return;
+  const histogram = monitorEventLoopDelay();
+  histogram.enable();
+  eventLoopDelay = histogram;
+  apiMetrics
+    .getMeter(METER_NAME)
+    .createObservableGauge("rome.eventloop.delay.max", {
+      unit: "ms",
+      description: "Longest main-process event-loop delay since the previous export.",
+    })
+    .addCallback((result) => {
+      result.observe(histogram.max / 1e6);
+      histogram.reset();
+    });
 }
 
 export function getTracer(name: string): Tracer {
@@ -288,6 +315,7 @@ export function withInboundSpans<
 }
 
 export async function shutdown(): Promise<void> {
+  eventLoopDelay?.disable();
   if (sdk) {
     await sdk.shutdown();
   }
@@ -431,6 +459,52 @@ export const modelTurnTtftMetric = lazyDurationHistogram(
   "Time from turn start to the first streamed event (time-to-first-token), " +
     "labelled by model id and is_subagent.",
 );
+
+export const conciergeTurnAckMetric = lazyDurationHistogram(
+  "rome.concierge.turn.ack",
+  "Concierge turn: from the owner's send (or Rome's start of the turn) to the " +
+    "first sign the owner sees: 👀 working, a reaction or a message.",
+);
+
+export const conciergeTurnFirstSayMetric = lazyDurationHistogram(
+  "rome.concierge.turn.first_say",
+  "Concierge turn: from the owner's send (or Rome's start of the turn) to the " +
+    "first message the turn said landing in the chat.",
+);
+
+export const conciergeTurnDurationMetric = lazyDurationHistogram(
+  "rome.concierge.turn.duration",
+  "Concierge turn: from the owner's send (or Rome's start of the turn) to its end.",
+);
+
+/** What a timed Concierge turn reports to the metrics (concierge/turn-timing.ts). */
+export interface ConciergeTurnMetricFacts {
+  trigger: string;
+  model: string | null;
+  effort: string | null;
+  session: string | null;
+  ackMs: number | null;
+  firstSayMs: number | null;
+  durationMs: number;
+}
+
+/**
+ * Records a Concierge turn's timings, labelled by trigger (guardian or
+ * system), model, effort and whether its session was warm or cold.
+ */
+export function recordConciergeTurnMetrics(facts: ConciergeTurnMetricFacts): void {
+  const attributes: Attributes = {
+    trigger: facts.trigger,
+    "model.id": facts.model ?? "unknown",
+    effort: facts.effort ?? "default",
+    session: facts.session ?? "unknown",
+  };
+  if (facts.ackMs !== null) conciergeTurnAckMetric().record(facts.ackMs, attributes);
+  if (facts.firstSayMs !== null) {
+    conciergeTurnFirstSayMetric().record(facts.firstSayMs, attributes);
+  }
+  conciergeTurnDurationMetric().record(facts.durationMs, attributes);
+}
 
 export const modelPromptCacheMetric = lazyCounter(
   "rome.model.prompt.cache",

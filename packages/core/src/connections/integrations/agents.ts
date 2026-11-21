@@ -13,7 +13,8 @@
 // agent id, so a rename or a reused name never moves a conversation or a
 // link. Cloud refuses a send to an agent no link allows as `not_reachable`.
 
-import { type ChannelMessage, type ChatId, SendRefused } from "@rome-os/app-runtime";
+import { type ChatId, SendRefused } from "@rome-os/app-runtime";
+import type * as connections from "../message.js";
 import { messageAsText, refuseUnshownParts } from "../outbound/send-refusals.js";
 import { z } from "zod";
 import {
@@ -24,7 +25,7 @@ import {
   createRomeCloudAgentsClient,
   isAgentId,
   isNotReachable,
-} from "../../lib/rome-cloud-agents.js";
+} from "./rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";
@@ -38,6 +39,7 @@ import type {
   TalkFeatures,
   Talker,
 } from "../types.js";
+import { SESSION_RESET_ONLY_CHAT_RULES } from "@rome/api-types/chat-rules";
 
 const log = createLogger("agents-channel");
 
@@ -70,11 +72,11 @@ export function reviveAgentsProfile(record: ProfileRecord): ProfileDisplay {
 }
 
 /**
- * An agent message as a channel message. The sender's agent id is the
+ * An agent message as a Connections message. The sender's agent id is the
  * conversation. Null for a sender Cloud has since removed, which nothing can
  * answer.
  */
-export function toAgentInboundMessage(message: AgentMessageEnvelope): ChannelMessage | null {
+export function toAgentInboundMessage(message: AgentMessageEnvelope): connections.Message | null {
   const sender = message.from.agentId;
   if (!sender) return null;
   const data =
@@ -82,17 +84,13 @@ export function toAgentInboundMessage(message: AgentMessageEnvelope): ChannelMes
       ? `\n\nData:\n\`\`\`json\n${JSON.stringify(message.data, null, 2)}\n\`\`\``
       : "";
   return {
-    channel: AGENTS_KIND,
-    direction: "inbound",
-    messageId: message.messageId,
-    chatId: sender as ChatId,
-    senderId: sender,
-    senderDisplayName: agentLabel(message.from),
-    text: `${message.text}${data}`,
-    attachments: [],
-    timestamp: new Date(message.sentAt),
+    id: message.messageId,
+    where: { chatId: sender as ChatId, kind: "direct" },
+    sender: { accountId: sender, name: agentLabel(message.from) },
+    content: { text: `${message.text}${data}`, attachments: [] },
+    receivedBy: message.to.agentId,
     ...(message.inReplyTo ? { replyTo: { messageId: message.inReplyTo } } : {}),
-    thread: { kind: "dm" },
+    saidAt: new Date(message.sentAt),
     raw: message,
   };
 }
@@ -174,7 +172,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
 
   async function loop(
     current: number,
-    deliver: (msg: ChannelMessage) => void,
+    deliver: (msg: connections.Message) => void,
     fault: (err: StreamFault) => void,
   ) {
     let failures = 0;
@@ -296,6 +294,9 @@ export function makeAgentsDescriptor(
     // The agent Rome Cloud assigned this Rome.
     accountIdOf: (record) => (typeof record.agentId === "string" && record.agentId) || null,
     grant: "cloud",
+    // Today's behaviour, stated: chats wake on every message the platform
+    // delivers, and only the session reset is the guardian's to set.
+    chatRules: SESSION_RESET_ONLY_CHAT_RULES,
     auth: agentsScheme(client),
     capabilities: {
       talker: {

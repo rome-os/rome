@@ -33,6 +33,7 @@ function mount(app: Hono, path: string, deps: ApiDeps) {
       connectionId: c.req.query("connectionId"),
       query: c.req.query("query"),
       cursor: c.req.query("cursor"),
+      changed: c.req.query("changed") === "true",
       limit: Number.isFinite(limit) ? limit : 50,
       availability: c.req.query("availability") as
         | "online"

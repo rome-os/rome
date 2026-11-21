@@ -78,6 +78,29 @@ All memory changes are tracked in git:
 
 ## File Formats
 
+### Voice Terms (`memory/voice-terms.md`)
+
+An optional dictation term list lives in the profile's memory directory. Create it as:
+
+```markdown
+---
+send: off
+---
+# Voice terms
+## Mine
+- term
+## Learned
+- term
+## Never
+- term
+```
+
+Only `send: on` (also `true` or `yes`, case-insensitive) enables sending terms to the transcription provider with each dictation. Missing, unreadable or malformed files send nothing. The provider bills context as input text tokens. Rome Cloud sees neither the terms nor the audio.
+
+`Mine` holds guardian-written terms. `Learned` holds automatically maintained terms. `Never` excludes terms from both sections, case-insensitively. Use `- ` or `* ` bullets. Mine comes first, with duplicates removed. Do not put secrets or private information in the list.
+
+Rome keeps single-slash terms such as `CI/CD` and `I/O`. It filters path prefixes (`/`, `\`, `./`, `../`, `~/`, `~\`, or a Windows drive) and terms with two or more separators. It also filters email addresses, URLs, items with six or more digits, long token-like strings, and items over 40 characters. It sends at most 150 terms and 3,000 characters, stopping before the next term exceeds either cap. These filters are defense in depth, not a guarantee that a term is safe to share. The file is read once per listening session and does not belong in `MEMORY.md`.
+
 ### Topic File (`memory/topics/<topic>.md`)
 
 One file per subject the guardian cares about. Holds the full, durable knowledge of that topic; `MEMORY.md` keeps only a one-line pointer to it. See `topics/README.md` for conventions and the recommended format. The `<topic>` is a URL-safe slug (e.g., `health.md`).

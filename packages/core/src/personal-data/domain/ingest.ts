@@ -1,0 +1,333 @@
+// The ingest contract: the envelope a device sends and the checks each item
+// passes. Contract: docs/personal-data.md#ingest.
+
+import { createHash } from "node:crypto";
+import { z } from "zod";
+import { isValidTimeZone } from "../../lib/timezone.js";
+import {
+  type ContentField,
+  type Resolution,
+  type Shape,
+  type SourceSpec,
+  type TypeSpec,
+  typeSpec,
+} from "./source.js";
+
+/** At most this many upserts and deletes together in one request. */
+export const MAX_ITEMS_PER_BATCH = 2000;
+/** At most this many bytes of JSON in one request. */
+export const MAX_BATCH_BYTES = 1024 * 1024;
+/** At most this many bytes of JSON in one item. */
+export const MAX_ITEM_BYTES = 4096;
+/** At most this many sample or record rows per type and origin. Buckets are
+ *  bounded by time and have no cap. */
+export const MAX_POINTS_PER_TYPE = 50_000;
+
+const HOUR_MS = 3_600_000;
+const DAY_MS = 24 * HOUR_MS;
+/** The earliest reading the store takes, so a wrong clock cannot fill it with
+ *  impossible years. */
+const EARLIEST_AT = Date.UTC(2000, 0, 1);
+
+export type RejectCode =
+  | "unknown_type"
+  | "bad_unit"
+  | "bad_range"
+  | "type_cap"
+  | "too_large"
+  | "bad_item";
+
+export interface Rejected {
+  /** The item's index: upserts first, then deletes after the last upsert. */
+  index: number;
+  key?: string;
+  code: RejectCode;
+}
+
+const isoTime = z.string().refine((text) => !Number.isNaN(Date.parse(text)), "an ISO 8601 time");
+
+/** The envelope. A request that fails it is refused whole with 400. */
+export const ingestEnvelopeSchema = z.object({
+  version: z.literal(1),
+  source: z.string().min(1),
+  origin: z.object({
+    id: z.string().min(1).max(100),
+    name: z.string().max(100).optional(),
+    platform: z.string().max(40).optional(),
+    appVersion: z.string().max(40).optional(),
+  }),
+  // The device connection that reads the same data live, such as
+  // `<deviceId>:apple_health`. Null clears it; absent leaves it as it is.
+  connectionId: z.string().min(1).max(200).nullable().optional(),
+  batch: z.object({
+    id: z.string().min(1).max(100),
+    trigger: z.string().max(40).optional(),
+    index: z.number().int().nonnegative().optional(),
+    last: z.boolean().optional(),
+  }),
+  types: z
+    .array(z.object({ type: z.string().min(1), syncedThrough: isoTime.optional() }))
+    .max(200)
+    .default([]),
+  // A snapshot of a window, for a type the device sends whole each sync
+  // (`syncedBackDays`). Every batch of the run carries the same id, which
+  // stamps the rows it sends. The last batch adds `windows` and commits:
+  // each type's rows in its window that this snapshot did not send are
+  // deleted. A run cut off before it deletes nothing. Absent, a batch
+  // applies its upserts and deletes as they are.
+  snapshot: z
+    .object({
+      id: z.string().min(1).max(100),
+      // When the device read the window: an older snapshot never replaces a newer one.
+      readAt: isoTime,
+      windows: z
+        .array(z.object({ type: z.string().min(1), start: isoTime, end: isoTime }))
+        .max(200)
+        .optional(),
+    })
+    .optional(),
+  // Items are checked one by one, so one bad item does not refuse the batch.
+  upserts: z.array(z.unknown()).default([]),
+  deletes: z.array(z.unknown()).default([]),
+});
+
+export type IngestEnvelope = z.infer<typeof ingestEnvelopeSchema>;
+
+const itemSchema = z.object({
+  key: z.string().min(1).max(200),
+  type: z.string().min(1),
+  shape: z.enum(["bucket", "sample", "record", "entry"]),
+  resolution: z.enum(["hour", "day"]).nullish(),
+  start: isoTime,
+  end: isoTime,
+  tz: z.string().min(1).max(64),
+  value: z.number().finite().nullish(),
+  unit: z.string().nullish(),
+  fields: z.record(z.string().max(40), z.number().finite()).nullish(),
+  metadata: z.record(z.string(), z.unknown()).nullish(),
+  // An entry's words, such as an event's title, kept as its type declares.
+  content: z.record(z.string(), z.unknown()).nullish(),
+});
+
+const deleteSchema = z.object({ key: z.string().min(1).max(200) });
+
+/** A reading as the store keeps it. */
+export interface PointInput {
+  key: string;
+  type: string;
+  shape: Shape;
+  resolution: Resolution | null;
+  startAt: number;
+  endAt: number;
+  tz: string;
+  value: number | null;
+  unit: string | null;
+  fields: Record<string, number> | null;
+  /** A reading's allowed metadata, or an entry's content. */
+  metadata: Record<string, unknown> | null;
+  contentHash: string;
+}
+
+export type ItemCheck<T> = { ok: true; item: T } | { ok: false; code: RejectCode; key?: string };
+
+/** Checks one upsert against the source's type table, or names why it is refused. */
+export function checkUpsert(source: SourceSpec, raw: unknown, now: number): ItemCheck<PointInput> {
+  if (JSON.stringify(raw ?? null).length > MAX_ITEM_BYTES) {
+    return { ok: false, code: "too_large", key: keyOf(raw) };
+  }
+  const parsed = itemSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, code: "bad_item", key: keyOf(raw) };
+  const item = parsed.data;
+  const reject = (code: RejectCode): ItemCheck<PointInput> => ({ ok: false, code, key: item.key });
+  const spec = typeSpec(source, item.type);
+  if (!spec) return reject("unknown_type");
+  if (item.shape !== spec.shape) return reject("bad_item");
+  const resolution = item.resolution ?? null;
+  if (spec.shape === "bucket") {
+    if (!resolution || !spec.resolutions?.includes(resolution)) return reject("bad_item");
+  } else if (resolution !== null) {
+    return reject("bad_item");
+  }
+  if (!isValidTimeZone(item.tz)) return reject("bad_item");
+  const value = item.value ?? null;
+  const unit = item.unit ?? null;
+  if (spec.shape === "entry") {
+    // An entry has words, not a value: a number in it is refused.
+    if (value !== null || item.fields) return reject("bad_item");
+  }
+  if (value !== null && unit !== spec.unit) return reject("bad_unit");
+  if (unit !== null && unit !== spec.unit) return reject("bad_unit");
+  const startAt = Date.parse(item.start);
+  const endAt = Date.parse(item.end);
+  if (!rangeFits(spec, resolution, startAt, endAt, now)) return reject("bad_range");
+  const metadata =
+    spec.shape === "entry"
+      ? keptContent(spec, item.content ?? null)
+      : allowedMetadata(source, item.metadata ?? null);
+  const fields = item.fields && Object.keys(item.fields).length > 0 ? item.fields : null;
+  const stored = {
+    type: item.type,
+    shape: spec.shape,
+    resolution,
+    startAt,
+    endAt,
+    tz: item.tz,
+    value,
+    unit: spec.shape === "entry" ? null : value === null ? unit : spec.unit,
+    fields,
+    metadata,
+  };
+  // A bucket is named by what it covers, never by the sender's key, so two
+  // spellings of one hour cannot both be stored and both be added up.
+  const key = resolution ? bucketKey(item.type, resolution, startAt) : item.key;
+  return { ok: true, item: { key, ...stored, contentHash: contentHash(stored) } };
+}
+
+/** Checks one delete. A bucket's key is read the way an upsert stores it. */
+export function checkDelete(raw: unknown): ItemCheck<{ key: string }> {
+  const parsed = deleteSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, code: "bad_item", key: keyOf(raw) };
+  const bucket = BUCKET_KEY.exec(parsed.data.key);
+  const at = bucket ? Date.parse(bucket[3]) : Number.NaN;
+  return {
+    ok: true,
+    item: {
+      key:
+        bucket && !Number.isNaN(at)
+          ? bucketKey(bucket[1], bucket[2] as Resolution, at)
+          : parsed.data.key,
+    },
+  };
+}
+
+const BUCKET_KEY = /^([^:]+):(hour|day):(.+)$/;
+
+/** The key a bucket is stored under: its type, width and start. */
+export function bucketKey(type: string, resolution: Resolution, startAt: number): string {
+  return `${type}:${resolution}:${new Date(startAt).toISOString()}`;
+}
+
+function keyOf(raw: unknown): string | undefined {
+  if (raw && typeof raw === "object" && "key" in raw) {
+    const key = (raw as { key: unknown }).key;
+    if (typeof key === "string" && key.length <= 200) return key;
+  }
+  return undefined;
+}
+
+function rangeFits(
+  spec: TypeSpec,
+  resolution: Resolution | null,
+  startAt: number,
+  endAt: number,
+  now: number,
+): boolean {
+  const shape: Shape = spec.shape;
+  const ahead = (spec.aheadDays ?? 1) * DAY_MS;
+  if (startAt < EARLIEST_AT || endAt > now + ahead || endAt < startAt) return false;
+  const length = endAt - startAt;
+  // An entry may last long, as a holiday on the calendar does.
+  if (shape === "entry") return length <= MAX_ENTRY_DAYS * DAY_MS;
+  if (resolution === "hour") return length === HOUR_MS;
+  // A local day lasts 23 to 25 hours across a daylight saving change.
+  if (resolution === "day") return length >= 22 * HOUR_MS && length <= 26 * HOUR_MS;
+  if (shape === "record") return length > 0 && length <= 7 * DAY_MS;
+  return length <= 7 * DAY_MS;
+}
+
+/** The longest entry, such as a holiday on the calendar. */
+const MAX_ENTRY_DAYS = 366;
+/** The most items a `texts` content field keeps. */
+const MAX_TEXTS = 30;
+const DEFAULT_TEXT_LENGTH = 200;
+
+/** An entry's content as its type declares it: other fields and wrong kinds are dropped. */
+function keptContent(
+  spec: TypeSpec,
+  content: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!content || !spec.content) return null;
+  const kept: Record<string, unknown> = {};
+  for (const [name, field] of Object.entries(spec.content)) {
+    const value = keptField(field, content[name]);
+    if (value !== undefined) kept[name] = value;
+  }
+  return Object.keys(kept).length > 0 ? kept : null;
+}
+
+function keptField(field: ContentField, value: unknown): unknown {
+  const max = field.maxLength ?? DEFAULT_TEXT_LENGTH;
+  switch (field.kind) {
+    case "text":
+      return typeof value === "string" && value.length > 0 ? value.slice(0, max) : undefined;
+    case "flag":
+      return typeof value === "boolean" ? value : undefined;
+    case "number":
+      return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+    case "texts": {
+      if (!Array.isArray(value)) return undefined;
+      const texts = value
+        .filter((item): item is string => typeof item === "string" && item.length > 0)
+        .slice(0, MAX_TEXTS)
+        .map((item) => item.slice(0, max));
+      return texts.length > 0 ? texts : undefined;
+    }
+  }
+}
+
+function allowedMetadata(
+  source: SourceSpec,
+  metadata: Record<string, unknown> | null,
+): Record<string, string> | null {
+  if (!metadata) return null;
+  const kept: Record<string, string> = {};
+  for (const key of source.metadataKeys) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.length > 0) kept[key] = value.slice(0, 100);
+  }
+  return Object.keys(kept).length > 0 ? kept : null;
+}
+
+function contentHash(stored: Record<string, unknown>): string {
+  return createHash("sha256").update(canonicalJson(stored)).digest("hex").slice(0, 32);
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+}
+
+/** A committed snapshot window, as the store keeps it. */
+export interface SnapshotWindow {
+  id: string;
+  startAt: number;
+  endAt: number;
+  readAt: number;
+}
+
+/**
+ * The window a snapshot commits for one type, or undefined when the type is
+ * not sent as a snapshot or the window is not one the device could have read:
+ * no further back or ahead of its read than the type declares, give or take
+ * two days for whole local days and a daylight-saving hour, so a skewed clock
+ * cannot clear the type's history.
+ */
+export function snapshotWindow(
+  spec: TypeSpec,
+  snapshot: { id: string; readAt: string },
+  window: { start: string; end: string },
+  receivedAt: number,
+): SnapshotWindow | undefined {
+  if (spec.syncedBackDays === undefined) return undefined;
+  const readAt = Date.parse(snapshot.readAt);
+  const startAt = Date.parse(window.start);
+  const endAt = Date.parse(window.end);
+  if (readAt > receivedAt + DAY_MS || startAt >= endAt) return undefined;
+  if (startAt < readAt - (spec.syncedBackDays + 2) * DAY_MS) return undefined;
+  if (endAt > readAt + ((spec.syncedAheadDays ?? 0) + 2) * DAY_MS) return undefined;
+  return { id: snapshot.id, startAt, endAt, readAt };
+}

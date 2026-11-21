@@ -172,11 +172,32 @@ function uninstallPortalEscapeGuard(): void {
   escapeObserver = null;
 }
 
+// Each app bundle carries its own copy of this SDK, so a bootstrap bound here
+// belongs to this app alone. The window global is shared by every app on the
+// page: cards from two apps in one chat would read each other's.
+let boundBootstrap: RomeAppBootstrap | null = null;
+
+/**
+ * Make `bootstrap` this app's own, read by `fetchAppApi` and every other call
+ * in place of the window global. The generated entry's `mount` and
+ * `mountComponent` bind the bootstrap they are handed, so an inline component
+ * reads its own app's. The latest mount of this app wins.
+ */
+export function bindBootstrap(bootstrap: RomeAppBootstrap): void {
+  boundBootstrap = bootstrap;
+}
+
+function currentBootstrap(): RomeAppBootstrap | undefined {
+  if (boundBootstrap) return boundBootstrap;
+  return typeof window === "undefined" ? undefined : window.__ROME_APP_BOOTSTRAP__;
+}
+
 function requireBootstrap(): RomeAppBootstrap {
-  if (typeof window === "undefined" || !window.__ROME_APP_BOOTSTRAP__) {
+  const bootstrap = currentBootstrap();
+  if (!bootstrap) {
     throw new Error("Rome app bootstrap is not available");
   }
-  return window.__ROME_APP_BOOTSTRAP__;
+  return bootstrap;
 }
 
 function normalizePath(path: string): string {
@@ -267,8 +288,7 @@ export function getBootstrap(): RomeAppBootstrap {
  * real host is the safe default.
  */
 export function isPreview(): boolean {
-  if (typeof window === "undefined" || !window.__ROME_APP_BOOTSTRAP__) return false;
-  return window.__ROME_APP_BOOTSTRAP__.shell.mode === "preview";
+  return currentBootstrap()?.shell.mode === "preview";
 }
 
 export function getCurrentAppPath(): string {
@@ -358,7 +378,7 @@ let globalParamsListenerInstalled = false;
 function ensureGlobalParamsInit(): void {
   if (globalParamsStore !== null) return;
   globalParamsStore =
-    typeof window !== "undefined" ? { ...(window.__ROME_APP_BOOTSTRAP__?.globalParams ?? {}) } : {};
+    typeof window !== "undefined" ? { ...(currentBootstrap()?.globalParams ?? {}) } : {};
   installGlobalParamsListener();
   postGlobalParamsReady();
 }
@@ -387,9 +407,8 @@ function applyGlobalParams(params: RomeAppGlobalParams): void {
   // key dropping out (e.g. the surface unbinding from a session) must clear it.
   const next: RomeAppGlobalParams = { ...params };
   globalParamsStore = next;
-  if (typeof window !== "undefined" && window.__ROME_APP_BOOTSTRAP__) {
-    window.__ROME_APP_BOOTSTRAP__.globalParams = next;
-  }
+  const bootstrap = currentBootstrap();
+  if (bootstrap) bootstrap.globalParams = next;
   for (const listener of globalParamsListeners) {
     try {
       listener(next);
@@ -424,8 +443,7 @@ export function getChatSessionId(): string | null {
  * so it is safe to read once during render.
  */
 export function getCaller(): RomeAppCaller | null {
-  if (typeof window === "undefined" || !window.__ROME_APP_BOOTSTRAP__) return null;
-  return window.__ROME_APP_BOOTSTRAP__.caller ?? null;
+  return currentBootstrap()?.caller ?? null;
 }
 
 /**

@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.3.13](https://github.com/rome-os/rome/compare/ui-v0.3.12...ui-v0.3.13) (2026-11-19)
+
+
+### Features
+
+* **app-runtime:** add a Markdown widget component ([#2316](https://github.com/rome-os/rome/issues/2316)) ([78f3467](https://github.com/rome-os/rome/commit/78f3467fab2793d11142b0c939c43cd43a02f34c))
+* **chats:** list what a chat's agent produced in an Outputs tab ([#2340](https://github.com/rome-os/rome/issues/2340)) ([62f0935](https://github.com/rome-os/rome/commit/62f0935023843368deea20c0f473444b354cd8cf))
+* **vault:** require a guardian PIN, checked by the signer, for grants and secret writes ([#2309](https://github.com/rome-os/rome/issues/2309)) ([fd79e29](https://github.com/rome-os/rome/commit/fd79e29e65dc1f909488cec0ebcccd8cf9785dab))
+
+## [0.3.12](https://github.com/rome-os/rome/compare/ui-v0.3.11...ui-v0.3.12) (2026-11-17)
+
+
+### Features
+
+* **ui:** add progressive blur to web chat chrome ([#2287](https://github.com/rome-os/rome/issues/2287)) ([f044239](https://github.com/rome-os/rome/commit/f044239cc9847cbe9191347d5ce38f4102007a12))
+* **ui:** leave Enter and Escape to an input method while it composes ([#2251](https://github.com/rome-os/rome/issues/2251)) ([4b73e01](https://github.com/rome-os/rome/commit/4b73e0121b9da641b60a0ab34537184916d0ac51))
+
+
+### Bug Fixes
+
+* **ui:** stop a long first cell from taking a Markdown table's width ([#2235](https://github.com/rome-os/rome/issues/2235)) ([1820656](https://github.com/rome-os/rome/commit/1820656c7068b12f8b897c62180a89741b4d8311))
+
+## [0.3.11](https://github.com/rome-os/rome/compare/ui-v0.3.10...ui-v0.3.11) (2026-11-15)
+
+
+### Features
+
+* **chat:** show pictures inline in chat replies with a download button ([#2015](https://github.com/rome-os/rome/issues/2015)) ([e481a8a](https://github.com/rome-os/rome/commit/e481a8a3f103d5874358e2f7fc1708fc5b612fa2))
+* **web:** open Settings as a dialog over the current page ([#2026](https://github.com/rome-os/rome/issues/2026)) ([033fa18](https://github.com/rome-os/rome/commit/033fa1839e7a72fab18937686fa9c6da528bca3b))
+
+## [0.3.10](https://github.com/rome-os/rome/compare/ui-v0.3.9...ui-v0.3.10) (2026-11-11)
+
+
+### Features
+
+* **concierge:** group a Concierge chat's messages into chat threads, and renew its session when its setup changes ([#1934](https://github.com/rome-os/rome/issues/1934)) ([7c88832](https://github.com/rome-os/rome/commit/7c88832c4e28a15552e0f12e71be201eb5248439))
+* **ui:** message typography, one share flow from every chat, and keep the request a superseded turn drops ([#1983](https://github.com/rome-os/rome/issues/1983)) ([a5a06bd](https://github.com/rome-os/rome/commit/a5a06bd9765f91ac82c0418a8f30bc2d8deefd43))
+* **web:** show whether Rome can use this computer next to the sidebar avatar ([#1911](https://github.com/rome-os/rome/issues/1911)) ([fea1ee0](https://github.com/rome-os/rome/commit/fea1ee0918d7d5ebbc6a2f36da9d824613680393))
+
+
+### Bug Fixes
+
+* **ui:** underline prose links at rest so they read as links on every theme and on touch ([#2006](https://github.com/rome-os/rome/issues/2006)) ([66265f0](https://github.com/rome-os/rome/commit/66265f0eecd66c45d3ac3ddfb1739f2a57899946))
+
 ## [0.3.9](https://github.com/rome-os/rome/compare/ui-v0.3.8...ui-v0.3.9) (2026-11-08)
 
 

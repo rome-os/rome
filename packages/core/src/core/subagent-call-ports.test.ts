@@ -1,21 +1,12 @@
 import { ROOT_CONTEXT } from "@opentelemetry/api";
-import { testTurnHandle } from "../test/turn-handle.js";
+import { AgentRecordedSessions } from "../sessions/agent-recorded-sessions.js";
+import { testReceipt, testTurnHandle } from "../test/turn-handle.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { createTestDb, type TestDb } from "../test/db.js";
-import type {
-  AgentSession,
-  AgentSessionManager,
-  AgentTurnInput,
-  SendTurnOptions,
-} from "../agent/index.js";
-import {
-  createSubagentCalls,
-  subagentRequest,
-  WebChatDashboardSessions,
-  type SubagentCalls,
-} from "../agent/index.js";
+import type { AgentSession, Sessions, AgentTurnInput, SendTurnOptions } from "../agent/index.js";
+import { createSubagentCalls, subagentRequest, type SubagentCalls } from "../agent/index.js";
 import { subagentLiveTurns, subagentSessions, subagentTurnLog } from "./subagent-call-ports.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -37,10 +28,11 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
   });
   const session: AgentSession = {
     selectModel: () => {},
+    release: () => {},
     key: { agentName: "researcher", channelThreadKey: `subagent:${sessionId}` },
     sessionId,
     status: "idle",
-    sendTurn(input, options) {
+    submit(input, options) {
       const index = turnIndex++;
       const turnId = turnIds[index];
       calls.push({ input, options });
@@ -65,17 +57,17 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
           };
         },
       };
-      return testTurnHandle({
-        turnId,
-        events,
-        turnContext: ROOT_CONTEXT,
-      });
+      return testReceipt(
+        testTurnHandle({
+          turnId,
+          events,
+          turnContext: ROOT_CONTEXT,
+        }),
+      );
     },
-    submitInput: rs.fn(),
-    runForkedTurn: rs.fn(),
-    subscribe: () => () => undefined,
+    fork: rs.fn(),
     onStatusChange: () => () => undefined,
-    interrupt,
+    stop: interrupt,
     close: rs.fn(async () => undefined),
   };
   return { session, releases, calls, interrupt };
@@ -98,20 +90,27 @@ describe("subagent calls through the run's ports", () => {
         parentToolUseId: string;
         parentAgentName: string;
         parentChannelThreadKey: string;
-        childManager: AgentSessionManager;
+        childManager: Sessions;
         workingDir: string;
+        actor?: { kind: string };
+        audience?: "private" | "shared";
       },
     ) {
       return calls.call(name, subagentRequest(input), {
         key: {
-          dashboardSessionId: context.parentSessionId,
+          parentSessionId: context.parentAgentSessionId,
           turnId: context.parentTurnId,
           toolUseId: context.parentToolUseId,
         },
+        chat: context.parentSessionId,
         agentName: context.parentAgentName,
         agentSessionId: context.parentAgentSessionId,
-        sessions: subagentSessions(context.childManager, context.parentChannelThreadKey, repo),
+        sessions: subagentSessions(context.childManager, context.parentChannelThreadKey, repo, {
+          audience: "private",
+        }),
         at: { workingDir: context.workingDir },
+        ...(context.actor ? { actor: context.actor } : {}),
+        ...(context.audience ? { audience: context.audience } : {}),
       });
     },
   });
@@ -120,7 +119,7 @@ describe("subagent calls through the run's ports", () => {
     db = createTestDb();
     repo = new ChatsWebChatRepository(db.db);
     calls = createSubagentCalls({
-      dashboard: new WebChatDashboardSessions(repo),
+      recorded: new AgentRecordedSessions(repo),
       turnLog: subagentTurnLog(repo),
       liveTurns: subagentLiveTurns(createAgentTurnStreamRegistry()),
     });
@@ -144,17 +143,65 @@ describe("subagent calls through the run's ports", () => {
 
   afterEach(() => db.close());
 
+  it("runs a guardian-delegated subagent's turn as the guardian", async () => {
+    const child = fakeChildSession("child-1", ["child-turn-1"]);
+    const childManager = {
+      open: rs.fn(async () => child.session),
+      find: rs.fn(),
+      shutdown: rs.fn(async () => undefined),
+    } as unknown as Sessions;
+    const guardian = { kind: "guardian", userId: "seat", via: "cookie" };
+    await createService().startSubagent(
+      "researcher",
+      { prompt: "one" },
+      {
+        parentSessionId: "parent-1",
+        parentAgentSessionId: "parent-runtime-1",
+        parentTurnId: "parent-turn-1",
+        parentToolUseId: "tool-1",
+        parentAgentName: "main",
+        parentChannelThreadKey: "webchat:parent-1",
+        childManager,
+        workingDir: "/tmp/project-a",
+        actor: guardian,
+      },
+    );
+    expect(child.calls[0].options?.actor).toBe(guardian);
+  });
+
+  it("opens a subagent of a private chat with its starter's place and turn audience", async () => {
+    const child = fakeChildSession("child-1", ["child-turn-1"]);
+    const open = rs.fn(async () => child.session);
+    const childManager = { open, find: rs.fn(), shutdown: rs.fn(async () => undefined) };
+    await createService().startSubagent(
+      "researcher",
+      { prompt: "steps today?" },
+      {
+        parentSessionId: "parent-1",
+        parentAgentSessionId: "parent-runtime-1",
+        parentTurnId: "parent-turn-1",
+        parentToolUseId: "tool-1",
+        parentAgentName: "main",
+        parentChannelThreadKey: "webchat:parent-1",
+        childManager: childManager as unknown as Sessions,
+        workingDir: "/tmp/project-a",
+        audience: "private",
+      },
+    );
+    expect((open.mock.calls[0] as unknown[])[1]).toMatchObject({ audience: "private" });
+    expect(child.calls[0].options?.parentAudience).toBe("private");
+  });
+
   it("returns stable IDs before completion, creates fresh sessions, and persists Child-owned text", async () => {
     const first = fakeChildSession("child-1", ["child-turn-1"]);
     const second = fakeChildSession("child-2", ["child-turn-2"]);
     const children = [first.session, second.session];
     const recordSessionInChat = rs.spyOn(repo, "recordSessionInChat");
     const childManager = {
-      acquire: rs.fn(async () => children.shift()!),
-      acquireBySessionId: rs.fn(),
-      peek: rs.fn(),
+      open: rs.fn(async () => children.shift()!),
+      find: rs.fn(),
       shutdown: rs.fn(async () => undefined),
-    } as unknown as AgentSessionManager;
+    } as unknown as Sessions;
     const service = createService();
     const parent = {
       parentSessionId: "parent-1",
@@ -167,7 +214,7 @@ describe("subagent calls through the run's ports", () => {
       workingDir: "/tmp/project-a",
     };
     const callKey = {
-      dashboardSessionId: "parent-1",
+      parentSessionId: "parent-runtime-1",
       turnId: "parent-turn-1",
       toolUseId: "tool-1",
     };
@@ -232,11 +279,10 @@ describe("subagent calls through the run's ports", () => {
     const child = fakeChildSession("child-unrecorded", ["child-turn"]);
     rs.spyOn(repo, "recordSessionInChat").mockRejectedValue(new Error("database is locked"));
     const childManager = {
-      acquire: rs.fn(async () => child.session),
-      acquireBySessionId: rs.fn(),
-      peek: rs.fn(),
+      open: rs.fn(async () => child.session),
+      find: rs.fn(),
       shutdown: rs.fn(async () => undefined),
-    } as unknown as AgentSessionManager;
+    } as unknown as Sessions;
     const service = createService();
 
     const execution = await service.startSubagent(
@@ -266,14 +312,13 @@ describe("subagent calls through the run's ports", () => {
     const child = fakeChildSession("child-orphan", ["child-turn"]);
     const childManager = {
       // The Parent goes while the Child's runtime opens.
-      acquire: rs.fn(async () => {
+      open: rs.fn(async () => {
         await repo.deleteSession("parent-1");
         return child.session;
       }),
-      acquireBySessionId: rs.fn(),
-      peek: rs.fn(),
+      find: rs.fn(),
       shutdown: rs.fn(async () => undefined),
-    } as unknown as AgentSessionManager;
+    } as unknown as Sessions;
     const service = createService();
     await expect(
       service.startSubagent(
@@ -309,11 +354,10 @@ describe("subagent calls through the run's ports", () => {
     const resumed = fakeChildSession("child-resume", ["resumed-turn"]);
     const recordSessionInChat = rs.spyOn(repo, "recordSessionInChat");
     const childManager = {
-      acquire: rs.fn(),
-      acquireBySessionId: rs.fn(async () => resumed.session),
-      peek: rs.fn(),
+      resume: rs.fn(async () => resumed.session),
+      find: rs.fn(),
       shutdown: rs.fn(async () => undefined),
-    } as unknown as AgentSessionManager;
+    } as unknown as Sessions;
     const service = createService();
     const context = {
       parentSessionId: "parent-1",
@@ -332,9 +376,8 @@ describe("subagent calls through the run's ports", () => {
       context,
     );
     expect(execution).toMatchObject({ sessionId: "child-resume", turnId: "resumed-turn" });
-    expect(childManager.acquireBySessionId).toHaveBeenCalledWith(
-      "child-resume",
-      "researcher",
+    expect(childManager.resume).toHaveBeenCalledWith(
+      { id: "child-resume", agent: "researcher" },
       expect.anything(),
     );
     expect(recordSessionInChat).toHaveBeenCalledWith("child-resume", "child-resume", {

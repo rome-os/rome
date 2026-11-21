@@ -18,6 +18,7 @@ import {
   MENU_WITHOUT_CONNECT,
   OWNER_URL,
   profileDom,
+  relationshipVariantsLayout,
 } from "./connect-test-fixtures.mjs";
 
 cli({
@@ -196,6 +197,42 @@ test("#1542: a profile without an owner header blocks instead of reporting conne
   );
   assert.deepEqual(page.visited, [OWNER_URL]);
   assert.deepEqual(page.profile.clicks, []);
+});
+
+test("a dry run reports a visible second-degree Connect despite hidden first-degree markup", async () => {
+  const page = fakePage(
+    relationshipVariantsLayout([
+      "<span hidden>1st degree connection</span>",
+      '<span class="dist-value">2nd</span>',
+    ]),
+  );
+  const [receipt] = await command.func(page, ownerArgs);
+  assert.deepEqual(receipt, {
+    status: "connectable_dry_run",
+    recipient: "Jane Doe",
+    reason: "verified",
+    profile_url: OWNER_URL,
+    note_chars: 0,
+    connectable: true,
+  });
+  assert.deepEqual(page.profile.clicks, []);
+});
+
+test("conflicting visible degree badges block a send before any click", async () => {
+  const page = fakePage(
+    relationshipVariantsLayout([
+      '<span class="dist-value">1st</span>',
+      '<span class="dist-value">2nd</span>',
+    ]),
+  );
+  await assert.rejects(
+    command.func(page, { ...ownerArgs, send: true }),
+    (error) =>
+      error instanceof CommandExecutionError && /connection_degree_conflict/.test(error.message),
+  );
+  assert.deepEqual(page.profile.clicks, []);
+  assert.equal(page.inviteRuns, 0);
+  assert.equal(page.verificationCalls, 0);
 });
 
 test("#1491: a dry run finds Connect in the More menu and clicks only More", async () => {

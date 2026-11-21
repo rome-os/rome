@@ -16,6 +16,12 @@ ROME_DISPLAY_NAME[config=Release] = Rome
 ROME_APS_ENVIRONMENT = development
 ROME_APS_ENVIRONMENT[config=Release] = production
 
+// The App Group the app shares its apps list with the widget through, and
+// the scheme of the widget's links: each build on one phone has its own.
+ROME_APP_GROUP = group.$(ROME_BUNDLE_IDENTIFIER)
+ROME_URL_SCHEME = rome-dev
+ROME_URL_SCHEME[config=Release] = rome
+
 // The version testers see. The build number is 1 for local builds; an
 // archive sets it to a UTC timestamp (see README.md, "Release to TestFlight").
 MARKETING_VERSION = 1.0.0
@@ -23,6 +29,11 @@ CURRENT_PROJECT_VERSION = 1
 
 // Rome Cloud signs the app in. Debug builds may point elsewhere from Local.xcconfig.
 ROME_CLOUD_ORIGIN = https:/$()/romeos.cc
+
+// Debug builds reach Rome's test hosts (*.romeos.dev) behind Cloudflare Access
+// with a service token, set in Local.xcconfig. Empty sends nothing.
+CF_ACCESS_CLIENT_ID =
+CF_ACCESS_CLIENT_SECRET =
 
 // Local signing for device builds: copy Local.xcconfig.example to Local.xcconfig.
 #include? "Local.xcconfig"

@@ -1,12 +1,13 @@
 // Chats, the adapters that feed it, and Agents' speakers, turn links and
 // replies over one database, built once so startup, the action worker and
 // tests hold the same objects wired the same way. Vocabulary:
-// docs/domains/chats.md.
+// docs/domains/chats.md and docs/domains/participation.md.
 
 import type { Account, Channel, ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
 import { ChatRepository } from "./chats/storage/chat-repository.js";
 import { MessageRepository } from "./chats/storage/message-repository.js";
+import { SenderLabels } from "./chats/sender-labels.js";
 import type { ChatRef } from "./chats/storage/place.js";
 import { ChatAdapters } from "./connections/chat-adapter.js";
 import { ChatAddresses } from "./connections/chat-addresses.js";
@@ -15,6 +16,7 @@ import { EMAIL_PLATFORM, emailChatAdapter } from "./connections/email-chat-adapt
 import { recordedSends } from "./connections/recorded-sends.js";
 import { SpeakerMessages } from "./connections/speaker-messages.js";
 import type { DrizzleDb } from "./db/index.js";
+import { DrizzlePeopleRepository } from "./people/infrastructure/drizzle-people-repository.js";
 import { SpeakerReplies } from "./sessions/speaker-replies.js";
 import { Speakers } from "./sessions/speakers.js";
 import { TurnLinks } from "./sessions/turn-links.js";
@@ -63,6 +65,7 @@ export function chatsWiring(db: DrizzleDb, deps: ChatsWiringDeps) {
   });
   const speakerMessages = new SpeakerMessages({ speakers, messages, adapters });
   const reads = new ChatReadModel(db, { messages, links });
+  const labels = new SenderLabels(new DrizzlePeopleRepository(db));
   return {
     chats,
     messages,
@@ -73,6 +76,8 @@ export function chatsWiring(db: DrizzleDb, deps: ChatsWiringDeps) {
     replies,
     speakerMessages,
     reads,
+    /** Who said each message an agent reads. */
+    labels,
     /** `channels` with each send recorded through Chats. */
     recordedSends<C extends Channel>(channels: readonly C[]): C[] {
       return recordedSends(channels, { adapters, chats, speakers, replies, messages });

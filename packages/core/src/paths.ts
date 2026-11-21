@@ -221,6 +221,19 @@ export function getProfileMemoryDir(): string {
   return join(getProfileDir(), "memory");
 }
 
+/**
+ * Immutable, randomly named copies of files shown in chat (`assets/store.ts`),
+ * served by `GET /api/assets/:name`.
+ */
+export function getAssetsDir(): string {
+  return join(getProfileDir(), "assets");
+}
+
+/** Release notes already read, one file per release version (instance/system-upgrade/release-notes.ts). */
+export function getReleaseNotesCacheDir(): string {
+  return join(getProfileDir(), "cache", "release-notes");
+}
+
 export function getDefaultSqlitePath(): string {
   return join(getProfileDir(), "rome.db");
 }

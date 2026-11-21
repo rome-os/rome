@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import { cloudBearer } from "../../lib/instance-identity.js";
-import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
+import { cloudBearer } from "../../instance/instance-identity.js";
+import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 
 // Dashboard/app-facing relay for Showcase preset cases (shareable agent-trace
 // "cases"). The Showcases app cannot reach Rome Cloud itself and must never hold

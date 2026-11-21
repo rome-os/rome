@@ -26,11 +26,8 @@
   ],
 
   // Host tools the runtime shells out to, installed in the container image or
-  // on the operator's machine rather than as npm packages. `expo` is the
-  // exception: packages/mobile depends on it, but .github/workflows/mobile-ci.yml
-  // invokes it at root scope, where that dependency is out of view. Removing it
-  // here on the strength of the mobile dependency reintroduces the finding.
-  "ignoreBinaries": ["composio", "rg", "lipo", "vale", "expo", "gofmt", "flock", "mkfifo"],
+  // on the operator's machine rather than as npm packages.
+  "ignoreBinaries": ["composio", "rg", "lipo", "vale", "gofmt", "flock", "mkfifo"],
 
   // Severity decides the exit code: `error` fails the command, while `warn`
   // prints and passes. The export rules are `warn` because a barrel that
@@ -61,7 +58,14 @@
 
   "workspaces": {
     ".": {
-      "entry": ["scripts/**/*.{mjs,mts,ts,js}", "lint/**/*.ts", "infra/**/*.test.mjs"],
+      // ios/Tools holds the iOS release scripts, run by hand before a
+      // TestFlight build and tested with node --test.
+      "entry": [
+        "scripts/**/*.{mjs,mts,ts,js}",
+        "lint/**/*.ts",
+        "infra/**/*.test.mjs",
+        "ios/Tools/**/*.mjs"
+      ],
       // Run by husky's pre-commit hook and by `rstest --coverage`, neither of
       // which is an import knip can follow.
       "ignoreDependencies": ["lint-staged", "@rstest/coverage-v8"]
@@ -71,13 +75,13 @@
       "ignoreBinaries": ["rome-node"],
       "entry": [
         // The action engine spawns these by resolved path, so no import
-        // reaches them. See packages/core/src/actions/engine.ts.
-        "src/actions/worker.ts",
-        "src/actions/worker-bootstrap.ts",
+        // reaches them. See packages/core/src/apps/actions/engine.ts.
+        "src/app-host/worker.ts",
+        "src/app-host/worker-bootstrap.ts",
         // oclif discovers commands by directory, named in package.json.
         "src/apps/cli/commands/**/*.ts",
         "src/bin/*.ts",
-        "src/apps/__fixtures__/**",
+        "src/api/routes/__fixtures__/**",
         "drizzle.*.config.ts"
       ]
     },
@@ -130,15 +134,6 @@
       // never imported.
       "ignoreDependencies": ["rome-desktop-base-web"]
     },
-    "packages/mobile": {
-      // The expo plugin evaluates app.config.js, which reads a native build
-      // variable that is absent outside an EAS build.
-      "expo": false,
-      "entry": ["app.config.js", "plugins/*.js", "src/**/*.test.{ts,tsx}"],
-      // app.json registers expo-notifications as an Expo native config plugin;
-      // no JavaScript import reaches that build-time registration.
-      "ignoreDependencies": ["expo-notifications"]
-    },
     "packages/lib": { "entry": ["src/**/*.test.ts"] },
     "packages/rome-node-core": {
       "entry": [
@@ -157,7 +152,7 @@
       "entry": ["src/**/*.test.ts", "src/entry.ts", "src/index.ts", "scripts/*.mjs"]
     },
     "packages/discord-cli": { "entry": ["src/**/*.test.ts", "src/entry.ts"] },
-    "packages/signer": { "entry": ["src/**/*.test.ts", "src/main.ts"] },
+    "packages/signer": { "entry": ["src/**/*.test.ts", "src/main.ts", "src/vault-entry.ts"] },
     "packages/app-web-sdk": {
       // bin/rome.js reaches the CLI through a dynamic import of the compiled
       // ../dist/cli/index.js, so nothing in the graph reaches src/cli unless

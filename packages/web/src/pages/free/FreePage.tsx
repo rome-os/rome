@@ -1,5 +1,17 @@
+import { MessageCircleWarning } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Navigate, useLocation } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import {
+  EmptyState,
+  EmptyStateAction,
+  EmptyStateIcon,
+  EmptyStateTitle,
+} from "@/components/ui/empty-state";
+import { useLastOrdinaryChatId, useStoredChatListMode } from "@/hooks/use-chat-list-mode";
+import { useChatSessionMayExist } from "@/hooks/use-chat-sessions";
 import { useConciergeChat } from "@/hooks/use-concierge";
+import { railChatHref } from "@/lib/chat-list-mode";
 import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { FreeGrid } from "./FreeGrid";
 
@@ -7,6 +19,43 @@ import { FreeGrid } from "./FreeGrid";
 export function MainChatRedirect() {
   const { search, state } = useLocation();
   return <Navigate to={{ pathname: MAIN_CHAT_PATH, search }} state={state} replace />;
+}
+
+/**
+ * The home address opens the chat the rail's Chat entry would: the main chat
+ * in Concierge mode, else, as on a device with no stored mode, the last
+ * ordinary chat. The chat list follows the open chat, so opening the main chat
+ * here would put a guardian who left the list in Chat mode back in Concierge
+ * mode.
+ */
+export function HomeRedirect() {
+  const mode = useStoredChatListMode();
+  const lastOrdinaryChatId = useLastOrdinaryChatId();
+  const lastOrdinaryChatExists = useChatSessionMayExist(lastOrdinaryChatId);
+  const to =
+    mode === "concierge"
+      ? MAIN_CHAT_PATH
+      : railChatHref("chat", lastOrdinaryChatId, lastOrdinaryChatExists);
+  return <Navigate to={to} replace />;
+}
+
+function MainChatUnavailable({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation("common");
+  return (
+    <div className="flex h-[var(--rome-mobile-content-height)] items-center justify-center p-6 md:h-[var(--rome-viewport-height)]">
+      <EmptyState role="alert">
+        <EmptyStateIcon>
+          <MessageCircleWarning aria-hidden />
+        </EmptyStateIcon>
+        <EmptyStateTitle>{t("recentChats.mainChatUnavailable")}</EmptyStateTitle>
+        <EmptyStateAction>
+          <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+            {t("recentChats.searchRetry")}
+          </Button>
+        </EmptyStateAction>
+      </EmptyState>
+    </div>
+  );
 }
 
 export default function FreePage() {
@@ -17,11 +66,16 @@ export default function FreePage() {
   const onMainChat = location.pathname === MAIN_CHAT_PATH;
   const main = useConciergeChat();
   if (onMainChat && main.loading) return null;
+  // `/message` without a main chat would open a blank chat, which is not the
+  // main chat the person asked for.
+  if (onMainChat && !main.chatId) return <MainChatUnavailable onRetry={main.retry} />;
 
   return (
     // Plain div: RomeShellLayout owns the `main` landmark. `hideSidebar` drops
-    // the sidebar but keeps the layout, so this is nested either way.
+    // the sidebar but keeps the layout, so this is nested either way. It fills
+    // the viewport and scrolls inside, so the document keeps no scrollbar track.
     <div
+      data-fills-viewport
       className={`flex min-h-0 flex-col overflow-hidden ${
         hideSidebar
           ? "h-[var(--rome-viewport-height)] pt-safe"

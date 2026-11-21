@@ -1,6 +1,6 @@
-# People: Guardian, Visitor, Persons, Accounts, Addresses, Links & Sending
+# People: Guardian, Visitor, Dashboard Admin, Persons, Accounts, Addresses, Links & Sending
 
-What person, guardian, bond level, account, link and stranger mean is in the [People](../domains/people.md) domain language. This page holds the engineering contracts behind those words, and the words of its own: visitor and address.
+What person, guardian, bond level, account, link and stranger mean is in the [People](../domains/people.md) domain language. This page holds the engineering contracts behind those words, and the words of its own: visitor, dashboard admin and address.
 
 ## Guardian
 
@@ -25,7 +25,8 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 
 **Contracts:**
 
-- A visitor reaches only the surfaces its email is allow-listed for: individual access-gated apps, or the full dashboard when the guardian keeps a dashboard allow-list. A visitor can never hold guardian privileges.
+- A visitor reaches only the surfaces its email is allow-listed for: individual access-gated apps, or the full dashboard as a [dashboard admin](#dashboard-admin). A visitor can never hold guardian privileges.
+- A dashboard admin sees an instance upgrade when one is offered and can start it, exactly as the guardian can, on the web and in the phone app. The upgrade restarts the instance for everyone on it.
 - The visitor's email is authoritative from the Rome Cloud sign-in exchange. Nothing the browser supplies can set or change it.
 - Every request re-checks allow-list membership, so removing an email revokes access immediately rather than at the next sign-in. The email comparison is case-insensitive.
 - Each sign-in keeps the visitor's email and Rome Cloud picture in `visitor_profiles`, replacing the last one. Chat reads it to show who sent a message, so it is display only and never authenticates anyone.
@@ -34,6 +35,21 @@ A visitor is the holder of a [Rome Cloud](rome-cloud.md) account that the guardi
 
 - **[Guardian](#guardian)** — the guardian owns the instance and holds full access. A visitor holds scoped access the guardian granted.
 - **[Person](#person)** — a person is someone the guardian knows, carrying a bond level. A visitor is an authenticated caller, and the two are orthogonal — a visitor need not be a tracked person.
+
+## Dashboard admin
+
+A dashboard admin is a [visitor](#visitor) whose email is on the dashboard allow-list. The guardian adds them in Settings, and they use the dashboard apart from the parts kept for the guardian.
+
+**Contracts:**
+
+- A dashboard admin never passes a guardian-only check, such as approvals, the vault or app-connection access. Which raw sockets admit them is in [access control](../architecture/access-control.md#request-flow).
+- A dashboard admin has their own Concierge while it is on. Memory and connections stay shared.
+- Removing the email ends dashboard admin access at the next request.
+
+**Not to be confused with:**
+
+- **[Guardian](#guardian)** — the guardian owns the instance. A dashboard admin's access is granted and revocable.
+- **An app visitor** — a visitor allow-listed for one app reaches only that app, never the dashboard.
 
 ## Person
 

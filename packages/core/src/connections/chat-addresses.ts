@@ -191,8 +191,8 @@ function joinChat(tx: DrizzleTx, from: number, into: number): void {
   `);
   // Where only the moving copy knows Rome said it, as when the other account
   // heard Rome's send as an echo, the kept copy takes the message as Rome
-  // said it, as a send that finds its echo on record does. A quote it takes
-  // names the moving chat's copy until quotes move below.
+  // said it, as a send that finds its echo on record does. A quote or a root it
+  // takes names the moving chat's copy until they move below.
   tx.run(sql`
     UPDATE chat_messages AS i
     SET sender_account_id = f.sender_account_id,
@@ -200,7 +200,8 @@ function joinChat(tx: DrizzleTx, from: number, into: number): void {
         sender_name = f.sender_name,
         text = f.text,
         parts = f.parts,
-        reply_to_message_id = coalesce(f.reply_to_message_id, i.reply_to_message_id)
+        reply_to_message_id = coalesce(f.reply_to_message_id, i.reply_to_message_id),
+        root_message_id = coalesce(f.root_message_id, i.root_message_id)
     FROM joined_chat_messages j JOIN chat_messages f ON f.id = j.from_id
     WHERE j.into_id = i.id AND i.sender_agent IS NULL AND f.sender_agent IS NOT NULL
   `);
@@ -215,8 +216,15 @@ function joinChat(tx: DrizzleTx, from: number, into: number): void {
       SELECT j.into_id FROM joined_chat_messages j WHERE j.from_id = reply_to_message_id)
     WHERE reply_to_message_id IN (SELECT from_id FROM joined_chat_messages)
   `);
+  // A thread rooted at the copy is rooted at the message that stays.
   tx.run(sql`
-    UPDATE concierge_tasks
+    UPDATE chat_messages
+    SET root_message_id = (
+      SELECT j.into_id FROM joined_chat_messages j WHERE j.from_id = root_message_id)
+    WHERE root_message_id IN (SELECT from_id FROM joined_chat_messages)
+  `);
+  tx.run(sql`
+    UPDATE task_chats
     SET source_message_id = (
       SELECT j.into_id FROM joined_chat_messages j WHERE j.from_id = source_message_id)
     WHERE source_message_id IN (SELECT from_id FROM joined_chat_messages)

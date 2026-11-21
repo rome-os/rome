@@ -1,12 +1,15 @@
 import { REPLY_TO_TEXT_MAX_LENGTH } from "@rome/api-types/chat";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatMessage } from "@/lib/chat-types";
+import type { ReplyTarget } from "./reply-draft";
 
 /** What a Reply button quotes: one message, or the answer of one agent turn. */
 export interface ReplySource {
   /** The message the server looks up. For an agent turn, its last row with text. */
   messageId: string;
   sessionId: string;
+  /** The turn the message belongs to, when known; Share picks it. */
+  turnId?: string | null;
   author: "guardian" | "agent" | "automated";
   name?: string;
   /** The text a whole-message reply quotes. */
@@ -25,16 +28,32 @@ export interface ReplySource {
 }
 
 /**
- * Quoted markdown as plain reading text for a chip or a quote block: heading,
- * list, and quote markers, emphasis, and code ticks are dropped and lines
- * run together. The stored quote keeps the source text.
+ * Quoted markdown as plain reading text for a chip or a quote block: a link
+ * reads as its text, and heading, list, and quote markers, emphasis, and code
+ * ticks are dropped and lines run together. The stored quote keeps the source
+ * text.
  */
 export function plainQuote(markdown: string): string {
   return markdown
+    .replace(/(?<!!)\[([^\]]*)\]\([^)\s]*\)/g, "$1")
     .replace(/^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|>\s?)/gm, "")
     .replace(/\*\*|__|`/g, "")
     .replace(/\s*\n\s*/g, " ")
     .trim();
+}
+
+/**
+ * The line of a quoted message a quote shows: its first line with text, as
+ * plain reading text. A fence line holds no words, so the first line inside it
+ * counts. The rest of the message is not quoted.
+ */
+export function quoteLine(markdown: string): string {
+  for (const line of markdown.split("\n")) {
+    if (!line.trim() || /^\s*(?:```|~~~)/.test(line)) continue;
+    const plain = plainQuote(line);
+    if (plain) return plain;
+  }
+  return "";
 }
 
 /**
@@ -102,4 +121,24 @@ export function lastTextMessage(messages: ChatMessage[]): ChatMessage | undefine
   return messages.findLast((message) =>
     parseMessageEntries(message).some((part) => part.type === "text" && part.content.trim()),
   );
+}
+
+/**
+ * The reply a Reply on `source` picks. A selection inside the message's own
+ * element (`source.scope`, else its `data-timeline-anchor`) becomes the
+ * quote; a message of several bubbles quotes the one bubble.
+ */
+export function replyTargetOf(source: ReplySource): ReplyTarget {
+  const selected = selectedQuote(
+    source.scope?.() ?? findMessageAnchor(document, source.messageId),
+    source.text,
+  );
+  const quote = selected ?? (source.ownBubble ? source.text : undefined);
+  return {
+    messageId: source.messageId,
+    author: source.author,
+    ...(source.name ? { name: source.name } : {}),
+    ...(quote ? { quote } : {}),
+    preview: replyPreview(quote ?? source.text),
+  };
 }

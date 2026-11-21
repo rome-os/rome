@@ -1,6 +1,7 @@
 import type { ChatMessageSender } from "@rome/api-types/chat";
 import type { TranscriptPart } from "@/lib/chat-types";
 import { appBuildingChat } from "./app-building-chat";
+import { CONCIERGE_RELEASE_DIGEST, CONCIERGE_TRIP_PLAN } from "./concierge-messages";
 import codingIcon from "../../../../rome_apps/coding/assets/icon.svg";
 
 export interface DemoChat {
@@ -202,6 +203,30 @@ Two completed reports are ready to explore:
 The report links to sources alongside the analysis. Follow those links when you want to check a number or read the underlying announcement.
 
 [Read the September 11 report](/apps/stock-daily/reports/report-2026-09-11)`,
+      },
+    ],
+  },
+  {
+    // The long answers the Concierge sends, in a common chat. Dated before
+    // the other chats, so it does not lead the chat list the e2e specs walk.
+    id: "mock-chat-long-answers",
+    name: "Kyoto trip and the week's releases",
+    project: "default",
+    turns: [
+      {
+        at: "2026-06-01T09:10:00.000Z",
+        prompt: "帮我排一下京都三天的行程",
+        reply: CONCIERGE_TRIP_PLAN,
+      },
+      {
+        at: "2026-06-01T09:30:00.000Z",
+        prompt: "What shipped this week?",
+        reply: CONCIERGE_RELEASE_DIGEST,
+      },
+      {
+        at: "2026-06-01T09:32:00.000Z",
+        prompt: "Thanks!",
+        reply: "Any time.",
       },
     ],
   },

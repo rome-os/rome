@@ -270,7 +270,7 @@ describe("publishPendingEvents", () => {
 
     expect(calls).toEqual([
       {
-        name: "publish_event",
+        name: "system:publish_event",
         args: {
           name: "provider:event:gmail.gmail_new_gmail_message",
           source: "connector",
@@ -532,7 +532,7 @@ describe("processGithubWebhook", () => {
     await publishPendingEvents(harness.repo, run, silentLog());
     expect(calls).toEqual([
       {
-        name: "publish_event",
+        name: "system:publish_event",
         args: {
           name: "provider:event:github.issues",
           source: "connector",

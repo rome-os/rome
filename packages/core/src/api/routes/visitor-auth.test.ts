@@ -2,12 +2,13 @@ import { createHash } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
 import { approvalsRoutes } from "./approvals.js";
-import { sessionActorMiddleware } from "../../lib/session-actor.js";
+import { sessionActorMiddleware } from "../../access/session-actor.js";
 import { visitorAuthRoutes, type VisitorAuthSeams } from "./visitor-auth.js";
-import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
-import { VISITOR_COOKIE_NAME, verifyVisitorSession } from "../../lib/auth.js";
-import { DashboardAccessState } from "../../lib/dashboard-access-state.js";
-import { PublicAccessState } from "../../lib/public-access-state.js";
+import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
+import { VISITOR_COOKIE_NAME, verifyVisitorSession } from "../../access/auth.js";
+import { DashboardAccessState } from "../../access/dashboard-access-state.js";
+import { Permissions } from "../../access/permissions.js";
+import { appPermissions } from "../../apps/app-permissions.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 
 const testDb = createTestDb();
@@ -73,7 +74,7 @@ async function startDashboardLogin(app: Hono): Promise<string> {
 }
 
 describe("/api/auth/visitor dashboard access", () => {
-  it("does not start dashboard visitor auth without a dashboard allow-list", async () => {
+  it("does not start dashboard admin auth without a dashboard allow-list", async () => {
     const app = await buildRoute(new DashboardAccessState());
     const res = await app.request("/api/auth/visitor/start", {
       method: "POST",
@@ -188,13 +189,15 @@ describe("/api/auth/visitor app access", () => {
   function publicAccess(config: {
     allowedApps?: string[];
     cloudEmailAccess?: Record<string, string[]>;
-  }): PublicAccessState {
-    const state = new PublicAccessState();
-    state.setConfig({
-      allowedApps: config.allowedApps ?? [],
-      cloudEmailAccess: config.cloudEmailAccess ?? {},
-    });
-    return state;
+  }): Permissions {
+    const permissions = new Permissions();
+    permissions.replace(
+      appPermissions({
+        allowedApps: config.allowedApps ?? [],
+        cloudEmailAccess: config.cloudEmailAccess ?? {},
+      }),
+    );
+    return permissions;
   }
 
   async function startAppLogin(app: Hono, appId: string): Promise<Response> {
@@ -210,7 +213,7 @@ describe("/api/auth/visitor app access", () => {
       new DashboardAccessState(),
       {},
       {
-        publicAccessState: publicAccess({}),
+        permissions: publicAccess({}),
       },
     );
 
@@ -224,7 +227,7 @@ describe("/api/auth/visitor app access", () => {
     const app = await buildRoute(
       new DashboardAccessState(),
       { fetchImpl: mockAccountSession("bob@example.com") },
-      { publicAccessState: publicAccess({ allowedApps: ["haiku-commission"] }) },
+      { permissions: publicAccess({ allowedApps: ["haiku-commission"] }) },
     );
 
     const startRes = await startAppLogin(app, "haiku-commission");
@@ -245,7 +248,7 @@ describe("/api/auth/visitor app access", () => {
       new DashboardAccessState(),
       {},
       {
-        publicAccessState: publicAccess({
+        permissions: publicAccess({
           cloudEmailAccess: { "haiku-commission": ["ada@example.com"] },
         }),
       },
@@ -339,7 +342,7 @@ describe("/api/auth/visitor/native", () => {
     expect(new Date(body.expires_at).getTime()).toBeGreaterThan(Date.now());
   });
 
-  it("returns a visitor session for an allow-listed visitor without setting a cookie", async () => {
+  it("returns a visitor session for a dashboard admin without setting a cookie", async () => {
     const cloud = recordingAccountSession("Ada@Example.com");
     const app = await buildRoute(allowList("ada@example.com"), { fetchImpl: cloud.fetchImpl });
     const { visitor_authorization_request: request } = await nativeStart(app);

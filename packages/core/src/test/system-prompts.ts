@@ -1,4 +1,5 @@
-import { createPromptSources, createSystemPrompts, type SystemPrompts } from "../agent/index.js";
+import { createSystemPrompts, type SystemPrompts } from "../agent/index.js";
+import { createPromptSources } from "../app-host/prompt-sources.js";
 
 type PromptSourceOptions = Parameters<typeof createPromptSources>[0];
 

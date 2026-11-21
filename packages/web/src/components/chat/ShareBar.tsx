@@ -16,13 +16,19 @@ import {
   type ShareSummary,
 } from "@/lib/chat-api";
 import { relativeTime } from "@/lib/routine-language";
-import { useApps } from "@/hooks/use-apps";
+import { useAppsList } from "@/hooks/use-apps";
 import { useFreeCells, type WidgetPlacement } from "@/pages/free/use-free-cells";
+import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 
 function shareableWidgets(placements: WidgetPlacement[]): WidgetPlacement[] {
   return [...placements]
     .filter((p) => p.type === "app" || p.type === "projects")
     .sort((a, b) => a.order - b.order);
+}
+
+/** The tiles a new link includes until its owner changes them: the apps. */
+function defaultIncluded(widgets: WidgetPlacement[]): Set<string> {
+  return new Set(widgets.filter((w) => w.type !== "projects").map((w) => w.id));
 }
 
 // The panel shown while picking turns to share. Turn selection itself lives on
@@ -32,27 +38,32 @@ function shareableWidgets(placements: WidgetPlacement[]): WidgetPlacement[] {
 export function ShareBar({
   sessionId,
   selectedTurnIds,
+  agentName,
   onExit,
 }: {
   sessionId: string;
   selectedTurnIds: string[];
+  /** The name the chat shows for its agent, which the shared page shows too. */
+  agentName?: string;
   onExit: () => void;
 }) {
   const { t } = useTranslation("chat");
   const { placements } = useFreeCells();
-  const { apps } = useApps();
+  const { apps } = useAppsList();
   const widgets = useMemo(() => shareableWidgets(placements), [placements]);
   const appById = useMemo(() => new Map((apps ?? []).map((a) => [a.id, a])), [apps]);
 
-  const [selectedWidgets, setSelectedWidgets] = useState<Set<string>>(
-    () => new Set(widgets.map((w) => w.id)),
+  // App tiles start included. A project tile starts left out: it exposes every
+  // file in the project, so its owner opts in.
+  const [selectedWidgets, setSelectedWidgets] = useState<Set<string>>(() =>
+    defaultIncluded(widgets),
   );
   const [shares, setShares] = useState<ShareSummary[]>([]);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   // Which URL was last copied, so each copy affordance shows its own check.
-  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  const { copiedText: copiedUrl, copy } = useCopyFeedback();
   // The session's project path — shown on the Projects row so the guardian sees
   // exactly which project a workspace share exposes (the backend scopes to it).
   const [projectPath, setProjectPath] = useState<string | null>(null);
@@ -71,7 +82,7 @@ export function ShareBar({
 
   // Keep widget toggles in sync if the layout changes while the panel is open.
   useEffect(() => {
-    setSelectedWidgets(new Set(widgets.map((w) => w.id)));
+    setSelectedWidgets(defaultIncluded(widgets));
   }, [widgets]);
 
   const refreshShares = useCallback(() => {
@@ -93,15 +104,12 @@ export function ShareBar({
     });
   }, []);
 
-  const handleCopy = useCallback((url: string) => {
-    void navigator.clipboard?.writeText(url).then(
-      () => {
-        setCopiedUrl(url);
-        setTimeout(() => setCopiedUrl((cur) => (cur === url ? null : cur)), 1500);
-      },
-      () => {},
-    );
-  }, []);
+  const handleCopy = useCallback(
+    (url: string) => {
+      void copy(url);
+    },
+    [copy],
+  );
 
   const handleCreate = useCallback(async () => {
     if (selectedTurnIds.length === 0) return;
@@ -109,7 +117,7 @@ export function ShareBar({
     setError(null);
     try {
       const layout = widgets.filter((w) => selectedWidgets.has(w.id));
-      const result = await createShare(sessionId, { turnIds: selectedTurnIds, layout });
+      const result = await createShare(sessionId, { turnIds: selectedTurnIds, layout, agentName });
       const url = `${window.location.origin}${result.url}`;
       setCreatedUrl(url);
       handleCopy(url);
@@ -123,7 +131,16 @@ export function ShareBar({
     } finally {
       setCreating(false);
     }
-  }, [sessionId, selectedTurnIds, selectedWidgets, widgets, handleCopy, refreshShares, t]);
+  }, [
+    sessionId,
+    selectedTurnIds,
+    agentName,
+    selectedWidgets,
+    widgets,
+    handleCopy,
+    refreshShares,
+    t,
+  ]);
 
   const handleRevoke = useCallback(
     async (id: string) => {

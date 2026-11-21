@@ -39,6 +39,29 @@ import Testing
         }
     }
 
+    /// A key the code looks up must be in the catalog, or the screen shows it
+    /// in English in every language. Scans the app's literal keys in the
+    /// calls that look them up; keys with interpolation are left to the build.
+    @Test func everyUsedKeyIsInTheCatalog() throws {
+        let strings = try #require(try Self.catalog()["strings"] as? [String: Any])
+        let sources = Self.catalogURL.deletingLastPathComponent()
+        let pattern = try NSRegularExpression(pattern: #"(?:\b(?:Text|Button|Label|Toggle)\(|String\(localized:|\.(?:accessibilityLabel|accessibilityHint|navigationTitle)\()\s*"((?:[^"\\]|\\.)*)""#)
+        let files = try #require(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+        var scanned = 0
+        for case let file as URL in files where file.pathExtension == "swift" {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                guard let range = Range(match.range(at: 1), in: text) else { continue }
+                let key = String(text[range])
+                scanned += 1
+                if key.contains("\\") { continue }
+                #expect(strings[key] != nil, "\(file.lastPathComponent) uses \"\(key)\", which is not in Localizable.xcstrings")
+            }
+        }
+        // The scan found the app's keys at all.
+        #expect(scanned > 100)
+    }
+
     @Test func builtAppCarriesChinese() throws {
         let path = try #require(Bundle.main.path(forResource: "zh-Hans", ofType: "lproj"))
         let chinese = try #require(Bundle(path: path))

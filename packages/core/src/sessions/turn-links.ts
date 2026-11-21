@@ -1,6 +1,6 @@
 // Agents' link from a session's turns to the chat messages they took, gave
 // and caught up on (`agent_turn_messages`). Vocabulary:
-// docs/domains/agents.md and docs/domains/chats.md#projection.
+// docs/domains/agents.md and docs/domains/participation.md#projection.
 //
 // Chats answers a message's id when it records or sends one, and the link is
 // written after, in a write of its own. A message carries no turn and a turn
@@ -8,7 +8,7 @@
 // Agents' catch-up and turn writes onto it.
 
 import { and, eq, isNull, min, sql } from "drizzle-orm";
-import type { AgentInputState } from "@rome-os/app-runtime";
+import type { Account, AgentInputState } from "@rome-os/app-runtime";
 import type { DrizzleDb } from "../db/index.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
@@ -139,6 +139,15 @@ export class TurnLinks {
         turn_id = coalesce(${turnId}, turn_id),
         input_state = coalesce(${inputState ?? null}, input_state)
       WHERE session_id = ${sessionId} AND message_id = ${messageId} AND role = 'prompt'
+    `);
+  }
+
+  /** Fails only a queued prompt, preserving any later dispatch or consumption state. */
+  failQueuedPrompt(sessionId: string, messageId: number): void {
+    this.db.run(sql`
+      UPDATE agent_turn_messages SET input_state = 'failed'
+      WHERE session_id = ${sessionId} AND message_id = ${messageId}
+        AND role = 'prompt' AND input_state = 'queued'
     `);
   }
 
@@ -324,7 +333,12 @@ export class TurnLinks {
 /** A message said where a session stands, as it would read it. */
 export interface ContextLine {
   readonly id: number;
+  /** What the message called its sender, as the platform showed it. */
   readonly senderName: string | null;
+  /** The account that said a message to Rome, which People can say who is
+   *  behind. Null on Rome's own messages and on one the record kept no
+   *  account for. */
+  readonly account: Account | null;
   readonly text: string;
   readonly at: Date;
 }
@@ -435,6 +449,7 @@ export function contextOf(message: SaidMessage): ContextLine {
   return {
     id: message.id,
     senderName: message.senderName ?? (message.direction === "fromRome" ? "Rome" : null),
+    account: (message.direction === "toRome" && message.saidBy?.account) || null,
     text: message.body.text,
     at: message.at,
   };

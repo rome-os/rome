@@ -1,4 +1,4 @@
-import { CONCIERGE_AGENT_ID } from "./privacy.js";
+import { CONCIERGE_AGENT_ID } from "../webchat/privacy.js";
 
 /**
  * The traits Rome gives agents beyond what their files declare, for the agent

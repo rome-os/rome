@@ -58,7 +58,8 @@ const config: ActionConfig = {
   reliability: "medium",
   sideEffects: "write",
 };
-const deps = { appContext: { db: {} } } as unknown as AppActionRuntimeDeps;
+const runAction = rs.fn();
+const deps = { appContext: { db: {}, runAction } } as unknown as AppActionRuntimeDeps;
 
 // A connected, unambiguous managed account — the happy resolution so each test
 // reaches the proxy response mapping under test.
@@ -73,6 +74,10 @@ const run = (input: Record<string, unknown>) => createAction(config, deps).execu
 
 beforeEach(() => {
   rs.clearAllMocks();
+  runAction.mockResolvedValue({
+    status: "error",
+    error: "gmail_not_connected: No Google connection.",
+  });
 });
 
 // path-only call: linear's default host (api.linear.app) is filled in by Rome, so
@@ -302,7 +307,7 @@ describe("connector_proxy response mapping", () => {
     expect(result.status).toBe("error");
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/settings/i);
-    expect(result.error).toContain('connector_connect({"toolkit":"github"})');
+    expect(result.error).toContain('connect_account tool with {"kind":"github"}');
     expect(result.error).not.toMatch(/can.t be connected from here/);
     expect(githubProxyCall).not.toHaveBeenCalled();
   });
@@ -543,7 +548,7 @@ describe("connector_proxy when Composio rejects the call", () => {
     });
     expect(result.status).toBe("error");
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
-    expect(result.error).toContain('connector_connect({"toolkit":"shopify"})');
+    expect(result.error).toContain('connect_account tool with {"kind":"shopify"}');
     expect(result.error).not.toMatch(/can.t be connected from here/);
     expect(shopifyProxyCall).not.toHaveBeenCalled();
   });
@@ -645,5 +650,58 @@ describe("connector_proxy when Composio rejects the call", () => {
     expect(result.status).toBe("error");
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/Access denied/);
+  });
+});
+
+describe("Rome-managed Gmail routing", () => {
+  const input = { toolkit: "gmail", path: "/gmail/v1/users/me/messages", method: "GET" };
+  it("uses Core without Composio sign-in or sharing the Google credential", async () => {
+    const managed = {
+      status: "ok",
+      data: { status: 200, data: { messages: [] }, connectionId: "google-1" },
+    };
+    runAction.mockResolvedValueOnce(managed);
+    expect(await run(input)).toEqual(managed);
+    expect(runAction).toHaveBeenCalledWith("core:gmail_read", {
+      path: input.path,
+      method: "GET",
+      host: "gmail.googleapis.com",
+    });
+    expect(loadConnectorClient).not.toHaveBeenCalled();
+  });
+  it("passes mutations and endpoint overrides to Core's fail-closed gate, never to Composio while connected", async () => {
+    runAction.mockResolvedValue({
+      status: "error",
+      error: "Only Gmail reads are allowed. Send with core:gmail_send.",
+    });
+    expect(
+      await run({
+        ...input,
+        method: "POST",
+        body: { raw: "mime" },
+        headers: { "X-HTTP-Method-Override": "DELETE" },
+      }),
+    ).toMatchObject({ status: "error" });
+    expect(runAction).toHaveBeenCalledWith(
+      "core:gmail_read",
+      expect.objectContaining({
+        method: "POST",
+        body: { raw: "mime" },
+        headers: { "X-HTTP-Method-Override": "DELETE" },
+      }),
+    );
+    expect(loadConnectorClient).not.toHaveBeenCalled();
+  });
+  it("does not silently switch mailboxes on a broken Google grant", async () => {
+    runAction.mockResolvedValueOnce({ status: "error", error: "Gmail connection unavailable." });
+    expect(await run(input)).toMatchObject({ status: "error" });
+    expect(loadConnectorClient).not.toHaveBeenCalled();
+  });
+  it("preserves the Composio path when no Google connection exists", async () => {
+    loadConnectorClient.mockResolvedValueOnce(
+      clientWithProxy(async () => ({ status: 200, data: { messages: [] }, headers: {} })),
+    );
+    expect(await run(input)).toMatchObject({ status: "ok" });
+    expect(loadConnectorClient).toHaveBeenCalled();
   });
 });

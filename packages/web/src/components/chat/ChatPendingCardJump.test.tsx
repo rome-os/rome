@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { ChatPendingCardJump } from "./ChatPendingCardJump";
 import { RoutineDraftCard } from "./entries/RoutineDraftCard";
 import { AiToolsCard } from "./entries/AiToolsCard";
+import { type Question, questionCardUi } from "@rome/api-types/question-card";
 import { QuestionCard } from "./entries/QuestionCard";
 import { createRoutine, listRoutineRefs } from "@/lib/chat-api";
 import i18n from "@/i18n";
@@ -14,6 +15,13 @@ rs.mock("@/lib/chat-api", () => ({
   createRoutine: rs.fn(),
   listRoutineRefs: rs.fn(),
 }));
+// The routine card reads run state through the Routines page's hooks.
+rs.mock("@/hooks/use-routines", () => ({
+  useRoutines: () => ({ routines: [], refetch: () => Promise.resolve() }),
+  useRunRoutineNow: () => () => Promise.resolve({ runId: "run", status: "success" }),
+}));
+
+const question: Question[] = [{ id: "q", question: "When?", type: "text" }];
 
 let cardTop = -200;
 const scrollTo = rs.fn();
@@ -24,7 +32,9 @@ function Harness({
   currentReplyMessageIds = new Set(["message"]),
   kind = "routine",
   aiResult,
+  scrollPaddingTop = 0,
 }: {
+  scrollPaddingTop?: number;
   questionResult?: Record<string, unknown>;
   currentReplyMessageIds?: ReadonlySet<string>;
   kind?: "routine" | "app" | "ai" | "approval" | "question";
@@ -35,7 +45,7 @@ function Harness({
   const [floor, setFloor] = useState<HTMLDivElement | null>(null);
   return (
     <MemoryRouter>
-      <div ref={setScroller} data-testid="scroller">
+      <div ref={setScroller} data-testid="scroller" style={{ scrollPaddingTop }}>
         <div ref={setContent}>
           <div data-chat-card-message="message">
             {kind === "approval" ? (
@@ -47,10 +57,12 @@ function Harness({
             ) : kind === "question" || questionResult ? (
               <QuestionCard
                 toolUseId="question"
-                props={{ questions: [{ id: "q", question: "When?", type: "text" }] }}
+                appId="core"
+                ui={questionCardUi(question)}
+                props={{ questions: question }}
                 result={questionResult?.resolved as Record<string, unknown> | undefined}
-                onSubmit={() => {}}
-                onDismiss={() => {}}
+                widgetId="m1"
+                onAnswer={() => {}}
               />
             ) : (
               <RoutineDraftCard
@@ -114,7 +126,8 @@ beforeEach(() => {
     configurable: true,
     value: (options: ScrollToOptions) => {
       scrollTo(options);
-      cardTop = 0;
+      cardTop =
+        Number.parseFloat(getComputedStyle(screen.getByTestId("scroller")).scrollPaddingTop) || 0;
       fireEvent.scroll(screen.getByTestId("scroller"));
     },
   });
@@ -221,6 +234,23 @@ describe("ChatPendingCardJump", () => {
     );
   });
 
+  it("keeps reminding about a card entirely behind the floating header", async () => {
+    cardTop = -68;
+    render(<Harness kind="app" scrollPaddingTop={48} />);
+
+    await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
+  });
+
+  it("lands a waiting card below the floating header", async () => {
+    render(<Harness scrollPaddingTop={48} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Needs you: jump to waiting card" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: -248, behavior: "instant" });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),
+    );
+  });
+
   it("finds a card covered by the sticky composer even inside the scroller's bounds", async () => {
     cardTop = 510;
     render(<Harness />);
@@ -248,7 +278,8 @@ describe("ChatPendingCardJump", () => {
       { id: "routine", key: "chat-routine:test", name: "Weekly update", enabled: true },
     ]);
     render(<Harness />);
-    await screen.findByText("On");
+    // The saved card is one row whose title links to the routine.
+    await screen.findByRole("link", { name: "Every Monday, remind me to send an update." });
     expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull();
   });
 

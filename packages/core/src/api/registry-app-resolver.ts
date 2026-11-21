@@ -3,7 +3,7 @@ import type {
   TraceSubagentStartEvent,
   ToolUseBlock,
 } from "@rome/api-types/trace-segments";
-import type { ActionRegistryImpl } from "../actions/registry.js";
+import type { ActionRegistryImpl } from "../apps/actions/registry.js";
 import type { AgentCatalog } from "../agent/index.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import { isResolvedApp, type ResolvedApp } from "../apps/state.js";

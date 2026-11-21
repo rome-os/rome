@@ -9,29 +9,29 @@ import {
   createGuardianSession,
   issueGuardianSession,
   shouldSecureCookie,
-} from "../../lib/auth.js";
+} from "../../access/auth.js";
 import {
   createCloudGuardian,
   getGuardianAuthState,
   setGuardianAccount,
-} from "../../lib/guardian-auth-state.js";
+} from "../../access/guardian-auth-state.js";
 import {
   backgroundNote,
   followRequest,
   readOnboardingSurvey,
   type OnboardingSurvey,
-} from "../../lib/cloud-onboarding.js";
+} from "../../instance/cloud-onboarding.js";
 import {
   applySetupDefaults,
   defaultGuardianName,
   writeGuardianBackground,
-} from "../../lib/guardian-profile.js";
+} from "../../people/guardian-profile/index.js";
 import {
   isInstanceLinked,
   isValidInstanceToken,
   persistInstanceToken,
-} from "../../lib/instance-identity.js";
-import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
+} from "../../instance/instance-identity.js";
+import { getInstanceOrigin, getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 import { beginDashboardVisitorFlow } from "./visitor-auth.js";
@@ -378,7 +378,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     if (oauthError || !code) {
       // `access_denied` is Rome Cloud's not-owner refusal: the human proved a
       // Rome Cloud identity, it just isn't the account that owns this box.
-      // The login UI has a single "Sign in with Rome Cloud" button, so this
+      // The login UI has a single "Continue with Rome Cloud" button, so this
       // callback owns the fork: when the guardian has invited emails to the
       // dashboard, re-route the browser into the visitor attestation flow
       // (they already hold a Rome Cloud session — one redirect hop, no second
@@ -399,7 +399,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         if (deps.dashboardAccessState.hasCloudEmailAccess()) {
           const authorizeUrl = beginDashboardVisitorFlow();
           if (authorizeUrl) {
-            log.info("cloud login not-owner; dispatching to dashboard visitor flow");
+            log.info("cloud login not-owner; dispatching to dashboard admin flow");
             return c.redirect(authorizeUrl);
           }
         }

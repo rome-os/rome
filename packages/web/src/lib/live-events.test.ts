@@ -297,4 +297,100 @@ describe("LiveEventsClient", () => {
     expect(error).toHaveBeenCalledWith("Invalid live events message");
     error.mockRestore();
   });
+
+  describe("hold", () => {
+    it("opens the socket with no topic and keeps it open, reconnecting, until released", () => {
+      const live = client();
+      const release = live.hold();
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      const socket = FakeWebSocket.latest();
+      socket.open();
+      rs.advanceTimersByTime(5_000);
+      expect(socket.readyState).toBe(FakeWebSocket.OPEN);
+
+      socket.close();
+      rs.advanceTimersByTime(100);
+      const next = FakeWebSocket.latest();
+      expect(next).not.toBe(socket);
+      next.open();
+
+      release();
+      release();
+      rs.advanceTimersByTime(1_000);
+      expect(next.readyState).toBe(FakeWebSocket.CLOSED);
+    });
+
+    it("keeps the socket after the last topic goes while held", () => {
+      const live = client();
+      const unsubscribe = live.subscribe("chat.status", listener());
+      const release = live.hold();
+      const socket = FakeWebSocket.latest();
+      socket.open();
+      unsubscribe();
+      rs.advanceTimersByTime(5_000);
+      expect(socket.readyState).toBe(FakeWebSocket.OPEN);
+      release();
+      rs.advanceTimersByTime(1_000);
+      expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+    });
+  });
+
+  describe("reportActivity", () => {
+    const active = { type: "activity", state: "active" };
+    const away = { type: "activity", state: "away" };
+
+    function openClient() {
+      let now = 0;
+      const live = new LiveEventsClient({
+        WebSocket: asWebSocket,
+        url: () => "ws://rome.test/ws/events",
+        reconnectDelayMs: () => 100,
+        activityIntervalMs: 30_000,
+        now: () => now,
+      });
+      live.subscribe("chat.status", listener());
+      const socket = FakeWebSocket.latest();
+      socket.open();
+      socket.sent.length = 0;
+      return { live, socket, advance: (ms: number) => (now += ms) };
+    }
+
+    it("sends active at most once every interval", () => {
+      const { live, socket, advance } = openClient();
+      live.reportActivity("active");
+      advance(29_999);
+      live.reportActivity("active");
+      expect(socket.sent).toEqual([active]);
+      advance(1);
+      live.reportActivity("active");
+      expect(socket.sent).toEqual([active, active]);
+    });
+
+    it("sends away at once after an active, and the next input is active again at once", () => {
+      const { live, socket, advance } = openClient();
+      live.reportActivity("away");
+      expect(socket.sent).toEqual([]);
+      live.reportActivity("active");
+      advance(1_000);
+      live.reportActivity("away");
+      live.reportActivity("away");
+      live.reportActivity("active");
+      expect(socket.sent).toEqual([active, away, active]);
+    });
+
+    it("sends nothing while the socket is down, and active at once on a new socket", () => {
+      const { live, socket } = openClient();
+      live.reportActivity("active");
+      socket.close();
+      live.reportActivity("active");
+      live.reportActivity("away");
+      rs.advanceTimersByTime(100);
+      const next = FakeWebSocket.latest();
+      next.open();
+      next.sent.length = 0;
+      live.reportActivity("active");
+      expect(socket.sent).toEqual([active]);
+      expect(next.sent).toEqual([active]);
+    });
+  });
 });

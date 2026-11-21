@@ -21,8 +21,36 @@ function Tooltip({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Root
   return <TooltipPrimitive.Root data-slot="tooltip" {...props} />;
 }
 
-function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
+/** Whether the browser would draw a focus ring on `element`: focus the keyboard moved there. */
+function showsFocus(element: Element): boolean {
+  try {
+    return element.matches(":focus-visible");
+  } catch {
+    // A browser that cannot tell keeps opening on every focus, as before.
+    return true;
+  }
+}
+
+/**
+ * Opens its tooltip on hover and on keyboard focus. Focus the page gives back
+ * on its own, such as to the button last clicked when the window comes to the
+ * front again, or focus a script moves, opens nothing: Radix's trigger skips
+ * its own focus handler once the event's default is prevented.
+ */
+function TooltipTrigger({
+  onFocus,
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
+  return (
+    <TooltipPrimitive.Trigger
+      data-slot="tooltip-trigger"
+      onFocus={(event) => {
+        onFocus?.(event);
+        if (!event.defaultPrevented && !showsFocus(event.currentTarget)) event.preventDefault();
+      }}
+      {...props}
+    />
+  );
 }
 
 function TooltipContent({
@@ -42,8 +70,10 @@ function TooltipContent({
         )}
         {...props}
       >
-        {children}
-        <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 bg-foreground fill-foreground" />
+        {/* The arrow reaches ~9px into a one-line tooltip. It comes first and the
+            content is positioned after it, so the text paints over the arrow. */}
+        <TooltipPrimitive.Arrow className="size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 bg-foreground fill-foreground" />
+        <span className="relative inline-flex items-center gap-2">{children}</span>
       </TooltipPrimitive.Content>
     </AutoPortal>
   );

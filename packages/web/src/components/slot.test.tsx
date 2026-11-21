@@ -35,3 +35,12 @@ describe("useSlotOutlet", () => {
     expect(screen.getByTestId("has").textContent).toBe("true");
   });
 });
+
+describe("SlotOutlet", () => {
+  it("draws its fallback without a provider, since nothing can fill it", () => {
+    const { container } = render(
+      <SlotOutlet name="header" className="host" fallback={<span>Rome</span>} />,
+    );
+    expect(container.querySelector(".host")?.textContent).toBe("Rome");
+  });
+});

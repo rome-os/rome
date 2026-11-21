@@ -1,7 +1,3 @@
-import { WebChatRepository } from "../db/repositories/webchat.js";
-import { backfillLegacyChats } from "../db/chats-backfill.js";
-import { resolveChatSenders } from "../api/routes/chat-senders.js";
-import { resolveReply } from "../api/routes/webchat-reply.js";
 import type { ChatId } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
@@ -11,7 +7,7 @@ import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/sche
 import { type Message, type RecordedMessage } from "../chats/storage/message.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { TurnLinks } from "../sessions/turn-links.js";
-import { buildAgent, createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 // The dashboard's repository over Chats' tables. What these pin: a dashboard
@@ -37,109 +33,6 @@ describe("ChatsWebChatRepository", () => {
     testDb.db.select().from(romeSessions).where(eq(romeSessions.id, id)).get();
   const ownRows = (id: string) =>
     testDb.db.select().from(romeAgentMessages).where(eq(romeAgentMessages.sessionId, id)).all();
-
-  it("keeps legacy Concierge attribution and human identities through startup backfill", async () => {
-    const legacy = new WebChatRepository(testDb.db);
-    await legacy.createSession("old-chat", "Before the switch");
-    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
-    await legacy.recordUserInput("old-concierge", "old-chat", text("Find flights"), guardian, {
-      platform: "webchat",
-      id: "core:concierge",
-    });
-    await legacy.recordUserInput("old-loopback", "old-chat", text("Loopback"), {
-      ...guardian,
-      via: "loopback",
-    });
-    await legacy.recordUserInput("old-cookie", "old-chat", text("Typed"), guardian);
-    await legacy.recordUserInput("old-visitor", "old-chat", text("Visitor"), {
-      kind: "visitor",
-      accountId: "alex",
-      email: "alex@example.com",
-    });
-    backfillLegacyChats(testDb.db);
-    const deps = {
-      db: testDb.db,
-      settingsRepo: { get: async () => "Ray" },
-      agentLoader: { list: () => [buildAgent("core:concierge")] },
-      appCatalog: { get: () => undefined },
-    } as never;
-    const sources = await repo.getUserMessageSources("old-chat");
-    expect(sources).toEqual(new Map([["old-concierge", "core:concierge"]]));
-    const senders = await resolveChatSenders(
-      deps,
-      await repo.getUserMessageActors("old-chat"),
-      sources,
-    );
-    expect(senders.get("old-concierge")).toMatchObject({ kind: "automated", name: "Concierge" });
-    expect(senders.get("old-concierge")).not.toHaveProperty("onBehalfOf");
-    expect(senders.get("old-loopback")).toMatchObject({ kind: "guardian", name: "Ray" });
-    expect(senders.get("old-cookie")).toMatchObject({ kind: "guardian", name: "Ray" });
-    expect(senders.get("old-visitor")).toMatchObject({
-      kind: "visitor",
-      name: "alex@example.com",
-      accountId: "alex",
-    });
-    expect(await repo.getReplyTarget("old-chat", "old-concierge")).not.toBeNull();
-    const page = await repo.getMessagesPage("old-chat", { limit: 10 });
-    expect(page.rows.map((message) => message.id).sort()).toEqual([
-      "old-concierge",
-      "old-cookie",
-      "old-loopback",
-      "old-visitor",
-    ]);
-  });
-
-  it.each([
-    "cookie",
-    "loopback",
-  ] as const)("reads a Concierge input speaking for the guardian via %s", async (via) => {
-    await repo.createSession("concierge-source", "Concierge");
-    const actor = { kind: "guardian" as const, userId: "seat", via };
-    await repo.recordUserInput("concierge-input", "concierge-source", "[]", actor, {
-      platform: "webchat",
-      id: "core:concierge",
-    });
-    const target = await repo.getReplyTarget("concierge-source", "concierge-input");
-    expect(target?.senderId).toBe("core:concierge");
-    expect(target?.actor?.kind).toBe("guardian");
-    expect((await repo.getUserMessageActors("concierge-source")).get("concierge-input")?.kind).toBe(
-      "guardian",
-    );
-    expect(await repo.getUserMessageSources("concierge-source")).toEqual(
-      new Map([["concierge-input", "core:concierge"]]),
-    );
-    const deps = {
-      db: testDb.db,
-      webchatRepo: repo,
-      settingsRepo: { get: async () => "Ray" },
-      agentLoader: { list: () => [buildAgent("core:concierge")] },
-      appCatalog: { get: () => undefined },
-    } as never;
-    const senders = await resolveChatSenders(
-      deps,
-      await repo.getUserMessageActors("concierge-source"),
-      await repo.getUserMessageSources("concierge-source"),
-    );
-    expect(senders.get("concierge-input")).toMatchObject({
-      kind: "automated",
-      name: "Concierge",
-      onBehalfOf: { kind: "guardian", name: "Ray" },
-    });
-    await repo.recordUserInput(
-      "concierge-quote",
-      "concierge-source",
-      JSON.stringify([{ type: "text", content: "Status?" }]),
-      actor,
-      { platform: "webchat", id: "core:concierge" },
-    );
-    const quote = await resolveReply(deps, {
-      sessionId: "concierge-source",
-      messageId: "concierge-quote",
-      ownRowOnly: true,
-    });
-    expect(quote).toMatchObject({ ok: true, part: { author: "automated", name: "Concierge" } });
-    if (quote.ok) expect(quote.promptLine).toContain("Concierge: Status?");
-  });
 
   it.each([
     "automated::1::agent:core:main",
@@ -263,19 +156,110 @@ describe("ChatsWebChatRepository", () => {
     expect((await repo.getUserMessageActors("chat-1")).get("in-1")?.kind).toBe("guardian");
   });
 
-  it("pages a chat's transcript by turn", async () => {
+  it("pages a chat's transcript by message, newest first, with each page's turns' traces", async () => {
     await repo.createSession("chat-1", "Plans");
     await repo.addMessage("in-1", "chat-1", "user", text("One"), "turn-1");
+    await repo.addMessage("trace-1", "chat-1", "trace", "[]", "turn-1");
     await repo.addMessage("out-1", "chat-1", "assistant", text("1"), "turn-1");
     await repo.addMessage("in-2", "chat-1", "user", text("Two"), "turn-2");
+    await repo.addMessage("trace-2", "chat-1", "trace", "[]", "turn-2");
     await repo.addMessage("out-2", "chat-1", "assistant", text("2"), "turn-2");
 
-    const page = await repo.getMessagesPage("chat-1", { limit: 1 });
-    expect(page.rows.map((line) => line.id)).toEqual(["in-2", "out-2"]);
+    // The traces of the turns a page's messages belong to come along, and do not count.
+    const page = await repo.getMessagesPage("chat-1", { limit: 2 });
+    expect(page.rows.map((line) => line.id)).toEqual(["in-2", "trace-2", "out-2"]);
     expect(page.nextCursor).not.toBeNull();
-    const older = await repo.getMessagesPage("chat-1", { limit: 1, before: page.nextCursor });
-    expect(older.rows.map((line) => line.id)).toEqual(["in-1", "out-1"]);
+    const older = await repo.getMessagesPage("chat-1", { limit: 2, before: page.nextCursor });
+    expect(older.rows.map((line) => line.id)).toEqual(["in-1", "trace-1", "out-1"]);
     expect(older.nextCursor).toBeNull();
+  });
+
+  it("pages in the order messages were said when two turns interleave, and splits no message", async () => {
+    await repo.createSession("chat-1", "Plans");
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const say = async (
+        seconds: number,
+        id: string,
+        role: "user" | "assistant" | "trace",
+        turn: string,
+      ) => {
+        rs.setSystemTime(new Date(1_800_000_000_000 + seconds * 1_000));
+        await repo.addMessage(id, "chat-1", role, role === "trace" ? "[]" : text(id), turn);
+      };
+      // Owner-A, owner-B queued behind A's turn, answer-A, answer-B.
+      await say(0, "owner-a", "user", "turn-a");
+      await say(1, "owner-b", "user", "turn-b");
+      await say(2, "trace-a", "trace", "turn-a");
+      await say(3, "answer-a", "assistant", "turn-a");
+      await say(4, "answer-b", "assistant", "turn-b");
+    } finally {
+      rs.useRealTimers();
+    }
+
+    expect((await repo.getMessages("chat-1")).map((line) => line.id)).toEqual([
+      "owner-a",
+      "owner-b",
+      "trace-a",
+      "answer-a",
+      "answer-b",
+    ]);
+    const newest = await repo.getMessagesPage("chat-1", { limit: 2 });
+    // A's trace is older than both answers, so it stands right after the oldest message.
+    expect(newest.rows.map((line) => line.id)).toEqual(["answer-a", "trace-a", "answer-b"]);
+    const older = await repo.getMessagesPage("chat-1", { limit: 2, before: newest.nextCursor });
+    expect(older.rows.map((line) => line.id)).toEqual(["owner-a", "owner-b", "trace-a"]);
+    expect(older.nextCursor).toBeNull();
+  });
+
+  it("keeps messages said in the same second in the order they were recorded, on every page", async () => {
+    await repo.createSession("chat-1", "Plans");
+    rs.useFakeTimers({ toFake: ["Date"] });
+    try {
+      rs.setSystemTime(new Date(1_800_000_000_000));
+      // Ids that sort against the order recorded in, all in one second.
+      for (const id of ["m-z", "m-a", "m-m", "m-b"]) {
+        await repo.addMessage(id, "chat-1", "assistant", text(id));
+      }
+    } finally {
+      rs.useRealTimers();
+    }
+    const ids = (rows: { id: string }[]) => rows.map((line) => line.id);
+    expect(ids(await repo.getMessages("chat-1"))).toEqual(["m-z", "m-a", "m-m", "m-b"]);
+    const newest = await repo.getMessagesPage("chat-1", { limit: 2 });
+    expect(ids(newest.rows)).toEqual(["m-m", "m-b"]);
+    const older = await repo.getMessagesPage("chat-1", { limit: 2, before: newest.nextCursor });
+    expect(ids(older.rows)).toEqual(["m-z", "m-a"]);
+    expect(older.nextCursor).toBeNull();
+  });
+
+  it("reaches an old message in one page, with older messages for context", async () => {
+    await repo.createSession("chat-1", "Plans");
+    for (let turn = 1; turn <= 8; turn++) {
+      await repo.addMessage(`in-${turn}`, "chat-1", "user", text(`Q${turn}`), `turn-${turn}`);
+      await repo.addMessage(`out-${turn}`, "chat-1", "assistant", text(`A${turn}`), `turn-${turn}`);
+    }
+    const idsOf = (rows: { id: string }[]) => rows.map((line) => line.id);
+
+    const all = idsOf(await repo.getMessages("chat-1"));
+
+    // From out-5 to the newest are 7 messages, and 5 older ones come with them.
+    const page = await repo.getMessagesPage("chat-1", { limit: 1, through: "out-5" });
+    expect(idsOf(page.rows)).toEqual(all.slice(4));
+    expect(page.nextCursor).not.toBeNull();
+
+    // From the oldest page held, it brings only what lies between.
+    const newest = await repo.getMessagesPage("chat-1", { limit: 2 });
+    const between = await repo.getMessagesPage("chat-1", {
+      limit: 1,
+      before: newest.nextCursor,
+      through: "in-4",
+    });
+    expect(idsOf(between.rows)).toEqual(all.slice(1, 14));
+
+    // A message the chat does not hold pages as usual.
+    const plain = await repo.getMessagesPage("chat-1", { limit: 1, through: "elsewhere" });
+    expect(idsOf(plain.rows)).toEqual(["out-8"]);
   });
 
   // A subagent, fork or action run stands in no chat, so its prompts and
@@ -673,7 +657,13 @@ describe("ChatsWebChatRepository", () => {
       state: "accepted",
     });
     expect(await repo.getTurnChatMessages("chat-1", "turn-1")).toEqual([
-      { id: "in-1", role: "user", content: text("Status?"), senderId: "concierge" },
+      {
+        id: "in-1",
+        role: "user",
+        content: text("Status?"),
+        senderId: "concierge",
+        inputState: "accepted",
+      },
     ]);
   });
 
@@ -856,5 +846,79 @@ describe("ChatsWebChatRepository", () => {
     } finally {
       rs.useRealTimers();
     }
+  });
+
+  describe("chat threads", () => {
+    beforeEach(async () => {
+      await repo.createSession("chat-1", "Plans");
+    });
+    const rows = () =>
+      testDb.db
+        .select({
+          key: chatMessages.key,
+          id: chatMessages.id,
+          replyTo: chatMessages.replyToMessageId,
+          root: chatMessages.rootMessageId,
+          parts: chatMessages.parts,
+        })
+        .from(chatMessages)
+        .all();
+    const row = (key: string) => rows().find((candidate) => candidate.key === key)!;
+    const said = async (words: string, replyTo?: string) =>
+      (
+        await repo.addBackendMessage("chat-1", "turn-1", [{ type: "text", content: words }], {
+          ...(replyTo ? { replyTo } : {}),
+        })
+      ).id;
+
+    it("records the message an input replies to, and its root, with no quote of its own", async () => {
+      await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+      expect(
+        await repo.recordUserInput("m2", "chat-1", text("And Friday?"), undefined, undefined, "m1"),
+      ).toBe(true);
+      expect(row("m1")).toMatchObject({ replyTo: null, root: null });
+      expect(row("m2")).toMatchObject({ replyTo: row("m1").id, root: row("m1").id });
+      expect(JSON.parse(row("m2").parts)).toEqual([{ type: "text", content: "And Friday?" }]);
+      // A reply to a reply joins the same thread, and a reply to nothing the chat holds is none.
+      await repo.recordUserInput("m3", "chat-1", text("Thanks"), undefined, undefined, "m2");
+      await repo.recordUserInput("m4", "chat-1", text("Hm"), undefined, undefined, "gone");
+      expect(row("m3")).toMatchObject({ replyTo: row("m2").id, root: row("m1").id });
+      expect(row("m4")).toMatchObject({ replyTo: null, root: null });
+    });
+
+    it("sets a backend message's reply and root, and adds no reply_to part", async () => {
+      await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+      const answer = await said("Sunny", "m1");
+      const alone = await said("Good morning");
+      expect(row(answer)).toMatchObject({ replyTo: row("m1").id, root: row("m1").id });
+      expect(JSON.parse(row(answer).parts)).toEqual([{ type: "text", content: "Sunny" }]);
+      expect(row(alone)).toMatchObject({ replyTo: null, root: null });
+    });
+
+    it("reads each message with the key of its thread's root, the root itself with its own", async () => {
+      await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+      const answer = await said("Sunny", "m1");
+      const alone = await said("Good morning");
+      const threads = new Map(
+        (await repo.getMessages("chat-1")).map((message) => [message.id, message.chatThreadId]),
+      );
+      expect(threads).toEqual(
+        new Map([
+          ["m1", "m1"],
+          [answer, "m1"],
+          [alone, alone],
+        ]),
+      );
+      expect((await repo.getReplyTarget("chat-1", answer))?.chatThreadId).toBe("m1");
+    });
+
+    it("tells a message's thread when it is inserted", async () => {
+      await repo.recordUserInput("m1", "chat-1", text("Weather?"));
+      const inserted: (string | null | undefined)[] = [];
+      repo.onMessageInserted((message) => inserted.push(message.chatThreadId));
+      await said("Sunny", "m1");
+      await said("Good morning");
+      expect(inserted).toEqual(["m1", expect.any(String)]);
+    });
   });
 });

@@ -1,19 +1,13 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
-import { chatKey, ownedBy } from "../connections/chat-ids.js";
-import type { ChatRef } from "../chats/storage/place.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
-import { approvals, channels, romeAgentMessages, romeSessions } from "../db/schema.js";
+import { type ChatRef, chatKey } from "../chats/storage/place.js";
+import { WebChatRepository } from "./repository.js";
+import { approvals, channels, romeAgentMessages, romeSessions, taskChats } from "../db/schema.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
-import {
-  ChatReadModel,
-  chatsSessionAwaitingGuardian,
-  type Transcript,
-  type TranscriptCursor,
-} from "./chat-read-model.js";
+import { ChatReadModel, chatsSessionAwaitingGuardian } from "./chat-read-model.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 const text = (content: string) => JSON.stringify([{ type: "text", content }]);
@@ -31,6 +25,28 @@ describe("ChatReadModel", () => {
     reads = new ChatReadModel(testDb.db);
     links = new TurnLinks(testDb.db);
     fixture = speakerFixture(testDb.db);
+  });
+
+  it("shows what an automated source said under the source's name, with no account", async () => {
+    await repo.createSession("automation-chat", "Automation");
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    for (const [id, source, actor] of [
+      ["app", "automated::1::app:daily-report", guardian],
+      ["routine", "automated::0::routine:Morning briefing", guardian],
+      ["concierge", "core:concierge", guardian],
+      ["subagent", "coding:coding", undefined],
+    ] as const) {
+      await repo.recordUserInput(id, "automation-chat", text(`Status ${id}`), actor, {
+        platform: "webchat",
+        id: source,
+      });
+    }
+
+    const transcript = (await reads.chatTranscript("automation-chat"))!;
+    expect(transcript.lines).toHaveLength(4);
+    for (const line of transcript.lines) {
+      expect(line).toMatchObject({ role: "user", senderAccountId: null, senderName: "Automation" });
+    }
   });
 
   /** A dashboard chat, and the agent's speaker in it, opened under `id`. */
@@ -97,25 +113,6 @@ describe("ChatReadModel", () => {
         ["t-0", "turn-0"],
         ["t-1", "turn-1"],
       ]);
-      expect(transcript?.nextCursor).toBeNull();
-    });
-
-    it("pages newest turns first and walks back to the start once", async () => {
-      const chat = dashboardChat("chat-1");
-      for (let index = 0; index < 5; index += 1) {
-        await dashboardTurn(chat, "chat-1", index, 1_000 + index * 10);
-      }
-
-      const seen: string[] = [];
-      let before: TranscriptCursor | null = null;
-      for (;;) {
-        const page: Transcript | null = await reads.chatTranscript("chat-1", { limit: 3, before });
-        seen.unshift(...(page?.lines.map((line) => line.id) ?? []));
-        if (!page?.nextCursor) break;
-        before = page.nextCursor;
-      }
-
-      expect(seen).toEqual([0, 1, 2, 3, 4].flatMap((index) => [`u-${index}`, `a-${index}`]));
     });
 
     it("is null for a session that stands in no chat", async () => {
@@ -150,7 +147,7 @@ describe("ChatReadModel", () => {
       fixture.speaker({ id: support, chat, accountId: "bot-support", agentName: "support" });
       // Wei's question reaches both bots: one line in the chat.
       const asked = fixture.say({
-        id: ownedBy(key, "bot-sales", "om_1"),
+        id: "om_1",
         chat,
         from: "ou_wei",
         name: "Wei",
@@ -160,7 +157,7 @@ describe("ChatReadModel", () => {
       links.prompt(asked, sales, "sales-turn-7");
       await traceAt(sales, "sales-trace-7", "sales-turn-7", now.getTime() / 1000);
       const answered = fixture.say({
-        id: ownedBy(key, "bot-sales", "om_2"),
+        id: "om_2",
         chat,
         from: "bot-sales",
         agent: "sales",
@@ -190,7 +187,7 @@ describe("ChatReadModel", () => {
       );
     });
 
-    it("pages whole turns even when two agents' turns interleave, and shows each once", async () => {
+    it("keeps the order lines were said in when two agents' turns interleave, and shows each once", async () => {
       const chat = fixture.chat("telegram", "-1001234567890123", "group");
       fixture.speaker({ id: "sales", chat, accountId: "bot-sales" });
       fixture.speaker({ id: "support", chat, accountId: "bot-support" });
@@ -207,14 +204,13 @@ describe("ChatReadModel", () => {
       links.answer(line("answer-a", 1_002, "sales"), "sales", "turn-a");
       links.answer(line("answer-b", 1_003, "support"), "support", "turn-b");
 
-      const newest = await reads.chatTranscript("sales", { limit: 1 });
-      expect(newest?.lines.map((l) => l.id)).toEqual(["prompt-b", "answer-b"]);
-      const older = await reads.chatTranscript("sales", {
-        limit: 1,
-        before: newest?.nextCursor ?? null,
-      });
-      expect(older?.lines.map((l) => l.id)).toEqual(["prompt-a", "answer-a"]);
-      expect(older?.nextCursor).toBeNull();
+      const transcript = await reads.chatTranscript("sales");
+      expect(transcript?.lines.map((l) => l.id)).toEqual([
+        "prompt-a",
+        "prompt-b",
+        "answer-a",
+        "answer-b",
+      ]);
     });
 
     it("shows the trace of every turn a shown line prompted, also one drawn under another's", async () => {
@@ -315,25 +311,20 @@ describe("ChatReadModel", () => {
       await setAt(`sa-${index}`, at + 2);
     }
 
-    it("draws a subagent's turns from its own prompt, answer and trace, paged by turn", async () => {
+    it("draws a subagent's turns from its own prompt, answer and trace, in the order they were said", async () => {
       await repo.ensureRomeSession({ id: "sub-1", name: "Sub", type: "subagent" } as never);
       for (let index = 0; index < 3; index += 1) await subagentTurn(index, 1_000 + index * 10);
 
-      const newest = await reads.sessionTranscript("sub-1", { limit: 2 });
-      expect(newest.lines.map((line) => [line.id, line.role])).toEqual([
+      const transcript = await reads.sessionTranscript("sub-1");
+      expect(transcript.lines.map((line) => [line.id, line.role])).toEqual([
+        ["sp-0", "user"],
+        ["sa-0", "assistant"],
         ["sp-1", "user"],
         ["sa-1", "assistant"],
         ["sp-2", "user"],
         ["sa-2", "assistant"],
       ]);
-      expect(newest.traces.map((trace) => trace.id)).toEqual(["st-1", "st-2"]);
-
-      const older = await reads.sessionTranscript("sub-1", {
-        limit: 2,
-        before: newest.nextCursor,
-      });
-      expect(older.lines.map((line) => line.id)).toEqual(["sp-0", "sa-0"]);
-      expect(older.nextCursor).toBeNull();
+      expect(transcript.traces.map((trace) => trace.id)).toEqual(["st-0", "st-1", "st-2"]);
     });
   });
 
@@ -550,6 +541,232 @@ describe("ChatReadModel", () => {
       });
 
       expect(await awaiting("chat-1")).toBe(true);
+    });
+  });
+
+  describe("awaitingGuardianSince and ownerSpokeAt", () => {
+    const card = [{ type: "pending_interaction", interaction: { kind: "question" } }];
+
+    it("tells when the newest open card or pending approval began, and when the owner last spoke", async () => {
+      const chat = dashboardChat("chat-1");
+      dashboardChat("quiet");
+      links.prompt(
+        fixture.say({ id: "q", chat, from: "guardian", at: new Date(10_000) }),
+        "chat-1",
+        "t1",
+      );
+      // An app speaking for the guardian is not the owner speaking.
+      fixture.say({
+        id: "app",
+        chat,
+        from: "automated::1::app:inbox",
+        at: new Date(15_000),
+      });
+      fixture.say({
+        id: "c1",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(20_000),
+        parts: card,
+      });
+      fixture.say({
+        id: "c2",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(30_000),
+        parts: card,
+      });
+
+      expect(await repo.awaitingGuardianSince(["chat-1", "quiet", "missing"])).toEqual(
+        new Map([["chat-1", 30_000]]),
+      );
+      expect(await repo.ownerSpokeAt("chat-1")).toBe(10_000);
+      expect(await repo.ownerSpokeAt("quiet")).toBeNull();
+
+      // A newer pending approval is the newest wait.
+      await testDb.db.insert(approvals).values({
+        id: "approval-1",
+        type: "action_execution",
+        status: "pending",
+        executionState: "idle",
+        requestedBy: "main",
+        description: "approve",
+        payload: { channelContext: { threadId: "chat-1" } },
+        createdAt: new Date(40_000),
+      });
+      expect(await repo.awaitingGuardianSince(["chat-1"])).toEqual(new Map([["chat-1", 40_000]]));
+    });
+
+    it("says a task chat waits on no one once its task ended, though its card was never answered", async () => {
+      const chat = dashboardChat("task-chat");
+      fixture.say({
+        id: "ask",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(20_000),
+        parts: card,
+      });
+      await testDb.db.insert(taskChats).values({
+        sessionId: "task-chat",
+        updatedAt: new Date(10_000),
+      });
+      expect(await repo.awaitingGuardianOf(["task-chat"])).toEqual(new Set(["task-chat"]));
+      expect(await repo.awaitingGuardianSince(["task-chat"])).toEqual(
+        new Map([["task-chat", 20_000]]),
+      );
+
+      // The guardian stops it: its card closes, and the chat waits on no one.
+      await testDb.db
+        .update(taskChats)
+        .set({ stoppedAt: new Date(30_000), endedAt: new Date(30_000) })
+        .where(sql`${taskChats.sessionId} = 'task-chat'`);
+      expect(await repo.awaitingGuardianOf(["task-chat"])).toEqual(new Set());
+      expect(await repo.awaitingGuardianSince(["task-chat"])).toEqual(new Map());
+      const [row] = await testDb.db
+        .select({ awaiting: chatsSessionAwaitingGuardian })
+        .from(romeSessions)
+        .where(sql`${romeSessions.id} = 'task-chat'`);
+      expect(row?.awaiting).toBe(false);
+    });
+
+    it("lists every open card and pending approval of a chat, oldest first, with how each card renders", async () => {
+      const chat = dashboardChat("chat-1");
+      const question = (toolUseId: string) => [
+        {
+          type: "pending_interaction",
+          toolUseId,
+          render: { builtin: true, componentId: "question-card", props: { questions: [] } },
+        },
+      ];
+      fixture.say({
+        id: "c1",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(20_000),
+        parts: question("tu-1"),
+      });
+      fixture.say({
+        id: "c2",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(30_000),
+        parts: question("tu-2"),
+      });
+      await testDb.db.insert(approvals).values({
+        id: "approval-1",
+        type: "action_execution",
+        status: "pending",
+        executionState: "idle",
+        requestedBy: "main",
+        description: "approve",
+        payload: { channelContext: { threadId: "chat-1" } },
+        createdAt: new Date(25_000),
+      });
+      const render = { builtin: true, componentId: "question-card", props: { questions: [] } };
+      expect((await repo.openWaitsOf(["chat-1"])).get("chat-1")).toEqual([
+        { kind: "card", id: "tu-1", messageId: "c1", render, since: 20_000 },
+        { kind: "approval", id: "approval-1", since: 25_000 },
+        { kind: "card", id: "tu-2", messageId: "c2", render, since: 30_000 },
+      ]);
+    });
+
+    it("reads every card a chat asked with the answer each got, and every approval, settled ones too", async () => {
+      const chat = dashboardChat("chat-1");
+      const render = { builtin: true, componentId: "question-card", props: { questions: [] } };
+      const question = (toolUseId: string) => [{ type: "pending_interaction", toolUseId, render }];
+      fixture.say({
+        id: "c1",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(20_000),
+        parts: question("tu-1"),
+      });
+      fixture.say({
+        id: "r1",
+        chat,
+        from: "guardian",
+        at: new Date(25_000),
+        parts: [{ type: "interaction_result", toolUseId: "tu-1", output: { dismissed: true } }],
+      });
+      fixture.say({
+        id: "c2",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(30_000),
+        parts: question("tu-2"),
+      });
+      await testDb.db.insert(approvals).values({
+        id: "approval-1",
+        type: "action_execution",
+        status: "rejected",
+        executionState: "idle",
+        requestedBy: "main",
+        description: "approve",
+        resolvedBy: "guardian",
+        payload: { channelContext: { threadId: "chat-1" } },
+        createdAt: new Date(22_000),
+      });
+      const cards = (await repo.taskCardsOf(["chat-1"])).get("chat-1");
+      expect(cards?.questions).toEqual([
+        { id: "tu-1", messageId: "c1", render, since: 20_000, output: { dismissed: true } },
+        { id: "tu-2", messageId: "c2", render, since: 30_000 },
+      ]);
+      expect(cards?.approvals).toMatchObject([
+        { id: "approval-1", status: "rejected", resolvedBy: "guardian", since: 22_000 },
+      ]);
+    });
+
+    it("reads the pending approvals once for every chat asked, with the same answer per chat", async () => {
+      const chat = dashboardChat("chat-1");
+      dashboardChat("chat-2");
+      dashboardChat("chat-3");
+      fixture.say({
+        id: "c1",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(50_000),
+        parts: card,
+      });
+      const approval = (id: string, threadId: string, status: "pending" | "approved", at: number) =>
+        testDb.db.insert(approvals).values({
+          id,
+          type: "action_execution",
+          status,
+          executionState: "idle",
+          requestedBy: "main",
+          description: "approve",
+          payload: { channelContext: { threadId } },
+          createdAt: new Date(at),
+        });
+      // chat-1: its card is newer than its pending approval.
+      await approval("a1", "chat-1", "pending", 20_000);
+      // chat-2: only approvals; a resolved one never waits, however new.
+      await approval("a2", "chat-2", "pending", 30_000);
+      await approval("a3", "chat-2", "pending", 35_000);
+      await approval("a4", "chat-2", "approved", 90_000);
+      // chat-3: only a resolved approval. other: pending, but not asked for.
+      await approval("a5", "chat-3", "approved", 60_000);
+      await approval("a6", "other", "pending", 70_000);
+
+      const all = await repo.awaitingGuardianSince(["chat-1", "chat-2", "chat-3"]);
+      expect(all).toEqual(
+        new Map([
+          ["chat-1", 50_000],
+          ["chat-2", 35_000],
+        ]),
+      );
+      // Asking for one chat at a time gives each the same answer.
+      for (const id of ["chat-1", "chat-2", "chat-3"]) {
+        expect((await repo.awaitingGuardianSince([id])).get(id)).toBe(all.get(id));
+      }
     });
   });
 

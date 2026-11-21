@@ -133,7 +133,7 @@ interface GitMultiCommitTarget {
 export const MAX_UPLOAD_FILE_BYTES = 1024 * 1024 * 1024;
 const MAX_UPLOAD_FILE_LABEL = "1 GB";
 
-interface FileDescriptor {
+export interface FileDescriptor {
   editable: boolean;
   kind: "text" | "image" | "video" | "audio" | "pdf" | "docx" | "binary";
   mimeType: string;
@@ -460,7 +460,7 @@ function getRequestedWatchDirectories(
   );
 }
 
-function describeFile(path: string): FileDescriptor {
+export function describeFile(path: string): FileDescriptor {
   const extension = extname(path).toLowerCase();
   const imageMimeType = IMAGE_MIME_TYPES.get(extension);
   if (imageMimeType) {
@@ -897,7 +897,7 @@ function buildTree(scope: FileBrowserScope, dirPath: string, depth: number): Tre
   return nodes;
 }
 
-function parseRangeHeader(
+export function parseRangeHeader(
   rangeHeader: string,
   size: number,
 ): { end: number; start: number } | null {
@@ -925,7 +925,7 @@ function parseRangeHeader(
   return { start, end };
 }
 
-function createStreamResponse(
+export function createStreamResponse(
   filePath: string,
   status: number,
   headers: Record<string, string>,
@@ -1924,6 +1924,36 @@ export function createSearchHandler(scope: FileBrowserScope): Handler {
   };
 }
 
+// The widths a client may ask for with `?w=`: a reply picture and an upload
+// thumbnail. Any other value serves the original.
+export const ASSET_IMAGE_WIDTHS = new Set(["600", "900"]);
+export const RESIZABLE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MAX_RESIZE_INPUT_PIXELS = 64_000_000;
+
+/**
+ * The picture at `filePath` as a WebP no wider or taller than `width`, or null
+ * when it is animated or cannot be decoded. `sharp` loads on first use, so a
+ * missing native binary only turns resizing off.
+ */
+export async function resizeAssetImage(filePath: string, width: number): Promise<Buffer | null> {
+  try {
+    const { default: sharp } = await import("sharp");
+    const image = sharp(filePath, { limitInputPixels: MAX_RESIZE_INPUT_PIXELS });
+    const { pages } = await image.metadata();
+    if ((pages ?? 1) > 1) return null;
+    return await image
+      .rotate()
+      .resize({ width, height: width, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toBuffer();
+  } catch (error) {
+    log.warn("failed to resize asset image", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
 export function createAssetHandler(scope: FileBrowserScope): Handler {
   return async (c) => {
     const logicalPath = c.req.query("path");
@@ -1942,15 +1972,67 @@ export function createAssetHandler(scope: FileBrowserScope): Handler {
 
     try {
       const file = describeFile(logicalPath);
-      const { size } = statSync(resolvedPath);
+      const { mtimeMs, size } = statSync(resolvedPath);
+      const etag = `W/"${Math.trunc(mtimeMs)}-${size}"`;
+      const requestedWidth = c.req.query("w");
+      const width =
+        requestedWidth !== undefined &&
+        ASSET_IMAGE_WIDTHS.has(requestedWidth) &&
+        RESIZABLE_IMAGE_TYPES.has(file.mimeType)
+          ? Number(requestedWidth)
+          : undefined;
+      // The ETag of a resized picture names its width, so a cached original and
+      // a cached thumbnail never validate each other.
+      const widthEtag = width ? `W/"${Math.trunc(mtimeMs)}-${size}-w${width}"` : undefined;
+      // Validators are compared before any decoding, so a 304 costs one stat.
+      // A picture served as the original keeps the plain ETag, so a request
+      // with a width accepts either.
+      const validators = (c.req.header("If-None-Match") ?? "").split(",").map((tag) => tag.trim());
+      const matchingEtag = [widthEtag, etag].find(
+        (candidate) =>
+          candidate !== undefined &&
+          validators.some(
+            (tag) => tag === "*" || tag.replace(/^W\//, "") === candidate.replace(/^W\//, ""),
+          ),
+      );
+      if (matchingEtag) {
+        return new Response(null, {
+          headers: { "Cache-Control": "private, no-cache", ETag: matchingEtag },
+          status: 304,
+        });
+      }
+
       const fileName = basename(resolvedPath);
       const baseHeaders: Record<string, string> = {
         "Accept-Ranges": "bytes",
-        "Cache-Control": "no-store",
+        "Cache-Control": "private, no-cache",
         "Content-Disposition": encodeContentDispositionFileName(fileName, "inline"),
         "Content-Length": String(size),
         "Content-Type": file.mimeType,
+        ETag: etag,
       };
+
+      if (width && widthEtag) {
+        const resized = await resizeAssetImage(resolvedPath, width);
+        if (resized && resized.length < size) {
+          return new Response(new Uint8Array(resized), {
+            headers: {
+              ...baseHeaders,
+              "Content-Disposition": encodeContentDispositionFileName(
+                `${fileName.replace(/\.[^.]*$/, "")}.webp`,
+                "inline",
+              ),
+              "Content-Length": String(resized.length),
+              "Content-Type": "image/webp",
+              ETag: widthEtag,
+            },
+            status: 200,
+          });
+        }
+        // A picture that does not shrink keeps its bytes, and the width ETag
+        // stays deterministic for that file and width.
+        if (resized) baseHeaders.ETag = widthEtag;
+      }
 
       if (
         file.kind === "video" ||

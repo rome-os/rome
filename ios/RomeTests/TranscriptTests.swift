@@ -18,6 +18,9 @@ private func message(
 
 private func text(_ value: String) -> [String: Any] { ["type": "text", "content": value] }
 
+/// What a reply to the guardian's message `original` starts with.
+private func replying(to original: String) -> [String: Any] { ["type": "reply_to", "messageId": original, "author": "guardian", "text": "hi"] }
+
 @Suite struct MessagePartTests {
     @Test func parsesTextFormatsAndForwardedOrigin() {
         let parts = MessagePart.parse(json([
@@ -54,10 +57,10 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(approval.title == "发送邮件")
         #expect(approval.fields == [.init(label: "收件人", value: "x@y.z")])
         guard case .question(let question) = parts[2] else { Issue.record("no question"); return }
-        #expect(question.questions.first?.options == ["A", "B"])
-        #expect(parts[3] == .webOnly(kind: "pricing-table"))
+        #expect(question.questions.first?.text == "Which?")
+        #expect(parts[3] == .webOnly(.unknown, toolUseId: "app"))
         #expect(parts[4] == .other(type: "tool_use"))
-        #expect(parts[5] == .error("boom"))
+        #expect(parts[5] == .error(TurnError(text: "boom")))
     }
 
     @Test func actionNamesReadAsWords() {
@@ -67,29 +70,57 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
 }
 
 @Suite struct TranscriptBuilderTests {
-    @Test func agentRunGetsFirstAndLastCornersAcrossCards() {
-        let rows = TranscriptBuilder.rows(
-            messages: [
-                message("u", role: "user", [text("hi")], at: 0),
-                message("a1", [text("one")], at: 10),
-                message("card", [["type": "task_chat", "chatId": "c", "title": "T"]], at: 11),
-                message("a2", [text("two")], at: 12),
-            ],
-            pending: [], answers: [:], options: .init()
-        )
-        let positions = rows.compactMap { row -> BubblePosition? in
+    private func positions(_ rows: [TranscriptRow]) -> [BubblePosition] {
+        rows.compactMap { row -> BubblePosition? in
             if case .agentText(_, _, _, _, let position) = row { return position }
             return nil
         }
-        #expect(positions == [.first, .last])
-        if case .separator = rows.first {} else { Issue.record("expected a leading separator") }
+    }
+
+    /// Replies to one message are a run, which gets first and last corners; a
+    /// card between them, which replies to nothing the app can see, ends it.
+    @Test func repliesToOneMessageGetFirstAndLastCorners() {
+        let user = message("u", role: "user", [text("hi")], at: 0)
+        let run = TranscriptBuilder.rows(
+            messages: [user, message("a1", [replying(to: "u"), text("one")], at: 10), message("a2", [replying(to: "u"), text("two")], at: 12)],
+            pending: [], answers: [:], options: .init()
+        )
+        #expect(positions(run) == [.first, .last])
+        if case .separator = run.first {} else { Issue.record("expected a leading separator") }
+        let split = TranscriptBuilder.rows(
+            messages: [
+                user,
+                message("a1", [replying(to: "u"), text("one")], at: 10),
+                message("card", [["type": "task_chat", "chatId": "c", "title": "T"]], at: 11),
+                message("a2", [replying(to: "u"), text("two")], at: 12),
+            ],
+            pending: [], answers: [:], options: .init()
+        )
+        #expect(positions(split) == [.single, .single])
+    }
+
+    /// Bubbles that reply to nothing stand apart, whoever said them.
+    @Test func bubblesThatReplyToNothingStandApart() {
+        let rows = TranscriptBuilder.rows(messages: [message("a1", [text("one")], at: 10), message("a2", [text("two")], at: 12)], pending: [], answers: [:], options: .init())
+        #expect(positions(rows) == [.single, .single])
+    }
+
+    @Test func aSeparatorComesAtAnHourAndNotBefore() {
+        func separators(_ gap: TimeInterval) -> Int {
+            TranscriptBuilder.rows(
+                messages: [message("a1", [text("one")], at: 3600), message("a2", [text("two")], at: 3600 + gap)],
+                pending: [], answers: [:], options: .init()
+            ).filter { if case .separator = $0 { return true } else { return false } }.count
+        }
+        #expect(separators(60 * 60 - 1) == 1)
+        #expect(separators(60 * 60) == 2)
     }
 
     @Test func longGapsGetSeparatorsAndBreakRuns() {
         let rows = TranscriptBuilder.rows(
             messages: [
                 message("a1", [text("one")], at: 0),
-                message("a2", [text("two")], at: 60 * 20),
+                message("a2", [text("two")], at: 60 * 70),
             ],
             pending: [], answers: [:], options: .init()
         )
@@ -130,6 +161,42 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         let answers = TranscriptBuilder.answers(in: [answer])
         #expect(answers["q1"]?["answers"]?.array?.first?["value"]?.string == "A")
     }
+
+    /// A provider reuses tool-use ids across turns: an answer belongs to the
+    /// card before it, and a later card with the same id stays open.
+    /// A result that names its card's message answers that card, even read
+    /// after a later card with the same tool-use id.
+    @Test func aResultThatNamesItsCardAnswersThatCard() {
+        let card: [String: Any] = ["type": "pending_interaction", "toolUseId": "item_0", "appId": "connector", "render": ["kind": "inline", "ui": ["components": [["id": "root", "component": "Text", "text": "Connect"]]]]]
+        let first = message("c1", role: "assistant", [card], at: 0)
+        let second = message("c2", role: "assistant", [card], at: 0)
+        let result = message("r1", role: "user", [["type": "interaction_result", "toolUseId": "item_0", "messageId": "c1", "output": ["from": "connector", "value": "ok"]]], at: 0)
+        let answers = TranscriptBuilder.answers(in: [first, second, result])
+        #expect(answers["c1"] != nil)
+        #expect(answers["c2"] == nil)
+    }
+
+    /// An answer known only from older messages, as a thread's own older
+    /// page holds it, reaches the card's row.
+    @Test func aWaitingCardsRowCarriesItsAnswer() {
+        let card: [String: Any] = ["type": "pending_interaction", "toolUseId": "item_0", "appId": "connector", "render": ["kind": "inline", "ui": ["components": [["id": "root", "component": "Text", "text": "Connect"]]]]]
+        let output: JSONValue = .object(["from": .string("connector"), "value": .string("ok")])
+        let rows = TranscriptBuilder.rows(messages: [message("c1", role: "assistant", [card], at: 0)], pending: [], answers: ["c1": output], options: .init())
+        let answered = rows.compactMap { row -> JSONValue? in
+            if case .widgetUI(_, _, _, let answered) = row { return answered } else { return nil }
+        }
+        #expect(answered == [output])
+    }
+
+    @Test func anAnswerBelongsToTheCardBeforeIt() {
+        let card: [String: Any] = ["type": "pending_interaction", "toolUseId": "item_0", "appId": "connector", "render": ["kind": "inline", "ui": ["components": [["id": "root", "component": "Text", "text": "Connect"]]]]]
+        let first = message("c1", role: "assistant", [card], at: 0)
+        let result = message("r1", role: "user", [["type": "interaction_result", "toolUseId": "item_0", "output": ["from": "connector", "value": "ok"]]], at: 1)
+        let second = message("c2", role: "assistant", [card], at: 2)
+        let answers = TranscriptBuilder.answers(in: [first, result, second])
+        #expect(answers["c1"] != nil)
+        #expect(answers["c2"] == nil)
+    }
 }
 
 @Suite struct RelativeTimeTests {
@@ -161,6 +228,18 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(RelativeTime.separator(date, now: now) == "Oct 27, 2025 14:05")
         #expect(RelativeTime.weekday(date) == "Mon")
     }
+
+    /// Chinese dates read the way a Chinese calendar writes them, whatever the region.
+    @Test func chineseDatesUseChineseFormats() {
+        var components = DateComponents()
+        components.year = 2025; components.month = 10; components.day = 27; components.hour = 14; components.minute = 5
+        let date = Calendar.current.date(from: components)!
+        for locale in [Locale(identifier: "zh-Hans_CN"), Locale(identifier: "zh-Hans_US")] {
+            #expect(RelativeTime.weekday(date, locale: locale) == "周一")
+            #expect(RelativeTime.day(date, locale: locale) == "10月27日")
+            #expect(RelativeTime.day(date, withYear: true, locale: locale) == "2025年10月27日")
+        }
+    }
 }
 
 /// Chat and topic chats draw the same answerable cards as task chats.
@@ -172,7 +251,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
              "props": ["questions": [["id": "s", "question": "Which?", "type": "single", "options": ["A", "B"], "freeText": true]]]]],
             ["type": "approval_card", "approvalId": "a1", "actionName": "calendar:create_event", "status": "pending",
              "preview": ["kind": "generic", "title": "Add event", "summary": "", "fields": []]],
-            ["type": "pending_interaction", "toolUseId": "h1", "render": ["componentId": "handoff"]],
+            ["type": "pending_interaction", "toolUseId": "h1", "appId": "pricing", "render": ["componentId": "pricing-table"]],
         ], at: 0, session: session)
         return TranscriptBuilder.rows(messages: [asked], pending: [], answers: [:], options: .init())
             .filter { if case .separator = $0 { return false } else { return true } }
@@ -187,48 +266,160 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(cards(session: "topic-1") == [.question(sessionId: "topic-1"), .approval, .webOnly])
     }
 
-    @Test func theAnswerGoesToTheQuestionsSession() async {
+    @Test func aWidgetsEventGoesToCoreByItsId() async {
         let backend = FakeBackend()
         let store = TranscriptStore(sessionId: "topic-1", kind: .concierge, backend: backend)
-        let part = MessagePart.QuestionPart(toolUseId: "q1", questions: [.init(id: "s", text: "Which?", multi: false, freeTextOnly: false, options: ["A"])])
-        store.answer(part, answers: QuestionAnswers.answers(part.questions, choices: ["s": ["A"]], typed: [:]), sessionId: "topic-1")
-        for _ in 0..<20 where backend.answeredSessions.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(backend.answeredSessions == ["topic-1"])
-    }
-
-    /// A lone optional question shows its send arrow while blank, and the
-    /// arrow sends `{answers: []}`; a required one shows it only once typed.
-    @Test func aBlankOptionalQuestionHasItsSendArrow() {
-        var question = MessagePart.QuestionPart.Question(id: "s", text: "Anything else?", multi: false, freeTextOnly: true, options: [])
-        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: [:]) == nil)
-        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: ["s": "  "]) == nil)
-        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: ["s": "No"]) == [.object(["questionId": .string("s"), "value": .string("No")])])
-        question.optional = true
-        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: [:]) == [])
-        #expect(QuestionAnswers.inlineSend(question, choices: [:], typed: ["s": "No"]) == [.object(["questionId": .string("s"), "value": .string("No")])])
-    }
-
-    /// A card of only optional questions goes out blank: `{answers: []}`.
-    @Test func anAllOptionalCardCanBeSentBlank() async {
-        let backend = FakeBackend()
-        let store = TranscriptStore(sessionId: "topic-1", kind: .concierge, backend: backend)
-        var question = MessagePart.QuestionPart.Question(id: "s", text: "Anything else?", multi: false, freeTextOnly: true, options: [])
-        question.optional = true
-        let part = MessagePart.QuestionPart(toolUseId: "q1", questions: [question])
-        #expect(QuestionAnswers.complete(part.questions, choices: [:], typed: [:]))
-        let answers = QuestionAnswers.answers(part.questions, choices: [:], typed: [:])
-        #expect(answers.isEmpty)
-        store.answer(part, answers: answers, sessionId: "topic-1")
-        for _ in 0..<20 where backend.answeredSessions.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
-        #expect(backend.answeredSessions == ["topic-1"])
+        try? await store.answerWidget(widgetId: "m-q1", name: "send", context: .object(["answers": .array([])]))
+        for _ in 0..<20 where backend.answeredWidgets.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(backend.answeredWidgets == ["m-q1"])
     }
 
     @Test func webOnlyCardsOpenTheirChatOnTheDashboard() {
         let origin = URL(string: "https://me.romeos.cc")!
-        #expect(WebOnlyCard.url(origin: origin, sessionId: "topic-1").absoluteString == "https://me.romeos.cc/chat/topic-1")
-        #expect(WebOnlyCard.url(origin: origin, sessionId: nil) == origin)
-        // The main chat opens by its id on the server, or the dashboard's chat page.
-        #expect(WebOnlyCard.url(origin: origin, sessionId: conciergeChatID, mainChatServerID: "c-42").absoluteString == "https://me.romeos.cc/chat/c-42")
-        #expect(WebOnlyCard.url(origin: origin, sessionId: conciergeChatID).absoluteString == "https://me.romeos.cc/chat")
+        #expect(InstancePages.chat(origin: origin, sessionId: "topic-1").absoluteString == "https://me.romeos.cc/chat/topic-1")
+        #expect(InstancePages.chat(origin: origin, sessionId: nil) == origin)
+        // The main chat opens at `/message`, the dashboard's address for it.
+        #expect(InstancePages.chat(origin: origin, sessionId: conciergeChatID, mainChatServerID: "c-42").absoluteString == "https://me.romeos.cc/message")
+        // Before the main chat's server id is known: `/message` too, never
+        // `/chat`, which starts a new chat on the dashboard.
+        #expect(InstancePages.chat(origin: origin, sessionId: conciergeChatID).absoluteString == "https://me.romeos.cc/message")
+        // A visitor's main chat goes by its own id: it is still their main chat.
+        #expect(InstancePages.chat(origin: origin, sessionId: "concierge-v-acc1", mainChatServerID: "concierge-v-acc1").absoluteString == "https://me.romeos.cc/message")
+        #expect(InstancePages.chat(origin: origin, sessionId: "chat-site", mainChatServerID: "concierge-v-acc1").absoluteString == "https://me.romeos.cc/chat/chat-site")
+    }
+}
+
+/// The "New messages" line: which message it goes above, and where.
+@Suite struct UnreadAtOpenTests {
+    /// The read mark, in whole seconds, at `seconds` past the base time.
+    private func mark(_ seconds: TimeInterval) -> Int {
+        UnreadAtOpen.second(Date(timeIntervalSince1970: 1_800_000_000 + seconds))
+    }
+
+    private func opened(_ messages: [ChatMessage], mark markSeconds: TimeInterval) -> UnreadAtOpen.Snapshot {
+        UnreadAtOpen.Snapshot(mark: mark(markSeconds), through: UnreadAtOpen.newest(in: messages))
+    }
+
+    @Test func onlyAgentMessagesAfterTheMarksSecondAreUnread() {
+        let messages = [
+            message("u", role: "user", [text("hi")], at: 20),
+            message("same", [text("read")], at: 10.4),
+            message("later", [text("new")], at: 11),
+        ]
+        let summary = UnreadAtOpen.summary(in: messages, at: opened(messages, mark: 10), hasOlder: false)
+        #expect(summary == UnreadSummary(firstId: "later", count: 1, more: false))
+    }
+
+    @Test func theLineGoesAboveTheFirstUnreadMessageThatDrawsSomething() {
+        let messages = [
+            message("a1", [text("read")], at: 0),
+            message("blank", [text("  ")], at: 20),
+            message("a2", [text("new")], at: 21),
+        ]
+        let open = opened(messages, mark: 10)
+        #expect(UnreadAtOpen.summary(in: messages, at: open, hasOlder: false) == UnreadSummary(firstId: "a2", count: 1, more: false))
+        // Nothing was unread when the chat held nothing newer than the mark.
+        #expect(UnreadAtOpen.summary(in: messages, at: opened([], mark: 10), hasOlder: false) == nil)
+    }
+
+    @Test func anUnreadRunThatMayStartOnAnOlderPageWaitsForIt() {
+        let messages = [
+            message("q", role: "user", [text("go")], at: 20),
+            message("r1", [text("new")], at: 30),
+            message("r2", [text("new too")], at: 40),
+        ]
+        let open = opened(messages, mark: 10)
+        #expect(UnreadAtOpen.summary(in: messages, at: open, hasOlder: true) == UnreadSummary(firstId: nil, count: 2, more: true))
+        #expect(UnreadAtOpen.summary(in: messages, at: open, hasOlder: false) == UnreadSummary(firstId: "r1", count: 2, more: false))
+        // The oldest loaded message is read: the run starts here.
+        let read = [message("old", [text("read")], at: 5)] + messages
+        #expect(UnreadAtOpen.summary(in: read, at: open, hasOlder: true)?.firstId == "r1")
+    }
+
+    /// A trace comes with the page of its turn and may be older than every
+    /// message on it: it does not end the search for the first unread one.
+    @Test func aTraceOlderThanTheLoadedMessagesDoesNotEndTheRun() {
+        var trace = message("trace", [text("[]")], at: 0)
+        trace.role = "trace"
+        let messages = [trace, message("r1", [text("new")], at: 30), message("r2", [text("new too")], at: 40)]
+        let open = opened(messages, mark: 10)
+        #expect(UnreadAtOpen.summary(in: messages, at: open, hasOlder: true) == UnreadSummary(firstId: nil, count: 2, more: true))
+        #expect(UnreadAtOpen.newest(in: messages) == mark(40))
+        #expect(UnreadAtOpen.newest(in: []) == Int.min)
+    }
+
+    /// A message made after the newest one the chat opened with arrived live.
+    @Test func aMessageMadeAfterTheOpeningHistoryIsNeverUnread() {
+        let opening = [message("r1", [text("new")], at: 30)]
+        let open = opened(opening, mark: 10)
+        let later = opening + [message("live", [text("just now")], at: 50)]
+        #expect(UnreadAtOpen.summary(in: later, at: open, hasOlder: false) == UnreadSummary(firstId: "r1", count: 1, more: false))
+    }
+
+    @Test func theLineSitsUnderItsTimeSeparatorAndEndsTheRunBeforeIt() {
+        let messages = [
+            message("a1", [replying(to: "u"), text("one")], at: 60 * 90),
+            message("a2", [replying(to: "u"), text("two")], at: 60 * 90 + 10),
+            message("a3", [replying(to: "u"), text("three")], at: 60 * 90 + 20),
+        ]
+        let rows = TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init(unreadFrom: "a2"))
+        #expect(rows.map(\.id) == ["sep-a1", "a1:1", "unread-divider", "a2:1", "a3:1"])
+        let positions = rows.compactMap { row -> BubblePosition? in
+            if case .agentText(_, _, _, _, let position) = row { return position }
+            return nil
+        }
+        #expect(positions == [.single, .first, .last])
+
+        let after = TranscriptBuilder.rows(messages: [message("old", [text("x")], at: 0)] + messages, pending: [], answers: [:], options: .init(unreadFrom: "a1"))
+        #expect(after.map(\.id).prefix(5) == ["sep-old", "old:0", "sep-a1", "unread-divider", "a1:1"])
+    }
+
+    @Test func noLineForAMessageTheChatDoesNotDraw() {
+        let rows = TranscriptBuilder.rows(messages: [message("a1", [text("one")], at: 0)], pending: [], answers: [:], options: .init(unreadFrom: "gone"))
+        #expect(!rows.contains(.unreadDivider))
+    }
+}
+
+/// When the "N new messages" pill shows.
+@MainActor
+@Suite struct UnreadPillTests {
+    @Test func aLineAboveTheScreenShowsItAndComingIntoViewEndsIt() {
+        let pill = UnreadPill()
+        pill.dividerAbove(true)
+        #expect(pill.phase == .shown)
+        pill.dividerAbove(false)
+        #expect(pill.phase == .done)
+        // Gone for good: the line scrolling out of sight again brings nothing.
+        pill.dividerAbove(true)
+        #expect(pill.phase == .done)
+    }
+
+    @Test func aLineThatStaysInViewNeverShowsIt() async {
+        let pill = UnreadPill()
+        pill.settleDelay = .milliseconds(20)
+        pill.dividerAbove(false)
+        #expect(pill.phase == .waiting)
+        for _ in 0..<50 where pill.phase == .waiting { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(pill.phase == .done)
+        pill.dividerAbove(true)
+        #expect(pill.phase == .done)
+    }
+
+    @Test func contentThatPushesTheLineUpBeforeItSettlesShowsIt() async {
+        let pill = UnreadPill()
+        pill.settleDelay = .milliseconds(50)
+        pill.dividerAbove(false)
+        pill.dividerAbove(true)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(pill.phase == .shown)
+    }
+
+    @Test func aTapEndsItAndANewOpenStartsOver() {
+        let pill = UnreadPill()
+        pill.dividerAbove(true)
+        pill.tapped()
+        #expect(pill.phase == .done)
+        pill.reset()
+        #expect(pill.phase == .waiting)
     }
 }

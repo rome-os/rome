@@ -1,12 +1,13 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "@/i18n";
 import type { DesktopDeviceStatus } from "@/lib/electron-shell";
 import DeviceActivityPage from "./DeviceActivityPage";
+import SettingsDialog from "./SettingsDialog";
 import SettingsPage from "./SettingsTabPage";
 
 beforeAll(async () => {
@@ -51,9 +52,6 @@ it("lists devices independently of the settings request", async () => {
     ],
   }));
   expect(await screen.findByText("Linux · Not connected")).toBeTruthy();
-  expect(screen.getByRole("link", { name: "Devices" }).getAttribute("href")).toBe(
-    "/settings/devices",
-  );
   expect(screen.getByRole("link", { name: /Desktop/ }).getAttribute("href")).toBe(
     "/settings/devices/two",
   );
@@ -96,7 +94,7 @@ it("holds the devices page in place while the first read is pending", async () =
   expect(await screen.findByRole("button", { name: "Link device" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Devices" })).toBeTruthy();
   // The service-recovery page waits for an answer that says the service needs it.
-  expect(screen.queryByRole("heading", { name: "Connect a computer" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "Connect a device" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
 });
 
@@ -154,17 +152,52 @@ it("drops the device list when the service stops and does not start it on its ow
   ).toBe(true);
 });
 
-it("offers computer setup for an idle running service without an error", async () => {
+it("shows device guides and the container placeholder in the empty list", async () => {
   renderDevices(() => ({
     connection: "stopped",
     checkedAt: new Date().toISOString(),
     devices: [],
   }));
-  expect(await screen.findByText("No computers are linked to this account.")).toBeTruthy();
-  await userEvent.click(screen.getByRole("button", { name: "Link device" }));
-  expect(await screen.findByText("rome-node connect")).toBeTruthy();
+  const setup = within(await screen.findByRole("region", { name: "Connect a device" }));
+  expect(setup.getByRole("heading", { name: "App" })).toBeTruthy();
+  expect(setup.getByRole("link", { name: "Download Rome" })).toBeTruthy();
+  expect(setup.getByRole("heading", { name: "Rome Node CLI" })).toBeTruthy();
+  expect(setup.getByText("rome-node connect")).toBeTruthy();
+  const containerHeading = setup.getByRole("heading", { name: "Rome Node container" });
+  expect(within(containerHeading.parentElement!).getByText("Coming soon")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Link device" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("opens each setup guide and the container placeholder from Link device", async () => {
+  renderDevices(() => ({
+    connection: "online",
+    checkedAt: new Date().toISOString(),
+    devices: [{ id: "mac", name: "MacBook", platform: "macos", status: "connected" }],
+  }));
+  const user = userEvent.setup();
+  await screen.findByRole("link", { name: /MacBook/ });
+  const trigger = screen.getByRole("button", { name: "Link device" });
+  const callsBefore = rs.mocked(fetch).mock.calls.length;
+  const choices = [
+    ["App", "Download Rome"],
+    ["Rome Node CLI", "rome-node connect"],
+    ["Rome Node container", "Coming soon"],
+  ] as const;
+  for (const [name, text] of choices) {
+    await user.click(trigger);
+    await user.click(await screen.findByRole("menuitem", { name }));
+    const dialog = await screen.findByRole("dialog", { name });
+    expect(within(dialog).getByText(text)).toBeTruthy();
+    if (name === "Rome Node container") {
+      const heading = within(dialog).getByRole("heading", { name });
+      expect(within(heading.parentElement!).getByText("Coming soon")).toBeTruthy();
+    }
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  }
+  expect(rs.mocked(fetch)).toHaveBeenCalledTimes(callsBefore);
 });
 
 it("starts only on explicit click and refreshes server truth after success", async () => {
@@ -187,8 +220,9 @@ it("starts only on explicit click and refreshes server truth after success", asy
     }),
     start,
   );
-  const button = await screen.findByRole("button", { name: "Start service" });
-  expect(screen.getByRole("heading", { name: "Connect a computer" })).toBeTruthy();
+  const connection = within(await screen.findByRole("region", { name: "Rome connection" }));
+  const button = connection.getByRole("button", { name: "Start service" });
+  expect(screen.getByRole("heading", { name: "Connect a device" })).toBeTruthy();
   expect(start).not.toHaveBeenCalled();
   await userEvent.click(button);
   const pending = await screen.findByRole("button", { name: "Starting…" });
@@ -196,7 +230,8 @@ it("starts only on explicit click and refreshes server truth after success", asy
   await userEvent.click(pending);
   expect(start).toHaveBeenCalledTimes(1);
   finish();
-  expect(await screen.findByText("No computers are linked to this account.")).toBeTruthy();
+  await waitFor(() => expect(screen.queryByText("Service not running")).toBeNull());
+  expect(screen.getByRole("heading", { name: "Connect a device" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Start service" })).toBeNull();
 });
 
@@ -225,7 +260,7 @@ it.each([
   expect(start).toHaveBeenCalledTimes(1);
 });
 
-it("localizes the service recovery and computer setup in Chinese", async () => {
+it("localizes the service recovery and device setup in Chinese", async () => {
   await i18n.changeLanguage("zh-CN");
   try {
     renderDevices(() => ({
@@ -233,9 +268,15 @@ it("localizes the service recovery and computer setup in Chinese", async () => {
       checkedAt: new Date().toISOString(),
       devices: [],
     }));
-    expect(await screen.findByRole("button", { name: "启动服务" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "连接电脑" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "安装与连接指南" })).toBeTruthy();
+    const connection = within(await screen.findByRole("region", { name: "Rome 连接" }));
+    expect(connection.getByRole("button", { name: "启动服务" })).toBeTruthy();
+    const setup = within(screen.getByRole("region", { name: "连接设备" }));
+    expect(setup.getByRole("heading", { name: "应用" })).toBeTruthy();
+    expect(setup.getByRole("link", { name: "下载 Rome" })).toBeTruthy();
+    expect(setup.getByRole("heading", { name: "Rome Node CLI" })).toBeTruthy();
+    expect(setup.getByRole("link", { name: "安装与连接指南" })).toBeTruthy();
+    const containerHeading = setup.getByRole("heading", { name: "Rome Node 容器" });
+    expect(within(containerHeading.parentElement!).getByText("即将推出")).toBeTruthy();
   } finally {
     cleanup();
     await i18n.changeLanguage("en");
@@ -269,6 +310,39 @@ it("opens a device's page with the selected command from the URL", async () => {
   expect(screen.getByRole("link", { name: "Devices" }).getAttribute("href")).toBe(
     "/settings/devices",
   );
+});
+
+it("steps back to the devices list on Escape, leaving Settings open", async () => {
+  rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+    String(input) === "/api/devices"
+      ? new Response(
+          JSON.stringify({
+            connection: "online",
+            checkedAt: new Date().toISOString(),
+            devices: [{ id: "one", name: "MacBook", platform: "macos", status: "connected" }],
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        )
+      : new Response("{}", { status: 503 }),
+  );
+  const close = rs.fn();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/settings/devices/one"]}>
+        <SettingsDialog onClose={close}>
+          <Routes>
+            <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
+            <Route path="/settings/devices" element={<p>Devices list</p>} />
+          </Routes>
+        </SettingsDialog>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("heading", { name: "MacBook" });
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(await screen.findByText("Devices list")).toBeTruthy();
+  expect(close).not.toHaveBeenCalled();
 });
 
 describe("managing a device from its page", () => {

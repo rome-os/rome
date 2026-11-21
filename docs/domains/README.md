@@ -8,31 +8,33 @@ This folder is the source of truth for what these words mean. Other docs link he
 
 | Context | Its question | File |
 |---|---|---|
-| **Chats** | Who said what, where, and as whom, and when an agent takes part: what wakes it, what it reads, and where it speaks | [chats.md](chats.md) |
+| **Chats** | Who said what, where, and as whom | [chats.md](chats.md) |
 | **Connections** | What access Rome has to which external account | [connections.md](connections.md) |
+| **Participation** | When an agent takes part in a chat, what wakes it, what it reads, and where it speaks | [participation.md](participation.md) |
 | **Agents** | What an agent is and how it runs | [agents.md](agents.md) |
 | **People** | Who is behind an account, and how close they are to the guardian | [people.md](people.md) |
-| **Apps** | What an installed app brings to Rome | no file yet, terms in [concepts/apps.md](../concepts/apps.md) |
-| **Routines** | What runs on a schedule or a trigger | no file yet, terms in [concepts/data.md](../concepts/data.md#routines) |
-
-Apps, Routines and Connections are each a context, and Participation is not one: its words live in Chats (Ouou, 2026-11-09). Apps and Routines have no file here yet.
 
 ```mermaid
 flowchart LR
     Connections["Connections<br/><i>what access Rome has to which external account</i>"]
-    Chats["Chats<br/><i>who said what, where, and as whom, and what wakes an agent, what it reads, where it speaks</i>"]
+    Chats["Chats<br/><i>who said what, where, and as whom</i>"]
+    Participation["Participation<br/><i>what wakes an agent, what it reads, and where it speaks</i>"]
     Agents["Agents<br/><i>what an agent is and how it runs</i>"]
     People["People<br/><i>who is behind an account, and how close they are</i>"]
     Connections -- carries messages --> Chats
-    Chats -- wakes an agent, starts a turn --> Agents
+    Participation -- reads --> Chats
+    Participation -- speaks --> Chats
+    Participation -- starts a turn --> Agents
     Chats -. which agent speaks through this account .-> Agents
     People -- platform and account --> Chats
-    Chats -- who is this --> People
+    Participation -- who is this --> People
 ```
 
-Connections carry messages between chats and Rome. Chats keeps the record, decides when a message wakes an agent, starts the agent's turn, and takes what the agent says back into the record. The dashed line is the link the guardian sets on a [connected account](chats.md#connected-account) after connecting it, as a separate step: which agent speaks through it. An account may have none. Chats follows the definitions of Connections and Agents and changes neither, and Connections never names an agent. Connections and Agents do not depend on each other.
+Connections carry messages between chats and Rome. Participation sits between Chats and Agents: it reads the chat's record, speaks back into it, and starts an agent's turn. The dashed line is the link the guardian sets on a [connected account](chats.md#connected-account) after connecting it, as a separate step: which agent speaks through it. An account may have none. Chats follows the definitions of Connections and Agents and changes neither, and Connections never names an agent. Connections and Agents do not depend on each other.
 
-People follows Chats for platform and account and changes neither. Chats asks People who a sender is and gets a person with their bond level, or nobody. People never decides what happens to a message. That the two read each other is an open question: the recommendation is that Chats hands People a sender's platform and platform id as plain values and People depends on no other context, and this paragraph changes when it is decided. Connections and People do not depend on each other, so a disconnect removes nothing from People.
+People follows Chats for platform and account and changes neither. Participation asks People who a sender is and gets a person with their bond level, or nobody. People never decides what happens to a message. Connections and People do not depend on each other, so a disconnect removes nothing from People.
+
+The code in `@rome/core` is split into more contexts than these, one folder each under `packages/core/src`. Each folder's `README.md` says what it owns, such as [`chats/README.md`](../../packages/core/src/chats/README.md).
 
 ## How to read a context file
 
@@ -63,8 +65,10 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - What the guardian writes in an assistant's chat goes to the assistant and wakes no agent.
 - A code People shows, sent in a direct message to any of Rome's accounts on any platform, links the account it came from to the guardian.
 - Disconnecting the last of Rome's accounts on a platform keeps every link on it.
-- The guardian can start topic chats beside the Concierge's main chat. Each follow and each task reports to one Concierge chat, and the digest goes to the main chat.
-- The guardian and every visitor on the dashboard allow-list each have their own Concierge, private to them, with their own follows, tasks, digest times, quiet hours and time zone. Memory is shared.
+- The guardian can start topic chats beside the Concierge's main chat. Each follow and each task reports to one Concierge chat, and a follow's alerts and digest go to that chat.
+- The dashboard's chat list has two modes. Chat mode lists the common chats and fork chats under Projects, and Concierge mode lists the main chat, its topic chats and the task chats. The home page opens the main chat, and so does the rail's Chat entry in Concierge mode. Only a common chat or a fork chat can be forked.
+- The guardian and every dashboard admin each have their own Concierge, private to them, with their own follows, tasks, digest times, quiet hours and time zone. Memory is shared.
+- Each Concierge chat's task list, labelled Tasks, lists its tasks, checks, follows and the routines that send into it, for its owner only. The dashboard has no checks strip.
 - The grant names the account it reaches, by platform and the platform's own id.
 - At most one connection reaches an account across every kind of connection on its platform.
 - A fix that reaches another account ends the connection and starts a new one to that account, in one step, for every kind of connection, email, WhatsApp and the sign-ins such as GitHub included. The dashboard says so when the setup finishes.

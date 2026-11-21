@@ -28,7 +28,7 @@ export function setupApplicationMenu(
 
   // This computer's record of the remote requests it ran. Local only: no page can open it.
   const auditItem: Electron.MenuItemConstructorOptions = {
-    label: "Audit Log…",
+    label: "Computer Use Log…",
     click: () => openAuditLog(),
   };
 

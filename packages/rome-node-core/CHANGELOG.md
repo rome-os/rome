@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.8](https://github.com/rome-os/rome/compare/node-core-v0.1.7...node-core-v0.1.8) (2026-11-11)
+
+
+### Features
+
+* **desktop:** show Rome Cloud notifications, and stay connected with Computer use off ([#1967](https://github.com/rome-os/rome/issues/1967)) ([3565ef7](https://github.com/rome-os/rome/commit/3565ef7431275a122547207a929ae0717fa32f8d))
+
+
+### Bug Fixes
+
+* **rome-node:** answer device status from the last check while a new one runs ([#1965](https://github.com/rome-os/rome/issues/1965)) ([0093b10](https://github.com/rome-os/rome/commit/0093b10267f067f0c428d0adb9a5c2692637101e))
+
 ## [0.1.7](https://github.com/rome-os/rome/compare/node-core-v0.1.6...node-core-v0.1.7) (2026-11-05)
 
 

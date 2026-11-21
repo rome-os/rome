@@ -33,7 +33,6 @@ import type { Chat } from "../chats/storage/chat.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type Place } from "../chats/storage/place.js";
-import { DASHBOARD_PLATFORM } from "./send.js";
 import { createLogger } from "../logger.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { Speakers } from "../sessions/speakers.js";
@@ -56,6 +55,9 @@ export interface AppChatsDeps {
   speakers: Pick<Speakers, "speakerIn" | "speaksIn" | "accountsIn">;
   replies: Pick<SpeakerReplies, "send">;
   messages: Pick<MessageRepository, "send" | "byIds" | "idOf">;
+  /** The platforms Rome serves itself, such as the dashboard's. An app does
+   *  not send into their chats. */
+  ownPlatforms: { has(platform: string): boolean };
 }
 
 /** The SDK's {@link ChatsPort} over Chats, its adapters and Agents' speakers. */
@@ -175,8 +177,8 @@ async function deliverAs(sender: Sender, deliver: () => Promise<Delivered>): Pro
 function heldChat(deps: AppChatsDeps, ref: SdkChatRef): Chat {
   const chat = deps.chats.get(ref);
   if (!chat) throw new SendError("chat_not_found", `No ${ref.platform} chat ${ref.id}`);
-  if (chat.ref.platform === DASHBOARD_PLATFORM) {
-    throw new SendError("unsupported", "An app does not send into a dashboard chat");
+  if (deps.ownPlatforms.has(chat.ref.platform)) {
+    throw new SendError("unsupported", "An app does not send into a chat Rome serves itself");
   }
   return chat;
 }

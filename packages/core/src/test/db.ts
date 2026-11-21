@@ -10,14 +10,14 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import type { AccountLink } from "@rome/api-types/account-agents";
-import type { ActionEngineRepositories } from "../actions/engine.js";
+import type { ActionEngineRepositories } from "../apps/actions/engine.js";
 import type { AccountLinkOf } from "../chats/connected-accounts/account-links.js";
 import type { ChannelOf } from "../chats/connected-accounts/connection-ports.js";
 import type { DrizzleDb } from "../db/index.js";
-import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
-import { ApprovalsRepository } from "../db/repositories/approvals.js";
+import { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
+import { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
-import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
+import { ExecutionJournalRepository } from "../apps/repositories/execution-journal.js";
 import * as schema from "../db/schema.js";
 
 export interface TestDb {

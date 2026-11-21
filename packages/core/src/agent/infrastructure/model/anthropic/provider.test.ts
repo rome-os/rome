@@ -13,7 +13,7 @@ import type {
   ModelSessionConfig,
   ModelSessionParams,
 } from "../../../domain/model-port.js";
-import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../../../lib/anthropic-compatible-providers.js";
+import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "./anthropic-compatible-providers.js";
 
 const { AbortError } = claudeAgentSdkModule;
 
@@ -311,6 +311,60 @@ describe("AnthropicProvider", () => {
       ]);
     });
 
+    it("prices a resumed turn from its tokens when an empty result came first", async () => {
+      scripted(async function* (sent) {
+        const prompt = await sent();
+        yield result("", [], "task-notification", 0);
+        yield { ...prompt, isReplay: true };
+        yield say("PONG", prompt.uuid);
+        yield {
+          ...result("PONG", [prompt.uuid], "human"),
+          usage: {
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+          // The total the resumed transcript saved, earlier turns included.
+          total_cost_usd: 42,
+        };
+      });
+      const session = await new AnthropicProvider().openSession(
+        buildParams({
+          config: { model: "claude-sonnet-5" },
+          thread: { kind: "resume", modelThreadId: "thread-1" },
+        }),
+      );
+      await session.sendUserInput({ text: "Reply with PONG.", inputId: p });
+      const turn = await nextTurn(session.events[Symbol.asyncIterator]());
+      await session.close();
+
+      const reply = turn.find((m) => m.type === "result") as { accounting?: { costUsd?: number } };
+      expect(reply.accounting?.costUsd).toBeGreaterThan(0);
+      expect(reply.accounting?.costUsd).toBeLessThan(42);
+    });
+
+    it("reports a compaction the SDK made partway through a turn", async () => {
+      scripted(async function* (sent) {
+        const prompt = await sent();
+        yield { ...prompt, isReplay: true };
+        yield {
+          type: "system",
+          subtype: "compact_boundary",
+          compact_metadata: { trigger: "auto", pre_tokens: 180_000 },
+        };
+        yield say("Done", prompt.uuid);
+        yield result("Done", [prompt.uuid], "human");
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      await session.sendUserInput({ text: "go on", inputId: p });
+      const turn = await nextTurn(session.events[Symbol.asyncIterator]());
+      await session.close();
+
+      expect(turn.filter((m) => m.type === "model_context_compacted")).toHaveLength(1);
+      expect(turn.at(-1)).toMatchObject({ type: "result", content: "Done" });
+    });
+
     it("keeps a turn the SDK starts while idle out of Rome's next turn", async () => {
       scripted(async function* (sent) {
         const first = await sent();
@@ -337,6 +391,43 @@ describe("AnthropicProvider", () => {
         { type: "text", content: "It printed MARKER-1", turnPhase: "final" },
       ]);
       expect(second.at(-1)).toMatchObject({ type: "result", content: "It printed MARKER-1" });
+    });
+
+    it("records the spend of a turn the SDK starts while idle in Rome's next turn", async () => {
+      const costed = (text: string, echo: string[], origin: string, total: number) => ({
+        ...result(text, echo, origin),
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+        total_cost_usd: total,
+      });
+      scripted(async function* (sent) {
+        const first = await sent();
+        yield { ...first, isReplay: true };
+        yield say("DONE", first.uuid);
+        yield costed("DONE", [first.uuid], "human", 0.5);
+        yield say("The background command finished.");
+        yield costed("The background command finished.", [], "task-notification", 0.75);
+        const second = await sent();
+        yield { ...second, isReplay: true };
+        yield say("It printed MARKER-1", second.uuid);
+        yield costed("It printed MARKER-1", [second.uuid], "human", 1);
+      });
+      const session = await new AnthropicProvider().openSession(buildParams());
+      const events = session.events[Symbol.asyncIterator]();
+      await session.sendUserInput({ text: "start it", inputId: a });
+      const first = await nextTurn(events);
+      await session.sendUserInput({ text: "what did it print?", inputId: p });
+      const second = await nextTurn(events);
+      await session.close();
+
+      const costOf = (turn: ModelSessionEvent[]) =>
+        (turn.at(-1) as { accounting?: { costUsd?: number } }).accounting?.costUsd;
+      expect(costOf(first)).toBeCloseTo(0.5);
+      expect(costOf(second)).toBeCloseTo(0.5);
     });
 
     it("hands an SDK-started turn to the Rome send it folds in", async () => {
@@ -899,8 +990,14 @@ describe("AnthropicProvider", () => {
     expect(q.interrupt).not.toHaveBeenCalled();
     expect(q.close).not.toHaveBeenCalled();
     expect(controller.signal.aborted).toBe(true);
+    // The abort's own result says the turn was stopped, not completed, so the
+    // session hands the turn's inputs on.
     expect(messages.filter((message) => message.type === "result")).toEqual([
-      { type: "result", content: phase === "startup" ? "" : "Saved work" },
+      {
+        type: "result",
+        content: phase === "startup" ? "" : "Saved work",
+        accounting: expect.objectContaining({ stop: { reason: "interrupted" } }),
+      },
     ]);
     if (phase !== "startup") {
       expect(messages).toContainEqual({ type: "text", content: "Saved work", turnPhase: "final" });
@@ -998,6 +1095,7 @@ describe("AnthropicProvider", () => {
       type: "result",
       content: interruptedCheckpoint ? "Current turn" : "",
       reasoningEffort: "high",
+      accounting: expect.objectContaining({ stop: { reason: "interrupted" } }),
     });
     await session.close();
   });
@@ -2593,6 +2691,53 @@ describe("AnthropicProvider", () => {
   });
 
   describe("accounting", () => {
+    it("counts only the context rows that occupy the window, not the compaction reserve", async () => {
+      mockQuery(
+        [
+          {
+            type: "result",
+            subtype: "success",
+            result: "Done",
+            usage: { input_tokens: 10, output_tokens: 1 },
+            num_turns: 1,
+            stop_reason: "end_turn",
+            duration_ms: 5,
+          },
+        ],
+        {
+          // The SDK's total includes the reserve here; the used rows sum to 35,000.
+          totalTokens: 68000,
+          maxTokens: 200000,
+          rawMaxTokens: 200000,
+          percentage: 34,
+          categories: [
+            { name: "System prompt", tokens: 5000, color: "x", kind: "used" },
+            { name: "Messages", tokens: 30000, color: "x", kind: "used" },
+            { name: "Autocompact buffer", tokens: 33000, color: "x", kind: "buffer" },
+            { name: "MCP tools", tokens: 9000, color: "x", kind: "deferred", isDeferred: true },
+            { name: "Free space", tokens: 123000, color: "x", kind: "free" },
+          ],
+          gridRows: [],
+          model: "claude-sonnet-5",
+          memoryFiles: [],
+          mcpTools: [],
+          agents: [],
+          isAutoCompactEnabled: true,
+        },
+      );
+      const provider = new AnthropicProvider();
+      const session = await provider.openSession(
+        buildParams({ config: { model: "claude-sonnet-5" } }),
+      );
+      const messages = await collectEvents(session);
+      await session.close();
+      expect(messages[0]).toMatchObject({
+        accounting: {
+          context: { usedTokens: 35000, windowTokens: 200000, remainingTokens: 165000 },
+        },
+      });
+    });
+
     it("attaches normalized accounting metadata to result messages", async () => {
       mockQuery(
         [
@@ -2679,6 +2824,40 @@ describe("AnthropicProvider", () => {
         (messages[0] as { type: "result"; accounting?: { usage: Record<string, unknown> } })
           .accounting?.usage,
       ).not.toHaveProperty("reasoningTokens");
+    });
+
+    it("prices a resumed thread's first result from its tokens, not the SDK's running total", async () => {
+      mockQuery([
+        {
+          type: "result",
+          subtype: "success",
+          result: "Done",
+          usage: {
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+          },
+          num_turns: 1,
+          stop_reason: "end_turn",
+          // The total the resumed transcript saved, earlier turns included.
+          total_cost_usd: 42,
+          duration_ms: 5,
+        },
+      ]);
+
+      const session = await new AnthropicProvider().openSession(
+        buildParams({
+          config: { model: "claude-sonnet-5" },
+          thread: { kind: "resume", modelThreadId: "thread-1" },
+        }),
+      );
+      const messages = await collectEvents(session);
+      await session.close();
+
+      const costUsd = (messages[0] as { accounting?: { costUsd?: number } }).accounting?.costUsd;
+      expect(costUsd).toBeGreaterThan(0);
+      expect(costUsd).toBeLessThan(42);
     });
 
     it("reads reasoning tokens from output_tokens_details and maps the stop reason", async () => {

@@ -4,6 +4,7 @@ import {
   Check,
   Folder,
   MessageSquare,
+  Plus,
   SearchX,
   SendHorizontal,
   X,
@@ -30,6 +31,7 @@ import {
 } from "@/components/ui/command";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { IconButton } from "@/components/ui/icon-button";
+import { Kbd } from "@/components/ui/kbd";
 import { useAppsList } from "@/hooks/use-apps";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { isHiddenInLauncher } from "@/lib/chat-helpers";
@@ -366,7 +368,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     sessions: cachedSessions,
     isError: sessionsFailed,
     refetch: refetchSessions,
-  } = useChatSessions("all", undefined, { enabled: open });
+  } = useChatSessions("all", undefined, { enabled: open, refetchOnShow: true });
   const sessions = cachedSessions ?? null;
   const loadError = sessionsFailed && !cachedSessions;
   const [contentMatches, setContentMatches] = useState<ChatSearchMessageMatch[]>([]);
@@ -483,6 +485,16 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
   const matchingPageEntries = useMemo(
     () => matchingPages(APP_NAV, (page) => t(page.labelKey), normalizedQuery),
     [normalizedQuery, t],
+  );
+  // New chat is offered when the query names it, as a command beside the
+  // pages. It is the palette's way to a common chat, besides Cmd+Shift+O.
+  const newChatLabel = t("recentChats.newChat");
+  const newChatMatches = useMemo(
+    () =>
+      [newChatLabel, "new chat"].some((name) =>
+        normalizeSearchText(name).includes(normalizedQuery),
+      ),
+    [newChatLabel, normalizedQuery],
   );
   const matchingApps = useMemo(
     () => matchingOpenableApps(apps ?? [], normalizedQuery),
@@ -689,7 +701,12 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
   const isSearching = normalizedQuery.length > 0;
   const chatLoading = sessions === null && !loadError;
   const contentPending = isSearching && contentSearchQuery !== trimmedQuery;
-  const resultCount = matchingPageEntries.length + matchingApps.length + visibleEntries.length;
+  const showNewChatResult = isSearching && newChatMatches;
+  const resultCount =
+    Number(showNewChatResult) +
+    matchingPageEntries.length +
+    matchingApps.length +
+    visibleEntries.length;
   const relevantLoading = isSearching
     ? chatLoading || appsLoading || contentLoading || contentPending
     : chatLoading;
@@ -776,6 +793,22 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
         </span>
       </CommandItem>
     ) : null;
+
+  const newChatItem = (
+    <CommandItem
+      key="command:new-chat"
+      value="command:new-chat"
+      aria-label={newChatLabel}
+      onSelect={() => openHref("/chat")}
+      data-new-chat-command
+      className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+    >
+      <SearchPageIcon Icon={Plus} />
+      <span className="min-w-0 flex-1 truncate text-ui text-foreground">
+        <HighlightedText text={newChatLabel} terms={queryTerms} />
+      </span>
+    </CommandItem>
+  );
 
   const pageItems = matchingPageEntries.map(({ page, label }) => (
     <CommandItem
@@ -918,9 +951,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
               className="text-muted-foreground hover:text-foreground"
             />
           ) : (
-            <kbd className="hidden shrink-0 rounded-4 border border-border bg-surface-muted px-2 py-1 font-sans text-aux text-muted-foreground sm:inline-flex">
-              {shortcut}
-            </kbd>
+            <Kbd className="hidden sm:inline-flex">{shortcut}</Kbd>
           )}
         </CommandInput>
 
@@ -1126,8 +1157,11 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
             {messagingAgent ? sendItem : null}
             {!pickingAgent && !messagingAgent ? (
               <>
-                {hasResults && isSearching && matchingPageEntries.length > 0 ? (
+                {hasResults &&
+                isSearching &&
+                (showNewChatResult || matchingPageEntries.length > 0) ? (
                   <CommandGroup heading={t("recentChats.searchPagesGroup")}>
+                    {showNewChatResult ? newChatItem : null}
                     {pageItems}
                   </CommandGroup>
                 ) : null}
@@ -1148,15 +1182,11 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
 
       <div className="hidden items-center gap-4 border-t border-border px-4 py-2 text-aux text-muted-foreground sm:flex">
         <span className="inline-flex items-center gap-2">
-          <kbd className="rounded-4 border border-border bg-surface-muted px-1 py-1 font-sans">
-            ↑↓
-          </kbd>
+          <Kbd>↑↓</Kbd>
           {t("recentChats.searchNavigateHint")}
         </span>
         <span className="inline-flex items-center gap-2">
-          <kbd className="rounded-4 border border-border bg-surface-muted px-1 py-1 font-sans">
-            ↵
-          </kbd>
+          <Kbd>↵</Kbd>
           {pickingAgent
             ? t("recentChats.agentPickHint")
             : messagingAgent
@@ -1164,9 +1194,7 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
               : t("recentChats.searchOpenHint")}
         </span>
         <span className="inline-flex items-center gap-2">
-          <kbd className="rounded-4 border border-border bg-surface-muted px-1 py-1 font-sans">
-            Esc
-          </kbd>
+          <Kbd>Esc</Kbd>
           {t("recentChats.searchCloseHint")}
         </span>
       </div>

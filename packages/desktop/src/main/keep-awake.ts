@@ -27,7 +27,7 @@ export class KeepAwake {
    * offline keeps the hold for up to the grace period, counted from when it
    * stopped being connected. An off or disabled device releases at once.
    */
-  sync(status: DeviceStatus): void {
+  sync(status: Pick<DeviceStatus, "state">): void {
     if (status.state === "connected") {
       this.clearGrace();
       this.expired = false;

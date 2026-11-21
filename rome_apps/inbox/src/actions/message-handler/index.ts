@@ -7,13 +7,16 @@ import type {
   AppActionRuntimeDeps,
   ApprovalsRepository,
   Attachment,
+  BondLevel,
+  ChatId,
   ChatRecord,
+  ChatRef,
   ChatRepository,
   EnsureChannelChatInput,
+  MessageAddressing,
   MessageReplyReference,
   PersonMappingRepository,
   PersonRecord,
-  PolicyEngine,
   SentinelLogRepository,
   StreamAgentMessage,
 } from "@rome-os/app-runtime";
@@ -26,12 +29,44 @@ const log = createAppLogger("message-handler");
 // Dependencies injected via factory
 // ---------------------------------------------------------------------------
 
+/** Core's send gate, which the SDK does not describe yet. */
+export type SendGate = (request: {
+  destination: {
+    connectionId: string;
+    chatId: string;
+    place: "direct" | "group";
+    sameChatAsWake: boolean;
+    onlyGuardianReads: boolean;
+  };
+  recipient: { bondLevel: BondLevel } | null;
+  author: { agentName: string };
+}) => "send" | "check" | "ask_guardian" | "refuse";
+
+/** Core's wake gate, which the SDK does not describe yet. */
+export type WakeGate = (
+  message: {
+    connectionId: string;
+    chatId: string;
+    channel: string;
+    place: "direct" | "group";
+    threadName?: string;
+    addressing?: MessageAddressing;
+    fromBot?: boolean;
+    mentionsOthers?: boolean;
+  },
+  sender: { person: { id: string; bondLevel: BondLevel } | null },
+) => "wake" | "quiet" | "block" | "review";
+
+/** The wake gate for a chat, built from its current settings. */
+export type WakeGateFor = (request: { chat: ChatRef }) => Promise<WakeGate>;
+
 export interface MessageHandlerDeps {
   agentRunner: AgentRunnerInterface;
+  sendGate: SendGate;
   personMappingRepo: PersonMappingRepository;
   sentinelLogRepo: SentinelLogRepository;
   approvalsRepo: ApprovalsRepository;
-  policyEngine: PolicyEngine;
+  wakeGateFor: WakeGateFor;
   emitAgentMessage?: (message: StreamAgentMessage) => void;
   resolveProfilePath(filePath: string): string;
   strangerPersonId: string;
@@ -62,23 +97,12 @@ export interface SentinelDecision {
 }
 
 type CollectedAgentResult =
-  | { success: true; content: string; turnId?: string }
+  | { success: true; content: string; structuredOutput?: unknown; turnId?: string }
   | { success: false; error: string };
 
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
-
-const DEFAULT_TRUSTED_BOND_LEVELS = ["guardian"];
-const DEFAULT_REPLY_TO_BOND_LEVELS = ["guardian"];
-
-function isTrustedBondLevel(bondLevel: string, trustedLevels: string[]): boolean {
-  return trustedLevels.includes(bondLevel);
-}
-
-function canReplyToBondLevel(bondLevel: string, replyToLevels: string[]): boolean {
-  return replyToLevels.includes(bondLevel);
-}
 
 function readMarkdownContext(filePath: string): string | null {
   const fullPath = isAbsolute(filePath) ? filePath : filePath;
@@ -137,8 +161,14 @@ function getRuntimeThreadPath(): string | undefined {
   return typeof threadPath === "string" && threadPath.trim() ? threadPath : undefined;
 }
 
-function buildSenderInfo(
-  ctx: MessageContext & {
+/**
+ * What Rome knows about a message's sender: their person's notes, or their
+ * name and bond level when the guardian keeps none, or that they are a
+ * stranger. Sentinel reads it with each message it triages. The agents that
+ * answer read a person's notes themselves, with `core:read_person`.
+ */
+export function buildSenderInfo(
+  ctx: Pick<MessageContext, "person"> & {
     resolveProfilePath(filePath: string): string;
     strangerPersonId: string;
   },
@@ -147,20 +177,15 @@ function buildSenderInfo(
     return "stranger (no person mapping yet)";
   }
 
-  if (!ctx.person.profilePath) {
-    return [
-      `Mapped person: ${ctx.person.displayName}`,
-      `Bond level: ${ctx.person.bondLevel}`,
-      "Sender profile markdown unavailable.",
-    ].join("\n");
-  }
-
+  // Notes live at the stored profile path, or by the person's id when none
+  // is stored, as core's `personProfilePath` places them.
+  const profilePath = ctx.person.profilePath || `memory/relationship/${ctx.person.id}.md`;
   return (
-    readMarkdownContext(ctx.resolveProfilePath(ctx.person.profilePath)) ??
+    readMarkdownContext(ctx.resolveProfilePath(profilePath)) ??
     [
       `Mapped person: ${ctx.person.displayName}`,
       `Bond level: ${ctx.person.bondLevel}`,
-      `Sender profile missing: ${ctx.person.profilePath}`,
+      "No notes on this sender yet.",
     ].join("\n")
   );
 }
@@ -176,26 +201,21 @@ export function buildMessageContext(
     return readMarkdownContext(resolved);
   };
 
-  // Only the STABLE Guardian profile (and, for non-guardian senders, the Sender
-  // info) belongs in this system-prompt suffix — both stay in the cacheable
-  // system prefix. The per-thread, dynamic thread + project framing is rendered
-  // separately as a `<thread_context>` block on the session's FIRST user message
+  // Only the STABLE Guardian profile belongs in this system-prompt suffix, so
+  // it stays in the cacheable system prefix. Who sent each message reaches the
+  // agent on the message itself, not here: a group has many senders, and the
+  // suffix is fixed when the session opens. The per-thread, dynamic thread +
+  // project framing is rendered separately as a `<thread_context>` block on the session's FIRST user message
   // (one renderer for every channel) — see `buildThreadContextBlock` in
   // @rome/core agent/domain/prompt.ts and AgentSession.runOneTurn. The thread context
   // travels there via the `threadContext` already forwarded into the agent run.
-  const sections: string[] = [
+  return [
     "# Context",
     "",
     "## Guardian",
     "",
     readContext("memory/relationship/GUARDIAN.md") ?? "Guardian profile unavailable.",
-  ];
-
-  if (ctx.bondLevel !== "guardian") {
-    sections.push("", "## Sender info", "", buildSenderInfo(ctx));
-  }
-
-  return sections.join("\n");
+  ].join("\n");
 }
 
 export function parseSentinelDecision(raw: string): SentinelDecision {
@@ -231,18 +251,57 @@ export function parseSentinelDecision(raw: string): SentinelDecision {
   return { action: "replied", response };
 }
 
+/** Who the envoy is told a reply goes to: the answered message's sender. */
+export interface EnvoyRecipient {
+  /** The name the message showed, which the sender chose. */
+  shownName: string;
+  /** The person Rome links to the sender's account, or null when none. */
+  person: string | null;
+  bondLevel: string;
+  threadType?: string;
+}
+
+const BOND_LEVEL_WORDS: Record<string, string> = {
+  guardian: "guardian",
+  "inner-circle": "inner circle",
+  acquaintance: "acquaintance",
+  other: "other",
+};
+
+/** The sender as the replying agent reads them, `Ada [Ada Lovelace, inner circle]`,
+ *  the same form Rome labels each message the agent reads with (`whoSaid` in
+ *  packages/core/src/chats/sender-labels.ts, which apps cannot import). */
+export function recipientLabel(recipient: EnvoyRecipient): string {
+  const who = recipient.person
+    ? `${recipient.person}, ${BOND_LEVEL_WORDS[recipient.bondLevel] ?? recipient.bondLevel}`
+    : "not linked";
+  return `${recipient.shownName} [${who}]`;
+}
+
+function placeOf(threadType: string | undefined): string {
+  if (threadType === "private") return "direct message";
+  if (threadType === "group") return "group chat";
+  return "chat";
+}
+
 async function envoyCheck(
   runner: AgentRunnerInterface,
   outgoingText: string,
   originalMessage: string,
-  bondLevel: string,
+  recipient: EnvoyRecipient,
+  replyingAgent: string,
   workingDir?: string,
 ): Promise<{ action: "approve" | "reject" | "require_approval"; reason?: string }> {
+  const place = placeOf(recipient.threadType);
   const prompt = [
     `Validate this outgoing message before it is sent.`,
     ``,
-    `Original user message: ${originalMessage}`,
-    `Bond level: ${bondLevel}`,
+    `Message being answered, from ${recipientLabel(recipient)}:`,
+    originalMessage,
+    ``,
+    `The reply goes to that sender, in the same ${place} the message was sent in.`,
+    `The sender is not the guardian: the guardian's replies skip this check.`,
+    `Replying agent: ${replyingAgent}`,
     ``,
     `Proposed reply:`,
     outgoingText,
@@ -267,15 +326,34 @@ async function envoyCheck(
     };
   }
 
-  const envoyOutput = envoyResult.content;
-  const upper = envoyOutput.toUpperCase();
-  if (upper.includes("REQUIRE_APPROVAL") || upper.includes("REQUIRE APPROVAL")) {
-    return { action: "require_approval", reason: envoyOutput };
+  return readEnvoyVerdict(envoyResult.structuredOutput, envoyResult.content);
+}
+
+const ENVOY_VERDICTS = ["approve", "require_approval", "reject"] as const;
+type EnvoyVerdict = (typeof ENVOY_VERDICTS)[number];
+
+/**
+ * The envoy's decision is its `verdict` field and nothing else. An answer
+ * without a known verdict holds the message for the guardian.
+ */
+function readEnvoyVerdict(
+  structuredOutput: unknown,
+  content: string,
+): { action: EnvoyVerdict; reason?: string } {
+  const answer =
+    structuredOutput && typeof structuredOutput === "object"
+      ? (structuredOutput as { verdict?: unknown; reason?: unknown })
+      : undefined;
+  const verdict = ENVOY_VERDICTS.find((v) => v === answer?.verdict);
+  if (!verdict) {
+    log.warn("envoy answered without a verdict; requiring approval", { content });
+    return {
+      action: "require_approval",
+      reason: `Envoy answered without a verdict: ${content}`,
+    };
   }
-  if (upper.includes("REJECT")) {
-    return { action: "reject", reason: envoyOutput };
-  }
-  return { action: "approve", reason: envoyOutput };
+  const reason = typeof answer?.reason === "string" ? answer.reason : undefined;
+  return { action: verdict, ...(reason ? { reason } : {}) };
 }
 
 async function collectAgentResult(
@@ -285,13 +363,17 @@ async function collectAgentResult(
   agentName?: string,
 ): Promise<CollectedAgentResult> {
   let response = "";
+  let structuredOutput: unknown;
   let lastError = "";
   let turnId: string | undefined;
   for await (const msg of runner.run(params)) {
     if (msg.type === "turn_start") {
       turnId = msg.turnId;
     }
-    if (msg.type === "result") response = msg.content;
+    if (msg.type === "result") {
+      response = msg.content;
+      structuredOutput = msg.structuredOutput;
+    }
     if (msg.type === "error") lastError = msg.error;
     emitAgentMessage?.({ ...msg, agent: agentName });
   }
@@ -299,7 +381,7 @@ async function collectAgentResult(
     log.warn("agent returned error instead of result", { agentName, error: lastError });
     return { success: false, error: lastError };
   }
-  return { success: true, content: response, turnId };
+  return { success: true, content: response, structuredOutput, turnId };
 }
 
 function requireChatRepository(deps: MessageHandlerRuntimeDeps): ChatRepository {
@@ -422,10 +504,10 @@ async function handleTrustedMessage(
     return { status: "ok", data: { action: "no_response" } };
   }
 
-  // Skip envoy for guardian — send directly
-  if (bondLevel === "guardian") {
-    log.info("skipping envoy (guardian)", { channel, channelUserId });
-    await sendAnswer(deps, {
+  const approval = { type: "outgoing_message" as const, requestedBy: targetAgent };
+  const payload = { response, channel, threadId, messageId, channelUserId };
+  const send = () =>
+    sendAnswer(deps, {
       channel,
       threadId,
       text: response,
@@ -435,37 +517,74 @@ async function handleTrustedMessage(
       ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
       knownToProvider: true,
     });
+  const senderPerson = typeof args.senderPerson === "string" ? args.senderPerson : null;
+  const recipient =
+    typeof args.senderPerson === "string" ? { bondLevel: bondLevel as BondLevel } : null;
+  const place = args.threadType === "private" ? "direct" : "group";
+  const decision = deps.sendGate({
+    destination: {
+      connectionId,
+      chatId: threadId,
+      place,
+      // The reply goes to the chat the message came from.
+      sameChatAsWake: true,
+      onlyGuardianReads: place === "direct" && recipient?.bondLevel === "guardian",
+    },
+    recipient,
+    author: { agentName: targetAgent },
+  });
+  log.info("send gate decision", { decision, channel, channelUserId });
+
+  if (decision === "send") {
+    await send();
     await deps.approvalsRepo.create({
-      type: "outgoing_message",
-      requestedBy: targetAgent,
+      ...approval,
       description: "Skipped envoy (guardian)",
-      payload: { response, channel, threadId, messageId, channelUserId },
+      payload,
       status: "auto_approved",
     });
     return { status: "ok", data: { action: "sent", response } };
   }
+  if (decision === "ask_guardian") {
+    await deps.approvalsRepo.create({
+      ...approval,
+      description: "Held by the send gate",
+      payload,
+    });
+    return { status: "ok", data: { action: "pending_approval", response } };
+  }
+  if (decision === "refuse") {
+    await deps.approvalsRepo.create({
+      ...approval,
+      description: "Refused by the send gate",
+      payload,
+      status: "rejected",
+    });
+    return { status: "ok", data: { action: "rejected_by_send_gate" } };
+  }
 
-  // Envoy check before sending (non-guardian trusted senders)
   log.info("running envoy check", { channel, channelUserId });
-  const envoyResult = await envoyCheck(deps.agentRunner, response, text, bondLevel, workingDir);
+  const envoyResult = await envoyCheck(
+    deps.agentRunner,
+    response,
+    text,
+    {
+      shownName: typeof args.displayName === "string" ? args.displayName : channelUserId,
+      person: senderPerson,
+      bondLevel,
+      threadType: typeof args.threadType === "string" ? args.threadType : undefined,
+    },
+    targetAgent,
+    workingDir,
+  );
   log.info("envoy decision", { action: envoyResult.action, channel, channelUserId });
 
   if (envoyResult.action === "approve") {
-    await sendAnswer(deps, {
-      channel,
-      threadId,
-      text: response,
-      channelUserId,
-      replyToMessageId: messageId,
-      romeSessionId: chatId,
-      ...(mainResult.turnId ? { turnId: mainResult.turnId } : {}),
-      knownToProvider: true,
-    });
+    await send();
     await deps.approvalsRepo.create({
-      type: "outgoing_message",
-      requestedBy: targetAgent,
+      ...approval,
       description: envoyResult.reason ?? "Envoy approved",
-      payload: { response, channel, threadId, messageId, channelUserId },
+      payload,
       status: "auto_approved",
     });
     return { status: "ok", data: { action: "sent", response } };
@@ -473,20 +592,17 @@ async function handleTrustedMessage(
 
   if (envoyResult.action === "require_approval") {
     await deps.approvalsRepo.create({
-      type: "outgoing_message",
-      requestedBy: targetAgent,
+      ...approval,
       description: envoyResult.reason ?? "Envoy flagged for approval",
-      payload: { response, channel, threadId, messageId, channelUserId },
+      payload,
     });
     return { status: "ok", data: { action: "pending_approval", response } };
   }
 
-  // Rejected
   await deps.approvalsRepo.create({
-    type: "outgoing_message",
-    requestedBy: targetAgent,
+    ...approval,
     description: envoyResult.reason ?? "Envoy rejected",
-    payload: { response, channel, threadId, messageId, channelUserId },
+    payload,
     status: "rejected",
   });
   return {
@@ -506,6 +622,7 @@ async function handleUntrustedMessage(
   contextSuffix: string,
   chatId: string,
   targetAgent: string,
+  senderInfo: string,
 ): Promise<ActionResult> {
   const { channel, channelUserId, threadId, text, messageId, displayName } = args as Record<
     string,
@@ -520,8 +637,13 @@ async function handleUntrustedMessage(
     deps.agentRunner,
     {
       agentName: "sentinel",
-      prompt: `Triage this message from ${displayName} (${bondLevel}):\n\n${text}`,
-      channelThreadKey: `sentinel:${channelThreadKey}`,
+      // The sender's own notes go on each message: the sentinel's session is
+      // the chat's, where many people speak, and it reads no one else's.
+      prompt: `<sender>\n${senderInfo}\n</sender>\n\nTriage this message from ${displayName} (${bondLevel}):\n\n${text}`,
+      // One sentinel session per sender: each message carries its sender's
+      // notes, and a session shared by a group would carry every sender's
+      // notes into the next stranger's triage.
+      channelThreadKey: `sentinel:${channelThreadKey}:${channelUserId}`,
       contextSuffix,
       workingDir,
     },
@@ -650,20 +772,28 @@ export function createMessageHandlerAction(
 
         const bondLevel = (person?.bondLevel as string) ?? "other";
 
-        const policy = await deps.policyEngine.evaluate({
-          channel,
-          sender: person ? { id: person.id, bondLevel: person.bondLevel } : null,
-          bondLevel,
-          threadName,
-          threadType,
-        });
+        // The hook asked the wake gate already when the host recorded the
+        // message with People's answer; otherwise ask it here.
+        const wake =
+          args.wake === "wake" || args.wake === "review"
+            ? args.wake
+            : (await deps.wakeGateFor({ chat: { connectionId, chatId: threadId as ChatId } }))(
+                {
+                  connectionId,
+                  chatId: threadId,
+                  channel,
+                  place: threadType === "private" ? "direct" : "group",
+                  threadName,
+                  ...addressedBy(args),
+                },
+                { person: person ? { id: person.id, bondLevel: person.bondLevel } : null },
+              );
 
-        if (policy.action === "block") {
+        if (wake === "block") {
           log.info("message blocked by policy", { channel, channelUserId });
           return { status: "ok", data: { action: "blocked" } };
         }
 
-        const settings = deps.appContext.repositories.settings;
         const conversations = requireChatRepository(deps);
         const requestedAgent =
           typeof args.routedAgentName === "string" && args.routedAgentName.trim()
@@ -728,9 +858,7 @@ export function createMessageHandlerAction(
         // the agent was away. Waking the agent makes it the turn's prompt.
         const recorded =
           typeof args.recordedMessageId === "string" && args.recordedMessageId.length > 0;
-        const replyToLevels =
-          (await settings.get<string[]>("replyToBondLevels")) ?? DEFAULT_REPLY_TO_BOND_LEVELS;
-        if (!canReplyToBondLevel(bondLevel, replyToLevels)) {
+        if (wake === "quiet") {
           const stored = recorded
             ? { inserted: true }
             : await conversations.addMessage({
@@ -746,7 +874,7 @@ export function createMessageHandlerAction(
           if (!stored.inserted) {
             return { status: "ok", data: { action: "duplicate", messageId: platformMessageId } };
           }
-          log.info("message ignored by reply-to bond-level setting", {
+          log.info("message wakes nobody", {
             channel,
             channelUserId,
             bondLevel,
@@ -770,13 +898,11 @@ export function createMessageHandlerAction(
           strangerPersonId: deps.strangerPersonId,
         });
 
-        const enrichedArgs = { ...args, text: promptText, bondLevel, replyTo };
+        const senderPerson =
+          person && person.id !== deps.strangerPersonId ? person.displayName : null;
+        const enrichedArgs = { ...args, text: promptText, bondLevel, replyTo, senderPerson };
 
-        const trustedLevels =
-          (await settings.get<string[]>("trustedBondLevels")) ?? DEFAULT_TRUSTED_BOND_LEVELS;
-
-        const trusted = isTrustedBondLevel(bondLevel, trustedLevels);
-        const triggersTargetAgent = trusted || policy.action === "allow";
+        const triggersTargetAgent = wake === "wake";
         if (recorded && triggersTargetAgent) {
           await conversations.promoteMessageToUser(conversation.id, platformMessageId);
         }
@@ -799,9 +925,8 @@ export function createMessageHandlerAction(
         log.info("routing message", {
           channel,
           channelUserId,
-          trusted,
           bondLevel,
-          policyAction: policy.action,
+          wake,
         });
 
         if (triggersTargetAgent) {
@@ -822,6 +947,11 @@ export function createMessageHandlerAction(
           contextSuffix,
           conversation.id,
           targetAgent,
+          buildSenderInfo({
+            person: person as PersonRecord | null,
+            resolveProfilePath: deps.resolveProfilePath,
+            strangerPersonId: deps.strangerPersonId,
+          }),
         );
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
@@ -844,7 +974,7 @@ export async function sendAnswer(
   input: Record<string, unknown> & { replyToMessageId?: string },
 ): Promise<void> {
   try {
-    await deps.appContext.runAction("send_message", input);
+    await deps.appContext.runAction("system:send_message", input);
   } catch (err) {
     // Matched by its fields, not its class, as `isSendRefused` matches, so a
     // copy of the SDK other than the host's still recognizes it.
@@ -854,6 +984,19 @@ export async function sendAnswer(
       (err as { refusal?: unknown }).refusal === "reply_unaddressable";
     if (!unquotable || input.replyToMessageId === undefined) throw err;
     const { replyToMessageId: _quote, ...unquoted } = input;
-    await deps.appContext.runAction("send_message", unquoted);
+    await deps.appContext.runAction("system:send_message", unquoted);
   }
+}
+
+/** How the message addressed Rome's account, as far as the hook passed it. */
+function addressedBy(
+  args: Record<string, unknown>,
+): Pick<Parameters<WakeGate>[0], "addressing" | "fromBot" | "mentionsOthers"> {
+  return {
+    ...(typeof args.addressing === "string"
+      ? { addressing: args.addressing as MessageAddressing }
+      : {}),
+    ...(args.fromBot === true ? { fromBot: true } : {}),
+    ...(args.mentionsOthers === true ? { mentionsOthers: true } : {}),
+  };
 }

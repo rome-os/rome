@@ -1,0 +1,17 @@
+import Foundation
+
+/// What a transcript's rows do when the guardian acts on them: Retry, Delete,
+/// Reply, Share, a quote. One object for each
+/// store, so a row holds a reference that never changes, not closures made
+/// anew each time its screen is drawn: a row that did not change is not drawn
+/// again.
+@MainActor
+final class ChatActions {
+    weak var store: TranscriptStore?
+
+    func retry(_ rowId: String) { store?.retry(rowId) }
+    func remove(_ rowId: String) { store?.removePending(rowId) }
+    func reply(to messageId: String, row: String? = nil) { store?.reply(to: messageId, row: row) }
+    func share(fromRow rowId: String) { store?.share.begin(fromRow: rowId) }
+    func quote(original: String) { store?.quoteAction(original: original)?() }
+}

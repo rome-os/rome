@@ -15,7 +15,8 @@ import {
   resolveWebchatProjectPath,
 } from "../../webchat/projects.js";
 import { createLogger } from "../../logger.js";
-import type { StoredSharedChat } from "../../db/repositories/webchat.js";
+import { SHARE_ROBOTS } from "../../lib/share-robots.js";
+import type { StoredSharedChat } from "../../webchat/repository.js";
 import type { ApiDeps } from "../deps.js";
 
 const log = createLogger("api:share");
@@ -30,6 +31,12 @@ const log = createLogger("api:share");
 export function shareRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
   const projectsRoot = ensureProjectsRootInitialized();
+
+  // Every public read, found or not, tells crawlers to keep out.
+  app.use("/share/*", async (c, next) => {
+    await next();
+    c.header("X-Robots-Tag", SHARE_ROBOTS);
+  });
 
   // Read-only snapshot: returns the frozen chat + widget layout for the token.
   app.get("/share/:token", async (c) => {

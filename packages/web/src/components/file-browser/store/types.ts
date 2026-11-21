@@ -89,7 +89,6 @@ export type NameDialogState =
   | {
       confirmLabel: string;
       currentName: string;
-      description: string;
       error?: string | null;
       initialValue: string;
       inputLabel: string;
@@ -139,6 +138,8 @@ export interface FileBrowserConfig {
   getRouteSnapshot: () => { pathname: string; search: string; hash: string };
   t: TFunction;
   embedded: boolean;
+  /** Shows one file the host chose, so a Markdown file opens in the editor, not the preview. */
+  singleFile?: boolean;
   getDeleteDescription?: DeleteDescriptionResolver;
   onPathsDeleted?: (paths: string[]) => void;
   /** Fired after a folder is created. Lets a host (e.g. the projects page) act on
@@ -251,7 +252,6 @@ export interface UiSlice {
   discardChangesConfirmOpen: boolean;
   isDragActive: boolean;
   sidebarWidth: number;
-  isResizingSidebar: boolean;
   creating: boolean;
   deleting: boolean;
   moving: boolean;
@@ -275,7 +275,6 @@ export interface UiSlice {
   resolveDiscardChangesConfirm(discard: boolean): void;
   setIsDragActive(value: boolean): void;
   setSidebarWidth(value: number): void;
-  setIsResizingSidebar(value: boolean): void;
   setFilesPaneDrillPath(value: string | null): void;
   loadHistory(): Promise<void>;
   doSearch(): Promise<void>;
@@ -317,7 +316,5 @@ export interface FileBrowserState {
     pendingUploadTarget: string | null;
     discardChangesResolver: ((discard: boolean) => void) | null;
     acceptedBrowserPath: string;
-    sidebarResize: { startWidth: number; startX: number } | null;
-    dragDepth: number;
   };
 }

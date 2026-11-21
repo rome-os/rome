@@ -6,7 +6,7 @@
 
 web
 
-The guardian dashboard (`packages/web`) and the app shells are web surfaces. `packages/desktop` is an Electron shell that signs in at Rome Cloud and opens the guardian's own instance, and `packages/mobile` is an Expo WebView shell that signs in at Rome Cloud and opens the guardian's own instance. Neither shell has its own design language.
+The guardian dashboard (`packages/web`) and the desktop shell are web surfaces. `packages/desktop` is an Electron shell that signs in at Rome Cloud and opens the guardian's own instance. It has no design language of its own. The native iOS app (`ios/`) follows [`ios/DESIGN.md`](ios/DESIGN.md).
 
 ## Users
 
@@ -42,13 +42,13 @@ Rome is open source (MIT), self-hostable or run on Rome Cloud, and exportable, s
 ## Operating Context
 
 - **Chat (webchat)** is the only interactive surface and the default entry point. Guardians also reach the agent through channels such as Telegram, Discord, and WhatsApp.
-- **Rome Apps** are the home for repeated work. "A workflow is a verb, an app is a noun." First-party apps in `rome_apps/` (assistant, briefing, browser-automation, coding, connector, dream, inbox, showcases, skills, system, workflow-studio) use the same app model as user-authored apps. [Replay](https://github.com/rome-os/rome-apps/tree/main/apps/replay) is maintained in the Rome Apps repository and installed separately.
+- **Rome Apps** are the home for repeated work. "A workflow is a verb, an app is a noun." First-party apps in `rome_apps/` (assistant, browser-automation, coding, connector, dream, inbox, showcases, skills, system, workflow-studio) use the same app model as user-authored apps. [Replay](https://github.com/rome-os/rome-apps/tree/main/apps/replay) is maintained in the Rome Apps repository and installed separately.
 - **Self-evolution loop.** The guardian describes a need, Rome writes a short spec, the guardian approves it, and Rome builds the app or workflow into the instance and keeps iterating in the same conversation.
 - **Approvals and suspensions.** Actions can pause for the guardian's decision, and the guardian answers from the dashboard or a channel.
 - **Background work.** Routines, scheduled tasks, and long-running follow-through run while the guardian is away, and results arrive as notifications, briefs, or app state.
 - **Inspection.** Agent traces, replays, projects and memory file browsers, local changes and sync, and settings let the guardian check what happened.
 - **Shared apps.** Guardians set each app to private, public, or a Rome Cloud email list, and visitors open it through the hosted app shell and sign-in gate.
-- **Devices.** Keyboard-heavy desktop use, compact phone and tablet use through the browser or mobile shell, and hybrid touch-and-pointer devices.
+- **Devices.** Keyboard-heavy desktop use, compact phone and tablet use through the browser or the iOS app, and hybrid touch-and-pointer devices.
 - **First run.** On Rome Cloud the signup survey runs before the instance exists. The first sign-in uses its answers for the guardian's and the agent's names and background, and when they asked Rome to follow a service, sends the Concierge one message for it, such as "Help me follow Gmail."
 
 ## Capabilities and Constraints

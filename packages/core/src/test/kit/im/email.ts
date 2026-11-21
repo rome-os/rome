@@ -8,8 +8,8 @@ import type {
   MailProvider,
   RomeMailEvent,
   RomeMailListItem,
-} from "../../../lib/rome-cloud-mail.js";
-import type { PeopleRepository } from "../../../db/repositories/people.js";
+} from "../../../connections/kinds/email/rome-cloud-mail.js";
+import type { PeopleRepository } from "../../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import { EmailAdapter } from "../../../connections/kinds/email/email.js";
 import { MessageStore, type VisibleMessage } from "./peer.js";

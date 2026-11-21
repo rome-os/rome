@@ -115,6 +115,20 @@ describe("send_notification action", () => {
       status: "error",
       error: "notification_outcome_unknown",
     });
+    expect(await withOutcome({ kind: "recipient_not_allowed" }).execute({})).toEqual({
+      status: "error",
+      error: "recipient_not_allowed",
+    });
+    expect(await withOutcome({ kind: "recipient_unknown" }).execute({})).toEqual({
+      status: "error",
+      error:
+        "recipient_unknown: can't tell whom to notify in this shared chat, so nothing was sent.",
+    });
+    expect(await withOutcome({ kind: "not_hosted" }).execute({})).toEqual({
+      status: "error",
+      error:
+        "not_hosted: the notification was not delivered. This Rome is not hosted by Rome Cloud, so it cannot push to a phone.",
+    });
   });
 
   it("rethrows an unexpected error from the notify capability", async () => {

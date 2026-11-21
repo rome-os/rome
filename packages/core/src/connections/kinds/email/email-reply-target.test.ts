@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { MailProvider, RomeMailListItem } from "../../../lib/rome-cloud-mail.js";
+import type { MailProvider, RomeMailListItem } from "./rome-cloud-mail.js";
 import { type ResolvedEmailReplyTarget, resolveEmailReplyTarget } from "./email-reply-target.js";
 
 function item(
@@ -211,14 +211,14 @@ describe("resolveEmailReplyTarget", () => {
     expect(listMessages).toHaveBeenCalledTimes(3);
   });
 
-  it("names the reply field of both the SDK and send_message when the lookup gives up", async () => {
+  it("names the reply field of both the SDK and system:send_message when the lookup gives up", async () => {
     const listMessages = rs.fn<MailProvider["listMessages"]>(async () => ({
       messages: [item("other")],
     }));
     const result = resolveEmailReplyTarget({ listMessages }, "wanted", bySentLabel);
 
     await expect(result).rejects.toThrow("`inReplyToMessageId`");
-    await expect(result).rejects.toThrow("`replyToMessageId` in send_message");
+    await expect(result).rejects.toThrow("`replyToMessageId` in system:send_message");
   });
 
   it("bounds an endless stream of empty pages", async () => {

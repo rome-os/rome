@@ -6,7 +6,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch --exclude '../../rome_apps/**' --exclude \"$HOME/.rome/**\" src/index.ts",
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs",
+    "build": "node ../../scripts/bundle-docker-core.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src",
     "lint:fix": "biome check --write src",
@@ -29,7 +29,7 @@
     "app:pack:first-party": "tsx bin/apps-cli.js pack:first-party",
     "app:install": "tsx bin/apps-cli.js install",
     "app:uninstall": "tsx bin/apps-cli.js uninstall",
-    "app:list:required": "tsx bin/apps-cli.js list:required"
+    "app:list:required": "tsx bin/list-required-apps.js"
   },
   "oclif": {
     "bin": "rome-apps",
@@ -41,9 +41,6 @@
       },
       "pack": {
         "description": "Build release artifacts from app sources (a single app, or all first-party apps)"
-      },
-      "list": {
-        "description": "Inspect derived app sets"
       }
     }
   },
@@ -97,11 +94,11 @@
     "pg": "^8.18.0",
     "qrcode": "^1.5.4",
     "semver": "^7.7.4",
+    "sharp": "0.34.5",
     "tar": "^7.5.13",
     "telegram": "^2.26.22",
     "turndown": "^7.2.4",
     "uuid": "^13.0.0",
-    "wechat-bridge": "0.2.1",
     "ws": "^8.18.0",
     "yaml": "^2.8.2",
     "zod": "^4.3.6",

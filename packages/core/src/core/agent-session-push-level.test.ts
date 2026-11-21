@@ -1,40 +1,39 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
+import { ChatSessionSettings } from "../webchat/chat-session-settings.js";
 import { createLogger } from "../logger.js";
-import {
-  ChatSessionSettings,
-  readAnswerShape,
-  romeSessionTracing,
-  TurnUsageReporter,
-} from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ActionEngine } from "../actions/engine.js";
-import { ActionRegistryImpl } from "../actions/registry.js";
+import { ActionEngine } from "../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
-import { AppTurnHooks, TurnListeners } from "../agent/index.js";
-import { AgentLoader } from "../agent/index.js";
+import { TurnListeners } from "../agent/index.js";
+import { AppTurnHooks } from "../app-host/app-turn-hooks.js";
+import { AgentLoader } from "../app-host/agent-loader.js";
 import {
   createSessionFromRun,
   type ModelProvider,
   type ModelSessionParams,
 } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
+import { createSessions, type Sessions } from "../agent/index.js";
 import type { SessionToolContext } from "./session-tools.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
-import { SkillLoader } from "../agent/index.js";
+import { SkillLoader } from "../app-host/skill-loader.js";
 import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { startAfter } from "../test/turn-handle.js";
 
 describe("AgentSession turn push level", () => {
   let directory: string;
   let testDb: TestDb;
-  let manager: AgentSessionManager;
+  let manager: Sessions;
   let opened: ModelSessionParams[];
   let tools: SessionToolContext | undefined;
 
@@ -81,10 +80,10 @@ describe("AgentSession turn push level", () => {
     const actionRegistry = new ActionRegistryImpl();
     const systemPrompts = createTestSystemPrompts();
     rs.spyOn(systemPrompts, "build").mockReturnValue("push level test prompt");
-    manager = createAgentSessionManager(
+    manager = createSessions(
       {
         agentLoader: loader,
-        sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
+        sessionRepository: new DrizzleSessionRepository(testDb.db),
         sessionSettings: new ChatSessionSettings({
           webchatRepo: new ChatsWebChatRepository(testDb.db),
         }),
@@ -126,11 +125,11 @@ describe("AgentSession turn push level", () => {
   });
 
   const resultOf = async (pushLevel?: "active" | "passive") => {
-    const session = await manager.acquire(
+    const session = await manager.open(
       { agentName: "worker", channelThreadKey: "webchat:worker" },
       { workingDir: directory },
     );
-    const handle = session.sendTurn({ prompt: "go" }, pushLevel ? { pushLevel } : {});
+    const handle = await startAfter(session, { prompt: "go" }, pushLevel ? { pushLevel } : {});
     let result: string | undefined;
     for await (const event of handle.events()) {
       if (event.type === "result") result = event.content;

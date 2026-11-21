@@ -72,6 +72,9 @@ describe("connector_proxy endpoint validation", () => {
     expect(
       validateProxyEndpoint("shopify", "https://acme.myshopify.com/admin/api/2026-10/graphql.json"),
     ).toBeNull();
+    expect(
+      validateProxyEndpoint("freshdesk", "https://acme.freshdesk.com/api/v2/tickets"),
+    ).toBeNull();
   });
 
   it("rejects an off-provider host (credential exfiltration)", () => {
@@ -157,6 +160,13 @@ describe("connector_proxy path/host assembly", () => {
     });
   });
 
+  it("suggests the toolkit's own host shape when a per-connection host is missing", () => {
+    const rejected = buildProxyEndpoint("freshdesk", "/api/v2/tickets");
+    if (rejected.ok) throw new Error("expected rejection");
+    expect(rejected.message).toContain("<domain>.freshdesk.com");
+    expect(rejected.message).not.toContain("supabase");
+  });
+
   it("rejects a full URL passed as the path", () => {
     const rejected = buildProxyEndpoint("linear", "https://evil.example.com/graphql");
     expect(rejected.ok).toBe(false);
@@ -175,7 +185,7 @@ describe("connector_proxy path/host assembly", () => {
     const withoutDefault = [...SUPPORTED_TOOLKITS]
       .filter((t) => !TOOLKIT_DEFAULT_API_HOST[t])
       .sort();
-    expect(withoutDefault).toEqual(["otter_ai_mcp", "shopify", "supabase"]);
+    expect(withoutDefault).toEqual(["freshdesk", "otter_ai_mcp", "shopify", "supabase"]);
   });
 
   it("every default host clears its toolkit's allowlist (default route never fails open)", () => {
@@ -278,12 +288,9 @@ describe("subscribeTriggerFeed", () => {
     expect(result).toMatchObject({ ok: false, code: "no_connected_account" });
     if (result.ok) throw new Error("expected failure");
     expect(result.message).toContain("Settings → Connections");
-    if (toolkit === "slack") {
-      expect(result.message).not.toContain("connector_connect");
-    } else {
-      expect(result.message).toContain(`connector_connect(${JSON.stringify({ toolkit })})`);
-      expect(result.message).not.toMatch(/can.t be connected from here/);
-    }
+    expect(result.message).toContain(
+      `connect_account tool with ${JSON.stringify({ kind: toolkit })}`,
+    );
   });
 
   it("rejects an ambiguous account rather than guessing which to subscribe", async () => {

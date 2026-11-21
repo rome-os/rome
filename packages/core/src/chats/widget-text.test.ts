@@ -36,6 +36,53 @@ describe("widgetText", () => {
     );
   });
 
+  it("reads a secret-access request by its title and reason", () => {
+    const line = widgetText(
+      card({
+        actionName: "vault_apply",
+        preview: {
+          kind: "secret_access",
+          name: "GITHUB_TOKEN",
+          ttlMinutes: 15,
+          reason: "Push the release tag",
+          title: "Use GITHUB_TOKEN for 15 min",
+          summary: "Push the release tag",
+        },
+      }),
+    );
+    expect(line).toBe(
+      [
+        "Approval needed: Use GITHUB_TOKEN for 15 min",
+        "Push the release tag",
+        "The guardian approves or denies it on Rome's dashboard.",
+      ].join("\n"),
+    );
+  });
+
+  it("reads a request for several secrets by one title naming them all", () => {
+    const line = widgetText(
+      card({
+        actionName: "vault_apply",
+        preview: {
+          kind: "secret_access",
+          name: "GITHUB_TOKEN",
+          names: ["GITHUB_TOKEN", "STRIPE_KEY"],
+          ttlMinutes: 15,
+          reason: "Release",
+          title: "Use GITHUB_TOKEN, STRIPE_KEY for 15 min",
+          summary: "Release",
+        },
+      }),
+    );
+    expect(line).toBe(
+      [
+        "Approval needed: Use GITHUB_TOKEN, STRIPE_KEY for 15 min",
+        "Release",
+        "The guardian approves or denies it on Rome's dashboard.",
+      ].join("\n"),
+    );
+  });
+
   it("reads a message the agent wants to send as that message and why", () => {
     const line = widgetText(
       card({
@@ -70,6 +117,18 @@ describe("widgetText", () => {
     expect(widgetText(partial)).toBe(
       "Approval needed: Deploy\nThe guardian approves or denies it on Rome's dashboard.",
     );
+  });
+
+  it("reads an app's widget as the line it brought", () => {
+    const widget: MessagePart = {
+      type: "widget",
+      toolUseId: "tu-1",
+      appId: "meals",
+      componentId: "today",
+      text: "You ate twice today.",
+    };
+    expect(widgetText(widget)).toBe("You ate twice today.");
+    expect(partsText([widget])).toBe("You ate twice today.");
   });
 
   it("is how a recorded card reads as plain text", () => {

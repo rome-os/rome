@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { devicesRoutes } from "./devices.js";
-import { createNodeDevicesService } from "../../lib/node-devices.js";
+import { createNodeDevicesService } from "../../desktops/node-devices.js";
 import {
   CallerConfigurationError,
   DaemonVersionError,

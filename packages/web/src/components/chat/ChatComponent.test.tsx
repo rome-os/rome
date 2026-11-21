@@ -6,11 +6,13 @@ import { useState } from "react";
 import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { romeNewsConfig } from "@/config/quick-entries";
+import { LAST_CONCIERGE_KEY, seedChatListMode } from "@/test/chat-list-mode";
 import { loadNewChatDraft, saveNewChatDraft } from "@/lib/new-chat-draft-storage";
 import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps, GREETING_ONLY_HOME_KEY } from "./ChatComponent";
 import * as chatModule from "./Chat" with { rstest: "importActual" };
 import type { ChatProps } from "./Chat";
+import type { MessageListProps } from "./MessageList";
 import { ToolTraceContext, type ToolTraceHost } from "@/pages/free/tool-trace";
 
 rs.mock("@/components/logo", () => ({
@@ -75,8 +77,13 @@ rs.mock("@/components/chat/entries", () => ({
   renderSingleEntry: () => null,
 }));
 
+function TranscriptProbe({ rows, variant }: MessageListProps) {
+  const ids = rows.flatMap((row) => (row.kind === "user" ? [row.message.id] : []));
+  return <div data-testid="message-list" data-variant={variant} data-message-ids={ids.join(",")} />;
+}
+
 rs.mock("@/components/chat/MessageList", () => ({
-  MessageList: () => <div data-testid="message-list" />,
+  MessageList: TranscriptProbe,
 }));
 
 function LocationProbe() {
@@ -333,7 +340,7 @@ describe("ChatComponent Concierge name", () => {
 
   it.each([
     ["the agent name the guardian chose", " Milo ", "Milo"],
-    ["Concierge when the agent name is blank", "  ", "Concierge"],
+    ["Rome when the agent name is blank", "  ", "Rome"],
   ])("hands Chat %s", async (_label, agentName, expected) => {
     renderChatComponent(
       { sessionId: "concierge" },
@@ -372,7 +379,11 @@ describe("ChatComponent topic chat draft", () => {
       return original(input, init);
     }) as typeof fetch);
     // The topic chat's own empty state, not the home greeting or the main chat's.
-    expect(await screen.findByRole("region", { name: "Start an ongoing topic" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Suggestions" })).toBeTruthy();
+    // The header's status capsule says the welcome until the first message.
+    expect(screen.getByText("What's on your mind?")).toBeTruthy();
+    const badge = document.querySelector("[data-concierge-header-badge]");
+    expect(badge).not.toBeNull();
     expect(
       screen.queryByRole("region", { name: "Just tell me what you want to get done" }),
     ).toBeNull();
@@ -381,6 +392,9 @@ describe("ChatComponent topic chat draft", () => {
     expect(posted).toEqual([]);
     await userEvent.setup().keyboard("Plan my week{Enter}");
     await waitFor(() => expect(onSessionCreated).toHaveBeenCalledWith("topic-9"));
+    // The same header carries on into the chat the send made: its badge is
+    // the very one the blank chat drew, not a fresh copy.
+    expect(document.querySelector("[data-concierge-header-badge]")).toBe(badge);
     // An untitled topic chat, which its first message names.
     expect(posted).toEqual([{ url: "/api/concierge/chats", body: {} }]);
     const turnPost = fetchSpy.mock.calls.find(
@@ -414,6 +428,16 @@ describe("ChatComponent missing sessions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Missing session" }));
 
     expect(screen.getByTestId("chat-location").textContent).toBe(`/chat${search} REPLACE`);
+  });
+
+  it("lands a missing Concierge chat on the main chat, so Agent mode stays", () => {
+    seedChatListMode({ mode: "concierge", lastConcierge: "session-1" });
+    renderChatComponent({ sessionId: "session-1" }, undefined, "/chat/session-1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Missing session" }));
+
+    expect(screen.getByTestId("chat-location").textContent).toBe("/message REPLACE");
+    expect(localStorage.getItem(LAST_CONCIERGE_KEY)).toBe("session-1");
   });
 
   it("keeps the chat open when another session is missing", () => {
@@ -496,7 +520,7 @@ describe("ChatComponent Concierge", () => {
     expect(
       await screen.findByRole("region", { name: "Just tell me what you want to get done" }),
     ).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Start an ongoing topic" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Suggestions" })).toBeNull();
   });
 });
 
@@ -710,7 +734,7 @@ describe("ChatComponent empty home", () => {
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Draft from Cloud");
 
     await user.click(screen.getByRole("button", { name: "Cloud App Store" }));
-    expect(screen.getByTitle("App store").getAttribute("src")).toBe(
+    expect(screen.getByTitle("App Store").getAttribute("src")).toBe(
       "https://romeos.cc/store/rome/example",
     );
     await user.click(screen.getByRole("button", { name: "Cancel" }));

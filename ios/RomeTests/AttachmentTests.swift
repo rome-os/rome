@@ -188,6 +188,38 @@ private func pixelSize(_ data: Data) -> CGSize? {
         #expect(UploadLines.split(message).uploads.isEmpty)
     }
 
+    private static let storedId = "0123456789abcdef0123456789abcdef"
+
+    @Test func linksToTheAssetStoreCount() {
+        let message = "Look\n\n- File 1: [image.png](</api/assets/\(Self.storedId).png>)\n- File 2: [notes.pdf](</api/assets/\(Self.storedId).pdf>)"
+        let (text, uploads) = UploadLines.split(message)
+        #expect(text == "Look")
+        #expect(uploads.map(\.name) == ["image.png", "notes.pdf"])
+        #expect(uploads[0].isImage)
+        #expect(uploads[0].source == .instance(path: "/assets/\(Self.storedId).png", query: nil))
+    }
+
+    @Test func bothRootsCanShareOneList() {
+        let message = "- File 1: [a.png](</projects/a/a.png>)\n- File 2: [b.png](</api/assets/\(Self.storedId).png>)"
+        let (_, uploads) = UploadLines.split(message)
+        #expect(uploads.count == 2)
+        #expect(uploads[0].source == .asset(path: "projects/a/a.png"))
+        #expect(uploads[1].source == .instance(path: "/assets/\(Self.storedId).png", query: nil))
+    }
+
+    @Test(arguments: [
+        "/api/assets/x.png",
+        "/api/assets/../projects/asset",
+        "/api/assets/0123456789ABCDEF0123456789ABCDEF.png",
+        "/api/assets/0123456789abcdef0123456789abcdef",
+        "/api/assets/0123456789abcdef0123456789abcdef.png?w=1",
+        "/api/assets/",
+        "/api/people",
+    ])
+    func onlyAStoredNameCounts(link: String) {
+        #expect(UploadLines.split("- File 1: [x.png](<\(link)>)").uploads.isEmpty)
+    }
+
     @Test func theListMustFollowABlankLine() {
         let message = "My notes\n- File 1: [x.png](</projects/a/x.png>)"
         #expect(UploadLines.split(message).uploads.isEmpty)

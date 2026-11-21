@@ -65,8 +65,18 @@ export interface PromptSources {
   onChanged(listener: () => void): void;
 }
 
-/** The fixed part of a system prompt, the same for every session of the agent. */
-export function buildPromptPrefix(agent: PromptAgent, material: PromptMaterial): string {
+/**
+ * The fixed part of a system prompt, the same for every session of the
+ * agent. With `setup`, only what a session's setup counts
+ * (docs/concepts/sessions.md#setup): the agent's own instructions, the
+ * charter and the identity, without the runtime facts and the installed
+ * apps, which change with the instance rather than with the agent.
+ */
+export function buildPromptPrefix(
+  agent: PromptAgent,
+  material: PromptMaterial,
+  options: { setup?: boolean } = {},
+): string {
   // An app agent's YAML is its complete base prompt. Rome's identity, policy,
   // tools, and app catalog are core-agent concerns and must not silently
   // constrain an app author's agent.
@@ -85,12 +95,22 @@ export function buildPromptPrefix(agent: PromptAgent, material: PromptMaterial):
 
   if (material.charter) sections.push(`# Charter\n\n${material.charter}`);
   if (material.identity) sections.push(markdownSection("Identity", material.identity));
-  if (resolveAgentPolicy(agent).loadMemory) sections.push(runtimeSection(material.runtime));
+  const policy = resolveAgentPolicy(agent);
+  if (policy.loadMemory && !options.setup) {
+    sections.push(
+      policy.delegatesWork
+        ? delegatorRuntimeSection(material.runtime)
+        : runtimeSection(material.runtime),
+    );
+  }
 
-  // Every core agent, because these executables are global runtime capabilities.
-  sections.push(COMMAND_LINE_TOOLS_SECTION);
+  // Every core agent that does its own work, because these executables are
+  // global runtime capabilities.
+  if (!policy.delegatesWork) sections.push(COMMAND_LINE_TOOLS_SECTION);
 
-  const installedApps = installedAppsSection(material.installedApps);
+  // An agent that delegates its work reaches no app itself.
+  const installedApps =
+    options.setup || policy.delegatesWork ? null : installedAppsSection(material.installedApps);
   if (installedApps) sections.push(installedApps);
 
   return sections.join(SECTION_DIVIDER);
@@ -107,6 +127,8 @@ export function buildSystemPrompt(input: {
   memory: PromptMemory | null;
   contextSuffix?: string;
   widgets: WidgetDrawing;
+  /** An agent that hands its work to others texts, and draws no diagrams. */
+  delegatesWork?: boolean;
 }): string {
   const sections = [input.prefix];
   if (input.memory?.index) sections.push(markdownSection("Memory", input.memory.index));
@@ -116,7 +138,7 @@ export function buildSystemPrompt(input: {
   if (input.contextSuffix) sections.push(input.contextSuffix);
   const prompt = sections.join("\n\n");
 
-  return input.owner === "core" && input.widgets === "card"
+  return input.owner === "core" && input.widgets === "card" && !input.delegatesWork
     ? `${prompt}${SECTION_DIVIDER}${DIAGRAMS_SECTION}`
     : prompt;
 }
@@ -167,8 +189,27 @@ const COMMAND_LINE_TOOLS_SECTION = [
   "# Command Line Tools",
   "",
   "- A global `discord` CLI is available to access Discord through Rome's connected bot. When a task requires current information from this connected Discord environment—such as channel history, messages, channels, threads, members, roles, or guild configuration—or a requested Discord management operation, prefer `discord api` over memory because it is live and authoritative. Run `discord api --help` when needed.",
-  '- Run `rome-node help` to learn the remote computer CLI and `rome-node help device run` for action arguments and result handling. Use `rome-node device` to list authorized remote computers. Authorization does not mean online. Use `rome-node device describe <id>` to query its platform and supported actions. Execute a program with `rome-node device run <id> exec --args \'{"command":"git","args":["status"],"cwd":"/workspace"}\'`. On macOS/Linux, read files with cat and list directories with ls. On Windows, explicitly invoke powershell.exe with Get-Content, Set-Content, or Get-ChildItem. Use an explicit shell for redirection or pipelines. Check exitCode, stderr, and truncated output. Never automatically retry an unknown outcome: a local timeout does not cancel the remote process. Never read or print device credential files.',
+  '- `rome-node` runs programs and reads files on the guardian\'s computers (macOS, Linux, Windows), and nothing else. What any of their devices offers live, such as a phone\'s status or synced data, goes through `core:device_describe` and `core:device_run`, never `rome-node`: those ask the device the guardian is asking from. Run `rome-node help` to learn the remote computer CLI and `rome-node help device run` for action arguments and result handling. Use `rome-node device` to list authorized remote computers. Authorization does not mean online. Use `rome-node device describe <id>` to query its platform. Execute a program with `rome-node device run <id> exec --args \'{"command":"git","args":["status"],"cwd":"/workspace"}\'`. On macOS/Linux, read files with cat and list directories with ls. On Windows, explicitly invoke powershell.exe with Get-Content, Set-Content, or Get-ChildItem. Use an explicit shell for redirection or pipelines. Check exitCode, stderr, and truncated output. Never automatically retry an unknown outcome: a local timeout does not cancel the remote process. Never read or print device credential files.',
+  "- When the guardian asks about their own data, such as their schedule or a device's state, read it this turn before you answer: for what their devices sync to Rome, call `core:personal_data_catalog`, then `core:personal_data_query`. When the reply's `connection` carries a `next` step, take it in the same reply. Answer only from this turn's query or live read. A connection existing, or an answer earlier in the conversation, never tells you the data is there or what it says. When one kind of data has several sources, such as the phone's calendar and a Google Calendar connected through the connector, read the phone's own source first, use another only when it cannot answer, and say which source answered. When no source is connected, show the matching connect card. When the store holds nothing, say so plainly, and that the data may have been deleted. Do not repeat the guardian's personal data in a shared chat, even from memory.",
 ].join("\n");
+
+/**
+ * The runtime context of an agent that hands its work to other chats: where
+ * memory and the docs are, without what only the agent doing the work reads.
+ */
+function delegatorRuntimeSection(runtime: RuntimeFacts): string {
+  const lines = [
+    "# Runtime Context",
+    "",
+    `- Profile memory directory: \`${runtime.profileMemoryDir}\``,
+  ];
+  if (runtime.docsDir) {
+    lines.push(
+      `- Rome's docs are in \`${runtime.docsDir}\`. Search them before answering whether Rome supports something.`,
+    );
+  }
+  return lines.join("\n");
+}
 
 function runtimeSection(runtime: RuntimeFacts): string {
   const lines = [
@@ -223,7 +264,7 @@ function runtimeSection(runtime: RuntimeFacts): string {
 /**
  * The installed-app catalog, for every core agent and not just main. It also
  * carries the connector catalog: the `connector` app's description lists the
- * connectable toolkits and their `connector_proxy` API hosts, so an agent that
+ * connectable toolkits and their `connector:connector_proxy` API hosts, so an agent that
  * can't see this section can't pick connectors.
  */
 function installedAppsSection(apps: PromptMaterial["installedApps"]): string | null {

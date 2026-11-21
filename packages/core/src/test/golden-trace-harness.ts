@@ -2,30 +2,32 @@ import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
-import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Tracer } from "@opentelemetry/api";
-import { AgentLoader } from "../agent/index.js";
+import { AgentLoader } from "../app-host/agent-loader.js";
 import {
   AgentRunner,
   createSessionFromRun,
   type ModelProvider,
   type ModelRunParams,
 } from "../core/agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
-import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { createSessions, type Sessions } from "../agent/index.js";
+import { TurnListeners } from "../agent/index.js";
+import { AppTurnHooks } from "../app-host/app-turn-hooks.js";
 import { createModelResolver } from "../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";
-import { SkillLoader } from "../agent/index.js";
+import { SkillLoader } from "../app-host/skill-loader.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { createTestSystemPrompts } from "./system-prompts.js";
-import { ActionEngine } from "../actions/engine.js";
-import { ActionRegistryImpl } from "../actions/registry.js";
+import { ActionEngine } from "../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { withInboundSpans } from "../telemetry.js";
-import type { Action } from "../actions/types.js";
+import type { Action } from "../apps/actions/types.js";
 import { channelList } from "../chats/connected-accounts/connected-account-list.js";
 import type { AgentEvent } from "../types.js";
 import { executeActionTool } from "./tool-calls.js";
@@ -60,9 +62,9 @@ export interface GoldenTraceRig {
   transports: Map<string, FakeTransport>;
   actionEngine: ActionEngine;
   runner: AgentRunner;
-  /** Direct AgentSessionManager handle — for tests that bypass the channel
-   * adapter path (e.g. the webchat-style direct `sendTurn` flow). */
-  manager: AgentSessionManager;
+  /** Direct Sessions handle — for tests that bypass the channel
+   * adapter path (e.g. the webchat-style direct `submit` flow). */
+  manager: Sessions;
   /** Deliver one inbound message on `channel` through the real channel and
    *  instrumentation path, resolving once the rig's handler has finished
    *  with it. The message needs text, or the channel drops it (R2) and this
@@ -86,7 +88,7 @@ export interface GoldenTraceOptions {
 export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<GoldenTraceRig> {
   const testDb = createTestDb();
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-  const sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(testDb.db);
   const systemPrompts = createTestSystemPrompts();
   const actionRegistry = new ActionRegistryImpl();
   const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db), {
@@ -104,7 +106,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     providers: [options.modelProvider],
     accounts: fakeAccounts(bothAvailable()),
   });
-  const manager = createAgentSessionManager({
+  const manager = createSessions({
     agentLoader,
     sessionRepository,
     systemPrompts,

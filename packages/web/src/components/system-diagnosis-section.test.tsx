@@ -3,8 +3,9 @@ import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { FormRows } from "@rome-os/ui/layout-form";
 import i18n from "@/i18n";
-import { SystemDiagnosisSection } from "./system-diagnosis-section";
+import { SystemDiagnosisRow } from "./system-diagnosis-section";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -76,7 +77,9 @@ function renderSection() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <SystemDiagnosisSection />
+      <FormRows>
+        <SystemDiagnosisRow />
+      </FormRows>
     </QueryClientProvider>,
   );
   // The checks live in the details sheet.
@@ -84,7 +87,7 @@ function renderSection() {
   return view;
 }
 
-describe("SystemDiagnosisSection", () => {
+describe("SystemDiagnosisRow", () => {
   it("shows a healthy verdict with build identity, channels, and app health", async () => {
     mockDiagnosis({ status: 200, body: diagnosis() });
     renderSection();

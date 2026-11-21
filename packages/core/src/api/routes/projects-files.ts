@@ -1,4 +1,4 @@
-import { currentChatOwner } from "../../lib/session-actor.js";
+import { currentChatOwner } from "../../access/session-actor.js";
 import { Hono } from "hono";
 import type {
   ProjectDashboardChat,
@@ -39,7 +39,7 @@ const PROJECT_DASHBOARD_MAX_CHAT_LIMIT = 100;
 const GUARDIAN_TIMEZONE_SETTING_KEY = "guardianTimezone";
 
 type ProjectsRouteDeps = {
-  agentSessionManager?: Pick<ApiDeps["agentSessionManager"], "peek">;
+  agentSessionManager?: Pick<ApiDeps["agentSessionManager"], "find">;
   // Optional only because `ApiDeps.settingsRepo` is still optional and the
   // production callsite passes the full ApiDeps; when absent, dashboard
   // dates fall back to UTC.
@@ -159,7 +159,7 @@ async function closeLiveProjectSessions(
 
   await Promise.all(
     sessions.map(async (session) => {
-      const liveSession = agentSessionManager.peek({
+      const liveSession = agentSessionManager.find({
         agentName: session.agentName ?? "main",
         channelThreadKey: webchatSessionKey(session.id),
       });

@@ -62,8 +62,7 @@ export function traceDrawerContentInsetClass(open: boolean, hasApps: boolean): s
     : "@5xl/chat:flex-none @5xl/chat:w-full";
 }
 
-// Default stored-trace loader: lazy-fetch the guardian content endpoint. The
-// public share page injects an in-memory resolver instead (no network, no auth).
+// Default stored-trace loader: lazy-fetch the guardian content endpoint.
 async function fetchStoredTrace(
   messageId: string,
   includeSubagentUsage: boolean,
@@ -112,24 +111,22 @@ export function TraceDrawer({
   onClose: () => void;
   renderInlineBlock: (block: TraceEventDto, key: string) => React.ReactNode;
   renderRunBlocks: (blocks: TraceEventDto[], live: boolean) => React.ReactNode;
-  // Resolve a stored trace's segments. Defaults to the authed content endpoint;
-  // the share page passes a map-backed resolver so traces render from the frozen
-  // snapshot. A thrown error surfaces as the drawer's retryable error state.
+  // Resolve a stored trace's segments. Defaults to the authed content endpoint.
+  // A thrown error surfaces as the drawer's retryable error state.
   loadStoredTrace?: (
     messageId: string,
     includeSubagentUsage: boolean,
   ) => Promise<TraceSnapshot | "archived" | null>;
   /** Whether this surface can ask the backend for derived descendant usage. */
   allowSubagentUsage?: boolean;
-  // Read-only surface (public share): hides the raw-dump download, which hits
-  // a guardian-only endpoint.
+  // Read-only surface: hides the raw-dump download.
   readOnly?: boolean;
   // App/widget presence is independent from chat width. When true, the trace
   // always covers the chat column so it never competes with the app surface.
   hasApps?: boolean;
   /**
-   * Where the trace renders. `undefined` is the standalone overlay (public
-   * share, sessions page). An element hosts the trace in the tool pane's Trace
+   * Where the trace renders. `undefined` is the standalone overlay (the
+   * sessions page). An element hosts the trace in the tool pane's Trace
    * tab, which draws the title, the Live indicator and the close button. `null`
    * is that mode before the tab has mounted, and renders nothing.
    */

@@ -2,45 +2,37 @@
 
 import type { EmailAdapter } from "../kinds/email/email.js";
 import type { DrizzleDb } from "../../db/index.js";
-import type { PeopleRepository } from "../../db/repositories/people.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { LinkedInSyncSink } from "../kinds/linkedin/linkedin-sync.js";
-import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
 import type { WhatsAppSyncSink } from "../kinds/whatsapp/whatsapp-sync.js";
-import type { MailProvider } from "../../lib/rome-cloud-mail.js";
-import { OAUTH_PROVIDERS, ROME_CLOUD_REFRESHABLE_PROVIDERS } from "../../lib/oauth-providers.js";
+import type { MailProvider } from "../kinds/email/rome-cloud-mail.js";
+import { OAUTH_PROVIDERS, ROME_CLOUD_REFRESHABLE_PROVIDERS } from "../oauth/oauth-providers.js";
 import {
   createRomeCloudOAuthStartRedirect,
   redeemRomeCloudOAuthHandoff,
   refreshRomeCloudOAuthGrant,
-} from "../../lib/rome-cloud-oauth.js";
+} from "../oauth/rome-cloud-oauth.js";
 import { credentialFromBundle, grantProfileFromBundle } from "../providers-import.js";
 import type { ConnectionRegistry } from "../registry.js";
-import type { ChatSettingsService } from "../../chat-settings/service.js";
 import type { ChatStopHandler } from "@rome-os/app-runtime";
 import { makeAgentsDescriptor } from "./agents.js";
 import { makeDiscordDescriptor } from "./discord.js";
 import { makeEmailDescriptor } from "./email.js";
-import { createFeishuDescriptor } from "./feishu.js";
-import { createLinkedInDescriptor } from "./linkedin.js";
 import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
 import { makeSlackBotDescriptor } from "./slack-bot.js";
 import { createWechatDescriptor } from "./wechat.js";
-import { createWechatUserDescriptor } from "./wechat-user.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
+import type { ChatSettingsPort } from "../types.js";
 
 export { makeTelegramDescriptor, isTelegramAuthError } from "./telegram.js";
 export { makeDiscordDescriptor, isDiscordAuthError } from "./discord.js";
 export { makeTelegramUserDescriptor } from "./telegram-user.js";
 export { createWechatDescriptor } from "./wechat.js";
-export { createWechatUserDescriptor, WECHAT_USER_KIND } from "./wechat-user.js";
-export { createFeishuDescriptor } from "./feishu.js";
 export { makeEmailDescriptor } from "./email.js";
 export { makeAgentsDescriptor } from "./agents.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
-export { createLinkedInDescriptor } from "./linkedin.js";
 export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-providers.js";
 export { makeSlackBotDescriptor, SLACK_BOT_KIND } from "./slack-bot.js";
 
@@ -51,17 +43,13 @@ export { makeSlackBotDescriptor, SLACK_BOT_KIND } from "./slack-bot.js";
  */
 export interface BuiltinConnectionDeps {
   settingsRepo: SettingsRepository;
-  chatSettings: ChatSettingsService;
+  chatSettings: ChatSettingsPort;
   chatStop: ChatStopHandler;
   peopleRepo: PeopleRepository;
   whatsAppSyncSink: WhatsAppSyncSink;
-  /** The LinkedIn inbox mirror (linkedin_threads/linkedin_messages). */
-  linkedInSyncSink: LinkedInSyncSink;
-  /** Jitter bounds for the LinkedIn poll cadence (config `linkedinPoll*Minutes`). */
-  linkedinPoll: { minIntervalMs: number; maxIntervalMs: number };
-  /** Loaded-agent lister (Discord/Feishu agent-binding validation + autocomplete). */
+  /** Loaded-agent lister (Discord agent-binding validation + autocomplete). */
   listAgents: () => string[];
-  /** The agent linked to a Connection's channel (Discord/Feishu in-chat settings). */
+  /** The agent linked to a Connection's channel (Discord in-chat settings). */
   accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
@@ -78,11 +66,6 @@ export interface BuiltinConnectionDeps {
    *  the begin-redirect (mints the PKCE attempt) and the return-leg redeem both
    *  read/write the `oauth_pending_attempts` table. */
   db: DrizzleDb;
-  /** The personal WeChat client runtime, present only when config
-   *  `wechatUserEnabled` is on. Its presence is what offers the connection, and
-   *  the channel list's reader shares it, so the account is read through one
-   *  client. */
-  wechatUserRuntime?: WechatUserRuntime;
 }
 
 /**
@@ -108,23 +91,6 @@ export function registerBuiltinConnections(
   registry.register(makeTelegramUserDescriptor());
   registry.register(makeSlackBotDescriptor());
   registry.register(createWechatDescriptor());
-  // The personal WeChat connection is opt-in: boot passes its runtime only when
-  // config `wechatUserEnabled` is on.
-  // It runs the client in this container and recovers its store key with a
-  // local debugger, so it needs no host execution — only the container's own
-  // capability to ptrace the client it launches.
-  if (deps.wechatUserRuntime) {
-    registry.register(createWechatUserDescriptor({ runtime: deps.wechatUserRuntime }));
-  }
-  registry.register(
-    createFeishuDescriptor({
-      chatSettings: deps.chatSettings,
-      peopleRepo: deps.peopleRepo,
-      listAgents: deps.listAgents,
-      accountAgentOf: deps.accountAgentOf,
-      hasAgent: deps.hasAgent,
-    }),
-  );
   registry.register(
     makeEmailDescriptor({
       provider: deps.mailProvider,
@@ -141,13 +107,6 @@ export function registerBuiltinConnections(
     createWhatsAppDescriptor({
       syncSink: deps.whatsAppSyncSink,
       onGuardianConnected: deps.onWhatsAppGuardianConnected,
-    }),
-  );
-  registry.register(
-    createLinkedInDescriptor({
-      syncSink: deps.linkedInSyncSink,
-      minIntervalMs: deps.linkedinPoll.minIntervalMs,
-      maxIntervalMs: deps.linkedinPoll.maxIntervalMs,
     }),
   );
   // Rome Cloud-OAuth provider connection state (github/slack/

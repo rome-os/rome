@@ -4,6 +4,10 @@ import type { InputStatusEvent } from "@rome-os/app-runtime";
 import type { AgentTurnHandle, AgentTurnInput } from "./agent-session.js";
 import type { ModelSession } from "../domain/model-port.js";
 import { AgentInputQueue } from "./agent-input-queue.js";
+import { INTERRUPTED_WORK_NOTE, NEW_INPUT_NOTE } from "../domain/input-queue.js";
+
+const interruptedPrompt = (interrupted: string[], inputs: string[]) =>
+  [INTERRUPTED_WORK_NOTE, ...interrupted, NEW_INPUT_NOTE, ...inputs].join("\n\n");
 
 /** A turn that says nothing and never ends; a stop goes to `stop`. */
 function fakeHandle(
@@ -28,7 +32,8 @@ const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 function setup(steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolvedValue("accepted")) {
   const started: AgentTurnInput[] = [];
   const statuses: InputStatusEvent[] = [];
-  const handles: AgentTurnHandle[] = [];
+  /** The turn each input landed in, by input id. */
+  const landedIn: Record<string, string> = {};
   const errors = rs.fn();
   const queue = new AgentInputQueue(
     (input) => {
@@ -38,17 +43,21 @@ function setup(steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolved
     () => ({ steerUserInput: steer }),
     errors,
   );
-  const submit = (inputId: string) =>
-    queue.submit(
+  const submit = (inputId: string) => {
+    const receipt = queue.submit(
       { inputId, prompt: inputId },
       {
-        onTurn: (handle) => handles.push(handle),
         onInputStatus: (status) => {
           statuses.push(status);
         },
       },
     );
-  return { queue, submit, started, statuses, handles, steer, errors };
+    void receipt.turn.then((turn) => {
+      landedIn[inputId] = turn.id;
+    });
+    return receipt;
+  };
+  return { queue, submit, started, statuses, landedIn, steer, errors };
 }
 
 describe("conversational input lane", () => {
@@ -67,7 +76,11 @@ describe("conversational input lane", () => {
     await s.queue.observe({ type: "input_status", inputId: "b", state: "consumed" }, a.turnId);
     await tick();
     expect(s.steer.mock.calls.map(([input]) => input.inputId)).toEqual(["b", "c"]);
-    expect(s.handles).toHaveLength(1);
+    // `c` is sent but not yet taken, so it has not landed until the turn ends with it.
+    expect(s.landedIn).toEqual({ a: "turn-1", b: "turn-1" });
+    s.queue.finish(a.turnId);
+    await tick();
+    expect(s.landedIn).toEqual({ a: "turn-1", b: "turn-1", c: "turn-1" });
   });
 
   it("adopts a provider-retained late input under a new turn and the same input id", async () => {
@@ -80,8 +93,8 @@ describe("conversational input lane", () => {
     await s.queue.seal("turn-1");
     s.queue.finish("turn-1");
     expect(s.started.map((input) => input.inputId)).toEqual(["a", "b"]);
-    expect(s.handles.map((handle) => handle.id)).toEqual(["turn-1", "turn-2"]);
     await tick();
+    expect(s.landedIn).toEqual({ a: "turn-1", b: "turn-2" });
     expect(s.statuses.at(-1)).toMatchObject({ inputId: "b", turnId: "turn-2", state: "queued" });
   });
 
@@ -171,7 +184,6 @@ function prioritySetup() {
       { inputId, prompt: inputId },
       {
         priority,
-        onTurn: () => {},
         onInputStatus: (status) => {
           statuses.push(status);
         },
@@ -191,12 +203,52 @@ describe("input priority", () => {
     await s.queue.observe({ type: "input_status", inputId: "a", state: "consumed" }, "turn-1");
     const b = s.submit("b", "now");
     await tick();
-    expect(b.disposition).toBe("queued");
+    expect(b.landed).toBe("queued");
     expect(s.steer).not.toHaveBeenCalled();
     expect(s.interrupts).toEqual([{ turnId: "turn-1", reason: "superseded" }]);
     s.queue.finish("turn-1");
-    // `a` was consumed, so it is in the provider's history and is not repeated.
+    expect(s.started.map((input) => input.prompt)).toEqual(["a", interruptedPrompt(["a"], ["b"])]);
+    // `a` was read in turn-1, so it stays consumed there.
+    expect(s.lastState("a")).toBe("consumed");
+    expect(s.statuses.filter((status) => status.inputId === "a").at(-1)?.turnId).toBe("turn-1");
+  });
+
+  it("re-sends nothing from a superseded turn that completed", async () => {
+    const s = prioritySetup();
+    s.submit("a");
+    await s.queue.beforeSend("turn-1");
+    s.queue.ready("turn-1");
+    await s.queue.observe({ type: "input_status", inputId: "a", state: "consumed" }, "turn-1");
+    s.submit("b", "now");
+    s.queue.finish("turn-1", true);
     expect(s.started.map((input) => input.prompt)).toEqual(["a", "b"]);
+  });
+
+  it("names a request once across two supersedes in a row", async () => {
+    const s = prioritySetup();
+    s.submit("today", "now");
+    s.queue.ready("turn-1");
+    await s.queue.observe({ type: "input_status", inputId: "today", state: "consumed" }, "turn-1");
+    s.submit("yesterday", "now");
+    s.queue.finish("turn-1");
+    s.queue.ready("turn-2");
+    await s.queue.observe(
+      { type: "input_status", inputId: "yesterday", state: "consumed" },
+      "turn-2",
+    );
+    s.submit("hello", "now");
+    s.queue.finish("turn-2");
+    expect(s.started.map((input) => input.prompt)).toEqual([
+      "today",
+      interruptedPrompt(["today"], ["yesterday"]),
+      interruptedPrompt(["today", "yesterday"], ["hello"]),
+    ]);
+    // A turn that completes hands on nothing.
+    s.queue.ready("turn-3");
+    await s.queue.observe({ type: "input_status", inputId: "hello", state: "consumed" }, "turn-3");
+    s.queue.finish("turn-3", true);
+    s.submit("next");
+    expect(s.started.at(-1)?.prompt).toBe("next");
   });
 
   it("carries an input the provider never consumed into the next turn", async () => {
@@ -242,7 +294,7 @@ describe("input priority", () => {
     expect(s.lastState("b")).toBe("accepted");
     s.submit("c", "now");
     s.queue.finish("turn-1");
-    expect(s.started.at(-1)?.prompt).toBe("b\n\nc");
+    expect(s.started.at(-1)?.prompt).toBe(interruptedPrompt(["a"], ["b", "c"]));
   });
 
   it("keeps a guardian stop from replaying anything", async () => {
@@ -257,5 +309,63 @@ describe("input priority", () => {
     await tick();
     expect(s.started).toHaveLength(1);
     expect(s.lastState("a")).toBe("unknown");
+  });
+});
+
+describe("who an input turn acts for", () => {
+  const guardian = { kind: "guardian", userId: "seat" };
+  const visitor = { kind: "visitor", accountId: "acct-v" };
+
+  function actorSetup() {
+    const startedWith: Array<{ actor?: object }> = [];
+    const mixed: string[] = [];
+    const steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolvedValue("accepted");
+    const queue = new AgentInputQueue(
+      (_input, options) => {
+        startedWith.push(options);
+        return fakeHandle(`turn-${startedWith.length}`);
+      },
+      () => ({ steerUserInput: steer }),
+      rs.fn(),
+      (turnId) => mixed.push(turnId),
+    );
+    const submit = (
+      inputId: string,
+      actor?: { kind: string; userId?: string; accountId?: string },
+      priority?: "now",
+    ) =>
+      queue.submit(
+        { inputId, prompt: inputId },
+        { ...(actor ? { actor } : {}), ...(priority ? { priority } : {}) },
+      );
+    return { queue, submit, startedWith, mixed, steer };
+  }
+
+  it("marks a running turn mixed when another person's input is steered into it", async () => {
+    const s = actorSetup();
+    const a = s.submit("a", guardian);
+    await s.queue.beforeSend(a.turnId);
+    s.queue.ready(a.turnId);
+    s.submit("b", { kind: "guardian", userId: "seat" });
+    await tick();
+    expect(s.mixed).toEqual([]);
+    await s.queue.observe({ type: "input_status", inputId: "b", state: "consumed" }, a.turnId);
+    s.submit("c", visitor);
+    await tick();
+    expect(s.steer.mock.calls.map(([input]) => input.inputId)).toEqual(["b", "c"]);
+    expect(s.mixed).toEqual([a.turnId]);
+  });
+
+  it("starts a turn that bundles two people's inputs as acting for no one", async () => {
+    const s = actorSetup();
+    const a = s.submit("a", guardian);
+    // Two inputs sent "now" stop the running turn and start the next one together.
+    s.submit("b", guardian, "now");
+    s.submit("c", visitor, "now");
+    s.queue.finish(a.turnId);
+    await tick();
+    expect(s.startedWith).toHaveLength(2);
+    expect(s.startedWith[0]?.actor).toBe(guardian);
+    expect(s.startedWith[1]).not.toHaveProperty("actor");
   });
 });

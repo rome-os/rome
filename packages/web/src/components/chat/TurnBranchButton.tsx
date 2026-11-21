@@ -17,7 +17,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { placeChatWidget } from "@/pages/free/use-free-cells";
-import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
+import { shouldSubmitOnEnter } from "@rome-os/ui/keyboard-submit";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +27,7 @@ const SUGGESTION_KEYS = [
   "message.branch.suggestions.example",
 ] as const;
 
-/** Opens a one-shot side chat branched from a settled assistant turn. */
+/** Opens a one-shot fork chat branched from a settled assistant turn. */
 export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; turnId: string }) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
@@ -50,7 +50,7 @@ export function TurnBranchButton({ sessionId, turnId }: { sessionId: string; tur
           body: JSON.stringify({ prompt: nextPrompt }),
         });
         if (!res.ok) {
-          // A turn with no branch point (a side chat's own first answer is
+          // A turn with no branch point (a fork chat's own first answer is
           // the common case) is a permanent property of that turn, not a
           // transient failure — tell the user what to do instead of
           // suggesting a retry.

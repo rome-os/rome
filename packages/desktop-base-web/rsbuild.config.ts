@@ -10,7 +10,7 @@ const ENTRY_TITLES: Record<string, string> = {
   onboarding: "Rome",
   settings: "Rome Settings",
   pill: "Rome",
-  audit: "Rome Audit Log",
+  audit: "Computer Use Log",
 };
 
 export default defineConfig({

@@ -1,3 +1,5 @@
+import BackgroundTasks
+import Combine
 import SwiftUI
 import UserNotifications
 
@@ -15,6 +17,10 @@ struct RomeApp: App {
                 // handoff already follows the setting.
                 .onAppear { model.appearance.apply() }
                 .task { await model.launch() }
+                .onOpenURL { url in
+                    guard let link = WidgetLink(url: url) else { return }
+                    Task { await model.openFromWidget(link) }
+                }
         }
     }
 }
@@ -28,7 +34,29 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // Before launch ends, so the tap that launched the app is delivered.
         UNUserNotificationCenter.current().delegate = self
         observeForeground()
+        // HealthKit may have launched the app in the background to deliver:
+        // its observers must be listening before this returns.
+        model.health.launch()
+        model.calendarSync.launch()
+        registerCalendarRefresh()
         return true
+    }
+
+    /// iOS's background app refresh for Calendar: registered before launch
+    /// ends, as BackgroundTasks requires. Each run syncs once, then asks for
+    /// the next.
+    private func registerCalendarRefresh() {
+        let model = model
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: CalendarSync.refreshTaskId, using: .main) { task in
+            // Called on the main queue, and only this closure touches it.
+            nonisolated(unsafe) let task = task
+            CalendarSync.scheduleRefresh()
+            let work = Task { @MainActor in
+                await model.calendarSync.backgroundRefresh()
+                task.setTaskCompleted(success: !Task.isCancelled)
+            }
+            task.expirationHandler = { work.cancel() }
+        }
     }
 
     /// UIKit's own notifications, not SwiftUI's scene phase: every trip away
@@ -67,7 +95,9 @@ extension AppDelegate: @preconcurrency UNUserNotificationCenterDelegate {
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        if let target = PushTarget(userInfo: response.notification.request.content.userInfo) {
+        if HealthSettings.isSyncNotice(response.notification.request.content.userInfo) {
+            model.openHealthHistory()
+        } else if let target = PushTarget(userInfo: response.notification.request.content.userInfo) {
             Task { await model.openFromPush(target) }
         }
         completionHandler()
@@ -76,6 +106,7 @@ extension AppDelegate: @preconcurrency UNUserNotificationCenterDelegate {
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @State private var today = Calendar.current.startOfDay(for: .now)
 
     var body: some View {
         ZStack {
@@ -86,7 +117,7 @@ struct RootView: View {
                 Color.clear
             } else if model.phase == .ready, let workspace = model.workspace {
                 MainShell(workspace: workspace)
-                    .environment(\.assetLoader) { [backend = workspace.backend] path in try await backend.asset(path: path) }
+                    .environment(\.assetLoader) { [backend = workspace.backend] path, width in try await backend.asset(path: path, width: width) }
                     .environment(\.apiFileLoader) { [backend = workspace.backend] path, query in try await backend.apiFile(path: path, query: query) }
                     .environment(\.instanceOrigin, workspace.backend.origin)
                     .id(ObjectIdentifier(workspace))
@@ -106,9 +137,21 @@ struct RootView: View {
                     .zIndex(1)
             }
         }
+        // Over the app, not the update page, so an upgrade that ends while
+        // the game is open leaves it open.
+        .fullScreenCover(item: Bindable(model).stackGame) { launch in
+            StackGameScreen(launch: launch) { model.stackGame = nil }
+                .environment(model)
+                .presentationBackground(Palette.bg)
+        }
         .animation(.easeInOut(duration: 0.3), value: model.update.blocking)
         .animation(.easeInOut(duration: 0.35), value: model.phase == .ready)
         .tint(Palette.primary)
+        .environment(\.today, today)
+        // Also sent when the app comes back after the day turned.
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
+            today = Calendar.current.startOfDay(for: .now)
+        }
         // Past this size the floating headers and cards stop fitting a phone.
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         #if DEBUG

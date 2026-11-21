@@ -2,12 +2,14 @@
 // projects them, the services watch providers connect themselves (the
 // connector's Composio toolkits), and each one's watch capability as its
 // provider fills it. `GET /concierge/connectors` and the following_list action
-// both read it through `ConciergeFollowing.list()`.
+// both read it through `ConciergeFollowing.list()`; the action answers the
+// agent's view of it (`agentViewOf`).
 
 import type {
   ConciergeCapabilityStatus,
   ConciergeConnectEntry,
   ConciergeConnectorDto,
+  ConciergeConnectorsResponse,
   ConciergeFollowDto,
   ConciergeFollowKindDto,
   ConciergeFollowOptionDto,
@@ -150,4 +152,45 @@ export function mergeConnectors(input: {
   });
   const all = [...fromConnections, ...fromProviders];
   return [...all.filter(isWatchable), ...all.filter((entry) => !isWatchable(entry))];
+}
+
+/**
+ * The following list as the Concierge reads it, leaving out what only a
+ * client draws with: each entry's icon, connection id and how to connect it.
+ * Without `service`, each watch capability also leaves out its catalog
+ * (target format, kinds and options), which a follow card needs for one
+ * service only. With `service`, only that service's entries, catalog
+ * included. A Composio toolkit and a connection may share a name, so `origin`
+ * stays wherever two entries do.
+ */
+export function agentViewOf(list: ConciergeConnectorsResponse, service?: string) {
+  const entries = service
+    ? list.connectors.filter((entry) => entry.service === service)
+    : list.connectors;
+  if (service && entries.length === 0) {
+    throw new Error(`No service ${service}. Call the list without service for their names.`);
+  }
+  const shared = new Set(
+    list.connectors
+      .map((entry) => entry.service)
+      .filter((name, index, names) => names.indexOf(name) !== index),
+  );
+  return {
+    connectors: entries.map((entry) => {
+      const { target, kinds, options, ...watch } = entry.capabilities.watch;
+      return {
+        service: entry.service,
+        ...(entry.label !== entry.service ? { label: entry.label } : {}),
+        ...(shared.has(entry.service) ? { origin: entry.origin } : {}),
+        state: entry.state,
+        ...(entry.account ? { account: entry.account } : {}),
+        capabilities: {
+          chat: entry.capabilities.chat,
+          act: entry.capabilities.act,
+          watch: service ? entry.capabilities.watch : watch,
+        },
+      };
+    }),
+    rules: list.rules,
+  };
 }

@@ -1,4 +1,13 @@
-import { AppWindow, ExternalLink, Info, MessageCircle, Pin, PinOff, Search } from "lucide-react";
+import {
+  AppWindow,
+  ExternalLink,
+  Info,
+  MessageCircle,
+  MessageSquare,
+  Pin,
+  PinOff,
+  Search,
+} from "lucide-react";
 import { Fragment, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -10,14 +19,18 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Kbd } from "@/components/ui/kbd";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useChatListModeForShell, useLastOrdinaryChatId } from "@/hooks/use-chat-list-mode";
+import { useChatSessionMayExist } from "@/hooks/use-chat-sessions";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
+import { railChatHref } from "@/lib/chat-list-mode";
 import { isElectronShell } from "@/lib/electron-shell";
 import { saveSetting } from "@/lib/chat-api";
 import { useAppCatalogChanges } from "@/hooks/use-app-catalog-events";
 import { hasSession, useAuthStateSnapshot } from "@/lib/auth-state";
-import { useApps, useInvalidateApps } from "@/hooks/use-apps";
+import { useAppsList, useInvalidateApps } from "@/hooks/use-apps";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
 import { useRecentApps } from "@/hooks/use-recent-apps";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
@@ -32,6 +45,7 @@ import {
   isEntryActive,
   railLinkClass,
 } from "./sidebar-shared";
+import { readStoredJson, writeStoredJson } from "@/lib/stored-preference";
 
 export interface PinnedEntry {
   type: "builtin" | "app";
@@ -104,57 +118,43 @@ export function normalizeSidebarPins(pins: PinnedEntry[]): PinnedEntry[] {
 }
 
 function readLocalPins(): PinnedEntry[] | null {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return null;
-    return parsePins(JSON.parse(stored));
-  } catch {
-    return null;
-  }
+  const stored = readStoredJson(STORAGE_KEY);
+  return stored === undefined ? null : parsePins(stored);
 }
 
 function writeLocalPins(pins: PinnedEntry[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(pins));
-  } catch {}
+  writeStoredJson(STORAGE_KEY, pins);
 }
 
 function readLocalApps(): CachedApp[] {
-  try {
-    const stored = localStorage.getItem(APPS_CACHE_KEY);
-    if (!stored) return [];
-    const parsed = JSON.parse(stored);
-    return Array.isArray(parsed) ? parsed.filter((app) => app && !isHiddenInLauncher(app)) : [];
-  } catch {
-    return [];
-  }
+  const parsed = readStoredJson(APPS_CACHE_KEY);
+  return Array.isArray(parsed) ? parsed.filter((app) => app && !isHiddenInLauncher(app)) : [];
 }
 
 function writeLocalApps(apps: InstalledAppCard[]): void {
-  try {
-    const cached: CachedApp[] = apps.map((a) => ({
-      id: a.id,
-      displayName: a.displayName,
-      iconUrl: a.iconUrl,
-      href: a.href,
-      hasFrontend: a.hasFrontend,
-      status: a.status,
-      origin: a.origin,
-      installedAt: a.installedAt ?? null,
-      projectPath: a.projectPath,
-    }));
-    localStorage.setItem(APPS_CACHE_KEY, JSON.stringify(cached));
-  } catch {}
+  const cached: CachedApp[] = apps.map((a) => ({
+    id: a.id,
+    displayName: a.displayName,
+    iconUrl: a.iconUrl,
+    href: a.href,
+    hasFrontend: a.hasFrontend,
+    status: a.status,
+    origin: a.origin,
+    installedAt: a.installedAt ?? null,
+    projectPath: a.projectPath,
+  }));
+  writeStoredJson(APPS_CACHE_KEY, cached);
 }
 
 function renderBuiltinIcon(entry: BuiltinNavEntry): React.ReactNode {
+  const Icon = entry.id === "chat" ? MessageSquare : entry.Icon;
   return (
     <span
-      className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
+      className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-foreground transition-colors"
       data-motion={entry.sidebarIconMotion}
       aria-hidden
     >
-      <entry.Icon className="h-4 w-4 shrink-0" aria-hidden />
+      <Icon className="h-4 w-4 shrink-0" aria-hidden />
     </span>
   );
 }
@@ -184,6 +184,15 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     useState<(InstalledAppCard | CachedApp)[]>(readLocalApps);
   const labelled = useContext(RailLabelsContext);
   const tileClass = railLinkClass(labelled);
+  // Chat opens the main chat in Concierge mode, else the ordinary chat last
+  // opened here, which is a blank chat once it is gone from the loaded lists.
+  const chatListMode = useChatListModeForShell(true);
+  const lastOrdinaryChatId = useLastOrdinaryChatId();
+  const lastOrdinaryChatExists = useChatSessionMayExist(lastOrdinaryChatId);
+  const entryHref = (entry: BuiltinNavEntry): string =>
+    entry.id === "chat"
+      ? railChatHref(chatListMode, lastOrdinaryChatId, lastOrdinaryChatExists)
+      : entry.href;
   // A labelled row already names itself, so its tooltip would only repeat it.
   const tip = (text: string): React.ReactNode =>
     labelled ? null : <TooltipContent side="right">{text}</TooltipContent>;
@@ -213,7 +222,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   });
 
   const { data: settings } = useSettings();
-  const { apps: appsFromQuery } = useApps();
+  const { apps: appsFromQuery } = useAppsList();
   const pinnedAppIds = useMemo(
     () => new Set(pins.filter((pin) => pin.type === "app").map((pin) => pin.id)),
     [pins],
@@ -313,7 +322,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
       <ContextMenu>
         <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
         <ContextMenuContent>
-          {canOpen ? renderOpenMenuItem(entry.href) : null}
+          {canOpen ? renderOpenMenuItem(entryHref(entry)) : null}
           {canOpen && canUnpin ? <ContextMenuSeparator /> : null}
           {canUnpin ? (
             <ContextMenuItem
@@ -400,8 +409,9 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
             {withBuiltinContextMenu(
               entry,
               <Link
-                to={entry.href}
+                to={entryHref(entry)}
                 aria-label={label}
+                aria-current={active ? "page" : undefined}
                 onPointerEnter={chatPeek.onPointerEnter}
                 onPointerLeave={chatPeek.onPointerLeave}
                 className={`${tileClass} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
@@ -419,8 +429,9 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
             entry,
             <TooltipTrigger asChild>
               <Link
-                to={entry.href}
+                to={entryHref(entry)}
                 aria-label={label}
+                aria-current={active ? "page" : undefined}
                 className={`${tileClass} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
               >
                 {renderBuiltinIcon(entry)}
@@ -444,6 +455,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
             <Link
               to={app.href}
               aria-label={app.displayName}
+              aria-current={active ? "page" : undefined}
               className={`${tileClass} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
             >
               <RailAppIcon app={app} />
@@ -471,7 +483,7 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
     // Without hoverable content, leaving the trigger closes the tooltip.
     <TooltipProvider delayDuration={150} disableHoverableContent={labelled}>
       <nav
-        className={`flex shrink-0 flex-col gap-1 px-3 pb-2 ${labelled ? "items-stretch" : "items-center"}`}
+        className={`flex shrink-0 flex-col gap-[var(--row-gap)] pb-2 ${labelled ? "items-stretch px-2 pt-2" : "items-center px-3"}`}
       >
         {onSearch ? (
           <Tooltip>
@@ -480,15 +492,17 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
                 type="button"
                 onClick={onSearch}
                 aria-label={t("recentChats.search")}
-                className={`${tileClass} ${IDLE_CLASS} text-subtle-foreground hover:text-foreground`}
+                className={`${labelled ? "rome-sidebar-link relative flex h-[var(--row-h)] w-full min-w-0 items-center gap-[var(--row-icon-gap)] rounded-full bg-surface-muted px-[var(--row-px)] text-left text-ui font-normal transition outline-none focus-visible:outline-solid focus-visible:outline-1 focus-visible:outline-ring/50 hover:bg-surface-hover" : `${tileClass} ${IDLE_CLASS}`} mb-[var(--row-py-md)] text-muted-foreground hover:text-foreground`}
               >
-                <Search className="h-4 w-4 shrink-0" aria-hidden />
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
+                  <Search className="h-4 w-4 shrink-0" />
+                </span>
                 {labelled ? (
                   <>
                     <RailLabel>{t("sidebar.search")}</RailLabel>
-                    <kbd className="shrink-0 font-sans text-aux text-subtle-foreground max-md:hidden">
-                      {chatSearchShortcutForPlatform()}
-                    </kbd>
+                    <span className="flex shrink-0 border-l border-border pl-3 max-md:hidden">
+                      <Kbd variant="ghost">{chatSearchShortcutForPlatform()}</Kbd>
+                    </span>
                   </>
                 ) : null}
               </button>
@@ -497,7 +511,11 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
           </Tooltip>
         ) : null}
         {pins.slice(0, fixedCount).map(renderPin)}
-        {pins.length > fixedCount ? <Separator className={labelled ? "my-1" : "my-1 w-6"} /> : null}
+        {pins.length > fixedCount ? (
+          <Separator
+            className={`my-1 bg-border-strong ${labelled ? "" : "data-[orientation=horizontal]:w-6"}`}
+          />
+        ) : null}
         {pins.slice(fixedCount).map(renderPin)}
         <RecentAppsRail
           apps={recentApps}

@@ -1,5 +1,6 @@
+import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
-import { orderChatMessages } from "@/lib/chat-message-ordering";
 import { parseEntries, parseMessageEntries } from "@/components/chat/entries/parse-entries";
 
 // Pure derivation: per-session message lists → one renderable view. No React,
@@ -37,20 +38,20 @@ export function interactionResultKey(sessionId: string, toolUseId: string): stri
 
 // The host's own built-in cards (vs an app's inline component):
 // the only suspensions auto-dismissed by a free-text reply, since typing in
-// chat instead of using the card is the natural "skip this" for a question or a
-// provider sign-in, but not for an app's half-filled form.
+// chat instead of using the card is the natural "skip this" for a question, a
+// location share or a provider sign-in, but not for an app's half-filled form.
 //
 // The connect-AI card has to be here as well as the question card: it resolves
 // itself once a provider signs in, so an earlier copy left open would submit a
 // second `{ connected: true }` and drive the script a step past where the
 // guardian is.
-const AUTO_DISMISSED_COMPONENT_IDS = new Set(["question-card", "ai-tools-card"]);
+const AUTO_DISMISSED_COMPONENT_IDS = new Set(["question-card", "ai-tools-card", LOCATION_CARD_ID]);
 
 function isAutoDismissedCard(b: TranscriptPart): boolean {
   return (
     b.type === "pending_interaction" &&
     b.render.builtin === true &&
-    AUTO_DISMISSED_COMPONENT_IDS.has(b.render.componentId)
+    AUTO_DISMISSED_COMPONENT_IDS.has(b.render.componentId ?? "")
   );
 }
 
@@ -101,10 +102,10 @@ export function buildChatView(
   mainSessionId: string,
   mainIdentity: AgentIdentity,
 ): ChatView {
-  // Trace placement needs no reorder: rows are grouped by turn and a turn's
-  // trace is looked up by id and shown as its subtitle, so its position in the
-  // list doesn't matter.
-  const displayMessages = orderChatMessages(messages.get(mainSessionId) ?? []);
+  // Messages stand in the order the server sent them, which is the order they
+  // were said. A turn's trace is looked up by its turn id and shown as its
+  // subtitle, so its position in the list doesn't matter.
+  const displayMessages = messages.get(mainSessionId) ?? [];
   return {
     displayMessages,
     identityBySession: new Map([[mainSessionId, mainIdentity]]),
@@ -217,7 +218,10 @@ export type ChatRow =
     })
   // The chat moved to another model: the turn after it ran on `model`, the
   // session's turn before it on another one.
-  | (RowBase & { kind: "model_switch"; model: string; turnId: string; sessionId: string });
+  | (RowBase & { kind: "model_switch"; model: string; turnId: string; sessionId: string })
+  // The turn after it ran on what a routine, an app or another agent sent
+  // into the chat, which shows as a faint line naming the source.
+  | (RowBase & { kind: "automated_input"; source: SystemInputSource; turnId: string });
 
 // The rows the last build made, by the message each starts from. A build hands
 // back the row object it made before when nothing the row shows has changed, so
@@ -226,6 +230,8 @@ export type ChatRow =
 const builtRows = new WeakMap<ChatMessage, ChatRow>();
 // A model-switch notice is keyed by the row it stands before.
 const builtSwitches = new WeakMap<ChatRow, ChatRow>();
+// So is an automated input's line.
+const builtInputs = new WeakMap<ChatRow, ChatRow>();
 
 function sameIdentity(a: AgentIdentity, b: AgentIdentity): boolean {
   return a === b || (a.name === b.name && a.iconUrl === b.iconUrl);
@@ -236,6 +242,14 @@ function sameRow(a: ChatRow, b: ChatRow): boolean {
   if (a.kind === "user") return true;
   if (a.kind === "model_switch") {
     return b.kind === "model_switch" && a.model === b.model && a.turnId === b.turnId;
+  }
+  if (a.kind === "automated_input") {
+    return (
+      b.kind === "automated_input" &&
+      a.turnId === b.turnId &&
+      a.source.type === b.source.type &&
+      a.source.name === b.source.name
+    );
   }
   if (a.kind === "trace") {
     return b.kind === "trace" && a.message === b.message && sameIdentity(a.identity, b.identity);
@@ -300,11 +314,11 @@ export function buildRows(
       );
       continue;
     }
-    // Group a whole turn under one header: gather this turn's assistant
-    // messages, stepping over a same-turn trace (it's rendered once as the
-    // turn's subtitle via tracesByTurn, so its position in the list is
-    // irrelevant — grouping keys on turnId, not raw adjacency). A different
-    // turn/session, or a user message, ends the turn.
+    // Group a turn's run of assistant messages under one header: gather the
+    // ones that follow this one, stepping over a same-turn trace (it's
+    // rendered once as the turn's subtitle via tracesByTurn, so its position
+    // in the list is irrelevant). A message of a different turn or session, or
+    // a user message, ends the run.
     const group = [msg];
     let j = i + 1;
     while (
@@ -337,7 +351,7 @@ export function buildRows(
 
 /** The turn and session a row belongs to, or null for a row with no turn. */
 function rowTurn(row: ChatRow): { turnId: string; sessionId: string } | null {
-  if (row.kind === "model_switch") return null;
+  if (row.kind === "model_switch" || row.kind === "automated_input") return null;
   const message = row.kind === "agent" ? row.messages[0] : row.message;
   return message?.turnId ? { turnId: message.turnId, sessionId: message.sessionId } : null;
 }
@@ -356,6 +370,21 @@ function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessag
     const turn = rowTurn(row);
     if (turn && !seenTurns.has(turn.turnId)) {
       seenTurns.add(turn.turnId);
+      const source = tracesByTurn.get(turn.turnId)?.traceSummary?.automatedInput;
+      if (source) {
+        const line: ChatRow = {
+          kind: "automated_input",
+          key: `automated-input:${turn.turnId}`,
+          source,
+          turnId: turn.turnId,
+        };
+        const built = builtInputs.get(row);
+        if (built && sameRow(built, line)) out.push(built);
+        else {
+          builtInputs.set(row, line);
+          out.push(line);
+        }
+      }
       const model = tracesByTurn.get(turn.turnId)?.traceSummary?.model;
       if (model) {
         const previous = lastModelBySession.get(turn.sessionId);

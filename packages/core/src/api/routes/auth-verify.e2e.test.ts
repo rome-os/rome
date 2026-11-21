@@ -25,12 +25,12 @@ import {
   VISITOR_COOKIE_NAME,
   createGuardianSession,
   createVisitorSession,
-} from "../../lib/auth.js";
+} from "../../access/auth.js";
 import type { ApiConfig, ApiDeps } from "../deps.js";
 import type { AppCatalog } from "../../apps/catalog.js";
 import type { AppView, ResolvedApp } from "../../apps/state.js";
 import { settings } from "../../db/schema.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
+import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 
 function buildResolvedApp(
@@ -174,6 +174,14 @@ describe("/api/auth/verify", () => {
     const host = buildHost(await stubDeps([]));
     const res = await verifyRequest(host, "/api/people");
     expect(res.status).toBe(401);
+  });
+
+  it("keeps stored chat files behind the guardian cookie", async () => {
+    const host = buildHost(await stubDeps([]));
+    const uri = "/api/assets/0123456789abcdef0123456789abcdef.png";
+    expect((await verifyRequest(host, uri)).status).toBe(401);
+    expect((await verifyRequest(host, `${uri}?w=900`)).status).toBe(401);
+    expect((await verifyRequest(host, uri, validCookieHeader())).status).toBe(204);
   });
 
   it("returns 204 for the connect return leg without a cookie", async () => {
@@ -462,7 +470,7 @@ describe("/api/auth/verify", () => {
     expect(body.bootstrap?.caller?.kind).toBe("guardian");
   });
 
-  it("marks cloud-email app manifest access allowed with dashboard visitor access", async () => {
+  it("marks cloud-email app manifest access allowed with dashboard admin access", async () => {
     const host = buildHost(
       await stubDeps([buildResolvedApp("restricted", false, { web: true })], {
         cloudEmailAccess: { restricted: ["lin@example.com"] },

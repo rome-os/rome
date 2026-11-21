@@ -26,7 +26,7 @@ A Concierge turn can run on another provider with no guardian action. Each switc
 
 Future diffs must respect:
 
-- Only the fixed Concierge chat qualifies. Ordinary chats, task chats, routines, summons, side chats, handoffs and subagents still fail closed.
+- Only the fixed Concierge chat qualifies. Ordinary chats, task chats, routines, summons, fork chats, handoffs and subagents still fail closed.
 - The other provider must be signed in, have quota, need no reauthentication, and use a subscription. An API key or Rome credits never qualifies.
 - A generic rate limit, network or auth failure, or single-model limit never triggers failover.
 - The host records a visible switch notice independently of the agent's output.

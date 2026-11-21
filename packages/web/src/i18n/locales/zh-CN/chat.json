@@ -4,17 +4,23 @@
   "senderAutomation": "自动化",
   "markdown": {
     "code": "代码",
-    "mermaid": "Mermaid 图表"
+    "mermaid": "Mermaid 图表",
+    "imageNotAvailable": "图片无法显示"
   },
   "title": "Rome",
   "concierge": {
     "typing": "正在输入",
+    "newMessages": "以下为新消息",
+    "newMessagesPill_one": "{{label}} 条新消息",
+    "newMessagesPill_other": "{{label}} 条新消息",
+    "newMessagesMissing": "找不到新消息的起点",
     "taskChat": "任务对话",
     "taskStatus": {
       "running": "进行中",
       "waiting": "等你处理",
       "failed": "出错停止了",
-      "idle": "已完成"
+      "idle": "已完成",
+      "later": "稍后"
     },
     "openForwardedChat": "打开任务对话：{{title}}",
     "showFullText": "展开全文",
@@ -30,59 +36,38 @@
       "blocked": "弹窗被拦截",
       "checkFailed": "无法检查连接状态"
     },
+    "ask": {
+      "expired": "已过期：一天内没有回应",
+      "unavailable": "这个问题或审批已无法显示",
+      "answered": "已回答",
+      "answeredWith": "已回答：{{answer}}",
+      "dismissed": "已忽略",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "waitingBelow": "等待回答：见下方卡片",
+      "closed": "已关闭：任务已结束",
+      "turnedDown": "已自动拒绝：一天内没有回应",
+      "turnedDownStopped": "已自动拒绝：任务已停止",
+      "openToAnswer": "打开任务对话来回答"
+    },
+    "taskCardAlreadyAnswered": "这张卡片已在别处回复，任务状态已刷新。",
     "openTaskChat": "打开",
     "tasks": {
-      "title": "任务",
-      "close": "关闭任务",
-      "groups": {
-        "needsYou": "等你处理",
-        "doing": "进行中",
-        "next": "接下来",
-        "watching": "盯着",
-        "done": "已完成"
+      "ended": {
+        "failed": "失败",
+        "stopped": "已停止",
+        "no_response": "没回应"
       },
       "stop": "停止",
-      "done": "完成",
-      "archive": "归档",
-      "retry": "再试一次",
-      "pending": {
-        "stop": "正在停止…",
-        "archive": "正在归档…",
-        "done": "正在发送…"
-      },
-      "unchanged": "{{name}} 没有改动这一项",
-      "timeout": "{{name}} 还没有处理",
-      "failed": "没发出去，请再试一次。",
-      "notSynced": "未同步",
       "sourceMissing": "找不到原消息",
-      "findingMessage": "正在查找消息…",
-      "showMore": "显示更早的 {{count}} 项",
-      "showLess": "收起",
-      "openChat": "打开「{{title}}」的对话",
-      "actionText": {
-        "stop": "停止「{{title}}」",
-        "archive": "归档「{{title}}」",
-        "done": "完成了「{{title}}」",
-        "withId": "（任务 {{id}}）"
-      },
-      "replyText": {
-        "done": "我已经完成了"
-      },
-      "pill": {
-        "needsYou_one": "任务，{{count}} 项等你处理",
-        "needsYou_other": "任务，{{count}} 项等你处理",
-        "doing_one": "任务，{{count}} 项进行中",
-        "doing_other": "任务，{{count}} 项进行中",
-        "idle": "任务"
-      },
-      "emptyTitle": "还没有任务",
-      "emptyDescription": "{{name}} 正在做、计划做或盯着的任务会显示在这里。"
+      "findingMessage": "正在查找消息…"
     },
     "messageDetails": "消息详情",
     "chooseFolder": "选择文件夹…",
     "removeFolder": "移除文件夹",
     "composerMenu": "添加文件或切换模型",
     "placeholder": "发消息",
+    "placeholderIn": "在「{{name}}」中发消息",
     "empty": {
       "title": "直接告诉我你想做什么",
       "prompts": {
@@ -93,15 +78,141 @@
       }
     },
     "topicEmpty": {
-      "title": "开一个长期话题",
-      "description": "给反复出现的事开个专门的地方，比如日历、某个项目、一次旅行。这里的提醒和任务只出现在这个对话里。",
+      "welcome": "有什么想法？",
+      "label": "建议",
       "starters": {
-        "life": "当我的生活小助手：日程、账单、快递这些琐事都放这里",
-        "work": "帮我跟进工作上的事：项目进度、PR、会议都放这里",
-        "trip": "帮我规划下个月的旅行，相关的事都放这里"
+        "life": {
+          "label": "账单和杂事放这里",
+          "text": "把我的账单、快递和其他杂事放在这里，到期前提醒我"
+        },
+        "work": {
+          "label": "跟进工作和会议",
+          "text": "在这里跟进我的工作：项目进度、PR 和会议"
+        },
+        "trip": {
+          "label": "规划下个月的旅行",
+          "text": "帮我规划下个月的旅行，相关的事都放在这里"
+        }
+      }
+    },
+    "activity": {
+      "idle": "空闲",
+      "needsYou": "等你回复",
+      "working": "正在处理",
+      "tasks": "{{title}}",
+      "tasksMore": "{{title}} +{{count}}",
+      "tool": {
+        "startingTask": "正在开始任务",
+        "messagingTask": "正在给任务对话发消息",
+        "readingChat": "正在查看对话",
+        "stoppingTask": "正在停止任务",
+        "updatingTasks": "正在更新任务",
+        "startingTopic": "正在开启话题对话",
+        "checkingFollows": "正在查看你的关注",
+        "searchingWeb": "正在搜索网页",
+        "readingPage": "正在阅读网页",
+        "tidyingUp": "正在整理上下文"
+      }
+    },
+    "reaction": "表情回应",
+    "status": {
+      "working": "正在处理",
+      "failed": "未完成"
+    },
+    "taskList": {
+      "title": "任务",
+      "close": "关闭任务",
+      "open": "打开任务",
+      "groups": {
+        "needs_you": "需要你",
+        "active": "进行中",
+        "later": "稍后",
+        "scheduled": "定时",
+        "ended": "已结束"
       },
-      "justAsk": "只是问个问题？",
-      "backToMain": "回主对话问 →"
+      "empty": "还没有任务。",
+      "loading": "正在加载任务",
+      "loadFailed": "任务加载失败",
+      "showMore": "再显示 {{count}} 条",
+      "task": {
+        "waitingAnswer": "等你回答",
+        "waitingApproval": "等你批准",
+        "running": "运行中",
+        "checksIn": "{{when}}检查",
+        "ended": {
+          "done": "已完成",
+          "failed": "失败",
+          "stopped": "已停止",
+          "no_response": "无回应"
+        },
+        "active": "进行中"
+      },
+      "schedule": {
+        "daily": "每天 {{time}}",
+        "days": "{{days}} {{time}}",
+        "once": "{{date}} {{time}}",
+        "event": "收到 {{event}} 时",
+        "manual": "仅手动运行",
+        "other": "按计划"
+      },
+      "check": {
+        "waiting": "等待 {{what}}"
+      },
+      "follow": {
+        "digest": "每天 {{times}} 汇总",
+        "unavailable": "不可用",
+        "off": "已关闭",
+        "next": "下次 {{when}}"
+      },
+      "routine": {
+        "paused": "已暂停",
+        "lastFailed": "上次运行失败",
+        "fromTask": "来自 {{title}}"
+      },
+      "actions": {
+        "more": "「{{title}}」的更多操作",
+        "stop": "停止",
+        "markDone": "标记完成",
+        "markDoneTask": "将「{{title}}」标记完成",
+        "cancel": "取消",
+        "unfollow": "取消关注",
+        "pause": "暂停",
+        "resume": "恢复",
+        "delete": "删除"
+      },
+      "failed": {
+        "stop": "停止任务失败",
+        "markDone": "标记完成失败",
+        "cancel": "取消提醒失败",
+        "unfollow": "取消关注失败",
+        "pause": "暂停定时任务失败",
+        "resume": "恢复定时任务失败",
+        "delete": "删除定时任务失败"
+      },
+      "endedAt": "结束于 {{when}}",
+      "needsYouDot": "有任务需要你",
+      "pending": {
+        "stopping": "正在停止…",
+        "finishing": "正在标记完成…",
+        "cancelling": "正在取消…",
+        "unfollowing": "正在取消关注…",
+        "pausing": "正在暂停…",
+        "resuming": "正在恢复…",
+        "deleting": "正在删除…"
+      },
+      "deleteRoutine": {
+        "title": "删除「{{name}}」？",
+        "description": "它将不再运行并被移除，无法撤销。"
+      },
+      "unfollowConfirm": {
+        "title": "取消关注 {{target}}？",
+        "description": "它的提醒和汇总将不再发到这里。要重新关注，请让 Concierge 帮你关注。"
+      }
+    },
+    "menu": {
+      "tasks": "任务",
+      "outputs": "产出",
+      "needsYouDot": "有任务需要你"
     }
   },
   "reply": {
@@ -129,8 +240,6 @@
     "sessionModel": "会话模型：{{model}}",
     "sessionModelWithEffort": "会话模型：{{model}}，推理强度：{{effort}}",
     "more": "更多操作",
-    "pin": "置顶对话",
-    "unpin": "取消置顶",
     "archive": "归档对话",
     "unarchive": "取消归档",
     "delete": "删除对话",
@@ -161,6 +270,7 @@
     "cancel": "取消",
     "create": "创建链接",
     "creating": "创建中…",
+    "tagline": "专业的个人助手",
     "unavailableTitle": "该分享对话不可用",
     "unavailableBody": "链接可能已被撤销或失效。"
   },
@@ -176,18 +286,19 @@
   "message": {
     "copy": "复制消息",
     "copied": "已复制",
+    "share": "分享",
     "feedback": {
       "thumbsUp": "标记为有帮助",
       "thumbsDown": "标记为无帮助",
       "commentPlaceholder": "可选：哪里有问题，或哪里做得好？",
-      "submit": "提交",
+      "submit": "发送反馈",
       "submitting": "提交中…",
       "submitFailed": "提交失败",
       "recorded": "反馈已记录"
     },
     "branch": {
-      "open": "从此回复发起侧边对话",
-      "title": "创建侧边对话",
+      "open": "从此回复分叉出新对话",
+      "title": "分叉为新对话",
       "description": "继续追问，同时不改变当前聊天。",
       "suggestionsLabel": "推荐提示词",
       "suggestions": {
@@ -196,10 +307,10 @@
         "example": "给我一个具体示例"
       },
       "promptPlaceholder": "针对这条回复提问…",
-      "submit": "发起侧边对话",
-      "submitting": "正在创建…",
-      "submitFailed": "无法创建侧边对话",
-      "notBranchable": "无法从这条回复创建侧边对话。发送一条追问，再从新的回复创建即可。"
+      "submit": "分叉对话",
+      "submitting": "正在分叉…",
+      "submitFailed": "无法分叉对话",
+      "notBranchable": "无法从这条回复分叉对话。发送一条追问，再从新的回复分叉即可。"
     }
   },
   "blocks": {
@@ -231,12 +342,12 @@
   "errors": {
     "providerAuthRevoked": {
       "title": "重新连接 {{provider}}",
-      "description": "你的 {{provider}} 登录已过期或被撤销。请在 AI Tools 中重新连接，然后重新发送消息。",
+      "description": "你的 {{provider}} 登录已过期或被撤销。重新连接后再发送一次消息。",
       "action": "重新连接"
     },
     "providerNotLoggedIn": {
       "title": "{{provider}} 尚未登录",
-      "description": "请前往 AI Tools 登录 {{provider}}，然后重新发送消息。",
+      "description": "登录后再发送一次消息。",
       "action": "前往登录"
     },
     "providerQuotaExhausted": {
@@ -308,6 +419,13 @@
       "rejected": "已拒绝",
       "failed": "执行失败"
     },
+    "secretAccess": {
+      "allow": "允许 {{minutes}} 分钟",
+      "separator": "、",
+      "duration": "{{minutes}} 分钟",
+      "allowed": "已允许 {{name}} · {{minutes}} 分钟",
+      "rejected": "已拒绝 {{name}}"
+    },
     "actions": {
       "approve": "批准",
       "approving": "批准中…",
@@ -353,6 +471,10 @@
     "previewImage": "预览",
     "playVideo": "播放",
     "closeImagePreview": "关闭",
+    "downloadImage": "下载",
+    "previousImage": "上一张",
+    "nextImage": "下一张",
+    "imageCounter": "{{current}} / {{total}}",
     "filePill": "#文件 {{index}}",
     "uploadProgressFor": "{{name}} 的上传进度",
     "cancelUpload": "取消",
@@ -361,19 +483,45 @@
     "sendWhileRunningTitle": "在 Agent 运行中发送消息",
     "stopGenerating": "停止生成"
   },
+  "agentCard": {
+    "usual": "通常 {{range}}",
+    "normal": "正常",
+    "high": "偏高",
+    "low": "偏低"
+  },
   "questionCard": {
+    "sent": "已发送",
     "optional": "可选",
     "addOwn": "添加自己的选项…",
     "typeOwn": "或输入自己的答案…",
     "typeAnswer": "输入你的答案…",
     "dismissed": "已跳过",
     "answered": "已回答",
-    "askedByRome": "Rome 正在提问",
     "dismiss": "跳过",
     "send": "发送"
   },
+  "deviceConnectCard": {
+    "connected": "已连接",
+    "notConnected": "未连接",
+    "connect": "连接",
+    "notNow": "暂不",
+    "note": "让你的 Rome 读取你允许的数据。"
+  },
+  "locationCard": {
+    "title": "共享你的位置？",
+    "share": "共享",
+    "shared": "已共享位置 · ±{{accuracy}}",
+    "notShared": "未共享",
+    "locating": "正在获取你的位置…",
+    "denied": "此网站的位置权限已关闭。请在浏览器中开启，或点按“暂不”。",
+    "unavailable": "无法获取你的位置。请重试，或点按“暂不”。",
+    "unsupported": "此浏览器无法共享位置。请点按“暂不”，并在消息中说明地点。"
+  },
   "appComponent": {
-    "dismiss": "跳过"
+    "dismiss": "跳过",
+    "widgetUnavailable": "无法读取这张卡片的数据。{{text}}",
+    "widgetOpenLink": "打开页面继续",
+    "widgetUndrawable": "无法显示这张卡片。{{text}}"
   },
   "aiToolsCard": {
     "title": "连接 Claude 或 ChatGPT",
@@ -541,7 +689,11 @@
       "sendInvalidResponse": "发送消息失败:无效响应。",
       "sendFallback": "发送消息失败。",
       "stopFallback": "停止生成失败。",
-      "stopStatus": "停止失败({{status}})。"
+      "stopStatus": "停止失败({{status}})。",
+      "reconnecting": "暂时连不上 Rome，重连中…",
+      "unreachable": "暂时连不上 Rome，稍后再试。",
+      "updating": "正在升级，稍后再试。",
+      "updatingReconnecting": "正在升级，重连中…"
     }
   },
   "empty": {
@@ -565,5 +717,131 @@
       "label": "早间简报",
       "prompt": "构建一个带前端设计的早间简报应用,读取我过去 24 小时的 Gmail 邮件和即将到来的 Google 日历事件。每天上午 8:00 更新仪表盘,展示最新的优先事项、紧急邮件、重要会议、截止日期和推荐的后续行动。识别最需要我关注的事项,并在每次每日更新后通过 Telegram 给我发送简短摘要。"
     }
+  },
+  "automatedInput": {
+    "named": "{{kind}} · {{name}}",
+    "kinds": {
+      "routine": "例程",
+      "app": "应用",
+      "agent": "Agent",
+      "automation": "自动化",
+      "following": "关注",
+      "digest": "关注 · 摘要",
+      "check": "检查"
+    }
+  },
+  "routineCard": {
+    "details": "详情",
+    "turnOn": "开启",
+    "turningOn": "正在开启…",
+    "turningOnLabel": "正在开启例程",
+    "createFailed": "开启失败（{{status}}）。",
+    "on": "已启用",
+    "paused": "已暂停",
+    "saving": "正在保存",
+    "running": "正在运行…",
+    "more": "更多",
+    "pause": "暂停",
+    "resume": "恢复",
+    "runNow": "立即运行",
+    "delete": "删除",
+    "deleting": "正在删除",
+    "deleteConfirm": "删除此例程？",
+    "cancel": "取消",
+    "then": "然后",
+    "channel": "渠道",
+    "sendMessage": "发送消息",
+    "action": "动作"
+  },
+  "voiceInput": {
+    "start": "开始语音输入",
+    "stop": "停止语音输入",
+    "finishing": "正在完成语音输入",
+    "whyMicrophone": "Rome 使用麦克风将你的语音转成文字",
+    "stopped": {
+      "provider-unavailable": "转写服务不可用，已停止收听",
+      "provider-refused": "转写服务拒绝了请求，已停止收听",
+      "bad-request": "出错，已停止收听",
+      "microphone-blocked": "麦克风被阻止，请在浏览器的网站设置中允许",
+      "microphone-missing": "未找到麦克风",
+      "connection-lost": "与 Rome 的连接已断开，已停止收听",
+      "microphone-failed": "麦克风无法启动，已停止收听",
+      "time-limit": "已达 10 分钟，已停止收听",
+      "service-refused": "Rome Cloud 拒绝了语音输入（{{code}}），已停止收听",
+      "service-unavailable": "无法连接 Rome Cloud，已停止收听",
+      "service-signed-out": "Rome Cloud 不接受此 Rome 的登录，请重新登录 Rome Cloud，已停止收听",
+      "left-chat": "离开此聊天时已停止收听",
+      "page-reloaded": "页面重新加载时已停止收听",
+      "no-speech": "30 秒未检测到语音，已停止收听"
+    },
+    "romeCloud": {
+      "voice_input_rate_limited": "最近一分钟语音输入次数过多，请稍后再试",
+      "voice_input_not_configured": "Rome Cloud 尚未开通语音输入，已停止收听",
+      "provider_unavailable": "Rome Cloud 的转写服务暂不可用，已停止收听",
+      "insufficient_credits": "Rome 额度不足，无法使用语音输入，已停止收听"
+    }
+  },
+  "outputs": {
+    "title": "产出",
+    "close": "关闭产出",
+    "loading": "正在加载产出",
+    "loadFailed": "无法加载产出",
+    "emptyTitle": "还没有产出",
+    "emptyDescription": "Agent 在这个聊天里写入或展示的文件会出现在这里。",
+    "written": "写入",
+    "shown": "展示",
+    "from": "来自 {{name}}",
+    "missing": "已移动或删除",
+    "download": "下载",
+    "noPreview": "这个文件没有预览。",
+    "unavailable": "这个文件无法在这里打开。",
+    "previewFailed": "无法加载文件",
+    "truncated": "只显示前 {{count}} 个字符。",
+    "back": "返回产出",
+    "edit": "编辑",
+    "doneEditing": "完成",
+    "filterLabel": "显示",
+    "noneOfType": "还没有这类产出。",
+    "today": "今天",
+    "earlier": "更早",
+    "filters": {
+      "all": "全部",
+      "document": "文档",
+      "spreadsheet": "表格",
+      "page": "页面"
+    },
+    "types": {
+      "document": "文档",
+      "spreadsheet": "表格",
+      "page": "页面",
+      "image": "图片",
+      "code": "代码",
+      "file": "文件"
+    },
+    "indexing": "还在查找更早的文件。"
+  },
+  "memoryFile": {
+    "openPage": "在记忆页打开",
+    "close": "关闭记忆"
+  },
+  "chatHeader": {
+    "menu": "聊天菜单",
+    "project": "项目 · {{name}}",
+    "lastModel": "上次回答：{{model}}"
+  },
+  "taskLink": {
+    "status": {
+      "needs_you": "需要你",
+      "active": "进行中",
+      "later": "稍后",
+      "done": "已完成",
+      "failed": "失败",
+      "stopped": "已停止",
+      "no_response": "无回应"
+    },
+    "label": "{{name}},{{status}}",
+    "untitled": "任务",
+    "mainChat": "主对话",
+    "backTo": "返回{{name}}"
   }
 }

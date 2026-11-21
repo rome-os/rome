@@ -3,7 +3,6 @@
 // Aggregate: agent/domain/session.ts.
 
 import { and, desc, eq } from "drizzle-orm";
-import { resolveArtifactId, type ArtifactIdentityContext } from "../../apps/artifact-id.js";
 import type { DrizzleDb, DrizzleTx } from "../../db/index.js";
 import { sessions, sessionTurnCheckpoints } from "../../db/schema.js";
 import {
@@ -24,14 +23,10 @@ type SessionRow = typeof sessions.$inferSelect;
  * that touches `sessions` and `session_turn_checkpoints`, except the
  * `chat_id` column: the web chat side reads and records which chat has a
  * session there (`chatOfSession`, `recordSessionInChat` in
- * db/repositories/webchat.ts). The agent also matches under its legacy names
- * in `current`, through {@link deprecatedSameAgent}.
+ * webchat/repository.ts).
  */
 export class DrizzleSessionRepository implements SessionRepository {
-  constructor(
-    private readonly db: DrizzleDb,
-    private readonly identity: ArtifactIdentityContext,
-  ) {}
+  constructor(private readonly db: DrizzleDb) {}
 
   /** The session, or null when none has the id. Never creates one. */
   async session(id: SessionId): Promise<Session | null> {
@@ -39,14 +34,24 @@ export class DrizzleSessionRepository implements SessionRepository {
     return rows[0] ? restore(rows[0]) : null;
   }
 
+  async predecessorOf(id: SessionId): Promise<Session | null> {
+    const rows = await this.db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.supersededBy, id))
+      .orderBy(desc(sessions.lastActiveAt))
+      .limit(1);
+    return rows[0] ? restore(rows[0]) : null;
+  }
+
   async current(continuityKey: ContinuityKey, agentName: AgentName): Promise<Session | null> {
     const rows = await this.db
       .select()
       .from(sessions)
-      .where(and(eq(sessions.channelThreadKey, continuityKey), eq(sessions.status, "active")))
-      .orderBy(desc(sessions.createdAt), desc(sessions.lastActiveAt));
-    const row = rows.find((candidate) => this.deprecatedSameAgent(candidate.agentName, agentName));
-    return row ? restore(row) : null;
+      .where(exactlyActive(continuityKey, agentName))
+      .orderBy(desc(sessions.createdAt), desc(sessions.lastActiveAt))
+      .limit(1);
+    return rows[0] ? restore(rows[0]) : null;
   }
 
   /**
@@ -59,22 +64,29 @@ export class DrizzleSessionRepository implements SessionRepository {
   async add(session: Session): Promise<void> {
     const state = session.snapshot();
     const pending = session.pendingChanges();
-    this.db.transaction((tx) => {
-      if (state.continuityKey !== null) {
-        const active = tx
-          .select({ id: sessions.id })
-          .from(sessions)
-          .where(exactlyActive(state.continuityKey, state.agentName))
-          .get();
-        if (active) {
-          throw new ActiveSessionExistsError(state.continuityKey, state.agentName, active.id);
+    // Immediate: the active-session check reads before the insert writes, and a
+    // deferred transaction fails at once with "database is locked" when another
+    // connection holds the write lock; BEGIN IMMEDIATE waits for it under
+    // busy_timeout instead.
+    this.db.transaction(
+      (tx) => {
+        if (state.continuityKey !== null) {
+          const active = tx
+            .select({ id: sessions.id })
+            .from(sessions)
+            .where(exactlyActive(state.continuityKey, state.agentName))
+            .get();
+          if (active) {
+            throw new ActiveSessionExistsError(state.continuityKey, state.agentName, active.id);
+          }
         }
-      }
-      // The row carries every fact the session holds, so a turn recorded
-      // before the add needs only its checkpoint written beside it.
-      tx.insert(sessions).values(toRow(state)).run();
-      for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
-    });
+        // The row carries every fact the session holds, so a turn recorded
+        // before the add needs only its checkpoint written beside it.
+        tx.insert(sessions).values(toRow(state)).run();
+        for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
+      },
+      { behavior: "immediate" },
+    );
     session.markSaved();
   }
 
@@ -88,16 +100,22 @@ export class DrizzleSessionRepository implements SessionRepository {
   async save(session: Session): Promise<void> {
     const state = session.snapshot();
     const pending = session.pendingChanges();
-    this.db.transaction((tx) => {
-      const stored = tx
-        .select({ id: sessions.id })
-        .from(sessions)
-        .where(eq(sessions.id, state.id))
-        .get();
-      if (!stored) throw new Error(`Session "${state.id}" was never added`);
-      writeChanges(tx, state, pending.changes);
-      for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
-    });
+    // Immediate: a deferred read-then-write fails at once with "database is
+    // locked" when another connection holds the write lock; BEGIN IMMEDIATE
+    // waits for it under busy_timeout instead.
+    this.db.transaction(
+      (tx) => {
+        const stored = tx
+          .select({ id: sessions.id })
+          .from(sessions)
+          .where(eq(sessions.id, state.id))
+          .get();
+        if (!stored) throw new Error(`Session "${state.id}" was never added`);
+        writeChanges(tx, state, pending.changes);
+        for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
+      },
+      { behavior: "immediate" },
+    );
     session.markSaved();
   }
 
@@ -129,7 +147,12 @@ export class DrizzleSessionRepository implements SessionRepository {
       for (const checkpoint of retiredPending.checkpoints) upsertCheckpoint(tx, checkpoint);
       if (retiredState.continuityKey !== null) {
         tx.update(sessions)
-          .set({ status: "completed", lastActiveAt: retiredState.lastActiveAt })
+          .set({
+            status: "completed",
+            lastActiveAt: retiredState.lastActiveAt,
+            supersededBy: successorState.id,
+            supersededFor: retiredState.supersededFor,
+          })
           .where(exactlyActive(retiredState.continuityKey, retiredState.agentName))
           .run();
       }
@@ -172,20 +195,24 @@ export class DrizzleSessionRepository implements SessionRepository {
     return rows[0] ?? null;
   }
 
-  /** @deprecated Matches an agent under its legacy names, which is identity
-   *  resolution Sessions should not do. Goes when agent names are canonical
-   *  before they reach Sessions, and `current` compares them as strings. */
-  private deprecatedSameAgent(storedName: string, requestedName: string): boolean {
-    if (storedName === requestedName) return true;
-    try {
-      const legacyBindings = this.identity.legacyBindings;
-      return (
-        resolveArtifactId({ kind: "agent", value: storedName, legacyBindings }) ===
-        resolveArtifactId({ kind: "agent", value: requestedName, legacyBindings })
-      );
-    } catch {
-      return false;
-    }
+  /**
+   * @deprecated Renames the agent of every session saved under an agent's
+   * old bare name, such as `coding`, to its app-prefixed name, such as
+   * `coding:coding`. Goes once no instance has a session saved under an old
+   * name.
+   */
+  deprecatedRenameAgents(newNameOf: Readonly<Record<string, string>>): number {
+    return this.db.transaction((tx) => {
+      let renamed = 0;
+      for (const [oldName, newName] of Object.entries(newNameOf)) {
+        renamed += tx
+          .update(sessions)
+          .set({ agentName: newName })
+          .where(eq(sessions.agentName, oldName))
+          .run().changes;
+      }
+      return renamed;
+    });
   }
 }
 
@@ -224,6 +251,11 @@ function restore(row: SessionRow): Session {
     model: row.model,
     reasoningEffort: row.reasoningEffort,
     workingDir: row.workingDir,
+    setup: row.setup,
+    supersededBy: row.supersededBy,
+    supersededFor: row.supersededFor,
+    handoff: row.handoff,
+    contextTokens: row.contextTokens,
     createdAt: row.createdAt,
     lastActiveAt: row.lastActiveAt,
   });
@@ -243,10 +275,18 @@ function writeChanges(
   }
   if (changes.has("reasoningEffort")) columns.reasoningEffort = state.reasoningEffort;
   if (changes.has("workingDir")) columns.workingDir = state.workingDir;
+  if (changes.has("contextTokens")) columns.contextTokens = state.contextTokens;
+  if (changes.has("setup")) columns.setup = state.setup;
   if (changes.has("lastActiveAt")) columns.lastActiveAt = state.lastActiveAt;
   // A completion is final. A stale instance that still believes the session is
   // active never writes that belief back.
-  if (changes.has("status") && state.status !== "active") columns.status = state.status;
+  if (changes.has("status") && state.status !== "active") {
+    columns.status = state.status;
+    if (state.supersededBy) {
+      columns.supersededBy = state.supersededBy;
+      columns.supersededFor = state.supersededFor;
+    }
+  }
   if (Object.keys(columns).length > 0) {
     tx.update(sessions).set(columns).where(eq(sessions.id, state.id)).run();
   }
@@ -264,6 +304,11 @@ function toRow(state: SessionState): SessionRow {
     model: state.model,
     reasoningEffort: state.reasoningEffort,
     workingDir: state.workingDir,
+    setup: state.setup,
+    supersededBy: state.supersededBy,
+    supersededFor: state.supersededFor,
+    handoff: state.handoff,
+    contextTokens: state.contextTokens,
     createdAt: state.createdAt,
     lastActiveAt: state.lastActiveAt,
     status: state.status,

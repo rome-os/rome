@@ -1,0 +1,128 @@
+import type { ThreadContext } from "@rome-os/app-runtime";
+import type { WebChatRepository } from "../webchat/repository.js";
+import { TASK_CHAT_TRIGGER_KIND } from "../webchat/privacy.js";
+
+// A task chat's conclusion: the closing section of each final answer, which
+// the Concierge tells the guardian from instead of the whole answer. The
+// marker is an HTML comment pair, so the dashboard's Markdown hides it and the
+// section reads as a paragraph of its own (docs/architecture/concierge.md).
+
+/** The longest conclusion a task chat writes, in characters. A longer one reads as no conclusion. */
+export const CONCLUSION_MAX_CHARS = 1200;
+
+/** How a task chat's answer tells the Concierge the guardian wants its work to recur. */
+export const RECURRING_PREFIX = "Recurring:";
+
+/** The answer's recurring line, without its prefix, or null for none. */
+export function recurringOf(answer: string): string | null {
+  const line = withoutConclusion(answer)
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.startsWith(RECURRING_PREFIX));
+  return line ? line.slice(RECURRING_PREFIX.length).trim() || null : null;
+}
+
+/** The conclusion of an answer that has nothing new for the guardian. */
+export const NOTHING_TO_REPORT = "Nothing to report.";
+
+export const CONCLUSION_OPEN = "<!-- rome:conclusion -->";
+export const CONCLUSION_CLOSE = "<!-- /rome:conclusion -->";
+
+// Spaces inside the comment are forgiven, and the closing marker is optional:
+// a section the task forgot to close runs to the end of its answer.
+const OPEN = /<!--\s*rome:conclusion\s*-->/g;
+const CLOSE = /<!--\s*\/rome:conclusion\s*-->/;
+const ANY_MARKER = /<!--\s*\/?rome:conclusion\s*-->/g;
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const lengthOf = (text: string) => Array.from(graphemes.segment(text)).length;
+
+export type Conclusion =
+  | { kind: "found"; text: string }
+  | { kind: "missing" }
+  | { kind: "too_long"; length: number };
+
+/**
+ * The conclusion of a task chat's answer: what lies between the last opening
+ * marker and its closing marker, trimmed. A missing or empty section is
+ * `missing`, and one over {@link CONCLUSION_MAX_CHARS} is `too_long`, which is
+ * never cut: the Concierge reports in its own words instead.
+ */
+export function conclusionOf(answer: string): Conclusion {
+  const opens = [...answer.matchAll(OPEN)];
+  const open = opens.at(-1);
+  if (!open) return { kind: "missing" };
+  const rest = answer.slice(open.index + open[0].length);
+  const close = CLOSE.exec(rest);
+  const text = (close ? rest.slice(0, close.index) : rest).trim();
+  if (!text) return { kind: "missing" };
+  const length = lengthOf(text);
+  return length > CONCLUSION_MAX_CHARS ? { kind: "too_long", length } : { kind: "found", text };
+}
+
+/**
+ * The answer with the conclusion's markers removed and everything else
+ * untouched: a line the markers leave empty goes with them, and no other
+ * whitespace changes, so a code block's blank lines stay as written.
+ */
+export function withoutMarkers(answer: string): string {
+  return answer
+    .split("\n")
+    .flatMap((line) => {
+      const stripped = line.replace(ANY_MARKER, "");
+      return stripped === line || stripped.trim() !== "" ? [stripped] : [];
+    })
+    .join("\n");
+}
+
+/** The answer without its conclusion section, markers included. */
+export function withoutConclusion(answer: string): string {
+  const open = [...answer.matchAll(OPEN)].at(-1);
+  if (!open) return answer.trim();
+  const rest = answer.slice(open.index + open[0].length);
+  const close = CLOSE.exec(rest);
+  const after = close ? rest.slice(close.index + close[0].length) : "";
+  // An excerpt for the Concierge to read, so the gap the section leaves closes.
+  return `${answer.slice(0, open.index)}${after}`.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
+ * What every task chat is told, whoever writes to it. It rides the chat's
+ * system prompt, so a follow-up, a continuation and the guardian's own
+ * message get it too. The conclusion follows the language of the guardian's
+ * request as the Concierge's brief gives it.
+ */
+export const CONCLUSION_INSTRUCTION = [
+  "## Your conclusion",
+  "",
+  "The guardian's Concierge started this chat for a task. Every final answer you give here keeps its full content. End it with a separate conclusion section, written in the language of the guardian's request as your brief gives it, on lines of their own between these two markers, exactly:",
+  "",
+  CONCLUSION_OPEN,
+  "the conclusion",
+  CONCLUSION_CLOSE,
+  "",
+  `The conclusion is three to five sentences, at most ${CONCLUSION_MAX_CHARS} characters, that stand on their own: the outcome and the specifics the guardian needs from it, such as key numbers, names, dates, prices and links, plus anything they must decide or do, such as a question you need answered. Lead with the answer, then cover every point the request asked for and nothing it did not: for a comparison, give each option's figure on each point asked, one short line per option when sentences would get dense, and leave side notes out. The Concierge tells the guardian from this section and nothing else of your answer, so it must make sense alone: never send them elsewhere for details, with words such as "see the task chat", "details above" or "open the chat". Never put a secret, code, password or token in it. Write it in every final answer, after a follow-up and when the guardian writes to you directly too.`,
+  "",
+  `The conclusion is news for the guardian, not a receipt. When your result only confirms or carries out what they just chose on a card or approved, such as saving the option they picked or writing the file they approved, they already know it: the conclusion is then exactly "${NOTHING_TO_REPORT}", word for word whatever their language, and the Concierge sends nothing. The same holds when they turned an approval down and you did nothing. Report a result, a finding, a failure, or a question for them.`,
+  "",
+  "A result that is a few key numbers against their usual ranges (a daily health or budget summary), three or more steps or an itinerary, or options compared side by side reads better as a card: show it with `show_card` in your final answer, with each number's `range`, and the Concierge forwards that card to the guardian as it is, or its `text` where cards cannot show. Never a card for a short answer, a single fact, or a result that needs the guardian to decide or answer something. The guardian receives only the card, so everything they need goes on it, a note such as a bill due tomorrow included, as its callout. With a card, still write the conclusion section, for the Concierge to judge the result by: restate the card's gist in a sentence or two, and add nothing the card does not hold.",
+  "",
+  "Your answer here is how your result reaches the guardian: the Concierge reads it and tells the guardian, or forwards your card. Never send a message into the guardian's Concierge chat yourself, with `system:send_message` or any other tool, and never set up a routine that does.",
+  "",
+  `When the guardian asks for recurring work for themselves ("every day at 10:00", "each Monday"), set up no routine or schedule yourself: the Concierge makes it a scheduled task of this chat. Do the work now if they asked for it now, and put one line before the conclusion, starting with "${RECURRING_PREFIX}" and saying when, such as "${RECURRING_PREFIX} every day at 10:00". Keep it out of the conclusion, which the guardian reads. Checks you defer while you work on the task are yours to keep.`,
+].join("\n");
+
+/**
+ * The agent context's `chatInstructions` for Rome: the conclusion instruction
+ * for a task chat, whichever way its session opens, and nothing for any other
+ * chat.
+ */
+export function taskChatInstructions(deps: {
+  webchatRepo: Pick<WebChatRepository, "getSession">;
+}): (thread: Pick<ThreadContext, "channel" | "threadId"> | undefined) => Promise<string | null> {
+  return async (thread) => {
+    if (thread?.channel !== "webchat" || !thread.threadId) return null;
+    const chat = await deps.webchatRepo.getSession(thread.threadId);
+    return chat?.triggerKind === TASK_CHAT_TRIGGER_KIND ? CONCLUSION_INSTRUCTION : null;
+  };
+}

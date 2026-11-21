@@ -1,6 +1,6 @@
 # Rome for iOS
 
-A native SwiftUI app for Rome. Chat (the Concierge) is the home screen; the Tasks sheet lists what the Concierge is working on, and each task opens its chat, where approvals and questions are answered. Sign-in goes through Rome Cloud, and the app opens an instance on its own: the one this device used last, else the only running one, else the first running one.
+A native SwiftUI app for Rome. Chat (the Concierge) is the home screen. The mascot in a chat's header opens the Agent page, whose Tasks tab lists what runs for that chat and whose Outputs tab lists the files its agent wrote or showed; a task's question or approval is answered at its card in the chat. Sign-in goes through Rome Cloud, and the app opens an instance on its own: the one this device used last, else the only running one, else the first running one.
 
 ## Build and run
 
@@ -10,16 +10,18 @@ Open `Rome.xcodeproj` in Xcode and run the `Rome` scheme on an iPhone simulator,
 xcodebuild -project Rome.xcodeproj -scheme Rome -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
 
+Chat cards are drawn with Google's A2UI Swift package, which runs a build plugin and uses Swift macros. Xcode asks once to trust them. On the command line, add `-skipPackagePluginValidation -skipMacroValidation` to any `xcodebuild` command, or it fails before compiling.
+
 If Xcode reports that CoreSimulator is out of date, finish Xcode's first launch once: `sudo xcodebuild -runFirstLaunch`, then `xcodebuild -downloadPlatform iOS` if no iOS runtime is installed.
 
 Device builds need a team: copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig`, which sets `DEVELOPMENT_TEAM` to Rome's own team, Amantru, Inc (`4YWXB26F39`). Debug and Release both sign with it, because pushes are sent with that team's APNs key and reach only apps it signed. Debug builds use the bundle id `cc.romeos.mobile.dev` and the name "Rome Dev"; Release builds are the TestFlight app (see "Release to TestFlight").
 
 ### On a physical iPhone
 
-Signing is automatic, so Xcode must have an Apple ID for that team under Xcode → Settings → Accounts. A development certificate in the keychain is not enough: without the account the build fails with "No Accounts". `xcrun devicectl list devices` gives the phone's identifier; the phone needs Developer Mode on.
+Signing is automatic and authenticates with the team's App Store Connect API key, so it works without an Apple ID in Xcode. Command-line builds often cannot see Xcode's signed-in account, even right after signing in, and then fail with "No Accounts". Keep the key's arguments in a shell array (see "Signing with the API key"). `xcrun devicectl list devices` gives the phone's identifier; the phone needs Developer Mode on.
 
 ```bash
-xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Debug -destination 'id=<device-id>' -derivedDataPath /tmp/rome-device -allowProvisioningUpdates build
+xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Debug -destination 'id=<device-id>' -derivedDataPath /tmp/rome-device -allowProvisioningUpdates -allowProvisioningDeviceRegistration "${ASC_KEY[@]}" build
 ```
 
 ```bash
@@ -34,39 +36,57 @@ Installing works on a locked phone, but launching does not: it fails with "Locke
 
 A phone keeps an installed app's team. A build signed by another team is refused with "MismatchedApplicationIdentifierEntitlement", so delete the app from the phone first; that also deletes its sign-in. The first launch right after installing from a new team can fail with "Application failed preflight checks"; launch again.
 
+### On an iPad
+
+The app runs on iPhone and iPad. A phone stays in portrait; an iPad turns to every orientation and works in Split View, Slide Over and Stage Manager windows. Layout goes by width, never by device: on a regular width the drawer is pinned beside the page, and the header's drawer button slides it away and back; on a compact width, such as a narrow iPad window, the drawer slides out as on a phone. Both are one view tree in `MainShell` that only changes frames and offsets, so a window resized across the two keeps the open page and its state. Conversations keep one centered column of `Metrics.readableWidth` (720 pt) at most. Check a screen change on an iPad simulator too, for example `name=iPad Pro 13-inch (M5)`.
+
 ## Release to TestFlight
 
 Release builds are the TestFlight app: bundle id `cc.romeos.mobile`, name "Rome", HTTPS to `https://romeos.cc` only, and no demo data, snapshot runner, debug environment variables or Mac Catalyst. Debug builds are `cc.romeos.mobile.dev`, named "Rome Dev", so both can sit on one phone. `MARKETING_VERSION` is in `Config/Base.xcconfig`.
 
 TestFlight ships under Rome's own Apple Developer team, not a personal one. The archive command passes that team on the command line, so it signs with it whatever `Config/Local.xcconfig` says. The build number is the archive time in UTC, `YYYYMMDDHHMM`. It always increases whatever branch you archive from, so no upload needs a manual edit.
 
-1. Archive (local only, safe to run):
+1. Raise the minimum instance versions from `Config/pending-minimum.json`, from the repository root:
 
    ```bash
-   xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/rome-archive/Rome.xcarchive -allowProvisioningUpdates DEVELOPMENT_TEAM=<ROME_TEAM_ID> CURRENT_PROJECT_VERSION=$(date -u +%Y%m%d%H%M) archive
+   node ios/Tools/bump-minimum.mjs
    ```
 
-2. Upload to App Store Connect. **This publishes a build: run it only with the lead's go.** `Config/ExportOptions.plist` uses the `app-store-connect` method with the `upload` destination, so exporting is the upload:
+   It fetches the tags and takes the newest published server release: a `v1.*` tag whose GitHub release exists and is neither a draft nor a prerelease, asked through `gh`. A tag is pushed before its image builds, so a tag alone is not a release. When `gh` cannot say, it stops and raises nothing. It then checks that the release contains the server change of every entry. If one is missing it stops with "Release the server first" and changes nothing: release the server, then run it again. Otherwise it sets `minimumInstanceVersion` to that release, and `blockingMinimumInstanceVersion` too when an entry is `blocking`. It never lowers either, and it empties the pending file. It commits nothing: review the two files and commit them with the build. With no entries it says so and changes nothing.
+
+   The archive in step 2 checks this: while the pending file has entries, the Rome target's "Check pending minimums" build phase fails it with "Run node ios/Tools/bump-minimum.mjs first" and lists them. The phase runs `bump-minimum.mjs --check` only when archiving the Release configuration, so builds, tests and CI's Release build are not affected. It needs `node`: Xcode's own PATH has none, so the phase also looks in the usual install folders (fnm's default, Homebrew, Nix).
+
+2. Archive (local only, safe to run):
 
    ```bash
-   xcodebuild -exportArchive -archivePath /tmp/rome-archive/Rome.xcarchive -exportOptionsPlist Config/ExportOptions.plist -exportPath /tmp/rome-archive/export -allowProvisioningUpdates
+   xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/rome-archive/Rome.xcarchive -allowProvisioningUpdates "${ASC_KEY[@]}" DEVELOPMENT_TEAM=<ROME_TEAM_ID> CURRENT_PROJECT_VERSION=$(date -u +%Y%m%d%H%M) archive
    ```
 
-   Xcode needs an Apple ID in Rome's team signed in under Xcode → Settings → Accounts, with the App Manager role or higher. The App Store Connect app record for `cc.romeos.mobile` must exist first.
-
-   That sign-in can lapse without warning. The export then fails with "No Accounts". To export without it, use a team App Store Connect API key instead. Add these to both the archive and the export command:
+3. Upload to App Store Connect. **This publishes a build: run it only with the lead's go.** `Config/ExportOptions.plist` uses the `app-store-connect` method with the `upload` destination, so exporting is the upload:
 
    ```bash
-   -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8 -authenticationKeyID <KEY_ID> -authenticationKeyIssuerID <ISSUER_ID>
+   xcodebuild -exportArchive -archivePath /tmp/rome-archive/Rome.xcarchive -exportOptionsPlist Config/ExportOptions.plist -exportPath /tmp/rome-archive/export -allowProvisioningUpdates "${ASC_KEY[@]}"
    ```
 
-   The key needs the Admin role, because the export creates or uses the cloud-managed distribution certificate. Its `.p8` stays outside every repository, at that path with mode 600. App Store Connect offers the file for download only once.
+   The App Store Connect app record for `cc.romeos.mobile` must exist first.
 
    No certificate needs to be on the Mac beforehand. The first archive creates an Apple Development certificate for the team in the keychain, and the export signs with the team's Apple Distribution certificate, which Xcode keeps in the cloud. The upload ends with "Uploaded package is processing"; App Store Connect then processes the build before TestFlight lists it.
 
    The archive is signed with the development profile, so its app reads `aps-environment` = `development` even in Release. The export re-signs it with `production`. To check that before uploading, export once with `destination` set to `export` in a copy of `ExportOptions.plist`, then read the entitlements of the app in the `.ipa`.
 
-3. Delete `/tmp/rome-archive` when the build shows up in App Store Connect.
+4. Delete `/tmp/rome-archive` when the build shows up in App Store Connect.
+
+### Signing with the API key
+
+Every signed build passes a team App Store Connect API key. Keep its arguments in a shell array, so zsh hands each one to `xcodebuild` as a separate argument:
+
+```bash
+ASC_KEY=(-authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8" -authenticationKeyID <KEY_ID> -authenticationKeyIssuerID <ISSUER_ID>)
+```
+
+A path with `~` inside quotes is not expanded, and the arguments joined into one string reach `xcodebuild` as one; both fail with "Authentication failed". The key needs the Admin role, because the export creates or uses the cloud-managed distribution certificate. Its `.p8` stays outside every repository, at that path with mode 600. App Store Connect offers the file for download only once. A build with `ASC_KEY` unset in the shell signs with Xcode's account instead, so a personal Apple ID still works wherever `xcodebuild` can see it, and the Admin key is needed only on the Mac that ships builds.
+
+The key registers bundle ids, devices (with `-allowProvisioningDeviceRegistration`, as in the phone build) and profiles, but cannot create an App Group. A new group is made once on the Apple Developer site (Identifiers → App Groups) and ticked under App Groups on each App ID that uses it. `group.cc.romeos.mobile` and `group.cc.romeos.mobile.dev` already exist, on the app's and the widget's App IDs.
 
 To check a Release build without signing: `xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -derivedDataPath /tmp/rome-release CODE_SIGNING_ALLOWED=NO build`.
 
@@ -86,6 +106,12 @@ xcrun simctl push booted cc.romeos.mobile.dev push.json
 
 While the app is open the push shows no banner; the chat updates from live events. A tap opens the instance named in `rome.instanceId`, then its Concierge.
 
+## Apps widget
+
+`RomeWidget` is a small home-screen widget: a 2×2 grid of the open instance's apps. The app writes the apps list and small icons to the App Group (`group.<bundle id>`, `ROME_APP_GROUP` in `Config/Base.xcconfig`) whenever it loads the list, and records each app it opens. The widget only reads that copy. It never calls the network or holds the session. A tap opens `rome://app/<instanceId>/<appId>` (`rome-dev://` for Debug), and the app switches instance first when it has to, as a tapped push does.
+
+Device and TestFlight builds sign the widget as `<bundle id>.widget` with the App Group on both IDs, so both must exist on Rome's team. The Simulator needs neither. To try it there, run with `ROME_DEMO=1`, go home, long-press, then choose Edit → Add Widget → Rome Dev.
+
 ## Debug modes
 
 Debug builds read these environment variables (set them in the scheme's Run options):
@@ -95,9 +121,20 @@ Debug builds read these environment variables (set them in the scheme's Run opti
 | `ROME_DEMO=1` | Opens built-in demo data: every task state, an approval, a question, a failed task. Also available by long-pressing "Rome" on the sign-in screen. |
 | `ROME_DEMO=update` | Opens the demo data on a Rome below the app's minimum version, so the update page covers the app; "Update now" finishes after a few seconds. |
 | `ROME_DEMO=update-offered` | Opens the demo data on a Rome behind its latest release but new enough for the app: the banner and the drawer's line offer the update. |
-| `ROME_DEMO=visitor` | Opens the demo data as a dashboard visitor of a shared Rome. |
-| `ROME_DEMO=many-apps` | Opens the demo data with a screenful of apps, for the Apps grid. |
+| `ROME_DEMO=visitor` | Opens the demo data as a dashboard admin of a shared Rome. |
+| `ROME_DEMO=many-apps` | Opens the demo data with a screenful of apps, for the Apps grid and the widget. |
+| `ROME_PERF=<scenario>` | With `ROME_DEMO=long-chat`: runs one scenario for about 20 s and logs frame hitches and how often rows, screens and parses ran (`PerfProbe`). Scenarios: `idle`, `idle-apps`, `stream`, `stream-apps`, `taskstream`, `sections`, `settings`, `scroll`, `chats`, `paging`, twelve flings up through older pages, and `pagingdown`, ten flings back down after paging past 520 messages (add `ROME_DEMO_PAIRS=300`, a deeper chat with pictures and cards). Both report `holdDriftPt`, how far a row mid-screen moved while each fling rested, and the time each older page took to go in. The result is in the log (category `Perf`) and in `tmp/perf-<scenario>.txt` in the app's container. |
 | `ROME_LOCAL_ORIGIN`, `ROME_LOCAL_USER`, `ROME_LOCAL_PASSWORD` | Signs in to a Rome on this Mac with a local test guardian instead of Rome Cloud. |
+
+**A chat with every card state.** To look at the app's cards and lines against a dev stack, fill a chat with copies of the main Chat's cards (tasks, questions and approvals in every state the stack holds, forwarded results, a connect card, model switches and stored model errors). Test data only, on a dev stack, never a real instance. Make a chat (`POST /api/concierge/chats` with a name such as `zz-all-card-states`), then run the script inside the dev container, never from the host:
+
+```bash
+docker exec -i rome-rome-1 python3 - <chat id> < ios/Tools/card-states-chat.py
+```
+
+Lines that come from a turn's trace (a renewal, a failed turn) are not copied: for those, read the demo data (`ROME_DEMO=1`) or the main Chat.
+
+The stacking game ("Build Rome") opens from the update page while a Rome upgrades, or with ten quick taps on the big mascot of the Agent page (a tap on a chat header's mascot opens it). To reach the update entry without a real upgrade, launch with `ROME_DEMO=update` and tap "Update now": the demo upgrade runs for about 8 seconds, and "Play a game" shows under its status line. The best score stays on the device, across sign-out.
 
 To run a local Rome for this, start core with its own profile so it does not touch `~/.rome/default`:
 
@@ -118,11 +155,28 @@ xcodebuild -project Rome.xcodeproj -scheme Rome -destination 'platform=iOS Simul
 
 Debug allows plain HTTP to names under `localhost`. The app opens an `http://` instance only while Rome Cloud itself is on `http://`, which is only ever a Cloud on this Mac: Release always signs in with `https://romeos.cc`.
 
+## Apple Health and device connections
+
+Each capability of the phone is a device connection under Settings → Connections → This iPhone: Apple Health and Device. A connection is declared once in `Rome/Node/Capabilities` (its id, prefix, operations, `personal`, the source it syncs into) and listed by `NodeCapabilityRegistry`, which answers `system.info` and builds the report `DeviceConnections` sends to the open Rome (`PUT /api/device-connections`). Connecting Health asks iOS, then turns on its Live access and Sync for the open Rome. Apple Health reaches Rome two ways:
+
+- **Sync** (`Rome/PersonalData`): the app backfills the Health history once, up to 6 months, or as much as the guardian allows in the Health sheet (iOS 27 offers "Past 30 days"), then pushes what changed to the personal-data store of the Rome open now, if that Rome's own switch is on (each Rome has its own switch, anchors, history and Delete; another Rome waits until it is open again) (`POST /api/personal-data/ingest`, see [`docs/personal-data.md`](../docs/personal-data.md)): on HealthKit background delivery, on return to the front (at most every 15 minutes) and on Sync now. Anchors per type move only once the Rome has the batch. It reads nothing while the phone is locked or sync is off, and an expired session stops it until the guardian signs in again. Background delivery needs the `com.apple.developer.healthkit.background-delivery` entitlement, which the App ID must have too. Sync now sits on the Sync status line of Health's connection page; Sync history, with Delete uploaded data, is under it. Turning sync off pauses the Rome's source and keeps what the Rome has; turning it on again goes on from the anchors.
+- **Live** (`Rome/Node`): while any connection's **Live access** is on (one switch per capability per phone, off until connected), the app connects the phone as a rome-node device while it is in front, and an agent can run `health.stats` and `health.samples`. A live Health answer starts a catch-up sync; live results are never stored. The wire protocol, arguments and audit log are in [`docs/rome-node.md`](../docs/rome-node.md#iphone).
+
+HealthKit needs the `com.apple.developer.healthkit` entitlement in `Config/Rome.entitlements` and `NSHealthShareUsageDescription` in both Info plists. Both builds read only. `NSHealthUpdateUsageDescription` is in `Config/Info-Debug.plist` alone, for the Debug seeding below. A build on a physical iPhone or TestFlight also needs the HealthKit capability on the App ID `cc.romeos.mobile` (and `.dev`) in the Apple Developer portal, and the App Store privacy answers need Health and Fitness data (the privacy manifest lists both).
+
+The Simulator's Health is empty. Launch a Debug build with the argument `-RomeSeedHealth` and it writes a week of steps, heart rate, sleep (with overlapping records) and three runs, once per install:
+
+```bash
+xcrun simctl launch booted cc.romeos.mobile.dev -RomeSeedHealth
+```
+
+It asks for Health access in one system sheet (tap "Turn On All", then "Allow"). To try the actions, sign in on the Simulator, then from a Rome with rome-node run `rome-node device describe <iphone>` and `rome-node device run <iphone> health.stats --args '{"type":"stepCount","interval":"day","start":"2026-11-03","end":"2026-11-09"}'`. The phone must be unlocked and the app in front.
+
 ## Instance versions
 
-The app works with any instance at or above `UpdateGate.minimumInstanceVersion` (in `Rome/Features/Update/InstanceUpdater.swift`), the oldest release with every API the app calls. An instance below it gets the update page over the whole app, with no way past it but updating. An instance at or above it that is behind its latest release only gets an offer: a banner when the guardian opens it, which stays closed for that release once closed, and a line in the drawer until it is current. Visitors see neither.
+The app has two minimum instance versions, both in `UpdateGate` (`Rome/Features/Update/InstanceUpdater.swift`). `blockingMinimumInstanceVersion` is the oldest release whose API Chat itself works with. An instance below it gets the update page over the whole app, with no way past it but updating, and the page says the app cannot be used meanwhile. `minimumInstanceVersion` is the oldest release with every API the app calls. An instance below it, but at or above the blocking one, gets the update page once, with one button, Update in background: the page closes and the upgrade runs as one started from the drawer, below. The page does not come back for that release on that instance, a failure or a relaunch included. An instance at or above both that is behind its latest release only gets an offer, a row in the drawer. A tap asks to confirm, then the upgrade runs in the background: the row shows its progress, and a failure with Retry. Once the instance answers on the new release, the app refreshes in place and says "{Agent} updated to X" once above the composer. Rome Cloud reporting the instance as no longer upgrading while it still answers on its old release ends the wait as failed, before the 40-minute timeout. Visitors get the same update flow as the guardian, the update itself included.
 
-Raise the minimum only when the app starts calling an API a newer release brought, to the first release tag (`v1.*`) that has it. Anything else the app reads from an older supported instance is optional and degrades quietly.
+Nobody edits the two constants by hand. A PR that starts calling an API the latest server release lacks adds an entry to `Config/pending-minimum.json`, and `Tools/bump-minimum.mjs` applies the entries before a TestFlight build (see "Release to TestFlight"). An entry is `blocking` only when Chat itself (sending, reading, streaming) needs the API; most new APIs belong to one feature, so most entries are `background`, and the rest of the app keeps working while the instance updates. Anything else the app reads from an older supported instance is optional and degrades quietly.
 
 ## Tests
 
@@ -131,6 +185,8 @@ Unit tests use Swift Testing. They run on a simulator, or on Mac Catalyst when n
 ```bash
 xcodebuild test -project Rome.xcodeproj -scheme Rome -destination 'platform=macOS,variant=Mac Catalyst' CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual
 ```
+
+A local run of some tests (`-only-testing:`) on a simulator passes `-parallel-testing-enabled NO`. A parallel run clones the simulator into `~/Library/Developer/XCTestDevices`, and an interrupted run leaves its clones there; they once reached 57 copies. When nothing is testing, clear the leftovers with `xcrun simctl --set ~/Library/Developer/XCTestDevices delete all`.
 
 The scheme runs tests in English (US region), whatever the Mac's language. `LocalizationTests` checks that every key in `Rome/Localizable.xcstrings` has Simplified Chinese text.
 
@@ -151,4 +207,4 @@ The app follows the system language: English, or Simplified Chinese on a Chinese
 ROME_SNAPSHOT_DIR=/tmp/rome-shots-zh /tmp/rome-cat/Build/Products/Debug-maccatalyst/Rome.app/Contents/MacOS/Rome -AppleLanguages "(zh-Hans)"
 ```
 
-`ROME_SNAPSHOT_ONLY=04-chat,06-tasks` limits the run to some screens. With the local Rome variables and `ROME_SNAPSHOT_LIVE=1`, it instead sends a real request and captures the Concierge starting and finishing a task.
+`ROME_SNAPSHOT_ONLY=04-chat,06-tasks` limits the run to some screens. When every PNG of a style comes out the same image, the window stopped redrawing while hidden behind other windows (App Nap): run it again with `-NSAppSleepDisabled YES` after the binary's path, which turns App Nap off for that launch only. With the local Rome variables and `ROME_SNAPSHOT_LIVE=1`, it instead sends a real request and captures the Concierge starting and finishing a task.

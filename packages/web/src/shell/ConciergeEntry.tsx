@@ -1,12 +1,13 @@
 import type { ConciergeChatDto } from "@rome/api-types/concierge";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, Ellipsis, Pencil, Plus, Trash2 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { Archive, ArchiveRestore, Ellipsis, Hash, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { z } from "zod";
-import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import { useTopicChatArchive } from "@/components/concierge/TopicChatArchiveDialog";
+import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,44 +15,116 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
-import { archiveSession, deleteSession, renameSession } from "@/lib/chat-api";
+import { archiveSession, deleteSession, pinSession, renameSession } from "@/lib/chat-api";
+import { findScrollableYAncestor } from "@/lib/scroll-container";
+import { useRenameInPlace } from "@/hooks/use-rename-in-place";
 import { Badge } from "@/components/ui/badge";
 import { RomeLogo } from "@/components/logo";
 import {
-  CONCIERGE_CHATS_QUERY_KEY,
   CONCIERGE_SESSION_QUERY_KEY,
   CONCIERGE_UNREAD_CAP,
   useConciergeChats,
-  useConciergeName,
   useConciergeUnread,
+  useRefreshTopicChats,
 } from "@/hooks/use-concierge";
 import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
-import { MAIN_CHAT_PATH } from "@/lib/chat-session";
+import { MAIN_CHAT_PATH, sessionActivityTime } from "@/lib/chat-session";
+import type { ChatSession } from "@/lib/chat-types";
 import { emitSessionsChanged, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
+import { useListEnd } from "@/hooks/use-list-end";
 
 const anyEvent = z.unknown();
 
+/** How many topic chats show at first, and how many more each scroll to the end adds. */
+export const TOPIC_CHATS_PAGE = 30;
+
+/** A topic chat as the sidebar lists it. */
+export interface TopicChatRow extends ConciergeChatDto {
+  archived: boolean;
+  /** When its owner pinned it; null when it is not pinned. An archived chat is never shown pinned. */
+  pinnedAt: string | null;
+}
+
 /**
- * The sidebar's Concierge entry, with a badge counting the agent messages the
- * guardian has not read, and the plus that opens a blank topic chat. A new
- * message recounts, and so does a read in this tab; another tab or device
- * catches up on its next focus refetch. The open chat reads what arrives, so
- * the entry shows no badge while it is active. The plus takes the badge's
- * place while the row is hovered or focused, so the two never overlap. On a
- * touch screen, which has no hover, it shows while there is nothing unread.
+ * The topic chats the Concierge section lists under a status filter: the
+ * pinned ones first, the latest pinned on top, then the rest, latest first.
+ * Active ones come from the Concierge's own list, which carries their unread
+ * counts; their pins and times come from the chat list. Archived ones are
+ * only in the chat list and are never shown pinned. A topic chat the chat
+ * list has not caught up with yet counts as the newest.
  */
-export function ConciergeEntry({
-  chatId,
-  active,
-  onNewTopic,
-}: {
-  chatId: string;
-  active: boolean;
-  onNewTopic: () => void;
-}) {
+export function topicChatRows(
+  statusFilter: "all" | "active" | "archived",
+  activeTopics: readonly ConciergeChatDto[],
+  topicSessions: readonly ChatSession[],
+): TopicChatRow[] {
+  const listed = new Map(topicSessions.map((session) => [session.id, session]));
+  const rows: Array<TopicChatRow & { at: number; pin: number }> = [];
+  if (statusFilter !== "archived") {
+    // The Concierge lists them oldest first. Walking it backwards leaves the
+    // newest first among those the chat list has no time for, as the sort
+    // below keeps ties in place.
+    for (const chat of [...activeTopics].reverse()) {
+      const session = listed.get(chat.id);
+      const pinnedAt = session?.pinnedAt ?? null;
+      rows.push({
+        ...chat,
+        archived: false,
+        pinnedAt,
+        at: session ? sessionActivityTime(session) : Number.POSITIVE_INFINITY,
+        pin: pinnedAt ? new Date(pinnedAt).getTime() : Number.NEGATIVE_INFINITY,
+      });
+    }
+  }
+  if (statusFilter !== "active") {
+    for (const session of topicSessions) {
+      if (!session.archivedAt) continue;
+      rows.push({
+        id: session.id,
+        name: session.name,
+        main: false,
+        unread: 0,
+        archived: true,
+        pinnedAt: null,
+        at: sessionActivityTime(session),
+        pin: Number.NEGATIVE_INFINITY,
+      });
+    }
+  }
+  return rows
+    .sort((a, b) => (a.pin !== b.pin ? b.pin - a.pin : b.at - a.at))
+    .map(({ at: _at, pin: _pin, ...row }) => row);
+}
+
+/**
+ * A row's unread count, on the bottom right corner of its icon, so the icon
+ * still shows. One red in every theme, ringed in the row's fill. Up to 99+;
+ * the pill widens to the left, so it never reaches the name.
+ */
+function UnreadCorner({ count, label }: { count: number; label: string }) {
   const { t } = useTranslation("common");
-  const name = useConciergeName();
+  return (
+    <Badge
+      shape="pill"
+      className="absolute -right-1.5 -bottom-1 h-2.75 min-w-2.75 justify-center border-0 bg-unread px-[var(--row-count-px)] font-semibold tabular-nums ring-2 ring-background group-hover:ring-surface-hover dark:group-hover:ring-surface"
+      data-concierge-unread
+      role="img"
+      aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
+    >
+      {label}
+    </Badge>
+  );
+}
+
+/**
+ * The sidebar's main chat entry, with a badge counting the agent messages the
+ * guardian has not read. A new message recounts, and a read in this tab clears
+ * it; another tab or device catches up on its next message or reconnect. The open
+ * chat reads what arrives, so the entry shows no badge while it is active.
+ */
+export function ConciergeEntry({ chatId, active }: { chatId: string; active: boolean }) {
+  const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const unread = useConciergeUnread(chatId);
   const recount = useCallback(() => {
@@ -66,76 +139,83 @@ export function ConciergeEntry({
   const count = active ? 0 : unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
   return (
-    <div className="group/concierge relative flex items-center">
+    <div className="mb-[var(--row-gap)] flex items-center">
       <Link
         to={MAIN_CHAT_PATH}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+        aria-current={active ? "page" : undefined}
         aria-label={
-          count > 0 ? t("recentChats.conciergeUnread", { name, count, label }) : undefined
+          count > 0
+            ? t("recentChats.conciergeUnread", { name: t("recentChats.mainChat"), count, label })
+            : undefined
         }
       >
-        <span
-          className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
-          aria-hidden
-        >
+        <span className="rome-sidebar-icon relative flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
           <RomeLogo className="size-4 shrink-0" aria-hidden />
+          {count > 0 ? <UnreadCorner count={count} label={label} /> : null}
         </span>
-        <span className="flex-1 truncate">{name}</span>
-        {count > 0 ? (
-          <Badge
-            variant="destructive"
-            className="shrink-0 tabular-nums group-focus-within/concierge:invisible group-hover/concierge:invisible"
-            data-concierge-unread
-            role="img"
-            aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-          >
-            {label}
-          </Badge>
-        ) : null}
+        <span className="flex-1 truncate">{t("recentChats.mainChat")}</span>
       </Link>
-      <IconButton
-        size="sm"
-        label={t("recentChats.newTopicChat")}
-        icon={<Plus aria-hidden />}
-        className={`absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-focus-within/concierge:opacity-100 group-hover/concierge:opacity-100 ${
-          count > 0 ? "" : "touch-show"
-        }`}
-        onClick={onNewTopic}
-        data-concierge-new-topic
-      />
     </div>
   );
 }
 
 /**
- * The sidebar's Concierge entries: the main chat's entry, then one row per
- * topic chat, each with its unread badge and a menu to rename, archive or
- * delete it. The plus beside the main entry opens a blank topic chat, which
- * its first message creates and names.
+ * The sidebar's Concierge section: the main chat's entry, then the topic
+ * chats, latest first, {@link TOPIC_CHATS_PAGE} at a time: scrolling near the
+ * end of the list shows the next page. Each topic chat has its unread badge
+ * and a menu to rename, pin or unpin, archive or unarchive, and delete it. The status filter applies here too:
+ * the main chat is never archived, so the archived filter hides it.
  */
 export function ConciergeChats({
   mainChatId,
   activeSessionId,
+  statusFilter,
+  topicSessions,
 }: {
   mainChatId: string;
   activeSessionId: string | null | undefined;
+  statusFilter: "all" | "active" | "archived";
+  /** The chat list's Concierge chats other than the main chat, under the same filter. */
+  topicSessions: readonly ChatSession[];
 }) {
-  const queryClient = useQueryClient();
+  const { t } = useTranslation("common");
   const navigate = useNavigate();
-  const topics = useConciergeChats().filter((chat) => !chat.main);
-  const refresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
-  }, [queryClient]);
+  const conciergeChats = useConciergeChats();
+  const topics = useMemo(
+    () =>
+      topicChatRows(
+        statusFilter,
+        conciergeChats.filter((chat) => !chat.main),
+        topicSessions,
+      ),
+    [conciergeChats, statusFilter, topicSessions],
+  );
+  const [limit, setLimit] = useState(TOPIC_CHATS_PAGE);
+  // A topic chat's rows read two lists, so every change refetches both. A
+  // reply in any topic chat, shown or not yet scrolled to, refetches them from
+  // the chat list's status stream, so no row subscribes on its own.
+  const refresh = useRefreshTopicChats();
   useSessionsChanged(refresh);
+  // The open topic chat stays in view, even when it is past the pages shown.
+  const activeIndex = topics.findIndex((chat) => chat.id === activeSessionId);
+  const shown = Math.max(limit, activeIndex + 1);
+  const visible = topics.slice(0, shown);
+  const hasMore = topics.length > shown;
+  // Near the end of the list, the next page: the list's scroller is the root,
+  // so the page lands a little before the guardian reaches the last row.
+  const end = useListEnd({
+    enabled: hasMore,
+    page: shown,
+    onReached: () => setLimit(shown + TOPIC_CHATS_PAGE),
+    rootMargin: "0px 0px 160px 0px",
+  });
   return (
-    <>
-      <ConciergeEntry
-        chatId={mainChatId}
-        active={activeSessionId === mainChatId}
-        // A blank topic chat, as New chat opens a blank chat: its first send creates it.
-        onNewTopic={() => navigate("/chat", { state: { conciergeTopic: true } })}
-      />
-      {topics.map((chat) => (
+    <section aria-label={t("recentChats.conciergeSection")} data-concierge-section>
+      {statusFilter === "archived" ? null : (
+        <ConciergeEntry chatId={mainChatId} active={activeSessionId === mainChatId} />
+      )}
+      {visible.map((chat) => (
         <ConciergeTopicEntry
           key={chat.id}
           chat={chat}
@@ -146,7 +226,8 @@ export function ConciergeChats({
           }}
         />
       ))}
-    </>
+      {hasMore ? <div ref={end.ref} aria-hidden className="h-px" data-topic-chats-end /> : null}
+    </section>
   );
 }
 
@@ -156,86 +237,94 @@ function ConciergeTopicEntry({
   onChanged,
   onGone,
 }: {
-  chat: ConciergeChatDto;
+  chat: TopicChatRow;
   active: boolean;
   onChanged: () => void;
   onGone: () => void;
 }) {
   const { t } = useTranslation("common");
-  const conciergeName = useConciergeName();
   // An untitled chat shows as a new chat until its first message names it.
   const name = chat.name || t("recentChats.newChat");
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(chat.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  useLiveEvents(
-    chatSessionTopic(chat.id),
-    { message_insert: { schema: anyEvent, fn: onChanged } },
-    { onReconnect: onChanged },
-  );
   const count = active ? 0 : chat.unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
-  const rename = async () => {
-    setEditing(false);
-    const trimmed = value.trim();
-    if (!trimmed || trimmed === chat.name) return;
-    await renameSession(chat.id, trimmed).catch(() => undefined);
-    onChanged();
-  };
-  const retire = async (how: "archive" | "delete") => {
+  const pinned = chat.pinnedAt !== null;
+  const togglePin = async () => {
     try {
-      if (how === "archive") await archiveSession(chat.id, true);
-      else await deleteSession(chat.id);
+      await pinSession(chat.id, !pinned);
+    } catch {
+      toast.error(t("recentChats.pinFailed"));
+    }
+    onChanged();
+    emitSessionsChanged();
+  };
+  const rename = useRenameInPlace({
+    onCommit: async (id, name) => {
+      await renameSession(id, name).catch(() => undefined);
+      onChanged();
+      emitSessionsChanged();
+    },
+  });
+  // `choice` stops the follows and open tasks of a delete or an archive, and
+  // moves an unarchived chat's follows back.
+  const retire = async (how: "archive" | "unarchive" | "delete", choice = false) => {
+    try {
+      if (how === "delete") await deleteSession(chat.id, choice ? { followsAndTasks: "stop" } : {});
+      else if (how === "archive")
+        await archiveSession(chat.id, true, choice ? { followsAndTasks: "stop" } : {});
+      else await archiveSession(chat.id, false, choice ? { follows: "moveBack" } : {});
     } catch {
       toast.error(t("recentChats.topicChatRetireFailed"));
     }
     onChanged();
     emitSessionsChanged();
-    onGone();
+    // An unarchived chat stays open where it is.
+    if (how !== "unarchive") onGone();
   };
-  if (editing) {
+  const archiving = useTopicChatArchive({
+    chatId: chat.id,
+    name,
+    topic: true,
+    onArchive: (stopWork) => void retire("archive", stopWork),
+    onUnarchive: (moveBack) => void retire("unarchive", moveBack),
+  });
+  if (rename.editingId === chat.id) {
     return (
       <input
-        autoFocus
-        value={value}
+        {...rename.inputProps}
         aria-label={t("recentChats.renameLabel")}
-        onChange={(event) => setValue(event.target.value)}
-        onBlur={() => void rename()}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            void rename();
-          } else if (event.key === "Escape") {
-            event.preventDefault();
-            setValue(chat.name);
-            setEditing(false);
-          }
-        }}
-        className="my-1 ml-6 h-[var(--control-h-sm)] min-w-0 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none"
+        className="my-1 ml-3 h-[var(--control-h-sm)] min-w-0 rounded-4 border border-foreground/20 bg-background px-1 py-1 text-ui text-foreground outline-none"
       />
     );
   }
   return (
-    <div className="group/topic relative flex items-center" data-concierge-topic={chat.id}>
+    <div
+      className="group/topic relative mb-[var(--row-gap)] flex items-center"
+      data-concierge-topic={chat.id}
+    >
       <Link
         to={`/chat/${chat.id}`}
-        className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS} pl-8`}
+        className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
+        aria-current={active ? "page" : undefined}
         aria-label={
           count > 0 ? t("recentChats.topicChatUnread", { name, count, label }) : undefined
         }
       >
-        <span className="flex-1 truncate">{name}</span>
-        {count > 0 ? (
-          <Badge
-            variant="destructive"
-            className="shrink-0 tabular-nums group-hover/topic:invisible"
-            data-concierge-unread
-            role="img"
-            aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-          >
-            {label}
-          </Badge>
-        ) : null}
+        <span className="rome-sidebar-icon relative flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
+          {pinned ? (
+            <Pin aria-hidden className="size-4 shrink-0" data-topic-pinned />
+          ) : (
+            <Hash aria-hidden className="size-4 shrink-0" />
+          )}
+          {count > 0 ? <UnreadCorner count={count} label={label} /> : null}
+        </span>
+        {/* The menu button floats over the row's end, so the name keeps clear
+            of it. */}
+        <span
+          className={`flex-1 truncate pr-[var(--control-h-sm)] ${chat.archived ? "text-subtle-foreground" : ""}`}
+        >
+          {name}
+        </span>
       </Link>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -243,41 +332,58 @@ function ConciergeTopicEntry({
             size="sm"
             label={t("recentChats.topicChatActions", { name })}
             icon={<Ellipsis aria-hidden />}
-            className="absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/topic:opacity-100"
+            className="touch-show absolute right-1 text-subtle-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover/topic:opacity-100"
           />
         </DropdownMenuTrigger>
-        <DropdownMenuContent side="bottom" align="end" className="min-w-[180px]">
-          <DropdownMenuItem
-            onSelect={() => {
-              setValue(chat.name);
-              setTimeout(() => setEditing(true), 0);
-            }}
-          >
+        <DropdownMenuContent
+          side="bottom"
+          align="end"
+          className="min-w-[180px]"
+          {...rename.menuContentProps}
+        >
+          <DropdownMenuItem onSelect={() => rename.start(chat.id, chat.name)}>
             <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
             {t("recentChats.rename")}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void retire("archive")}>
-            <Archive className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            {t("recentChats.archive")}
-          </DropdownMenuItem>
+          {chat.archived ? null : (
+            <DropdownMenuItem onSelect={() => void togglePin()}>
+              {pinned ? (
+                <PinOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              ) : (
+                <Pin className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              )}
+              {pinned ? t("recentChats.unpin") : t("recentChats.pin")}
+            </DropdownMenuItem>
+          )}
+          {chat.archived ? (
+            <DropdownMenuItem onSelect={() => void archiving.unarchive()}>
+              <ArchiveRestore className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              {t("recentChats.unarchive")}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onSelect={() => void archiving.archive()}>
+              <Archive className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              {t("recentChats.archive")}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem variant="destructive" onSelect={() => setConfirmDelete(true)}>
             <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
             {t("recentChats.delete")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <RomeConfirmDialog
+      <TopicChatDeleteDialog
         open={confirmDelete}
-        destructive
-        title={t("recentChats.delete")}
-        description={t("recentChats.topicChatDeleteConfirm", { name: conciergeName })}
-        confirmLabel={t("recentChats.delete")}
+        chatId={chat.id}
+        name={name}
+        archived={chat.archived}
         onCancel={() => setConfirmDelete(false)}
-        onConfirm={() => {
+        onConfirm={(stopWork) => {
           setConfirmDelete(false);
-          void retire("delete");
+          void retire("delete", stopWork);
         }}
       />
+      {archiving.dialog}
     </div>
   );
 }

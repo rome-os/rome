@@ -29,7 +29,7 @@ When the filer arrives with a solution in mind, the underlying gap goes in Situa
 
 A feature request closes with a decision, stated in a closing comment. The comment names the task specs it spun out by number, the PR that resolved it, or the reason the pain stays unaddressed. A decision that keeps constraining diffs after the work ships [earns an ADR](adrs.md).
 
-A PR closes a feature request directly when the change is small enough that a task spec would restate the PR description. The PR's [What this PR does](prs.md#what-this-pr-does) section then carries the decision. A larger change flows through the task specs the request spins out.
+A PR closes a feature request directly when the change is small enough that a task spec would restate the PR description. The PR's [Why](prs.md#why) section then carries the decision. A larger change flows through the task specs the request spins out.
 
 > Prefer: a one-file change that closes the request with `Closes #<number>` in the PR.
 > Over: a task spec whose Scope and Acceptance repeat the PR description.

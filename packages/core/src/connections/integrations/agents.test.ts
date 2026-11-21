@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { channelMessageOf } from "../../chats/connected-accounts/channel-message.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import {
   type AgentMessageEnvelope,
   type AgentMessagingClient,
   AgentMessagingError,
-} from "../../lib/rome-cloud-agents.js";
+} from "./rome-cloud-agents.js";
 import { createTestDb } from "../../test/db.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
@@ -70,9 +71,15 @@ async function until(ready: () => boolean, fakeTime = false): Promise<void> {
   throw new Error("condition never held");
 }
 
+/** An agent message as apps receive it. */
+function asApp(message: AgentMessageEnvelope) {
+  const inbound = toAgentInboundMessage(message);
+  return inbound && channelMessageOf(inbound, "agents");
+}
+
 describe("agents channel", () => {
   it("turns an agent message into a direct message from its agent id", () => {
-    const inbound = toAgentInboundMessage(envelope({ data: { order: 41 }, inReplyTo: "msg_0" }))!;
+    const inbound = asApp(envelope({ data: { order: 41 }, inReplyTo: "msg_0" }))!;
     expect(inbound).toMatchObject({
       messageId: "msg_1",
       chatId: ATLAS,
@@ -95,13 +102,13 @@ describe("agents channel", () => {
         sameAccount: false,
       },
     });
-    expect(toAgentInboundMessage(external)).toMatchObject({
+    expect(asApp(external)).toMatchObject({
       chatId: ATLAS,
       senderId: ATLAS,
       senderDisplayName: "atlas (@friend's dot)",
     });
     const renamed = envelope({ from: { ...external.from, name: "nova", account: "newfriend" } });
-    expect(toAgentInboundMessage(renamed)?.senderId).toBe(ATLAS);
+    expect(asApp(renamed)?.senderId).toBe(ATLAS);
   });
 
   it("drops a message from an agent Cloud has removed, and still acknowledges it", async () => {
@@ -114,7 +121,7 @@ describe("agents channel", () => {
     const talker = createAgentsTalker(client);
     const delivered: ChannelMessage[] = [];
     talker.start(
-      (message) => delivered.push(message),
+      (message) => delivered.push(channelMessageOf(message, "agents")),
       () => {},
     );
     await until(() => client.acknowledged.length > 0);
@@ -132,7 +139,7 @@ describe("agents channel", () => {
     const delivered: ChannelMessage[] = [];
     const faults: unknown[] = [];
     talker.start(
-      (message) => delivered.push(message),
+      (message) => delivered.push(channelMessageOf(message, "agents")),
       (fault) => faults.push(fault),
     );
     await until(() => faults.length > 0);
@@ -162,7 +169,7 @@ describe("agents channel", () => {
     const talker = createAgentsTalker(client);
     const delivered: ChannelMessage[] = [];
     talker.start(
-      (message) => delivered.push(message),
+      (message) => delivered.push(channelMessageOf(message, "agents")),
       () => {},
     );
     await until(() => client.acknowledged.length > 0);
@@ -183,7 +190,7 @@ describe("agents channel", () => {
     const talker = createAgentsTalker(client);
     const delivered: ChannelMessage[] = [];
     talker.start(
-      (message) => delivered.push(message),
+      (message) => delivered.push(channelMessageOf(message, "agents")),
       () => {},
     );
     await until(() => calls === 1, true);

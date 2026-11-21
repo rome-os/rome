@@ -8,6 +8,11 @@ function Page({ title }: { title: string | readonly (string | null)[] | null }) 
   return null;
 }
 
+function Dialog({ title }: { title: string }) {
+  useDocumentTitle(title, "dialog");
+  return null;
+}
+
 function Layout({ title, children }: { title: string | null; children?: React.ReactNode }) {
   useDocumentTitle(title, "route");
   return <>{children}</>;
@@ -85,6 +90,41 @@ describe("useDocumentTitle", () => {
 
     view.rerender(<Page title="Arriving" />);
     expect(document.title).toBe("Arriving · Rome");
+  });
+
+  // Settings opens as a dialog over a page that stays mounted.
+  it("returns the covered page's title when a dialog over it closes", () => {
+    const view = render(
+      <>
+        <Page title="Trip planning" />
+        <Dialog title="Settings" />
+      </>,
+    );
+    expect(document.title).toBe("Settings · Rome");
+
+    view.rerender(
+      <>
+        <Page title="Trip planning" />
+        {null}
+      </>,
+    );
+    expect(document.title).toBe("Trip planning · Rome");
+  });
+
+  it("keeps the dialog's title while the page beneath names itself", () => {
+    const view = render(
+      <>
+        <Page title={null} />
+        <Dialog title="Settings" />
+      </>,
+    );
+    view.rerender(
+      <>
+        <Page title="Trip planning" />
+        <Dialog title="Settings" />
+      </>,
+    );
+    expect(document.title).toBe("Settings · Rome");
   });
 
   it("holds no title for a list that names nothing", () => {

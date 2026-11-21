@@ -1,15 +1,17 @@
+import { SourceLabel } from "@/components/chat/reply/SourceLabel";
+import { QuotedReply } from "@/components/chat/reply/QuotedReply";
+import type { ReplyDrawing } from "@/components/chat/reply/reply-drawing";
 import { memo, useMemo, type ReactNode } from "react";
-import type { ForwardedFrom } from "@rome/api-types/chat";
-import { UserMessage } from "./UserMessage";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CollapsibleBubbleContent } from "@/components/chat/CollapsibleBubbleContent";
 import { ConciergeBubble } from "@/components/chat/ConciergeBubble";
-import { ForwardedChip } from "@/components/chat/ForwardedChip";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
+import { ReactionBadge, useMessageStatus, useReaction } from "@/components/chat/reaction";
 import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
-import type { BlockActions } from "@/components/chat/MessageList";
+import type { BlockActions, ShareSelection } from "@/components/chat/MessageList";
+import { SelectableRow } from "@/components/chat/SelectableRow";
 import { userMessageText } from "@/components/chat/chat-view";
 import type { ReplySource } from "@/components/chat/reply/reply-source";
 import type { ConciergeEntry, ConciergeItem } from "@/components/chat/concierge-groups";
@@ -18,11 +20,20 @@ import type { ArrivalProps } from "@/components/chat/use-bubble-arrivals";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 
+// Room every guardian bubble keeps above it for its reaction, whose badge
+// stands 14px above the bubble's top-left corner (reaction.tsx).
+// With the group's 8px gap it leaves 10px clear of the message above, its
+// shadow included. It is there whether or not a mark shows, so nothing moves
+// when one comes or goes.
+const GUARDIAN_BUBBLE_GAP = "mt-4";
+
 // The same bubble reparses nothing while the transcript re-renders around it;
 // a message's identity changes on every reload, so compare what it shows.
 const GuardianBubble = memo(
   function GuardianBubble({ msg, arrival }: { msg: ChatMessage; arrival?: number }) {
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
+    const reaction = useReaction(msg);
+    const status = useMessageStatus(msg);
     // The bubble is a direct child of the group, so its width cap is a share
     // of the column, as the agent's is.
     return (
@@ -36,6 +47,7 @@ const GuardianBubble = memo(
             ? {
                 messageId: msg.id,
                 sessionId: msg.sessionId,
+                turnId: msg.turnId,
                 author: "guardian",
                 name: msg.sender?.name ?? undefined,
                 text,
@@ -44,8 +56,14 @@ const GuardianBubble = memo(
         }
         anchorId={msg.id}
         arrival={arrival}
+        className={GUARDIAN_BUBBLE_GAP}
       >
-        <UserMessageBubble msg={msg} text={text} own />
+        <UserMessageBubble
+          msg={msg}
+          text={text}
+          own
+          badge={<ReactionBadge reaction={reaction} status={status} />}
+        />
       </ConciergeBubble>
     );
   },
@@ -53,35 +71,26 @@ const GuardianBubble = memo(
     prev.msg.id === next.msg.id &&
     prev.msg.content === next.msg.content &&
     prev.msg.inputState === next.msg.inputState &&
+    prev.msg.reaction === next.msg.reaction &&
+    prev.msg.status === next.msg.status &&
     prev.arrival === next.arrival,
 );
 
-// Core stores a text part's origin as it was written, so it is read as unknown.
-function forwardedOrigin(value: unknown): ForwardedFrom | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const { chatId, title } = value as Partial<ForwardedFrom>;
-  return typeof chatId === "string" && typeof title === "string" ? { chatId, title } : undefined;
-}
-
-// The task chat a text part was forwarded from, when it carries one.
-function originOf(part: TranscriptPart): ForwardedFrom | undefined {
-  return part.type === "text" && "forwardedFrom" in part
-    ? forwardedOrigin(part.forwardedFrom)
-    : undefined;
-}
-
-// Each `say` call is its own message, so each text part is its own bubble. A
-// long message is the same bubble with markdown that reads as a document, cut
-// with a toggle when it is tall. A forwarded report is a bubble of its own with
-// a quote's gray left edge and a chip that names its task chat; the intro that
-// came with it is the bubble above. Task chat cards render as they do anywhere.
+// Each `say` call is its own message, so each text part is its own bubble,
+// cut with a toggle when it is tall. A forwarded report is a bubble of its own,
+// the intro that came with it is the bubble above. A message that replies to
+// another shows the quote in its first bubble, unless it sits under what it
+// answers. Task chat cards render as they do anywhere.
 const AgentEntry = memo(function AgentEntry({
   entry,
   actions,
   rateable,
   arrival,
+  quoted: showQuote,
 }: {
   entry: ConciergeEntry;
+  /** Whether the message shows the quote it carries: it does not sit under what it answers. */
+  quoted: boolean;
   actions: BlockActions;
   arrival: ArrivalProps;
   /** Whether the entry's turn is over and feedback is on. */
@@ -89,6 +98,7 @@ const AgentEntry = memo(function AgentEntry({
 }) {
   const { message } = entry;
   const parts = parseMessageEntries(message);
+  const quote = parts.find((part) => part.type === "reply_to");
   const lastText = parts.findLastIndex((part) => part.type === "text" && part.content.trim());
   // A quote of this message jumps to its first bubble.
   const firstBubble = parts.findIndex(
@@ -101,12 +111,18 @@ const AgentEntry = memo(function AgentEntry({
   const replyTo = (text: string): ReplySource => ({
     messageId: message.id,
     sessionId: message.sessionId,
+    turnId: message.turnId,
     author: "agent",
     text,
     ...(bubbles > 1 ? { ownBubble: true } : {}),
   });
   return parts.map((part, index) => {
     const key = `${message.id}:${index}`;
+    if (part.type === "reply_to") return null;
+    // The first bubble of a reply carries its quote on top of its content,
+    // unless the reply sits under what it answers or in a run of replies to it.
+    const first = quote?.type === "reply_to" && index === firstBubble ? quote : null;
+    const quoted = first && showQuote ? <QuotedReply part={first} /> : null;
     if (part.type === "task_chat") {
       // The card is a message of its own, so it takes the same details as a bubble.
       return (
@@ -116,8 +132,10 @@ const AgentEntry = memo(function AgentEntry({
           copyText=""
           createdAt={message.createdAt}
           feedbackTurn={null}
-          reply={replyTo(`[Task chat] ${part.title} (chat ${part.chatId})`)}
+          // A card has no text to quote: only a message with text takes a Reply.
+          reply={null}
           anchorId={index === firstBubble ? message.id : undefined}
+          partOf={message.id}
         >
           {renderFlatEntries([part], {
             ...actions,
@@ -134,6 +152,7 @@ const AgentEntry = memo(function AgentEntry({
           {renderFlatEntries([part], {
             ...actions,
             sessionId: message.sessionId,
+            messageId: message.id,
             turnId: message.turnId ?? undefined,
           })}
         </div>
@@ -141,7 +160,6 @@ const AgentEntry = memo(function AgentEntry({
     }
     if (!part.content.trim()) return null;
     const long = "format" in part && part.format === "long";
-    const forwardedFrom = originOf(part);
     return (
       <ConciergeBubble
         key={key}
@@ -155,17 +173,11 @@ const AgentEntry = memo(function AgentEntry({
         }
         reply={replyTo(part.content)}
         anchorId={index === firstBubble ? message.id : undefined}
+        partOf={message.id}
       >
-        <ChatBubble
-          tone="received"
-          data-concierge-bubble
-          className={forwardedFrom ? "border-l-3 border-l-muted-foreground" : undefined}
-          {...arrival(message.id)}
-        >
-          {forwardedFrom ? (
-            <ForwardedChip chatId={forwardedFrom.chatId} title={forwardedFrom.title} />
-          ) : null}
+        <ChatBubble tone="received" data-concierge-bubble {...arrival(message.id)}>
           <CollapsibleBubbleContent>
+            {quoted}
             <Markdown
               className="min-w-0 text-foreground"
               compact={false}
@@ -184,55 +196,107 @@ const AgentEntry = memo(function AgentEntry({
  * One stretch of messages from a single sender, packed close together. The
  * guardian's bubbles align to the end, the agent's to the start. `typing` is
  * the agent's typing bubble, drawn after its messages.
+ *
+ * In share mode (`selection`), every bubble carries its turn's checkbox, and a
+ * click anywhere on it picks or drops the whole turn, as a common chat's row
+ * does. A bubble of no turn, or of another session, is dimmed and not picked.
+ *
+ * Each message is one box. `data-join` marks one that sits in a run of replies
+ * to the same message, which the bubbles draw closer, with tight corners where
+ * they meet (`[data-join]` in globals.css).
  */
 export const ConciergeGroup = memo(function ConciergeGroup({
   group,
   actions,
   runningTurnId,
+  selection,
   feedback,
   arrival,
   typing,
+  drawings,
 }: {
   group: Extract<ConciergeItem, { kind: "group" }>;
   actions: BlockActions;
   runningTurnId: string | null;
+  selection?: ShareSelection;
   feedback: boolean;
   /** Marks the bubbles that arrived while the transcript is open. */
   arrival: ArrivalProps;
   typing: ReactNode;
+  /** How the group's messages draw their replies, by message id. */
+  drawings?: ReadonlyMap<string, ReplyDrawing>;
 }) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-1",
+        // A card keeps no margin of its own here, so the line under it sits as
+        // close to it as one under a bubble does.
+        "flex flex-col gap-2 [&_[data-chat-card]]:mb-0",
         group.sender === "guardian" ? "items-end" : "items-start",
       )}
     >
-      {group.entries.map((entry) =>
-        entry.message.sender?.kind === "automated" ? (
-          <div
-            key={entry.message.id}
-            data-timeline-anchor={entry.message.id}
-            className="w-full self-start"
-          >
-            <UserMessage msg={entry.message} />
+      {group.entries.map((entry) => {
+        const side = group.sender === "guardian" ? "items-end" : "items-start";
+        const drawing = drawings?.get(entry.message.id);
+        const box = { "data-join": drawing?.join };
+        const bubble = (
+          <>
+            {group.sender === "guardian" ? (
+              <GuardianBubble
+                key={entry.message.id}
+                msg={entry.message}
+                arrival={arrival(entry.message.id)["data-arrival"]}
+              />
+            ) : (
+              <AgentEntry
+                key={entry.message.id}
+                entry={entry}
+                actions={actions}
+                rateable={feedback && (!runningTurnId || entry.message.turnId !== runningTurnId)}
+                arrival={arrival}
+                quoted={drawing?.quote ?? false}
+              />
+            )}
+            {entry.source ? <SourceLabel source={entry.source} /> : null}
+          </>
+        );
+        if (!selection) {
+          return (
+            <div
+              key={entry.message.id}
+              {...box}
+              className={cn("flex w-full flex-col gap-2 empty:hidden", side)}
+            >
+              {bubble}
+            </div>
+          );
+        }
+        const turnId = entry.message.turnId;
+        if (!turnId || entry.message.sessionId !== selection.selectableSessionId) {
+          return (
+            <div
+              key={entry.message.id}
+              {...box}
+              className={cn("flex w-full flex-col gap-2 pl-9 opacity-60", side)}
+            >
+              {bubble}
+            </div>
+          );
+        }
+        const selected = selection.selectedTurns.has(turnId);
+        return (
+          <div key={entry.message.id} {...box} className="w-full">
+            <SelectableRow
+              selected={selected}
+              onToggle={() => selection.onToggleTurn(turnId)}
+              label={selected ? "Deselect message" : "Select message"}
+              contentClassName={cn("flex flex-col gap-2", side)}
+            >
+              {bubble}
+            </SelectableRow>
           </div>
-        ) : group.sender === "guardian" ? (
-          <GuardianBubble
-            key={entry.message.id}
-            msg={entry.message}
-            arrival={arrival(entry.message.id)["data-arrival"]}
-          />
-        ) : (
-          <AgentEntry
-            key={entry.message.id}
-            entry={entry}
-            actions={actions}
-            rateable={feedback && (!runningTurnId || entry.message.turnId !== runningTurnId)}
-            arrival={arrival}
-          />
-        ),
-      )}
+        );
+      })}
       {group.typing ? typing : null}
     </div>
   );

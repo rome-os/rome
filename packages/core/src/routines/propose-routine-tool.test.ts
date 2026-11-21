@@ -15,7 +15,7 @@ const validInput = {
   thenSummary: "summarize it and notify you",
   eventName: "provider:event:gmail.gmail_new_gmail_message",
   filter: [{ field: "from.email", equals: "dana@example.com" }],
-  actionName: "summon",
+  actionName: "system:summon",
   args: { agentName: "main", prompt: "Summarize the email." },
 };
 
@@ -28,7 +28,7 @@ const validSchedule = {
   tzid: "America/Los_Angeles",
   localTime: "09:00",
   rrule: "FREQ=WEEKLY;BYDAY=FR",
-  actionName: "summon",
+  actionName: "system:summon",
   args: { agentName: "main", prompt: "Remind the guardian to send their weekly update." },
 };
 
@@ -43,7 +43,7 @@ describe("normalizeRoutineDraftForCard", () => {
       filter: [{ field: "from.email", equals: "dana@example.com" }],
     });
     expect(result.draft.name).toBe("Landlord emails");
-    expect(result.draft.actionName).toBe("summon");
+    expect(result.draft.actionName).toBe("system:summon");
     expect(result.draft.filterSummary).toBe("sender is dana@example.com");
   });
 
@@ -94,7 +94,7 @@ describe("normalizeRoutineDraftForCard", () => {
       name: "Morning briefing",
       watchLabel: "Run on demand",
       thenSummary: "pull your day and send you a briefing",
-      actionName: "summon",
+      actionName: "system:summon",
       args: { agentName: "main", prompt: "Build the morning briefing." },
     });
     expect(result.ok).toBe(true);
@@ -270,7 +270,7 @@ describe("normalizeRoutineDraftForCard", () => {
       expect(res.isError).toBeUndefined();
       expect(calls).toEqual([
         {
-          name: "create_routine",
+          name: "system:create_routine",
           input: {
             // Derived from the tool call, so the drain computes the card's key
             // itself instead of reading it from this result.
@@ -283,7 +283,7 @@ describe("normalizeRoutineDraftForCard", () => {
               localTime: "09:00",
               rrule: "FREQ=WEEKLY;BYDAY=FR",
             },
-            actionName: "summon",
+            actionName: "system:summon",
             args: validSchedule.args,
           },
         },
@@ -293,16 +293,18 @@ describe("normalizeRoutineDraftForCard", () => {
     });
 
     it("falls back to a draft card when the agent may not call the target", async () => {
-      const { calls, run } = setup({ permissions: { summon: "denied" } });
+      const { calls, run } = setup({ permissions: { "system:summon": "denied" } });
       const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);
       expect(res.isError).toBeUndefined();
       expect(res.content[0].text).toContain(DRAFTED);
-      expect(res.content[0].text).toContain('"summon" is not an action you are permitted to call');
+      expect(res.content[0].text).toContain(
+        '"system:summon" is not an action you are permitted to call',
+      );
     });
 
     it("falls back to a draft card when the agent may not call create_routine", async () => {
-      const { calls, run } = setup({ permissions: { create_routine: "denied" } });
+      const { calls, run } = setup({ permissions: { "system:create_routine": "denied" } });
       const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);
       expect(res.isError).toBeUndefined();
@@ -317,7 +319,7 @@ describe("normalizeRoutineDraftForCard", () => {
     });
 
     it("errors without a card for an unregistered target action", async () => {
-      const { calls, run } = setup({ permissions: { summon: "unknown" } });
+      const { calls, run } = setup({ permissions: { "system:summon": "unknown" } });
       const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);
       expect(res.isError).toBe(true);
@@ -328,7 +330,7 @@ describe("normalizeRoutineDraftForCard", () => {
     // card's "Turn it on" gets must run here too.
     it("creates nothing when the args don't fit the target action's schema", async () => {
       const { calls, run } = setup({
-        argsError: 'args do not satisfy the input schema for action "summon"',
+        argsError: 'args do not satisfy the input schema for action "system:summon"',
       });
       const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);
@@ -391,5 +393,37 @@ describe("normalizeRoutineDraftForCard", () => {
       expect(calls).toEqual([]);
       expect(res.content[0].text).toContain("routine draft card has been delivered");
     });
+  });
+});
+
+// A model reads these shapes from the tool's input schema, so they must be
+// spelled out there, whichever model provider converts it.
+describe("propose_routine's input schema", () => {
+  const [tool] = proposeRoutineTools({
+    widgets: "card",
+    hasSpeaker: true,
+    gate: {
+      canCallAction: () => "permitted",
+      validateArgs: () => null,
+      routineKeyFor: () => undefined,
+    },
+    runAction: async (): Promise<ActionResult> => ({ status: "ok" }),
+  });
+  const properties = (tool.inputSchema as { properties: Record<string, unknown> }).properties;
+
+  it("gives each filter condition its field and value, both required", () => {
+    expect(properties.filter).toMatchObject({
+      type: "array",
+      items: {
+        type: "object",
+        required: expect.arrayContaining(["field", "equals"]),
+        properties: { field: { type: "string" }, equals: { type: "string" } },
+      },
+    });
+  });
+
+  it("leaves the action's args free-form", () => {
+    expect(properties.args).toMatchObject({ type: "object", additionalProperties: true });
+    expect(properties.args).not.toHaveProperty("properties");
   });
 });

@@ -1,13 +1,24 @@
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import type { QuotaSwitchPart } from "@rome/api-types/chat";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { userMessageText } from "@/components/chat/chat-view";
+import { replyTarget } from "@/components/chat/reply/reply-drawing";
 import type { ChatRow } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
+import type { LivePreview } from "@/components/chat/MessageList";
 
 /** Messages from the same sender closer than this share one group. */
 const GROUP_GAP_MS = 5 * 60_000;
 /** A gap of at least this long, or a change of local day, gets a time separator. */
-const SEPARATOR_GAP_MS = 15 * 60_000;
+const SEPARATOR_GAP_MS = 60 * 60_000;
+
+/** The sources that label a reply: someone else made the Concierge speak. */
+const LABELLED_SOURCES: ReadonlySet<SystemInputSource["type"]> = new Set([
+  "routine",
+  "app",
+  "agent",
+  "automation",
+]);
 
 /** One message in a group. */
 export interface ConciergeEntry {
@@ -18,12 +29,20 @@ export interface ConciergeEntry {
    * from one place however many bubbles it has.
    */
   endsTurn: boolean;
+  /**
+   * Where the input of the message's turn came from, when the Concierge spoke
+   * on its own rather than answering its owner: a routine, an app, another
+   * agent, or what it follows. Drawn as one quiet label under the message.
+   */
+  source?: SystemInputSource;
 }
 
 export type ConciergeItem =
   /** Centered time line before `at`, an ISO timestamp. */
   | { kind: "separator"; key: string; at: string }
   | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
+  /** Line above the first message that was unread when the chat opened. */
+  | { kind: "unread"; key: string }
   /**
    * Consecutive messages from one sender. Agent messages of separate turns share a
    * group when they are close enough in time. `typing` adds the typing bubble to
@@ -37,7 +56,10 @@ export type ConciergeItem =
       typing: boolean;
     };
 
-function isRenderable(message: ChatMessage): boolean {
+const UNREAD_DIVIDER: ConciergeItem = { kind: "unread", key: "unread-divider" };
+
+/** Whether the Concierge draws something for `message`. */
+export function isRenderable(message: ChatMessage): boolean {
   if (message.role === "user") return userMessageText(message.content).length > 0;
   return parseMessageEntries(message).some((part) => part.type !== "text" || part.content.trim());
 }
@@ -64,6 +86,35 @@ export function turnHasSpoken(rows: ChatRow[], turnId: string | null): boolean {
   );
 }
 
+/** How long a simulated turn's message waits behind the dots: by its length, 0.5 to 1 s. */
+export function simulatedTypingMs(message: ChatMessage): number {
+  const length = parseMessageEntries(message).reduce(
+    (sum, part) => sum + (part.type === "text" ? part.content.length : 0),
+    0,
+  );
+  return Math.min(1000, Math.max(500, length * 5));
+}
+
+/**
+ * Whether the Concierge chat shows its typing dots: the Concierge is writing
+ * a message (docs/domains/chats.md#reaction). A reaction on the owner's
+ * message says the Concierge heard it; the dots say a message is coming. The
+ * server says how the running turn shows them (`live.writing`):
+ * - `exact`, where the provider says when it writes a message: while it does.
+ * - `simulated`, where it cannot: while a message that just landed is held
+ *   back behind them (`holding`), with no guess from the trace.
+ * A quiet turn shows none until it says something.
+ */
+export function showsTyping(
+  rows: ChatRow[],
+  live: Pick<LivePreview, "isStreaming" | "runningTurnId" | "quiet" | "writing">,
+  holding = false,
+): boolean {
+  if (holding) return true;
+  if (!live.isStreaming || live.writing?.mode !== "exact" || !live.writing.writing) return false;
+  return !live.quiet || turnHasSpoken(rows, live.runningTurnId);
+}
+
 // What the last build made, keyed by the message each piece starts from. A
 // build gives back the same entry and item objects for messages it has seen,
 // so the memoized rows that draw them skip a render when a message arrives.
@@ -71,10 +122,21 @@ export function turnHasSpoken(rows: ChatRow[], turnId: string | null): boolean {
 const builtEntries = new WeakMap<ChatMessage, ConciergeEntry>();
 const builtItems = new WeakMap<ChatMessage, ConciergeItem[]>();
 
-function entryFor(message: ChatMessage, endsTurn: boolean): ConciergeEntry {
+function entryFor(
+  message: ChatMessage,
+  endsTurn: boolean,
+  source: SystemInputSource | undefined,
+): ConciergeEntry {
   const built = builtEntries.get(message);
-  if (built && built.endsTurn === endsTurn) return built;
-  const entry = { message, endsTurn };
+  if (
+    built &&
+    built.endsTurn === endsTurn &&
+    built.source?.type === source?.type &&
+    built.source?.name === source?.name
+  ) {
+    return built;
+  }
+  const entry: ConciergeEntry = { message, endsTurn, ...(source ? { source } : {}) };
   builtEntries.set(message, entry);
   return entry;
 }
@@ -90,6 +152,7 @@ function itemFor(anchor: ChatMessage, next: ConciergeItem): ConciergeItem {
 
 function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
   if (a.kind === "separator") return b.kind === "separator" && a.key === b.key && a.at === b.at;
+  if (a.kind === "unread") return b.kind === "unread";
   if (a.kind === "notice")
     return (
       b.kind === "notice" &&
@@ -110,12 +173,18 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
 
 /**
  * Turns the transcript's rows into what the Concierge draws: groups of
- * same-sender messages, time separators, and model-switch notices. Two
+ * same-sender messages, time separators, model-switch notices, and the unread
+ * divider. Two
  * adjacent messages join a group when the sender is the same and the gap
- * between their `createdAt` is under {@link GROUP_GAP_MS}. A separator comes
+ * between their `createdAt` is under {@link GROUP_GAP_MS}, or when the
+ * Concierge's message replies to the same message as the one before it, which
+ * keeps a run of replies to one message in one group however long the gap. A separator comes
  * before the first message, after a gap of at least {@link SEPARATOR_GAP_MS},
  * and when the local day changes. It always ends the group before it. A message
  * with an unparsable time gets no separator and is grouped by sender alone.
+ * The unread divider comes before the message `opts.unreadFrom` names, after
+ * that message's separator, and it ends the group before it. A chat that does
+ * not draw that message has no divider.
  * Rows with nothing to draw (trace rows, empty messages) leave no trace.
  *
  * Items and entries are reference-stable: building again from the same message
@@ -123,14 +192,19 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
  * changed message touches (usually the last group) comes back new. A caller
  * must not change what it gets.
  */
-export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }): ConciergeItem[] {
+export function buildConciergeItems(
+  rows: ChatRow[],
+  opts: { typing: boolean; unreadFrom?: string | null },
+): ConciergeItem[] {
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
     | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
+    | { kind: "unread" }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
   let group: Extract<Slot, { kind: "group" }> | null = null;
   let previous: ChatMessage | null = null;
+  let previousSender: "guardian" | "agent" | null = null;
 
   const add = (message: ChatMessage, sender: "guardian" | "agent") => {
     const at = Date.parse(message.createdAt);
@@ -148,18 +222,50 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
         at: message.createdAt,
       });
     }
-    if (!group || separate || group.sender !== sender || gap >= GROUP_GAP_MS) {
+    if (message.id === opts.unreadFrom) {
+      slots.push({ kind: "unread" });
+      group = null;
+    }
+    // A run of replies to one message stays whole: the Concierge answers it
+    // in as many messages as it takes, some minutes apart.
+    const target = sender === "agent" ? replyTarget(message) : undefined;
+    const sameReply =
+      target !== undefined &&
+      previous !== null &&
+      previousSender === "agent" &&
+      replyTarget(previous) === target;
+    if (!group || separate || group.sender !== sender || (gap >= GROUP_GAP_MS && !sameReply)) {
       group = { kind: "group", sender, messages: [] };
       slots.push(group);
     }
     group.messages.push(message);
     previous = message;
+    previousSender = sender;
   };
 
+  // Where each turn's input came from, when someone else made the Concierge
+  // speak. The chat draws no line for it: the turn's replies carry it as a
+  // label. The Concierge's own wake-ups (a check, what it follows, its digest)
+  // label nothing.
+  const sources = new Map<string, SystemInputSource>();
+  const labelSource = (turnId: string, source: SystemInputSource) => {
+    if (LABELLED_SOURCES.has(source.type)) sources.set(turnId, source);
+  };
   let automaticModel: string | undefined;
   for (const row of rows) {
     if (row.kind === "user") {
-      if (isRenderable(row.message)) add(row.message, "guardian");
+      // A Concierge chat holds no automated messages. One from before that
+      // rule, sent on the owner's behalf or not, is no owner's bubble: like a
+      // newer one, it names the replies of the turn it started.
+      const sender = row.message.sender;
+      if (sender?.kind === "automated") {
+        if (row.message.turnId) {
+          labelSource(row.message.turnId, {
+            type: sender.sourceType ?? "automation",
+            name: sender.name,
+          });
+        }
+      } else if (isRenderable(row.message)) add(row.message, "guardian");
     } else if (row.kind === "agent") {
       for (const message of row.messages) {
         // Only a Concierge chat's transcript is grouped here, and any of them may switch.
@@ -172,6 +278,8 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
           group = null;
         } else if (isRenderable(message)) add(message, "agent");
       }
+    } else if (row.kind === "automated_input") {
+      labelSource(row.turnId, row.source);
     } else if (row.kind === "model_switch") {
       if (row.model === automaticModel) {
         automaticModel = undefined;
@@ -195,7 +303,9 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
 
   const items: ConciergeItem[] = [];
   for (const slot of slots) {
-    if (slot.kind === "separator") {
+    if (slot.kind === "unread") {
+      items.push(UNREAD_DIVIDER);
+    } else if (slot.kind === "separator") {
       items.push(itemFor(slot.anchor, { kind: "separator", key: slot.key, at: slot.at }));
     } else if (slot.kind === "notice") {
       items.push(slot);
@@ -206,6 +316,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
           slot.sender === "agent" &&
             !!message.turnId &&
             turnEnds.get(`${message.sessionId}:${message.turnId}`) === message,
+          slot.sender === "agent" && message.turnId ? sources.get(message.turnId) : undefined,
         ),
       );
       items.push(

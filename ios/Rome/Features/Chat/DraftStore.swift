@@ -5,6 +5,9 @@ import SwiftUI
 struct Draft: Equatable, Sendable {
     var text: String
     var photos: [ComposerImage]
+    /// A reply that did not get through: the message it was for. Nil for
+    /// anything typed with no reply picked.
+    var reply: ReplyTarget? = nil
 }
 
 /// A message the guardian has in a chat's transcript, to tell whether an
@@ -75,10 +78,11 @@ final class DraftStore {
 
     // MARK: Writing
 
-    /// Keeps the composer as it is; written a moment later, and an empty one
-    /// clears the live slot. Only the newest content of a chat is written.
-    func save(chat: String, text: String, photos: [ComposerImage]) {
-        pending[chat] = Draft(text: text, photos: photos)
+    /// Keeps the composer as it is, with the message it replies to;
+    /// written a moment later, and an empty one clears the live slot. Only
+    /// the newest content of a chat is written.
+    func save(chat: String, text: String, photos: [ComposerImage], reply: ReplyTarget? = nil) {
+        pending[chat] = Draft(text: text, photos: photos, reply: reply)
         debounce[chat]?.cancel()
         debounce[chat] = Task { [weak self] in
             try? await Task.sleep(for: Self.saveDelay)
@@ -96,7 +100,7 @@ final class DraftStore {
     /// A message is going out: kept until `delivered`. `fromComposer`: it
     /// came out of the composer just now, so the live slot is gone at once,
     /// with no debounce in between that a kill could cut off.
-    func sending(chat: String, inputId: String, text: String, photos: [ComposerImage], fromComposer: Bool = false) {
+    func sending(chat: String, inputId: String, text: String, photos: [ComposerImage], fromComposer: Bool = false, reply: ReplyTarget? = nil) {
         unsettled.insert(inputId)
         let folder = folder(chat)
         let slot = folder.appending(path: "sending-\(Self.safe(inputId))", directoryHint: .isDirectory)
@@ -109,7 +113,8 @@ final class DraftStore {
         let root = root
         disk.run {
             if fromComposer { try? FileManager.default.removeItem(at: live) }
-            Self.write(slot, text: text, photos: photos, root: root)
+            // With the reply it was for, so a relaunch takes it back there.
+            Self.write(slot, text: text, photos: photos, root: root, reply: reply)
         }
     }
 
@@ -158,6 +163,51 @@ final class DraftStore {
             try? manager.moveItem(at: source, to: target)
         }
     }
+
+    // MARK: Resends
+
+    /// The chat's resends: a stored message the instance did not take, by
+    /// its id, and the `inputId` of the new copy sent in its place.
+    func resends(chat: String) async -> [String: String] {
+        let file = folder(chat).appending(path: Self.resendsFile)
+        return await disk.value([:]) {
+            guard let data = try? Data(contentsOf: file) else { return [:] }
+            return (try? JSONDecoder().decode([String: String].self, from: data)) ?? [:]
+        }
+    }
+
+    /// Adds a resend pair, merged into what the file holds, never replacing
+    /// it: pairs a cold launch has not read yet stay.
+    func recordResend(chat: String, original: String, copy: String) {
+        updateResends(chat: chat) { $0[original] = copy }
+    }
+
+    /// Forgets the pairs whose copy is `copy`.
+    func forgetResend(chat: String, copy: String) {
+        updateResends(chat: chat) { pairs in pairs = pairs.filter { $0.value != copy } }
+    }
+
+    /// Reads, changes and writes the chat's pairs in one step on the disk
+    /// queue, after any read or write asked for before it.
+    private func updateResends(chat: String, _ change: @escaping @Sendable (inout [String: String]) -> Void) {
+        let folder = folder(chat)
+        let file = folder.appending(path: Self.resendsFile)
+        let root = root
+        disk.run {
+            var pairs = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+            change(&pairs)
+            if pairs.isEmpty {
+                try? FileManager.default.removeItem(at: file)
+                Self.removeIfEmpty(folder)
+                return
+            }
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            Self.excludeFromBackup(root)
+            try? JSONEncoder().encode(pairs).write(to: file, options: .atomic)
+        }
+    }
+
+    nonisolated private static let resendsFile = "resends.json"
 
     /// Drops everything the chat holds: a blank chat left without sending.
     func discard(chat: String) {
@@ -220,7 +270,7 @@ final class DraftStore {
                 try? FileManager.default.removeItem(at: live)
                 Self.removeIfEmpty(folder)
             } else {
-                Self.write(live, text: draft.text, photos: draft.photos, root: root)
+                Self.write(live, text: draft.text, photos: draft.photos, root: root, reply: draft.reply)
             }
         }
     }
@@ -243,6 +293,8 @@ final class DraftStore {
     private struct Manifest: Codable {
         var text: String
         var photos: [UUID]
+        /// Absent for a message that replies to none.
+        var reply: ReplyTarget?
     }
 
     /// A blank chat's folder holding a failed start's message for the next one.
@@ -256,6 +308,14 @@ final class DraftStore {
     nonisolated private static func merged(_ drafts: [Draft]) -> Draft {
         let texts = drafts.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         return Draft(text: texts.joined(separator: "\n\n"), photos: drafts.flatMap(\.photos))
+    }
+
+    /// The reply a merged draft goes back to: only when everything in it
+    /// replied to that one message.
+    nonisolated static func reply(of drafts: [Draft]) -> ReplyTarget? {
+        let parts = drafts.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !$0.photos.isEmpty }
+        guard let first = parts.first?.reply, parts.allSatisfy({ $0.reply == first }) else { return nil }
+        return first
     }
 
     /// The live draft with every unsent slot merged in, oldest first.
@@ -287,8 +347,8 @@ final class DraftStore {
             removeIfEmpty(folder)
             return nil
         }
-        let draft = Draft(text: all.text, photos: Array(photos.prefix(photoLimit)))
-        write(live, text: draft.text, photos: draft.photos, root: root)
+        let draft = Draft(text: all.text, photos: Array(photos.prefix(photoLimit)), reply: reply(of: drafts))
+        write(live, text: draft.text, photos: draft.photos, root: root, reply: draft.reply)
         // Photos past four wait in their own slot for the next draft.
         if photos.count > photoLimit {
             let kept = folder.appending(path: "sending-kept-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -305,7 +365,7 @@ final class DraftStore {
         return transcript.contains { $0.id == id }
     }
 
-    nonisolated private static func write(_ slot: URL, text: String, photos: [ComposerImage], root: URL) {
+    nonisolated private static func write(_ slot: URL, text: String, photos: [ComposerImage], root: URL, reply: ReplyTarget? = nil) {
         let manager = FileManager.default
         do {
             try manager.createDirectory(at: slot, withIntermediateDirectories: true)
@@ -319,7 +379,7 @@ final class DraftStore {
                 let file = slot.appending(path: "\(photo.id.uuidString).jpg")
                 if !manager.fileExists(atPath: file.path(percentEncoded: false)) { try photo.jpeg.write(to: file, options: .atomic) }
             }
-            let manifest = Manifest(text: text, photos: photos.map(\.id))
+            let manifest = Manifest(text: text, photos: photos.map(\.id), reply: reply)
             try JSONEncoder().encode(manifest).write(to: slot.appending(path: "draft.json"), options: .atomic)
         } catch {
             // A draft that cannot be written is lost, as it was before drafts.
@@ -347,7 +407,7 @@ final class DraftStore {
             guard let jpeg = try? Data(contentsOf: slot.appending(path: "\(id.uuidString).jpg")) else { return nil }
             return ComposerImage(id: id, jpeg: jpeg)
         }
-        return Draft(text: manifest.text, photos: photos)
+        return Draft(text: manifest.text, photos: photos, reply: manifest.reply)
     }
 
     nonisolated private static func modified(_ url: URL) -> Date {
@@ -417,6 +477,8 @@ private struct ComposerDraft: ViewModifier {
     /// The chat's transcript; the restore waits for it to load. Nil for a
     /// blank chat, which has none.
     let transcript: TranscriptStore?
+    /// A restored draft was a reply: the reply bar comes back.
+    let onReply: ((ReplyTarget) -> Void)?
     /// A prompt to put in the composer, unsent, then cleared. It waits for the
     /// restore, so it never takes the place of a draft still loading.
     let prefill: Binding<String?>
@@ -440,6 +502,7 @@ private struct ComposerDraft: ViewModifier {
                     if text.isEmpty && attachments.images.isEmpty {
                         text = draft.text
                         attachments.restore(draft.photos)
+                        if let reply = draft.reply { onReply?(reply) }
                     }
                 }
                 restored = true
@@ -449,6 +512,8 @@ private struct ComposerDraft: ViewModifier {
             .onChange(of: prefill.wrappedValue) { applyPrefill() }
             .onChange(of: text) { save() }
             .onChange(of: attachments.images.map(\.id)) { save() }
+            // Picking or dropping a reply changes what the draft is for.
+            .onChange(of: transcript?.composerReply) { save() }
             .onDisappear {
                 save()
                 Task { await store.flush() }
@@ -464,14 +529,14 @@ private struct ComposerDraft: ViewModifier {
 
     private func save() {
         guard restored else { return }
-        store.save(chat: chat, text: text, photos: attachments.images)
+        store.save(chat: chat, text: text, photos: attachments.images, reply: transcript?.composerReply)
     }
 }
 
 extension View {
     /// Keeps the composer's text and photos as the chat's draft, and puts a
     /// `prefill` prompt after it.
-    func composerDraft(_ store: DraftStore, chat: String, text: Binding<String>, attachments: ComposerAttachments, transcript: TranscriptStore?, prefill: Binding<String?> = .constant(nil), onPrefill: @escaping () -> Void = {}) -> some View {
-        modifier(ComposerDraft(store: store, chat: chat, text: text, attachments: attachments, transcript: transcript, prefill: prefill, onPrefill: onPrefill))
+    func composerDraft(_ store: DraftStore, chat: String, text: Binding<String>, attachments: ComposerAttachments, transcript: TranscriptStore?, onReply: ((ReplyTarget) -> Void)? = nil, prefill: Binding<String?> = .constant(nil), onPrefill: @escaping () -> Void = {}) -> some View {
+        modifier(ComposerDraft(store: store, chat: chat, text: text, attachments: attachments, transcript: transcript, onReply: onReply, prefill: prefill, onPrefill: onPrefill))
     }
 }

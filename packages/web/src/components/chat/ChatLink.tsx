@@ -1,11 +1,19 @@
-import { useContext } from "react";
+import { useContext, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { MarkdownLink, MARKDOWN_LINK_CLASS, type MarkdownLinkProps } from "@/components/markdown";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { decodeFileBrowserRoutePath } from "@/lib/file-browser-routing";
-import { isInternalHref } from "@/lib/internal-href";
+import { getInternalRawPath, isApiHref, isInternalHref, toInternalPath } from "@/lib/internal-href";
 import { autoPlaceApp } from "@/pages/free/use-free-cells";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
+import { taskChatOfLink } from "@rome/api-types/task-link";
+import { parseAssetHref } from "@/lib/asset-links";
+import { ChatMedia, InsideLinkContext } from "./ChatImage";
+import { FileChip } from "./FileChip";
+import { MemoryFileSheet } from "./MemoryFileSheet";
+import { type OutputLinks, useOutputLinks } from "./outputs/chat-outputs";
+import { TaskLink } from "./task-link/TaskLink";
 
 // The link renderer for markdown rendered inside the chat workspace. It keeps
 // the generic Markdown component workspace-agnostic: the special-casing for the
@@ -16,9 +24,12 @@ import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
 //                              → open the projects panel + select the file
 //                                (reuses the same follow signal ChatWidget
 //                                publishes when an agent links a file).
-//   /apps/<appId>[/<route>][?q]  → open that app's workspace tile, preserving
-//                                 the in-app sub-route and query params so the
-//                                 tile lands on the exact linked page.
+//   /apps/<appId>[/<route>][?q] or an absolute same-origin form
+//                              → open that app's workspace tile, preserving
+//                                the in-app sub-route and query params so the
+//                                tile lands on the exact linked page.
+//   /memory/<path>             → open the file or folder in a sheet beside
+//                                the chat.
 //
 // Both reuse the exact mechanisms FreeGrid already drives for agent-linked
 // files and installed apps, just triggered by an explicit click.
@@ -68,18 +79,6 @@ function stripQueryAndFragment(path: string): string {
   return cut === -1 ? path : path.slice(0, cut);
 }
 
-// The raw path+query+hash of an href `isInternalHref` accepted, without the
-// canonicalization `new URL().pathname` applies. A leading `/`, `#` or `?` href
-// is already just that path; an absolute same-origin URL has its scheme and
-// authority sliced off verbatim. A schemeless relative href like `foo/bar`
-// (which `isInternalHref` also accepts) is never a `/projects` route, so it
-// resolves to null here.
-function getInternalRawPath(href: string): string | null {
-  if (href.startsWith("/") || href.startsWith("#") || href.startsWith("?")) return href;
-  const authority = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(href);
-  return authority ? href.slice(authority[0].length) || "/" : null;
-}
-
 // The markdown pipeline percent-encodes hrefs (micromark's normalizeUri), so a
 // non-ASCII or spaced filename arrives as `/projects/default/%E9%A2%9E….docx`.
 // The follow signal carries *logical* file paths — the resolve endpoint would
@@ -93,6 +92,36 @@ function decodeProjectsHref(href: string): string | null {
   if (href === "/projects") return href;
   const decoded = decodeFileBrowserRoutePath(href.slice("/projects/".length));
   return decoded === null ? null : `/projects/${decoded}`;
+}
+
+// The logical path (`memory/<path>`, or `memory` for the root) of an href
+// that addresses a `/memory` route on this workspace, or null. Decoded and
+// guarded the way the full Memory page decodes its URL.
+function memoryLogicalPath(href: string): string | null {
+  if (!isInternalHref(href)) return null;
+  const rawPath = getInternalRawPath(href);
+  if (rawPath === null) return null;
+  const path = stripQueryAndFragment(rawPath).replace(/\/+$/, "");
+  if (path === "/memory") return "memory";
+  if (!path.startsWith("/memory/")) return null;
+  const decoded = decodeFileBrowserRoutePath(path.slice("/memory/".length));
+  return decoded === null ? null : `memory/${decoded}`;
+}
+
+// A same-origin link whose path names a file by its extension, such as an
+// absolute path an agent wrote (`/home/…/projects/demo/report.md`): decoded,
+// or null for anything else. The dashboard's own routes name no extension.
+function localFileHref(href: string): string | null {
+  if (!isInternalHref(href) || isApiHref(href)) return null;
+  const rawPath = getInternalRawPath(href);
+  if (rawPath === null) return null;
+  const path = stripQueryAndFragment(rawPath);
+  if (!/\.[A-Za-z0-9]{1,8}$/.test(path)) return null;
+  try {
+    return decodeURI(path);
+  } catch {
+    return null;
+  }
 }
 
 // /apps/<appId>[/<route...>][?query]. `route` rides the iframe src path
@@ -152,13 +181,100 @@ function WorkspaceLink({
   );
 }
 
+// A link to a stored file (`/api/assets/<id>.<ext>`, relative or same-origin)
+// is the file itself, never a route: a react-router `<Link>` would navigate the
+// SPA to it. A video or audio file plays in place, anything else is a chip.
+function AssetLink({ children, href }: MarkdownLinkProps) {
+  const outputs = useOutputLinks();
+  const asset = parseAssetHref(href);
+  if (!href || !asset) return null;
+  const label = linkText(children) || href.split("/").at(-1) || href;
+  if (asset.kind === "video" || asset.kind === "audio") {
+    return <ChatMedia src={asset.path} kind={asset.kind} label={label} />;
+  }
+  // A file the chat's agent showed opens in its Outputs tab; any other one saves.
+  return (
+    <FileChip
+      href={href}
+      label={label}
+      onOpen={outputs ? () => outputs.open(asset.path) : undefined}
+    />
+  );
+}
+
+function linkText(children: ReactNode): string {
+  if (typeof children === "string" || typeof children === "number") return String(children);
+  if (Array.isArray(children)) return children.map(linkText).join("");
+  return "";
+}
+
+// A link to a local file by its path opens the file in the chat's Outputs
+// tab when it is one of them; anything else follows the link as before.
+function LocalFileLink({ path, ...props }: MarkdownLinkProps & { path: string }) {
+  const outputs = useOutputLinks();
+  const navigate = useNavigate();
+  const href = props.href ?? "";
+  return (
+    <WorkspaceLink
+      {...props}
+      onActivate={() => {
+        void outputs?.open(path).then((opened) => {
+          if (!opened) navigate(toInternalPath(href));
+        });
+      }}
+    />
+  );
+}
+
+// A link to a memory file or folder: one of the chat's outputs opens in its
+// Outputs tab, anything else in a sheet beside the chat.
+function MemoryLink({
+  path,
+  outputs,
+  ...props
+}: MarkdownLinkProps & { path: string; outputs: OutputLinks }) {
+  const [open, setOpen] = useState(false);
+  const href = props.href ?? "";
+  return (
+    <>
+      <WorkspaceLink
+        {...props}
+        onActivate={() => {
+          void outputs.open(`/${path}`).then((opened) => {
+            if (!opened) setOpen(true);
+          });
+        }}
+      />
+      <MemoryFileSheet
+        path={open ? path : null}
+        href={toInternalPath(href)}
+        onClose={() => setOpen(false)}
+      />
+    </>
+  );
+}
+
+// A picture inside the link leaves the tap to the link.
 export function ChatLink(props: MarkdownLinkProps) {
+  return (
+    <InsideLinkContext.Provider value={true}>
+      <ChatLinkTarget {...props} />
+    </InsideLinkContext.Provider>
+  );
+}
+
+function ChatLinkTarget(props: MarkdownLinkProps) {
   // Defensive: read the store via context (not the throwing hook) so ChatLink
   // is safe even if a chat block is ever rendered outside the workspace — it
   // just degrades to the default react-router link.
   const store = useContext(WorkspaceStoreContext);
   const eventBus = useWorkspaceEventBus();
+  const outputs = useOutputLinks();
   const href = props.href;
+
+  const taskChat = taskChatOfLink(href);
+  if (taskChat !== null) return <TaskLink id={taskChat} fallback={linkText(props.children)} />;
+  if (parseAssetHref(href)) return <AssetLink {...props} />;
 
   if (store && href) {
     const projectsHref = getProjectsRouteHref(href);
@@ -168,15 +284,25 @@ export function ChatLink(props: MarkdownLinkProps) {
           {...props}
           onActivate={() => {
             const path = decodeProjectsHref(projectsHref) ?? projectsHref;
-            // `force` bypasses the user's manual close of the panel — an
-            // explicit click is an explicit request to see the file.
-            eventBus?.emit("projects:opened", { paths: [path], force: true });
-            store.set("followTargetPath", path);
+            const follow = () => {
+              // `force` bypasses the user's manual close of the panel — an
+              // explicit click is an explicit request to see the file.
+              eventBus?.emit("projects:opened", { paths: [path], force: true });
+              store.set("followTargetPath", path);
+            };
+            // A file the chat's agent wrote opens in its Outputs tab. A folder
+            // and any other file follow in the Projects panel.
+            if (!outputs) return follow();
+            void outputs.open(path).then((opened) => {
+              if (!opened) follow();
+            });
           }}
         />
       );
     }
-    const app = parseAppHref(href);
+    // A same-origin absolute URL names the same app as its `/apps/...` path.
+    const appPath = isInternalHref(href) ? getInternalRawPath(href) : null;
+    const app = appPath ? parseAppHref(appPath) : null;
     if (app) {
       return (
         <WorkspaceLink
@@ -186,6 +312,13 @@ export function ChatLink(props: MarkdownLinkProps) {
       );
     }
   }
+
+  // Outside a chat, a memory link opens the Memory page as before.
+  const memoryPath = outputs && href ? memoryLogicalPath(href) : null;
+  if (outputs && memoryPath) return <MemoryLink {...props} path={memoryPath} outputs={outputs} />;
+
+  const localFile = outputs && href ? localFileHref(href) : null;
+  if (localFile) return <LocalFileLink {...props} path={localFile} />;
 
   return <MarkdownLink {...props} />;
 }

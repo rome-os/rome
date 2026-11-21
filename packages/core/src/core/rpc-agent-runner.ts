@@ -2,11 +2,11 @@
 //
 // This is the implementation used inside action workers (forked subprocess).
 // It satisfies AgentRunnerInterface but never owns a ModelProvider locally;
-// every turn is an RPC into main where the AgentSessionManager keeps the SDK
+// every turn is an RPC into main where the Sessions keeps the SDK
 // CLI alive across turns.
 
-import { getWorkerIpc, type IpcRpc } from "../actions/ipc.js";
-import { callMain } from "../actions/worker-rpc-client.js";
+import { getWorkerIpc, type IpcRpc } from "../apps/actions/ipc.js";
+import { callMain } from "../apps/actions/worker-rpc-client.js";
 import { getCurrentActionContext, type StreamAgentEvent } from "@rome-os/app-runtime";
 import type { AgentEvent } from "../types.js";
 import type { AgentRunnerInterface, RunParams } from "./types.js";

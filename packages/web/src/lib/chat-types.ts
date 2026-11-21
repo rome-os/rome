@@ -32,10 +32,15 @@ export interface ChatSession {
   /** Folder on a rome-node device the chat works in, set when the chat was created. */
   deviceFolder?: DeviceFolder | null;
   agentName?: string | null;
-  /** The chat a side chat branched from, kept once it is promoted to a chat. */
+  /** The chat a fork chat branched from, kept once it is promoted to a chat. */
   parentSessionId?: string | null;
   /** Why the chat exists, when something other than the guardian started it, e.g. `concierge`. */
   triggerKind?: string | null;
+  /**
+   * Present on `GET /chat/sessions/:id` for a task chat: the Concierge chat it
+   * reports to, which its header links back to.
+   */
+  taskOf?: { conciergeChatId: string; conciergeChatName: string; main: boolean } | null;
   /** ISO timestamp when the chat was archived (soft-hidden), or null. */
   archivedAt?: string | null;
   /** ISO timestamp when this chat was pinned by the guardian, or null. */
@@ -120,6 +125,11 @@ export interface ApprovalRecord {
   status: "pending" | "approved" | "rejected" | "auto_approved";
   executionState?: "idle" | "queued" | "running" | "succeeded" | "failed" | null;
   executionError?: string | null;
+  /**
+   * Who resolved it: `rome:task-ended` when Rome turned it down as its task's
+   * wait ran out, `rome:task-stopped` as its task was stopped.
+   */
+  resolvedBy?: string | null;
 }
 
 export interface DoneEventData {
@@ -154,6 +164,8 @@ export interface CreateTurnResponse {
   inputState?: import("@rome/api-types/trace-segments").AgentInputState | null;
   sessionId: string;
   startedAt: string;
+  /** The user message as the server stored it (a JSON array of parts). */
+  content?: string;
 }
 
 export interface ChatMessage {
@@ -168,6 +180,12 @@ export interface ChatMessage {
   traceArchived?: boolean;
   /** Who sent a user message. Absent when the message recorded no sender. */
   sender?: ChatMessageSender;
+  /** The emoji the Concierge reacted to a guardian message of its chat with.
+   *  Absent when it has none, and from servers before it. */
+  reaction?: string | null;
+  /** Rome's status on a guardian message of a Concierge chat, shown over its
+   *  reaction. Absent when it has none, and from servers before it. */
+  status?: import("@rome/api-types/concierge").ConciergeMessageStatus | null;
 }
 
 export interface ProjectOption {

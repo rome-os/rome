@@ -75,7 +75,7 @@ test("navigation and reload restore text/context, but do not replay consumed pre
     agentMention: { agentName: "agent" },
     skill: { name: "draft_skill" },
   });
-  await navigate(page, "/settings");
+  await navigate(page, "/apps");
   await expect(page.locator(INPUT)).toHaveCount(0);
   await navigate(page, "/chat");
   await expect(page.locator(INPUT)).toHaveValue(text);

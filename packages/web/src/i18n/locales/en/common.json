@@ -27,7 +27,7 @@
     "more": "More actions"
   },
   "sidebar": {
-    "aiApps": "AI Apps",
+    "aiApps": "AI apps",
     "appDisabled": "Disabled",
     "hideNames": "Hide names",
     "more": "More",
@@ -41,18 +41,43 @@
     "allChats": "All chats",
     "title": "Chats",
     "newChat": "New chat",
-    "empty": "No chats yet",
+    "mainChat": "Main chat",
+    "conciergeSection": "Main chat and topic chats",
+    "mainChatUnavailable": "Could not load the main chat",
     "conciergeUnread_one": "{{name}}, {{label}} unread message",
     "conciergeUnread_other": "{{name}}, {{label}} unread messages",
     "conciergeUnreadBadge_one": "{{label}} unread message",
     "conciergeUnreadBadge_other": "{{label}} unread messages",
-    "newTopicChat": "New topic chat",
+    "newTopic": "New topic",
+    "modeSwitch": "Chat list mode",
+    "modeChat": "Chat",
+    "modeConcierge": "Agent",
+    "modeChatReplying": "A chat is replying",
+    "modeConciergeUnread": "Unread Agent messages or a task waiting for you",
     "topicChatActions": "Actions for {{name}}",
     "topicChatUnread_one": "{{name}}, {{label}} unread message",
     "topicChatUnread_other": "{{name}}, {{label}} unread messages",
-    "topicChatDeleteConfirm": "Delete this topic chat permanently? Its follows and open tasks move to the main {{name}} chat.",
+    "topicChatDeleteTitle": "Delete \"{{name}}\"?",
+    "topicChatDeleteEmpty": "This chat is deleted permanently.",
+    "topicChatDeleteWithWork": "This chat is deleted permanently. It has:",
+    "topicChatDeleteMoves": "This chat is deleted permanently. Its follows and open tasks move to the main {{name}} chat.",
+    "topicChatDeleteFollow": "Following {{source}} · {{target}}",
+    "topicChatDeleteTask": "Open task: {{title}}",
+    "topicChatDeleteMore": "and {{count}} more",
+    "topicChatDeleteChoice": "What happens to them?",
+    "topicChatDeleteMove": "Move to the main chat",
+    "topicChatDeleteMoveHint": "Alerts and task updates go there.",
+    "topicChatDeleteStop": "Stop them",
+    "topicChatDeleteStopHint": "The follows end and the tasks stop.",
+    "topicChatArchiveTitle": "Archive \"{{name}}\"?",
+    "topicChatArchiveWithWork": "This chat will be archived. It has:",
+    "topicChatUnarchiveTitle": "Unarchive \"{{name}}\"?",
+    "topicChatUnarchiveMoved": "When this chat was archived, these follows moved to the main chat:",
+    "topicChatUnarchiveMoveBack": "Move them back to this chat",
+    "topicChatUnarchiveMoveBackHint": "Alerts come here again.",
+    "topicChatUnarchiveKeep": "Keep them in the main chat",
+    "topicChatUnarchiveKeepHint": "Alerts keep going there.",
     "topicChatRetireFailed": "Couldn't change the topic chat.",
-    "startedByConcierge": "Started by {{name}}",
     "rowStatus": {
       "waiting": "Waiting for you",
       "running": "Replying now",
@@ -64,6 +89,9 @@
     "archive": "Archive",
     "unarchive": "Unarchive chat",
     "rename": "Rename",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "pinFailed": "Couldn't change the pin.",
     "renameLabel": "Chat name",
     "chatActions": "Chat actions",
     "newChatInProject": "New chat in this project",
@@ -120,16 +148,7 @@
     "agentRemove": "Remove {{agent}}",
     "agentPickHint": "Select",
     "agentSendHint": "Send",
-    "projectActions": "Project actions",
-    "pinned": "Pinned",
     "sectionProjects": "Projects",
-    "pin": "Pin",
-    "unpin": "Unpin",
-    "pinChat": "Pin chat",
-    "unpinChat": "Unpin chat",
-    "groupBy": "Group by",
-    "groupByDate": "Date",
-    "groupByProjects": "Project",
     "status": "Status",
     "statusAll": "All",
     "statusActive": "Active",
@@ -147,10 +166,24 @@
   },
   "profile": {
     "menuLabel": "Account",
-    "guardian": "Guardian",
-    "visitor": "Visitor",
+    "visitor": "Admin",
     "signOut": "Log out",
     "signOutError": "Couldn't log out. Please try again."
+  },
+  "thisComputer": {
+    "label": "Computer use",
+    "auditLog": "Computer use log",
+    "tooltip": {
+      "connected": "Rome can use this computer",
+      "connecting": "Connecting…",
+      "offline": "Rome can't reach this computer right now",
+      "disabled": "Rome can't use this computer",
+      "limited": {
+        "connected": "Connected · Computer use off",
+        "connecting": "Connecting… · Computer use off",
+        "offline": "Offline · Computer use off"
+      }
+    }
   },
   "terminal": {
     "title": "Terminal",
@@ -185,6 +218,19 @@
       "submittingCode": "Submitting Claude login code"
     }
   },
+  "upgradeIndicator": {
+    "available": "Update to {{version}}",
+    "availableFull": "Update {{name}} to {{version}}",
+    "updating": "Updating to {{version}}…",
+    "updatingFull": "{{name}} is updating to {{version}}…",
+    "failed": "Update failed",
+    "failedFull": "Update to {{version}} failed",
+    "failedReason": "Update to {{version}} failed: {{message}}",
+    "updated": "Updated",
+    "updatedFull": "{{name}} updated to {{version}}",
+    "retry": "Retry",
+    "reload": "Reload"
+  },
   "upgradeBanner": {
     "countdownTitle": "Update to Rome {{version}} is ready",
     "countdownBody": "Updating in {{remaining}} unless you defer.",
@@ -193,7 +239,7 @@
     "verbFailed": "That didn't go through — try again.",
     "remindLater": "Remind me later",
     "updatingTitle": "Updating Rome…",
-    "updatingBody": "Rome is restarting to finish the update. This takes a moment.",
+    "updatingBody": "Rome is restarting to finish the update.",
     "stalledTitle": "The update is taking longer than expected",
     "stalledBody": "Rome hasn't come back since the update started. It may still finish on its own — try reloading this page in a minute.",
     "dismiss": "Dismiss"
@@ -209,44 +255,7 @@
   },
   "desktop": {
     "iframeTitle": "Rome Desktop",
-    "namedIframeTitle": "Rome desktop “{{name}}”",
-    "notFound": "There is no desktop called “{{name}}”.",
     "reconnecting": "Reconnecting…"
-  },
-  "wechatApp": {
-    "loading": "Checking WeChat…",
-    "loadFailed": "Could not check WeChat",
-    "installFailed": "Could not install WeChat",
-    "startFailed": "Could not start WeChat",
-    "retry": "Try again",
-    "unavailable": {
-      "title": "WeChat is not enabled",
-      "description": "WECHAT_USER_ENABLED is off on this instance. To turn WeChat on, set it to true and restart Rome."
-    },
-    "absent": {
-      "title": "WeChat is not installed",
-      "description": "Rome downloads the WeChat desktop client once and opens it here. The download takes a few minutes.",
-      "action": "Install WeChat",
-      "failed": "Install did not finish: {{error}}"
-    },
-    "installing": {
-      "title": "Installing WeChat",
-      "description": "Rome is downloading the WeChat client and opens it here when it finishes. Leaving this page does not stop the download."
-    },
-    "stopped": {
-      "title": "WeChat is not running",
-      "description": "The WeChat client is installed on this instance.",
-      "action": "Start WeChat",
-      "failed": "WeChat did not start: {{error}}"
-    },
-    "starting": {
-      "title": "Starting WeChat"
-    },
-    "sharedDesktop": {
-      "title": "WeChat is running on the shared desktop",
-      "description": "This desktop stays empty while WeChat runs there.",
-      "action": "Open the shared desktop"
-    }
   },
   "chat": {
     "add": "Open an app",
@@ -274,16 +283,6 @@
     "resizeTools": "Resize chat and apps",
     "emptyAppsTitle": "No apps open",
     "emptyAppsDescription": "Open an app to use it alongside this chat."
-  },
-  "connectChatApp": {
-    "title": "Connect your chat app",
-    "description": "Talk to your agent from Telegram, WhatsApp, Discord, or WeChat.",
-    "dismiss": "Dismiss"
-  },
-  "visitAppStore": {
-    "title": "Visit the app store",
-    "description": "Discover AI-native apps built for Rome.",
-    "dismiss": "Dismiss"
   },
   "feedback": {
     "open": "Feedback",
@@ -325,5 +324,15 @@
     "noText": "No text",
     "placeholder": "Message {{name}}",
     "loadOlderFailed": "Failed to load older messages"
+  },
+  "vaultPin": {
+    "label": "PIN",
+    "show": "Show PIN",
+    "hide": "Hide PIN",
+    "wrong_one": "Wrong PIN. {{count}} try left.",
+    "wrong_other": "Wrong PIN. {{count}} tries left.",
+    "locked": "Locked. Try again at {{time}}.",
+    "notSet": "Set a PIN in Settings first.",
+    "signerOutdated": "The signer is too old for the vault. Upgrade the instance."
   }
 }

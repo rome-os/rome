@@ -78,62 +78,21 @@ describe("connector actions when not logged in to Composio", () => {
     expect(result.error).toContain("notion");
   });
 
-  it("connector_connect renders the unified card for GitHub, never a Composio connect", async () => {
-    // GitHub is brokered by Rome's own integration (Rome Cloud OAuth); a Composio
-    // connect here would create a second, unmanaged connection. The action must
-    // short-circuit to the inline connect card — before the sign-in check, so it
-    // never falls through to connector_login. It renders the single unified
-    // `connect-card` (same componentId the Composio branch uses) with the github
-    // toolkit; the card selects the Rome Cloud adapter from that prop and drives the
-    // OAuth against core's /api/integrations.
+  it.each([
+    "github",
+    "slack",
+    "shopify",
+  ])("connector_connect sends the agent to core's connect_account for %s, never a Composio connect", async (toolkit) => {
+    // Rome connects these itself; a Composio connect here would create a
+    // second, unmanaged connection. The refusal comes before the sign-in
+    // check, so it never falls through to connector_login.
     const action = createConnectorConnect(config("connector_connect"), deps);
-    const result = await action.execute({ toolkit: "github" });
-    expect(result).toMatchObject({
-      status: "pending_interaction",
-      interaction: {
-        appId: "connector",
-        // Cross-surface fallback: a messaging channel that can't mount the card
-        // still gets the Settings → Connections hint as prose.
-        promptText: expect.stringMatching(/settings/i),
-        render: { kind: "inline", componentId: "connect-card", props: { toolkit: "github" } },
-      },
-    });
-    if (result.status !== "pending_interaction") throw new Error(`got ${result.status}`);
-    expect(result.interaction.promptText).toContain("click Connect on the card");
-    expect(result.interaction.promptText).toContain("If no card is shown");
-    expect(result.interaction.promptText).not.toMatch(
-      /connector_login|can.t be connected from here|A connect card|Ask the guardian/,
-    );
-  });
-
-  it("connector_connect renders the unified card for Shopify too, never a Composio connect", async () => {
-    const action = createConnectorConnect(config("connector_connect"), deps);
-    const result = await action.execute({ toolkit: "shopify" });
-    expect(result).toMatchObject({
-      status: "pending_interaction",
-      interaction: {
-        appId: "connector",
-        promptText: expect.stringMatching(/settings/i),
-        render: { kind: "inline", componentId: "connect-card", props: { toolkit: "shopify" } },
-      },
-    });
-    if (result.status !== "pending_interaction") throw new Error(`got ${result.status}`);
-    expect(result.interaction.promptText).toContain("click Connect on the card");
-    expect(result.interaction.promptText).toContain("If no card is shown");
-    expect(result.interaction.promptText).not.toMatch(
-      /connector_login|can.t be connected from here|A connect card|Ask the guardian/,
-    );
-  });
-
-  it("connector_connect keeps Settings-only guidance for Rome-managed toolkits without a card", async () => {
-    const action = createConnectorConnect(config("connector_connect"), deps);
-    const result = await action.execute({ toolkit: "slack" });
-    expect(result).toMatchObject({
-      status: "error",
-      error: expect.stringContaining("Settings → Connections"),
-    });
+    const result = await action.execute({ toolkit });
+    expect(result).toMatchObject({ status: "error" });
     if (result.status !== "error") throw new Error(`got ${result.status}`);
-    expect(result.error).toContain("can't be connected from here");
+    expect(result.error).toContain(`connect_account tool with {"kind":"${toolkit}"}`);
+    expect(result.error).toContain("Settings → Connections");
+    expect(result.error).not.toMatch(/connector_login/);
   });
 
   it("connector_connect refuses an unsupported toolkit and never renders a connect card", async () => {

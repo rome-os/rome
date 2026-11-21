@@ -888,6 +888,8 @@ describe("PersonDetailPage, sending", () => {
     const { queryClient } = renderPage();
 
     expect(await screen.findByText(/WhatsApp · \+6591881123/)).toBeTruthy();
+    // The timeline loads on its own read, after the account line shows.
+    await screen.findByText("the landlord replies fast");
     person.accounts[1]!.latestAt = NOW;
     await act(async () => {
       await queryClient.invalidateQueries({ queryKey: ["people"] });

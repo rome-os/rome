@@ -3,10 +3,10 @@ import Foundation
 import UIKit
 
 // Native sign-in, ported from packages/lib/src/native-auth (RFC 065). Rome Cloud
-// signs the device in once (PKCE, ephemeral browser session) and returns a device
-// credential. For each instance the app then asks the instance for an
-// authorization request, has Cloud authorize it, and trades the code at the
-// instance for a `rome_session`.
+// signs the device in once (PKCE, the browser session shared with Safari) and
+// returns a device credential. For each instance the app then asks the instance
+// for an authorization request, has Cloud authorize it, and trades the code at
+// the instance for a `rome_session`.
 
 struct CloudCredential: Codable, Sendable {
     var accessToken: String
@@ -72,7 +72,7 @@ enum AuthError: Error, Equatable, LocalizedError {
         case .accessDenied: return String(localized: "No access to this Rome")
         case .accessRevoked: return String(localized: "You no longer have access to this Rome")
         case .notOwner: return String(localized: "Sign in to this Rome once in a browser, then try again")
-        case .instanceTooOld: return String(localized: "This Rome needs an update from its owner")
+        case .instanceTooOld: return String(localized: "\(UpdateCopy.agent(nil)) needs its guardian to update first")
         case .sessionRejected: return String(localized: "Sign-in did not finish")
         case .network: return String(localized: "Could not reach Rome Cloud")
         case .invalidResponse: return String(localized: "Invalid sign-in response")
@@ -246,6 +246,12 @@ final class CloudAuth {
     nonisolated static func opens(_ url: URL, cloudOrigin: URL) -> Bool {
         guard url.host() != nil, url.host() != cloudOrigin.host() else { return false }
         return url.scheme == "https" || (url.scheme == "http" && cloudOrigin.scheme == "http")
+    }
+
+    /// The session kept for `instance`, fresh or not: a cached launch opens
+    /// with it and refreshes it after.
+    func storedSession(for instance: CloudInstance) -> InstanceSession? {
+        store.value(InstanceSession.self, for: Key.session(for: instance))
     }
 
     /// A fresh session for `instance`: the stored one when it has time left, else a new one.
@@ -490,7 +496,11 @@ final class CloudAuth {
         return (data, status)
     }
 
+    /// Every Cloud request goes out through here, so it is where a Debug build
+    /// adds the test host's access headers.
     private func perform(_ request: URLRequest) async throws -> (Data, Int) {
+        var request = request
+        DevAccess.stamp(&request)
         do {
             let (data, response) = try await http.data(for: request)
             return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
@@ -513,7 +523,7 @@ final class CloudAuth {
     }
 }
 
-private final class NoRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+final class NoRedirects: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
@@ -534,5 +544,18 @@ extension CloudAuth: DeviceRegistry {
 
     func unregisterDevice(token: String) async throws {
         try await deviceCall("DELETE", body: ["token": token])
+    }
+}
+
+extension CloudAuth: NodeCredentials {
+    var deviceCredential: CloudCredential? { store.value(CloudCredential.self, for: Key.credential) }
+
+    /// Rome Cloud no longer knows this device session: the sign-in is over,
+    /// as when any call of the app gets a 401. Only that credential goes; a
+    /// newer one stays.
+    func rejectCredential(_ rejected: CloudCredential) {
+        guard deviceCredential?.deviceSessionId == rejected.deviceSessionId else { return }
+        endAccount()
+        store.remove(Key.credential)
     }
 }

@@ -26,10 +26,13 @@ afterEach(() => {
 });
 
 describe("preload bridge", () => {
-  it("gives remote pages only the device bridge, never the audit log", async () => {
+  it("gives remote pages only the device bridge and the microphone marker, never the audit log", async () => {
     const remote = await load("https:");
-    expect(Object.keys(remote)).toEqual(["device"]);
+    expect(Object.keys(remote)).toEqual(["device", "microphone"]);
+    expect(remote.microphone).toBe(true);
     expect(remote.audit).toBeUndefined();
+    // Settings, such as the notifications choice, belong to the app's own pages.
+    expect(remote.settings).toBeUndefined();
     // The device bridge can open the local audit window, but carries nothing from the log.
     expect(Object.keys(remote.device as object).sort()).toEqual(
       ["get", "onStatus", "openAuditLog", "pickFolder", "setEnabled"].sort(),

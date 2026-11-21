@@ -52,6 +52,20 @@ describe("parseEntries", () => {
     ]);
   });
 
+  it("keeps a stored widget and drops one that names no component", () => {
+    const widget = {
+      type: "widget",
+      toolUseId: "w1",
+      appId: "meals",
+      componentId: "today",
+      props: { date: "2026-11-11" },
+      text: "Showing today's meals as a card.",
+    };
+    const content = JSON.stringify([widget, { type: "widget", toolUseId: "w2", appId: "meals" }]);
+
+    expect(parseEntries(content)).toEqual([widget]);
+  });
+
   it("keeps a reply part and drops one without its quote", () => {
     const reply = { type: "reply_to", messageId: "m1", author: "agent", name: "Rome", text: "Hi" };
     const content = JSON.stringify([

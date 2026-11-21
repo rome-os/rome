@@ -18,6 +18,7 @@ A pnpm monorepo. All TypeScript code lives under `packages/*` and `rome_apps/*`;
 - Before explaining a concept or asserting how a surface behaves, check [`docs/`](docs/README.md) and link instead of re-deriving.
 - Before naming a chat, thread, account, agent, connection or their operations in code, UI copy or docs, use the words in [`docs/domains/`](docs/domains/README.md). When a rule there changes, change the word's entry in the same PR as the code.
 - Before building or editing an app, read [`rome_apps/CLAUDE.md`](rome_apps/CLAUDE.md).
+- When moving or renaming source files, use the `move-code` skill ([`.claude/skills/move-code`](.claude/skills/move-code/SKILL.md)).
 - When handling code review on an open PR, use the `/babysit-pr` skill ([`.claude/skills/babysit-pr`](.claude/skills/babysit-pr/SKILL.md)). It answers review feedback through `respond-to-review`, fixes failing CI, and resolves merge conflicts until the PR is clean.
 - When writing prose (docs, PR text), follow [`docs/authoring/WRITING.md`](docs/authoring/WRITING.md).
 - When writing or editing code comments, follow [`docs/authoring/comments.md`](docs/authoring/comments.md).
@@ -25,6 +26,7 @@ A pnpm monorepo. All TypeScript code lives under `packages/*` and `rome_apps/*`;
 - When running the fullstack local loop, use `pnpm dev:all` — containerized Rome with `tsx --watch`, plus rome-obs, Traefik, and the Rsbuild dev server. `pnpm start` and `pnpm start:web` skip the production-shaped wiring, so reach for them only to debug the host process.
 - When changing a file the container does not watch (`package.json`, container env), run `docker compose restart <service>`.
 - When doing frontend-only work in `packages/web`, use `pnpm start:web:mock`.
+- When iterating on a change, run `pnpm preflight`. It runs Biome, the import rules, the type checks and the unit tests that the branch's changed files reach, in about 5 to 30 seconds.
 - When verifying a change, run `pnpm typecheck` on the host, then `pnpm test:unit`, then `pnpm dev:all` and confirm the rome container reaches `Rome started` in `docker logs`. For UI changes, also exercise the feature in the browser — type checks and tests verify code correctness, not feature correctness.
 - When adding a runtime dependency, declare it in `packages/core`.
 - When bumping `@playwright/test`, re-pin the `layout-invariants` container image in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) to the matching release's digest (`docker buildx imagetools inspect mcr.microsoft.com/playwright:v<version>-noble` prints it). The image ships the browsers, the pin decides the client, and they are separate edits. Check the guard step's parse of `playwright install --dry-run` in the same pass, since it reads a CLI label that upstream can reword. The guard fails readably when the image and the client disagree.

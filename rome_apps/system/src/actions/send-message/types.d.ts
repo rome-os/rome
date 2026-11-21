@@ -3,11 +3,11 @@
  *
  * Agent-callable action. Agents invoke this via tool use to send outbound messages.
  * Can also be called directly from other actions via `executeSendMessage()` or
- * `callAction("send_message", input)`.
+ * `callAction("system:send_message", input)`.
  *
  * @example
  * // Via callAction (from another action)
- * await callAction("send_message", {
+ * await callAction("system:send_message", {
  *   channel: "discord",
  *   threadId: "123456",
  *   text: "Hello!",
@@ -29,7 +29,7 @@ export interface SendMessageAttachment {
   type: "image" | "video" | "audio" | "document";
   /**
    * Absolute local path to the attachment. Must resolve under a Rome project
-   * workspace or channel attachment directory.
+   * workspace, chat upload or channel attachment directory.
    */
   source: string;
   /** Optional caption for the attachment. */

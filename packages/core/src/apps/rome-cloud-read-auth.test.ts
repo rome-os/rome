@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { setInstanceTokenInMemory } from "../lib/instance-identity.js";
+import { setInstanceTokenInMemory } from "../instance/instance-identity.js";
 import { createBundleFetcher } from "./bundle-fetcher.js";
 import { withRomeCloudReadAuth } from "./rome-cloud-read-auth.js";
 

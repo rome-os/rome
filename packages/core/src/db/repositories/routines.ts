@@ -1,7 +1,15 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { routineRuns, routines } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
+import { actorOfOwner } from "../../access/owner-actor.js";
+import {
+  currentSessionActor,
+  guardianActor,
+  type SessionActor,
+} from "../../access/session-actor.js";
+import { actionExecutionContext } from "../../apps/actions/context.js";
+import { isPersonalDataAction } from "../../apps/actions/personal-data.js";
 import {
   ACTIVE_ROUTINE_RUN_STATUSES,
   type DeleteRoutineResult,
@@ -28,8 +36,125 @@ export function toRoutine(row: RoutineRow): Routine {
   };
 }
 
+/**
+ * A routine row as the dashboard's `/routines` routes answer it. Who created
+ * it stays in core: only the routine engine reads it ({@link RoutinesRepository.creatorOf}).
+ */
+export function publicRoutineRow<T extends RoutineRow>(row: T): Omit<T, "createdBy"> {
+  const { createdBy: _createdBy, ...rest } = row;
+  return rest;
+}
+
+/**
+ * Who a routine its creator names for a person serves, by owner key
+ * ("guardian", "visitor:<account>"), such as a Concierge's digest.
+ */
+export interface RoutineOwner {
+  owner: string;
+}
+
+/**
+ * Who a routine created now acts for. One that names its person, or an
+ * owner (as {@link RoutineOwner}), acts for them. An app's routine is the
+ * guardian's. Otherwise the person of the action or request creating it; an
+ * action that acts for no one (a turn with more than one person's input)
+ * makes it act for no one. Core work outside any action, with no person, is
+ * the guardian's.
+ */
+export async function routineCreator(
+  db: DrizzleDb,
+  given: { createdBy?: SessionActor | RoutineOwner; managedBy?: string },
+): Promise<SessionActor | null> {
+  if (given.createdBy && "owner" in given.createdBy) {
+    return (await actorOfOwner(db, given.createdBy.owner)) ?? { kind: "anonymous" };
+  }
+  if (given.createdBy !== undefined) return given.createdBy;
+  if (given.managedBy) return (await guardianActor(db)) ?? null;
+  const store = actionExecutionContext.getStore();
+  if (store) return store.actor ?? { kind: "anonymous" };
+  return (await currentSessionActor()) ?? (await guardianActor(db)) ?? null;
+}
+
+/** The actions whose args name the chat they send into, and the arg that names it. */
+const CHAT_ARG_OF_ACTION: Record<string, string> = {
+  resume_session: "threadId",
+  send_message: "threadId",
+  send_user_message: "sessionId",
+};
+
+/**
+ * The chat a routine works for: the chat its args send into (`threadId` of
+ * `system:resume_session` and `system:send_message`, `sessionId` of `system:send_user_message`),
+ * else the chat it was made in: `madeIn`, or the webchat chat whose turn
+ * creates it. Null when neither names one. Migration 0134 fills older rows by
+ * their args alone, as nothing on them says where they were made.
+ */
+export function routineChatOf(
+  actionName: string,
+  args: Record<string, unknown>,
+  madeIn?: string,
+): string | null {
+  const arg = CHAT_ARG_OF_ACTION[actionName.replace(/^system:/, "")];
+  const value = arg ? args[arg] : undefined;
+  if (typeof value === "string" && value) return value;
+  if (madeIn) return madeIn;
+  const context = actionExecutionContext.getStore()?.channelContext;
+  return context?.channel === "webchat" && context.threadId ? context.threadId : null;
+}
+
+/** Who can read a chat a routine works for. Domain: docs/domains/participation.md#audience. */
+export type RoutinePlaceAudience = (chatId: string) => Promise<"private" | "shared">;
+
+/** Why a routine that reads personal data is not created. */
+export const PERSONAL_DATA_ROUTINE_REFUSED =
+  "personal_data_private_only: A routine that reads personal data (Apple Health and other synced " +
+  "data) must work for a private chat, such as one of the guardian's own dashboard chats.";
+
 export class RoutinesRepository {
-  constructor(private db: DrizzleDb) {}
+  /**
+   * @param placeAudience Who can read a routine's chat. Absent, every chat is
+   *   shared, so no routine reads personal data.
+   */
+  constructor(
+    private db: DrizzleDb,
+    private placeAudience?: RoutinePlaceAudience,
+  ) {}
+
+  /**
+   * @deprecated Renames the action of every routine saved under an action's
+   * old bare name, such as `send_message`, to its full ID, such as
+   * `system:send_message`. Goes once no instance has a routine saved under an
+   * old name.
+   */
+  async deprecatedQualifyActionNames(fullIdOf: Readonly<Record<string, string>>): Promise<number> {
+    let renamed = 0;
+    for (const [oldName, fullId] of Object.entries(fullIdOf)) {
+      const updated = await this.db
+        .update(routines)
+        .set({ actionName: fullId })
+        .where(eq(routines.actionName, oldName))
+        .returning({ id: routines.id });
+      renamed += updated.length;
+    }
+    return renamed;
+  }
+
+  /**
+   * Who can read what a routine's fires say: its chat's audience, and shared
+   * for a routine of no chat or one that no longer exists.
+   */
+  async audienceOf(id: string): Promise<"private" | "shared"> {
+    const [row] = await this.db
+      .select({ chatId: routines.chatId })
+      .from(routines)
+      .where(eq(routines.id, id));
+    return this.chatAudience(row?.chatId ?? null);
+  }
+
+  private async chatAudience(chatId: string | null): Promise<"private" | "shared"> {
+    if (!chatId || !this.placeAudience) return "shared";
+    return this.placeAudience(chatId);
+  }
 
   async findAll() {
     const rows = await this.db.select().from(routines);
@@ -46,6 +171,21 @@ export class RoutinesRepository {
     return rows[0] ?? null;
   }
 
+  /**
+   * The person a routine's fires act for, as stored: who created it, or the
+   * guardian for one no person made, or `anonymous` for one made in work that
+   * acts for no one. Null for a row from before the record, whose fires act
+   * for its chat's owner. Undefined when no such routine exists.
+   */
+  async creatorOf(id: string): Promise<SessionActor | null | undefined> {
+    const rows = await this.db
+      .select({ createdBy: routines.createdBy })
+      .from(routines)
+      .where(eq(routines.id, id));
+    if (rows.length === 0) return undefined;
+    return (rows[0].createdBy as SessionActor | null) ?? null;
+  }
+
   /** The trigger type shared by every routine named `name`. Names are not
    * unique, so this is null when the routines disagree or none has the name. */
   async findTriggerTypeByName(name: string): Promise<string | null> {
@@ -55,6 +195,16 @@ export class RoutinesRepository {
       .where(eq(routines.name, name));
     const types = new Set(rows.map((row) => (row.trigger as Trigger).type));
     return types.size === 1 ? [...types][0] : null;
+  }
+
+  /** The routines that work for chat `chatId`, as stored rows. */
+  async findByChat(chatId: string) {
+    return this.db.select().from(routines).where(eq(routines.chatId, chatId));
+  }
+
+  /** The routines that work for some chat, as stored rows. */
+  async findWithChat() {
+    return this.db.select().from(routines).where(isNotNull(routines.chatId));
   }
 
   /** Look up a routine by its caller-assigned `key`. Used by create_routine to
@@ -72,6 +222,38 @@ export class RoutinesRepository {
   async listRoutines(): Promise<Routine[]> {
     const rows = await this.findAll();
     return rows.map(toRoutine);
+  }
+
+  /** The apps that manage at least one routine. */
+  async managingAppIds(): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ managedBy: routines.managedBy })
+      .from(routines)
+      .where(isNotNull(routines.managedBy));
+    return rows.flatMap((row) => (row.managedBy ? [row.managedBy] : []));
+  }
+
+  /**
+   * Deletes the routines these apps manage, with their run history. Nobody can
+   * maintain a routine once its app is gone. A routine with an active run is
+   * kept, and a later call deletes it once the run ends. Returns the ids of the
+   * deleted routines.
+   */
+  async deleteManagedRoutines(
+    appIds: readonly string[],
+  ): Promise<{ deleted: string[]; kept: number }> {
+    const result = { deleted: [] as string[], kept: 0 };
+    if (appIds.length === 0) return result;
+    const rows = await this.db
+      .select({ id: routines.id, managedBy: routines.managedBy })
+      .from(routines)
+      .where(inArray(routines.managedBy, [...appIds]));
+    for (const row of rows) {
+      const outcome = await this.deleteIfNoActiveRuns(row.id, row.managedBy ?? undefined);
+      if (outcome.status === "deleted") result.deleted.push(row.id);
+      else if (outcome.status === "active-runs") result.kept += 1;
+    }
+    return result;
   }
 
   /** Delete a routine only if it has no in-flight runs. The active-run count
@@ -132,9 +314,24 @@ export class RoutinesRepository {
     enabled?: boolean;
     nextRunAt?: Date;
     keepTriggerPayload?: boolean;
+    /** Who its fires act for; absent, {@link routineCreator} decides. */
+    createdBy?: SessionActor | RoutineOwner;
+    /** The chat it works for; absent, {@link routineChatOf} decides. Null for none. */
+    chatId?: string | null;
+    /** The chat it is made in, when no webchat turn makes it (a chat's card). */
+    madeIn?: string;
   }): Promise<string> {
     const id = uuid();
     const now = new Date();
+    const chatId =
+      data.chatId === undefined
+        ? routineChatOf(data.actionName, data.args, data.madeIn)
+        : data.chatId;
+    // Refused when it is made, not on every fire.
+    if (isPersonalDataAction(data.actionName) && (await this.chatAudience(chatId)) !== "private") {
+      throw new Error(PERSONAL_DATA_ROUTINE_REFUSED);
+    }
+    const createdBy = await routineCreator(this.db, data);
     await this.db.insert(routines).values({
       id,
       name: data.name,
@@ -145,6 +342,8 @@ export class RoutinesRepository {
       actionName: data.actionName,
       args: data.args as unknown,
       keepTriggerPayload: data.keepTriggerPayload ?? true,
+      createdBy,
+      chatId,
       createdAt: now,
       lastFiredAt: null,
       nextRunAt: data.nextRunAt ?? null,
@@ -164,6 +363,13 @@ export class RoutinesRepository {
       keepTriggerPayload: boolean;
     }>,
   ) {
+    if (
+      data.actionName !== undefined &&
+      isPersonalDataAction(data.actionName) &&
+      (await this.audienceOf(id)) !== "private"
+    ) {
+      throw new Error(PERSONAL_DATA_ROUTINE_REFUSED);
+    }
     const values: Record<string, unknown> = {};
     if (data.name !== undefined) values.name = data.name;
     if (data.enabled !== undefined) values.enabled = data.enabled;

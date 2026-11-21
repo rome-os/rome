@@ -159,8 +159,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         pendingUploadTarget: null,
         discardChangesResolver: null,
         acceptedBrowserPath: `${initialRouteSnapshot.pathname}${initialRouteSnapshot.search}${initialRouteSnapshot.hash}`,
-        sidebarResize: null,
-        dragDepth: 0,
       },
 
       tree: {
@@ -586,7 +584,9 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
                 committedContent: nextContent,
                 lastDiskContent: nextContent,
                 textViewMode:
-                  data.kind === "text" && getTextPreviewKind(data.path, data.mimeType)
+                  data.kind === "text" &&
+                  !config.singleFile &&
+                  getTextPreviewKind(data.path, data.mimeType)
                     ? "preview"
                     : "edit",
               },
@@ -731,7 +731,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         discardChangesConfirmOpen: false,
         isDragActive: false,
         sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
-        isResizingSidebar: false,
         creating: false,
         deleting: false,
         moving: false,
@@ -768,9 +767,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
         },
         setSidebarWidth(value) {
           set((s) => ({ ui: { ...s.ui, sidebarWidth: value } }));
-        },
-        setIsResizingSidebar(value) {
-          set((s) => ({ ui: { ...s.ui, isResizingSidebar: value } }));
         },
         setFilesPaneDrillPath(value) {
           set((s) => ({ ui: { ...s.ui, filesPaneDrillPath: value } }));
@@ -1030,7 +1026,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
                 nameDialog: {
                   confirmLabel: config.t("dialog.renameConfirm"),
                   currentName,
-                  description: config.t("dialog.renameDescription", { path }),
                   initialValue: currentName,
                   inputLabel: config.t("dialog.nameLabel"),
                   mode: "rename",
@@ -1325,7 +1320,6 @@ export function createFileBrowserStore(config: FileBrowserConfig): FileBrowserSt
               nameDialog: {
                 confirmLabel: config.t("dialog.renameConfirm"),
                 currentName,
-                description: config.t("dialog.renameDescription", { path }),
                 initialValue: currentName,
                 inputLabel: config.t("dialog.nameLabel"),
                 mode: "rename",

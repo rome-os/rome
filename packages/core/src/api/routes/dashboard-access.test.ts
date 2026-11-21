@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { Hono } from "hono";
 import { dashboardAccessRoutes } from "./dashboard-access.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
-import { DashboardAccessState } from "../../lib/dashboard-access-state.js";
+import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
+import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { buildTestDeps, createTestDb, type TestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 

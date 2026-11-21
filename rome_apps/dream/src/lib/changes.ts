@@ -161,8 +161,8 @@ function changesFromFileChange(record: Record<string, unknown>): FileChange[] {
 }
 
 /**
- * The dream memory agent writes through `write_memory_file` and
- * `edit_memory_file` actions, called via `execute_action`. Read as the `Write`
+ * The dream memory agent writes through `dream:write_memory_file` and
+ * `dream:edit_memory_file` actions, called via `execute_action`. Read as the `Write`
  * or `Edit` they stand for.
  */
 function memoryFileCall(

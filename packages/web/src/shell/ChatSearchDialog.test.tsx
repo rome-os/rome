@@ -403,8 +403,8 @@ describe("ChatSearchDialog", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("uses the page search icon treatment only for the four first-party apps", async () => {
-    const ids = ["briefing", "inbox", "showcases", "skills"];
+  it("uses the page search icon treatment only for the three first-party apps", async () => {
+    const ids = ["inbox", "showcases", "skills"];
     mockSessionSearch(
       [],
       [],
@@ -556,6 +556,26 @@ describe("ChatSearchDialog", () => {
 
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/desktop"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers New chat once the query names it, and opens a blank chat", async () => {
+    mockSessionSearch([chatSession("news-chat", "News digest", "rome")], [], []);
+    const user = userEvent.setup();
+    renderSearch("/message", true);
+
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
+    await screen.findByRole("option", { name: /News digest/ });
+    // The blank state stays recent chats only.
+    expect(screen.queryByRole("option", { name: "New chat" })).toBeNull();
+
+    await user.type(input, "new");
+    const options = await screen.findAllByRole("option");
+    expect(options[0].getAttribute("aria-label")).toBe("New chat");
+    expect(screen.getByText("Pages")).toBeTruthy();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/chat"));
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
@@ -869,7 +889,7 @@ describe("ChatSearchDialog agent messaging", () => {
     expect(requests).toHaveLength(2);
     expect(requests[0]).toMatchObject({
       url: "/api/chat/sessions",
-      body: { name: "New Chat", projectPath: "default", agentName: "research:writer" },
+      body: { name: "New chat", projectPath: "default", agentName: "research:writer" },
     });
     expect(requests[1]).toMatchObject({
       url: "/api/chat/sessions/new-chat/turns",

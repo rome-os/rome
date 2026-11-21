@@ -6,7 +6,7 @@ import type { Action, ActionConfig, ActionResult } from "@rome-os/app-runtime";
 // ---------------------------------------------------------------------------
 
 /** Structural copy of core's `SendOutcome`/`NotifyService`
- * (`packages/core/src/lib/notify-client.ts`). Like every system action's
+ * (`packages/core/src/instance/notify-client.ts`). Like every system action's
  * capability interface, it is re-declared here rather than imported: the action
  * can't reach core internals, and the runtime injects the real `NotifyClient`
  * in the main process or its WorkerRPC proxy in a worker — both satisfy this
@@ -16,6 +16,12 @@ export type SendOutcome =
   | { kind: "no_token" }
   | { kind: "unconfigured" }
   | { kind: "reenroll" }
+  /** Rome Cloud refused the named recipient: not the instance's owner nor on its visitor list. Nothing was sent. */
+  | { kind: "recipient_not_allowed" }
+  /** Rome Cloud pushes only for a hosted instance, and this one is not (desktop, self-hosted, test). Nothing was sent. */
+  | { kind: "not_hosted" }
+  /** The call came from a shared chat with no one person to notify. Nothing was sent. */
+  | { kind: "recipient_unknown" }
   | { kind: "outcome_unknown" };
 
 /** Structural copy of core's `NotifyContent`. An optional
@@ -76,6 +82,21 @@ export function createSendNotificationAction(
           return { status: "error", error: "unconfigured" };
         case "reenroll":
           return { status: "error", error: "instance_reenrollment_required" };
+        case "recipient_not_allowed":
+          return { status: "error", error: "recipient_not_allowed" };
+        case "not_hosted":
+          // Not a failure to retry: this Rome has no phone push at all.
+          return {
+            status: "error",
+            error:
+              "not_hosted: the notification was not delivered. This Rome is not hosted by Rome Cloud, so it cannot push to a phone.",
+          };
+        case "recipient_unknown":
+          return {
+            status: "error",
+            error:
+              "recipient_unknown: can't tell whom to notify in this shared chat, so nothing was sent.",
+          };
         case "outcome_unknown":
           return { status: "error", error: "notification_outcome_unknown" };
         default: {
@@ -95,7 +116,7 @@ export function createAction(config: ActionConfig, deps: SendNotificationDeps): 
   // untyped bag, so a missing/mis-wired notify is caught here at load rather
   // than as a TypeError on the first send.
   if (typeof deps.notify?.send !== "function") {
-    throw new Error("send_notification requires a notify capability with a send() method");
+    throw new Error("system:send_notification requires a notify capability with a send() method");
   }
   return createSendNotificationAction(config, deps);
 }

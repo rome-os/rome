@@ -1,8 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { createLogger } from "../logger.js";
 import type { UsageAttributionResolver } from "./attribution.js";
-import type { TurnUsageFacts } from "../agent/index.js";
-import type { LoginMethod, TurnUsageEvent, UsageEvent } from "./events.js";
+import type { RomeSessionType } from "@rome-os/app-runtime";
+import type { SessionKind, TurnUsageFacts } from "../agent/index.js";
+import type { LoginMethod, TranscriptionUsageEvent, TurnUsageEvent, UsageEvent } from "./events.js";
+
+/** The chat type a turn counts under when its chat's row is missing, by its
+ *  session's kind. A web chat always has its row, so a conversation without
+ *  one is a connected account's. */
+const FALLBACK_TYPE: Record<SessionKind, RomeSessionType> = {
+  conversation: "channel",
+  action: "action",
+  fork: "fork",
+  subagent: "subagent",
+};
 
 const log = createLogger("usage-recorder");
 
@@ -14,6 +25,13 @@ export interface TurnUsageSink {
 /** The sign-in seam the auth routes call. Never throws and never blocks the sign-in. */
 export interface LoginUsageSink {
   recordLogin(method: LoginMethod): void;
+}
+
+/** The seam voice input hands each ended Rome Cloud listening session to. Never throws. */
+export interface TranscriptionUsageSink {
+  recordTranscription(
+    session: Omit<TranscriptionUsageEvent, "type" | "eventId" | "kind" | "occurredAt">,
+  ): void;
 }
 
 export interface UsageRecorderDeps {
@@ -31,7 +49,7 @@ export interface UsageRecorderDeps {
  * that happens while the instance is not signed in to Rome Cloud is not
  * recorded.
  */
-export class UsageRecorder implements TurnUsageSink, LoginUsageSink {
+export class UsageRecorder implements TurnUsageSink, LoginUsageSink, TranscriptionUsageSink {
   private readonly pending = new Set<Promise<void>>();
 
   constructor(private readonly deps: UsageRecorderDeps) {}
@@ -70,6 +88,28 @@ export class UsageRecorder implements TurnUsageSink, LoginUsageSink {
     );
   }
 
+  recordTranscription(
+    session: Omit<TranscriptionUsageEvent, "type" | "eventId" | "kind" | "occurredAt">,
+  ): void {
+    const credential = this.deps.credential();
+    if (!credential) return;
+    const event: UsageEvent = {
+      type: "transcription",
+      eventId: session.sessionId,
+      kind: "voice_input",
+      ...session,
+      occurredAt: new Date().toISOString(),
+    };
+    this.track(
+      this.deps.outbox.enqueue(event, credential).catch((err: unknown) => {
+        log.warn("failed to queue transcription usage", {
+          sessionId: session.sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }),
+    );
+  }
+
   /** Resolves once every turn recorded so far is queued or has failed. */
   async flush(): Promise<void> {
     await Promise.all(this.pending);
@@ -83,7 +123,7 @@ export class UsageRecorder implements TurnUsageSink, LoginUsageSink {
   private async writeTurn(facts: TurnUsageFacts, credential: string): Promise<void> {
     const attribution = await this.deps.attribution.forTurn({
       romeSessionId: facts.romeSessionId,
-      fallbackType: facts.romeSessionType,
+      fallbackType: FALLBACK_TYPE[facts.sessionKind],
       agentName: facts.agentName,
     });
     const { accounting } = facts;

@@ -1,22 +1,23 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
-import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ActionEngine } from "../actions/engine.js";
-import { ActionRegistryImpl } from "../actions/registry.js";
+import { ActionEngine } from "../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/db.js";
 import type { AgentEvent } from "../types.js";
-import { AgentLoader } from "../agent/index.js";
+import { AgentLoader } from "../app-host/agent-loader.js";
 import {
-  AppTurnHooks,
   TurnListeners,
   type AgentTurnFailedBeforeStart,
   type TurnLifecycle,
 } from "../agent/index.js";
+import { AppTurnHooks } from "../app-host/app-turn-hooks.js";
 import {
   createSessionFromRun,
   type ModelProvider,
@@ -24,16 +25,17 @@ import {
   type ModelSessionParams,
   type ProviderId,
 } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
+import { createSessions, type Sessions } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
-import { SkillLoader } from "../agent/index.js";
+import { SkillLoader } from "../app-host/skill-loader.js";
 import {
   createEmptyLegacyArtifactBindings,
   type ArtifactIdentityContext,
 } from "../apps/artifact-id.js";
 import { reportOf, fakeAccounts, loginsOn, RESTRICTED_PLAN } from "../test/kit/model-accounts.js";
+import { startAfter } from "../test/turn-handle.js";
 
 const AGENT = "pinned_agent";
 const MODEL = "gpt-5.3-codex-spark";
@@ -85,7 +87,7 @@ async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]>
   return messages;
 }
 
-describe("agent model pins through AgentSessionManager", () => {
+describe("agent model pins through Sessions", () => {
   let directory: string;
   let testDb: TestDb;
   let loader: AgentLoader;
@@ -93,7 +95,7 @@ describe("agent model pins through AgentSessionManager", () => {
   let openai: ReturnType<typeof createProvider>;
   let anthropic: ReturnType<typeof createProvider>;
   let state: ReturnType<typeof healthyState>;
-  const managers: AgentSessionManager[] = [];
+  const managers: Sessions[] = [];
   let artifactIdentity: ArtifactIdentityContext;
 
   async function writeConfig(overrides: Record<string, unknown> = {}): Promise<void> {
@@ -107,11 +109,11 @@ describe("agent model pins through AgentSessionManager", () => {
     isSubagent = false,
     useRomeCredits: boolean | (() => boolean) = false,
     turnLifecycle: TurnLifecycle = new TurnListeners(new AppTurnHooks()),
-  ): AgentSessionManager {
+  ): Sessions {
     const actionRegistry = new ActionRegistryImpl();
     const systemPrompts = createTestSystemPrompts();
     rs.spyOn(systemPrompts, "build").mockReturnValue("Model pin test prompt");
-    const manager = createAgentSessionManager(
+    const manager = createSessions(
       {
         agentLoader: loader,
         sessionRepository,
@@ -150,7 +152,7 @@ describe("agent model pins through AgentSessionManager", () => {
     testDb = createTestDb();
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
     loader = new AgentLoader(artifactIdentity);
-    sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
+    sessionRepository = new DrizzleSessionRepository(testDb.db);
     openai = createProvider("openai");
     anthropic = createProvider("anthropic");
     state = healthyState();
@@ -167,9 +169,9 @@ describe("agent model pins through AgentSessionManager", () => {
   it("loads a no-tier YAML pin and uses it on the first and later turns", async () => {
     expect(loader.find(AGENT)?.definition).toMatchObject({ providerId: "openai", modelId: MODEL });
     expect(loader.find(AGENT)?.definition.tier).toBeUndefined();
-    const session = await createManager().acquire(key, { workingDir: directory });
-    await collect(session.sendTurn({ prompt: "first" }).events());
-    await collect(session.sendTurn({ prompt: "second" }).events());
+    const session = await createManager().open(key, { workingDir: directory });
+    await collect((await startAfter(session, { prompt: "first" })).events());
+    await collect((await startAfter(session, { prompt: "second" })).events());
 
     expect(openai.openSession).toHaveBeenCalledTimes(1);
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
@@ -187,10 +189,10 @@ describe("agent model pins through AgentSessionManager", () => {
     state.openai = reportOf("unauthorized");
     state.anthropic = reportOf("unauthorized");
     let usingRomeCredits = true;
-    const session = await createManager(false, () => usingRomeCredits).acquire(key, {
+    const session = await createManager(false, () => usingRomeCredits).open(key, {
       workingDir: directory,
     });
-    await collect(session.sendTurn({ prompt: "credits" }).events());
+    await collect((await startAfter(session, { prompt: "credits" })).events());
     expect(await sessionRepository.session(session.sessionId)).toMatchObject({
       provider: "openai",
       model: "gpt-6.1-sol",
@@ -199,7 +201,7 @@ describe("agent model pins through AgentSessionManager", () => {
     // Connecting ChatGPT changes only the login: the pinned model keeps running.
     state.openai = reportOf("available");
     usingRomeCredits = false;
-    await collect(session.sendTurn({ prompt: "guardian" }).events());
+    await collect((await startAfter(session, { prompt: "guardian" })).events());
 
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6.1-sol", "gpt-6.1-sol"]);
     expect(openai.openSession).toHaveBeenCalledTimes(1);
@@ -208,53 +210,53 @@ describe("agent model pins through AgentSessionManager", () => {
   it("keeps a pinned Codex session running on credits after ChatGPT disconnects", async () => {
     await writeConfig({ provider: undefined, modelId: undefined, tier: "small" });
     const firstManager = createManager();
-    const first = await firstManager.acquire(key, { workingDir: directory });
-    await collect(first.sendTurn({ prompt: "guardian" }).events());
+    const first = await firstManager.open(key, { workingDir: directory });
+    await collect((await startAfter(first, { prompt: "guardian" })).events());
     await firstManager.shutdown();
 
     state.openai = reportOf("unauthorized");
-    const resumed = await createManager(false, true).acquire(key, { workingDir: directory });
-    await collect(resumed.sendTurn({ prompt: "credits" }).events());
+    const resumed = await createManager(false, true).open(key, { workingDir: directory });
+    await collect((await startAfter(resumed, { prompt: "credits" })).events());
 
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-luna", "gpt-6-luna"]);
   });
 
   it("resumes the saved pin after a manifest change, but uses the new pin for a new session", async () => {
     const firstManager = createManager();
-    const first = await firstManager.acquire(key, { workingDir: directory });
-    await collect(first.sendTurn({ prompt: "establish pin" }).events());
+    const first = await firstManager.open(key, { workingDir: directory });
+    await collect((await startAfter(first, { prompt: "establish pin" })).events());
     await firstManager.shutdown();
 
     await writeConfig({ provider: "anthropic", modelId: "future-model[1m]" });
     const secondManager = createManager();
-    const resumed = await secondManager.acquire(key, { workingDir: directory });
+    const resumed = await secondManager.open(key, { workingDir: directory });
     expect(resumed.sessionId).toBe(first.sessionId);
-    await collect(resumed.sendTurn({ prompt: "resume" }).events());
+    await collect((await startAfter(resumed, { prompt: "resume" })).events());
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
     expect(anthropic.openSession).not.toHaveBeenCalled();
 
-    const fresh = await secondManager.acquire(
+    const fresh = await secondManager.open(
       { ...key, channelThreadKey: "webchat:new-model-pin-test" },
       { workingDir: directory },
     );
-    await collect(fresh.sendTurn({ prompt: "new conversation" }).events());
+    await collect((await startAfter(fresh, { prompt: "new conversation" })).events());
     expect(anthropic.calls.map((call) => call.model)).toEqual(["future-model[1m]"]);
   });
 
   it("allows a guardian override without a tier and persists the override on cold resume", async () => {
     const firstManager = createManager();
-    const first = await firstManager.acquire(key, {
+    const first = await firstManager.open(key, {
       workingDir: directory,
       selectionId: "claude-sonnet",
     });
-    await collect(first.sendTurn({ prompt: "use selected model" }).events());
+    await collect((await startAfter(first, { prompt: "use selected model" })).events());
     await firstManager.shutdown();
 
-    const resumed = await createManager().acquire(key, {
-      workingDir: directory,
-      resumeSessionId: first.sessionId,
-    });
-    await collect(resumed.sendTurn({ prompt: "continue" }).events());
+    const resumed = await createManager().resume(
+      { id: first.sessionId, agent: key.agentName },
+      { workingDir: directory },
+    );
+    await collect((await startAfter(resumed, { prompt: "continue" })).events());
     expect(anthropic.calls.map((call) => call.model)).toEqual([
       "claude-sonnet-5-5",
       "claude-sonnet-5-5",
@@ -264,7 +266,7 @@ describe("agent model pins through AgentSessionManager", () => {
 
   it("fails closed on a disconnected pinned provider even when another provider is healthy", async () => {
     state.openai = reportOf("unauthorized");
-    await expect(createManager().acquire(key, { workingDir: directory })).rejects.toMatchObject({
+    await expect(createManager().open(key, { workingDir: directory })).rejects.toMatchObject({
       code: "model_provider_unavailable",
       provider: "openai",
       reason: "not_logged_in",
@@ -274,10 +276,10 @@ describe("agent model pins through AgentSessionManager", () => {
   });
 
   it("fails a later turn on quota exhaustion and recovers on the same model", async () => {
-    const session = await createManager().acquire(key, { workingDir: directory });
-    await collect(session.sendTurn({ prompt: "first" }).events());
+    const session = await createManager().open(key, { workingDir: directory });
+    await collect((await startAfter(session, { prompt: "first" })).events());
     state.openai = reportOf("usage_limit_reached");
-    const failed = await collect(session.sendTurn({ prompt: "blocked" }).events());
+    const failed = await collect((await startAfter(session, { prompt: "blocked" })).events());
     expect(failed).toContainEqual(
       expect.objectContaining({
         type: "error",
@@ -290,7 +292,7 @@ describe("agent model pins through AgentSessionManager", () => {
     expect(anthropic.openSession).not.toHaveBeenCalled();
 
     state.openai = reportOf("available");
-    await collect(session.sendTurn({ prompt: "retry" }).events());
+    await collect((await startAfter(session, { prompt: "retry" })).events());
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
   });
 
@@ -302,13 +304,13 @@ describe("agent model pins through AgentSessionManager", () => {
       ended: (event) => finished.push(event.turn.turnId),
       couldNotStart: (event) => failedBeforeStart.push(event),
     });
-    const session = await createManager(false, false, lifecycle).acquire(key, {
+    const session = await createManager(false, false, lifecycle).open(key, {
       workingDir: directory,
     });
-    const first = session.sendTurn({ prompt: "first" });
+    const first = await startAfter(session, { prompt: "first" });
     await collect(first.events());
     state.openai = reportOf("usage_limit_reached");
-    const blocked = session.sendTurn({ prompt: "blocked" });
+    const blocked = await startAfter(session, { prompt: "blocked" });
     await collect(blocked.events());
 
     expect(finished).toEqual([first.id]);
@@ -323,7 +325,7 @@ describe("agent model pins through AgentSessionManager", () => {
   it("enforces known model entitlements instead of substituting a tier model", async () => {
     await writeConfig({ modelId: "gpt-6-astra" });
     state.openai = reportOf("available", RESTRICTED_PLAN);
-    await expect(createManager().acquire(key, { workingDir: directory })).rejects.toMatchObject({
+    await expect(createManager().open(key, { workingDir: directory })).rejects.toMatchObject({
       code: "model_unavailable",
       provider: "openai",
       reason: "model_access_denied",
@@ -333,14 +335,14 @@ describe("agent model pins through AgentSessionManager", () => {
   });
 
   it("keeps a child's tier selection independent of a parent's pin on a shared thread", async () => {
-    const parent = await createManager().acquire(key, { workingDir: directory });
-    await collect(parent.sendTurn({ prompt: "parent" }).events());
+    const parent = await createManager().open(key, { workingDir: directory });
+    await collect((await startAfter(parent, { prompt: "parent" })).events());
     await writeConfig({ name: "worker", modelId: undefined, tier: "medium" });
-    const child = await createManager(true).acquire(
+    const child = await createManager(true).open(
       { ...key, agentName: "worker" },
       { workingDir: directory },
     );
-    await collect(child.sendTurn({ prompt: "child" }).events());
+    await collect((await startAfter(child, { prompt: "child" })).events());
     expect(child.sessionId).not.toBe(parent.sessionId);
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, "gpt-6.1-sol"]);
   });

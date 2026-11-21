@@ -4,7 +4,7 @@ import { createTestDb, type TestDb } from "../test/db.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { type Message, type RecordedMessage } from "../chats/storage/message.js";
 import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../db/schema.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import {

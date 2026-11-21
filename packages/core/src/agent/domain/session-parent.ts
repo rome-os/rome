@@ -5,14 +5,14 @@
 // one place that writes and reads that stored form. The strings stay byte for
 // byte, because stored rows resolve by them.
 //
-// The dashboard keeps a second copy of the same link, by its own id for the
-// session (`rome_sessions.parent_session_id`). `rootSession` walks that copy
+// The session's record keeps a second copy of the same link, by the record's
+// id (`rome_sessions.parent_session_id`). `rootSession` walks that copy
 // and `walkToRoot` walks the string. Both find the same root session, except
-// for a fork promoted to a chat: the dashboard then holds it as a chat, its
+// for a fork promoted to a chat: its record then holds it as a chat, its
 // own root, while its string still leads to the chat it was forked from.
 
 import { v4 as uuidv4 } from "uuid";
-import type { DashboardSessions } from "./dashboard-sessions.js";
+import type { RecordedSessions } from "./recorded-sessions.js";
 import type { SessionId } from "./session.js";
 import type { SessionRecordId } from "./subagent.js";
 
@@ -64,7 +64,7 @@ export function walkToRoot(stored: string): StoredRoot {
 }
 
 /**
- * The parent turn's session that a dashboard session of `type` names: only a
+ * The parent turn's session that a recorded session of `type` names: only a
  * subagent's or a fork's session has a parent turn, so any other type has
  * none, whatever parent it names.
  */
@@ -81,14 +81,14 @@ export function parentTurnSession(
 export const MAX_ANCESTORS = 16;
 
 /**
- * The session `id`'s work started from, by the dashboard's id: the session
+ * The session `id`'s work started from, by its record id: the session
  * itself when it has no parent turn, otherwise the first session up its
  * parent turns that has none. When a parent's session is gone, the walk stops
  * at the last session it found, and it stops after MAX_ANCESTORS parents.
- * Null when the dashboard has no session with the id.
+ * Null when no session is recorded with the id.
  */
 export async function rootSession(
-  sessions: Pick<DashboardSessions, "parentSession">,
+  sessions: Pick<RecordedSessions, "parentSession">,
   id: SessionRecordId,
 ): Promise<SessionRecordId | null> {
   let current = id;

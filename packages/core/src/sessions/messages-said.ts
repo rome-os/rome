@@ -1,16 +1,23 @@
 // Agents hearing what Chats records from the channels, and the hook's port
-// onto it. Vocabulary: docs/domains/chats.md#wake.
+// onto it. Vocabulary: docs/domains/participation.md#wake.
 //
 // A message said to Rome wakes an agent or does not, and until that is
 // decided no catch-up reads it. Agents holds it out from the moment Chats
 // raises MessageSaid, and lets it go once the hook that heard it says the wake
 // is decided. Nothing hears through it until the Chats switch.
 
-import type { InboundEvent, MessagesSaid, SaidInboundEvent } from "@rome-os/app-runtime";
+import type {
+  InboundEvent,
+  MessagesSaid,
+  SaidInboundEvent,
+  SaidSender,
+} from "@rome-os/app-runtime";
+import type { SenderLabels } from "../chats/sender-labels.js";
+import { createLogger } from "../logger.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { ChatEvents, MessageSaid } from "../chats/storage/events.js";
 import type { InboundRecording } from "../connections/inbound-recording.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import type { TurnLinks } from "./turn-links.js";
 
 export interface MessagesSaidDeps {
@@ -23,7 +30,12 @@ export interface MessagesSaidDeps {
   events: ChatEvents;
   /** Holds a message out of every catch-up until its wake is decided. */
   wakes: Pick<TurnLinks, "wakeUndecided" | "wakeDecided">;
+  /** Who said a message, the answer Rome's own turns read. Absent, a hook
+   *  hears no sender. */
+  labels?: Pick<SenderLabels, "sender">;
 }
+
+const log = createLogger("messages-said");
 
 /**
  * The hook's port onto recorded messages. Call it before anything else
@@ -50,6 +62,16 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
     recorded: SaidInboundEvent["recorded"];
   };
   const handed = new Map<string, Handed[]>();
+  /** Who said each raise, asked of People once however many hooks hear it. */
+  const senders = new WeakMap<MessageSaid, Promise<SaidSender | undefined>>();
+  const senderOf = (event: MessageSaid): Promise<SaidSender | undefined> => {
+    let answer = senders.get(event);
+    if (!answer) {
+      answer = askSender(deps, event);
+      senders.set(event, answer);
+    }
+    return answer;
+  };
   /** The records handed to hooks that have left, whose late decisions
    *  settle nothing: leaving settled them already. */
   const departed = new WeakSet<SaidInboundEvent["recorded"]>();
@@ -95,11 +117,13 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
           settle(event, hearer);
           throw error;
         }
+        const sender = await senderOf(event);
         // A hook that left while its session opened is owed nothing more.
         if (!owed.get(event)?.has(hearer)) return;
         const recorded: SaidInboundEvent = {
           ...heard,
           recorded: { chatRecordId: speaker, messageId: String(event.message.id) },
+          ...(sender ? { sender } : {}),
         };
         const key = handedKey(recorded.recorded);
         handed.set(key, [
@@ -137,6 +161,24 @@ export function messagesSaid(deps: MessagesSaidDeps): MessagesSaid {
       settle(raise.event, raise.hearer);
     },
   };
+}
+
+/** Who said `event`'s message, or nothing when People could not be asked:
+ *  the hook still hears the message, without a sender. */
+async function askSender(
+  deps: MessagesSaidDeps,
+  event: MessageSaid,
+): Promise<SaidSender | undefined> {
+  if (!deps.labels) return undefined;
+  try {
+    return await deps.labels.sender(event.message.saidBy.account);
+  } catch (error) {
+    log.warn("could not ask People who said a message", {
+      messageId: event.message.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
+  }
 }
 
 /** A raise handed to a hook, as the hook names it back. */

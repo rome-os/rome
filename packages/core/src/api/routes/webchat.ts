@@ -1,5 +1,24 @@
-import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
+import { withTaskCards } from "../../concierge/task-cards.js";
+import {
+  ConciergeTurnTiming,
+  reportConciergeTurn,
+  type TimedEvent,
+} from "../../concierge/turn-timing.js";
+import { ownerOf } from "../../webchat/owner.js";
+import { chatOutputsRoutes } from "./chat-outputs.js";
+import {
+  canOpenChat,
+  type ConciergeService,
+  isConciergeChat,
+  isMainConciergeChat,
+  TASK_CHAT_TRIGGER_KIND,
+} from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
+import type {
+  ChatPendingChecksResponse,
+  ConciergeMessageStatus,
+  MessageWritingEvent,
+} from "@rome/api-types/concierge";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import { existsSync, readFileSync } from "node:fs";
@@ -25,12 +44,13 @@ import {
   type TraceEventDto,
 } from "../trace-segments.js";
 import type {
+  AgentPlan,
   TraceAccounting,
   TraceModelUsage,
   TraceSnapshot,
   TraceTokenUsage,
 } from "@rome/api-types/trace-segments";
-import type { ChatShareSnapshot, ChatShareMessage } from "../share-snapshot.js";
+import { type ChatShareSnapshot, type ChatShareMessage, shareTitleOf } from "../share-snapshot.js";
 import { createRegistryAppResolver } from "../registry-app-resolver.js";
 import {
   ensureWebchatProjectWorkspace,
@@ -44,19 +64,26 @@ import {
 } from "../../webchat/projects.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
 import { sessionTraceCutoff } from "../../webchat/trace-retention.js";
+import { AssetTooLargeError, MAX_ASSET_BYTES } from "../../assets/store.js";
 import { appendUploadPathsToPrompt, saveWebchatUploads } from "../../webchat/uploads.js";
 import {
   TURN_BRANCH_PROMPT_MAX_LENGTH,
   TURN_FEEDBACK_COMMENT_MAX_LENGTH,
   isTurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
-import type { TurnFeedback } from "@rome/api-types/trace-segments";
-import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
+import type { SessionTurnFeedbackResponse, TurnFeedback } from "@rome/api-types/trace-segments";
+import type { MessagePageCursor, StoredTurnFeedback } from "../../webchat/repository.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../agent/index.js";
-import type { AgentTurnHandle } from "../../agent/index.js";
-import { openedInChat } from "../../core/session-conversation.js";
-import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
+import type { AgentSession, AgentTurnHandle } from "../../agent/index.js";
+import { openedInChat, withRomeSession } from "../../core/session-conversation.js";
+import {
+  type Account,
+  checkWidgetUi,
+  type RomeSessionType,
+  type StreamAgentEvent,
+  type WidgetUi,
+} from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import {
@@ -67,7 +94,11 @@ import {
   normalizeWebchatReasoningEffort,
   resolveWebchatLargeModelSelection,
 } from "../../core/model-selector.js";
-import { resolveAgentPolicy, type ModelSelection } from "../../agent/index.js";
+import {
+  resolveAgentPolicy,
+  type ModelSelection,
+  type ModelSelectionId,
+} from "../../agent/index.js";
 import { toModelResolutionErrorPayload } from "../../agent/index.js";
 import type { ModelReasoningEffort } from "../../core/agent-runner.js";
 import type { ForkSourceCheckpoint, ThreadContext } from "../../core/types.js";
@@ -86,32 +117,74 @@ import {
   currentSessionActor,
   sessionOwnerKey,
   type SessionActor,
-} from "../../lib/session-actor.js";
-import type { DashboardInbox } from "../../connections/send.js";
+} from "../../access/session-actor.js";
+import type { DashboardInbox } from "../../webchat/send.js";
+import {
+  admitTaskInput,
+  withoutTaskInputActor,
+  assertTaskInputCurrent,
+  claimTaskInputActor,
+  taskInputActor,
+  refreshTaskInputActor,
+  type TaskInputClaim,
+} from "../../webchat/task-input-actor.js";
 import {
   resolveChatSenders,
   resolveAutomatedSender,
   automatedMessageNotice,
 } from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
-import { automatedSenderId } from "../../webchat/automated-source.js";
+import { automatedSenderId, automatedSource } from "../../webchat/automated-source.js";
+import {
+  automatedInputLabel,
+  automatedInputPrompt,
+  automatedInputSource,
+  fromOwner,
+} from "../../concierge/automated-input.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../agent/index.js";
+import { MessageWriting, messageWritingModeOf } from "./message-writing.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
+import { EMPTY_WORKSPACE_CONTEXT } from "../../core/sticky-headers.js";
 import type {
   BackendEmitOptions,
   BackendSessionTask,
   BackendTurnOptions,
-} from "../../actions/backend-turn.js";
+} from "../../app-host/backend-turn.js";
 import { z } from "zod";
 import { withReplyContext } from "../../agent/index.js";
+import {
+  answersFromQuestionCard,
+  parseAskQuestionInput,
+  type Question,
+  questionCardFromAnswers,
+  questionCardUi,
+} from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
+import { connectCardUiFromProps } from "../../connections/connect-card.js";
+import { claimAgentCard, isShowCardTool } from "../../chats/agent-card.js";
+import { ASKING_DEVICE_HEADER, withAskingDevice } from "../../connections/device/live-route.js";
+import {
+  locationAnswerPrompt,
+  locationCardUiFromProps,
+  storedLocationAnswer,
+} from "../../webchat/location-card.js";
+import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
+import { cameThroughWidgetEvent } from "./widget-events.js";
+
+/** The agent of a chat that saved no agent, under the name its sessions are saved by. */
+const MAIN_AGENT = "core:main";
 
 const log = createLogger("api:webchat");
 
 const inputPrioritySchema = z.enum(["now", "next"]).optional();
 
 // Client-sent parts never carry a reply: only `replyToMessageId` builds one.
+/** The line that names the guardian's message to the Concierge, so an answer can name it as `replyTo`. */
+function chatThreadLine(messageId: string): string {
+  return `<chat_thread message_id="${messageId}"/>`;
+}
+
 const isReplyToPart = (part: unknown): boolean =>
   typeof part === "object" && part !== null && (part as { type?: unknown }).type === "reply_to";
 
@@ -233,6 +306,16 @@ function routeError(refused: RouteAnswer): string {
 }
 
 /** What `POST /chat/sessions` takes. */
+/** A chat Rome starts for an owner, such as a task chat the Concierge hands work to. */
+export interface ChatStart {
+  agentName?: string;
+  projectPath?: string;
+  /** The chat's model, stored as a model menu pick is, whatever the model selector says. */
+  model?: ModelSelectionId;
+  /** The effort its messages run at when they name none. */
+  reasoningEffort?: ModelReasoningEffort;
+}
+
 export interface NewChatBody {
   name?: string;
   personaId?: string;
@@ -275,8 +358,8 @@ type WebchatEventName =
 // `routineKey` is set for an `activate: true` call: the key its routine was
 // created with, so the card's lookup finds it and opens saved.
 async function persistRoutineDraftCard(
-  webchatRepo: import("../../db/repositories/webchat.js").WebChatRepository,
-  actionRegistry: import("../../actions/types.js").ActionRegistry,
+  webchatRepo: import("../../webchat/repository.js").WebChatRepository,
+  actionRegistry: import("../../apps/actions/types.js").ActionRegistry,
   sessionId: string,
   turnId: string,
   toolUseId: string,
@@ -328,24 +411,33 @@ async function persistRoutineDraftCard(
   }
 }
 
-// Snapshot a suspension into a first-class assistant card message — a
-// `pending_interaction` part for an inline component. Unlike the ask_user /
+// Snapshot an app's card into a first-class assistant card message — a
+// `pending_interaction` part for an inline component that waits, a `widget`
+// part for one that does not. Unlike the ask_user /
 // routine cards (built from the tool INPUT), this is built from the action
 // RESULT: the agent-session executeAction shim returns
 // `{ pendingInteraction: true, ... }` on the tool_result. `toolUseId` is the correlation key the component /
 // surface cites when it posts its result back.
-async function persistSuspensionCard(
-  webchatRepo: import("../../db/repositories/webchat.js").WebChatRepository,
+//
+// A Concierge chat's card replies to the message the `ask_question` call
+// named, and to nothing when it names none.
+async function persistCard(
+  webchatRepo: import("../../webchat/repository.js").WebChatRepository,
   sessionId: string,
   turnId: string,
-  part: Extract<MessagePart, { type: "pending_interaction" }>,
+  part: Extract<MessagePart, { type: "pending_interaction" | "widget" }>,
+  replies?: CardReplies,
 ): Promise<void> {
   try {
     // Push live (message_insert) so the card appears in the transcript as the
     // turn streams, not only on the post-turn reload. `addMessage` is silent.
-    await webchatRepo.addBackendMessage(sessionId, turnId, [part]);
+    if (replies) {
+      await replies.concierge.addCard(sessionId, turnId, part, replies.named.get(part.toolUseId));
+    } else {
+      await webchatRepo.addBackendMessage(sessionId, turnId, [part]);
+    }
   } catch (err) {
-    log.warn("failed to persist suspension card", {
+    log.warn("failed to persist card", {
       sessionId,
       turnId,
       toolUseId: part.toolUseId,
@@ -353,6 +445,17 @@ async function persistSuspensionCard(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/** How a Concierge chat's cards reply: the message each `ask_question` call named, by tool-use id. */
+type CardReplies = { concierge: ConciergeService; named: Map<string, string> };
+
+/** The message an `ask_question` call names for its card to reply to, if it names one. */
+function askedReplyTo(msg: Extract<AgentEvent, { type: "tool_use" }>): string | undefined {
+  const named = (msg.input as { replyTo?: unknown } | undefined)?.replyTo;
+  return typeof named === "string" && named.trim() && /(^|__)ask_question$/.test(msg.tool)
+    ? named.trim()
+    : undefined;
 }
 
 /** A suspension pulled from an action's tool_result: an inline component the
@@ -378,10 +481,9 @@ type PendingInteractionPart = Extract<MessagePart, { type: "pending_interaction"
 const isProposeRoutineTool = (tool: unknown): boolean =>
   typeof tool === "string" && (tool === "propose_routine" || tool.endsWith("__propose_routine"));
 
-/** Pull a suspension descriptor (`pendingInteraction: true`) out of an action's tool_result output, whether it arrived structured or
- * JSON-serialized through the Rome tools. Returns null for any non-suspended
- * result so the drain loop ignores ordinary tool calls. */
-function readSuspensionFromOutput(output: unknown): Suspension | null {
+/** The object an action's tool_result carries, whether it arrived structured
+ * or JSON-serialized through the Rome tools, or null for any other output. */
+function toolOutputObject(output: unknown): Record<string, unknown> | null {
   let value: unknown = output;
   // A Rome tool_result surfaces as `[{ type: "text", text: "<json>" }]`
   // (or `{ content: [...] }`); unwrap to the JSON text the action returned.
@@ -408,6 +510,141 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
   }
   if (!value || typeof value !== "object") return null;
   const o = value as Record<string, unknown>;
+  return o;
+}
+
+type OmitEach<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+type ShownWidgetPart = OmitEach<Extract<MessagePart, { type: "widget" }>, "type" | "toolUseId"> & {
+  /** The agent waits on the card until one of its events answers it. */
+  waits?: boolean;
+};
+
+/** A widget that does not wait, pulled from an action's tool_result
+ * (`showWidget: true`, written by `actionToolOutput`), or null for any other
+ * result. `appId` is the app that owns the action. A described card (`ui`)
+ * is checked again here, since the stored part is drawn on every load. */
+function readWidgetFromOutput(output: unknown): ShownWidgetPart | null {
+  const o = toolOutputObject(output);
+  if (!o || o.showWidget !== true) return null;
+  if (typeof o.appId !== "string" || typeof o.text !== "string") return null;
+  if (o.ui !== undefined) {
+    const bind = o.bind ?? {};
+    if (checkWidgetUi(o.ui, bind).length > 0) return null;
+    return {
+      appId: o.appId,
+      text: o.text,
+      ui: o.ui as WidgetUi,
+      ...(o.bind ? { bind: o.bind as Record<string, string> } : {}),
+      ...(o.waits === true ? { waits: true } : {}),
+    };
+  }
+  if (typeof o.componentId !== "string") return null;
+  const props =
+    o.props && typeof o.props === "object" && !Array.isArray(o.props)
+      ? (o.props as Record<string, unknown>)
+      : undefined;
+  return {
+    appId: o.appId,
+    componentId: o.componentId,
+    ...(props ? { props } : {}),
+    text: o.text,
+  };
+}
+
+// Matched by name: a provider drops the `mcp__<server>__` prefix, so a tool of
+// the same name on an agent's external MCP server matches too (ZHA-171).
+const isExecuteActionTool = (tool: unknown): boolean =>
+  typeof tool === "string" && (tool === "execute_action" || tool.endsWith("__execute_action"));
+
+/** The action an `execute_action` tool call names, or undefined for any other
+ *  tool call. */
+function executedActionName(msg: Extract<AgentEvent, { type: "tool_use" }>): string | undefined {
+  if (!isExecuteActionTool(msg.tool)) return undefined;
+  const name = (msg.input as { action_name?: unknown } | undefined)?.action_name;
+  return typeof name === "string" ? name : undefined;
+}
+
+type WidgetPart = Extract<MessagePart, { type: "widget" }>;
+
+/**
+ * The widget a tool_result shows, when Rome may store it. Tool output is not
+ * proof of where it came from: an action's own data, a shell command or
+ * another tool can print the same JSON. So a widget is stored only from a
+ * tool call named `execute_action` (`actionName`), only for the app that owns
+ * that action, and only when that app is installed and declares the component
+ * (a described card names none).
+ */
+function trustedWidget(
+  msg: Extract<AgentEvent, { type: "tool_result" }>,
+  actionName: string | undefined,
+  deps: Pick<ApiDeps, "appCatalog" | "actionRegistry">,
+  sessionId: string,
+): WidgetPart | PendingInteractionPart | null {
+  const widget = readWidgetFromOutput(msg.output);
+  if (!widget) return null;
+  // An agent card is Rome's own: stored only as the card core's `show_card`
+  // kept under the token in its output, never as the output prints it, since
+  // any tool can be named `show_card` (docs/domains/chats.md#agent-card).
+  if (widget.appId === "core") {
+    const card =
+      isShowCardTool(msg.tool) && actionName === undefined
+        ? claimAgentCard(toolOutputObject(msg.output)?.cardToken, msg.toolUseId)
+        : null;
+    if (card) return card;
+    log.warn("rejected widget: a core card core's show_card did not issue", {
+      sessionId,
+      tool: typeof msg.tool === "string" ? msg.tool : undefined,
+    });
+    return null;
+  }
+  const owner = actionName ? deps.actionRegistry.getMetadata?.(actionName) : undefined;
+  if (owner?.ownerType !== "app" || owner.ownerId !== widget.appId) {
+    log.warn("rejected widget: not shown by an action its app owns", {
+      sessionId,
+      appId: widget.appId,
+      tool: typeof msg.tool === "string" ? msg.tool : undefined,
+      actionName,
+    });
+    return null;
+  }
+  const resolvedApp = deps.appCatalog.listResolved().find((a) => a.appId === widget.appId);
+  if (!resolvedApp) {
+    log.warn("rejected widget: app not installed", { sessionId, appId: widget.appId });
+    return null;
+  }
+  if (
+    "componentId" in widget &&
+    !(resolvedApp.manifest.components ?? []).includes(widget.componentId)
+  ) {
+    log.warn("rejected widget: component not declared by app", {
+      sessionId,
+      appId: widget.appId,
+      componentId: widget.componentId,
+    });
+    return null;
+  }
+  if ("ui" in widget && widget.waits) {
+    // A described card the agent waits on is the same card as a pending
+    // interaction, so the chat waits on it and its answer resumes the agent.
+    return {
+      type: "pending_interaction",
+      toolUseId: msg.toolUseId,
+      appId: widget.appId,
+      render: { kind: "inline", ui: widget.ui, ...(widget.bind ? { bind: widget.bind } : {}) },
+      // The card's line, for a reader that cannot draw it.
+      text: widget.text,
+    };
+  }
+  const { waits: _waits, ...shown } = widget;
+  return { type: "widget", toolUseId: msg.toolUseId, ...shown };
+}
+
+/** Pull a suspension descriptor (`pendingInteraction: true`) out of an action's tool_result output, whether it arrived structured or
+ * JSON-serialized through the Rome tools. Returns null for any non-suspended
+ * result so the drain loop ignores ordinary tool calls. */
+function readSuspensionFromOutput(output: unknown): Suspension | null {
+  const o = toolOutputObject(output);
+  if (!o) return null;
   if (typeof o.appId !== "string") return null;
   const asRecord = (v: unknown): Record<string, unknown> | undefined =>
     v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
@@ -439,6 +676,14 @@ const BUILTIN_CARDS: ReadonlyArray<{ componentId: string; emittedBy: (tool: stri
       emittedBy: (tool) => tool === "ask_question" || tool.endsWith("__ask_question"),
     },
     { componentId: "ai-tools-card", emittedBy: (tool) => tool === "connect_ai" },
+    {
+      componentId: "connect-card",
+      emittedBy: (tool) => tool === "connect_account" || tool.endsWith("__connect_account"),
+    },
+    {
+      componentId: LOCATION_CARD_ID,
+      emittedBy: (tool) => tool === "share_location" || tool.endsWith("__share_location"),
+    },
   ];
 
 /** Validate and shape a host-owned suspension a tool result may emit.
@@ -456,6 +701,19 @@ function buildBuiltinCard(
   const toolName = typeof msg.tool === "string" ? msg.tool : "";
   const card = BUILTIN_CARDS.find((c) => c.componentId === suspension.componentId);
   if (card && suspension.appId === "core" && card.emittedBy(toolName)) {
+    // The question card described as data, built here from its questions so
+    // the agent never carries it in its context and no tool can supply one.
+    // Readers that know `ui` draw it; older ones draw their own question card
+    // from `props`.
+    const questions =
+      suspension.componentId === "question-card" ? parseAskQuestionInput(suspension.props) : null;
+    // The connect card described as data, built here for the same reason.
+    const connectUi =
+      suspension.componentId === "connect-card" ? connectCardUiFromProps(suspension.props) : null;
+    const locationUi =
+      suspension.componentId === LOCATION_CARD_ID
+        ? locationCardUiFromProps(suspension.props)
+        : null;
     return {
       type: "pending_interaction",
       toolUseId: msg.toolUseId,
@@ -466,6 +724,9 @@ function buildBuiltinCard(
         props: suspension.props,
         builtin: true,
         ...(suspension.requiresCard ? { requiresCard: true } : {}),
+        ...(questions?.ok ? { ui: questionCardUi(questions.questions) } : {}),
+        ...(connectUi ? { ui: connectUi } : {}),
+        ...(locationUi ? { ui: locationUi } : {}),
       },
     };
   }
@@ -489,31 +750,8 @@ function readPlaceWidgetFromOutput(output: unknown): {
   route?: string;
   params?: Record<string, string | number | boolean>;
 } | null {
-  let value: unknown = output;
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const content = (value as { content?: unknown }).content;
-    if (Array.isArray(content)) value = content;
-  }
-  if (Array.isArray(value)) {
-    const textBlock = value.find(
-      (b): b is { type: "text"; text: string } =>
-        !!b &&
-        typeof b === "object" &&
-        (b as { type?: unknown }).type === "text" &&
-        typeof (b as { text?: unknown }).text === "string",
-    );
-    value = textBlock?.text;
-  }
-  if (typeof value === "string") {
-    try {
-      value = JSON.parse(value);
-    } catch {
-      return null;
-    }
-  }
-  if (!value || typeof value !== "object") return null;
-  const o = value as Record<string, unknown>;
-  if (o.placeWidget !== true) return null;
+  const o = toolOutputObject(output);
+  if (!o || o.placeWidget !== true) return null;
   if (typeof o.appId !== "string") return null;
   // `route` addresses a screen inside the app; `params` are flat scalar query
   // params. Both are agent-supplied, so accept only well-formed shapes and drop
@@ -595,10 +833,32 @@ interface OpenSuspensionCard {
   /** A host-owned built-in card (a question or the connect-AI card) that a
    * typed chat reply dismisses — mirrors rome-web's auto-dismiss rule. */
   dismissedByReply?: boolean;
+  /** The questions of an open question card, to read its answers by. */
+  questions?: Question[];
+  /** A share-location card, whose answer the agent reads in its own words. */
+  location?: true;
+  /** The message that holds the card. */
+  messageId: string;
+  /** An app's card described as data: only the app answers it, through the
+   *  widget route. */
+  answeredByOwner: boolean;
+}
+
+/** The message an `interaction_result` part says holds its card, when it says. */
+function addressedMessageId(parts: unknown, toolUseId: string): string | undefined {
+  if (!Array.isArray(parts)) return undefined;
+  const part = parts.find(
+    (p) =>
+      !!p &&
+      typeof p === "object" &&
+      (p as { type?: unknown }).type === "interaction_result" &&
+      (p as { toolUseId?: unknown }).toolUseId === toolUseId,
+  ) as { messageId?: unknown } | undefined;
+  return typeof part?.messageId === "string" ? part.messageId : undefined;
 }
 
 async function findOpenSuspensions(
-  webchatRepo: import("../../db/repositories/webchat.js").WebChatRepository,
+  webchatRepo: import("../../webchat/repository.js").WebChatRepository,
   sessionId: string,
 ): Promise<Map<string, OpenSuspensionCard>> {
   // Matching is order-aware because provider toolUseIds are only unique within
@@ -620,13 +880,43 @@ async function findOpenSuspensions(
       const part = p as {
         type?: unknown;
         toolUseId?: unknown;
-        render?: { builtin?: unknown; componentId?: unknown };
+        appId?: unknown;
+        render?: {
+          builtin?: unknown;
+          componentId?: unknown;
+          props?: { questions?: unknown };
+          ui?: unknown;
+        };
       };
-      if (part.type === "pending_interaction" && typeof part.toolUseId === "string") {
+      // Only a card the agent said opens a wait; a turn cannot carry one.
+      if (
+        part.type === "pending_interaction" &&
+        typeof part.toolUseId === "string" &&
+        msg.role === "assistant"
+      ) {
+        const builtin = part.render?.builtin === true;
+        const questions =
+          builtin && part.render?.componentId === "question-card"
+            ? parseAskQuestionInput(part.render?.props)
+            : null;
         cards.set(part.toolUseId, {
           dismissedByReply:
-            part.render?.builtin === true &&
-            BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
+            builtin && BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
+          ...(questions?.ok ? { questions: questions.questions } : {}),
+          ...(builtin && part.render?.componentId === LOCATION_CARD_ID
+            ? { location: true as const }
+            : {}),
+          messageId: msg.id,
+          // A card whose owner decides its answer: an app's card described as
+          // data, core's connect card, which answers once the connection works,
+          // or core's share-location card, which checks the position it is sent.
+          answeredByOwner:
+            (part.appId !== "core" &&
+              part.render?.ui !== undefined &&
+              part.render?.componentId === undefined) ||
+            (builtin &&
+              (part.render?.componentId === "connect-card" ||
+                part.render?.componentId === LOCATION_CARD_ID)),
         });
       } else if (part.type === "interaction_result" && typeof part.toolUseId === "string") {
         cards.delete(part.toolUseId);
@@ -662,12 +952,39 @@ interface StreamSubscriber {
   queue: Promise<void>;
 }
 
+/**
+ * The tool a session's turn is in: the latest open call of its unfinished
+ * stream that has one. The queue also holds streams still waiting their
+ * turn, which have no calls, so the newest stream is not the running one.
+ */
+export function openToolOf(
+  streams: readonly Pick<ActiveWebchatStream, "finished" | "openTools">[],
+): string | null {
+  const running = [...streams]
+    .reverse()
+    .find((stream) => !stream.finished && stream.openTools.size > 0);
+  return [...(running?.openTools.values() ?? [])].at(-1) ?? null;
+}
+
+/** The plan of a chat's running turn, as its Plan card shows it: the latest
+ *  unfinished stream that has one. A send queued behind it has none yet. */
+export function turnPlanOf(
+  streams: readonly Pick<ActiveWebchatStream, "finished" | "segmentBuilder">[],
+): AgentPlan | null {
+  for (const stream of [...streams].reverse()) {
+    if (stream.finished) continue;
+    const plan = stream.segmentBuilder.snapshot().summary.plan;
+    if (plan?.steps.length) return plan;
+  }
+  return null;
+}
+
 interface ActiveWebchatStream {
   streamId: string;
   sessionId: string;
   /**
    * The turnId the stream was opened under: the one allocated by
-   * `AgentSession.sendTurn` for a user turn, or a synthetic `backend:` id for
+   * `AgentSession.submit` for a user turn, or a synthetic `backend:` id for
    * a backend task. Used in the URL for `/turns/:turnId/stream` and
    * `/turns/:turnId/interrupt`.
    */
@@ -680,6 +997,8 @@ interface ActiveWebchatStream {
   agentTurnId?: string;
   /** A backend turn that is housekeeping for its agent; see `BackendTurnOptions`. */
   quiet?: boolean;
+  /** A quiet turn has said something in its chat, so it shows as running from then on. */
+  spoke?: boolean;
   /** A Stop request reached the stream's turn. */
   stopRequested?: boolean;
   startedAt: string;
@@ -696,13 +1015,19 @@ interface ActiveWebchatStream {
    * accumulation resets at the *block boundary* (a complete `text` block),
    * never on tool_use — what to show during tool calls is client policy
    * (delayed fold: keep the last block until the next one starts). Transient —
-   * the durable reply is still persisted via `send_message` on `result`.
+   * the durable reply is still persisted via `system:send_message` on `result`.
    */
   assistantText: string;
   assistantBlockIx: number;
   persistedTraceEventCount: number;
   tracePersistPromise: Promise<void> | null;
   segmentBuilder: SegmentBuilder;
+  /**
+   * The turn's tool calls whose results have not come back, by call id, in
+   * the order they started. A call without an id is keyed by its position
+   * and closes at the next result without one.
+   */
+  openTools: Map<string, string>;
   subscribers: Map<string, StreamSubscriber>;
   cleanupTimer: ReturnType<typeof setTimeout> | null;
   onFinish: Promise<void>;
@@ -710,6 +1035,33 @@ interface ActiveWebchatStream {
   interrupt?: (reason?: string) => Promise<void>;
   agentName: string;
   channelThreadKey: string | null;
+  /** How the turn shows the typing dots, from its first event on. */
+  writing?: MessageWriting;
+  /** The turn called a tool: a message it takes from then on joins it while it runs. */
+  calledTool?: boolean;
+  /** A Concierge chat's turn: how long it took as its owner sees it (concierge/turn-timing.ts). */
+  timing?: ConciergeTurnTiming;
+}
+
+/** Whether a message's stored parts say something to read: a say, a forwarded
+ *  result, or an agent card the agent composed. A card that asks or connects
+ *  something is not one. */
+function carriesWords(content: string): boolean {
+  try {
+    const parts = JSON.parse(content) as unknown;
+    return (
+      Array.isArray(parts) &&
+      parts.some((p) => {
+        const part = p as { type?: unknown; appId?: unknown; ui?: unknown } | null;
+        return (
+          part?.type === "text" ||
+          (part?.type === "widget" && part.appId === "core" && part.ui !== undefined)
+        );
+      })
+    );
+  } catch {
+    return false;
+  }
 }
 
 interface IncomingWebchatUpload {
@@ -744,9 +1096,9 @@ export interface WebchatRuntime {
     options?: BackendTurnOptions,
   ): Promise<void>;
   /**
-   * Emits `session_running` whenever a chat starts or stops running a turn,
-   * after first emitting one for every chat running now. Returns the
-   * unsubscribe.
+   * Emits `session_running` when a chat starts or stops a turn, after
+   * replaying every running chat. Also emits `agent_name_changed` on a rename.
+   * Returns the unsubscribe.
    */
   subscribeStatusEvents(emit: LiveEventEmit): () => void;
   /**
@@ -757,17 +1109,35 @@ export interface WebchatRuntime {
   subscribeSessionEvents(sessionId: string, emit: LiveEventEmit): () => void;
   /** Whether the id names a session the session events stream serves. */
   hasStoredSession(sessionId: string): Promise<boolean>;
-  /** The dashboard's side of a send into one of its chats (connections/send.ts). */
+  /** The dashboard's side of a send into one of its chats (webchat/send.ts). */
   post: DashboardInbox["post"];
   /** Start a chat owned by `ownerKey`, as `POST /chat/sessions` does, and answer
    *  its id. Throws the route's error. */
-  startChat(input: { agentName?: string; projectPath?: string }, ownerKey: string): Promise<string>;
+  startChat(input: ChatStart, ownerKey: string): Promise<string>;
   /** Opens the runtime session of a chat that has had no turn yet, and answers its id. */
   openSession(chatId: string): Promise<string>;
   /** Sends `text` into the chat as the guardian's own message, as their composer does. Throws the route's error. */
   sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
+  /**
+   * Whether the chat is running a turn its owner sees: any but a quiet one
+   * that has not said anything yet, as the transcript shows it.
+   */
+  isBusy(sessionId: string): boolean;
+  /**
+   * The tool the chat's running turn is in now: its latest call whose result
+   * has not come back, as the trace names it. Null when it is in none.
+   */
+  openTool(sessionId: string): string | null;
+  /** The plan of the chat's running turn, as its Plan card shows it, or null for none. */
+  turnPlan(sessionId: string): AgentPlan | null;
+  /**
+   * Calls `listener` with the chat's id whenever it starts or stops running a
+   * turn, or its running turn enters or leaves a tool; the latter alone comes
+   * with `toolOnly`. Returns the unsubscribe.
+   */
+  onTurnChange(listener: (sessionId: string, change: { toolOnly?: boolean }) => void): () => void;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
   activeTurns(sessionId: string): string[];
   /** Stop a turn. A turn that already ended is not an error. */
@@ -804,35 +1174,185 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const activeStreams = new Map<string, ActiveWebchatStream[]>();
   /**
    * secondary index for direct lookup by turnId. Populated when a
-   * stream is enqueued (turnId is known by then because sendTurn is sync),
+   * stream is enqueued (turnId is known by then because submit answers it at once),
    * and again under `agentTurnId` once a backend stream learns it.
    * URL routes `/turns/:turnId/...` resolve via this map.
    */
   const streamsByTurnId = new Map<string, ActiveWebchatStream>();
+  /** Input turns given a stream, until they end, so a turn gets one stream however many inputs land in it. */
+  const attachedTurns = new Set<string>();
 
   /** Listeners told when a session starts or stops running a turn. */
   const runningListeners = new Set<(event: { sessionId: string; running: boolean }) => void>();
+  /** Listeners told how a running turn shows the typing dots (`message_writing`). */
+  const writingListeners = new Set<(event: MessageWritingEvent) => void>();
+  const writingEventOf = (stream: ActiveWebchatStream): MessageWritingEvent | null =>
+    stream.writing
+      ? {
+          sessionId: stream.sessionId,
+          turnId: stream.agentTurnId ?? stream.turnId,
+          mode: stream.writing.mode,
+          // A quiet turn shows no dots until it has said something.
+          writing: !stream.finished && stream.writing.writing && !(stream.quiet && !stream.spoke),
+        }
+      : null;
+  const publishWriting = (stream: ActiveWebchatStream): void => {
+    const event = writingEventOf(stream);
+    if (!event) return;
+    for (const listener of writingListeners) listener(event);
+  };
+  /**
+   * Takes a stream's next agent event for its typing dots. Its first event
+   * settles the turn's mode, by its provider, and tells it.
+   */
+  const trackWriting = (
+    stream: ActiveWebchatStream,
+    msg: Parameters<MessageWriting["on"]>[0],
+  ): void => {
+    stream.timing?.event(msg as TimedEvent);
+    // A working tool call that runs long shows the turn's open messages
+    // working (docs/domains/chats.md#status). Only a Concierge chat has open ones.
+    if (msg.type === "tool_use") {
+      stream.calledTool = true;
+      if (msg.tool && msg.id) {
+        void deps.concierge?.messageStatus?.toolCalled(
+          stream.sessionId,
+          stream.agentTurnId ?? stream.turnId,
+          msg.tool,
+          msg.id,
+        );
+      }
+    } else if (msg.type === "tool_result" && msg.toolUseId) {
+      deps.concierge?.messageStatus?.toolEnded(
+        stream.sessionId,
+        stream.agentTurnId ?? stream.turnId,
+        msg.toolUseId,
+      );
+    }
+    if (!stream.writing) {
+      const owner = stream.channelThreadKey
+        ? deps.agentSessionManager.find({
+            agentName: stream.agentName,
+            channelThreadKey: stream.channelThreadKey,
+          })
+        : undefined;
+      stream.writing = new MessageWriting(messageWritingModeOf(owner?.providerId));
+      stream.writing.on(msg);
+      publishWriting(stream);
+      return;
+    }
+    if (stream.writing.on(msg) !== null) publishWriting(stream);
+  };
   // Same definition as `GET /chat/sessions/:id/turns`: chat streams here plus
-  // turns in the shared registry, such as a side chat's first answer.
+  // turns in the shared registry, such as a fork chat's first answer.
   const isSessionRunning = (sessionId: string): boolean =>
     (activeStreams.get(sessionId)?.some((stream) => !stream.finished) ?? false) ||
     deps.agentTurnStreamRegistry.listBySession(sessionId).length > 0;
   // Sessions running right now, so a status stream can open with a snapshot.
   const runningSessions = new Set<string>();
+  /** Listeners told when a session's running turn changes in any way, tools included. */
+  const turnListeners = new Set<(sessionId: string, change: { toolOnly?: boolean }) => void>();
+  const notifyTurn = (sessionId: string, change: { toolOnly?: boolean } = {}): void => {
+    for (const listener of turnListeners) listener(sessionId, change);
+  };
   const notifyRunning = (sessionId: string): void => {
     const event = { sessionId, running: isSessionRunning(sessionId) };
     if (event.running) runningSessions.add(sessionId);
     else runningSessions.delete(sessionId);
     for (const listener of runningListeners) listener(event);
+    notifyTurn(sessionId);
   };
+  const isSessionBusy = (sessionId: string): boolean =>
+    (activeStreams.get(sessionId) ?? []).some(
+      (stream) => !stream.finished && (!stream.quiet || stream.spoke),
+    ) || deps.agentTurnStreamRegistry.listBySession(sessionId).length > 0;
+  // The unfinished streams of a chat whose turn is `turnId`, by either id it goes by.
+  const streamsOfTurn = (sessionId: string, turnId: string | null | undefined) =>
+    turnId
+      ? (activeStreams.get(sessionId) ?? []).filter(
+          (stream) =>
+            !stream.finished && (stream.turnId === turnId || stream.agentTurnId === turnId),
+        )
+      : [];
+  // The unfinished stream timing the turn that took owner message `messageKey`.
+  const streamOfMessage = (sessionId: string, messageKey: string) =>
+    (activeStreams.get(sessionId) ?? []).find(
+      (stream) => !stream.finished && stream.timing?.start.messageKey === messageKey,
+    );
+  // A quiet turn shows once it says something.
+  deps.webchatRepo.onMessageInserted((message) => {
+    if (message.role !== "assistant") return;
+    // A message times only the turn that said it: another turn may be queued
+    // or still finishing in the same chat.
+    if (carriesWords(message.content)) {
+      for (const stream of streamsOfTurn(message.sessionId, message.turnId)) {
+        stream.timing?.said();
+      }
+    }
+    let changed = false;
+    for (const stream of activeStreams.get(message.sessionId) ?? []) {
+      if (!stream.finished && stream.quiet && !stream.spoke) {
+        stream.spoke = true;
+        changed = true;
+        // Its typing dots were held back until now.
+        if (stream.writing?.writing) publishWriting(stream);
+      }
+    }
+    if (changed) notifyTurn(message.sessionId);
+  });
+  // 👀 and a reaction on the owner's message time the turn that took it, as
+  // the owner sees them, whatever set them: a long tool call, a task made
+  // for the message, or the Concierge's own reaction. Watched only while a
+  // timed turn runs: the status watch reads the store on every task change.
+  let timedRunning = 0;
+  let stopSignWatch: (() => void) | null = null;
+  const timeTurn = (stream: ActiveWebchatStream, timing: ConciergeTurnTiming): void => {
+    stream.timing = timing;
+    timedRunning += 1;
+    if (stopSignWatch) return;
+    const stopStatus = deps.concierge?.onMessageStatus?.((event) => {
+      if (event.status !== "working") return;
+      streamOfMessage(event.sessionId, event.messageId)?.timing?.working();
+    });
+    const stopReaction = deps.webchatRepo.onMessageReaction((event) => {
+      if (event.reaction) streamOfMessage(event.sessionId, event.messageId)?.timing?.reacted();
+    });
+    stopSignWatch = () => {
+      stopStatus?.();
+      stopReaction();
+    };
+  };
+  const releaseSignWatch = (): void => {
+    timedRunning = Math.max(0, timedRunning - 1);
+    if (timedRunning > 0 || !stopSignWatch) return;
+    stopSignWatch();
+    stopSignWatch = null;
+  };
+  const openTool = (sessionId: string): string | null =>
+    openToolOf(activeStreams.get(sessionId) ?? []);
+  const turnPlan = (sessionId: string): AgentPlan | null =>
+    turnPlanOf(activeStreams.get(sessionId) ?? []);
   deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
+  // A task that ended closes its chat's cards, so the chat waits on no one:
+  // a stop's `session_running` is every client's cue to read the list again,
+  // even when no turn ran, as on a Stop from the Tasks panel or a wait's expiry.
+  deps.concierge?.deps?.tasks?.onEnded?.((row) => {
+    if (row.sessionId) notifyRunning(row.sessionId);
+  });
   const subscribeStatusEvents = (emit: LiveEventEmit): (() => void) => {
     const listener = (event: { sessionId: string; running: boolean }) =>
       emit("session_running", event);
     runningListeners.add(listener);
+    const unsubscribeName = deps.agentNameEvents?.subscribe(emit);
+    // A press's turn ended: the task panel stops waiting on it.
+    const unsubscribeInputs = deps.concierge?.onInputsSettled?.((event) =>
+      emit("inputs_settled", event),
+    );
     for (const sessionId of runningSessions) listener({ sessionId, running: true });
     return () => {
       runningListeners.delete(listener);
+      unsubscribeName?.();
+      unsubscribeInputs?.();
     };
   };
   // `session_running` here is the open chat's cue to look up the turn to
@@ -844,16 +1364,54 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
     runningListeners.add(runningListener);
     if (runningSessions.has(sessionId)) runningListener({ sessionId, running: true });
+    // The typing dots: how the running turn shows them, its latest at once.
+    const writingListener = (event: MessageWritingEvent) => {
+      if (event.sessionId === sessionId) emit("message_writing", event);
+    };
+    writingListeners.add(writingListener);
+    for (const stream of activeStreams.get(sessionId) ?? []) {
+      const event = !stream.finished ? writingEventOf(stream) : null;
+      if (event) writingListener(event);
+    }
+    // A message arrives as a page would hand it out: a task card with its
+    // card, and a message in a chat thread with its thread and the thread's
+    // name. Nothing places it later. One queue keeps the order they were said in.
+    let inserting: Promise<void> = Promise.resolve();
     const unsubscribeMessages = deps.webchatRepo.onMessageInserted((message) => {
-      if (message.sessionId === sessionId) emit("message_insert", message);
+      if (message.sessionId !== sessionId) return;
+      inserting = inserting.then(async () => {
+        try {
+          const [filled] = await fillTaskCards(sessionId, [message]);
+          emit("message_insert", filled ?? message);
+        } catch {
+          emit("message_insert", message);
+        }
+      });
+    });
+    // A card a task card shows settled: the client patches it in place.
+    const unsubscribeCards = deps.concierge?.onCardSettled((event) => {
+      if (event.sessionId === sessionId) emit("chat_card_settled", event);
     });
     const unsubscribeSessionName = deps.webchatRepo.onSessionNameChanged((event) => {
       if (event.sessionId === sessionId) emit("session_name", event);
     });
+    // A reaction is no message, so it only changes the bubble and never
+    // pushes (docs/domains/chats.md#reaction).
+    const unsubscribeReaction = deps.webchatRepo.onMessageReaction((event) => {
+      if (event.sessionId === sessionId) emit("message_reaction", event);
+    });
+    // Nor is a status: it never pushes either (docs/domains/chats.md#status).
+    const unsubscribeStatus = deps.concierge?.onMessageStatus?.((event) => {
+      if (event.sessionId === sessionId) emit("message_status", event);
+    });
     return () => {
       runningListeners.delete(runningListener);
+      writingListeners.delete(writingListener);
       unsubscribeMessages();
       unsubscribeSessionName();
+      unsubscribeReaction();
+      unsubscribeStatus?.();
+      unsubscribeCards?.();
     };
   };
 
@@ -880,11 +1438,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   /**
-   * Session lookup for the two routes a side chat needs: the client's
+   * Session lookup for the two routes a fork chat needs: the client's
    * continuability probe and the follow-up send. A fork qualifies only once it
    * has left a resumable model thread behind (see
    * `AgentSession.persistForkThread`) — which is also how the client tells a
-   * live side chat from a read-only trajectory, since the probe 404s for one
+   * live fork chat from a read-only trajectory, since the probe 404s for one
    * and 200s for the other. A legacy branch, an errored one, and one that
    * borrowed its source's thread all stay read-only.
    *
@@ -896,7 +1454,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (session.type !== "fork") return false;
     const stored = await deps.sessionRepository.current(
       webchatSessionKey(session.id),
-      session.agentName ?? "main",
+      session.agentName ?? MAIN_AGENT,
     );
     return !!stored?.modelThreadId;
   };
@@ -1237,8 +1795,46 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : message;
     });
   };
+  // The status on each guardian message that has one, which only a Concierge
+  // chat's can (docs/domains/chats.md#status).
+  const attachMessageStatuses = async <T extends StoredMessages[number]>(
+    sessionId: string,
+    messages: T[],
+  ): Promise<(T & { status?: ConciergeMessageStatus })[]> => {
+    const tasks = deps.concierge?.deps.tasks;
+    const asked = messages.filter((message) => message.role === "user").map((m) => m.id);
+    if (!tasks?.messageStatusesOf || asked.length === 0) return messages;
+    const statuses = await tasks.messageStatusesOf(sessionId, asked);
+    if (statuses.size === 0) return messages;
+    return messages.map((message) => {
+      const status = statuses.get(message.id);
+      return status ? { ...message, status } : message;
+    });
+  };
+  // A task card's question or approval and how it ended, read for the whole
+  // page at once (concierge/task-cards.ts). Only a Concierge chat has them.
+  const fillTaskCards = async <
+    T extends { role: string; content: string; createdAt: Date | string },
+  >(
+    sessionId: string,
+    messages: T[],
+  ): Promise<T[]> => {
+    if (!deps.concierge || !messages.some((message) => message.content.includes('"task_chat"'))) {
+      return messages;
+    }
+    // A card shows only the reader's own task chats. A Concierge chat opens
+    // only for its owner, so its owner is the reader; any other chat may be
+    // read by others, so its cards show nothing.
+    const chat = await deps.webchatRepo.getSession(sessionId);
+    if (!chat) return messages;
+    const owner = isConciergeChat(chat) ? ownerOf(chat) : null;
+    return withTaskCards(deps.concierge.taskCardSources(), messages, owner);
+  };
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
-    const withTraces = await attachTraceSummaries(sessionId, messages);
+    const withTraces = await attachMessageStatuses(
+      sessionId,
+      await attachTraceSummaries(sessionId, await fillTaskCards(sessionId, messages)),
+    );
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
     const shownIds = new Set(messages.map((m) => m.id));
     const actors = new Map([...allActors].filter(([id]) => shownIds.has(id)));
@@ -1255,18 +1851,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   };
 
-  // `limit` and `before` page the list by turn, newest first, and wrap it as
-  // `{ messages, nextCursor }`; a request with neither keeps the bare array of
-  // the whole session.
+  // `limit` and `before` page the list by message, newest first, and wrap it
+  // as `{ messages, nextCursor }`; a request with neither keeps the bare array
+  // of the whole session. The trace rows of the turns a page's messages belong
+  // to ride along, uncounted. `through` names a message the page must reach, so
+  // one read lands on an old message, such as the card a task's Respond opens.
   const encodeMessageCursor = (cursor: MessagePageCursor): string =>
-    Buffer.from(JSON.stringify([cursor.startedAt, cursor.key])).toString("base64url");
+    Buffer.from(JSON.stringify([cursor.at, cursor.seq])).toString("base64url");
   const decodeMessageCursor = (raw: string): MessagePageCursor | null => {
     try {
       const parsed: unknown = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
       if (!Array.isArray(parsed) || parsed.length !== 2) return null;
-      const [startedAt, key] = parsed;
-      if (!Number.isFinite(startedAt) || typeof key !== "string" || key === "") return null;
-      return { startedAt: Number(startedAt), key };
+      const [at, seq] = parsed;
+      if (!Number.isFinite(at) || !Number.isFinite(seq)) return null;
+      return { at: Number(at), seq: Number(seq) };
     } catch {
       return null;
     }
@@ -1279,9 +1877,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     sessionId: string,
     { withLayout = false }: { withLayout?: boolean } = {},
   ) => {
+    // Builds that page a Concierge chat with `type=concierge` take this answer
+    // as "page the way any chat is paged".
+    if (c.req.query("type") === "concierge") {
+      return c.json({ error: "Not a Concierge chat", code: "not_concierge" }, 400);
+    }
     const limitParam = c.req.query("limit");
     const beforeParam = c.req.query("before");
-    if (limitParam === undefined && beforeParam === undefined) {
+    const throughParam = c.req.query("through");
+    if (limitParam === undefined && beforeParam === undefined && throughParam === undefined) {
       const messages = await deps.webchatRepo.getMessages(sessionId);
       return c.json(await enrichStoredMessages(sessionId, messages));
     }
@@ -1293,7 +1897,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const before = beforeParam === undefined ? null : decodeMessageCursor(beforeParam);
     if (beforeParam !== undefined && !before)
       return c.json({ error: "Invalid before cursor" }, 400);
-    const page = await deps.webchatRepo.getMessagesPage(sessionId, { limit, before });
+    if (throughParam !== undefined && !throughParam) {
+      return c.json({ error: "through must name a message" }, 400);
+    }
+    const page = await deps.webchatRepo.getMessagesPage(sessionId, {
+      limit,
+      before,
+      ...(throughParam ? { through: throughParam } : {}),
+    });
     return c.json({
       messages: await enrichStoredMessages(sessionId, page.rows),
       nextCursor: page.nextCursor ? encodeMessageCursor(page.nextCursor) : null,
@@ -1304,58 +1915,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   // Freeze the selected turns of a session into a self-contained
-  // ChatShareSnapshot. Reuses the exact read-path repo methods as /chat so turn
-  // grouping on the public side goes through the identical chat-view pipeline. Trace summaries are
-  // prebuilt here with the guardian's resolver so the public reader needs none.
+  // ChatShareSnapshot: their messages only. A share never carries the work
+  // behind them (trace rows, tool calls, subagents), from any chat
+  // (docs/domains/chats.md#share-link). Reuses the read path's repo methods,
+  // so turn grouping on the public side goes through the same chat-view
+  // pipeline as /chat.
   const buildChatShareSnapshot = async (
     rootSessionId: string,
     turnIds: Set<string>,
   ): Promise<ChatShareSnapshot> => {
     const messages: ChatShareMessage[] = [];
-    const traces: Record<string, TraceSnapshot> = {};
-
-    const addSession = async (sid: string, turnFilter: Set<string>): Promise<void> => {
-      const rows = await deps.webchatRepo.getMessages(sid);
-      const traceContents = await deps.webchatRepo.getTraceContents(sid);
-      const contentById = new Map(traceContents.map((r) => [r.id, r.content]));
-      for (const row of rows) {
-        // Only the chosen turns are kept; rows with no turnId are skipped.
-        if (!row.turnId || !turnFilter.has(row.turnId)) continue;
-        const message: ChatShareMessage = {
-          id: row.id,
-          sessionId: row.sessionId,
-          turnId: row.turnId,
-          role: row.role,
-          content: row.content,
-          createdAt: row.createdAt.toISOString(),
-        };
-        if (row.role === "trace") {
-          const content = contentById.get(row.id);
-          if (content) {
-            let blocks: TraceEventDto[] = [];
-            try {
-              const parsed = JSON.parse(content);
-              if (Array.isArray(parsed)) blocks = parsed as TraceEventDto[];
-            } catch {
-              blocks = [];
-            }
-            if (blocks.length > 0) {
-              const snapshot = buildTraceSnapshot({
-                idPrefix: `msg-${row.id}`,
-                blocks,
-                resolver: appResolver,
-              });
-              traces[row.id] = snapshot;
-              message.traceSummary = snapshot.summary;
-            }
-          }
-        }
-        messages.push(message);
-      }
-    };
-
-    await addSession(rootSessionId, turnIds);
-    return { mainSessionId: rootSessionId, messages, traces };
+    for (const row of await deps.webchatRepo.getMessages(rootSessionId)) {
+      // Only the chosen turns are kept; rows with no turnId are skipped.
+      if (!row.turnId || !turnIds.has(row.turnId) || row.role === "trace") continue;
+      messages.push({
+        id: row.id,
+        sessionId: row.sessionId,
+        turnId: row.turnId,
+        role: row.role,
+        content: row.content,
+        createdAt: row.createdAt.toISOString(),
+      });
+    }
+    return { mainSessionId: rootSessionId, messages, traces: {} };
   };
 
   // The source session's frozen widget layout: browser/noVNC (`desktop`) is
@@ -1375,27 +1957,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         projectPrefix = null;
       }
     }
-    return layout
-      .filter((item) => {
-        if (!item || typeof item !== "object") return true;
-        const widgetType = (item as { type?: unknown }).type;
-        // A desktop card is host-private; a chat card pins a private session
-        // id, and the public renderer has no case for it. Defense on the
-        // stored-layout fallback — the client already excludes both.
-        return widgetType !== "desktop" && widgetType !== "chat";
-      })
-      .map((item) => {
-        if (!item || typeof item !== "object") return item;
-        const widget = item as { type?: unknown; selectedPath?: unknown };
-        if (widget.type !== "projects" || typeof widget.selectedPath !== "string") return item;
-        const sel = widget.selectedPath;
-        if (!projectPrefix) return { ...widget, selectedPath: undefined };
-        if (sel === projectPrefix) return { ...widget, selectedPath: "projects" };
-        if (sel.startsWith(`${projectPrefix}/`)) {
-          return { ...widget, selectedPath: `projects/${sel.slice(projectPrefix.length + 1)}` };
-        }
-        return { ...widget, selectedPath: undefined };
-      });
+    return (
+      layout
+        // Only app and project tiles ride along. A desktop card is host-private,
+        // a chat card pins a private session id, and anything else the client
+        // sends (a trace or tool pane) is work a share never carries.
+        .filter((item) => {
+          if (!item || typeof item !== "object") return false;
+          const widgetType = (item as { type?: unknown }).type;
+          return widgetType === "app" || widgetType === "projects";
+        })
+        .map((item) => {
+          if (!item || typeof item !== "object") return item;
+          const widget = item as { type?: unknown; selectedPath?: unknown };
+          if (widget.type !== "projects" || typeof widget.selectedPath !== "string") return item;
+          const sel = widget.selectedPath;
+          if (!projectPrefix) return { ...widget, selectedPath: undefined };
+          if (sel === projectPrefix) return { ...widget, selectedPath: "projects" };
+          if (sel.startsWith(`${projectPrefix}/`)) {
+            return { ...widget, selectedPath: `projects/${sel.slice(projectPrefix.length + 1)}` };
+          }
+          return { ...widget, selectedPath: undefined };
+        })
+    );
   };
 
   // 256-bit URL-safe bearer token: the link IS the credential (Share Chat).
@@ -1414,7 +1998,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     label: string;
     initiator: string;
     /**
-     * Whether the guardian is meant to keep talking to this fork. A side chat
+     * Whether the guardian is meant to keep talking to this fork. A fork chat
      * is a conversation and asks for a resumable thread; the private learning
      * fork behind turn feedback is a background errand and stays one-shot.
      */
@@ -1437,6 +2021,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let sourceSessionId: string;
     let threadContext: ThreadContext;
     let sourceCheckpoint: ForkSourceCheckpoint | null = null;
+    // The source session is held from its acquire until the fork's own turn
+    // holds it, or until this route gives up on the fork.
+    let heldSource: AgentSession | undefined;
+    const letSourceGo = () => {
+      heldSource?.release();
+      heldSource = undefined;
+    };
     try {
       const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
       const turnStatus = traceRow
@@ -1478,19 +2069,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // The in-memory source is intentionally short-lived (15s in production),
       // while webchat provider sessions are durable. Acquire transparently
       // resumes an evicted source from its persisted model thread, allowing
-      // side chats from settled conversations after the first fork or a
+      // fork chats from settled conversations after the first fork or a
       // backend restart.
-      const source = await deps.agentSessionManager.acquire(
+      const source = await deps.agentSessionManager.open(
         { agentName, channelThreadKey },
         {
-          ...deps.sessionOpeningFor(channelThreadKey, threadContext),
+          ...(await deps.sessionOpeningFor(channelThreadKey, threadContext)),
+          kind: "conversation",
           workingDir,
           threadContext,
           contextSuffix: buildWebchatContextSuffix(),
           selectionId: modelSelection?.id,
-          reasoningEffort: await resolveRequestedReasoningEffort(undefined),
+          // The source session stays live for the chat's next message, and
+          // Claude fixes effort at open, so it opens at the chat's own.
+          reasoningEffort: await chatReasoningEffort(input.session, undefined),
         },
       );
+      heldSource = source;
       await openedInChat(deps.webchatRepo, source, input.session.id);
       sourceSessionId = source.sessionId;
       const storedCheckpoint = await deps.sessionRepository.deprecatedCheckpoint(
@@ -1505,8 +2100,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           label: input.label,
         });
         // Distinguishable so the branch route can tell the user this turn has
-        // no branch point (a promoted side chat's own first answer is the
+        // no branch point (a promoted fork chat's own first answer is the
         // common case) rather than implying a transient failure.
+        letSourceGo();
         return "no_turn_checkpoint";
       }
       sourceCheckpoint = {
@@ -1515,6 +2111,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         checkpointId: storedCheckpoint.checkpointId,
       };
     } catch (err) {
+      letSourceGo();
       log.warn("turn fork skipped: source session could not be acquired", {
         sessionId: input.session.id,
         turnId: input.turnId,
@@ -1524,8 +2121,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
 
-    if (!sourceCheckpoint) return null;
+    if (!sourceCheckpoint) {
+      letSourceGo();
+      return null;
+    }
 
+    const forkActor = turnActor(await currentSessionActor(), undefined);
     const iterator = deps.agentRunner
       .runForked({
         agentName,
@@ -1537,6 +2138,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         label: input.label,
         mode: "exact",
         sourceCheckpoint,
+        // The fork acts for the person who asked for it.
+        ...(forkActor ? { actor: forkActor } : {}),
         // Keyed by the fork's own id, exactly what `handleChatSend` will
         // derive for it later.
         ...(input.continuable ? { persistThreadKey: webchatSessionKey } : {}),
@@ -1547,6 +2150,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     try {
       first = await iterator.next();
     } catch (err) {
+      letSourceGo();
       log.warn("failed to start turn fork", {
         sessionId: input.session.id,
         turnId: input.turnId,
@@ -1555,6 +2159,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
       return null;
     }
+    // The fork's own turn now holds the source session, or there is none.
+    letSourceGo();
     if (first.done || first.value.type !== "turn_start") {
       log.warn("turn fork did not emit turn_start", {
         sessionId: input.session.id,
@@ -1611,7 +2217,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!input.continuable) {
       try {
         const result = await deps.actionEngine.run(
-          "show_app",
+          "system:show_app",
           { appId: SESSIONS_HOST_APP_ID, route: forkSessionId },
           {
             initiator: input.initiator,
@@ -1632,7 +2238,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             placement: { appId: SESSIONS_HOST_APP_ID, route: forkSessionId },
           };
         }
-        log.warn("show_app did not return the fork session placement", {
+        log.warn("system:show_app did not return the fork session placement", {
           sessionId: input.session.id,
           turnId: input.turnId,
           forkSessionId,
@@ -1724,6 +2330,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     );
   };
 
+  /**
+   * The effort a turn of `session` opens at. A Concierge chat runs at its own
+   * effort, the chat's or else its agent's (undefined), whatever the composer
+   * sends: its owner sets nothing. Elsewhere a turn that names no effort runs
+   * at the chat's own, as a task chat's do, else the dashboard's.
+   */
+  const chatReasoningEffort = async (
+    session: StoredWebchatSession,
+    requested: unknown,
+  ): Promise<ModelReasoningEffort | undefined> =>
+    isConciergeChat(session)
+      ? ((session.reasoningEffort as ModelReasoningEffort | null) ?? undefined)
+      : resolveRequestedReasoningEffort(requested ?? session.reasoningEffort ?? undefined);
+
   const resolveStoredModelSelection = (stored: unknown): ModelSelection | null => {
     if (stored === null || stored === undefined) {
       return null;
@@ -1773,7 +2393,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!initialSelection) {
       return null;
     }
-    await deps.webchatRepo.updateSessionLargeModelSelection(session.id, initialSelection.id);
+    await deps.webchatRepo.updateSessionLargeModelSelection(
+      session.id,
+      initialSelection.id,
+      "owner",
+    );
     return initialSelection;
   };
 
@@ -1880,6 +2504,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
   };
 
+  // Keeps `stream.openTools` in step with a trace block, and answers whether
+  // it changed.
+  const trackOpenTool = (
+    stream: ActiveWebchatStream,
+    block: ReturnType<typeof toTraceEvent>,
+  ): boolean => {
+    if (block.type === "tool_use") {
+      stream.openTools.set(block.id ?? `anon:${stream.openTools.size}`, block.tool);
+      return true;
+    }
+    if (block.type !== "tool_result") return false;
+    if (block.toolUseId) return stream.openTools.delete(block.toolUseId);
+    const anon = [...stream.openTools.keys()].reverse().find((key) => key.startsWith("anon:"));
+    return anon ? stream.openTools.delete(anon) : false;
+  };
+
   // Push an AgentEvent through the segment builder and emit segment_upsert
   // events for any segments whose payload changed, plus a refreshed summary.
   const emitLiveTraceEvent = (
@@ -1887,6 +2527,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     msg: TraceableEvent & { agent?: string },
   ): void => {
     const block = toTraceEvent(msg);
+    if (trackOpenTool(stream, block)) notifyTurn(stream.sessionId, { toolOnly: true });
     const changed = stream.segmentBuilder.push(block);
     for (const seg of changed) {
       emitToStream(stream, "segment_upsert", seg, `seg:${seg.id}`);
@@ -1928,12 +2569,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const finishStream = (stream: ActiveWebchatStream): void => {
     if (stream.finished) return;
     stream.finished = true;
+    const timed = stream.timing?.finish(stream.agentTurnId ?? stream.turnId);
+    // A quiet turn that said nothing was housekeeping: nobody waited on it.
+    if (timed && (!stream.quiet || timed.firstSayMs !== null)) reportConciergeTurn(timed);
+    if (stream.timing) releaseSignWatch();
     // The live preview is over — the durable reply lives in the DB now. Drop
     // the assistant_text replay frame so a late reattach doesn't flash a
     // transient bubble before swapping to the persisted message. Subscribers
     // already attached received it live; this only affects future replays.
     stream.events.delete("assistant_text");
     stream.resolveFinish();
+    publishWriting(stream);
     notifyRunning(stream.sessionId);
     if (stream.cleanupTimer) clearTimeout(stream.cleanupTimer);
     stream.cleanupTimer = setTimeout(() => {
@@ -1976,6 +2622,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       persistedTraceEventCount: 0,
       tracePersistPromise: null,
       segmentBuilder,
+      openTools: new Map(),
       subscribers: new Map(),
       cleanupTimer: null,
       onFinish,
@@ -2143,6 +2790,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   app.use("/chat/turns/:turnId/*", privateByIdGate(turnOpenTo));
   app.use("/chat/messages/:id/*", privateByIdGate(messageOpenTo));
   app.use("/sessions/messages/:id/*", privateByIdGate(messageOpenTo));
+  // After the gates: a chat's outputs are as private as the chat.
+  app.route("/", chatOutputsRoutes(deps));
 
   app.get("/sessions/:id/messages", async (c) => {
     const sessionId = c.req.param("id");
@@ -2430,7 +3079,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     // Time-ordered, so new chats sit together in the id index (RFC 9562).
     const id = uuidv7();
-    const name = body.name || "New Chat";
+    const name = body.name || "New chat";
     let project;
     try {
       project = await ensureStoredProjectSelection(
@@ -2554,12 +3203,26 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
     const runtimeSession = await deps.sessionRepository.current(
       webchatSessionKey(sessionId),
-      session.agentName ?? "main",
+      session.agentName ?? MAIN_AGENT,
     );
+    // A task chat names the Concierge chat it reports to, so its header links back.
+    const task =
+      session.triggerKind === TASK_CHAT_TRIGGER_KIND
+        ? await deps.concierge?.deps.tasks.repo.getWithChat(sessionId)
+        : null;
     return c.json({
       ...toWebchatSessionResponse(session, messageCount),
       model: runtimeSession?.model ?? null,
       reasoningEffort: runtimeSession?.reasoningEffort ?? null,
+      ...(task
+        ? {
+            taskOf: {
+              conciergeChatId: task.conciergeChat.id,
+              conciergeChatName: task.conciergeChat.name,
+              main: task.conciergeChat.main,
+            },
+          }
+        : {}),
     });
   });
 
@@ -2573,21 +3236,30 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (isMainConciergeChat(session)) {
       return c.json({ error: "The main Concierge chat cannot be deleted" }, 409);
     }
-    if (isConciergeChat(session)) await deps.concierge?.retireChat(sessionId, "deleted");
+    // `followsAndTasks=stop` ends them first, so retireChat has nothing to move.
+    const isTopic = isConciergeChat(session);
+    if (isTopic && c.req.query("followsAndTasks") === "stop") {
+      await deps.concierge?.endChatWork(sessionId);
+    }
+    const retiredTo = isTopic
+      ? ((await deps.concierge?.retireChat(sessionId, "deleted")) ?? null)
+      : null;
     // Closing the chat session also closes the live AgentSession
     // so we don't keep an idle SDK CLI subprocess pinned to a deleted thread.
-    const sess = deps.agentSessionManager.peek({
+    const sess = deps.agentSessionManager.find({
       agentName: session?.agentName ?? "main",
       channelThreadKey: webchatSessionKey(sessionId),
     });
     if (sess) {
       await sess.close("user").catch(() => undefined);
     }
-    // The chat's row on the Concierge's todo list stays, unlinked, once the
-    // chat is gone; the Concierge hears of it quietly.
-    const taskId = (await deps.concierge?.taskOfChat(sessionId)) ?? null;
-    await deps.webchatRepo.deleteSession(sessionId);
-    if (taskId) deps.concierge?.chatDeleted(taskId);
+    // A task chat's task stops with it: its running work stops, and the task
+    // goes with the chat in the delete's own transaction.
+    if (deps.concierge) await deps.concierge.endTaskChat(sessionId, "deleted");
+    else await deps.webchatRepo.deleteSession(sessionId);
+    // Told after the delete, as an archive is, so the activity reads the
+    // chat's finished rows as the main chat's.
+    if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo, true);
     // Durable audit signal for guardian-initiated chat deletion. Keep the
     // payload free of chat titles and message content because the OTLP
     // record can outlive the local session data it describes.
@@ -2608,24 +3280,61 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     const body = await c.req
-      .json<{ archived?: unknown }>()
-      .catch(() => ({}) as { archived?: unknown });
+      .json<{ archived?: unknown; followsAndTasks?: unknown; follows?: unknown }>()
+      .catch(() => ({}) as { archived?: unknown; followsAndTasks?: unknown; follows?: unknown });
     if (typeof body.archived !== "boolean") {
       return c.json({ error: "archived must be a boolean" }, 400);
     }
     if (body.archived && isMainConciergeChat(lookup.session)) {
       return c.json({ error: "The main Concierge chat cannot be archived" }, 409);
     }
-    if (body.archived) {
-      await deps.webchatRepo.archiveSession(sessionId);
-      if (isConciergeChat(lookup.session)) await deps.concierge?.retireChat(sessionId, "archived");
-    } else {
+    const isTopic = isConciergeChat(lookup.session);
+    // A repeated archive changes nothing, so a topic chat is not retired twice.
+    if (body.archived && !lookup.session.archivedAt) {
+      // `followsAndTasks: "stop"` ends a topic chat's follows and open tasks
+      // first, as a delete's does, so retireChat has nothing to move.
+      if (isTopic && body.followsAndTasks === "stop") await deps.concierge?.endChatWork(sessionId);
+      // Archiving a task chat stops its task, in the archive's own transaction.
+      if (deps.concierge) await deps.concierge.endTaskChat(sessionId, "archived");
+      else await deps.webchatRepo.archiveSession(sessionId);
+      if (isTopic) await deps.concierge?.retireChat(sessionId, "archived");
+    } else if (!body.archived) {
       await deps.webchatRepo.unarchiveSession(sessionId);
+      await deps.concierge?.restoreTaskChat(sessionId);
+      // `follows: "moveBack"` moves back the follows its archive moved to the main chat.
+      if (isTopic) await deps.concierge?.restoreChat(sessionId, body.follows === "moveBack");
     }
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
     return c.json(toWebchatSessionResponse(session, messageCount));
+  });
+
+  // The checks pending in a chat, which its owner can cancel there.
+  app.get("/chat/sessions/:id/checks", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getTopLevelWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const pending = (await deps.concierge?.deps.checks?.inChatForApi(sessionId)) ?? [];
+    // A check for a task names it, so the strip can say which task it is for.
+    const tasks = deps.concierge?.deps.tasks.repo;
+    const checks = await Promise.all(
+      pending.map(async (check) => ({
+        ...check,
+        taskTitle: check.taskId ? ((await tasks?.get(check.taskId))?.title ?? null) : null,
+      })),
+    );
+    return c.json({ checks } satisfies ChatPendingChecksResponse);
+  });
+
+  app.delete("/chat/sessions/:id/checks/:checkId", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getTopLevelWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    // One for a task tells the Concierge, as from the task's row.
+    const cancelled = await deps.concierge?.cancelCheckByOwner(sessionId, c.req.param("checkId"));
+    if (!cancelled) return c.json({ error: "No such check in this chat" }, 404);
+    return c.json({ ok: true });
   });
 
   app.patch("/chat/sessions/:id/pin", async (c) => {
@@ -2659,10 +3368,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
-    // A side chat promoted to a chat runs on its branch's thread; picking a
-    // model for it waits on the side-chat review (#1384).
+    // A fork chat promoted to a chat runs on its branch's thread; picking a
+    // model for it waits on the fork-chat review (#1384).
     if (lookup.session.parentSessionId) {
-      return c.json({ error: "A side chat keeps the model it branched with" }, 409);
+      return c.json({ error: "A fork chat keeps the model it branched with" }, 409);
     }
     const body = await c.req.json<unknown>().catch(() => undefined);
     const requested =
@@ -2682,7 +3391,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "The model selector is turned off" }, 409);
     }
     const selection = resolveWebchatLargeModelSelection(requested);
-    await deps.webchatRepo.updateSessionLargeModelSelection(sessionId, selection?.id ?? null);
+    await deps.webchatRepo.updateSessionLargeModelSelection(
+      sessionId,
+      selection?.id ?? null,
+      "owner",
+    );
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
@@ -2748,8 +3461,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const { session } = lookup;
 
     const body = await c.req
-      .json<{ turnIds?: unknown; title?: unknown; layout?: unknown }>()
-      .catch(() => ({}) as { turnIds?: unknown; title?: unknown; layout?: unknown });
+      .json<{ turnIds?: unknown; title?: unknown; layout?: unknown; agentName?: unknown }>()
+      .catch(
+        () => ({}) as { turnIds?: unknown; title?: unknown; layout?: unknown; agentName?: unknown },
+      );
 
     const turnIds = Array.isArray(body.turnIds)
       ? body.turnIds.filter((t): t is string => typeof t === "string" && t.length > 0)
@@ -2762,6 +3477,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (snapshot.messages.length === 0) {
       return c.json({ error: "No messages match the selected turns" }, 400);
     }
+    // The name the chat showed for its agent, so the shared page labels the
+    // agent's turns by it rather than by the page's own "Rome".
+    if (typeof body.agentName === "string" && body.agentName.trim()) {
+      snapshot.agentName = body.agentName.trim().slice(0, 80);
+    }
 
     const projectPath = session.projectPath ?? null;
     const layoutSource = Array.isArray(body.layout)
@@ -2769,10 +3489,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       : ((await deps.webchatRepo.getLayout(sessionId)) ?? []);
     const layout = filterShareLayout(layoutSource, projectPath);
 
+    // A title the client sends wins. Otherwise a Concierge chat's share is
+    // named by what it shows, since its chat name ("Concierge") says nothing
+    // of it; any other chat by its name while it has one.
     const title =
       typeof body.title === "string" && body.title.trim()
         ? body.title.trim().slice(0, 200)
-        : session.name;
+        : !isConciergeChat(session) && session.name.trim()
+          ? session.name
+          : shareTitleOf(snapshot.messages);
 
     const id = generateShareToken();
     await deps.webchatRepo.createSharedChat({
@@ -2906,7 +3631,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // Branch a settled assistant turn into a one-shot exact fork. AgentRunner
   // persists the submitted prompt and the fork's reply as a separate `fork`
   // session; the returned Sessions placement lets the web client open that
-  // side chat immediately while its response continues in the background.
+  // fork chat immediately while its response continues in the background.
   app.post("/chat/sessions/:sessionId/turns/:turnId/forks", async (c) => {
     const sessionId = c.req.param("sessionId");
     const turnId = c.req.param("turnId");
@@ -2916,7 +3641,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const turnInSession = await deps.webchatRepo.hasTurnInSession(sessionId, turnId);
     if (!turnInSession) return c.json({ error: "Turn not found in session" }, 404);
     if (!deps.agentRunner.runForked) {
-      return c.json({ error: "Side chats are unavailable" }, 503);
+      return c.json({ error: "Fork chats are unavailable" }, 503);
     }
 
     let payload: unknown;
@@ -2954,7 +3679,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "This answer has no branch point", code: "turn_not_branchable" }, 409);
     }
     if (!started) {
-      return c.json({ error: "Couldn't start side chat from this conversation" }, 409);
+      return c.json({ error: "Couldn't fork a chat from this conversation" }, 409);
     }
     // `placement` is always null for a branch (show_app is feedback-only);
     // the client places a real chat card from the session id.
@@ -2968,6 +3693,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // GET and POST agree on errors: an unknown session or an unanchored turn
   // produces 404 on both verbs so a misrouted client surfaces the bug on
   // hydrate instead of silently rendering an empty drawer.
+  // Every turn's feedback in one read, so a transcript does not ask once per
+  // turn. A turn with none is absent.
+  app.get("/chat/sessions/:sessionId/feedback", async (c) => {
+    const sessionId = c.req.param("sessionId");
+    const lookup = await getStoredWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const rows = await deps.webchatRepo.listTurnFeedback(sessionId);
+    const feedback: Record<string, TurnFeedback> = {};
+    for (const [turnId, row] of rows) feedback[turnId] = formatFeedback(row) as TurnFeedback;
+    return c.json({ feedback } satisfies SessionTurnFeedbackResponse);
+  });
+
   app.get("/chat/sessions/:sessionId/turns/:turnId/feedback", async (c) => {
     const sessionId = c.req.param("sessionId");
     const turnId = c.req.param("turnId");
@@ -3071,7 +3808,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         })
       : null;
     // The learning fork is best-effort; a turn with no branch point (e.g. a
-    // promoted side chat's first answer) just skips it.
+    // promoted fork chat's first answer) just skips it.
     const processingPlacement =
       !processing || typeof processing === "string" ? null : processing.placement;
 
@@ -3109,15 +3846,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // A stream without a turn-bound interrupt can only be cancelled through
     // its live session owner. Require the exact active turn so a queued turn
     // cannot cancel the turn currently producing output.
-    const agentSess = deps.agentSessionManager.peek({
+    const agentSess = deps.agentSessionManager.find({
       agentName: stream.agentName,
       channelThreadKey: stream.channelThreadKey ?? webchatSessionKey(stream.sessionId),
     });
-    if (!agentSess || agentSess.currentTurnId !== turnId) {
+    const turn = agentSess?.runningTurn;
+    if (!turn || turn.id !== turnId) {
       return answer({ stopped: false, reason: "turn_not_interruptible" }, 409);
     }
     stream.stopRequested = true;
-    await agentSess.interrupt("user-stop", turnId);
+    await turn.stop("user-stop");
     return answer({ stopped: true });
   };
 
@@ -3147,10 +3885,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           status:
             s.channelThreadKey &&
             (s.agentTurnId ?? s.turnId) ===
-              deps.agentSessionManager.peek({
+              deps.agentSessionManager.find({
                 agentName: s.agentName,
                 channelThreadKey: s.channelThreadKey,
-              })?.currentTurnId
+              })?.runningTurn?.id
               ? "running"
               : "queued",
         })),
@@ -3164,11 +3902,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const turnId = c.req.param("turnId");
     const stream = streamsByTurnId.get(turnId);
     if (!stream) {
-      const turn = deps.agentTurnStreamRegistry.get(turnId)
-        ? deps.agentSessionManager.turn(turnId)
-        : undefined;
-      if (!turn) return c.json({ error: "No stream for turn" }, 404);
+      const registered = deps.agentTurnStreamRegistry.get(turnId);
+      const turn = registered ? deps.agentSessionManager.turn(turnId) : undefined;
+      if (!registered || !turn) return c.json({ error: "No stream for turn" }, 404);
       return streamSSE(c, async (sse) => {
+        // The chat the turn records in, which its session's start names.
+        const chat = await deps.webchatRepo.getSession(registered.chatId).catch(() => null);
+        const romeSession = chat
+          ? { _romeSessionId: chat.id, _type: chat.type as RomeSessionType }
+          : undefined;
         const builder = createSegmentBuilder({
           idPrefix: turnId,
           resolver: appResolver,
@@ -3224,7 +3966,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         try {
           for await (const message of turn.events()) {
             if (aborted) break;
-            project(message);
+            project(romeSession ? withRomeSession(message, romeSession) : message);
           }
           write("done", {
             success: !terminalError,
@@ -3308,6 +4050,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     replyQuote?: unknown;
   };
 
+  // The chats whose last input carried an open workspace. In memory: after a
+  // restart a closed workspace is not announced, and the next one opened is.
+  const workspaceOpenIn = new Set<string>();
+
   const parseChatSendBody = async (c: Context): Promise<SendBody> => {
     const contentType = c.req.header("content-type") ?? "";
     if (contentType.includes("multipart/form-data")) {
@@ -3358,12 +4104,26 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return await c.req.json<SendBody>().catch(() => ({}) as SendBody);
   };
 
+  const taskSourceChat = async (target: string): Promise<string | null> => {
+    const tasks = deps.concierge?.deps.tasks.repo;
+    const row = await tasks?.findBySession(target);
+    return row ? ((await tasks?.getWithChat(row.id))?.conciergeChat.id ?? null) : null;
+  };
+
   const handleChatSend = async (
     sessionId: string | undefined,
     body: SendBody,
-    said: { saidBy?: Account } = {},
+    said: {
+      saidBy?: Account;
+      fromWidgetEvent?: boolean;
+      askingDeviceId?: string;
+      taskActor?: SessionActor;
+      taskInput?: TaskInputClaim;
+    } = {},
   ): Promise<RouteAnswer> => {
-    const actor = await currentSessionActor();
+    // A Concierge turn's timing starts when the owner's send reaches Rome.
+    const receivedAtMs = Date.now();
+    const actor = said.taskActor ?? (await currentSessionActor());
     const sourceId =
       actor?.kind === "guardian" &&
       actor.via === "loopback" &&
@@ -3388,6 +4148,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // A resolution from an app interaction surface is a valid turn trigger even
     // with no typed text: it re-drives the calling agent with the artifact.
     const resolution = interpretInteractionResult(body.parts);
+    // A card is Rome's to show: a turn that carries one is refused.
+    if (
+      Array.isArray(body.parts) &&
+      body.parts.some(
+        (p) =>
+          !!p &&
+          typeof p === "object" &&
+          ["widget", "pending_interaction"].includes(String((p as { type?: unknown }).type)),
+      )
+    ) {
+      return answer({ error: "A turn cannot carry a card" }, 400);
+    }
+    // A turn answers one card. More than one result would let a valid answer
+    // carry another past the checks below, which look only at the first.
+    if (
+      Array.isArray(body.parts) &&
+      body.parts.filter(
+        (p) =>
+          !!p && typeof p === "object" && (p as { type?: unknown }).type === "interaction_result",
+      ).length > 1
+    ) {
+      return answer({ error: "A turn answers one card" }, 400);
+    }
 
     // A structured skill selection. Resolved against the catalog up
     // front — an unknown name (e.g. the skill was uninstalled between pick and
@@ -3418,6 +4201,54 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return answer({ error: "This chat is archived and read-only" }, 409);
     }
 
+    // A Concierge chat holds only its owner's messages and the Concierge's. A
+    // routine, an app or another agent sending into it wakes the Concierge
+    // with a quiet system turn instead: the text stays in the turn's trace and
+    // the chat shows a faint line naming who sent it.
+    if (automated && isConciergeChat(session)) {
+      // An action's loopback send stands for the person its turn ran for,
+      // known here only by kind. That person must be able to open the chat,
+      // as on any send into a dashboard chat: a visitor's, of no known
+      // account, opens no one's. A send no person made is Rome's own work.
+      const actorKind = sourceId ? body.automatedActorKind : undefined;
+      if (
+        actorKind === "visitor" ||
+        (actorKind === "guardian" &&
+          !(await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, "guardian")))
+      ) {
+        return answer({ error: "Session not found" }, 404);
+      }
+      const concierge = deps.concierge;
+      const text = body.text?.trim() ?? "";
+      // A turn takes only the text: files are refused, not dropped.
+      if (!concierge || !text || uploadedFiles.length > 0) {
+        return answer({ error: "A Concierge chat takes only text from an automation" }, 400);
+      }
+      const source = automatedInputSource(automated);
+      void concierge
+        .runSystemTurn(
+          sessionId,
+          automatedInputPrompt(
+            source,
+            text,
+            fromOwner(source, automatedSource(saidBy?.id)?.onBehalf === true),
+          ),
+          {
+            quiet: true,
+            inputLabel: automatedInputLabel(source),
+            inputSource: source,
+            pushLevel: "active",
+          },
+        )
+        .catch((error: unknown) =>
+          log.warn("automated input into a Concierge chat did not run", {
+            sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      return answer({ inputId, sessionId, turnId: null, disposition: "system_turn" }, 202);
+    }
+
     // A branch is visible in the sidebar from its 201, but its model thread
     // only exists once persistForkThread lands at first-answer completion.
     // Sending before then (or after a failed first answer) would acquire a
@@ -3425,13 +4256,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (session.parentSessionId !== null) {
       const branchThread = await deps.sessionRepository.current(
         webchatSessionKey(session.id),
-        session.agentName ?? "main",
+        session.agentName ?? MAIN_AGENT,
       );
       if (!branchThread?.modelThreadId) {
         return answer(
           {
             error:
-              "This side chat's thread isn't ready — its first answer is still running or did not complete.",
+              "This fork chat's thread isn't ready — its first answer is still running or did not complete.",
             code: "branch_thread_missing",
           },
           409,
@@ -3448,18 +4279,93 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (resolution && !openSuspensions.has(resolution.toolUseId)) {
       return answer({ error: "No open interaction matches this toolUseId" }, 400);
     }
-
-    let reply: Extract<ReplyResolution, { ok: true }> | undefined;
-    if (!resolution && body.replyToMessageId !== undefined && body.replyToMessageId !== "") {
-      if (typeof body.replyToMessageId !== "string") {
-        return answer({ error: "replyToMessageId must be a string" }, 400);
+    // An app's card described as data is answered only by its app, whose
+    // reply the widget route turns into this turn.
+    if (
+      resolution &&
+      openSuspensions.get(resolution.toolUseId)?.answeredByOwner &&
+      !said.fromWidgetEvent
+    ) {
+      return answer({ error: "Only the card's owner answers it" }, 400);
+    }
+    // A widget's event names the message that holds the card. A later card can
+    // reuse the tool-use id, so the answer goes only to the card pressed.
+    const addressed = resolution ? addressedMessageId(body.parts, resolution.toolUseId) : undefined;
+    if (
+      resolution &&
+      addressed !== undefined &&
+      openSuspensions.get(resolution.toolUseId)?.messageId !== addressed
+    ) {
+      return answer({ error: "No open interaction matches this toolUseId" }, 400);
+    }
+    // A question card drawn from its description sends its data model; store
+    // and hand on the answer in the shape the card has always sent.
+    const questions = resolution && openSuspensions.get(resolution.toolUseId)?.questions;
+    if (resolution && questions && !resolution.dismissed) {
+      const answers = answersFromQuestionCard(questions, resolution.output);
+      // A reader that draws its own question card sends the answers as they
+      // are; keep what the described card would have sent beside them, so
+      // every reader shows the same answered card.
+      const card = answers ? null : questionCardFromAnswers(questions, resolution.output);
+      if (card) {
+        for (const part of body.parts as Array<Record<string, unknown>>) {
+          if (part?.type === "interaction_result" && part.toolUseId === resolution.toolUseId) {
+            part.output = { ...(resolution.output as Record<string, unknown>), card };
+          }
+        }
       }
+      if (answers) {
+        const sent = (resolution.output as { answers?: unknown } | null)?.answers;
+        Object.assign(
+          resolution,
+          interpretInteractionResult([
+            { type: "interaction_result", toolUseId: resolution.toolUseId, output: answers },
+          ]),
+        );
+        // The stored part also keeps what the card sent (`card`), so a reader
+        // draws the answered card from the same data; the agent reads only
+        // `answers`.
+        for (const part of body.parts as Array<Record<string, unknown>>) {
+          if (part?.type === "interaction_result" && part.toolUseId === resolution.toolUseId) {
+            part.output = { ...answers, card: sent };
+          }
+        }
+      }
+    }
+
+    // A share-location card's answer reads in its own words, which say how
+    // far to trust the position and that it is for this turn only.
+    if (resolution && openSuspensions.get(resolution.toolUseId)?.location) {
+      resolution.prompt = locationAnswerPrompt(resolution.output);
+      // The position reaches this turn only: the chat keeps how the card
+      // ended and how precise it was, never where the guardian was.
+      for (const part of body.parts as Array<Record<string, unknown>>) {
+        if (part?.type === "interaction_result" && part.toolUseId === resolution.toolUseId) {
+          part.output = storedLocationAnswer(resolution.output);
+        }
+      }
+    }
+
+    if (
+      body.replyToMessageId !== undefined &&
+      body.replyToMessageId !== "" &&
+      typeof body.replyToMessageId !== "string"
+    ) {
+      return answer({ error: "replyToMessageId must be a string" }, 400);
+    }
+    // The message the owner's message replies to, which puts it in that
+    // message's chat thread (docs/domains/chats.md#chat-thread). The client
+    // names it, so the quote it showed and the reply stored are one message.
+    const repliedTo = body.replyToMessageId || undefined;
+    let reply: Extract<ReplyResolution, { ok: true }> | undefined;
+    if (!resolution && repliedTo !== undefined) {
       if (body.replyQuote !== undefined && typeof body.replyQuote !== "string") {
         return answer({ error: "replyQuote must be a string" }, 400);
       }
       const resolved = await resolveReply(deps, {
         sessionId,
-        messageId: body.replyToMessageId,
+        messageId: repliedTo,
+        // A selection quotes only what the owner picked on the Reply button.
         quote: body.replyQuote === "" ? undefined : body.replyQuote,
         // An agent whose text is private speaks one message per tool call, so
         // each of its rows is a message of its own.
@@ -3467,8 +4373,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           resolveAgentPolicy(agentPolicySource(deps.agentLoader, session.agentName ?? "main"))
             .finalText === "private",
       });
-      if (!resolved.ok) return answer({ error: resolved.error }, 400);
-      reply = resolved;
+      if (!resolved.ok) {
+        return answer({ error: resolved.error }, 400);
+      }
+      if (resolved.ok) reply = resolved;
     }
 
     const sessionProjectPath = normalizeSelectedWebchatProjectPath(
@@ -3488,13 +4396,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let savedUploads;
     try {
       savedUploads = await saveWebchatUploads(
-        workingDir,
-        projectsRoot,
         uploadedFiles.map((file, index) => {
           const fileName = typeof file.name === "string" ? file.name.trim() : "";
           const dataBase64 = typeof file.dataBase64 === "string" ? file.dataBase64 : "";
           if (!fileName) throw new Error(`Uploaded file ${index + 1} is missing a name`);
           if (!dataBase64) throw new Error(`Uploaded file ${fileName} is empty`);
+          // Refuse before decoding: base64 is 4 bytes of text per 3 of data.
+          if ((dataBase64.length / 4) * 3 > MAX_ASSET_BYTES + 3) {
+            throw new AssetTooLargeError(`Uploaded file ${fileName}`, MAX_ASSET_BYTES);
+          }
           return {
             name: fileName,
             mimeType: typeof file.mimeType === "string" ? file.mimeType : undefined,
@@ -3504,7 +4414,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Internal error";
-      const status = /unavailable|required|missing|empty/.test(message) ? 400 : 500;
+      const status =
+        err instanceof AssetTooLargeError
+          ? 413
+          : /unavailable|required|missing|empty/.test(message)
+            ? 400
+            : 500;
       return answer({ error: message }, status);
     }
 
@@ -3514,6 +4429,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const basePrompt = resolution
       ? resolution.prompt
       : appendUploadPathsToPrompt(body.text ?? "", savedUploads);
+    // The model's copy of the turn also names each upload's local file; the
+    // persisted text (`displayText`) keeps only the URL.
+    const modelBasePrompt = resolution
+      ? basePrompt
+      : appendUploadPathsToPrompt(body.text ?? "", savedUploads, { localPaths: true });
     // Concierge delegates skill invocations; other agents read the skill.
     // A structured selection (body.skillName, from the composer chip)
     // wins; a typed `/<skill-name> task` first token is parsed out of the text
@@ -3522,14 +4442,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const skillInvocation = resolution
       ? null
       : skillName
-        ? { skillName, task: basePrompt.trim() }
-        : parseSlashSkillInvocation(basePrompt, deps.skillCatalog);
+        ? { skillName, task: modelBasePrompt.trim() }
+        : parseSlashSkillInvocation(modelBasePrompt, deps.skillCatalog);
     const slashSkillPrompt = skillInvocation
       ? isConciergeChat(session)
         ? buildConciergeSkillPrompt(skillInvocation)
         : buildSlashSkillPrompt(skillInvocation)
       : null;
-    const modelPrompt = slashSkillPrompt ?? basePrompt;
+    const modelPrompt = slashSkillPrompt ?? modelBasePrompt;
     const displayText = skillName
       ? `/${artifactLocalName(skillName)}${basePrompt.trim() ? ` ${basePrompt.trim()}` : ""}`
       : basePrompt;
@@ -3550,7 +4470,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const repliedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
     // user message so the cached fixed part of the system prompt stays stable.
-    const workspaceSection = buildWorkspaceContextSection(body.workspace);
+    // The session leaves out a block that did not change, so the input after
+    // one with an open workspace says it closed with an empty block.
+    const openWorkspace = buildWorkspaceContextSection(body.workspace);
+    const workspaceSection =
+      openWorkspace ?? (workspaceOpenIn.has(sessionId) ? EMPTY_WORKSPACE_CONTEXT : null);
+    if (openWorkspace) workspaceOpenIn.add(sessionId);
+    else workspaceOpenIn.delete(sessionId);
     const contextPrompt = workspaceSection
       ? `${workspaceSection}\n\n${repliedPrompt}`
       : repliedPrompt;
@@ -3562,10 +4488,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const conciergeChat = isConciergeChat(session)
       ? await deps.concierge?.conciergeChat(sessionId)
       : null;
-    const promptText =
-      conciergeChat && deps.concierge
-        ? `${await deps.concierge.turnHeader(conciergeChat)}\n\n${noticedPrompt}`
-        : noticedPrompt;
+    const conciergeHeader =
+      conciergeChat && deps.concierge ? await deps.concierge.turnHeader(conciergeChat) : null;
+    let promptText = conciergeHeader ? `${conciergeHeader}\n\n${noticedPrompt}` : noticedPrompt;
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
 
@@ -3591,21 +4516,32 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     }
 
-    // WebChat owns input admission and one output drain per actual run.
-    const threadContext = {
-      channel: "webchat",
-      threadId: sessionId,
-      romeSessionId: sessionId,
-      threadPath: join(workingDir, ".threads", sessionId),
-      channelUserId,
-      threadType: "private" as const,
-      projectName: sessionProjectName,
-      projectPath: sessionProjectPath,
-      ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
-      // The web dashboard is guardian-only, so a webchat turn is always from
-      // the guardian.
-      senderBondLevel: "guardian",
-    };
+    // WebChat owns input admission and one output drain per actual run. The
+    // device the guardian sent from is the one a live read asks, so it is
+    // kept only for the guardian's own message.
+    const threadContext = withAskingDevice(
+      {
+        channel: "webchat",
+        threadId: sessionId,
+        romeSessionId: sessionId,
+        threadPath: join(workingDir, ".threads", sessionId),
+        channelUserId,
+        threadType: "private" as const,
+        projectName: sessionProjectName,
+        projectPath: sessionProjectPath,
+        ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
+        // The web dashboard is guardian-only, so a webchat turn is always from
+        // the guardian.
+        senderBondLevel: "guardian",
+      },
+      // The guardian's own message names its device; a task chat's message
+      // from the Concierge reads the device the task was handed from.
+      actor?.kind === "guardian" && !saidBy
+        ? said.askingDeviceId
+        : saidBy
+          ? ((await deps.webchatRepo.askingDeviceOf(sessionId)) ?? undefined)
+          : undefined,
+    );
 
     const contextSuffix = buildWebchatContextSuffix();
     let largeModelSelection = session.largeModelSelection;
@@ -3628,7 +4564,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             messageCount,
             body.largeModelSelection,
           );
-    const reasoningEffort = await resolveRequestedReasoningEffort(body.reasoningEffort);
+    const reasoningEffort = await chatReasoningEffort(session, body.reasoningEffort);
     const channelThreadKey = webchatSessionKey(sessionId);
 
     // Session-locked agent (null ⇒ "main"). Validated at creation, but we
@@ -3653,9 +4589,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // The main Concierge chat keeps its fixed name, and so does a topic chat
     // started with one. An untitled topic chat is named from its first
     // message, as an ordinary chat is.
+    // A task chat is named by the task that started it, so its first message
+    // does not rename it.
     const autoTitle =
-      policy.autoTitle ||
-      (isConciergeChat(session) && !isMainConciergeChat(session) && session.name === "");
+      session.triggerKind !== TASK_CHAT_TRIGGER_KIND &&
+      (policy.autoTitle ||
+        (isConciergeChat(session) && !isMainConciergeChat(session) && session.name === ""));
 
     // Build the durable transcript payload before acquiring the AgentSession.
     // A recoverable model-resolution failure is still an accepted user turn:
@@ -3682,7 +4621,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     };
 
-    if (!(await deps.webchatRepo.recordUserInput(inputId, sessionId, userContent, actor, saidBy))) {
+    // A card's answer from a Reply is no reply.
+    const replyTo = resolution ? undefined : repliedTo;
+    if (said.taskInput) assertTaskInputCurrent(said.taskInput);
+    if (
+      !(await deps.webchatRepo.recordUserInput(
+        inputId,
+        sessionId,
+        userContent,
+        actor,
+        saidBy,
+        replyTo,
+      ))
+    ) {
       const existing = await deps.webchatRepo.getUserInput(sessionId, inputId);
       if (!existing) return answer({ error: "inputId is already in use" }, 409);
       return answer({
@@ -3700,16 +4651,61 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       messageId: inputId,
       text: displayText,
     });
+    // An answer, and the cards a typed reply dismisses, settle the cards a
+    // Concierge chat shows for them. The owner's input announces no insert,
+    // so it is told here.
+    for (const toolUseId of [...(resolution ? [resolution.toolUseId] : []), ...skippedCardIds]) {
+      void deps.concierge
+        ?.cardSettled(sessionId, { kind: "question", id: toolUseId })
+        .catch((error: unknown) =>
+          log.warn("failed to tell a settled card", {
+            sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+    }
+    // Words typed into a task chat take a stopped task up again.
+    if (!conciergeHeader) {
+      await deps.concierge?.resumeTaskChat?.(sessionId).catch((error: unknown) =>
+        log.warn("failed to take a stopped task up again", {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+    // The Concierge reads which message this is.
+    if (conciergeHeader) {
+      const line = chatThreadLine(inputId);
+      // Messages the owner stopped before an answer are named once, so this
+      // turn does not pick them up from the history.
+      const stopped = (await deps.concierge?.stoppedRequestLines(sessionId)) ?? "";
+      // The headers a session sends again only when they change open the
+      // input in one run, the chat, its owner and the workspace, so the
+      // per-turn lines after them never hide an unchanged one.
+      const sticky = workspaceSection ? `${conciergeHeader}\n${workspaceSection}` : conciergeHeader;
+      const now = (await deps.concierge?.nowLine?.(sessionId)) ?? "";
+      const body = automated
+        ? `${automatedMessageNotice(automated)}\n\n${repliedPrompt}`
+        : repliedPrompt;
+      promptText = `${sticky}\n${stopped ? `${stopped}\n` : ""}${line}${now ? `\n${now}` : ""}\n\n${body}`;
+    }
 
+    // Whether the chat's session was still open: a turn on it starts warm.
+    const sessionWarmth = !isConciergeChat(session)
+      ? undefined
+      : deps.agentSessionManager.find({ agentName, channelThreadKey }) === undefined
+        ? ("cold" as const)
+        : ("warm" as const);
     let agentSess;
     try {
-      agentSess = await deps.agentSessionManager.acquire(
+      agentSess = await deps.agentSessionManager.open(
         {
           agentName,
           channelThreadKey,
         },
         {
-          ...deps.sessionOpeningFor(channelThreadKey, threadContext),
+          ...(await deps.sessionOpeningFor(channelThreadKey, threadContext)),
+          kind: "conversation",
           workingDir,
           threadContext,
           contextSuffix,
@@ -3721,6 +4717,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       );
       await openedInChat(deps.webchatRepo, agentSess, sessionId);
     } catch (err) {
+      // A session opened before the failure is let go, since no turn follows.
+      agentSess?.release();
       const modelError = toModelResolutionErrorPayload(err);
       if (modelError) {
         const turnId = randomUUID();
@@ -3772,7 +4770,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           error: modelError.error,
         });
 
-        return answer({ turnId, sessionId, startedAt: stream.startedAt });
+        return answer({ turnId, sessionId, startedAt: stream.startedAt, content: userContent });
       }
       const message = err instanceof Error ? err.message : "Failed to open agent session";
       return answer({ error: message }, 500);
@@ -3794,6 +4792,26 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       stream.interrupt = async (reason) => {
         await handle.stop(reason);
       };
+      // The effort the turn runs at: a Concierge turn names none and runs at its agent's.
+      const timedEffort =
+        reasoningEffort ?? deps.agentLoader.find(agentName)?.definition.reasoningEffort;
+      if (isConciergeChat(session)) {
+        timeTurn(
+          stream,
+          new ConciergeTurnTiming(
+            {
+              chatId: sessionId,
+              turnId,
+              trigger: said.taskInput || saidBy ? "system" : "guardian",
+              messageKey: inputId,
+              startedAtMs: receivedAtMs,
+              ...(timedEffort ? { effort: timedEffort } : {}),
+              ...(sessionWarmth ? { session: sessionWarmth } : {}),
+            },
+            agentName,
+          ),
+        );
+      }
       enqueueStream(sessionId, stream);
       if (autoTitle) {
         void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
@@ -3823,6 +4841,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           // from the tool-use id (the key the handler created the routine
           // with), never read from the tool's output.
           const pendingRoutineActivations = new Map<string, unknown>();
+          // The action each `execute_action` call of this turn names, by tool
+          // call id, so a widget is stored only for the app that owns it.
+          const executeActionCalls = new Map<string, string>();
+          const cardReplies: CardReplies | undefined =
+            deps.concierge && isConciergeChat(session)
+              ? { concierge: deps.concierge, named: new Map() }
+              : undefined;
           const persistActivatedCard = (toolUseId: string, toolInput: unknown) =>
             persistRoutineDraftCard(
               deps.webchatRepo,
@@ -3848,9 +4873,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // Block id of the in-flight text block, from its deltas.
             let inFlightTextBlockId: string | undefined;
             let resultError: Extract<AgentEvent, { type: "error" }> | undefined;
-            for await (const msg of handle.events()) {
+            const romeSession = {
+              _romeSessionId: sessionId,
+              _type: session.type as RomeSessionType,
+            };
+            for await (const event of handle.events()) {
+              const msg = withRomeSession(event, romeSession);
               if (msg.type === "input_status") continue;
-              // Deltas other than text have no webchat consumer yet.
+              trackWriting(stream, msg);
+              // Other deltas than text have no webchat consumer.
               if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
               // Accumulated deltas of the in-flight text block. Transient — never a
               // trace block, never persisted. The replay key is fixed so a
@@ -3954,7 +4985,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               stream.traceEvents.push(msg);
               emitTraceEvent(stream, msg);
               if (msg.type === "subagent_result") {
-                const call = { dashboardSessionId: sessionId, turnId, toolUseId: msg.toolUseId };
+                const call = {
+                  parentSessionId: agentSess.sessionId,
+                  turnId,
+                  toolUseId: msg.toolUseId,
+                };
                 if (deps.subagentCalls.forget(call)) {
                   await safePersistTrace(stream, "subagent result");
                 }
@@ -3964,6 +4999,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // Out-of-band snapshot for the routine draft card. An
               // `activate: true` call creates the routine in its handler, so its
               // card waits for the tool_result, which carries the routine id.
+              if (msg.type === "tool_use") {
+                const actionName = executedActionName(msg);
+                if (actionName) executeActionCalls.set(msg.id, actionName);
+                const named = askedReplyTo(msg);
+                if (named) cardReplies?.named.set(msg.id, named);
+              }
               if (
                 msg.type === "tool_use" &&
                 isProposeRoutineTool(msg.tool) &&
@@ -4003,7 +5044,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   // there is no owning app to validate.
                   const card = buildBuiltinCard(msg, suspension, sessionId);
                   if (card) {
-                    await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, card);
+                    await persistCard(deps.webchatRepo, sessionId, turnId, card, cardReplies);
                   }
                 } else if (suspension) {
                   const resolvedApp = deps.appCatalog
@@ -4023,18 +5064,35 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                       componentId: suspension.componentId,
                     });
                   } else {
-                    await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, {
-                      type: "pending_interaction",
-                      toolUseId: msg.toolUseId,
-                      appId: suspension.appId,
-                      render: {
-                        kind: "inline",
-                        componentId: suspension.componentId,
-                        props: suspension.props,
-                        ...(suspension.requiresCard ? { requiresCard: true } : {}),
+                    await persistCard(
+                      deps.webchatRepo,
+                      sessionId,
+                      turnId,
+                      {
+                        type: "pending_interaction",
+                        toolUseId: msg.toolUseId,
+                        appId: suspension.appId,
+                        render: {
+                          kind: "inline",
+                          componentId: suspension.componentId,
+                          props: suspension.props,
+                          ...(suspension.requiresCard ? { requiresCard: true } : {}),
+                        },
                       },
-                    });
+                      cardReplies,
+                    );
                   }
+                }
+                // A widget that does not wait: stored as its own part of a
+                // message, so it shows in the turn and again on every load.
+                const widget = trustedWidget(
+                  msg,
+                  executeActionCalls.get(msg.toolUseId),
+                  deps,
+                  sessionId,
+                );
+                if (widget) {
+                  await persistCard(deps.webchatRepo, sessionId, turnId, widget, cardReplies);
                 }
                 // Fire-and-forget widget placement: an action that returned
                 // `place_widget` surfaces it on its tool_result. Emit a transient
@@ -4101,7 +5159,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                     ? lastCompletedText?.blockId
                     : undefined;
               await deps.actionEngine.run(
-                "send_message",
+                "system:send_message",
                 {
                   channel: "webchat",
                   threadId: sessionId,
@@ -4187,42 +5245,101 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return stream;
     };
 
-    let started: ReturnType<typeof attachTurn> | undefined;
+    const actingActor = said.taskActor ?? turnActor(actor, saidBy);
     const options = {
       ...(replyPushes(actor, saidBy) ? { pushLevel: "active" as const } : {}),
+      // Who the turn acts for, captured now: its tool calls run as this
+      // person however late the model's callback arrives.
+      ...(actingActor ? { actor: actingActor } : {}),
+      ...(said.taskInput ? { parentAudience: said.taskInput.source.audience } : {}),
       links: turnLinks,
       priority: priority.data,
       threadContext,
       romeSessionId: sessionId,
-      romeSessionType: session.type as RomeSessionType,
-      onTurn: (handle: AgentTurnHandle) => {
-        started = attachTurn(handle);
-        void started.catch((error) =>
-          log.error("failed to attach input turn", {
-            turnId: handle.id,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
-      },
       onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusEvent) => {
         await deps.webchatRepo.updateUserInput(sessionId, status);
+        // A Concierge turn that takes its owner's message records it, so a
+        // turn its owner stops before it answers can be told to the next one
+        // (docs/domains/chats.md#task), and its status can show the turn
+        // working on it (docs/domains/chats.md#status).
+        if (status.state === "consumed" && status.turnId && isConciergeChat(session)) {
+          // A turn that called a tool already runs: the message joins it.
+          const running = streamsByTurnId.get(status.turnId);
+          const joined = running?.calledTool === true;
+          // The turn as its tool calls name it.
+          const turnId = running ? (running.agentTurnId ?? running.turnId) : status.turnId;
+          await deps.concierge?.deps.tasks.repo
+            .takeMessage(status.turnId, { chatId: sessionId, messageKey: status.inputId })
+            .then(() =>
+              deps.concierge?.messageStatus?.taken(sessionId, status.inputId, turnId, { joined }),
+            )
+            .catch((error: unknown) =>
+              log.warn("failed to record the message a turn took", {
+                sessionId,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+        }
         const stream = status.turnId ? streamsByTurnId.get(status.turnId) : undefined;
         if (stream) emitToStream(stream, "input_status", status, `input:${status.inputId}`);
       },
     };
     const input = { inputId, prompt: promptText, reasoningEffort };
-    const receipt = agentSess.submitInput(input, options);
-    const stream = started ? await started : streamsByTurnId.get(receipt.turnId);
+    // Opening a model session can outlive Stop or the handoff's deadline.
+    // Refuse the recorded input rather than replaying it as autonomous work.
+    if (said.taskInput) {
+      try {
+        await refreshTaskInputActor(said.taskInput, deps.webchatRepo, taskSourceChat);
+        assertTaskInputCurrent(said.taskInput);
+      } catch {
+        agentSess.release();
+        await deps.webchatRepo.updateUserInput(sessionId, {
+          type: "input_status",
+          inputId,
+          state: "failed",
+        });
+        return answer({ error: "Task input attribution is unavailable" }, 409);
+      }
+    }
+    const receipt = said.taskInput
+      ? admitTaskInput(said.taskInput, () => agentSess.submit(input, options))
+      : agentSess.submit(input, options);
+    // The turn this input started gets its stream here, and so does one a
+    // queued input starts later. A turn it was folded or steered into has one.
+    const attached = receipt.turn.then((handle) => {
+      if (attachedTurns.has(handle.id)) return undefined;
+      attachedTurns.add(handle.id);
+      void handle.ended().then(() => attachedTurns.delete(handle.id));
+      return attachTurn(handle);
+    });
+    void attached.catch((error) =>
+      log.error("failed to attach input turn", {
+        turnId: receipt.turnId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    const stream =
+      (receipt.landed === "started" ? await attached : undefined) ??
+      streamsByTurnId.get(receipt.turnId);
     return answer({
-      ...receipt,
+      inputId,
+      turnId: receipt.turnId,
+      // The wire word for a steered input stays `steering`.
+      disposition: receipt.landed === "steered" ? "steering" : receipt.landed,
       sessionId,
       startedAt: stream?.startedAt ?? new Date().toISOString(),
+      // The message as stored, so the sender's row shows what a reload would,
+      // uploads as their asset links included.
+      content: userContent,
     });
   };
 
   app.post("/chat/sessions/:id/turns", async (c) => {
     const body = await parseChatSendBody(c);
-    const sent = await handleChatSend(c.req.param("id"), body);
+    const sent = await handleChatSend(c.req.param("id"), body, {
+      fromWidgetEvent: cameThroughWidgetEvent(c.env),
+      askingDeviceId: c.req.header(ASKING_DEVICE_HEADER),
+    });
     return c.json(sent.body, sent.status);
   });
 
@@ -4259,7 +5376,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // recorded turn adds its own id as `agentTurnId` once it starts.
     const syntheticTurnId = `backend:${randomUUID()}`;
     const session = await deps.webchatRepo.getSession(sessionId);
-    // Deliberately top-level only. A side chat has no scheduled wake-ups (see
+    // Deliberately top-level only. A fork chat has no scheduled wake-ups (see
     // `deferEnabled`) and does not host approval continuations: resuming one
     // here would reopen its session without the detached surface, and a
     // continuation raised on the branch's first turn still carries the parent's
@@ -4275,6 +5392,28 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       session.agentName ?? "main",
     );
     if (options?.quiet) stream.quiet = true;
+    // A quiet turn is timed too, and reported only once it said something.
+    if (isConciergeChat(session)) {
+      timeTurn(
+        stream,
+        new ConciergeTurnTiming(
+          {
+            chatId: sessionId,
+            turnId: syntheticTurnId,
+            trigger: "system",
+            startedAtMs: Date.now(),
+            session:
+              deps.agentSessionManager.find({
+                agentName: session.agentName ?? "main",
+                channelThreadKey: webchatSessionKey(sessionId),
+              }) === undefined
+                ? "cold"
+                : "warm",
+          },
+          session.agentName ?? "main",
+        ),
+      );
+    }
     enqueueStream(sessionId, stream);
 
     // Capture the resumed agent's final reply so it can be persisted as a
@@ -4286,7 +5425,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // foreground turn (notably after `defer` wakes it). Its tool result still
     // needs to become a first-class transcript card; otherwise it exists only
     // in the trace and the model falsely believes the form was shown.
-    const builtinQuestionCards: PendingInteractionPart[] = [];
+    const backendCards: Array<PendingInteractionPart | WidgetPart> = [];
+    // As in a foreground turn: the action each `execute_action` call names.
+    const executeActionCalls = new Map<string, string>();
+    const cardReplies: CardReplies | undefined =
+      deps.concierge && isConciergeChat(session)
+        ? { concierge: deps.concierge, named: new Map() }
+        : undefined;
     // A recorded event's turn delivers its own reply, so its cards are written
     // as they arrive, ahead of that reply, under the turn's own id.
     let recordedTurnId: string | undefined;
@@ -4314,23 +5459,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
       }
       if (msg.type === "turn_start" && stream.channelThreadKey) {
-        const owner = deps.agentSessionManager.peek({
+        const owner = deps.agentSessionManager.find({
           agentName: msg.agent ?? stream.agentName,
           channelThreadKey: stream.channelThreadKey,
         });
         // The wrapper may outlive its provider turn. Never stop a later turn
         // merely because it reuses the same runtime session.
-        if (owner?.currentTurnId === msg.turnId) {
+        if (owner?.runningTurn?.id === msg.turnId) {
           stream.interrupt = async (reason) => {
-            if (owner.currentTurnId !== msg.turnId) return;
+            if (owner.runningTurn?.id !== msg.turnId) return;
             // Marked only when the Stop reaches this turn: one that lands
             // after a newer input ended it stops nothing.
             if (reason === "user-stop") stream.stopRequested = true;
-            await owner.interrupt(reason);
+            await owner.stop(reason);
           };
         }
       }
-      // Backend turns have no live bubble; drop delta events.
+      trackWriting(stream, msg);
+      // Backend turns have no live bubble; drop the other delta events.
       if (isTransientDelta(msg) || msg.type === "input_status") return recordedCardWrites;
       if (recorded) {
         emitLiveTraceEvent(stream, msg);
@@ -4368,18 +5514,25 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           });
         }
       }
+      if (msg.type === "tool_use") {
+        const actionName = executedActionName(msg);
+        if (actionName) executeActionCalls.set(msg.id, actionName);
+        const named = askedReplyTo(msg);
+        if (named) cardReplies?.named.set(msg.id, named);
+      }
       if (msg.type === "tool_result") {
         const suspension = readSuspensionFromOutput(msg.output);
-        if (suspension && suspension.kind === "inline" && suspension.builtin) {
-          const card = buildBuiltinCard(msg, suspension, sessionId);
-          if (card && recorded) {
-            const cardTurnId = recordedTurnId ?? syntheticTurnId;
-            recordedCardWrites = recordedCardWrites.then(() =>
-              persistSuspensionCard(deps.webchatRepo, sessionId, cardTurnId, card),
-            );
-          } else if (card) {
-            builtinQuestionCards.push(card);
-          }
+        const card =
+          suspension && suspension.kind === "inline" && suspension.builtin
+            ? buildBuiltinCard(msg, suspension, sessionId)
+            : trustedWidget(msg, executeActionCalls.get(msg.toolUseId), deps, sessionId);
+        if (card && recorded) {
+          const cardTurnId = recordedTurnId ?? syntheticTurnId;
+          recordedCardWrites = recordedCardWrites.then(() =>
+            persistCard(deps.webchatRepo, sessionId, cardTurnId, card, cardReplies),
+          );
+        } else if (card) {
+          backendCards.push(card);
         }
       }
       return recordedCardWrites;
@@ -4391,8 +5544,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // Persist cards before the final narration so transcript order matches the
       // foreground path ("choose above"). `addBackendMessage` also pushes a
       // message_insert event to an already-open session.
-      for (const card of builtinQuestionCards) {
-        await persistSuspensionCard(deps.webchatRepo, sessionId, syntheticTurnId, card);
+      for (const card of backendCards) {
+        await persistCard(deps.webchatRepo, sessionId, syntheticTurnId, card, cardReplies);
       }
       // Persist + push the reply before the stream emits `done`, so a
       // late-attached subscriber's reload-on-done also sees it. The push
@@ -4452,12 +5605,31 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         return { ok: false, error: `No agent ${as.id} to say it as` };
       }
       const inputId = randomUUID();
-      const sent = await handleChatSend(
-        chatId,
-        { inputId, text: body.text, skillName: body.skillName },
-        { saidBy: as },
+      const claim = claimTaskInputActor(chatId, body, as);
+      const taskActor = claim
+        ? await taskInputActor(claim, deps.webchatRepo, taskSourceChat)
+        : undefined;
+      if (claim)
+        log.info("task input attributed", {
+          sourceChatId: claim.source.chatId,
+          sourceTurnId: claim.source.turnId,
+          chatId,
+          inputId,
+          actorKind: taskActor?.kind,
+        });
+      const sent = await withoutTaskInputActor(() =>
+        handleChatSend(
+          chatId,
+          { inputId, text: body.text, skillName: body.skillName },
+          { saidBy: as, taskActor, taskInput: claim },
+        ),
       );
       if (sent.status >= 400) {
+        // A refused attributed input never reached submit, even if recorded.
+        if (claim) {
+          await deps.webchatRepo.failQueuedUserInput(chatId, inputId);
+          return { ok: false, error: `${routeError(sent)}; task input was not admitted` };
+        }
         // Once the input is recorded it is said, even when the agent could not
         // be woken on it: answering failed would invite a second message.
         if (!(await deps.webchatRepo.getUserInput(chatId, inputId))) {
@@ -4471,11 +5643,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       return { ok: true, messageId: inputId, at: new Date() };
     },
-    async startChat(input, ownerKey) {
+    async startChat({ model, reasoningEffort, ...input }, ownerKey) {
       // A task chat is the owner's whose Concierge started it.
       const started = await startChat(input, ownerKey);
       const id = started.body.id;
       if (started.status >= 400 || typeof id !== "string") throw new Error(routeError(started));
+      // The model and effort Rome picked for the chat hold whatever the
+      // dashboard's model selector says, as a Concierge chat's model does.
+      if (model) await deps.webchatRepo.updateSessionLargeModelSelection(id, model, "auto");
+      if (reasoningEffort) await deps.webchatRepo.updateSessionReasoningEffort(id, reasoningEffort);
       return id;
     },
     async openSession(chatId) {
@@ -4508,18 +5684,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         ...(session.deviceFolder ? { deviceFolder: session.deviceFolder } : {}),
         senderBondLevel: "guardian",
       };
-      const opened = await deps.agentSessionManager.acquire(
+      const opened = await deps.agentSessionManager.open(
         { agentName: session.agentName ?? "main", channelThreadKey },
         {
-          ...deps.sessionOpeningFor(channelThreadKey, threadContext),
+          ...(await deps.sessionOpeningFor(channelThreadKey, threadContext)),
+          kind: "conversation",
           workingDir,
           threadContext,
           contextSuffix: buildWebchatContextSuffix(),
           selectionId: modelSelection?.id ?? null,
         },
       );
-      await openedInChat(deps.webchatRepo, opened, chatId);
-      return opened.sessionId;
+      // Only its id is wanted: no turn follows, so the session is let go.
+      try {
+        await openedInChat(deps.webchatRepo, opened, chatId);
+        return opened.sessionId;
+      } finally {
+        opened.release();
+      }
     },
     async sendAsGuardian(chatId, text) {
       const inputId = randomUUID();
@@ -4536,6 +5718,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     },
     isRunning: isSessionRunning,
+    isBusy: isSessionBusy,
+    openTool,
+    turnPlan,
+    onTurnChange(listener) {
+      turnListeners.add(listener);
+      return () => {
+        turnListeners.delete(listener);
+      };
+    },
     activeTurns: (sessionId) =>
       sessionTurns(sessionId).map(
         (turn) => ("agentTurnId" in turn ? turn.agentTurnId : undefined) ?? turn.turnId,
@@ -4551,11 +5742,26 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 }
 
 /**
- * Whether the Concierge's reply to a sent message may reach the guardian's
- * phone (ConciergePush): only a message the guardian wrote, signed in. A
- * message said as someone else (an agent account, an automated source) and a
- * loopback caller acting as the guardian are not the guardian writing.
+ * The person a sent message's turn acts for: the guardian or a visitor who
+ * wrote it. A message said as an agent account, or with no person behind
+ * it, gives none.
+ */
+export function turnActor(
+  actor: SessionActor | undefined,
+  saidBy: Account | undefined,
+): SessionActor | undefined {
+  if (saidBy !== undefined) return undefined;
+  return actor?.kind === "guardian" || actor?.kind === "visitor" ? actor : undefined;
+}
+
+/**
+ * Whether the Concierge's reply to a sent message may reach the sender's
+ * phone (ConciergePush): only a message the guardian or a visitor wrote,
+ * signed in. A message said as someone else (an agent account, an automated
+ * source) and a loopback caller acting as the guardian are not a person
+ * writing.
  */
 export function replyPushes(actor: SessionActor | undefined, saidBy: Account | undefined): boolean {
-  return actor?.kind === "guardian" && actor.via === "cookie" && saidBy === undefined;
+  if (saidBy !== undefined) return false;
+  return actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie");
 }

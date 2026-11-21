@@ -26,7 +26,7 @@ rs.mock("@/hooks/use-apps", () => {
     app("user-skills", "User Skills"),
     app("quiet", "Quiet App", true, true),
   ];
-  return { useApps: () => ({ apps }) };
+  return { useAppsList: () => ({ apps }) };
 });
 
 beforeAll(async () => {

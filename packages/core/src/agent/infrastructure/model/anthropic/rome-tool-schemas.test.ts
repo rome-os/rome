@@ -2,7 +2,6 @@ import { describe, it, expect } from "@rstest/core";
 import { z } from "zod";
 import { jsonSchemaObjectToZodRawShape } from "zod-from-json-schema";
 import type { JSONSchema } from "zod/v4/core";
-import { proposeRoutineTools } from "../../../../routines/propose-routine-tool.js";
 import { testRomeTools } from "../../../../test/tool-calls.js";
 import { ROME_TOOL_GROUPS, type RomeToolDefinition } from "../../../domain/rome-tools.js";
 import { toMcpToolShape } from "./json-schema-zod.js";
@@ -11,16 +10,6 @@ import { toMcpToolShape } from "./json-schema-zod.js";
 function allBuiltInTools(): RomeToolDefinition[] {
   const tools = testRomeTools({
     defer: { schedule: async () => ({}), finalText: "deliver" },
-    sessionTools: proposeRoutineTools({
-      widgets: "card",
-      hasSpeaker: true,
-      gate: {
-        canCallAction: () => "permitted",
-        validateArgs: () => null,
-        routineKeyFor: () => undefined,
-      },
-      runAction: async () => ({ status: "ok" }),
-    }),
   });
   return ROME_TOOL_GROUPS.flatMap((group) => [...tools.listTools(group)]);
 }
@@ -37,7 +26,7 @@ function findTool(name: string): RomeToolDefinition {
 describe("Rome tool input schemas", () => {
   it("offers every optional built-in when each option is on", () => {
     expect(allBuiltInTools().map((t) => t.name)).toEqual(
-      expect.arrayContaining(["execute_action", "ask_question", "defer", "propose_routine"]),
+      expect.arrayContaining(["execute_action", "ask_question", "defer"]),
     );
   });
 
@@ -87,9 +76,21 @@ describe("Rome tool input schemas", () => {
     });
   });
 
-  it("advertises propose_routine's filter conditions with their item shape", () => {
-    const shape = toMcpToolShape("propose_routine", findTool("propose_routine").inputSchema);
-    const advertised = z.toJSONSchema(z.object(shape)) as {
+  it("keeps the item shape of an array of objects", () => {
+    const inputSchema = {
+      type: "object",
+      properties: {
+        filter: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["field", "equals"],
+            properties: { field: { type: "string" }, equals: { type: "string" } },
+          },
+        },
+      },
+    };
+    const advertised = z.toJSONSchema(z.object(toMcpToolShape("sample", inputSchema))) as {
       properties: Record<string, { items?: { properties?: object; required?: string[] } }>;
     };
     const items = advertised.properties.filter.items;
@@ -99,18 +100,14 @@ describe("Rome tool input schemas", () => {
     expect(items?.required).toEqual(expect.arrayContaining(["field", "equals"]));
   });
 
-  it("keeps every key of propose_routine's free-form args", () => {
-    const shape = toMcpToolShape("propose_routine", findTool("propose_routine").inputSchema);
+  it("keeps every key of a free-form object", () => {
+    const inputSchema = {
+      type: "object",
+      required: ["args"],
+      properties: { args: { type: "object", additionalProperties: true } },
+    };
     const args = { agentName: "main", prompt: "Summarize the email.", nested: { n: 1 } };
-    const parsed = z.object(shape).parse({
-      kind: "manual",
-      sentence: "Rome will summarize your inbox when you run it.",
-      name: "Inbox summary",
-      watchLabel: "Run manually",
-      thenSummary: "summarize your inbox",
-      actionName: "summon",
-      args,
-    });
+    const parsed = z.object(toMcpToolShape("sample", inputSchema)).parse({ args });
     expect(parsed.args).toEqual(args);
   });
 });

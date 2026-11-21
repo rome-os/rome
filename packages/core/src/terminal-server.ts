@@ -3,11 +3,12 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import * as pty from "node-pty";
 import type { DrizzleDb } from "./db/index.js";
-import { gateGuardianUpgrade } from "./lib/ws-guardian-gate.js";
+import type { DashboardAccessState } from "./access/dashboard-access-state.js";
+import { gateUpgrade } from "./access/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
-import { ClaudeLoginCodeValidationError, formatClaudeLoginCodeInput } from "./claude-login-code.js";
-import { createClaudeLoginWatcher } from "./claude-login-watch.js";
+import { ClaudeLoginCodeValidationError, formatClaudeLoginCodeInput } from "./agent/index.js";
+import { createClaudeLoginWatcher } from "./agent/index.js";
 
 const log = createLogger("terminal-server");
 
@@ -71,6 +72,7 @@ export interface TerminalServerOptions {
 export function attachTerminalServer(
   httpServer: Server,
   db: DrizzleDb,
+  dashboardAccess: Pick<DashboardAccessState, "isCloudEmailAllowed">,
   options: TerminalServerOptions = {},
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true });
@@ -85,9 +87,9 @@ export function attachTerminalServer(
 
     socket.on("error", () => socket.destroy());
 
-    void gateGuardianUpgrade(req, socket, db)
-      .then((allowed) => {
-        if (!allowed || socket.destroyed) return;
+    void gateUpgrade(req, socket, db, dashboardAccess)
+      .then((caller) => {
+        if (!caller || socket.destroyed) return;
         const preset = url.searchParams.get("preset");
         if (!preset || !TERMINAL_COMMAND_PRESETS[preset]) {
           rejectUpgrade(socket, 400, "Bad Request");

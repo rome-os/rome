@@ -25,9 +25,6 @@ import {
   type SpecSource,
   writeLockfile,
 } from "./lockfile.js";
-import { resolveArtifactId, type LegacyArtifactBindings } from "./artifact-id.js";
-import type { RoutinesRepository } from "../db/repositories/routines.js";
-import type { RoutineEngine } from "../routines/engine.js";
 import type { AppCatalog } from "./catalog.js";
 import type { AppInstaller } from "./installer.js";
 import { normalizeListingId } from "./rome-cloud-urls.js";
@@ -103,11 +100,10 @@ export interface BootResult {
 export interface AppManagerOptions {
   lockfilePath: string;
   installer: AppInstaller;
-  routines?: {
-    legacyBindings: Readonly<LegacyArtifactBindings>;
-    repository: Pick<RoutinesRepository, "findEnabled" | "update">;
-    engine: Pick<RoutineEngine, "deactivate">;
-  };
+  /** Pauses the routines that fire the app's actions, when the app is disabled or removed. */
+  pauseRoutines?: (appId: AppId) => Promise<void>;
+  /** Deletes the routines the app managed, once it is uninstalled. */
+  deleteRoutines?: (appId: AppId) => Promise<void>;
 }
 
 /**
@@ -544,6 +540,16 @@ export class AppManager {
           delete fresh.apps[appId];
           await writeLockfile(this.lockfilePath, fresh);
         });
+        try {
+          await this.opts.deleteRoutines?.(appId);
+        } catch (err) {
+          // Boot deletes routines of apps that are not installed, so a miss
+          // here heals at the next start.
+          log.warn("could not delete the app's routines on uninstall", {
+            appId,
+            error: (err as Error).message,
+          });
+        }
         let diskCleanupError: string | null = null;
         try {
           await this.installer.tearDown(appId);
@@ -588,26 +594,7 @@ export class AppManager {
   }
 
   private async pauseRoutines(appId: AppId): Promise<void> {
-    const deps = this.opts.routines;
-    if (!deps) return;
-    const prefix = `${appId}:`;
-    for (const routine of await deps.repository.findEnabled()) {
-      let actionName = routine.actionName;
-      if (!actionName.startsWith(prefix)) {
-        try {
-          actionName = resolveArtifactId({
-            kind: "action",
-            value: actionName,
-            legacyBindings: deps.legacyBindings,
-          });
-        } catch {
-          continue;
-        }
-        if (!actionName.startsWith(prefix)) continue;
-      }
-      await deps.repository.update(routine.id, { enabled: false });
-      await deps.engine.deactivate(routine.id);
-    }
+    await this.opts.pauseRoutines?.(appId);
   }
 
   async boot(): Promise<BootResult> {

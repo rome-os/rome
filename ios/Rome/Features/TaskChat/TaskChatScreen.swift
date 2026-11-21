@@ -8,16 +8,16 @@ struct TaskChatScreen: View {
     let initialTitle: String
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(AppModel.self) private var model
-    @Environment(\.openURL) private var openURL
+    @Environment(\.visibleChat) private var visibleChat
     /// Kept on the workspace, so a failed send's bubble and Retry are still
     /// there when the guardian comes back, and the draft waits for it to load.
     private var store: TranscriptStore { workspace.taskStore(chatId) }
     @State private var draft = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
+    @State private var confirmDelete = false
 
-    private var title: String { workspace.tasks.title(forChat: chatId, fallback: initialTitle) }
+    private var title: String { workspace.taskChats.title(forChat: chatId, fallback: initialTitle) }
 
     /// The header shows a spinner only while this chat runs a turn. The
     /// task's own state is left out: it is not reported accurately enough.
@@ -35,6 +35,10 @@ struct TaskChatScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .floatingTopBar { header }
+        .overlay(alignment: .top) {
+            TranscriptBanners(store: store)
+                .padding(.top, 62)
+        }
         .background(Palette.bg.ignoresSafeArea())
         .composerDraft(workspace.drafts, chat: chatId, text: $draft, attachments: attachments, transcript: store)
         .toolbar(.hidden, for: .navigationBar)
@@ -46,6 +50,10 @@ struct TaskChatScreen: View {
                 stopping: store.stopping,
                 focused: $composerFocused,
                 attachments: attachments,
+                voiceInput: workspace.voiceInput,
+                voiceKey: chatId,
+                voiceField: .taskChat,
+                onScreen: visibleChat == chatId && !store.share.isSelecting,
                 onSend: {
                     guard !attachments.isPreparing else { return }
                     if store.send(draft, images: attachments.images, fromComposer: true) {
@@ -55,7 +63,9 @@ struct TaskChatScreen: View {
                 },
                 onStop: { store.stopTurn() }
             )
+            .shareModeComposer(store.share)
             .padding(.horizontal, Metrics.pagePadding)
+            .readableColumn()
             .padding(.top, 6)
             .padding(.bottom, 8)
         }
@@ -69,6 +79,13 @@ struct TaskChatScreen: View {
         }
         // Keep the swipe-back gesture with a hidden navigation bar.
         .background(SwipeBackEnabler())
+        .deleteChatAlert(isPresented: $confirmDelete) {
+            Task { if await workspace.deleteTaskChat(chatId) { dismiss() } }
+        }
+    }
+
+    private func archive() {
+        Task { if await workspace.archiveTaskChat(chatId) { dismiss() } }
     }
 
     private var header: some View {
@@ -93,16 +110,11 @@ struct TaskChatScreen: View {
             .frame(maxWidth: .infinity)
             .animation(.easeInOut(duration: 0.25), value: spinning)
             Menu {
-                Button {
-                    if let url = model.webURL?.appending(path: "chat/\(chatId)") { openURL(url) }
-                } label: {
-                    Label("Open on the web", systemImage: "safari")
+                Button(action: archive) { Label("Archive", systemImage: "archivebox") }
+                Button(role: .destructive) { confirmDelete = true } label: {
+                    Label("Delete", systemImage: "trash")
                 }
-                Button {
-                    UIPasteboard.general.url = model.webURL?.appending(path: "chat/\(chatId)")
-                } label: {
-                    Label("Copy link", systemImage: "link")
-                }
+                ChatShareMenuItems(share: store.share)
             } label: {
                 Image(systemName: "ellipsis")
                     .romeFont(17, .semibold)
@@ -115,20 +127,27 @@ struct TaskChatScreen: View {
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .frame(height: 52)
+        .shareModeHeader(store.share)
         .headerFade()
     }
 
     @ViewBuilder
     private func transcript(_ store: TranscriptStore) -> some View {
         let briefID = store.brief?.id
+        let agentName = workspace.agentDisplayName
         TranscriptList(
             store: store,
             composerFocused: composerFocused,
             alignTop: true,
             footer: store.running && store.loaded ? AnyView(runningLine(store)) : nil
         ) { row, previous in
-            taskRow(row, store: store, briefID: briefID)
-                .padding(.top, spacing(row, after: previous))
+            // A row that draws nothing takes no space either: a row view of
+            // its own would still take the spacing above it.
+            if TaskChatRow.draws(row, briefID: briefID) {
+                TaskChatRow(row: row, info: store.info(for: row), briefID: briefID, agentName: agentName, store: store)
+                    .equatable()
+                    .shareSelectable(row, share: store.share, top: Self.spacing(row, after: previous, briefID: briefID), placement: isBrief(row, briefID) ? .corner : nil)
+            }
         }
         .onTapGesture { composerFocused = false }
     }
@@ -146,8 +165,52 @@ struct TaskChatScreen: View {
         .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder
-    private func taskRow(_ row: TranscriptRow, store: TranscriptStore, briefID: String?) -> some View {
+    /// The brief opens the chat as a card, though it is the guardian's message.
+    private func isBrief(_ row: TranscriptRow, _ briefID: String?) -> Bool {
+        guard let briefID, case .userText(let id, _, _, _) = row else { return false }
+        return id.hasPrefix(briefID + ":")
+    }
+
+    /// Task chats space every block by 12 pt, as on the board; bubbles in a run keep 3 pt.
+    private static func spacing(_ row: TranscriptRow, after previous: TranscriptRow?, briefID: String?) -> CGFloat {
+        guard let previous else { return 12 }
+        if case .separator = row { return 20 }
+        if case .separator(let id, _) = previous {
+            // Directly under a hidden separator: the brief starts the page.
+            return id == "sep-\(briefID ?? "")" ? 4 : 14
+        }
+        if case .agentText = row, case .agentText = previous { return 3 }
+        return 12
+    }
+}
+
+/// One row of a task chat. It draws from values (`row`, `info`, the brief's
+/// id, the Concierge's name) and acts through the store's `ChatActions`, so
+/// a row whose values did not change is not drawn again.
+private struct TaskChatRow: View, Equatable {
+    let row: TranscriptRow
+    let info: RowInfo
+    let briefID: String?
+    let agentName: String
+    let store: TranscriptStore
+
+    nonisolated static func == (a: Self, b: Self) -> Bool {
+        a.row == b.row && a.info == b.info && a.briefID == b.briefID && a.agentName == b.agentName && a.store === b.store
+    }
+
+    /// Whether a task chat draws the row at all: not the brief's time line,
+    /// nor the rows only a Concierge chat shows.
+    static func draws(_ row: TranscriptRow, briefID: String?) -> Bool {
+        switch row {
+        case .separator(let id, _): briefID.map { id != "sep-\($0)" } ?? true
+        case .taskAsk, .sourceLabel, .sessionRenewal, .unreadDivider: false
+        default: true
+        }
+    }
+
+    var body: some View {
+        let _ = PerfProbe.count("taskRowBody")
+        let actions = store.actions
         switch row {
         case .separator(let id, let date):
             // The brief opens the chat; no time line above it.
@@ -159,32 +222,38 @@ struct TaskChatScreen: View {
         case .userText(let id, let text, let images, let pending):
             if let briefID, id.hasPrefix(briefID + ":") {
                 BriefCard(text: text)
+            } else if info.saidByAgent {
+                // The Concierge relays the guardian's words: their side, its name.
+                ConciergeBubble(name: info.senderName ?? agentName, text: text, menu: menu)
             } else {
-                UserBubble(text: text, images: images, pending: pending) { store.retry(id) }
+                UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu)
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position)
-        case .tools, .approval, .question, .webOnly, .connect:
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, menu: menu)
+        case .tools, .approval, .question, .webOnly, .routineDraft, .connect, .widgetUI:
             InteractionRow(row: row, store: store)
-        case .error(_, let text):
-            ErrorLine(text: text)
-        case .taskCard(_, let id, let title):
+        case .error(_, let error):
+            ErrorLine(error: error)
+        case .notice(_, let text):
+            NoticeLine(text: text)
+        case .taskCard(_, _, let title, _, _):
             TaskCard(title: title) {}
+        case .taskAsk, .sourceLabel:
+            // Only a Concierge chat shows a task's question alone, or thread labels.
+            EmptyView()
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
+        case .sessionRenewal, .unreadDivider:
+            // Only a Concierge chat draws its faint lines.
+            EmptyView()
         }
     }
 
-    /// Task chats space every block by 12 pt, as on the board; bubbles in a run keep 3 pt.
-    private func spacing(_ row: TranscriptRow, after previous: TranscriptRow?) -> CGFloat {
-        guard let previous else { return 12 }
-        if case .separator = row { return 20 }
-        if case .separator(let id, _) = previous {
-            // Directly under a hidden separator: the brief starts the page.
-            return id == "sep-\(store.brief?.id ?? "")" ? 4 : 14
-        }
-        if case .agentText = row, case .agentText = previous { return 3 }
-        return 12
+    /// A task chat's bubbles: the time, Copy and Share; no threads to reply in.
+    private var menu: BubbleMenu {
+        let actions = store.actions
+        let onShare: (() -> Void)? = info.canShare ? { [rowId = row.id] in actions.share(fromRow: rowId) } : nil
+        return BubbleMenu(date: info.date, onShare: onShare)
     }
 }
 

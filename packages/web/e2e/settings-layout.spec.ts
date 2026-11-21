@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const tabs = ["appearance", "connections", "channels", "ai-tools", "favors", "advanced"];
+const tabs = ["appearance", "connections", "ai-tools", "favors", "advanced"];
 
 for (const width of [390, 1440]) {
   test(`Settings keeps its header and controls inside the viewport at ${width}px`, async ({
@@ -9,15 +9,20 @@ for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.addInitScript(() => localStorage.setItem("i18nextLng", "en"));
     let headerLeft: number | undefined;
+    const dialog = page.getByRole("dialog", { name: "Settings" });
+    const heading = dialog.getByRole("heading", { name: "Settings", exact: true });
+    // Load once, then switch sections from the menu. Each fresh load also
+    // renders the main chat behind the dialog, and five of them exceed the
+    // test timeout on a shared runner.
+    await page.goto(`/settings/${tabs[0]}`);
     for (const tab of tabs) {
-      await page.goto(`/settings/${tab}`);
-      const heading = page.getByRole("heading", { name: "Settings", exact: true });
+      if (tab !== tabs[0]) await dialog.locator(`nav a[href="/settings/${tab}"]`).click();
       await expect(heading).toBeVisible();
-      await expect(page.locator("main h1")).toHaveCount(1);
-      await expect(
-        page.locator('[data-slot="page-nav-link"][aria-current="page"]'),
-      ).toHaveAttribute("href", `/settings/${tab}`);
-      const body = page.locator('[data-slot="page"]').first();
+      await expect(dialog.locator('nav a[aria-current="page"]')).toHaveAttribute(
+        "href",
+        `/settings/${tab}`,
+      );
+      const body = dialog.locator('[data-slot="page"]').first();
       await expect(
         body
           .getByRole("combobox")
@@ -25,7 +30,6 @@ for (const width of [390, 1440]) {
           .or(body.getByRole("switch"))
           .first(),
       ).toBeVisible();
-      if (tab === "channels") await expect(page.locator("main article").first()).toBeVisible();
       if (tab === "advanced") {
         // Developer settings is always open, so its switches show without a click.
         await expect(
@@ -50,18 +54,43 @@ for (const width of [390, 1440]) {
 }
 
 for (const width of [390, 1440]) {
-  test(`Settings detail routes retain navigation and contain wide content at ${width}px`, async ({
+  test(`Settings detail routes keep a way back and contain wide content at ${width}px`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.addInitScript(() => localStorage.setItem("i18nextLng", "en"));
     await page.goto("/settings/connections/github");
-    await expect(page.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
-    await expect(page.locator("main h1")).toHaveCount(1);
-    const back = page.locator("main").getByRole("link", { name: "Connections", exact: true });
-    await expect(back).toHaveAttribute("href", "/settings/connections");
+    const dialog = page.getByRole("dialog", { name: "Settings" });
+    await expect(dialog.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "Connections", exact: true }).click();
+    await expect(page).toHaveURL(/\/settings\/connections$/);
+    await page.goBack();
     expect(
-      await page.locator('[data-slot="page"]').evaluate((el) => el.getBoundingClientRect().right),
+      await dialog.locator('[data-slot="page"]').evaluate((el) => el.getBoundingClientRect().right),
     ).toBeLessThanOrEqual(width);
   });
 }
+
+test("A Connections card opens its detail inside Settings, and Escape returns to the card", async ({
+  page,
+}) => {
+  await page.addInitScript(() => localStorage.setItem("i18nextLng", "en"));
+  await page.goto("/settings/connections");
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  const card = dialog.getByRole("button", { name: "Open GitHub" });
+  await card.click();
+  await expect(dialog.getByRole("dialog", { name: "GitHub" })).toBeVisible();
+  await expect(dialog.getByLabel("Search connections")).toBeHidden();
+  // Settings is the only modal: no dialog sits outside it.
+  const outside = await dialog.evaluate(
+    (settings) =>
+      [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].filter(
+        (other) => other !== settings && !settings.contains(other),
+      ).length,
+  );
+  expect(outside).toBe(0);
+  await page.keyboard.press("Escape");
+  await expect(card).toBeFocused();
+  await expect(dialog).toBeVisible();
+  await expect(page).toHaveURL(/\/settings\/connections$/);
+});

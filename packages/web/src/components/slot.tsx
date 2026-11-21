@@ -63,8 +63,15 @@ export function SlotProvider({ children }: { children: ReactNode }) {
 /**
  * The layout-side anchor — renders a host element and shows `fallback` until a
  * `<SlotContent name=...>` for the same name mounts. `className` styles the host.
+ * Without a provider nothing can fill it, so it shows `fallback`.
  */
-export function SlotOutlet({
+export function SlotOutlet(props: { name: string; fallback?: ReactNode; className?: string }) {
+  const registry = useContext(SlotContext);
+  if (!registry) return <div className={props.className}>{props.fallback}</div>;
+  return <RegisteredSlotOutlet {...props} />;
+}
+
+function RegisteredSlotOutlet({
   name,
   fallback,
   className,

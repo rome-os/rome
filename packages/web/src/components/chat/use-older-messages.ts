@@ -8,19 +8,19 @@ import {
   useState,
 } from "react";
 import { listSessionMessagePage } from "@/lib/chat-api";
-import { mergeFetchedChatMessages } from "@/lib/chat-message-ordering";
+import { prependChatMessages } from "@/lib/chat-message-merge";
 import type { ChatMessage } from "@/lib/chat-types";
 
 /**
- * Turns per page. A page is what the transcript renders at once, so it is
- * sized to fill a few screens and no more: a regular chat's turns carry long
- * answers and cost the most to render, a Concierge turn is a few short
- * bubbles.
+ * Messages per page. A page is what the transcript renders at once, so it is
+ * sized to fill a few screens and no more: a regular chat's messages carry
+ * long answers and cost the most to render, a Concierge message is a short
+ * bubble.
  */
-export const CHAT_PAGE_TURNS = 10;
-export const CONCIERGE_PAGE_TURNS = 30;
+export const CHAT_PAGE_SIZE = 20;
+export const CONCIERGE_PAGE_SIZE = 60;
 
-/** How far above the viewport the sentinel counts as reached, so older turns arrive before the top does. */
+/** How far above the viewport the sentinel counts as reached, so older messages arrive before the top does. */
 const LOAD_AHEAD_PX = 800;
 
 /** Wait after a failed page before the sentinel tries again. */
@@ -43,8 +43,8 @@ export function scrollTopAfterPrepend(
 }
 
 interface UseOlderMessagesOptions {
-  /** Turns per page; see {@link CHAT_PAGE_TURNS}. */
-  pageTurns: number;
+  /** Messages per page; see {@link CHAT_PAGE_SIZE}. */
+  pageSize: number;
   /** The element that scrolls the transcript. */
   scroller: HTMLElement | null;
   /** Whether the viewport follows the newest message. A pinned viewport needs no anchoring. */
@@ -55,12 +55,16 @@ interface UseOlderMessagesOptions {
 export interface OlderMessages {
   /** Remembers where a session's older history starts, from a newest-page response. */
   setCursor: (sessionId: string, cursor: string | null) => void;
-  /** Whether the session has older turns that are not loaded yet. */
+  /** Whether the session has older messages that are not loaded yet. */
   hasOlder: (sessionId: string) => boolean;
   /** Attach to an element placed at the top of the transcript. */
   sentinelRef: (node: HTMLElement | null) => void;
-  /** Loads the page of turns before the oldest loaded one, keeping the viewport on what it shows. */
-  loadOlder: (sessionId: string) => Promise<void>;
+  /**
+   * Loads the page of messages before the oldest loaded one, keeping the viewport
+   * on what it shows. With `through`, the page reaches that message however
+   * far back it is, in one read.
+   */
+  loadOlder: (sessionId: string, options?: { through?: string }) => Promise<void>;
 }
 
 /**
@@ -69,11 +73,12 @@ export interface OlderMessages {
  */
 export function useOlderMessages(
   sessionId: string | null,
-  { pageTurns, scroller, pinned, setMessages }: UseOlderMessagesOptions,
+  { pageSize, scroller, pinned, setMessages }: UseOlderMessagesOptions,
 ): OlderMessages {
   const [cursors, setCursors] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const cursorsRef = useRef(cursors);
-  const loadingRef = useRef(new Set<string>());
+  // Each session's page read in flight.
+  const loadingRef = useRef(new Map<string, Promise<void>>());
   const [loading, setLoading] = useState(false);
   const [retryBlocked, setRetryBlocked] = useState(false);
   const pinnedRef = useRef(pinned);
@@ -105,14 +110,15 @@ export function useOlderMessages(
 
   const hasOlder = useCallback((id: string) => !!cursors.get(id), [cursors]);
 
-  const loadOlder = useCallback(
-    async (id: string) => {
-      const cursor = cursorsRef.current.get(id);
-      if (!cursor || loadingRef.current.has(id)) return;
-      loadingRef.current.add(id);
+  const readPage = useCallback(
+    async (id: string, cursor: string, options: { through?: string }) => {
       setLoading(true);
       try {
-        const page = await listSessionMessagePage(id, { limit: pageTurns, before: cursor });
+        const page = await listSessionMessagePage(id, {
+          limit: pageSize,
+          before: cursor,
+          ...(options.through ? { through: options.through } : {}),
+        });
         // A newer response may have restarted the history while this one flew.
         if (!page || cursorsRef.current.get(id) !== cursor) return;
         const el = scrollerRef.current;
@@ -122,7 +128,7 @@ export function useOlderMessages(
         }
         setMessages((prev) => {
           const next = new Map(prev);
-          next.set(id, mergeFetchedChatMessages(next.get(id) ?? [], page.messages));
+          next.set(id, prependChatMessages(next.get(id) ?? [], page.messages));
           return next;
         });
         setCursor(id, page.nextCursor);
@@ -133,7 +139,25 @@ export function useOlderMessages(
         setLoading(false);
       }
     },
-    [pageTurns, setCursor, setMessages],
+    [pageSize, setCursor, setMessages],
+  );
+
+  const loadOlder = useCallback(
+    async (id: string, options: { through?: string } = {}): Promise<void> => {
+      const inFlight = loadingRef.current.get(id);
+      if (inFlight) {
+        await inFlight;
+        // The page in flight may stop short of the message `through` names,
+        // so its own read follows.
+        if (!options.through || loadingRef.current.has(id)) return;
+      }
+      const cursor = cursorsRef.current.get(id);
+      if (!cursor) return;
+      const read = readPage(id, cursor, options);
+      loadingRef.current.set(id, read);
+      await read;
+    },
+    [readPage],
   );
 
   useEffect(() => {

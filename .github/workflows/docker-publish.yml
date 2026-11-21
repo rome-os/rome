@@ -263,3 +263,69 @@ jobs:
           done
 
           docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+
+  github-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    # Room for the highlights' model call (release-highlights.mjs) before the
+    # release is created.
+    timeout-minutes: 10
+    needs:
+      - release
+      - publish
+    env:
+      RELEASE_TAG: ${{ needs.release.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The notes walk history back to the previous release's tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Write release notes
+        env:
+          # Writes the highlights the upgrade dialog shows. Without it, or
+          # when the model fails, release-notes.json has none.
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::A release for ${RELEASE_TAG} already exists"
+            exit 1
+          fi
+
+          # Every version published on Docker Hub. The notes count from the
+          # highest stable one below this release (see release-notes.mjs).
+          url="https://hub.docker.com/v2/repositories/${IMAGE_NAME}/tags?page_size=100"
+          : > published-versions.txt
+          while [[ -n "$url" && "$url" != "null" ]]; do
+            page=$(curl -fsSL "$url")
+            jq -r '.results[].name' <<< "$page" >> published-versions.txt
+            url=$(jq -r '.next' <<< "$page")
+          done
+          node scripts/docker/release-notes.mjs "$RELEASE_TAG" published-versions.txt \
+            --json release-notes.json > release-notes.md
+          cat release-notes.md release-notes.json
+
+      - name: Create release
+        run: |
+          set -euo pipefail
+
+          # Not Latest: that badge stays with the package releases, which
+          # release-please would take it back for anyway. Instances download
+          # release-notes.json to show what an upgrade changes.
+          prerelease=false
+          [[ "$RELEASE_TAG" == *-* ]] && prerelease=true
+          gh release create "$RELEASE_TAG" \
+            --verify-tag \
+            --latest=false \
+            --prerelease="$prerelease" \
+            --title "Rome ${RELEASE_TAG}" \
+            --notes-file release-notes.md \
+            release-notes.json

@@ -17,13 +17,26 @@ final class FakeBackend: RomeBackend {
 
     /// Runs while an older page is in flight, after the page was read.
     var duringOlderFetch: (() async -> Void)?
-    /// How many times the newest page and the task list were fetched.
+    /// How many times the newest page and the chat list were fetched.
     var newestFetches = 0
-    var taskFetches = 0
+    var sessionFetches = 0
     /// Runs while the newest page is in flight.
     var duringNewestFetch: (() async -> Void)?
 
+    /// Set, every message read fails with it.
+    var messagesError: APIError?
+
+    /// Set, the page each read answers, by the cursor it passes (nil for the
+    /// newest), as the server hands them out; a page missing fails.
+    var servedPages: [String?: MessagePage] = [:]
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
+        pageLimits.append(limit)
+        if let messagesError { throw messagesError }
+        if !servedPages.isEmpty {
+            guard let page = servedPages[before] else { throw APIError.notFound }
+            return page
+        }
         let end = before.flatMap { cursor in stored.firstIndex { $0.id == cursor } } ?? stored.count
         let start = max(0, end - limit)
         let page = MessagePage(messages: Array(stored[start..<end]), nextCursor: start > 0 ? stored[start].id : nil)
@@ -41,7 +54,13 @@ final class FakeBackend: RomeBackend {
         return page
     }
 
-    func activeTurns(sessionId: String) async throws -> [ActiveTurn] { turns }
+    /// Set, the active turns cannot be read.
+    var activeTurnsError: APIError?
+
+    func activeTurns(sessionId: String) async throws -> [ActiveTurn] {
+        if let activeTurnsError { throw activeTurnsError }
+        return turns
+    }
 
     func interrupt(turnId: String) async throws {
         interrupted.append(turnId)
@@ -60,8 +79,13 @@ final class FakeBackend: RomeBackend {
     var calls: [String] = []
     var startFails = false
 
+    /// Runs inside the chat-list fetch, before it answers.
+    var duringChatsFetch: (() async -> Void)?
+
     func conciergeChats() async throws -> [ConciergeChat] {
-        [ConciergeChat(id: conciergeChatID, name: "", main: true, unread: 0)] + topicChats
+        let answer = [ConciergeChat(id: conciergeChatID, name: "", main: true, unread: 0)] + topicChats
+        await duringChatsFetch?()
+        return answer
     }
 
     func startTopicChat() async throws -> ConciergeChat {
@@ -82,37 +106,198 @@ final class FakeBackend: RomeBackend {
         topicChats.removeAll { $0.id == id }
     }
 
+    var pinFails = false
+    /// Pins as the server does: on the chat list's row.
+    func pinChat(_ id: String, pinned: Bool) async throws {
+        calls.append(pinned ? "pin \(id)" : "unpin \(id)")
+        if pinFails { throw APIError.network }
+        if let index = sessionRows.firstIndex(where: { $0.id == id }) {
+            sessionRows[index].pinnedAt = pinned ? RomeDate.string(.now) : nil
+        }
+    }
+
+    func deleteChat(_ id: String) async throws {
+        calls.append("delete \(id)")
+        topicChats.removeAll { $0.id == id }
+    }
+
+    /// What a topic chat's delete would move; nil, the read fails, as on an
+    /// older instance. `chatWorkDelay` holds the answer back.
+    var chatWorkAnswer: ConciergeChatWork?
+    var chatWorkDelay: Duration?
+
+    func archiveChat(_ id: String, stoppingWork: Bool) async throws {
+        calls.append(stoppingWork ? "archive \(id) stopping work" : "archive \(id)")
+        topicChats.removeAll { $0.id == id }
+    }
+
+    func deleteChat(_ id: String, stoppingWork: Bool) async throws {
+        calls.append(stoppingWork ? "delete \(id) stopping work" : "delete \(id)")
+        topicChats.removeAll { $0.id == id }
+    }
+
+    func chatWork(chatId: String) async throws -> ConciergeChatWork {
+        calls.append("work \(chatId)")
+        if let chatWorkDelay { try await Task.sleep(for: chatWorkDelay) }
+        guard let chatWorkAnswer else { throw APIError.notFound }
+        return chatWorkAnswer
+    }
+
+    /// Share links: what each create asked for, the answer it gets, the
+    /// chat's links, and the revokes, in order.
+    var shareRequests: [(sessionId: String, turnIds: [String], agentName: String?)] = []
+    var shareAnswer: Result<ChatShareLink, APIError> = .success(ChatShareLink(id: "s1", url: "/share/tok1", title: "Trip"))
+    var shareLinks: [ChatShareLink] = []
+    var revoked: [String] = []
+    var revokeError: APIError?
+
+    /// Runs inside a share, after the instance took it.
+    var duringShare: (() async -> Void)?
+
+    func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink {
+        shareRequests.append((sessionId, turnIds, agentName))
+        await duringShare?()
+        return try shareAnswer.get()
+    }
+
+    /// The chats whose links were listed, in order.
+    var sharesListed: [String] = []
+    func chatShares(sessionId: String) async throws -> [ChatShareLink] {
+        sharesListed.append(sessionId)
+        return shareLinks
+    }
+
+    /// Runs inside a revoke, before it answers.
+    var duringRevoke: (() async -> Void)?
+
+    func revokeShare(id: String) async throws {
+        revoked.append(id)
+        await duringRevoke?()
+        if let revokeError { throw revokeError }
+        shareLinks.removeAll { $0.id == id }
+    }
+
     /// The files of the last send.
     var sentFiles: [OutgoingFile] = []
 
     func asset(path: String) async throws -> Data { throw APIError.notFound }
-    func apiFile(path: String, query: String?) async throws -> Data { throw APIError.notFound }
+    /// Files under `/api`, by path; any other path is not found.
+    var apiFiles: [String: Data] = [:]
+    /// The `/api` files asked for, in order.
+    var apiFileRequests: [String] = []
+    /// Runs inside a file request, before it answers.
+    var duringApiFile: (() async -> Void)?
+    func apiFile(path: String, query: String?) async throws -> Data {
+        apiFileRequests.append(path)
+        await duringApiFile?()
+        guard let data = apiFiles[path] else { throw APIError.notFound }
+        return data
+    }
     var origin: URL? { nil }
+
+    /// The task list each read answers, by chat; a missing one fails.
+    var taskLists: [String: TaskListResponse] = [:]
+    var taskListReads = 0
+    /// What a Stop from the task list fails with; nil lets it through.
+    var stopListedError: APIError?
+    var stoppedFromList: [String] = []
+    /// Set, every task list read throws it (a cancellation, say).
+    var taskListError: Error?
+    func taskList(chatId: String) async throws -> TaskListResponse {
+        taskListReads += 1
+        if let taskListError { throw taskListError }
+        guard let list = taskLists[chatId] else { throw APIError.notFound }
+        return list
+    }
+    /// The Ended pages after the first, by cursor; a missing one fails.
+    var endedPages: [String: TaskListResponse] = [:]
+    var endedReads: [String] = []
+    func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse {
+        endedReads.append(endedBefore)
+        guard let page = endedPages[endedBefore] else { throw APIError.notFound }
+        return page
+    }
+    func stopListedTask(chatId: String, taskId: String) async throws {
+        stoppedFromList.append(taskId)
+        if let stopListedError { throw stopListedError }
+    }
+    /// Every other task list action, as "<action> <row>"; each fails with
+    /// `listActionError` when it is set.
+    var listActions: [String] = []
+    var listActionError: APIError?
+    private func listAction(_ text: String) throws {
+        listActions.append(text)
+        if let listActionError { throw listActionError }
+    }
+    func markListedTaskDone(chatId: String, taskId: String) async throws { try listAction("done \(taskId)") }
+    func cancelListedCheck(chatId: String, checkId: String) async throws { try listAction("cancel \(checkId)") }
+    func unfollowListed(chatId: String, source: String, target: String) async throws { try listAction("unfollow \(source):\(target)") }
+    func setListedRoutineEnabled(chatId: String, routineId: String, enabled: Bool) async throws { try listAction("\(enabled ? "resume" : "pause") \(routineId)") }
+    func deleteListedRoutine(chatId: String, routineId: String) async throws { try listAction("delete \(routineId)") }
 
     /// Off, every send fails, as it always did here.
     var sendSucceeds = false
 
+    /// The reply each send named, in order.
+    var sentReplies: [ReplyTarget?] = []
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, reply: ReplyTarget?) async throws -> CreatedTurn {
+        sentReplies.append(reply)
+        return try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
+    }
+
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
         sentFiles = files
+        sentInputIds.append(inputId)
         calls.append(files.isEmpty ? "send \(sessionId) \(text)" : "send \(sessionId) \(text) [\(files.count) files]")
-        if sendSucceeds { return CreatedTurn(turnId: "turn", inputId: inputId, disposition: "started") }
-        throw APIError.network
+        if sendSucceeds { return CreatedTurn(turnId: sendTurnId, inputId: inputId, disposition: "started") }
+        throw sendError
     }
+    /// The input id of each send, in order.
+    var sentInputIds: [String] = []
+    /// What a send fails with when `sendSucceeds` is off.
+    var sendError: APIError = .network
+    /// The turn a successful send starts; nil is a send that started none.
+    var sendTurnId: String? = "turn"
     var answeredSessions: [String] = []
-    func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
-        answeredSessions.append(sessionId)
-        throw APIError.network
+    var answeredWidgets: [String] = []
+    /// What an answer fails with; nil lets it through.
+    var answerError: APIError? = .network
+    var pending: [PendingApproval] = []
+    /// The page size of each fetch, in order.
+    var pageLimits: [Int] = []
+
+    func pendingApprovals() async throws -> [PendingApproval] { pending }
+
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply {
+        answeredWidgets.append(widgetId)
+        if let answerError { throw answerError }
+        return WidgetEventReply(answered: true)
     }
     /// The chats marked read, in order.
     var reads: [String] = []
     func markRead(sessionId: String) async { reads.append(sessionId) }
-    func sessions() async throws -> [ChatSession] { [] }
-    func tasks() async throws -> [ConciergeTask] {
-        taskFetches += 1
-        return []
+    /// The chat's read mark, as `GET /chat/sessions/:id` gives it, and how
+    /// many reads had gone out each time it was asked for.
+    var readMarkValue: String?
+    var readsBeforeMark: [Int] = []
+    func readMark(sessionId: String) async -> String? {
+        readsBeforeMark.append(reads.count)
+        return readMarkValue
+    }
+    /// The chats the list holds.
+    var sessionRows: [ChatSession] = []
+    func sessions() async throws -> [ChatSession] {
+        sessionFetches += 1
+        return sessionRows
     }
     func approval(id: String) async throws -> ApprovalRecord { throw APIError.network }
-    func resolveApproval(id: String, approve: Bool) async throws { throw APIError.network }
+    /// What a decision on an approval fails with; nil lets it through.
+    var resolveError: APIError? = .network
+    var resolved: [String] = []
+    func resolveApproval(id: String, approve: Bool) async throws {
+        if let resolveError { throw resolveError }
+        resolved.append(id)
+    }
     func toolCalls(traceMessageId: String) async throws -> [ToolCall] { [] }
     func aiTools() async throws -> AIToolsStatus { throw APIError.network }
     func setConciergeEnabled(_ enabled: Bool) async throws {}
@@ -131,7 +316,13 @@ final class FakeBackend: RomeBackend {
     var connectCalls: [(method: String, path: String, body: JSONValue?)] = []
     var notified: [(chatId: String, service: String)] = []
 
+    /// Runs inside a connector read, before it answers, once.
+    var duringConnectorRead: (() async -> Void)?
     func connectors() async throws -> [ConnectorState] {
+        if let during = duringConnectorRead {
+            duringConnectorRead = nil
+            await during()
+        }
         guard !connectorReads.isEmpty else { return [] }
         let index = min(connectorReadCount, connectorReads.count - 1)
         connectorReadCount += 1
@@ -155,8 +346,13 @@ final class FakeBackend: RomeBackend {
     var startResults: [Result<UpgradeStarted, Error>] = []
     var started: [String] = []
     var buildVersion: String?
+    /// How long the upgrade check takes to answer.
+    var checkDelay: Duration?
 
-    func upgradeCheck() async throws -> UpgradeCheck { try check.get() }
+    func upgradeCheck() async throws -> UpgradeCheck {
+        if let checkDelay { try? await Task.sleep(for: checkDelay) }
+        return try check.get()
+    }
 
     func startUpgrade(target: String) async throws -> UpgradeStarted {
         started.append(target)
@@ -183,7 +379,7 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         return backend
     }
 
-    @Test func olderPageWaitsUntilPlaced() async {
+    @Test func anOlderPageGoesInAtOnce() async {
         let backend = backendWithLongChat()
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
         await store.reload()
@@ -191,11 +387,6 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.hasOlder)
 
         await store.loadOlder()
-        #expect(store.olderPage != nil)
-        #expect(store.messages.count == 40)
-
-        await store.placeOlderPage()
-        #expect(store.olderPage == nil)
         #expect(store.messages.count == 50)
         #expect(!store.hasOlder)
     }
@@ -205,7 +396,6 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
         await store.reload()
         await store.loadOlder()
-        await store.placeOlderPage()
 
         backend.stored.append(chatMessage(50))
         await store.reload()
@@ -220,8 +410,136 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.brief == nil)
 
         await store.loadOlder()
-        await store.placeOlderPage()
         #expect(store.brief?.id == "m0")
+    }
+
+    /// The read mark at `seconds` past the base time of `chatMessage`.
+    private func readMark(at seconds: TimeInterval) -> String {
+        RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds))
+    }
+
+    @Test func theUnreadLineIsReadBeforeTheChatIsMarkedReadAndOutlivesIt() async {
+        let backend = FakeBackend()
+        backend.stored = (0..<4).map { chatMessage($0, role: $0 == 0 ? "user" : "assistant") }
+        backend.readMarkValue = readMark(at: 1)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        store.markRead()
+        await store.reload()
+        for _ in 0..<100 where store.unreadFrom == nil || backend.reads.isEmpty {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(backend.readsBeforeMark == [0])
+        #expect(backend.reads == ["task"])
+        #expect(store.unreadFrom == "m2")
+        let ids = store.rows.map(\.id)
+        #expect(ids.firstIndex(of: "unread-divider").map { ids[$0 + 1] } == "m2:0")
+
+        // Read now, and still marked while the chat stays open; closed, it goes.
+        store.markRead()
+        #expect(store.unreadFrom == "m2")
+        store.endOpen()
+        #expect(store.unreadFrom == nil)
+        #expect(!store.rows.contains(.unreadDivider))
+    }
+
+    @Test func aMessageThatArrivesLiveWhileTheChatOpensIsNeverUnread() async {
+        let backend = FakeBackend()
+        backend.stored = [chatMessage(0, role: "user"), chatMessage(1)]
+        backend.readMarkValue = readMark(at: 1)
+        backend.duringNewestFetch = {
+            backend.bus.emit(LiveTopic.chat("task"), .messageInsert(chatMessage(5)))
+        }
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        store.markRead()
+        store.start()
+        for _ in 0..<100 where backend.reads.isEmpty || !store.loaded {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.messages.map(\.id).contains("m5"))
+        #expect(store.unreadFrom == nil)
+        store.stop()
+    }
+
+    @Test func thePillPagesOlderMessagesInUntilTheLineIsDrawnThenGoesToIt() async {
+        let backend = FakeBackend()
+        backend.stored = (0..<60).map { chatMessage($0, role: $0 == 0 ? "user" : "assistant") }
+        backend.readMarkValue = readMark(at: 5)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        await store.reload()
+        for _ in 0..<100 where store.unread == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        // The newest page is all unread, and older pages remain.
+        #expect(store.unread == UnreadSummary(firstId: nil, count: 40, more: true))
+        #expect(!store.rows.contains(.unreadDivider))
+        #expect(store.unreadPill.phase == .shown)
+
+        let jumps = store.jumps
+        await store.revealUnread()
+        #expect(store.unread == UnreadSummary(firstId: "m6", count: 54, more: false))
+        #expect(store.rows.contains(.unreadDivider))
+        #expect(store.jumps == jumps + 1)
+        #expect(store.jumpTarget == TranscriptRow.unreadDivider.id)
+    }
+
+    @Test func comingBackFromTheBackgroundOpensTheChatAgain() async {
+        let backend = FakeBackend()
+        backend.stored = [chatMessage(0, role: "user"), chatMessage(1)]
+        backend.readMarkValue = readMark(at: 1)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        store.markRead()
+        store.start()
+        for _ in 0..<100 where backend.reads.isEmpty || !store.loaded {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.unreadFrom == nil)
+
+        // A reply comes while the app is away; back in front, the read waits
+        // for the read mark, and the catch-up read brings the reply.
+        store.leftForBackground()
+        backend.stored.append(chatMessage(2))
+        store.chatShown()
+        store.markRead()
+        await store.reload()
+        for _ in 0..<100 where store.unreadFrom == nil || backend.reads.count < 2 {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(backend.readsBeforeMark == [0, 1])
+        #expect(store.unreadFrom == "m2")
+        store.stop()
+    }
+
+    @Test func thePillsSearchStopsWhenTheChatCloses() async {
+        let backend = FakeBackend()
+        backend.stored = (0..<200).map { chatMessage($0, role: $0 == 0 ? "user" : "assistant") }
+        backend.readMarkValue = readMark(at: 5)
+        let store = TranscriptStore(sessionId: "task", kind: .concierge, backend: backend)
+        store.beginOpen()
+        await store.reload()
+        for _ in 0..<100 where store.unread == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(store.unread?.more == true)
+        backend.duringOlderFetch = { store.endOpen() }
+        await store.revealUnread()
+        // One page went in, the one already asked for; no more were fetched.
+        #expect(store.messages.count == 80)
+        #expect(store.notice == nil)
+    }
+
+    @Test func aTaskChatHasNoUnreadLine() async {
+        let backend = FakeBackend()
+        backend.stored = [chatMessage(0, role: "user"), chatMessage(1)]
+        backend.readMarkValue = readMark(at: 0)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        store.beginOpen()
+        await store.reload()
+        #expect(backend.readsBeforeMark.isEmpty)
+        #expect(store.unreadFrom == nil)
     }
 
     @Test func stopEndsRunningWithoutALiveEvent() async throws {
@@ -253,18 +571,19 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
             ChatMessage(id: id, sessionId: "task", turnId: turn, role: role, content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
         }
         let backend = FakeBackend()
-        // Server order: a turn's rows together, the turn's late reply before
-        // the next turn, two rows in the same second in the order written.
+        // Server order: by when each was said, whichever turn it is in: the
+        // turn's late reply after the next turn's prompt, two rows in the same
+        // second in the order written.
         backend.stored = [
             row("u1", turn: "t1", second: 0, role: "user"),
             row("a1", turn: "t1", second: 20),
-            row("a2", turn: "t1", second: 50),
-            row("a3", turn: "t1", second: 50),
             row("u2", turn: "t2", second: 30, role: "user"),
+            row("a3", turn: "t1", second: 50),
+            row("a2", turn: "t1", second: 50),
         ]
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
         await store.reload()
-        let expected = ["u1", "a1", "a2", "a3", "u2"]
+        let expected = ["u1", "a1", "u2", "a3", "a2"]
         #expect(store.messages.map(\.id) == expected)
 
         await store.reload()
@@ -286,6 +605,85 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         #expect(store.messages.map(\.id) == ["z-recap", "a-card"])
     }
 
+    @Test func pagesMergeByPositionNotByTime() async {
+        // Times that run against the server's order decide nothing.
+        func row(_ id: String, second: Double, role: String = "assistant") -> ChatMessage {
+            ChatMessage(id: id, sessionId: "task", turnId: nil, role: role, content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
+        }
+        let backend = FakeBackend()
+        backend.servedPages[nil] = MessagePage(messages: [row("m3", second: 30), row("m4", second: 20)], nextCursor: "older")
+        backend.servedPages["older"] = MessagePage(messages: [row("m1", second: 50), row("m2", second: 10)], nextCursor: nil)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        store.start()
+        for _ in 0..<100 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.messages.map(\.id) == ["m3", "m4"])
+
+        // An older page goes above.
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4"])
+
+        // A live message goes last, and the same id is replaced where it stands.
+        backend.bus.emit(LiveTopic.chat("task"), .messageInsert(row("live", second: 1)))
+        backend.bus.emit(LiveTopic.chat("task"), .messageInsert(row("m2", second: 99)))
+        #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4", "live"])
+
+        // A refetched newest page replaces from its first message onward; the
+        // older pages stay, and so does a live message the page does not carry.
+        backend.servedPages[nil] = MessagePage(messages: [row("m3", second: 30), row("m4", second: 20), row("m5", second: 5)], nextCursor: "older")
+        await store.reload()
+        #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4", "m5", "live"])
+    }
+
+    /// The refresh after a send reads the newest page: when it shares no message
+    /// with the history held and older messages remain, the history starts over
+    /// from it, as a reload's does, and the paging follows its cursor.
+    @Test func theRefreshAfterASendThatSharesNothingStartsTheHistoryOver() async {
+        func row(_ id: String, second: Double) -> ChatMessage {
+            ChatMessage(id: id, sessionId: "task", turnId: nil, role: "assistant", content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
+        }
+        let backend = FakeBackend()
+        backend.servedPages[nil] = MessagePage(messages: [row("m3", second: 3), row("m4", second: 4)], nextCursor: "older")
+        backend.servedPages["older"] = MessagePage(messages: [row("m1", second: 1), row("m2", second: 2)], nextCursor: nil)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["m1", "m2", "m3", "m4"])
+        #expect(!store.hasOlder)
+
+        // The chat moved on far enough that the newest page shares nothing.
+        backend.servedPages[nil] = MessagePage(messages: [row("m10", second: 10), row("m11", second: 11)], nextCursor: "c2")
+        backend.servedPages["c2"] = MessagePage(messages: [row("m8", second: 8), row("m9", second: 9)], nextCursor: nil)
+        #expect(await store.refreshLatest())
+        #expect(store.messages.map(\.id) == ["m10", "m11"])
+        #expect(store.hasOlder)
+
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["m8", "m9", "m10", "m11"])
+        #expect(!store.hasOlder)
+
+        // A page that shares a message does not start over.
+        backend.servedPages[nil] = MessagePage(messages: [row("m9", second: 9), row("m10", second: 10), row("m11", second: 11), row("m12", second: 12)], nextCursor: "c2")
+        #expect(await store.refreshLatest())
+        #expect(store.messages.map(\.id) == ["m8", "m9", "m10", "m11", "m12"])
+        #expect(!store.hasOlder)
+    }
+
+    @Test func aTraceOfATurnOnBothPagesTakesTheOlderPagesPlace() async {
+        func row(_ id: String, role: String = "assistant", second: Double) -> ChatMessage {
+            ChatMessage(id: id, sessionId: "task", turnId: nil, role: role, content: "[]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + second)))
+        }
+        let backend = FakeBackend()
+        backend.servedPages[nil] = MessagePage(messages: [row("answer-a", second: 3), row("trace-a", role: "trace", second: 2), row("answer-b", second: 4)], nextCursor: "older")
+        backend.servedPages["older"] = MessagePage(messages: [row("owner-a", role: "user", second: 0), row("owner-b", role: "user", second: 1), row("trace-a", role: "trace", second: 2)], nextCursor: nil)
+        let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
+        await store.reload()
+        await store.loadOlder()
+        #expect(store.messages.map(\.id) == ["owner-a", "owner-b", "trace-a", "answer-a", "answer-b"])
+        // The newest page again: placed by its first message, the trace no longer ahead of it.
+        await store.reload()
+        #expect(store.messages.map(\.id) == ["owner-a", "owner-b", "answer-a", "trace-a", "answer-b"])
+    }
+
     @Test func olderPageFromBeforeAGapIsDropped() async {
         let backend = backendWithLongChat()
         let store = TranscriptStore(sessionId: "task", kind: .task, backend: backend)
@@ -299,7 +697,6 @@ private func chatMessage(_ index: Int, role: String = "assistant") -> ChatMessag
         }
         await store.loadOlder()
 
-        #expect(store.olderPage == nil)
         #expect(store.messages.allSatisfy { Int($0.id.dropFirst())! >= 100 })
         #expect(store.hasOlder)
     }

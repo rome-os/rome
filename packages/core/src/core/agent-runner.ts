@@ -1,6 +1,6 @@
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type { AgentEvent, McpServerConfig } from "../types.js";
-import type { ActionRegistry } from "../actions/types.js";
+import type { ActionRegistry } from "../apps/actions/types.js";
 import type {
   ModelReasoningEffort,
   ModelSession,
@@ -13,12 +13,12 @@ import type {
   ThreadStart,
 } from "../agent/index.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
-import type { AgentSession, AgentSessionManager } from "../agent/index.js";
+import type { AgentSession, Sessions } from "../agent/index.js";
 import type { AgentCatalog } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
 import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import { channelChatId } from "../db/session-kind.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import {
@@ -27,7 +27,13 @@ import {
   resolveTurnConversation,
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
-import { findChat, findSessionChat, openedInChat, openerChat } from "./session-conversation.js";
+import {
+  findChat,
+  findSessionChat,
+  openedInChat,
+  openerChat,
+  withRomeSession,
+} from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { adhocSessionKey } from "./agent-session-key.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
@@ -55,7 +61,7 @@ export type {
  * Legacy one-turn invocation parameters retained for tests and the
  * internal `runOneTurn` shim used by mock providers. Production code should
  * not construct `ModelRunParams` directly — use `ModelSessionParams` +
- * `sendUserInput` via `AgentSessionManager`.
+ * `sendUserInput` via `Sessions`.
  */
 export interface ModelRunParams {
   model: string;
@@ -162,17 +168,17 @@ export function createSessionFromRun(
   };
 }
 
-// AgentRunner — thin shim over AgentSessionManager: acquires the session for
+// AgentRunner — thin shim over Sessions: acquires the session for
 // a given (agentName, channelThreadKey), pushes one turn, and yields the
 // events.
 
 export class AgentRunner {
   constructor(
-    private agentSessionManager: AgentSessionManager,
+    private agentSessionManager: Sessions,
     private agentLoader: AgentCatalog,
     private webchatRepo?: WebChatRepository,
     private turnStreams?: AgentTurnStreamRegistry,
-    private actionRegistry?: Pick<ActionRegistry, "getForAgent" | "getCanonicalName">,
+    private actionRegistry?: Pick<ActionRegistry, "getForAgent">,
     /** Chats' lines a run names by the platform's ids. Given, a recorded
      *  prompt becomes its turn's through Chats' turn links, not
      *  `webchatRepo`'s rows. */
@@ -204,10 +210,9 @@ export class AgentRunner {
     const agent = this.agentLoader.find(agentName);
     if (!agent) return false;
     const actions = agent.definition.actions ?? [];
-    const canonical = this.actionRegistry.getCanonicalName?.(actionName) ?? actionName;
     return this.actionRegistry
       .getForAgent(actions)
-      .some((action) => action.config.name === canonical);
+      .some((action) => action.config.name === actionName);
   }
 
   async *run(params: RunParams): AsyncIterable<AgentEvent> {
@@ -227,24 +232,47 @@ export class AgentRunner {
     const openedKey = explicitSessionId
       ? await this.webchatRepo?.continuityKeyOfSession(explicitSessionId)
       : requestedChannelThreadKey;
-    const init = {
-      ...this.openingFor(openedKey ?? "", threadContext),
+    const opening = {
+      ...(await this.openingFor(openedKey ?? "", threadContext)),
+      kind: threadContext ? ("conversation" as const) : ("action" as const),
       workingDir: params.workingDir,
       threadContext,
       sharedContext: params.sharedContext,
       contextSuffix: params.contextSuffix,
-      resetPolicy: await resetPolicyOfMessage(this.resetPolicyOf, {
-        platformMessageId: params.platformMessageId,
-        sessionId: explicitSessionId,
-        threadContext,
-      }),
     };
     const session = explicitSessionId
-      ? await this.agentSessionManager.acquireBySessionId(explicitSessionId, params.agentName, init)
-      : await this.agentSessionManager.acquire(
+      ? await this.agentSessionManager.resume(
+          { id: explicitSessionId, agent: params.agentName },
+          opening,
+        )
+      : await this.agentSessionManager.open(
           { agentName: params.agentName, channelThreadKey: requestedChannelThreadKey },
-          init,
+          {
+            ...opening,
+            resetPolicy: await resetPolicyOfMessage(this.resetPolicyOf, {
+              platformMessageId: params.platformMessageId,
+              threadContext,
+            }),
+          },
         );
+    // The session is in use from here until the turn is submitted, or until
+    // this run lets it go: an early return or an error before the submit.
+    const held = { submitted: false };
+    try {
+      yield* this.runAcquired(session, params, threadContext, held);
+    } finally {
+      if (!held.submitted) session.release();
+    }
+  }
+
+  /** Runs the turn on the session `run` acquired. Sets `held.submitted` once
+   *  the turn has the session. */
+  private async *runAcquired(
+    session: AgentSession,
+    params: RunParams,
+    threadContext: ThreadContext | undefined,
+    held: { submitted: boolean },
+  ): AsyncIterable<AgentEvent> {
     await openedInChat(this.webchatRepo, session, params.romeSessionId);
     const agentName = session.key.agentName;
     // An explicit sessionId is the source of truth for continuations. Use the
@@ -272,22 +300,26 @@ export class AgentRunner {
       ? await runLines(this.runLineDeps.lines, romeSessionId, params)
       : null;
 
-    // sendTurn is sync — turnId is allocated by AgentSession
-    // and surfaced on the stream's turn_start event.
+    // An action's turn waits behind the running one. Its id is allocated by
+    // AgentSession and surfaced on the stream's turn_start event.
     if (params.shouldRun && !params.shouldRun()) return;
-    const handle = session.sendTurn(
+    const receipt = session.submit(
       { prompt: params.prompt, images: params.images },
       {
+        priority: "after",
         threadContext,
         sharedContext: params.sharedContext,
         romeSessionId,
-        romeSessionType,
         replyTo: params.replyTo,
-        ...(lines ? { quoted: lines.quoted } : {}),
+        ...(lines ? { quotedId: lines.quoted, currentId: lines.prompt } : {}),
         initiatedBy: params.initiatedBy ?? "user",
         ...(params.pushLevel ? { pushLevel: params.pushLevel } : {}),
+        ...(params.actor ? { actor: params.actor } : {}),
+        ...(params.reportedTask ? { reportedTask: params.reportedTask } : {}),
       },
     );
+    held.submitted = true;
+    const handle = await receipt.turn;
     this.runLineDeps?.replies?.runs(handle.id, agentName);
     if (lines && this.runLineDeps) {
       if (conversation.promptPersisted && lines.prompt !== null) {
@@ -322,7 +354,9 @@ export class AgentRunner {
           })
         : null;
 
-    for await (const msg of handle.events()) {
+    const romeSession = { _romeSessionId: romeSessionId, _type: romeSessionType };
+    for await (const event of handle.events()) {
+      const msg = withRomeSession(event, romeSession);
       if (recorder) {
         await recordAgentTraceBestEffort(recorder, msg, log, {
           turnId: handle.id,
@@ -331,7 +365,7 @@ export class AgentRunner {
         // The turn's input, under the caller's label, right after it starts.
         if (msg.type === "turn_start" && params.inputLabel) {
           await recorder
-            .recordSystemInput(params.inputLabel, params.prompt)
+            .recordSystemInput(params.inputLabel, params.prompt, params.inputSource)
             .catch((error: unknown) =>
               log.warn("system input not recorded", {
                 turnId: handle.id,
@@ -367,7 +401,7 @@ export class AgentRunner {
   }
 
   async *runForked(params: ForkRunParams): AsyncIterable<AgentEvent> {
-    const source = this.agentSessionManager.peek({
+    const source = this.agentSessionManager.find({
       agentName: params.agentName,
       channelThreadKey: params.channelThreadKey,
     });
@@ -389,7 +423,7 @@ export class AgentRunner {
     // Forked turns persist like action runs: the fork gets its own rome
     // session (type "fork", linked to its parent) and the turn's trace lands
     // there, so the trajectory shows up under /sessions. The fork mints its
-    // session/turn ids inside runForkedTurn, so the recorder can only be
+    // session/turn ids inside `fork`, so the recorder can only be
     // attached once turn_start surfaces them. Not gated on
     // shouldPersistAgentTrace: that gate exists because the webchat HTTP
     // route owns live webchat persistence, but no route owns a forked turn.
@@ -398,13 +432,14 @@ export class AgentRunner {
     let forkSessionId: string | undefined;
     let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;
     try {
-      for await (const message of source.runForkedTurn({
+      for await (const message of source.fork({
         prompt: params.prompt,
         tier: params.tier,
         mode: params.mode,
         checkpoint: params.sourceCheckpoint,
         threadContext: params.threadContext,
         continuityKey: params.persistThreadKey,
+        ...(params.actor ? { actor: params.actor } : {}),
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
@@ -503,7 +538,7 @@ export class AgentRunner {
         agentName: isCoreMainAgentId(params.agentName) ? null : params.agentName,
         projectName: thread?.projectName,
         projectPath: thread?.projectPath,
-        // Later turns of the side chat read the folder from this row.
+        // Later turns of the fork chat read the folder from this row.
         deviceFolder: thread?.deviceFolder ?? null,
         trigger,
         parentSessionId,

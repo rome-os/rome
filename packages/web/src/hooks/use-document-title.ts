@@ -3,27 +3,30 @@ import { composeTitle } from "@/lib/page-title";
 
 /**
  * Which claim a title makes. `route` is the shell's fallback for the current
- * path; `page` is the routed view naming its own subject. A page title outranks
- * a route title whenever both are mounted.
+ * path; `page` is the routed view naming its own subject; `dialog` is a dialog
+ * with an address of its own, such as Settings, open over a page that stays
+ * mounted. A higher level outranks a lower one whenever both are mounted, so
+ * closing the dialog shows the page's title again.
  */
-export type TitleLevel = "route" | "page";
+export type TitleLevel = "route" | "page" | "dialog";
 
 interface TitleSlot {
   owner: symbol;
   segments: readonly string[];
 }
 
-// Two slots rather than a last-write-wins assignment to document.title. The
-// shell layout and the routed page both hold a title and mount in the same
-// commit, and React runs a child's effect before its parent's, so a layout that
-// assigned the title directly would overwrite the page's on every navigation.
+// One slot per level rather than a last-write-wins assignment to
+// document.title. The shell layout and the routed page both hold a title and
+// mount in the same commit, and React runs a child's effect before its
+// parent's, so a layout that assigned the title directly would overwrite the
+// page's on every navigation.
 // Writing to separate slots and reading them in precedence order makes the
 // result independent of effect order.
 const slots = new Map<TitleLevel, TitleSlot>();
 
 function render(): void {
   if (typeof document === "undefined") return;
-  const active = slots.get("page") ?? slots.get("route");
+  const active = slots.get("dialog") ?? slots.get("page") ?? slots.get("route");
   document.title = composeTitle(active?.segments ?? []);
 }
 

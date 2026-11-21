@@ -1,4 +1,5 @@
-import { lazy, Suspense, useMemo } from "react";
+import { Suspense, useMemo } from "react";
+import { lazyInPlace } from "@/lib/lazy-with-reload";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,7 @@ import Markdown from "@/components/markdown";
 import { IconButton } from "@/components/ui/icon-button";
 import { MonacoFileEditor } from "@/components/monaco-file-editor";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import { PreviewNeedsReload } from "./PreviewNeedsReload";
 import { useFileBrowserStore, useFileBrowserStoreApi } from "./store/context";
 import {
   getDelimitedSeparator,
@@ -14,13 +16,17 @@ import {
   parseDelimitedContent,
 } from "@/lib/file-preview";
 
-const DocxPreviewPane = lazy(() =>
+// The agent can open a file here on its own, so a preview whose code is gone
+// after an upgrade asks for a reload rather than reloading the page.
+const lazyPreview = lazyInPlace(PreviewNeedsReload);
+
+const DocxPreviewPane = lazyPreview(() =>
   import("@/components/docx-preview-pane").then((module) => ({
     default: module.DocxPreviewPane,
   })),
 );
 
-const SpreadsheetPreviewPane = lazy(() =>
+const SpreadsheetPreviewPane = lazyPreview(() =>
   import("@/components/spreadsheet-preview-pane").then((module) => ({
     default: module.SpreadsheetPreviewPane,
   })),
@@ -33,7 +39,19 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-export function FileViewHeader({ onMobileBack }: { onMobileBack: () => void }) {
+/**
+ * `onMobileBack` is absent where there is no file list to go back to.
+ * `singleFile` is a host that already names the file and offers its download,
+ * so the header keeps only what acts on the file, and says how it saved at any
+ * width.
+ */
+export function FileViewHeader({
+  onMobileBack,
+  singleFile = false,
+}: {
+  onMobileBack?: () => void;
+  singleFile?: boolean;
+}) {
   const { t } = useTranslation("files");
   const store = useFileBrowserStoreApi();
   const selectedPath = useFileBrowserStore((s) => s.selection.selectedPath);
@@ -73,37 +91,43 @@ export function FileViewHeader({ onMobileBack }: { onMobileBack: () => void }) {
 
   return (
     <div className="flex items-center justify-between gap-2 border-b border-border bg-surface px-3 py-2 md:gap-3 md:px-6">
-      <IconButton
-        onClick={onMobileBack}
-        label={t("header.backToFiles")}
-        icon={<ArrowLeft aria-hidden />}
-        className="text-muted-foreground hover:bg-surface-muted hover:text-foreground @min-[1024px]/fb:hidden"
-      />
+      {onMobileBack && (
+        <IconButton
+          onClick={onMobileBack}
+          label={t("header.backToFiles")}
+          icon={<ArrowLeft aria-hidden />}
+          className="text-muted-foreground hover:bg-surface-muted hover:text-foreground @min-[1024px]/fb:hidden"
+        />
+      )}
       <div className="min-w-0 flex-1">
-        {(() => {
-          const path = selectedPath ?? "";
-          const lastSlash = path.lastIndexOf("/");
-          const fileName = lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
-          const dirPath = lastSlash >= 0 ? path.slice(0, lastSlash) : "";
-          return (
-            <>
-              <div className="truncate font-mono text-ui text-foreground">{fileName || path}</div>
-              {selectedFile && (
-                <div className="mt-1 truncate font-mono text-aux text-muted-foreground">
-                  {dirPath && (
-                    <>
-                      <span>{dirPath}</span>
+        {singleFile
+          ? null
+          : (() => {
+              const path = selectedPath ?? "";
+              const lastSlash = path.lastIndexOf("/");
+              const fileName = lastSlash >= 0 ? path.slice(lastSlash + 1) : path;
+              const dirPath = lastSlash >= 0 ? path.slice(0, lastSlash) : "";
+              return (
+                <>
+                  <div className="truncate font-mono text-ui text-foreground">
+                    {fileName || path}
+                  </div>
+                  {selectedFile && (
+                    <div className="mt-1 truncate font-mono text-aux text-muted-foreground">
+                      {dirPath && (
+                        <>
+                          <span>{dirPath}</span>
+                          <span className="mx-2 text-subtle-foreground">·</span>
+                        </>
+                      )}
+                      <span>{selectedFile.mimeType}</span>
                       <span className="mx-2 text-subtle-foreground">·</span>
-                    </>
+                      <span>{formatBytes(selectedFile.size)}</span>
+                    </div>
                   )}
-                  <span>{selectedFile.mimeType}</span>
-                  <span className="mx-2 text-subtle-foreground">·</span>
-                  <span>{formatBytes(selectedFile.size)}</span>
-                </div>
-              )}
-            </>
-          );
-        })()}
+                </>
+              );
+            })()}
       </div>
       <div className="flex shrink-0 items-center gap-2 md:gap-2">
         {textPreviewKind && selectedFile?.editable && (
@@ -216,7 +240,7 @@ export function FileViewHeader({ onMobileBack }: { onMobileBack: () => void }) {
           <>
             {autoSaveStatusLabel ? (
               <span
-                className={`hidden text-aux @min-[1024px]/fb:inline ${
+                className={`text-aux ${singleFile ? "" : "hidden @min-[1024px]/fb:inline"} ${
                   autoSaveState === "error" ? "text-destructive" : "text-subtle-foreground"
                 }`}
               >
@@ -232,16 +256,18 @@ export function FileViewHeader({ onMobileBack }: { onMobileBack: () => void }) {
             </Button>
           </>
         ) : null}
-        <button
-          type="button"
-          onClick={() => selectedPath && store.getState().ui.downloadPaths([selectedPath])}
-          disabled={!selectedPath}
-          title={t("contextMenu.download")}
-          aria-label={t("contextMenu.download")}
-          className="rounded-8 p-2 text-muted-foreground hover:bg-surface-muted hover:text-foreground disabled:opacity-50"
-        >
-          <Download className="h-5 w-5" aria-hidden="true" />
-        </button>
+        {singleFile ? null : (
+          <button
+            type="button"
+            onClick={() => selectedPath && store.getState().ui.downloadPaths([selectedPath])}
+            disabled={!selectedPath}
+            title={t("contextMenu.download")}
+            aria-label={t("contextMenu.download")}
+            className="rounded-8 p-2 text-muted-foreground hover:bg-surface-muted hover:text-foreground disabled:opacity-50"
+          >
+            <Download className="h-5 w-5" aria-hidden="true" />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -255,6 +281,7 @@ export function FileViewBody() {
   const loadingFile = useFileBrowserStore((s) => s.file.loadingFile);
   const content = useFileBrowserStore((s) => s.file.content);
   const textViewMode = useFileBrowserStore((s) => s.file.textViewMode);
+  const singleFile = useFileBrowserStore((s) => s.config.singleFile ?? false);
 
   const textPreviewKind =
     selectedFile?.kind === "text"
@@ -354,6 +381,10 @@ export function FileViewBody() {
       <div className="h-full w-full bg-surface">
         <MonacoFileEditor
           path={selectedPath}
+          // A single-file browser can sit beside the full browser on the same
+          // file, so it keeps its own editor model: closing it must not
+          // dispose the model the other editor still shows.
+          modelPath={singleFile ? `single-file/${selectedPath}` : undefined}
           value={content}
           onChange={(next) => store.getState().file.setContent(next)}
           onBlur={() => void store.getState().file.flushAutoSave()}

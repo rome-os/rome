@@ -49,27 +49,20 @@ import { useLongPressMenu } from "@/hooks/use-long-press-menu";
 import { cn } from "@/lib/utils";
 import type { FileBrowserTreeNode } from "@/lib/file-browser-tree";
 import { FileActionSheet, type ContextMenuActions } from "@/components/file-browser/ContextMenu";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
+import { readStored, writeStored } from "@/lib/stored-preference";
 
 export type FilesPaneNode = Pick<FileBrowserTreeNode, "name" | "path" | "type">;
 
 const VIEW_STORAGE_KEY = "rome:files-pane:view";
 
 function readPersistedView(): "list" | "grid" {
-  try {
-    const stored = window.localStorage.getItem(VIEW_STORAGE_KEY);
-    if (stored === "list" || stored === "grid") return stored;
-  } catch {
-    // localStorage unavailable; ignore.
-  }
-  return "list";
+  const stored = readStored(VIEW_STORAGE_KEY);
+  return stored === "grid" ? "grid" : "list";
 }
 
 function persistView(view: "list" | "grid"): void {
-  try {
-    window.localStorage.setItem(VIEW_STORAGE_KEY, view);
-  } catch {
-    // ignore
-  }
+  writeStored(VIEW_STORAGE_KEY, view);
 }
 
 function fileIconFor(name: string): LucideIcon {
@@ -319,8 +312,7 @@ export function FilesPane({ className, searchPlaceholder, contextMenuActions }: 
         </div>
       ) : sorted.length === 0 ? (
         <div className="mt-2 rounded-8 border border-dashed border-border p-6 text-center text-ui text-subtle-foreground">
-          <div className="mb-1 text-muted-foreground">{t("pane.emptyTitle")}</div>
-          <div>{t("pane.emptyDescription")}</div>
+          <div className="text-muted-foreground">{t("pane.emptyTitle")}</div>
         </div>
       ) : view === "grid" ? (
         <div className="grid flex-1 grid-cols-[repeat(auto-fill,minmax(96px,1fr))] content-start gap-1 overflow-auto px-1 py-1">
@@ -382,7 +374,10 @@ function Toolbar({ searchPlaceholder }: { searchPlaceholder: string }) {
           placeholder={searchPlaceholder}
           value={searchQuery}
           onChange={(event) => store.getState().ui.setSearchQuery(event.target.value)}
-          onKeyDown={(event) => event.key === "Enter" && void store.getState().ui.doSearch()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !isImeCompositionEvent(event))
+              void store.getState().ui.doSearch();
+          }}
           className="flex-1 pl-8"
           aria-label={t("header.search")}
         />

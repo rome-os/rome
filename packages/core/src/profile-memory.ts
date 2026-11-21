@@ -155,6 +155,19 @@ export function personProfileFileName(personId: string): string {
   return `${personId}.md`;
 }
 
+/**
+ * Where a person's notes live under the memory root: the stored profile path
+ * when it is inside the relationship directory, and otherwise the file named
+ * after the person's id, which the agent writes when it has something to
+ * remember. The file may not exist.
+ */
+export function personProfilePath(person: { id: string; profilePath: string | null }): string {
+  const stored = person.profilePath?.startsWith(`${RELATIONSHIP_DIR}/`)
+    ? person.profilePath.slice(RELATIONSHIP_DIR.length + 1)
+    : null;
+  return `${RELATIONSHIP_DIR}/${stored ?? personProfileFileName(person.id)}`;
+}
+
 /** The relationship directory on disk, for reading or writing the files in it. */
 export function getRelationshipDir(): string {
   return resolveProfileMemoryPath(RELATIONSHIP_DIR);

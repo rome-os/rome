@@ -16,7 +16,7 @@ struct InstancesScreen: View {
                             SkeletonRow(last: index == 2)
                         }
                     }
-                    .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+                    .background(Palette.secondaryCard, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                     .hairline(radius: Metrics.groupRadius)
                     .padding(.horizontal, 16)
                 } else {
@@ -25,7 +25,7 @@ struct InstancesScreen: View {
                             row(instance, last: index == model.instances.count - 1)
                         }
                     }
-                    .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+                    .background(Palette.secondaryCard, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                     .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
                     .hairline(radius: Metrics.groupRadius)
                     .padding(.horizontal, 16)
@@ -48,7 +48,7 @@ struct InstancesScreen: View {
         }
         .softTopScrollEdge()
         .floatingTopBar { PageHeader(title: "Switch instance", inSheet: true) }
-        .background(Palette.bg.ignoresSafeArea())
+        .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
         .task { await model.refreshInstances() }
@@ -72,21 +72,26 @@ struct InstancesScreen: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
+                        // A long name is cut, never the badge.
                         Text(instance.name)
-                            .romeFont(17, .semibold)
+                            .romeFont(16, .semibold)
                             .foregroundStyle(Palette.fg)
-                        if instance.isVisitor { VisitorBadge() }
+                            .lineLimit(1)
+                        if instance.isVisitor { VisitorBadge(fill: Palette.secondaryFill).fixedSize() }
                     }
-                    Text(instance.host)
-                        .romeFont(14)
+                    Text(verbatim: instance.host)
+                        .romeFont(13)
                         .foregroundStyle(Palette.sub)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle().fill(instance.isRunning ? Palette.success : Palette.sub.opacity(0.4)).frame(width: 7, height: 7)
-                    Text(instance.isRunning ? "Running" : "Stopped")
+                Spacer(minLength: 8)
+                // Running is the normal case and says nothing; only a stopped one is named.
+                if !instance.isRunning {
+                    Text("Stopped")
                         .romeFont(14)
                         .foregroundStyle(Palette.sub)
+                        .fixedSize()
                 }
                 Group {
                     if switching == instance.id {
@@ -121,8 +126,8 @@ private struct SkeletonRow: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 6) {
-                RoundedRectangle(cornerRadius: 4).fill(Palette.fill).frame(width: 96, height: 14)
-                RoundedRectangle(cornerRadius: 4).fill(Palette.fill).frame(width: 140, height: 11)
+                RoundedRectangle(cornerRadius: 4).fill(Palette.secondaryFill).frame(width: 96, height: 14)
+                RoundedRectangle(cornerRadius: 4).fill(Palette.secondaryFill).frame(width: 140, height: 11)
             }
             Spacer()
         }
@@ -305,14 +310,17 @@ struct SearchScreen: View {
 
 /// A Rome shared with this account: its owner put them on its allow-list.
 struct VisitorBadge: View {
+    /// `Palette.secondaryFill` on a second-level page's card.
+    var fill = Palette.fill
+
     var body: some View {
-        Text("Visitor")
+        Text("Admin")
             .romeFont(11, .semibold)
             .foregroundStyle(Palette.sub)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(Palette.fill, in: Capsule())
-            .accessibilityLabel(Text("Visitor"))
+            .background(fill, in: Capsule())
+            .accessibilityLabel(Text("Admin"))
     }
 }
 

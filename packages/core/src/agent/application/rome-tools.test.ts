@@ -1,4 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import type { AgentAction } from "../domain/agent-action.js";
 import type { AgentPolicy } from "../domain/agent-policy.js";
 import type { RomeTool } from "../domain/rome-tools.js";
 import type { TurnFacts } from "../domain/turn-facts.js";
@@ -15,13 +16,22 @@ const TURN: TurnFacts = {
   threadContext: () => undefined,
   sharedContext: () => undefined,
   pushLevel: () => undefined,
+  actor: () => undefined,
+  audience: () => "shared",
+  reportedTask: () => undefined,
   inTurn: (fn) => fn(),
 };
 
 function tools(overrides: Partial<RomeToolsOptions> = {}) {
   return createRomeTools({
     turn: TURN,
-    actions: { list: () => [], permits: () => true, run: async () => ({ status: "ok" }) },
+    actions: {
+      list: () => [],
+      permits: () => true,
+      appOf: () => undefined,
+      find: () => undefined,
+      run: async () => ({ status: "ok" }),
+    },
     skills: { list: () => [] },
     subagents: { list: () => [], run: async () => ({}) },
     widgetsShow: false,
@@ -67,6 +77,34 @@ describe("ask_question", () => {
     expect(text).toContain("- This");
     expect(text).toContain("- Next");
     expect(text).toContain("Which city?");
+  });
+
+  it("names the message its card replies to only for an agent whose cards reply", () => {
+    const properties = (overrides: Partial<RomeToolsOptions>) =>
+      Object.keys(
+        (
+          tools(overrides)
+            .listTools("ask_user")
+            .find((tool) => tool.name === "ask_question")?.inputSchema as {
+            properties: object;
+          }
+        ).properties,
+      );
+    expect(properties({})).toEqual(["questions"]);
+    expect(properties({ repliesTo: true })).toEqual(["questions", "replyTo"]);
+  });
+
+  it("offers the reply of a card that names one, and lets it be left out or null", () => {
+    const schema = (overrides: Partial<RomeToolsOptions>) =>
+      tools(overrides)
+        .listTools("ask_user")
+        .find((tool) => tool.name === "ask_question")?.inputSchema as {
+        required: string[];
+        properties: { replyTo?: { type: unknown } };
+      };
+    expect(schema({}).required).toEqual(["questions"]);
+    expect(schema({ repliesTo: true }).required).toEqual(["questions"]);
+    expect(schema({ repliesTo: true }).properties.replyTo?.type).toEqual(["string", "null"]);
   });
 
   it("relays defaults and option descriptions as readable prose", async () => {
@@ -223,15 +261,92 @@ describe("defer", () => {
     const result = await tools({ defer: { schedule, finalText: "deliver" } }).callTool(
       "ask_user",
       "defer",
-      { name: "check CI", afterMinutes: 5 },
+      { name: "check CI", note: "Read CI run 42 and tell the guardian.", afterMinutes: 5 },
     );
     expect(schedule).toHaveBeenCalledWith(TURN, {
       kind: "time",
       name: "check CI",
+      note: "Read CI run 42 and tell the guardian.",
       fireAtMs: expect.any(Number),
     });
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("2026-06-25T12:05:00.000Z");
+  });
+
+  it("waits for an event without a label or a deadline, for an agent whose policy asks for neither", async () => {
+    const schedule = rs.fn().mockResolvedValue({ ok: true, waitingFor: "ci.done" });
+    const served = tools({ defer: { schedule, finalText: "deliver" } })
+      .listTools("ask_user")
+      .find((tool) => tool.name === "defer");
+    const event = (served?.inputSchema as { properties: { event: Record<string, unknown> } })
+      .properties.event as { required: string[]; properties: Record<string, unknown> };
+    expect(event.required).toEqual(["eventName"]);
+    expect(event.properties).not.toHaveProperty("deadline");
+    const result = await tools({ defer: { schedule, finalText: "deliver" } }).callTool(
+      "ask_user",
+      "defer",
+      { name: "CI", note: "Read the run.", event: { eventName: "ci.done" } },
+    );
+    expect(result.isError).toBeFalsy();
+    expect(schedule).toHaveBeenCalledWith(TURN, {
+      kind: "event",
+      name: "CI",
+      note: "Read the run.",
+      event: { eventName: "ci.done" },
+    });
+  });
+
+  it("names no task for an agent whose policy checks none", async () => {
+    const schedule = rs.fn().mockResolvedValue({ ok: true });
+    const served = tools({ defer: { schedule, finalText: "deliver" } });
+    const schema = served.listTools("ask_user").find((tool) => tool.name === "defer")
+      ?.inputSchema as { properties: Record<string, unknown> };
+    expect(schema.properties).not.toHaveProperty("taskId");
+    const refused = await served.callTool("ask_user", "defer", {
+      name: "CI",
+      note: "Read the run.",
+      afterMinutes: 5,
+      taskId: "task-1",
+    });
+    expect(refused.isError).toBe(true);
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it("tells an agent that checks tasks only what it can do when it wakes", () => {
+    const description = (taskChecks: boolean) =>
+      tools({ defer: { schedule: rs.fn(), finalText: "private", taskChecks } })
+        .listTools("ask_user")
+        .find((tool) => tool.name === "defer")?.description ?? "";
+    const checks = description(true);
+    expect(checks).not.toContain("search_event_catalog");
+    expect(checks).not.toContain("whole conversation still in context");
+    expect(checks).not.toContain("no limit on re-defers");
+    expect(checks).toContain("a newer session may be the one that wakes");
+    // A check still pending is checked again, so the task stays later until
+    // the digest asks after three.
+    expect(checks).toContain("`defer` again (minimum one minute) while it is still pending");
+    expect(checks).not.toContain("only when something changed");
+    const plain = description(false);
+    expect(plain).toContain("search_event_catalog");
+    expect(plain).toContain("no limit on re-defers");
+  });
+
+  it("asks for a label and a deadline on an event wait when the agent's policy does", async () => {
+    const schedule = rs.fn().mockResolvedValue({ ok: true });
+    const served = tools({ defer: { schedule, finalText: "private", taskChecks: true } });
+    const event = (
+      served.listTools("ask_user").find((tool) => tool.name === "defer")?.inputSchema as {
+        properties: { event: { required: string[] } };
+      }
+    ).properties.event;
+    expect(event.required).toEqual(["eventName", "waitingFor", "deadline"]);
+    const refused = await served.callTool("ask_user", "defer", {
+      name: "CI",
+      note: "Read the run.",
+      event: { eventName: "ci.done" },
+    });
+    expect(refused.isError).toBe(true);
+    expect(schedule).not.toHaveBeenCalled();
   });
 
   // A private-text agent can confirm only with another message, which repeats
@@ -252,7 +367,7 @@ describe("defer", () => {
     const result = await tools({ defer: { schedule, finalText: "deliver" } }).callTool(
       "ask_user",
       "defer",
-      { name: "x", at: "2020-01-01T00:00:00Z" },
+      { note: "n", name: "x", at: "2020-01-01T00:00:00Z" },
     );
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("defer fires in the past");
@@ -264,7 +379,7 @@ describe("defer", () => {
     const result = await tools({ defer: { schedule, finalText: "deliver" } }).callTool(
       "ask_user",
       "defer",
-      { name: "x", afterMinutes: 5 },
+      { note: "n", name: "x", afterMinutes: 5 },
     );
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("no thread to wake");
@@ -300,6 +415,8 @@ describe("execute_action", () => {
       actions: {
         list: () => [],
         permits: () => true,
+        appOf: () => undefined,
+        find: () => undefined,
         run: async () => ({
           status: "place_widget",
           placement: { appId: "maps" },
@@ -312,11 +429,35 @@ describe("execute_action", () => {
     expect((await callAction(false)).content[0].text).toContain("could not be shown");
   });
 
+  it("shows a widget as the app that owns the action", async () => {
+    const result = await tools({
+      widgetsShow: true,
+      actions: {
+        list: () => [],
+        permits: () => true,
+        appOf: (name) => (name === "show_today" ? "meals" : undefined),
+        find: () => undefined,
+        run: async () => ({
+          status: "show_widget",
+          widget: { componentId: "today", text: "Showing today's meals." },
+        }),
+      },
+    }).callTool("actions", "execute_action", { action_name: "show_today", json_args: {} });
+
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      showWidget: true,
+      appId: "meals",
+      componentId: "today",
+    });
+  });
+
   it("turns an unknown action into an error result", async () => {
     const result = await tools({
       actions: {
         list: () => [],
         permits: () => false,
+        appOf: () => undefined,
+        find: () => undefined,
         run: async (_turn, name) => {
           throw new Error(`Unknown action: ${name}`);
         },
@@ -324,5 +465,38 @@ describe("execute_action", () => {
     }).callTool("actions", "execute_action", { action_name: "nope", json_args: {} });
     expect(result).toMatchObject({ isError: true });
     expect(result.content[0].text).toBe("Unknown action: nope");
+  });
+
+  it("reads an action by any of its names, as running it does", async () => {
+    const send: AgentAction = {
+      name: "system:send_message",
+      description: "Send a message",
+      type: "system",
+      complexity: "simple",
+      speed: "fast",
+      reliability: "high",
+      sideEffects: "write",
+      requiresApproval: false,
+      cancellable: false,
+      inputSchema: { properties: {} },
+    };
+    const read = (name: string) =>
+      tools({
+        actions: {
+          list: () => [send],
+          permits: () => true,
+          appOf: () => undefined,
+          find: (_turn, asked) =>
+            asked === "send_message" || asked === send.name ? send : undefined,
+          run: async () => ({ status: "ok" }),
+        },
+      }).callTool("actions", "read_action", { action_name: name });
+
+    expect(JSON.parse((await read("send_message")).content[0].text)).toMatchObject({
+      name: "system:send_message",
+    });
+    const unknown = await read("nope");
+    expect(unknown).toMatchObject({ isError: true });
+    expect(unknown.content[0].text).toBe("Unknown action: nope");
   });
 });

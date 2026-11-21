@@ -86,10 +86,10 @@
     "enabledHint": "关闭后，此应用会被隐藏，其智能体、动作和钩子也会停止运行。",
     "chatHint": "在此应用的源码项目中打开对话。",
     "publishTitle": "发布到应用商店",
-    "publishHint": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。",
-    "publishHintListed": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。商店最新版本：v{{storeVersion}}。",
-    "publishHintUnlisted": "将已安装的应用包（v{{version}}）上传到 Rome 应用商店。尚未发布到商店。",
-    "uninstallHint": "移除应用，数据会保留以便日后重装。",
+    "publishHint": "将 v{{version}} 发布到 Rome 应用商店。",
+    "publishHintListed": "将 v{{version}} 发布到 Rome 应用商店。商店最新版本：v{{storeVersion}}。",
+    "publishHintUnlisted": "将 v{{version}} 发布到 Rome 应用商店。尚未发布到商店。",
+    "uninstallHint": "移除应用，数据会保留以便日后重装，但它管理的例程会被删除。",
     "uninstallPurgeHint": "此应用的数据会被永久删除，无法恢复。"
   },
   "installed": {
@@ -139,8 +139,8 @@
     },
     "uninstallDialog": {
       "title": "卸载 {{name}}?",
-      "descriptionKeep": "应用将被卸载,但其数据库记录和数据目录会保留,以便日后重装时可以继续使用。",
-      "descriptionPurge": "应用将被卸载,其数据库记录和数据目录将一并清除。此操作不可撤销。",
+      "descriptionKeep": "其数据会保留，以便日后重新安装。它管理的例程会被删除。",
+      "descriptionPurge": "其数据将被永久删除，无法恢复。",
       "confirmKeep": "卸载",
       "confirmPurge": "卸载并清除数据"
     },
@@ -250,7 +250,6 @@
   "install": {
     "loading": "加载应用信息中...",
     "title": "安装此应用？",
-    "subtitle": "将在你的 Rome 上安装 <strong>{{name}}</strong>。",
     "confirm": "安装 v{{version}}",
     "installing": "安装中...",
     "cancel": "取消",
@@ -264,7 +263,8 @@
       "loadFailed": "加载应用信息失败",
       "installFailed": "安装应用失败",
       "notFound": "应用商店中未找到该应用"
-    }
+    },
+    "titleNamed": "安装 {{name}}？"
   },
   "embedded": {
     "failedTitle": "加载应用失败",
@@ -280,7 +280,6 @@
   },
   "accessGate": {
     "title": "{{name}} 需要 Rome Cloud 访问权限",
-    "description": "请使用 Rome Cloud 登录后继续。",
     "deniedDescription": "{{email}} 已登录，但不在此应用的访问列表中。",
     "signIn": "使用 Rome Cloud 登录",
     "signingIn": "正在打开 Rome Cloud...",

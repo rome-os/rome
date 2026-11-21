@@ -72,7 +72,6 @@ const meta = {
             set: fn(),
             clear: fn(),
             restore: fn(),
-            has: () => true,
             jump: fn(),
           }}
         >

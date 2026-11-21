@@ -8,7 +8,7 @@ import {
 } from "./schedule-trigger-provider.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
-import type { SessionActor } from "../lib/session-actor.js";
+import type { SessionActor } from "../access/session-actor.js";
 import type { Routine, Trigger } from "./types.js";
 
 // Reach into the provider's private `jobs` map to invoke `Cron.trigger()`
@@ -79,6 +79,32 @@ describe("ScheduleTriggerProvider", () => {
     const after = await repo.findById(id);
     expect(after?.nextRunAt).toBeInstanceOf(Date);
     expect(after!.nextRunAt!.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("wakes a defer whose time passed while Rome was down, and leaves another missed one-off alone", async () => {
+    const past = {
+      type: "schedule" as const,
+      tzid: "UTC",
+      tzMode: "fixed" as const,
+      localTime: "09:00",
+      date: "2001-01-01",
+    };
+    const make = (actionName: string) =>
+      repo.create({ name: actionName, trigger: past, actionName, args: {}, enabled: true });
+    const deferId = await make("system:resume_session");
+    const otherId = await make("noop");
+    const fired: string[] = [];
+    for (const id of [deferId, otherId]) {
+      const row = await repo.findById(id);
+      await provider.activate(
+        buildRoutine({ id, trigger: row!.trigger as Trigger, actionName: row!.actionName }),
+        async () => void fired.push(id),
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fired).toEqual([deferId]);
+    expect((await repo.findById(deferId))?.enabled).toBe(false);
+    expect((await repo.findById(otherId))?.enabled).toBe(true);
   });
 
   it("refuses a schedule with neither date nor rrule", async () => {
@@ -575,7 +601,7 @@ describe("ScheduleTriggerProvider", () => {
     // through that same fresh module — not this file's top-level import.
     const capturedAtConstruction: Promise<SessionActor | undefined>[] = [];
     rs.resetModules();
-    const freshSessionActor = await import("../lib/session-actor.js");
+    const freshSessionActor = await import("../access/session-actor.js");
     rs.doMock("croner", () => ({
       Cron: class {
         constructor() {

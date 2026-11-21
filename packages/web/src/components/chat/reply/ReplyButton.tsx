@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 import { useReplyDraft } from "./reply-draft";
-import { findMessageAnchor, replyPreview, selectedQuote, type ReplySource } from "./reply-source";
+import { replyTargetOf, type ReplySource } from "./reply-source";
 
 /**
  * Starts a reply to `source` in the composer. It renders nothing where the
@@ -33,18 +33,7 @@ export function ReplyButton({
       icon={<Reply />}
       className={cn("text-muted-foreground hover:text-foreground", className)}
       onClick={() => {
-        const selected = selectedQuote(
-          source.scope?.() ?? findMessageAnchor(document, source.messageId),
-          source.text,
-        );
-        const quote = selected ?? (source.ownBubble ? source.text : undefined);
-        draft.set({
-          messageId: source.messageId,
-          author: source.author,
-          ...(source.name ? { name: source.name } : {}),
-          ...(quote ? { quote } : {}),
-          preview: replyPreview(quote ?? source.text),
-        });
+        draft.set(replyTargetOf(source));
         onReply?.();
       }}
     />

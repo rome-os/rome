@@ -1,8 +1,11 @@
 import { romeToolPorts } from "../core/rome-tool-ports.js";
+import { appGuardianProfile } from "../app-host/guardian-profile.js";
+import { AgentRecordedSessions } from "../sessions/agent-recorded-sessions.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
-import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
 import {
@@ -14,6 +17,8 @@ import {
 } from "./db.js";
 import * as schema from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
+import type * as connections from "../connections/message.js";
+import { legacyMessage } from "../connections/test-fixtures.js";
 import { givenGrant } from "../connections/connection.js";
 import type { GrantValue } from "../connections/grant.js";
 import type { Credential } from "../connections/types.js";
@@ -27,9 +32,9 @@ import type {
   ModelSessionParams,
 } from "../core/agent-runner.js";
 import { AgentRunner, createSessionFromRun } from "../core/agent-runner.js";
-import { AgentLoader } from "../agent/index.js";
+import { AgentLoader } from "../app-host/agent-loader.js";
 import { agentsByLegacyName } from "../apps/agents-by-legacy-name.js";
-import { SkillLoader } from "../agent/index.js";
+import { SkillLoader } from "../app-host/skill-loader.js";
 import { createTestSystemPrompts } from "./system-prompts.js";
 import {
   createModelAccounts,
@@ -40,30 +45,33 @@ import {
 } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { normalizeConversationTitle } from "../core/conversation-title.js";
-import { createAgentSessionManager } from "../agent/index.js";
+import { createSessions } from "../agent/index.js";
 import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import {
   subagentLiveTurns,
   subagentSessions,
   subagentTurnLog,
 } from "../core/subagent-call-ports.js";
-import { createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
-import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { createSubagentCalls } from "../agent/index.js";
+import { TurnListeners } from "../agent/index.js";
+import { AppTurnHooks } from "../app-host/app-turn-hooks.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
-import { ApprovalHandler } from "../actions/approval-handler.js";
-import { createBackendTurnRunner } from "../actions/backend-turn.js";
+import { ApprovalHandler } from "../apps/actions/approval-handler.js";
+import { createBackendTurnRunner } from "../app-host/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
 import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
-import { PublicAccessState } from "../lib/public-access-state.js";
-import { DashboardAccessState } from "../lib/dashboard-access-state.js";
-import { DashboardAccessStore } from "../lib/dashboard-access-store.js";
-import { VisitorAllowListSync } from "../lib/visitor-allowlist-sync.js";
+import { Permissions } from "../access/permissions.js";
+import { loadAppPermissions } from "../apps/app-permissions.js";
+import { DashboardAccessState } from "../access/dashboard-access-state.js";
+import { DashboardAccessStore } from "../access/dashboard-access-store.js";
+import { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
 import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
 import { EventBus } from "../events/event-bus.js";
 import { RelayDrainer } from "../relay/drainer.js";
-import { SystemUpgradeService } from "../system-upgrade/service.js";
+import { ReleaseNotes } from "../instance/system-upgrade/release-notes.js";
+import { SystemUpgradeService } from "../instance/system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type {
   ChannelMessage,
@@ -73,9 +81,10 @@ import type {
 } from "@rome-os/app-runtime";
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
-import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
-import { PeopleRepository } from "../db/repositories/people.js";
-import { GuardianLinkCodes } from "../people/guardian-link-code.js";
+import { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
+import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../people/model/people-repository.js";
+import { GuardianLinkCodes } from "../people/link-code/index.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
@@ -90,36 +99,37 @@ import type {
 } from "../chats/connected-accounts/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../chats/connected-accounts/connected-account-list.js";
-import { createChannelsService } from "../apps/accounts-service.js";
+import { createChannelsService } from "../app-host/accounts-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
-import { ApprovalsRepository } from "../db/repositories/approvals.js";
+import { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import type { AccountLink } from "@rome/api-types/account-agents";
 import type { AccountLinkOf } from "../chats/connected-accounts/account-links.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
-import { AppKeysRepository } from "../db/repositories/app-keys.js";
-import { AppKeyInjector } from "../app-keys/injector.js";
+import { AppKeysRepository } from "../apps/repositories/app-keys.js";
+import { AppKeyInjector } from "../apps/app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
-import { chatsWiring } from "../chats-wiring.js";
+import { WebChatRepository } from "../webchat/repository.js";
+import { ownPlatforms } from "../webchat/send.js";
+import { chatsWiring, type ChatsWiringDeps } from "../chats-wiring.js";
 import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
-import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
-import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
+import { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
+import { ExecutionJournalRepository } from "../apps/repositories/execution-journal.js";
+import { WebhookInvocationsRepository } from "../apps/repositories/webhook-invocations.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
-import { ActionEngine, type ActionEngineRepositories } from "../actions/engine.js";
-import { ActionRegistryImpl } from "../actions/registry.js";
-import { ActionLoader } from "../actions/loader.js";
+import { ActionEngine, type ActionEngineRepositories } from "../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
+import { ActionLoader } from "../apps/actions/loader.js";
 import {
   assertNoAppActionLoadFailures,
   registerAppActions,
-} from "../actions/app-actions-wiring.js";
+} from "../app-host/app-actions-wiring.js";
 import { appsRoutes } from "../api/routes/apps.js";
 import { migrateAppByMetadata } from "../db/migrate.js";
 import { createAppDomain } from "../apps/index.js";
-import { createAppRuntimeRepositories } from "../apps/repositories.js";
+import { createAppRuntimeRepositories } from "../app-host/repositories.js";
 import type { BundleFetcher } from "../apps/installer.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { AppManager } from "../apps/manager.js";
@@ -130,10 +140,10 @@ import {
 import { createAppStoreService } from "../apps/store-service.js";
 import { type CatalogEvent, isResolvedApp } from "../apps/state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../lib/feedback-client.js";
-import { assembleDiagnosticBundle } from "../lib/diagnostics.js";
+import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../instance/feedback-client.js";
+import { assembleDiagnosticBundle } from "../instance/diagnostics.js";
 import type { ApiDeps } from "../api/deps.js";
-import type { FavorService } from "../favors/types.js";
+import type { FavorService } from "../favors/index.js";
 import { Hono } from "hono";
 import { mkdtempSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
@@ -145,14 +155,17 @@ export * from "./db.js";
 /** Chats over `db` as Rome wires it, reading the channel records `db`
  *  holds. Every channel is active: one its record names no account for is
  *  the account named like it, so tests need not record one per channel. */
-export function testChatsWiring(db: DrizzleDb) {
+export function testChatsWiring(db: DrizzleDb, accounts?: ChatsWiringDeps) {
   const records = new ChannelRecordsRepository(db, testAccountLinkOf);
-  return chatsWiring(db, {
-    accountOf: (channel) =>
-      records.accountOf(channel) ?? { platform: records.platformOfChannel(channel), id: channel },
-    platformOfChannel: (name) => records.platformOfChannel(name),
-    channelsOn: (platform) => [...new Set([...records.namesOn(platform), platform])],
-  });
+  return chatsWiring(
+    db,
+    accounts ?? {
+      accountOf: (channel) =>
+        records.accountOf(channel) ?? { platform: records.platformOfChannel(channel), id: channel },
+      platformOfChannel: (name) => records.platformOfChannel(name),
+      channelsOn: (platform) => [...new Set([...records.namesOn(platform), platform])],
+    },
+  );
 }
 
 /** What opens a speaker over `db`: {@link testChatsWiring}'s chats,
@@ -220,7 +233,7 @@ export interface SentMessage {
 export class FakeTransport {
   /** Every message sent and accepted, oldest first. */
   readonly sentMessages: SentMessage[] = [];
-  private readonly listeners = new Set<(message: ChannelMessage) => Promise<void>>();
+  private readonly listeners = new Set<(message: connections.Message) => Promise<void>>();
 
   constructor(readonly channel = "test") {}
 
@@ -232,7 +245,7 @@ export class FakeTransport {
   }
 
   /** What the Connection's talker delivers through. */
-  listen(listener: (message: ChannelMessage) => Promise<void>): () => void {
+  listen(listener: (message: connections.Message) => Promise<void>): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -245,7 +258,9 @@ export class FakeTransport {
    */
   async receive(overrides: Partial<ChannelMessage> = {}): Promise<ChannelMessage> {
     const message = buildMessage({ channel: this.channel, ...overrides });
-    await Promise.all([...this.listeners].map((listener) => listener(message)));
+    // The talker hands over the Connections message apps receive this as.
+    const heard = legacyMessage(message);
+    await Promise.all([...this.listeners].map((listener) => listener(heard)));
     return message;
   }
 }
@@ -277,7 +292,7 @@ export function createTestConnections(
       id,
       connectionKind,
       withTalker: (call: (talker: TestTalker) => unknown) => call(live),
-      hearTalker: (handler: (message: ChannelMessage) => Promise<void>) =>
+      hearTalker: (handler: (message: connections.Message) => Promise<void>) =>
         transport.listen(handler),
       isUnlocked: (capability: string) => capability === "chat",
       status: () => ({ chat: { state: "unlocked" } }),
@@ -516,7 +531,7 @@ export async function buildTestDeps(
   }
 
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
-  const peopleRepo = new PeopleRepository(db);
+  const peopleRepo = new DrizzlePeopleRepository(db);
   const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -565,7 +580,11 @@ export async function buildTestDeps(
       adapters: chatsWired.adapters,
       speakers: chatsWired.speakers,
     },
-    guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
+    guardianProfile: appGuardianProfile({
+      db,
+      settingsRepo,
+      reactivateFloating: () => routineEngine.reactivateFloating(),
+    }),
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);
@@ -601,7 +620,7 @@ export async function buildTestDeps(
   // before startApi. Tests that exercise agent turns load fixture agents
   // explicitly (src/test/fixtures/agents/); a test that hits the default agent
   // path without doing so fails loudly with `Agent "main" not found`.
-  const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(db);
   const systemPrompts = createTestSystemPrompts({ apps: appCatalog });
   const codexAccountChangedListeners = new Set<() => void>();
   const codexAccountService: ModelAccount & CodexLogins = {
@@ -661,11 +680,11 @@ export async function buildTestDeps(
   });
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
   const subagentCalls = createSubagentCalls({
-    dashboard: new WebChatDashboardSessions(webchatRepo),
+    recorded: new AgentRecordedSessions(webchatRepo),
     turnLog: subagentTurnLog(webchatRepo),
     liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
   });
-  const agentSessionManager = createAgentSessionManager({
+  const agentSessionManager = createSessions({
     agentLoader,
     sessionRepository,
     systemPrompts,
@@ -705,7 +724,7 @@ export async function buildTestDeps(
       ensureChannelChat: (input) =>
         openChannelChat(
           {
-            webchatRepo,
+            records: webchatRepo,
             speakers: {
               chats: chatsWired.chats,
               adapters: chatsWired.adapters,
@@ -741,10 +760,10 @@ export async function buildTestDeps(
 
   // Mirror daemon boot: the auth-edge snapshot is loaded from the persisted
   // `publicAccess` setting before serving (src/index.ts). Tests that change
-  // the setting after construction refresh via setAllowedApps(), exactly like
-  // the /api/public-access PUT handler.
-  const publicAccessState = new PublicAccessState();
-  await publicAccessState.load(db);
+  // the setting after construction refresh via permissions.replace(), exactly
+  // like the /api/public-access PUT handler.
+  const permissions = new Permissions();
+  await loadAppPermissions(db, permissions);
   const dashboardAccessState = new DashboardAccessState();
   await dashboardAccessState.load(db);
   // Not linked, so a test that saves the allow-list never reaches the network.
@@ -804,11 +823,15 @@ export async function buildTestDeps(
       chats: chatsWired.chats,
       messages: chatsWired.messages,
     },
+    ownPlatforms: ownPlatforms(),
     actionExecutionsRepo,
     executionJournalRepo,
     webhookInvocationsRepo,
     routinesRepo,
     routineRunsRepo,
+    personalData: new PersonalDataRepository(db, PERSONAL_DATA_SOURCES),
+    deviceConnections: new DeviceConnectionsRepository(db),
+    placeAudience: async () => "shared",
     routineEngine,
     eventCatalog: new EventCatalog(),
     appCatalog,
@@ -826,7 +849,7 @@ export async function buildTestDeps(
     sessionOpeningFor: sessionOpeningFor({ channelSurface: testChannelSurface }),
     conversationTitleGenerator: {
       async generate(firstMessage) {
-        return normalizeConversationTitle(firstMessage) ?? "New Chat";
+        return normalizeConversationTitle(firstMessage) ?? "New chat";
       },
     },
     agentRunner,
@@ -836,7 +859,7 @@ export async function buildTestDeps(
     codexAccountService,
     claudeAccount,
     romeCreditsProxy: romeCreditsProxyRoutes("127.0.0.1"),
-    publicAccessState,
+    permissions,
     dashboardAccessState,
     dashboardAccessStore,
     visitorAllowListSync,
@@ -853,7 +876,7 @@ export async function buildTestDeps(
         devices: [],
       }),
     },
-    wechatApp: null,
+    connectionKinds: [],
     computerUse: {
       getStatus: async () => ({
         daemon: { status: "unavailable", version: null },
@@ -879,6 +902,7 @@ export async function buildTestDeps(
     // Inert in tests: checkAndOffer is never invoked here, and the Rome Cloud
     // client self-rejects on the versionless test boot if it ever were.
     systemUpgradeService: new SystemUpgradeService({ countdownMs: 600_000 }),
+    releaseNotes: new ReleaseNotes({ baseUrl: "https://release-notes.invalid", cacheDir: null }),
     isCloudAuthEnabled: async () => false,
     loginUsage: { recordLogin: () => {} },
     transports,
@@ -978,6 +1002,9 @@ import {
   type TelemetryBridge,
 } from "@rome-os/app-runtime";
 import { testChannelSurface } from "./channel-surface.js";
+import { DeviceConnectionsRepository } from "../connections/device/repository.js";
+import { PersonalDataRepository } from "../personal-data/repository.js";
+import { PERSONAL_DATA_SOURCES } from "../personal-data/sources/index.js";
 export interface SpanHarness {
   exporter: InMemorySpanExporter;
   shutdown(): Promise<void>;

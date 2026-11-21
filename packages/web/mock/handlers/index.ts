@@ -1,6 +1,10 @@
+import { appDocumentAccessHandlers } from "./app-document-access";
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
+import { questionCardRender } from "../fixtures/question-card";
+import type { Question } from "@rome/api-types/question-card";
 import type {
   ChatId,
+  ChatSettingField,
   ChatSettings,
   ChatSettingsListItem,
   PartialChatSettings,
@@ -15,9 +19,15 @@ import type {
   TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import { http, HttpResponse } from "msw";
+import {
+  CONCIERGE_CHAT_ID,
+  type ConciergeChatsResponse,
+  type ConciergeChatWorkResponse,
+} from "@rome/api-types/concierge";
 import type { Capability } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import type { SettingsMap } from "@/hooks/use-settings";
+import { CONCIERGE_AGENT_ID } from "@/hooks/use-concierge";
 import type { UpgradeStatus } from "@/hooks/use-upgrade-status";
 import type {
   AgentCatalogGroup,
@@ -42,26 +52,74 @@ import type { ActionCatalogEntry } from "@/hooks/use-action-catalog";
 import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
+import { vaultHandlers } from "./vault";
 import { connectorHandlers } from "./connector";
+import { dinnerQuestion, mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
+import {
+  AGENT_CARD_HEALTH,
+  AGENT_CARD_ITINERARY,
+  CONNECT_CARD_A2UI,
+} from "../fixtures/agent-cards";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
 import type { ConnectedAccountEntry } from "@rome/api-types/connected-accounts";
-import { connections } from "./connections-store";
+import { CHAT_RULE_DEFAULTS, chatRuleDefaultsOf, connections } from "./connections-store";
 
 /** Connected accounts left by a disconnect in this session, each with its
  *  agent. Core keeps them, so Envoys lists them as disconnected. */
+/** The questions of the mock `ask_question` card: one per layout the card takes. */
+const WAITLIST_QUESTIONS: Question[] = [
+  {
+    id: "tone",
+    question: "How should the rewrite read?",
+    type: "single",
+    options: ["Warm", "Plain", "Playful"],
+    freeText: true,
+  },
+  {
+    id: "keep",
+    question: "What should the new opening keep?",
+    type: "multi",
+    options: [
+      "The line about not holding it all in your head",
+      "The pricing note",
+      "The beta thank-you",
+    ],
+    freeText: true,
+  },
+  {
+    id: "avoid",
+    question: "Anything to avoid?",
+    type: "text",
+    optional: true,
+  },
+];
+
 const disconnectedAccounts: ConnectedAccountEntry[] = [];
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
+import { taskListHandlers } from "./task-list";
+import { chatOutputHandlers, outputProjectFolder } from "./chat-outputs";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { pickerDevices, settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
+import { shareHandlers } from "./shares";
 import { curatedChats } from "../fixtures/chats";
+import {
+  CONCIERGE_ATTENTION_DIGEST,
+  CONCIERGE_FORWARDED_REPORT,
+  CONCIERGE_LAS_VEGAS_LIST,
+  CONCIERGE_MORNING_DIGEST,
+  CONCIERGE_RELEASE_DIGEST,
+  CONCIERGE_TRIP_PLAN,
+  TASK_CHAT_ANSWER_WITH_CONCLUSION,
+  TASK_CHAT_CONCLUSION,
+} from "../fixtures/concierge-messages";
 
 // Fixtures are typed against the same types the fetch sites parse into
 // (@rome/api-types where the contract lives there, the web-local types
@@ -233,7 +291,14 @@ function traceSummaryOf(blocks: TraceEventDto[]): TraceSummary {
     ...(turnEnd?.type === "turn_end" && turnEnd.status === "interrupted"
       ? { stoppedByUser: true }
       : {}),
-    ...(failed && lastError?.type === "error" ? { terminalError: lastError.error } : {}),
+    ...(failed && lastError?.type === "error"
+      ? {
+          terminalError: lastError.error,
+          ...(lastError.code ? { terminalErrorCode: lastError.code } : {}),
+          ...(lastError.provider ? { terminalErrorProvider: lastError.provider } : {}),
+          ...(lastError.reason ? { terminalErrorReason: lastError.reason } : {}),
+        }
+      : {}),
     ...(model ? { model } : {}),
   };
 }
@@ -295,6 +360,78 @@ const turn = (
   return rows;
 };
 
+// The Concierge's afternoon, as the server sends it: replies that answer
+// several topics in turn, interleaved. A reply, the guardian's or the
+// Concierge's, carries the quote of the message it replies to, and the chat
+// draws it by what sits above it: plain, in a run of replies to one message, or
+// with the quote in its bubble. The plumber exchange is a plain back-and-forth.
+const NAS_CLEANUP_SCRIPT = `Yes. Give the backup disk a limit, and delete the oldest snapshot when it goes over:
+
+\`\`\`bash
+# Every day at 03:00: over 85% full, delete the oldest snapshot
+used=$(df --output=pcent /Volumes/Backup | tail -1 | tr -dc '0-9')
+if [ "$used" -gt 85 ]; then
+  tmutil delete "$(tmutil listbackups | head -1)"
+fi
+\`\`\`
+
+Want me to set it up as a daily routine?`;
+const guardianSender: NonNullable<ChatMessage["sender"]> = {
+  kind: "guardian",
+  name: identity.displayName,
+  avatarUrl: identity.avatarUrl,
+};
+// Which afternoon message each one replies to, by number.
+const AFTERNOON_REPLIES: Record<number, number> = {
+  2: 1,
+  4: 3,
+  5: 1,
+  6: 5,
+  7: 3,
+  9: 6,
+  10: 7,
+  11: 10,
+  12: 8,
+  13: 12,
+  14: 13,
+  15: 9,
+  16: 15,
+  18: 17,
+  19: 18,
+  20: 19,
+};
+const afternoonSaid = new Map<number, { from: "guardian" | "agent"; content: string }>();
+const afternoon = (
+  n: number,
+  at: string,
+  from: "guardian" | "agent",
+  content: string,
+): ChatMessage => {
+  afternoonSaid.set(n, { from, content });
+  const quoted = AFTERNOON_REPLIES[n];
+  const original = quoted === undefined ? undefined : afternoonSaid.get(quoted);
+  const quote =
+    quoted === undefined || !original
+      ? []
+      : [
+          {
+            type: "reply_to",
+            messageId: `${CONCIERGE_CHAT_ID}-pm-${quoted}`,
+            author: original.from === "guardian" ? "guardian" : "agent",
+            text: original.content,
+          } as TranscriptPart,
+        ];
+  return {
+    id: `${CONCIERGE_CHAT_ID}-pm-${n}`,
+    sessionId: CONCIERGE_CHAT_ID,
+    turnId: `${CONCIERGE_CHAT_ID}-pm-turn-${n}`,
+    role: from === "guardian" ? "user" : "assistant",
+    content: JSON.stringify([...quote, text(content)]),
+    createdAt: `2026-08-07T${at}:00.000Z`,
+    ...(from === "guardian" ? { sender: guardianSender } : {}),
+  };
+};
+
 // The transcript behind each session — served by /api/chat/sessions/:id/messages
 // and searched by /api/chat/sessions/search. `content` is a JSON array of
 // ChatEntries exactly as the real API stores it, so what renders here goes
@@ -307,6 +444,193 @@ const turn = (
 // chats that mention it, and "brief" matches one title *and* its transcript,
 // which is the session that keeps its title rank and gains a snippet.
 const transcripts: Record<string, ChatMessage[]> = {
+  // The later turns cover the message shapes the Concierge sends: a short
+  // answer, and long ones with a table, many links, a digest and a forward.
+  [CONCIERGE_CHAT_ID]: [
+    // Cards the Concierge composed itself, each a message of its own. They come
+    // first, so the later turns the layout checks wait for stay in view.
+    ...turn(CONCIERGE_CHAT_ID, 11, "2026-08-04T19:00:00.000Z", "Open an issue in the repo", [
+      CONNECT_CARD_A2UI,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 13, "2026-08-04T19:05:00.000Z", "How did I do today?", [
+      AGENT_CARD_HEALTH,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 12, "2026-08-04T19:10:00.000Z", "周六在东京怎么安排？", [
+      AGENT_CARD_ITINERARY,
+    ]),
+    ...turn(
+      CONCIERGE_CHAT_ID,
+      1,
+      "2026-08-05T08:42:00.000Z",
+      "Draft the launch email and let Ray know about the plumber.",
+      [
+        { type: "task_chat", chatId: "mock-task-question", title: "Draft launch email" },
+        { type: "task_chat", chatId: "mock-chat-4", title: "Plumber for the leak" },
+      ],
+    ),
+    ...turn(CONCIERGE_CHAT_ID, 2, "2026-08-05T09:10:00.000Z", "帮我排一下京都三天的行程", [
+      text(CONCIERGE_TRIP_PLAN),
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 3, "2026-08-05T09:30:00.000Z", "What shipped this week?", [
+      text(CONCIERGE_RELEASE_DIGEST),
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 4, "2026-08-06T07:00:00.000Z", "Weather today?", [
+      text("Sunny, 24° high, light wind. No umbrella needed."),
+      text(CONCIERGE_MORNING_DIGEST),
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 5, "2026-08-06T10:00:00.000Z", "How did the plumber visit go?", [
+      text("Ray's task chat finished. Here is the report:"),
+      {
+        type: "text",
+        content: CONCIERGE_FORWARDED_REPORT,
+        forwardedFrom: { chatId: "mock-chat-4", title: "Plumber for the leak" },
+      } as TranscriptPart,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 6, "2026-08-07T07:00:00.000Z", "Anything for me this morning?", [
+      text(CONCIERGE_ATTENTION_DIGEST),
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 7, "2026-08-07T09:00:00.000Z", "拉斯维加斯有什么值得去的？", [
+      text("找景点的任务聊天做完了，结果如下："),
+      {
+        type: "text",
+        content: CONCIERGE_LAS_VEGAS_LIST,
+        forwardedFrom: { chatId: "mock-chat-4", title: "拉斯维加斯景点" },
+      } as TranscriptPart,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 8, "2026-08-07T12:40:00.000Z", "How much have I eaten today?", [
+      mealPlannerCard,
+      text("1,240 kcal so far, 760 under your goal. A protein-heavy dinner fits."),
+      dinnerQuestion,
+    ]),
+    // A finished task is reported by forwarding only its conclusion; the chip opens the task chat.
+    ...turn(CONCIERGE_CHAT_ID, 9, "2026-08-07T13:00:00.000Z", "How are the Lisbon flights going?", [
+      {
+        type: "text",
+        content: TASK_CHAT_CONCLUSION,
+        format: "long",
+        forwardedFrom: { chatId: "mock-chat-lisbon", title: "Lisbon flights" },
+      } as TranscriptPart,
+    ]),
+    afternoon(
+      1,
+      "13:10",
+      "guardian",
+      "Can you book a table for 4 on Friday evening, somewhere close to the office?",
+    ),
+    afternoon(2, "13:11", "agent", "I found three tables for Friday at 7."),
+    afternoon(
+      3,
+      "13:12",
+      "guardian",
+      "Also check flights to Berlin next Tuesday, back on Thursday.",
+    ),
+    afternoon(4, "13:12", "agent", "On it. I'll compare fares and tell you what I find."),
+    afternoon(
+      5,
+      "13:20",
+      "agent",
+      "All three take a booking for 4. Osteria 23 has a quiet back room, and it is the closest at 9 minutes on foot. Shall I take that one?",
+    ),
+    afternoon(6, "13:22", "guardian", "Does the back room have a minimum spend?"),
+    afternoon(
+      7,
+      "13:30",
+      "agent",
+      "Round trip, Tuesday 11/17 to Thursday 11/19, economy:\n\n1. **Lufthansa LH1135** · 08:40 out, 18:30 back · €210\n2. **Eurowings EW9021** · 07:15 out, 20:50 back · €148, no bag\n3. **Ryanair FR1832** · 06:10 out, 21:40 back · €96, no bag",
+    ),
+    // A routine made the Concierge speak: its reply carries the routine's name.
+    {
+      id: `${CONCIERGE_CHAT_ID}-routine-trace`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
+      role: "trace",
+      content: "[]",
+      createdAt: "2026-08-07T13:32:00.000Z",
+      traceSummary: {
+        distinctApps: [],
+        invocationCounts: {},
+        totalSteps: 0,
+        automatedInput: { type: "routine", name: "Daily summary" },
+      },
+    },
+    {
+      id: `${CONCIERGE_CHAT_ID}-routine-reply`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
+      role: "assistant",
+      content: JSON.stringify([text("Today: two meetings, and the plumber at 4.")]),
+      createdAt: "2026-08-07T13:32:01.000Z",
+    },
+    afternoon(8, "13:40", "agent", "Last night's NAS backup failed. I'm looking into why."),
+    afternoon(
+      9,
+      "13:41",
+      "agent",
+      "Yes, there is a €200 minimum for the back room, which fits a table of 4.",
+    ),
+    afternoon(10, "13:50", "guardian", "Anything that gets me back on Thursday afternoon?"),
+    afternoon(
+      11,
+      "13:51",
+      "agent",
+      "Lufthansa has a 14:30 back on Thursday. With the Tuesday morning flight it is €190 round trip.",
+    ),
+    afternoon(
+      12,
+      "14:00",
+      "agent",
+      "The backup disk is full: Time Machine kept 14 months of snapshots and never cleared the old ones. I deleted the ones before 2025, which freed 820 GB, and last night's backup has run again.",
+    ),
+    afternoon(13, "14:02", "guardian", "Can it clean up by itself from now on?"),
+    afternoon(14, "14:03", "agent", NAS_CLEANUP_SCRIPT),
+    afternoon(15, "14:15", "guardian", "Book the back room."),
+    afternoon(
+      16,
+      "14:16",
+      "agent",
+      "Booked: Friday 19:00, Osteria 23 back room, 4 people, under your name. A confirmation text is on its way to your phone.",
+    ),
+    afternoon(17, "14:20", "guardian", "What time is the plumber coming?"),
+    afternoon(18, "14:20", "agent", "At 4 pm. He will call from the car park."),
+    afternoon(19, "14:22", "guardian", "Thanks. Does he need a key?"),
+    afternoon(20, "14:22", "agent", "No, Ray is home all afternoon."),
+    // The owner's latest message, which the Concierge is still working on: it
+    // carries the working status, which Rome derives.
+    {
+      ...turn(CONCIERGE_CHAT_ID, 10, "2026-08-07T14:40:00.000Z", "Book the 9:40 one", [])[0]!,
+      status: "working",
+    },
+  ],
+  // The task chat the conclusion above came from: the full answer, then its conclusion.
+  "mock-chat-lisbon": turn(
+    "mock-chat-lisbon",
+    1,
+    "2026-08-07T09:20:00.000Z",
+    "Compare round-trip fares to Lisbon for 1–7 March and tell me what to book.",
+    [text(TASK_CHAT_ANSWER_WITH_CONCLUSION)],
+  ),
+  "mock-task-question": turn(
+    "mock-task-question",
+    1,
+    "2026-08-05T08:41:00.000Z",
+    "Draft the launch email.",
+    [
+      {
+        type: "pending_interaction",
+        toolUseId: "mock-task-tone",
+        appId: "core",
+        render: questionCardRender([
+          {
+            id: "tone",
+            question: "Which tone should the launch email use?",
+            type: "single",
+            options: ["Warm", "Plain"],
+            freeText: true,
+          },
+        ]),
+      },
+    ],
+  ),
   ...Object.fromEntries(
     curatedChats.map((chat) => [
       chat.id,
@@ -506,9 +830,10 @@ const transcripts: Record<string, ChatMessage[]> = {
         },
       ],
     ),
-    // A turn parked on an unresolved `ask_question` card. `appId` is the "core"
-    // sentinel and `builtin` routes the render to rome-web's own QuestionCard
-    // rather than an app bundle in a shadow root.
+    // A turn parked on an unresolved `ask_question` card, as core stores it:
+    // the questions and the card described from them. `appId` is the "core"
+    // sentinel and `builtin` routes the render to the question card rather
+    // than an app bundle in a shadow root.
     //
     // One question per branch the card lays out differently, so reading this
     // transcript in mock mode covers all three. The `multi` option past 32
@@ -524,39 +849,7 @@ const transcripts: Record<string, ChatMessage[]> = {
           type: "pending_interaction",
           toolUseId: "mock-chat-2-ask-1",
           appId: "core",
-          render: {
-            kind: "inline",
-            componentId: "question-card",
-            builtin: true,
-            props: {
-              questions: [
-                {
-                  id: "tone",
-                  question: "How should the rewrite read?",
-                  type: "single",
-                  options: ["Warm", "Plain", "Playful"],
-                  freeText: true,
-                },
-                {
-                  id: "keep",
-                  question: "What should the new opening keep?",
-                  type: "multi",
-                  options: [
-                    "The line about not holding it all in your head",
-                    "The pricing note",
-                    "The beta thank-you",
-                  ],
-                  freeText: true,
-                },
-                {
-                  id: "avoid",
-                  question: "Anything to avoid?",
-                  type: "text",
-                  optional: true,
-                },
-              ],
-            },
-          },
+          render: questionCardRender(WAITLIST_QUESTIONS),
         },
       ],
     ),
@@ -732,6 +1025,23 @@ const transcripts: Record<string, ChatMessage[]> = {
   ],
 };
 
+// The Concierge's topic chats, each with a short exchange, so opening one loads
+// like a real chat rather than answering its messages with a 404.
+transcripts["mock-topic-travel"] = turn(
+  "mock-topic-travel",
+  1,
+  "2026-08-04T09:00:00.000Z",
+  "Where should we stay in Lisbon?",
+  [text("Alfama is walkable and quiet at night. I can compare three places if you like.")],
+);
+transcripts["mock-topic-news"] = turn(
+  "mock-topic-news",
+  1,
+  "2026-08-03T07:30:00.000Z",
+  "Send me a weekly news digest.",
+  [text("Done. Every Monday at 7:30 I will send the week's top stories.")],
+);
+
 /** Session metadata is derived from the transcript so `messageCount` and the
  *  activity timestamps can't drift away from the messages they describe. */
 const session = (
@@ -758,6 +1068,11 @@ const session = (
 };
 
 const chatSessions: ChatSession[] = [
+  // The guardian's main chat, which Chat and `/` open at /message.
+  session(CONCIERGE_CHAT_ID, "Main chat", "default", CONCIERGE_AGENT_ID),
+  // Topic chats, which the Concierge section lists under the main chat.
+  session("mock-topic-travel", "Travel planning", "default", CONCIERGE_AGENT_ID),
+  session("mock-topic-news", "Weekly news digest", "default", CONCIERGE_AGENT_ID),
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
   {
@@ -772,8 +1087,20 @@ const chatSessions: ChatSession[] = [
     model: "gpt-5.6-sol",
     reasoningEffort: "xhigh",
   },
+  { ...session("mock-chat-lisbon", "Lisbon flights"), triggerKind: "concierge" },
+  // A task chat that is still working, for the chat list's Tasks section.
+  {
+    ...session("mock-task-running", "Compare standing desks"),
+    triggerKind: "concierge",
+    running: true,
+  },
   { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true, model: "gemini-2.5-pro" },
   { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
+  {
+    ...session("mock-task-question", "Draft launch email"),
+    awaitingGuardian: true,
+    triggerKind: "concierge",
+  },
   // A chat that works in a folder on another computer groups under that folder.
   {
     ...session("mock-chat-device-folder", "Fix the flaky e2e test"),
@@ -785,6 +1112,9 @@ const chatSessions: ChatSession[] = [
     },
   },
 ];
+
+/** Unread agent messages per topic chat, so the chat list's Concierge dot shows. */
+const topicChatUnread: Record<string, number> = { "mock-topic-travel": 2 };
 
 const messageText = (message: ChatMessage): string =>
   (JSON.parse(message.content) as TranscriptPart[])
@@ -986,6 +1316,7 @@ const mockBody = (path: string) =>
   `# ${path.split("/").pop()}\n\nMock file content for the dashboard mock mode.\n`;
 
 const projectsTree: MockFsNode[] = [
+  outputProjectFolder,
   dir("projects/demo-app", [
     dir("projects/demo-app/src", [
       file("projects/demo-app/src/index.ts", mockBody("projects/demo-app/src/index.ts")),
@@ -1023,13 +1354,50 @@ const composioStatus: { composio: ComposioCliStatus } = {
   },
 };
 
-const conversationDefaults: ChatSettings = {
-  enabled: true,
-  activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
-  replies: { placement: "thread" },
-  routing: { agentName: null },
-  session: { reset: { mode: "idle", idleMinutes: 10_080 } },
-};
+const conversationDefaults: ChatSettings = CHAT_RULE_DEFAULTS;
+
+const DISCORD_FIELDS: ChatSettingField[] = [
+  "enabled",
+  "activation.mode",
+  "activation.botMessages",
+  "activation.whenOthersMentioned",
+  "replies.placement",
+  "routing.agentName",
+  "session.reset",
+];
+
+/** A channel on the mock Discord bot, with any values a guardian set on it. */
+function discordChannel(
+  chatId: string,
+  displayName: string,
+  containerName: string,
+  overrides: PartialChatSettings = {},
+): ChatSettingsListItem {
+  const configured = Object.keys(overrides).length > 0;
+  return {
+    availability: "online",
+    source: configured ? "configured" : "live",
+    snapshot: {
+      conversation: {
+        ref: { connectionId: "discord-1", chatId: chatId as ChatId },
+        connectionKind: "discord",
+        service: "discord",
+        kind: "channel",
+        displayName,
+        containerName,
+      },
+      supportedFields: DISCORD_FIELDS,
+      effective: mergeSettings(structuredClone(conversationDefaults), overrides),
+      overrides: structuredClone(overrides),
+      ...(configured
+        ? {
+            updatedAt: "2026-11-18T09:30:00.000Z",
+            updatedBy: { kind: "guardian" as const, displayName: "Mock Guardian" },
+          }
+        : {}),
+    },
+  };
+}
 
 const conversationSettings: { items: ChatSettingsListItem[] } = {
   items: [
@@ -1060,6 +1428,18 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
         updatedBy: { kind: "guardian", displayName: "Mock Guardian" },
       },
     },
+    discordChannel("general", "general", "Rome", { activation: { mode: "all" } }),
+    discordChannel("launch", "launch-planning", "Rome", { routing: { agentName: "pm-assistant" } }),
+    discordChannel("random", "random", "Rome", { enabled: false }),
+    discordChannel("announcements", "announcements", "Rome"),
+    discordChannel("design", "design", "Rome"),
+    discordChannel("standup", "standup", "Rome"),
+    discordChannel("support", "customer-support", "Rome Community", {
+      replies: { placement: "inline" },
+    }),
+    discordChannel("welcome", "welcome", "Rome Community"),
+    discordChannel("feedback", "feedback", "Rome Community"),
+    discordChannel("showcase", "showcase", "Rome Community"),
     {
       availability: "offline",
       source: "known",
@@ -1072,7 +1452,8 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
           displayName: "Ray",
           containerName: undefined,
         },
-        supportedFields: ["enabled", "session.reset"],
+        // A direct message offers only the session reset.
+        supportedFields: ["session.reset"],
         effective: {
           ...conversationDefaults,
           session: { reset: { mode: "daily", atHour: 4 } },
@@ -1108,6 +1489,7 @@ const upgradeStatus = (): Omit<UpgradeStatus, "receivedAt"> => ({
 });
 
 export const handlers = [
+  ...appDocumentAccessHandlers,
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
   // A healthy snapshot for the Advanced tab. Identity is already enrolled, so the
   // section shows the account row rather than a reconnect prompt.
@@ -1137,6 +1519,49 @@ export const handlers = [
   http.get("/api/bootstrap", () => HttpResponse.json(bootstrap)),
   http.get("/api/auth/me", () => HttpResponse.json(identity)),
   http.get("/api/chat/sessions", () => HttpResponse.json(chatSessions)),
+  // The Concierge: the guardian's main chat, and the topic chats started here.
+  http.get("/api/concierge/session", () => HttpResponse.json({ id: CONCIERGE_CHAT_ID, unread: 0 })),
+  http.put("/api/concierge/timezone", () => new HttpResponse(null, { status: 204 })),
+  http.get("/api/concierge/chats", () =>
+    HttpResponse.json({
+      chats: chatSessions
+        .filter((s) => s.agentName === CONCIERGE_AGENT_ID && !s.archivedAt)
+        .sort(
+          (a, b) =>
+            Number(b.id === CONCIERGE_CHAT_ID) - Number(a.id === CONCIERGE_CHAT_ID) ||
+            a.createdAt.localeCompare(b.createdAt),
+        )
+        // Mock mode runs no turns, so every chat is idle.
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          main: s.id === CONCIERGE_CHAT_ID,
+          unread: topicChatUnread[s.id] ?? 0,
+          activity: { kind: "idle" as const },
+        })),
+    } satisfies ConciergeChatsResponse),
+  ),
+  http.post("/api/concierge/chats", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { name?: string };
+    const id = `mock-topic-${chatSessions.length + 1}`;
+    transcripts[id] = [];
+    chatSessions.push(session(id, body.name?.trim() ?? "", "default", CONCIERGE_AGENT_ID));
+    return HttpResponse.json(
+      { id, name: body.name?.trim() ?? "", main: false, unread: 0 },
+      {
+        status: 201,
+      },
+    );
+  }),
+  // Mock mode runs no turns and follows nothing, so a topic chat has nothing to move or stop.
+  http.get("/api/concierge/chats/:chatId/follows-and-tasks", () =>
+    HttpResponse.json({ follows: [], openTasks: [] } satisfies ConciergeChatWorkResponse),
+  ),
+  // Held open without events: mock mode runs no turns, so no chat's activity changes.
+  http.get("/api/concierge/activity/events", () => {
+    const stream = new ReadableStream({ start() {} });
+    return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+  }),
   // Held open without events: the fixture's running flags never change.
   http.get("/api/chat/status/events", () => {
     const stream = new ReadableStream({ start() {} });
@@ -1172,23 +1597,69 @@ export const handlers = [
     const query = new URL(request.url).searchParams;
     const limit = Number(query.get("limit"));
     if (!limit) return HttpResponse.json(messages);
-    // Pages by turn like the server; the cursor is the index of the page's first turn.
-    const turns = new Map<string, typeof messages>();
-    for (const message of messages) {
-      const key = message.turnId ?? message.id;
-      turns.set(key, [...(turns.get(key) ?? []), message]);
-    }
-    const groups = [...turns.values()];
-    const end = query.has("before") ? Number(query.get("before")) : groups.length;
+    // Pages by message like the server: the cursor is the index of the page's first
+    // message, and the traces of the page's turns ride along.
+    const said = messages.filter((message) => message.role !== "trace");
+    const end = query.has("before") ? Number(query.get("before")) : said.length;
     const start = Math.max(0, end - limit);
+    const page = said.slice(start, end);
+    const turns = new Set(page.flatMap((message) => (message.turnId ? [message.turnId] : [])));
+    const traces = messages.filter(
+      (message) => message.role === "trace" && message.turnId && turns.has(message.turnId),
+    );
+    const shown = new Set([...page, ...traces]);
     return HttpResponse.json({
-      messages: groups.slice(start, end).flat(),
+      messages: messages.filter((message) => shown.has(message)),
       nextCursor: start > 0 ? String(start) : null,
     });
   }),
   // No turn is ever in flight: the transcripts are static and mock mode has no
   // model behind it, so a session always reads as idle.
   http.get("/api/chat/sessions/:sessionId/turns", () => HttpResponse.json([] as TurnInfo[])),
+  // A sent message is only recorded: no turn starts, so nothing answers it. It
+  // replies to the message the owner picked, else to nothing.
+  http.post("/api/chat/sessions/:sessionId/turns", async ({ params, request }) => {
+    const sessionId = String(params.sessionId);
+    const messages = transcripts[sessionId];
+    if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    const form = await request.formData();
+    const picked = form.get("replyToMessageId");
+    const repliesTo = picked ? messages.find((message) => message.id === picked) : undefined;
+    const sentAt = new Date().toISOString();
+    // A reply shows the quote of what it replies to.
+    const original = repliesTo ? JSON.parse(repliesTo.content) : [];
+    const quote = original.find((part: { type: string }) => part.type === "text");
+    const content = JSON.stringify([
+      ...(repliesTo && quote
+        ? [
+            {
+              type: "reply_to",
+              messageId: repliesTo.id,
+              author: repliesTo.role === "user" ? "guardian" : "agent",
+              text: quote.content,
+            },
+          ]
+        : []),
+      text(String(form.get("text") ?? "")),
+    ]);
+    messages.push({
+      id: String(form.get("inputId")),
+      sessionId,
+      turnId: null,
+      role: "user",
+      content,
+      createdAt: sentAt,
+      sender: guardianSender,
+    });
+    return HttpResponse.json({
+      turnId: null,
+      inputId: String(form.get("inputId")),
+      inputState: "consumed",
+      sessionId,
+      startedAt: sentAt,
+      content,
+    });
+  }),
   http.post("/api/chat/sessions/:sessionId/read", ({ params }) => {
     const found = chatSessions.find((s) => s.id === params.sessionId);
     if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
@@ -1217,9 +1688,17 @@ export const handlers = [
     found.largeModelSelection = largeModelSelection === "auto" ? null : largeModelSelection;
     return HttpResponse.json(found);
   }),
-  // Thumbs on an assistant turn. Each row hydrates lazily as it scrolls into
-  // view, so this only became reachable once sessions had a transcript. Kept in
+  // Thumbs on an assistant turn. A chat's rows hydrate from one read once the
+  // first scrolls into view, so this only became reachable once sessions had a transcript. Kept in
   // memory rather than always-null so a click actually sticks for the session.
+  http.get("/api/chat/sessions/:sessionId/feedback", ({ params }) => {
+    const prefix = `${params.sessionId}:`;
+    const feedback: Record<string, TurnFeedback> = {};
+    for (const [key, value] of turnFeedback) {
+      if (key.startsWith(prefix)) feedback[key.slice(prefix.length)] = value;
+    }
+    return HttpResponse.json({ feedback });
+  }),
   http.get("/api/chat/sessions/:sessionId/turns/:turnId/feedback", ({ params }) => {
     const key = `${params.sessionId}:${params.turnId}`;
     return HttpResponse.json({ feedback: turnFeedback.get(key) ?? null });
@@ -1466,7 +1945,38 @@ export const handlers = [
     return HttpResponse.json({ ok: true, connection: null });
   }),
   http.get("/api/integrations/composio/status", () => HttpResponse.json(composioStatus)),
-  http.get("/api/chat-settings", () => HttpResponse.json(conversationSettings)),
+  http.get("/api/chat-settings", ({ request }) => {
+    const search = new URL(request.url).searchParams;
+    const connectionId = search.get("connectionId");
+    const query = search.get("query")?.trim().toLocaleLowerCase();
+    const changed = search.get("changed") === "true";
+    return HttpResponse.json({
+      items: conversationSettings.items.filter((item) => {
+        const chat = item.snapshot.conversation;
+        if (connectionId && chat.ref.connectionId !== connectionId) return false;
+        if (changed && Object.keys(item.snapshot.overrides).length === 0) return false;
+        if (!query) return true;
+        return [chat.connectionKind, chat.containerName, chat.displayName]
+          .filter(Boolean)
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query);
+      }),
+    });
+  }),
+  http.post("/api/chat-settings/reset", async ({ request }) => {
+    const body = (await request.json()) as { ref: { connectionId: string; chatId: string } };
+    const found = conversationSettings.items.find(
+      (candidate) =>
+        candidate.snapshot.conversation.ref.connectionId === body.ref.connectionId &&
+        candidate.snapshot.conversation.ref.chatId === body.ref.chatId,
+    );
+    if (!found) return HttpResponse.json({ error: "Unknown conversation" }, { status: 404 });
+    found.source = "live";
+    found.snapshot.overrides = {};
+    found.snapshot.effective = chatRuleDefaultsOf(found.snapshot.conversation.connectionKind);
+    return HttpResponse.json(found.snapshot);
+  }),
   // Auto-save writes through on every edit, so mock mode needs a real write
   // path or the dashboard would toast an error on each change.
   http.patch("/api/chat-settings", async ({ request }) => {
@@ -1494,6 +2004,7 @@ export const handlers = [
       delete found.snapshot.overrides.routing;
       found.snapshot.effective.routing.agentName = null;
     }
+    found.source = "configured";
     found.snapshot.updatedAt = new Date().toISOString();
     found.snapshot.updatedBy = { kind: "guardian", displayName: identity.displayName ?? undefined };
     return HttpResponse.json(found.snapshot);
@@ -1502,6 +2013,8 @@ export const handlers = [
   // orders its own routes internally, so they can be appended in any order —
   // MSW's first-match rule only bites within a path family.
   ...appHandlers,
+  ...taskListHandlers,
+  ...chatOutputHandlers,
   ...activityHandlers,
   ...peopleHandlers,
   ...assistantHandlers,
@@ -1510,10 +2023,13 @@ export const handlers = [
   // chats the conversation routes serve — one inventory row per chat, its run
   // and message counts read off that chat's transcript.
   ...sessionQueryHandlers(chatSessions, transcripts),
+  ...shareHandlers(chatSessions, transcripts),
   ...settingsHandlers,
   ...connectorHandlers,
+  ...mealPlannerHandlers,
   ...recordedAppHandlers,
   ...appKeysHandlers,
+  ...vaultHandlers,
   ...liveEventsHandlers,
   ...nodeConsoleHandlers,
   // The two file-browser surfaces, each an in-memory filesystem: the projects

@@ -59,6 +59,10 @@ Use "you" and "your" for possession and benefit. Use the imperative for an instr
 > Prefer: "Rome restarts to apply the upgrade." (Rome performs the restart)
 > Over: "Rome hides this app and Rome stops its agents." (the toggle does this, not Rome)
 
+## What the guardian sees
+
+Describe what the guardian sees happen, not how the code does it. Storage, protocols, internal component names and code vocabulary stay out of every string, labels and errors included: write "Sign-in did not finish", not "OAuth handoff redemption failed", and "Its data is kept", not "Its database rows are preserved". Name an internal thing only when the guardian has to act on it, such as an environment variable they set or a status code they report. `[llm]`
+
 ## Contractions
 
 <!-- vale Rome.Contractions = NO -->
@@ -140,7 +144,7 @@ Each row was verified against the rendered pair.
 | Upgrade Rome to {{version}}? | Rome restarts to apply the upgrade. Expect a few minutes of downtime, and any work in progress is interrupted. This page reconnects automatically once Rome is back. | Rome is the actor. Cause, then cost, then what needs no action. |
 | Webhook relay | No relay credential is stored, so incoming webhooks are not delivered to this instance. | A state the guardian did not choose, so the cause leads. No control on this screen fixes it. |
 | Access for {{name}} | Applies to the public Rome URL. Your own dashboard access is not affected. | Scope, plus the misreading it prevents. |
-| Allowed emails | Grants the full dashboard, not just individual apps. | Cost. Apps carry their own email lists, so the wider grant is the surprise. |
+| Admins | Grants the full dashboard, not just individual apps. | Cost. Apps carry their own email lists, so the wider grant is the surprise. |
 | On a schedule | *(no description)* | "These run at a set time" restates the heading. Deleted, not reworded. |
 
 ### Economical

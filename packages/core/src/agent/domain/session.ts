@@ -10,10 +10,18 @@ export type AgentName = string;
  *  continuity key and agent is active. docs/concepts/sessions.md#continuity-key */
 export type ContinuityKey = string;
 export type SessionStatus = "active" | "completed" | "error";
+/**
+ * What a session serves, fixed for its life: a conversation, an action, a
+ * fork or a subagent call. An opener states conversation or action; the agent
+ * context makes forks and subagents itself.
+ */
+export type SessionKind = "conversation" | "action" | "fork" | "subagent";
 
 export interface CreateSessionOptions {
   continuityKey?: ContinuityKey;
   workingDir?: string;
+  /** The fingerprint of the setup the session opens with ({@link Session.setup}). */
+  setup?: string;
   /** @deprecated A persisted fork's session must have the id the fork minted
    *  when its turn started, because the fork's chat and the turn's events
    *  already carry it. Every other caller leaves it out and Sessions mints
@@ -23,6 +31,12 @@ export interface CreateSessionOptions {
 
 export interface ReplaceSessionOptions {
   workingDir?: string;
+  /** Why the reset replaces the session (SessionRenewal reason). */
+  reason?: string;
+  /** The fingerprint of the setup the successor opens with. */
+  setup?: string;
+  /** The handoff the retired session left for the successor ({@link Session.handoff}). */
+  handoff?: string;
 }
 
 /** What one turn ran on. */
@@ -34,6 +48,8 @@ export interface TurnRun {
   /** Where the turn left the provider's thread, so a fork can branch at it.
    *  Recorded only with a `modelThreadId`. */
   checkpoint?: { turnId: string; checkpointId: string };
+  /** How many tokens the context held at the turn's last model request, when the provider said. */
+  contextTokens?: number;
 }
 
 /** Where a completed turn left the provider's thread. Opaque to Sessions:
@@ -57,6 +73,15 @@ export interface SessionState {
   model: string | null;
   reasoningEffort: string | null;
   workingDir: string | null;
+  setup: string | null;
+  /** The session that replaced this one in a reset, or null. */
+  supersededBy: SessionId | null;
+  /** Why the reset replaced it, or null. */
+  supersededFor: string | null;
+  /** The handoff this session started from, or null. */
+  handoff: string | null;
+  /** The context's size at the last turn that reported one, in tokens, or null. */
+  contextTokens: number | null;
   createdAt: Date;
   lastActiveAt: Date;
 }
@@ -64,7 +89,14 @@ export interface SessionState {
 /** The facts a session can change after it is created. The repository writes
  *  only the ones that changed, so two instances of one session, each changing
  *  a different fact, never undo each other's write. */
-export type SessionChange = "turn" | "reasoningEffort" | "workingDir" | "lastActiveAt" | "status";
+export type SessionChange =
+  | "turn"
+  | "reasoningEffort"
+  | "workingDir"
+  | "lastActiveAt"
+  | "status"
+  | "contextTokens"
+  | "setup";
 
 /**
  * One agent's conversation from one reset to the next: the agent, what it last
@@ -95,6 +127,11 @@ export class Session {
       model: null,
       reasoningEffort: null,
       workingDir: options.workingDir ?? null,
+      setup: options.setup ?? null,
+      supersededBy: null,
+      supersededFor: null,
+      handoff: null,
+      contextTokens: null,
       createdAt: now,
       lastActiveAt: now,
     });
@@ -135,6 +172,43 @@ export class Session {
   get workingDir(): string | null {
     return this.state.workingDir;
   }
+  /**
+   * A fingerprint of the setup the session opened with: its agent's
+   * instructions and identity, and its tools. Fixed for the session's life.
+   * Null when the session was opened before setups were recorded, or for an
+   * agent whose policy does not replace a session on a setup change.
+   * docs/concepts/sessions.md#setup
+   */
+  get setup(): string | null {
+    return this.state.setup;
+  }
+  /**
+   * The session that replaced this one in a reset, or null. A superseded
+   * session is completed, and whatever still names it by id, such as a
+   * scheduled wake-up, reaches the chat through its successor.
+   */
+  get supersededBy(): SessionId | null {
+    return this.state.supersededBy;
+  }
+  /** Why a reset replaced this session, or null when none did. */
+  get supersededFor(): string | null {
+    return this.state.supersededFor;
+  }
+  /**
+   * The note the session it replaced wrote for it in a renewal: what was in
+   * progress, agreed and still open. Fixed for the session's life. Null when
+   * no renewal handoff was written. docs/concepts/sessions.md#handoff
+   */
+  get handoff(): string | null {
+    return this.state.handoff;
+  }
+  /**
+   * How many tokens the provider's context held at the last turn that said:
+   * its latest model request's input. Null until a turn reports one.
+   */
+  get contextTokens(): number | null {
+    return this.state.contextTokens;
+  }
   get createdAt(): Date {
     return this.state.createdAt;
   }
@@ -143,7 +217,7 @@ export class Session {
   }
 
   /** @deprecated Whether the provider has a thread for this session, which the
-   *  dashboard reads as "this side chat can continue". Sessions should answer
+   *  dashboard reads as "this fork chat can continue". Sessions should answer
    *  that question itself. */
   get deprecatedHasModelThread(): boolean {
     return this.state.modelThreadId !== null;
@@ -165,6 +239,10 @@ export class Session {
       this.state.reasoningEffort = run.reasoningEffort;
       this.changes.add("reasoningEffort");
     }
+    if (run.contextTokens !== undefined) {
+      this.state.contextTokens = run.contextTokens;
+      this.changes.add("contextTokens");
+    }
     if (run.checkpoint && run.modelThreadId) {
       this.checkpoints.set(run.checkpoint.turnId, {
         sessionId: this.state.id,
@@ -174,6 +252,18 @@ export class Session {
         checkpointId: run.checkpoint.checkpointId,
       });
     }
+  }
+
+  /**
+   * The session opens with setup `setup` from now on. Only for a session no
+   * turn has run on: its thread has read no setup yet, so it starts on this one.
+   */
+  adoptSetup(setup: string): void {
+    if (this.state.modelThreadId !== null) {
+      throw new Error(`Session "${this.state.id}" has a thread and keeps the setup it opened with`);
+    }
+    this.state.setup = setup;
+    this.changes.add("setup");
   }
 
   /** The provider's transcript now lives here. */
@@ -205,10 +295,15 @@ export class Session {
    */
   replace(options: ReplaceSessionOptions = {}): Session {
     this.complete();
-    return Session.create(this.state.agentName, {
+    const successor = Session.create(this.state.agentName, {
       continuityKey: this.state.continuityKey ?? undefined,
       workingDir: options.workingDir,
+      setup: options.setup,
     });
+    successor.state.handoff = options.handoff ?? null;
+    this.state.supersededBy = successor.id;
+    this.state.supersededFor = options.reason ?? null;
+    return successor;
   }
 
   /** The state to write. Only the repository calls this. */

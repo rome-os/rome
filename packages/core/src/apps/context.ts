@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { actionExecutionContext } from "../actions/context.js";
+import { actionExecutionContext } from "./actions/context.js";
 import {
   type ActionDispatchReceipt,
   ActionInvocationError,
@@ -13,25 +13,22 @@ import {
   type RunActionOptions,
   type RomeAppDefinition as SdkRomeAppDefinition,
 } from "@rome-os/app-runtime";
-import type { ActionEngine } from "../actions/engine.js";
-import { callAction } from "../actions/call-action.js";
-import { sendRefusalOf } from "../actions/worker-protocol.js";
-import type { ActionInvocationObserver } from "../actions/runtime-events.js";
-import type { ActionResult } from "../actions/types.js";
+import type { ActionEngine } from "./actions/engine.js";
+import { callAction } from "./actions/call-action.js";
+import { sendRefusalOf } from "./actions/worker-protocol.js";
+import type { ActionInvocationObserver } from "./actions/runtime-events.js";
+import type { ActionResult } from "./actions/types.js";
 import type { DrizzleDb } from "../db/index.js";
 import { toRoutine } from "../db/repositories/routines.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
-import type { Routine } from "../routines/types.js";
+import type { Routine } from "@rome-os/app-runtime";
 import { createAppLogger, type Logger } from "../logger.js";
 import type { AppCatalog } from "./catalog.js";
 import type { ResolvedApp } from "./state.js";
 import type { AgentRunnerInterface } from "../core/types.js";
-import type { RomeAppViewer } from "../lib/visitor-session.js";
-import type { FavorService } from "../favors/types.js";
-import {
-  DeniedAppConnections,
-  type AppConnectionsContextFactory,
-} from "../connections/app-connections.js";
+import type { RomeAppViewer } from "../access/visitor-session.js";
+import type { AppFavorRequests } from "./app-favors-port.js";
+import { DeniedAppConnections, type AppConnectionsContextFactory } from "./app-connections-port.js";
 
 export interface AppDbContext {
   connection: DrizzleDb;
@@ -72,13 +69,13 @@ export interface RomeAppRuntimeServices {
   agentRunner?: AgentRunnerInterface;
   routinesRepo?: RoutinesRepository;
   repositories: AppRuntimeRepositories;
-  favorService?: FavorService;
+  favorService?: AppFavorRequests;
   appConnections?: AppConnectionsContextFactory;
   /** What this context's out-of-execution `runAction` does when every action
    * worker is busy (see ActionRunContext.whenWorkersBusy). Defaults to
    * `"fail"`. Set `"queue"` only for a context built for one caller that no
    * action worker waits on. App code can run on behalf of a waiting worker,
-   * such as turn middleware during a `summon`-driven turn, so a shared app
+   * such as turn middleware during a `system:summon`-driven turn, so a shared app
    * context must stay fail-fast. */
   whenWorkersBusy?: "fail" | "queue";
 }

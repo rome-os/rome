@@ -1,10 +1,9 @@
 /**
- * Dev-only gallery of every service's Connection detail dialog, for reviewing
- * the credential-slot card layout/copy across ALL services and auth states at
+ * Dev-only gallery of every service's Connection detail, for reviewing the
+ * credential-slot card layout/copy across ALL services and auth states at
  * once. Renders each card the real `buildConnectionCards` presentation adapter
- * produces from mock `/api/connections` payloads, framed like
- * `ConnectionDetailDialog`, tiled per state section — so what you see is
- * exactly what the production dialog renders.
+ * produces from mock `/api/connections` payloads through the shared
+ * `ConnectionDetailBody`, in a static frame tiled per state section.
  *
  * Served at `/dev/connections`, gated on `import.meta.env.DEV` in App.tsx like
  * every page in `pages/dev/` — the route and this chunk are dropped from
@@ -353,9 +352,8 @@ function GallerySection({ scenario }: { scenario: GalleryScenario }) {
 }
 
 /**
- * A static replica of `ConnectionDetailDialog`'s chrome (Dialog size="lg" +
- * DialogHeader + DialogBody class stacks) so many dialogs can tile on one page
- * instead of portaling a modal.
+ * A static dialog chrome (Dialog size="lg" + DialogHeader + DialogBody class
+ * stacks) so many details can tile on one page instead of portaling a modal.
  */
 function DialogFrame({ card, scenario }: { card: ConnectionCard; scenario: GalleryScenario }) {
   return (

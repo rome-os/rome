@@ -18,7 +18,11 @@ rs.mock("@/hooks/use-dashboard-identity", () => ({
 }));
 // The card reads the chat list; the transcript only decides what surrounds it.
 rs.mock("@/components/chat/entries/TaskChatCard", () => ({
-  TaskChatCard: ({ title }: { title: string }) => <div data-testid="task-card">{title}</div>,
+  TaskChatCard: ({ title, isLatestForChat }: { title: string; isLatestForChat: boolean }) => (
+    <div data-testid="task-card" data-latest={isLatestForChat}>
+      {title}
+    </div>
+  ),
 }));
 // The real buttons fetch and observe the viewport; the transcript only decides
 // where they appear and for which turn.
@@ -106,7 +110,10 @@ const idle = {
   identity: { name: "Rome", iconUrl: null },
 } as LivePreview;
 
-function renderTranscript(rows: ChatRow[], opts: { live?: LivePreview } = {}) {
+function renderTranscript(
+  rows: ChatRow[],
+  opts: { live?: LivePreview; unreadFrom?: string | null } = {},
+) {
   return render(
     <ThemeProvider>
       <ConciergeTranscript
@@ -115,6 +122,7 @@ function renderTranscript(rows: ChatRow[], opts: { live?: LivePreview } = {}) {
         actions={actions}
         contentRef={() => {}}
         feedback
+        unreadFrom={opts.unreadFrom}
       />
     </ThemeProvider>,
   );
@@ -127,7 +135,59 @@ function bubbleOf(content: string): HTMLElement {
   return bubble;
 }
 
+describe("Concierge unread divider", () => {
+  const rows = [
+    agentRow(agent("old", 0, [text("Seen")], "turn-old")),
+    agentRow(agent("new", 1000, [text("Not seen")], "turn-new")),
+  ];
+
+  it("draws a labelled divider between the last read message and the first unread one", () => {
+    renderTranscript(rows, { unreadFrom: "new" });
+    const divider = screen.getByRole("separator", { name: "New messages" });
+    const seen = screen.getByText("Seen");
+    const unseen = screen.getByText("Not seen");
+    expect(seen.compareDocumentPosition(divider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(divider.compareDocumentPosition(unseen) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(divider.hasAttribute("data-concierge-unread-divider")).toBe(true);
+  });
+
+  it("draws none for a chat with nothing unread", () => {
+    renderTranscript(rows);
+    expect(screen.queryByRole("separator")).toBeNull();
+  });
+});
+
 describe("Concierge layout", () => {
+  it("expands only the newest block for each task across messages and within one message", () => {
+    const card = (chatId: string, title: string) => ({ type: "task_chat", chatId, title });
+    const rows = [
+      agentRow(agent("start", 0, [card("task-a", "Started A"), card("task-b", "Started B")])),
+      agentRow(
+        agent("ask", 1000, [card("task-a", "First ask"), card("task-a", "Latest ask")], "turn-2"),
+      ),
+    ];
+    const view = renderTranscript(rows);
+    const expanded = () =>
+      screen
+        .getAllByTestId("task-card")
+        .filter((card) => card.dataset.latest === "true")
+        .map((card) => card.textContent);
+    expect(expanded()).toEqual(["Started B", "Latest ask"]);
+    view.rerender(
+      <ThemeProvider>
+        <ConciergeTranscript
+          rows={[...rows, agentRow(agent("new", 2000, [card("task-b", "New ask B")], "turn-3"))]}
+          live={idle}
+          actions={actions}
+          contentRef={() => {}}
+          feedback
+        />
+      </ThemeProvider>,
+    );
+    expect(expanded()).toEqual(["Latest ask", "New ask B"]);
+    expect(screen.getAllByTestId("task-card")).toHaveLength(5);
+  });
+
   describe("with a pointer that can hover", () => {
     beforeEach(() => stubHover(true));
 
@@ -167,7 +227,7 @@ describe("Concierge layout", () => {
       const toolbar = toolbarOf("Found three.");
       expect(toolbar.className).toContain("absolute");
       expect(toolbar.className).toContain("bottom-full");
-      expect(toolbar.className).toContain("translate-y-3");
+      expect(toolbar.className).toContain("translate-y-2");
       expect(toolbar.className).toContain("w-max");
       expect(toolbar.contains(bubbleOf("Found three."))).toBe(false);
     });
@@ -292,7 +352,7 @@ describe("Concierge layout", () => {
       return cap;
     };
 
-    it("draws a long message as a normal bubble", () => {
+    it("draws a long message as a bubble like any other, capped at the reading width", () => {
       renderTranscript([
         agentRow(
           agent("a1", 0, [text("Short.")]),
@@ -303,11 +363,15 @@ describe("Concierge layout", () => {
       const short = bubbleOf("Short.");
       const long = bubbleOf("The long one.");
       expect(long.className).toBe(short.className);
-      for (const bubble of [short, long]) {
-        const classes = bubble.className.split(/\s+/);
-        expect(classes).toContain("w-fit");
-        expect(classes).not.toContain("w-full");
-      }
+      const classes = long.className.split(/\s+/);
+      expect(classes).toEqual(
+        expect.arrayContaining([
+          "w-fit",
+          "max-w-[min(100%,var(--container-2xl))]",
+          "bg-surface-muted",
+        ]),
+      );
+      expect(long.querySelector(".rome-markdown")?.classList).toContain("rome-markdown-message");
     });
 
     it("caps every kind of bubble at 90% of the column, from the group itself", () => {
@@ -354,7 +418,7 @@ describe("Concierge layout", () => {
         expect(classes).not.toContain("max-w-full");
         // A percentage of a box that shrinks to the bubble would wrap short
         // text, so the cap sits right in the group, which spans the column.
-        expect(cap.parentElement?.className).toContain("gap-1");
+        expect(cap.parentElement?.className).toContain("gap-2");
       }
     });
 
@@ -413,15 +477,15 @@ describe("Concierge layout", () => {
       expect(within(mine as HTMLElement).getByText("Two")).toBeTruthy();
       expect(within(theirs as HTMLElement).getByText("Reply A")).toBeTruthy();
       expect(within(theirs as HTMLElement).getByText("Reply B")).toBeTruthy();
-      expect((mine as HTMLElement).className).toContain("gap-1");
+      expect((mine as HTMLElement).className).toContain("gap-2");
       expect((mine as HTMLElement).parentElement?.className).toContain("gap-4");
     });
 
-    it("adds a time line at fifteen minutes and splits the group at five", () => {
+    it("adds a time line at an hour and splits the group at five", () => {
       const { container } = renderTranscript([
         userRow(guardian("u1", 0, "Morning")),
         userRow(guardian("u2", 6 * 60_000, "Later")),
-        userRow(guardian("u3", 30 * 60_000, "Much later")),
+        userRow(guardian("u3", 90 * 60_000, "Much later")),
       ]);
 
       const tags = topLevel(container).map((el) => el.tagName);
@@ -430,8 +494,10 @@ describe("Concierge layout", () => {
     });
 
     it("puts the typing bubble in the agent's group", () => {
+      // The server says the running turn writes a message.
+      const writing = { sessionId: "s", turnId: "turn-1", mode: "exact", writing: true } as const;
       const { container } = renderTranscript([agentRow(agent("a1", 0, [text("One sec.")]))], {
-        live: { ...idle, isStreaming: true, runningTurnId: "turn-1" },
+        live: { ...idle, isStreaming: true, runningTurnId: "turn-1", writing },
       });
 
       const groups = topLevel(container).filter((el) => el.tagName === "DIV");
@@ -450,7 +516,6 @@ describe("Concierge reply", () => {
     set: rs.fn(),
     clear: rs.fn(),
     restore: rs.fn(),
-    has: () => true,
     jump: rs.fn(),
     ...overrides,
   });
@@ -521,18 +586,13 @@ describe("Concierge reply", () => {
     expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
   });
 
-  it("gives a task chat card the same Reply, quoting it as one line", () => {
-    const draft = draftOf();
-    inChat(draft, [
+  it("offers a task card no Reply: only a message with text is replyable", () => {
+    inChat(draftOf(), [
       agentRow(agent("c1", 0, [{ type: "task_chat", chatId: "chat-7", title: "Trip" }])),
     ]);
 
     expect(screen.getByTestId("task-card")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Reply" }));
-
-    expect(draft.set).toHaveBeenCalledWith(
-      expect.objectContaining({ messageId: "c1", preview: "[Task chat] Trip (chat chat-7)" }),
-    );
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
   });
 
   it("makes each message the target of a jump from a quote of it", () => {

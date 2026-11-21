@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
@@ -8,15 +8,25 @@ import { estimatedServerNow, useUpgradeStatus } from "../hooks/use-upgrade-statu
 
 /**
  * Global top banner fronting the upgrade consent countdown. Persistent and
- * non-blocking, so the prompt itself doesn't disrupt a guardian mid-task.
+ * non-blocking, so the prompt itself doesn't disrupt anyone mid-task.
  * Four states, driven by useUpgradeStatus's poll loop: countdown (the human
  * gate), updating (the restart, tracked client-side so it survives the server
  * going away), stalled (restart overdue — dismissable), hidden. The desktop
  * app renders the same SPA, so this covers both.
  */
-export function UpgradeCountdownBanner() {
+export function UpgradeCountdownBanner({
+  onVisibleChange,
+}: {
+  /** Told whether the banner is up, so the shell can hide the sidebar's
+   * upgrade arrow without re-rendering on every poll. */
+  onVisibleChange?: (visible: boolean) => void;
+}) {
   const { t } = useTranslation("common");
   const { state, updateNow, defer, dismissStalled } = useUpgradeStatus();
+  const visible = state !== null;
+  useEffect(() => {
+    onVisibleChange?.(visible);
+  }, [visible, onVisibleChange]);
   const [busy, setBusy] = useState(false);
   const [verbFailed, setVerbFailed] = useState(false);
 
@@ -49,10 +59,15 @@ export function UpgradeCountdownBanner() {
         className="pointer-events-auto flex w-full items-start gap-3 px-3 py-2 shadow-1"
       >
         {state.phase === "updating" && (
-          <div className="flex-1">
-            <AlertTitle>{t("upgradeBanner.updatingTitle")}</AlertTitle>
-            <AlertDescription className="mt-1">{t("upgradeBanner.updatingBody")}</AlertDescription>
-          </div>
+          <>
+            <Loader2 aria-hidden className="animate-spin" />
+            <div className="flex-1">
+              <AlertTitle>{t("upgradeBanner.updatingTitle")}</AlertTitle>
+              <AlertDescription className="mt-1">
+                {t("upgradeBanner.updatingBody")}
+              </AlertDescription>
+            </div>
+          </>
         )}
         {state.phase === "stalled" && (
           <>

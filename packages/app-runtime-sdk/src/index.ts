@@ -3,10 +3,12 @@ import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
 import type { ChatSettingsControl } from "./chat-settings.js";
 import type { ChatReads, MessageRef, Place } from "./chats.js";
+import type { WidgetUi } from "./widget-ui.js";
 
 export { z };
 export type { JSONSchema };
 export * from "./chat-settings.js";
+export * from "./widget-ui.js";
 
 // Browser-safe package entry point. Node-only CDP helpers live under the `/browser` subpath.
 
@@ -119,6 +121,7 @@ export const SUPPORTED_CONNECTORS: readonly SupportedConnector[] = [
   { toolkit: "neon", displayName: "Neon", apiHost: "console.neon.tech" },
   { toolkit: "hubspot", displayName: "HubSpot", apiHost: "api.hubapi.com" },
   { toolkit: "stripe", displayName: "Stripe", apiHost: "api.stripe.com" },
+  { toolkit: "freshdesk", displayName: "Freshdesk" },
   { toolkit: "shopify", displayName: "Shopify" },
   { toolkit: "otter_ai_mcp", displayName: "Otter.ai" },
 ];
@@ -239,6 +242,19 @@ export type PreviewPayload =
       title: string;
       summary: string;
       fields?: { label: string; value: string }[];
+    }
+  | {
+      /** Time-limited use of one or several named secrets. `title` and `summary`
+       * say the same in words, for a surface that draws only the generic card.
+       * `name` is the first of `names`. A preview stored before several names
+       * carries `name` alone. */
+      kind: "secret_access";
+      name: string;
+      names?: string[];
+      ttlMinutes: number;
+      reason: string;
+      title: string;
+      summary: string;
     };
 
 /** Execution was suspended pending guardian approval; the action body has NOT
@@ -262,6 +278,10 @@ export interface PendingApproval {
  * Resolves by posting an `interaction_result` (the produced artifact, or
  * `{ dismissed: true }`) on the session, which re-drives the calling agent
  * with a server-built outcome prompt. Control never leaves the calling agent.
+ *
+ * @deprecated Return `{ status: "show_widget", widget: { ..., waits: true } }`
+ * instead. Rome stores and answers both the same way, and this spelling keeps
+ * working for apps that already return it.
  */
 export interface PendingInteraction {
   appId: string;
@@ -277,6 +297,54 @@ export interface PendingInteraction {
     componentId: string;
     props?: Record<string, unknown>;
   };
+}
+
+/**
+ * A card from this app, shown inside the agent's message in the dashboard
+ * chat. The app is the one that owns the action: Rome takes it from the
+ * action, never from the result.
+ *
+ * The card is either one of the app's web components (`componentId`), which
+ * only the dashboard draws, or a card described as data (`ui`), which the
+ * dashboard and the iOS app both draw. See {@link WidgetUi}.
+ *
+ * By default the card shows and the turn goes on. A button on such a card
+ * calls the app's own API, says nothing in the chat and does not wake the
+ * agent. With `waits: true` a component card behaves as a
+ * {@link PendingInteraction} does: the agent stops until the card answers.
+ */
+export type ShownWidget = ShownComponent | ShownUi;
+
+export interface ShownComponent {
+  /** A component the app declares under `components:` in app.yaml. A
+   *  component the app does not declare shows no card. */
+  componentId: string;
+  /** What the card needs to find its data, such as a date. Stored with the
+   *  message and handed to the component on every mount, so the card reads
+   *  current data from its app rather than carrying a copy. */
+  props?: Record<string, unknown>;
+  /** What the model reads, such as "Showing today's meals as a card." Where
+   *  no card can show, such as a messaging connection, the model is told so
+   *  and gets this sentence. */
+  text: string;
+  /** True: the agent stops until the guardian answers the card. Default false. */
+  waits?: boolean;
+}
+
+export interface ShownUi {
+  /** The card, described as data. A card that fails {@link checkWidgetUi}
+   *  shows nowhere, and the model is told why. */
+  ui: WidgetUi;
+  /** Where the card's data model comes from: JSON Pointer to a GET path in
+   *  the app's own API, such as `{ "/today": "logs/2026-11-11" }`. */
+  bind?: Record<string, string>;
+  /** What the model reads, as for {@link ShownComponent.text}. Also the
+   *  card's line for a reader that draws no card. */
+  text: string;
+  /** True: the agent stops until the card answers it. The card's events go to
+   *  the app as usual; a reply of `{ answer: <value> }` answers the agent with
+   *  that value, labelled as the app's. Default false. */
+  waits?: boolean;
 }
 
 /** True only for Rome Core's default agent, in legacy or canonical form. */
@@ -326,8 +394,9 @@ export interface PlaceWidget {
  * `runAction`, webhook invocation records — so the states are modeled as a union
  * rather than independent flags: a result is exactly one of completed (`ok`),
  * domain-rejected (`error`), suspended on approval, suspended on an inline
- * guardian input (`pending_interaction`), or completed-with-a-widget-placed (`place_widget`, which does NOT
- * suspend). Infrastructure failures (handler throw, serialization, worker crash)
+ * guardian input (`pending_interaction`), completed-with-a-widget-placed (`place_widget`, which does NOT
+ * suspend), or showing a card in the chat (`show_widget`, which suspends only
+ * when the widget `waits`). Infrastructure failures (handler throw, serialization, worker crash)
  * are NOT `error` results — they surface as a thrown {@link ActionInvocationError}.
  * The `error` variant is for domain rejections the caller can act on ("routine
  * name already taken").
@@ -337,7 +406,8 @@ export type ActionResult<T = unknown> =
   | { status: "error"; error: string }
   | { status: "pending_approval"; approval: PendingApproval }
   | { status: "pending_interaction"; interaction: PendingInteraction }
-  | { status: "place_widget"; placement: PlaceWidget };
+  | { status: "place_widget"; placement: PlaceWidget }
+  | { status: "show_widget"; widget: ShownWidget };
 
 const TRIGGER_PAYLOAD_KEY = "__triggerPayload";
 
@@ -724,6 +794,17 @@ export interface TurnStartEvent {
   /** Session the turn runs on — stable across turns of a conversation. */
   sessionId: string;
   userPrompt: string;
+  /** Set on the first turn of a session that replaced the chat's earlier
+   *  one in a reset: why, and the new session's id. */
+  sessionRenewal?: SessionRenewal;
+}
+
+/** Why a reset replaced a chat's session: its agent's setup changed, its
+ *  chat's reset policy found it idle or a day old, or the folder its
+ *  transcript lived in is gone. A host may add reasons. */
+export interface SessionRenewal {
+  reason: "setup" | "idle" | "daily" | "working_dir" | (string & {});
+  sessionId: string;
 }
 
 /** Turn bracketing: the last event of a turn's stream, emitted after the
@@ -1195,7 +1276,7 @@ export interface RunParams {
    * A streamed reply is the turn's answer in the conversation's history. The
    * host records it there in place of the run's transcript. A reply reported
    * `failed` recorded nothing, so the caller sends the reply and records it,
-   * as `send_message` does.
+   * as `system:send_message` does.
    *
    * @deprecated The host no longer streams replies to external platforms and
    * ignores this. The caller always sends the reply.
@@ -1542,8 +1623,13 @@ export type MessagePart =
       appId: string;
       render: {
         kind: "inline";
-        componentId: string;
+        /** The component that draws the card. Absent for a card an app
+         *  described as data (`ui`), which every client draws itself. */
+        componentId?: string;
         props?: Record<string, unknown>;
+        /** For a card described as data: where its data model comes from, as
+         *  on a `widget` part. */
+        bind?: Record<string, string>;
         /** Host built-in component (e.g. the ask_question card): rendered by
          *  rome-web directly, with no owning app to validate. */
         builtin?: boolean;
@@ -1552,8 +1638,39 @@ export type MessagePart =
          *  reach the agent as a reply the card cannot be answered with. Unset
          *  (the default) keeps the composer open beside the card. */
         requiresCard?: boolean;
+        /** The same card described as data (see {@link WidgetUi}), which
+         *  readers that know it draw instead of the component. Its buttons
+         *  may answer or dismiss the interaction. */
+        ui?: WidgetUi;
       };
+      /** For a card described as data: its plain-text line, for a reader
+       *  that cannot draw the card. */
+      text?: string;
     }
+  | ({
+      /**
+       * An app's card the agent showed without waiting: the action that showed
+       * it returned `show_widget` without `waits`. The host draws it on every
+       * load, from the app's component (`componentId`, `props`) or from its
+       * description (`ui`, `bind`), so the card always shows its app's
+       * current data. Nothing answers it, so the chat never waits on it. A widget that waits stores
+       * a `pending_interaction` part instead.
+       */
+      type: "widget";
+      toolUseId: string;
+      appId: string;
+      /** The widget's plain-text line, the `text` its action wrote, for a
+       *  reader that draws no card. */
+      text: string;
+    } & (
+      | { componentId: string; props?: Record<string, unknown> }
+      | {
+          /** A card described as data, already checked by
+           *  {@link checkWidgetUi}. Drawn by the dashboard and the iOS app. */
+          ui: WidgetUi;
+          bind?: Record<string, string>;
+        }
+    ))
   | {
       /**
        * Resolution of an inline interaction. Lives in a user-role
@@ -1693,7 +1810,20 @@ export interface ChannelMessage {
   timestamp: Date;
   replyTo?: MessageReplyReference;
   thread?: { kind: "dm" | "group" | "topic"; name?: string };
+  /** The chat thread the message is in, in a chat that keeps them, such as
+   *  a Concierge chat: the id of the root of its reply chain, which is the
+   *  message's own id when it replies to nothing. Not a platform thread.
+   *  Absent in a chat that keeps none. */
+  chatThread?: string;
   addressing?: MessageAddressing;
+  /** Another bot sent it, as the connection tells. A webhook linked to a
+   *  person speaks for that person, so it is not a bot. Absent where the
+   *  connection does not tell. */
+  fromBot?: boolean;
+  /** It mentions someone, none of them is Rome's account, and it does not
+   *  address Rome's account by a reply or in Rome's own thread either.
+   *  Absent where the connection does not tell. */
+  mentionsOthers?: boolean;
   raw?: unknown;
   /** Where this message sits in a channel read, as an opaque token. Set on
    *  what {@link ChannelsService.query} answers: pass it as
@@ -2016,6 +2146,33 @@ export interface SaidInboundEvent extends InboundEvent {
     /** The message's own id in that chat. */
     readonly messageId: string;
   };
+  /**
+   * Who said the message: People's answer for the account it came from, the
+   * same answer Rome's own turns read. The name the message showed stays on
+   * {@link ChannelMessage.senderDisplayName}, apart from it. Absent from a
+   * host that predates it, and when People could not be asked.
+   */
+  readonly sender?: SaidSender;
+}
+
+/** How close a person is to the guardian. */
+export type BondLevel = "guardian" | "inner-circle" | "acquaintance" | "other";
+
+/** Who said a message, as People answers for the account it came from. */
+export interface SaidSender {
+  /** The person linked to the account, or null when it is linked to nobody:
+   *  a stranger, or an account the guardian dismissed. */
+  readonly person: {
+    readonly id: string;
+    readonly name: string;
+    readonly bondLevel: BondLevel;
+  } | null;
+  /** The account is an agent's, acting for `person` (a delegate link), so
+   *  the message comes from that person's agent, not from the person. */
+  readonly delegate: boolean;
+  /** The answer as Rome's own turns read it, such as "Ana Lopez, inner
+   *  circle", "agent acting for Ana Lopez, inner circle" or "not linked". */
+  readonly label: string;
 }
 
 /**
@@ -2078,6 +2235,14 @@ export interface ChannelMessageHookDeps {
    * that passes only `linkedAgentOf` answers the same through it.
    */
   accountAgentOf?: (account: Account | string) => string | null | undefined;
+  /**
+   * @internal For the Inbox app. True when the Inbox app must answer no
+   * message on an account linked to `agent`, a canonical agent id, because
+   * the app that installed it runs the agent's turns itself. The host answers
+   * true only for an agent that declares `runsOwnTurns: true` in an app on its
+   * allow-list, and false for every other. Not for apps to build on.
+   */
+  unsafeTestOnlyBypassesInbox?: (agent: string) => boolean;
   /** @deprecated Use `accountAgentOf`, which answers the same. */
   linkedAgentOf?: (channelName: string) => string | null | undefined;
 }
@@ -2516,6 +2681,8 @@ export interface AppConnectionErrorBody {
     | "outcome_unknown"
     | "provider_error";
   message: string;
+  /** Optional stable provider reason. Human-readable messages are not machine codes. */
+  reason?: string;
   retryable: boolean;
 }
 
@@ -2800,7 +2967,7 @@ export interface ChannelMappingRecord {
 export interface PersonRecord {
   id: string;
   displayName: string;
-  bondLevel: "guardian" | "inner-circle" | "acquaintance" | "other";
+  bondLevel: BondLevel;
   /** Superseded by {@link PersonRecord.accounts}, which names the same links
    *  by the {@link Account} value. Still filled. */
   channelMappings: ChannelMappingRecord[];
@@ -2989,7 +3156,7 @@ export interface EventBusTrigger {
 /** A producer app's declaration that it can currently emit `eventType`.
  * `eventType` is the same value a routine binds to as
  * `EventBusTrigger.eventName`; `appId` is the producer that owns it. Surfaced to
- * apps discovering which events are watchable (e.g. `search_event_catalog`). */
+ * apps discovering which events are watchable (e.g. `system:search_event_catalog`). */
 export interface EventCatalogEntry {
   eventType: string;
   appId: string;

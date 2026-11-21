@@ -53,7 +53,9 @@ export function Toaster({ className, icons, style, toastOptions, ...props }: Toa
         close: <XIcon className="size-3" />,
         ...icons,
       }}
-      style={style}
+      // An open modal dialog turns pointer events off on the body, and the
+      // toasts would inherit that.
+      style={{ pointerEvents: "auto", ...style }}
       toastOptions={{
         ...toastOptions,
         // Sonner still owns positioning, stacking, swiping, and motion. Rome

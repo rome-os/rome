@@ -24,7 +24,8 @@ function previewLines(preview: PreviewPayload): unknown[] {
       ...(typeof preview.reason === "string" ? [`Why: ${preview.reason}`] : []),
     ];
   }
-  const fields: unknown[] = Array.isArray(preview.fields) ? preview.fields : [];
+  const fields: unknown[] =
+    preview.kind === "generic" && Array.isArray(preview.fields) ? preview.fields : [];
   return [
     preview.summary,
     ...fields.flatMap((field) => {
@@ -38,7 +39,7 @@ function previewLines(preview: PreviewPayload): unknown[] {
  *  agent wants to do, and, while it waits, where the guardian answers it. */
 export function approvalCardText(card: ApprovalCard): string {
   const title =
-    card.preview.kind === "generic"
+    card.preview.kind === "generic" || card.preview.kind === "secret_access"
       ? typeof card.preview.title === "string"
         ? card.preview.title
         : card.actionName
@@ -66,5 +67,7 @@ export function widgetText(part: MessagePart): string | undefined {
   if (part.type === "approval_card" && typeof part.preview === "object" && part.preview) {
     return approvalCardText(part);
   }
+  // An app's widget brings its own line.
+  if (part.type === "widget") return part.text;
   return undefined;
 }

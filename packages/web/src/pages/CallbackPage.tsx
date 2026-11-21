@@ -331,9 +331,7 @@ export default function CallbackPage() {
           <p className="mt-3 text-ui text-muted-foreground">{t("callback.cancelledBody")}</p>
         ) : delivered ? (
           <p className="mt-3 text-ui text-muted-foreground">{t("callback.deliveredBody")}</p>
-        ) : (
-          <p className="mt-3 text-ui text-muted-foreground">{t("callback.description")}</p>
-        )}
+        ) : null}
       </div>
     </main>
   );

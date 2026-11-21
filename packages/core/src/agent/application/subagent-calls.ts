@@ -2,8 +2,10 @@
 // subagent's session (docs/domains/agents.md#subagent-call).
 
 import type { StreamAgentEvent, ThreadContext } from "@rome-os/app-runtime";
-import type { DashboardSessions } from "../domain/dashboard-sessions.js";
+import type { RecordedSessions } from "../domain/recorded-sessions.js";
 import type { AgentName, SessionId } from "../domain/session.js";
+import type { Audience } from "../domain/turn-audience.js";
+import type { TurnActor } from "../domain/turn-facts.js";
 import {
   newSubagentSession,
   refuseResume,
@@ -13,9 +15,9 @@ import {
   type SubagentRequest,
 } from "../domain/subagent.js";
 
-/** Which call: the calling turn's dashboard session, its turn and its tool use. */
+/** Which call: the calling session, its turn and its tool use. */
 export interface SubagentCallKey {
-  dashboardSessionId: SessionRecordId;
+  parentSessionId: SessionId;
   turnId: string;
   toolUseId: string;
 }
@@ -30,6 +32,10 @@ export interface SessionPlace {
 /** The turn a call comes from, as the run that owns it knows it. */
 export interface CallingTurn {
   key: SubagentCallKey;
+  /** The chat the calling turn records in, which the subagent's
+   *  session is listed under. Carried with the turn while each turn picks its
+   *  own chat (ZHA-157). */
+  chat: SessionRecordId;
   agentName: AgentName;
   agentSessionId: SessionId;
   /** Where the caller's subagent sessions open, already bound to the calling
@@ -38,6 +44,10 @@ export interface CallingTurn {
    *  manager per fork. */
   sessions: SubagentSessions;
   at: SessionPlace;
+  /** Who the calling turn acts for: the subagent's turn acts for the same person. */
+  actor?: TurnActor;
+  /** Who can read the calling turn: the subagent's turn is never more private. */
+  audience?: Audience;
 }
 
 /** One subagent call, from its start to its outcome. */
@@ -55,7 +65,7 @@ export interface SubagentCalls {
   /**
    * Starts a call and returns it running. Fails, in this order:
    * - the resume is refused: nothing is opened;
-   * - opening or resuming the session, or adding a fresh one to the dashboard,
+   * - opening or resuming the session, or adding a fresh one to the records,
    *   fails: the session may be open with no turn;
    * - a call with the same key is already held: the subagent's turn is stopped
    *   and its live turn finished.
@@ -83,9 +93,16 @@ export interface SubagentSession {
   submit(
     prompt: string,
     parentTurn: { sessionId: SessionId; turnId: string; agentName: AgentName },
-    context: { threadContext?: ThreadContext; sharedContext?: Record<string, unknown> },
+    context: {
+      threadContext?: ThreadContext;
+      sharedContext?: Record<string, unknown>;
+      actor?: TurnActor;
+      audience?: Audience;
+    },
   ): { turnId: string; events: AsyncIterable<StreamAgentEvent> };
   stop(reason?: string): Promise<void>;
+  /** Lets go of the session when no turn is submitted on it after all. */
+  release(): void;
 }
 
 /** The subagent turn's log. Best effort: a failed write is logged. */
@@ -104,10 +121,10 @@ export interface LiveTurns {
 }
 
 const callKey = (key: SubagentCallKey): string =>
-  `${key.dashboardSessionId}\u0000${key.turnId}\u0000${key.toolUseId}`;
+  `${key.parentSessionId}\u0000${key.turnId}\u0000${key.toolUseId}`;
 
 export function createSubagentCalls(deps: {
-  dashboard: DashboardSessions;
+  recorded: RecordedSessions;
   turnLog: SubagentTurnLog;
   liveTurns: LiveTurns;
 }): SubagentCalls {
@@ -118,25 +135,31 @@ export function createSubagentCalls(deps: {
     request: SubagentRequest,
     from: CallingTurn,
   ): Promise<SubagentSession> => {
-    const parent = await deps.dashboard.get(from.key.dashboardSessionId);
+    const parent = await deps.recorded.get(from.chat);
     if (request.resumeSessionId) {
-      const stored = parent ? await deps.dashboard.get(request.resumeSessionId) : null;
+      const stored = parent ? await deps.recorded.get(request.resumeSessionId) : null;
       const refusal = refuseResume(stored, parent, {
         subagent,
-        parentRecordId: from.key.dashboardSessionId,
+        parentRecordId: from.chat,
         resumeSessionId: request.resumeSessionId,
       });
       if (refusal) throw new Error(refusal);
       return await from.sessions.resume(request.resumeSessionId, subagent, from.at);
     }
     const session = await from.sessions.open(subagent, from.at);
-    await deps.dashboard.addSubagentSession(
-      newSubagentSession(session.id, subagent, parent, {
-        dashboardSessionId: from.key.dashboardSessionId,
-        turnId: from.key.turnId,
-        agentName: from.agentName,
-      }),
-    );
+    try {
+      await deps.recorded.addSubagentSession(
+        newSubagentSession(session.id, subagent, parent, {
+          chat: from.chat,
+          turnId: from.key.turnId,
+          agentName: from.agentName,
+        }),
+      );
+    } catch (err) {
+      // No turn follows on a session the call could not record.
+      session.release();
+      throw err;
+    }
     return session;
   };
 
@@ -146,7 +169,12 @@ export function createSubagentCalls(deps: {
       const turn = session.submit(
         request.prompt,
         { sessionId: from.agentSessionId, turnId: from.key.turnId, agentName: from.agentName },
-        { threadContext: from.at.threadContext, sharedContext: from.at.sharedContext },
+        {
+          threadContext: from.at.threadContext,
+          sharedContext: from.at.sharedContext,
+          ...(from.actor ? { actor: from.actor } : {}),
+          ...(from.audience ? { audience: from.audience } : {}),
+        },
       );
 
       let settled = false;
@@ -172,9 +200,9 @@ export function createSubagentCalls(deps: {
       if (held.has(key)) {
         live.finish();
         await session.stop("subagent registration failed").catch(() => undefined);
-        const { dashboardSessionId, turnId, toolUseId } = from.key;
+        const { parentSessionId, turnId, toolUseId } = from.key;
         throw new Error(
-          `Active subagent link already exists for parent ${dashboardSessionId}/${turnId}/${toolUseId}`,
+          `Active subagent link already exists for parent ${parentSessionId}/${turnId}/${toolUseId}`,
         );
       }
       held.add(key);

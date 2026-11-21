@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
-import { LanguageSwitcher } from "@/components/language-switcher";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { AuthActionButton, AuthError, AuthScreen } from "@/components/auth-screen";
 import { beginInstanceEnroll } from "@/lib/instance-enroll";
 
 // The set of reasons the enroll callback can hand back. Anything
@@ -51,31 +49,15 @@ export default function ConnectPage() {
   }
 
   return (
-    <main className="relative flex min-h-dvh items-center justify-center bg-surface-muted px-4 pb-safe pt-safe">
-      <div className="absolute right-4 top-[calc(1rem+var(--rome-safe-area-top))]">
-        <LanguageSwitcher />
-      </div>
-      <div className="w-full max-w-sm">
-        <h1 className="mb-2 text-center text-title text-foreground">{t("connect.title")}</h1>
-        <p className="mb-8 text-center text-ui text-muted-foreground">{t("connect.description")}</p>
-
-        <div className="rounded-12 border border-border bg-surface p-6 shadow-1 sm:p-8">
-          {error && (
-            <Alert variant="destructive" className="mb-4">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          <Button
-            type="button"
-            size="md"
-            className="w-full touch-target"
-            disabled={starting}
-            onClick={() => void startEnroll()}
-          >
-            {starting ? t("connect.connecting") : t("connect.connect")}
-          </Button>
-        </div>
-      </div>
-    </main>
+    <AuthScreen title={t("connect.title")}>
+      <AuthActionButton
+        busy={starting}
+        busyLabel={t("connect.connecting")}
+        onClick={() => void startEnroll()}
+      >
+        {t("connect.connect")}
+      </AuthActionButton>
+      {error && <AuthError>{error}</AuthError>}
+    </AuthScreen>
   );
 }

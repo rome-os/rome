@@ -1,15 +1,19 @@
-import type { ConciergeChatDto, ConciergeChatsResponse } from "@rome/api-types/concierge";
-import { type QueryClient, useQuery } from "@tanstack/react-query";
+import type {
+  ConciergeChatDto,
+  ConciergeChatsResponse,
+  ConciergeChatWorkResponse,
+} from "@rome/api-types/concierge";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
+import { invalidateChatSessions } from "@/hooks/use-chat-sessions";
 import { fetchJson } from "@/lib/fetch-json";
+import { LIVE_QUERY_OPTIONS, patchQueries } from "@/lib/query-client";
 import { useSettings } from "@/hooks/use-settings";
 import { mainAgentDisplayName } from "@/lib/agent-name";
 
-/** The canonical id of the agent behind the Concierge chat. */
-export const CONCIERGE_AGENT_ID = "core:concierge";
+export { CONCIERGE_AGENT_ID, TASK_CHAT_TRIGGER_KIND } from "@/lib/chat-session";
 /** The guardian's main Concierge chat's id. A visitor's main chat has its own, which the server answers. */
 export const CONCIERGE_CHAT_ID = "concierge";
-/** `triggerKind` of a task chat Concierge started. */
-export const TASK_CHAT_TRIGGER_KIND = "concierge";
 /** The Concierge chat and its unread count; invalidate it to recount. */
 export const CONCIERGE_SESSION_QUERY_KEY = ["concierge-session"] as const;
 /** The Concierge chats, main first, with their unread counts; invalidate it to recount. */
@@ -57,7 +61,7 @@ const conciergeSessionQuery = {
 };
 
 function useConciergeSession(enabled = true) {
-  return useQuery({ ...conciergeSessionQuery, enabled, staleTime: 0 });
+  return useQuery({ ...conciergeSessionQuery, enabled, ...LIVE_QUERY_OPTIONS });
 }
 
 /**
@@ -83,24 +87,36 @@ export interface ConciergeChat {
   chatId: string | null;
   /** Whether the chat's creation is still in flight. */
   loading: boolean;
+  /** Whether the first load failed, so there is no chat to show, such as when the Concierge is off. A failed refetch after a success is not a failure. */
+  failed: boolean;
+  /** Asks the server again after a failure. */
+  retry: () => void;
 }
 
 /**
  * The signed-in person's main Concierge chat. The server creates it on the
  * first request, and asks again on every mount, which recreates a deleted chat.
+ * With `enabled` false it only reads what is already loaded.
  */
-export function useConciergeChat(): ConciergeChat {
-  const { data, isSuccess, isPending } = useConciergeSession();
-  return { chatId: isSuccess ? data.id : null, loading: isPending };
+export function useConciergeChat(enabled = true): ConciergeChat {
+  const { data, isPending, isError, refetch } = useConciergeSession(enabled);
+  // A failed refetch keeps the data it had, with an error status. The chat it
+  // names still exists, so only a first load that failed counts as failed.
+  return {
+    chatId: data?.id ?? null,
+    loading: isPending,
+    failed: isError && data === undefined,
+    retry: () => void refetch(),
+  };
 }
 
 /**
  * What the dashboard calls the Concierge: the name the guardian gave their
- * agent, else "Concierge". A main Concierge chat shows it in place of the
- * session name the server stores.
+ * agent, else the main agent's default name. A main Concierge chat shows it in
+ * place of the session name the server stores.
  */
 export function useConciergeName(): string {
-  return mainAgentDisplayName(useSettings().data?.agentName, "Concierge");
+  return mainAgentDisplayName(useSettings().data?.agentName);
 }
 
 /** The Concierge chat's id, or null while it is not loaded yet. */
@@ -115,16 +131,93 @@ export function useConciergeUnread(chatId: string | null): number {
 
 /**
  * The Concierge chats: the main chat first, then the topic chats, each with
- * its unread count. Empty while the list is loading.
+ * its unread count. Empty while the list is loading. Like the chat list, it
+ * stays cached for the tab's lifetime (`gcTime: Infinity`), so the sidebar's
+ * topic chats show at once after a long time away from Chat. Events and the
+ * sidebar's changes invalidate it; a mount refetches only past
+ * {@link LIVE_QUERY_OPTIONS}' staleTime.
  */
 export function useConciergeChats(): ConciergeChatDto[] {
   const { data } = useQuery({
     queryKey: CONCIERGE_CHATS_QUERY_KEY,
     queryFn: ({ signal }) =>
       fetchJson<ConciergeChatsResponse>("/api/concierge/chats", { signal, fallback: "" }),
-    staleTime: 0,
+    ...LIVE_QUERY_OPTIONS,
+    gcTime: Number.POSITIVE_INFINITY,
   });
   return data?.chats ?? [];
+}
+
+/**
+ * Clears chat `id`'s unread count wherever this tab holds it: the main chat's
+ * badge and the Concierge's chat list. A read mark changes nothing else, so
+ * nothing is fetched again for it.
+ */
+export async function markConciergeChatReadInCache(
+  queryClient: QueryClient,
+  id: string,
+): Promise<void> {
+  await patchQueries<ConciergeSession>(queryClient, CONCIERGE_SESSION_QUERY_KEY, (session) =>
+    session?.id === id && session.unread !== 0 ? { ...session, unread: 0 } : session,
+  );
+  await patchQueries<ConciergeChatsResponse>(queryClient, CONCIERGE_CHATS_QUERY_KEY, (data) =>
+    data?.chats.some((chat) => chat.id === id && chat.unread !== 0)
+      ? {
+          ...data,
+          chats: data.chats.map((chat) => (chat.id === id ? { ...chat, unread: 0 } : chat)),
+        }
+      : data,
+  );
+}
+
+/**
+ * Refetches both lists a topic chat's row reads: the Concierge's own list,
+ * which carries names and unread counts, and the chat list, which carries
+ * activity times and the archived topic chats. Call it after anything that
+ * changes a topic chat, so the two never disagree about one.
+ */
+export function refreshTopicChats(queryClient: QueryClient): Promise<void> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY }),
+    invalidateChatSessions(queryClient),
+  ]).then(() => undefined);
+}
+
+/** {@link refreshTopicChats} bound to this component's query client. */
+export function useRefreshTopicChats(): () => void {
+  const queryClient = useQueryClient();
+  return useCallback(() => void refreshTopicChats(queryClient), [queryClient]);
+}
+
+/**
+ * The follows and open tasks archiving or deleting topic chat `chatId` would
+ * move or stop and, while it is archived, the follows its archive moved that
+ * unarchiving it can move back. Throws when the server cannot answer.
+ */
+export function fetchConciergeChatWork(
+  chatId: string,
+  signal?: AbortSignal,
+): Promise<ConciergeChatWorkResponse> {
+  return fetchJson<ConciergeChatWorkResponse>(
+    `/api/concierge/chats/${encodeURIComponent(chatId)}/follows-and-tasks`,
+    { signal, fallback: "" },
+  );
+}
+
+/**
+ * The follows and open tasks deleting topic chat `chatId` would move or stop.
+ * Read afresh each time `enabled` turns on; it errors when the server cannot
+ * answer, and the caller then keeps the default, which moves them.
+ */
+export function useConciergeChatWork(chatId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["concierge-chat-work", chatId],
+    queryFn: ({ signal }) => fetchConciergeChatWork(chatId, signal),
+    enabled,
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
 }
 
 /** Starts an untitled topic chat, which its first message names, and answers it. */

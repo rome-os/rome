@@ -166,7 +166,7 @@ describe("ChannelMessageHook", () => {
 
     expect(harness.run).toHaveBeenCalledTimes(1);
     expect(harness.run).toHaveBeenCalledWith(
-      "message_handler",
+      "inbox:message_handler",
       expect.objectContaining({
         connectionId: TELEGRAM_ID,
         channel: "telegram",
@@ -272,7 +272,7 @@ describe("ChannelMessageHook", () => {
     expect(harness.send).not.toHaveBeenCalled();
     expect(harness.get).toHaveBeenCalledWith({ connectionId: AGENTS_ID, chatId: agentId });
     expect(harness.run).toHaveBeenCalledWith(
-      "message_handler",
+      "inbox:message_handler",
       expect.objectContaining({
         connectionId: AGENTS_ID,
         channel: "agents",
@@ -295,7 +295,7 @@ describe("ChannelMessageHook", () => {
     );
     await harness.emit(TELEGRAM_ID, message({ messageId: "routed" }));
     expect(harness.run).toHaveBeenCalledWith(
-      "message_handler",
+      "inbox:message_handler",
       expect.objectContaining({ routedAgentName: "envoy" }),
       expect.anything(),
     );
@@ -312,7 +312,7 @@ describe("ChannelMessageHook", () => {
 
     expect(materialize).toHaveBeenCalledWith(incoming);
     expect(harness.run).toHaveBeenCalledWith(
-      "message_handler",
+      "inbox:message_handler",
       expect.objectContaining({
         attachments: [{ type: "image", url: "file-id", localPath: "/tmp/photo.jpg" }],
       }),
@@ -443,7 +443,7 @@ describe("ChannelMessageHook", () => {
     ]);
     await harness.emit(FEISHU_2_ID, message({ channel: "feishu-2" }));
     expect(harness.run).toHaveBeenCalledWith(
-      "message_handler",
+      "inbox:message_handler",
       expect.objectContaining({ connectionId: FEISHU_2_ID, channel: "feishu-2" }),
       expect.anything(),
     );
@@ -462,7 +462,10 @@ describe("ChannelMessageHook", () => {
     beforeEach(async () => {
       linked = "sales:agent";
       accountAgentOf.mockClear();
-      harness = createHarness({ accountAgentOf });
+      harness = createHarness({
+        accountAgentOf,
+        unsafeTestOnlyBypassesInbox: (agent) => agent === "chief-of-staff:chief-of-staff",
+      });
       harness.channels.push(harness.channel("feishu-2", FEISHU_2_ID));
       await harness.hook.register();
       harness.get.mockImplementation(async ({ connectionId, chatId }) =>
@@ -471,7 +474,7 @@ describe("ChannelMessageHook", () => {
     });
 
     const passed = (fields: Record<string, unknown>) => [
-      "message_handler",
+      "inbox:message_handler",
       expect.objectContaining(fields),
       expect.anything(),
     ];
@@ -541,6 +544,19 @@ describe("ChannelMessageHook", () => {
       );
     });
 
+    it("answers nothing on an account whose agent runs its own turns", async () => {
+      linked = "chief-of-staff:chief-of-staff";
+
+      await harness.emit(FEISHU_2_ID, message({ messageId: "m-1" }));
+
+      expect(harness.run).not.toHaveBeenCalled();
+      expect(harness.send).not.toHaveBeenCalled();
+
+      linked = "sales:agent";
+      await harness.emit(FEISHU_2_ID, message({ messageId: "m-2" }));
+      expect(harness.run).toHaveBeenCalledWith(...passed({ accountAgentName: "sales:agent" }));
+    });
+
     it("still stops a running turn on an account that is now unlinked", async () => {
       linked = null;
 
@@ -567,7 +583,7 @@ describe("ChannelMessageHook", () => {
     await harness.emit(TELEGRAM_ID, message());
 
     expect(harness.run).toHaveBeenCalledWith(
-      "message_handler",
+      "inbox:message_handler",
       expect.objectContaining({ channel: "telegram", accountAgentName: undefined }),
       expect.anything(),
     );
@@ -653,7 +669,7 @@ describe("ChannelMessageHook hearing recorded messages", () => {
     expect(harness.subscribes).not.toHaveBeenCalled();
     await harness.hear(WHATSAPP_ID, message({ channel: "whatsapp", messageId: "wa-1" }));
     expect(harness.run).toHaveBeenCalledWith(
-      "message_handler",
+      "inbox:message_handler",
       expect.objectContaining({
         connectionId: WHATSAPP_ID,
         channel: "whatsapp",
@@ -675,7 +691,7 @@ describe("ChannelMessageHook hearing recorded messages", () => {
 
     expect(materialize).not.toHaveBeenCalled();
     expect(harness.run).toHaveBeenCalledWith(
-      "message_handler",
+      "inbox:message_handler",
       expect.objectContaining({ attachments: saved }),
       expect.anything(),
     );

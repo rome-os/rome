@@ -6,6 +6,8 @@ import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { RoutineDraftCard } from "./RoutineDraftCard";
 import { createRoutine, deleteRoutine, listRoutineRefs, setRoutineEnabled } from "@/lib/chat-api";
+import { useRoutines, useRunRoutineNow } from "@/hooks/use-routines";
+import i18n from "@/i18n";
 import type { RoutineDraftSpec } from "@/lib/chat-types";
 
 // The card reaches the backend through exactly these calls; stub them so the
@@ -16,11 +18,22 @@ rs.mock("@/lib/chat-api", () => ({
   setRoutineEnabled: rs.fn(),
   deleteRoutine: rs.fn(),
 }));
+// Run now goes through the Routines page's hook (it refreshes run history).
+rs.mock("@/hooks/use-routines", () => ({ useRunRoutineNow: rs.fn(), useRoutines: rs.fn() }));
 
 const mockCreate = rs.mocked(createRoutine);
 const mockList = rs.mocked(listRoutineRefs);
 const mockSetEnabled = rs.mocked(setRoutineEnabled);
 const mockDelete = rs.mocked(deleteRoutine);
+const mockRun = rs.fn();
+const mockRefetch = rs.fn();
+// The Routines page list, read only for whether a run is going.
+const routinesList = (routines: unknown[]) =>
+  rs
+    .mocked(useRoutines)
+    .mockReturnValue({ routines, refetch: mockRefetch } as unknown as ReturnType<
+      typeof useRoutines
+    >);
 
 // The saved state links into the router, so render inside one.
 const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
@@ -56,12 +69,16 @@ const scheduleDraft: RoutineDraftSpec = {
   args: { agentName: "main", prompt: "Remind the guardian to send their weekly update." },
 };
 
-beforeEach(() => {
+beforeEach(async () => {
+  await i18n.changeLanguage("en");
   // Default: this routine doesn't exist yet, and creating it succeeds.
   mockList.mockResolvedValue([]);
   mockCreate.mockResolvedValue({ ok: true, status: 201, routineId: "r-1" });
   mockSetEnabled.mockResolvedValue({ ok: true });
   mockDelete.mockResolvedValue({ ok: true });
+  mockRun.mockResolvedValue({ runId: "run-1", status: "success" });
+  rs.mocked(useRunRoutineNow).mockReturnValue(mockRun);
+  routinesList([]);
 });
 
 afterEach(() => {
@@ -69,34 +86,38 @@ afterEach(() => {
   rs.clearAllMocks();
 });
 
+// The saved row's title links to the routine's page.
+const routineLink = () => screen.getByRole("link", { name: eventDraft.sentence });
+
+async function openMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: "More" }));
+}
+
 describe("RoutineDraftCard", () => {
-  it("renders an event draft as an Event routine with watch / filter / then rows", async () => {
+  it("renders an event draft as one row with its trigger and filter on one line", async () => {
     render(<RoutineDraftCard draft={eventDraft} />);
 
-    expect(screen.getByText("Event routine")).toBeTruthy();
     expect(screen.getByText(eventDraft.sentence)).toBeTruthy();
-    expect(screen.getByText("Watches")).toBeTruthy();
-    expect(screen.getByText("Gmail · new email")).toBeTruthy();
-    expect(screen.getByText("Only when")).toBeTruthy();
-    expect(screen.getByText("sender is dana@example.com")).toBeTruthy();
-    expect(screen.getByText("Then")).toBeTruthy();
     // The button appears once the lookup confirms nothing exists yet.
     expect(await screen.findByRole("button", { name: /turn it on/i })).toBeTruthy();
+    expect(screen.getByText(/Gmail · new email · sender is dana@example\.com/)).toBeTruthy();
+    // What will run stays folded until asked for.
+    expect(screen.queryByText("Then")).toBeNull();
+    expect(screen.getByRole("button", { name: "Details" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
   });
 
-  it("renders a schedule draft as a Scheduled routine with a Runs row and no filter", async () => {
+  it("renders a schedule draft with its schedule and no filter", async () => {
     render(<RoutineDraftCard draft={scheduleDraft} />);
 
-    expect(screen.getByText("Scheduled routine")).toBeTruthy();
-    expect(screen.getByText("Runs")).toBeTruthy();
+    await screen.findByRole("button", { name: /turn it on/i });
     expect(screen.getByText("Every Friday at 9:00 AM")).toBeTruthy();
-    // Schedule routines carry no payload filter.
-    expect(screen.queryByText("Only when")).toBeNull();
-
-    await waitFor(() => expect(mockList).toHaveBeenCalled());
+    expect(screen.queryByText(/sender is/)).toBeNull();
   });
 
-  it("renders the action's preview as ground truth in place of the prose summary", async () => {
+  it("Details shows the action's preview as ground truth in place of the prose summary", async () => {
+    const user = userEvent.setup();
     const draft: RoutineDraftSpec = {
       ...eventDraft,
       thenSummary: "summarize it and text you",
@@ -108,15 +129,19 @@ describe("RoutineDraftCard", () => {
     };
     render(<RoutineDraftCard draft={draft} />);
 
+    await user.click(await screen.findByRole("button", { name: "Details" }));
+
     // The authoritative render shows; the agent's drift-prone prose does not.
     expect(screen.getByText("Run agent “main”")).toBeTruthy();
     expect(screen.getByText("Summarize the email and notify the guardian.")).toBeTruthy();
     expect(screen.queryByText("summarize it and text you")).toBeNull();
-
-    await waitFor(() => expect(mockList).toHaveBeenCalled());
+    // The real bound action, so no summary can stand in for it.
+    expect(screen.getByText("Action")).toBeTruthy();
+    expect(screen.getByText("summon")).toBeTruthy();
   });
 
-  it("renders preview fields and message body for a send_message routine", async () => {
+  it("Details shows preview fields and the message body for a send_message routine", async () => {
+    const user = userEvent.setup();
     const draft: RoutineDraftSpec = {
       ...scheduleDraft,
       actionName: "send_message",
@@ -130,25 +155,27 @@ describe("RoutineDraftCard", () => {
     };
     render(<RoutineDraftCard draft={draft} />);
 
+    await user.click(await screen.findByRole("button", { name: "Details" }));
+
     expect(screen.getByText("Send a message")).toBeTruthy();
     expect(screen.getByText("Channel")).toBeTruthy();
     expect(screen.getByText("Telegram")).toBeTruthy();
     expect(screen.getByText("Good morning!")).toBeTruthy();
-
-    await waitFor(() => expect(mockList).toHaveBeenCalled());
+    expect(screen.getByText("send_message")).toBeTruthy();
   });
 
-  it("falls back to the prose summary when the action provides no preview", async () => {
+  it("Details falls back to the prose summary when the action provides no preview", async () => {
+    const user = userEvent.setup();
     render(<RoutineDraftCard draft={eventDraft} />);
+
+    await user.click(await screen.findByRole("button", { name: "Details" }));
 
     // eventDraft has no `preview`, so the Then row uses thenSummary.
     expect(screen.getByText("Then")).toBeTruthy();
     expect(screen.getByText(eventDraft.thenSummary)).toBeTruthy();
-
-    await waitFor(() => expect(mockList).toHaveBeenCalled());
   });
 
-  it("turning it on posts the keyed create payload and links to the run history", async () => {
+  it("turning it on posts the keyed create payload and links the row to the routine", async () => {
     const user = userEvent.setup();
     render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
 
@@ -162,9 +189,10 @@ describe("RoutineDraftCard", () => {
       key: "chat-routine:card-1",
     });
     await waitFor(() => expect(screen.getByText("On")).toBeTruthy());
-    const link = screen.getByRole("link", { name: /view run history/i });
-    expect(link.getAttribute("href")).toBe("/routines/r-1");
+    expect(routineLink().getAttribute("href")).toBe("/routines/r-1");
     expect(screen.queryByRole("button", { name: /turn it on/i })).toBeNull();
+    // A saved card is one row: no trigger line, no Details.
+    expect(screen.queryByRole("button", { name: "Details" })).toBeNull();
   });
 
   it("surfaces the server error and keeps the action when creation fails", async () => {
@@ -176,7 +204,7 @@ describe("RoutineDraftCard", () => {
 
     await waitFor(() => expect(screen.getByText("Routine name already taken")).toBeTruthy());
     expect(screen.queryByText("On")).toBeNull();
-    expect(screen.queryByRole("link", { name: /view run history/i })).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
     expect(screen.getByRole("button", { name: /turn it on/i })).toBeTruthy();
   });
 
@@ -187,9 +215,8 @@ describe("RoutineDraftCard", () => {
     ]);
     render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-1" />);
 
-    const link = await screen.findByRole("link", { name: /view run history/i });
-    expect(link.getAttribute("href")).toBe("/routines/r-mine");
-    expect(screen.getByText("On")).toBeTruthy();
+    expect(await screen.findByText("On")).toBeTruthy();
+    expect(routineLink().getAttribute("href")).toBe("/routines/r-mine");
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
@@ -210,12 +237,11 @@ describe("RoutineDraftCard", () => {
     ]);
     render(<RoutineDraftCard draft={eventDraft} />);
 
-    const link = await screen.findByRole("link", { name: /view run history/i });
-    expect(link.getAttribute("href")).toBe("/routines/r-legacy");
+    expect(await screen.findByText("On")).toBeTruthy();
+    expect(routineLink().getAttribute("href")).toBe("/routines/r-legacy");
     expect(mockCreate).not.toHaveBeenCalled();
-    // A name match may be an unrelated routine: link only, no Pause or Delete.
-    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    // A name match may be an unrelated routine: link only, no menu.
+    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
   });
 
   // A key outside the chat namespace (e.g. an app's managed routine) never
@@ -226,16 +252,16 @@ describe("RoutineDraftCard", () => {
     ]);
     render(<RoutineDraftCard draft={eventDraft} routineKey="briefing-daily" />);
 
-    expect(await screen.findByRole("link", { name: /view run history/i })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(await screen.findByText("On")).toBeTruthy();
+    expect(routineLink()).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
   });
 
-  it("shows the real bound action name", async () => {
+  it("renders its labels in Chinese", async () => {
+    await i18n.changeLanguage("zh-CN");
     render(<RoutineDraftCard draft={eventDraft} />);
-    expect(screen.getByText("Action")).toBeTruthy();
-    expect(screen.getByText("summon")).toBeTruthy();
-    await waitFor(() => expect(mockList).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: "开启" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "详情" })).toBeTruthy();
   });
 
   // `propose_routine` with `activate: true`: the agent created the routine with
@@ -250,34 +276,39 @@ describe("RoutineDraftCard", () => {
       mockList.mockResolvedValue([ref]);
     });
 
-    it("opens saved with Pause, Delete and the run-history link — never Turn it on", async () => {
+    it("opens saved as one linked row with a menu — never Turn it on", async () => {
+      const user = userEvent.setup();
       renderActivated();
 
       expect(await screen.findByText("On")).toBeTruthy();
       expect(screen.queryByRole("button", { name: /turn it on/i })).toBeNull();
-      const link = screen.getByRole("link", { name: /view run history/i });
-      expect(link.getAttribute("href")).toBe("/routines/r-5");
-      expect(screen.getByRole("button", { name: "Pause" })).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+      expect(routineLink().getAttribute("href")).toBe("/routines/r-5");
+      await openMenu(user);
+      expect(screen.getByRole("menuitem", { name: "Pause" })).toBeTruthy();
+      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
       expect(mockCreate).not.toHaveBeenCalled();
     });
 
     it("reflects a routine paused elsewhere", async () => {
+      const user = userEvent.setup();
       mockList.mockResolvedValue([{ ...ref, enabled: false }]);
       renderActivated();
       expect(await screen.findByText("Paused")).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+      await openMenu(user);
+      expect(screen.getByRole("menuitem", { name: "Resume" })).toBeTruthy();
     });
 
     it("pauses and resumes the routine", async () => {
       const user = userEvent.setup();
       renderActivated();
 
-      await user.click(await screen.findByRole("button", { name: "Pause" }));
+      await openMenu(user);
+      await user.click(screen.getByRole("menuitem", { name: "Pause" }));
       expect(mockSetEnabled).toHaveBeenCalledWith("r-5", false);
       expect(await screen.findByText("Paused")).toBeTruthy();
 
-      await user.click(screen.getByRole("button", { name: "Resume" }));
+      await openMenu(user);
+      await user.click(screen.getByRole("menuitem", { name: "Resume" }));
       expect(mockSetEnabled).toHaveBeenLastCalledWith("r-5", true);
       expect(await screen.findByText("On")).toBeTruthy();
     });
@@ -287,7 +318,8 @@ describe("RoutineDraftCard", () => {
       mockSetEnabled.mockResolvedValue({ ok: false, error: "Routine not found" });
       renderActivated();
 
-      await user.click(await screen.findByRole("button", { name: "Pause" }));
+      await openMenu(user);
+      await user.click(screen.getByRole("menuitem", { name: "Pause" }));
       expect(await screen.findByText("Routine not found")).toBeTruthy();
       expect(screen.getByText("On")).toBeTruthy();
     });
@@ -296,7 +328,8 @@ describe("RoutineDraftCard", () => {
       const user = userEvent.setup();
       renderActivated();
 
-      await user.click(await screen.findByRole("button", { name: "Delete" }));
+      await openMenu(user);
+      await user.click(screen.getByRole("menuitem", { name: "Delete" }));
       expect(mockDelete).not.toHaveBeenCalled();
       expect(screen.getByText("Delete this routine?")).toBeTruthy();
 
@@ -318,7 +351,7 @@ describe("RoutineDraftCard", () => {
       mockList.mockResolvedValue(null);
       renderActivated();
       expect(await screen.findByRole("button", { name: /turn it on/i })).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "More" })).toBeNull();
     });
 
     it("shows the real state when Turn it on finds the routine already exists", async () => {
@@ -330,7 +363,6 @@ describe("RoutineDraftCard", () => {
 
       await user.click(await screen.findByRole("button", { name: /turn it on/i }));
       expect(await screen.findByText("Paused")).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
     });
 
     it("offers neither Pause nor Resume when the existing state can't be read", async () => {
@@ -340,23 +372,96 @@ describe("RoutineDraftCard", () => {
       renderActivated();
 
       await user.click(await screen.findByRole("button", { name: /turn it on/i }));
-      expect(await screen.findByText(/couldn’t be loaded/)).toBeTruthy();
+      await openMenu(user);
       expect(screen.queryByText("On")).toBeNull();
-      expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
-      expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+      expect(screen.queryByText("Paused")).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "Pause" })).toBeNull();
+      expect(screen.queryByRole("menuitem", { name: "Resume" })).toBeNull();
+      expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
     });
 
-    it("offers no Pause for a manual routine", async () => {
+    it("offers Run now instead of Pause for a manual routine", async () => {
+      const user = userEvent.setup();
       renderActivated({
         ...eventDraft,
         watchLabel: "Run on demand",
         filterSummary: undefined,
         trigger: { type: "manual" },
       });
-      expect(await screen.findByRole("button", { name: "Delete" })).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+      await openMenu(user);
+      expect(screen.queryByRole("menuitem", { name: "Pause" })).toBeNull();
+      // A manual routine never fires on its own: no On / Paused either.
+      expect(screen.queryByText("On")).toBeNull();
+
+      await user.click(screen.getByRole("menuitem", { name: "Run now" }));
+      expect(mockRun).toHaveBeenCalledWith("r-5");
     });
+
+    it("surfaces a failed run", async () => {
+      const user = userEvent.setup();
+      mockRun.mockResolvedValue({
+        runId: "run-1",
+        status: "error",
+        error: "gh: not authenticated",
+      });
+      renderActivated({ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } });
+      await openMenu(user);
+      await user.click(screen.getByRole("menuitem", { name: "Run now" }));
+      expect(await screen.findByText("gh: not authenticated")).toBeTruthy();
+    });
+  });
+
+  it("shows a paused manual routine as Paused and offers Resume, not Run now", async () => {
+    const user = userEvent.setup();
+    mockList.mockResolvedValue([
+      { id: "r-5", name: "Landlord emails", key: "chat-routine:card-5", enabled: false },
+    ]);
+    render(
+      <RoutineDraftCard
+        draft={{ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } }}
+        routineKey="chat-routine:card-5"
+      />,
+    );
+    expect(await screen.findByText("Paused")).toBeTruthy();
+    await openMenu(user);
+    expect(screen.queryByRole("menuitem", { name: "Run now" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Resume" })).toBeTruthy();
+  });
+
+  it("offers no Run now while the routine's latest run is still going", async () => {
+    const user = userEvent.setup();
+    mockList.mockResolvedValue([
+      { id: "r-5", name: "Landlord emails", key: "chat-routine:card-5", enabled: true },
+    ]);
+    routinesList([{ id: "r-5", lastRun: { status: "running", firedAt: "2026-11-10T00:00:00Z" } }]);
+    render(
+      <RoutineDraftCard
+        draft={{ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } }}
+        routineKey="chat-routine:card-5"
+      />,
+    );
+    await openMenu(user);
+    // Opening the menu re-reads the list, so a run that ended frees Run now.
+    expect(mockRefetch).toHaveBeenCalled();
+    expect(screen.queryByRole("menuitem", { name: "Run now" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+  });
+
+  it("surfaces a run request that fails outright", async () => {
+    const user = userEvent.setup();
+    mockList.mockResolvedValue([
+      { id: "r-5", name: "Landlord emails", key: "chat-routine:card-5", enabled: true },
+    ]);
+    mockRun.mockRejectedValue(new Error("Routine not found"));
+    render(
+      <RoutineDraftCard
+        draft={{ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } }}
+        routineKey="chat-routine:card-5"
+      />,
+    );
+    await openMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: "Run now" }));
+    expect(await screen.findByText("Routine not found")).toBeTruthy();
   });
 
   // Until the lookup settles the card can't tell a draft from a routine that
@@ -367,7 +472,8 @@ describe("RoutineDraftCard", () => {
     render(<RoutineDraftCard draft={eventDraft} routineKey="chat-routine:card-5" />);
 
     expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
     resolve([{ id: "r-5", name: "Landlord emails", key: "chat-routine:card-5", enabled: false }]);
-    expect(await screen.findByRole("button", { name: "Resume" })).toBeTruthy();
+    expect(await screen.findByText("Paused")).toBeTruthy();
   });
 });

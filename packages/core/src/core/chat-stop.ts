@@ -1,13 +1,13 @@
 import type { Account, ChatRef, ChatStopInput, ChatStopResult } from "@rome-os/app-runtime";
 import type { PlatformOfChannel } from "../chats/connected-accounts/connected-account.js";
-import type { AgentSessionManager } from "../agent/index.js";
+import type { Sessions } from "../agent/index.js";
 import type { ChatTurns } from "./chat-turns.js";
 
 export async function stopActiveConversationTurn(
   input: ChatStopInput,
   options: {
     chatTurns: ChatTurns;
-    sessions: Pick<AgentSessionManager, "turn">;
+    sessions: Pick<Sessions, "turn">;
     isGuardian: (service: string, senderId: string) => Promise<boolean>;
   },
 ): Promise<ChatStopResult> {

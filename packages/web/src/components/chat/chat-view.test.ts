@@ -259,6 +259,62 @@ describe("buildRows model switch notice", () => {
   });
 });
 
+describe("buildRows session renewal", () => {
+  const idMap = new Map([[MAIN, MAIN_IDENTITY]]);
+  const turn = (turnId: string, renewal?: { reason: string; sessionId: string }) => [
+    mk(MAIN, "user", turnId, [{ type: "text", content: `ask ${turnId}` }]),
+    mk(MAIN, "trace", turnId, [], {
+      traceSummary: {
+        distinctApps: [],
+        totalSteps: 0,
+        invocationCounts: {},
+        ...(renewal ? { sessionRenewal: renewal } : {}),
+      },
+    }),
+    mk(MAIN, "assistant", turnId, [{ type: "text", content: `reply ${turnId}` }]),
+  ];
+
+  it("draws nothing where the chat's session was replaced", () => {
+    const renewal = { reason: "setup", sessionId: "runtime-2" };
+    const rows = buildRows([...turn("t1"), ...turn("t2", renewal)], idMap, MAIN_IDENTITY, {
+      runningTurnId: null,
+      isStreaming: false,
+    });
+
+    expect(rows.map((r) => r.kind)).toEqual(["user", "agent", "user", "agent"]);
+  });
+});
+
+describe("buildRows automated input line", () => {
+  it("puts a line naming the source before a system turn that ran on an automated input", () => {
+    const source = { type: "routine" as const, name: "Daily summary" };
+    const rows = buildRows(
+      [
+        mk(MAIN, "trace", "t1", [], {
+          traceSummary: {
+            distinctApps: [],
+            totalSteps: 0,
+            invocationCounts: {},
+            automatedInput: source,
+          },
+        }),
+        mk(MAIN, "assistant", "t1", [{ type: "text", content: "Your summary" }]),
+      ],
+      new Map([[MAIN, MAIN_IDENTITY]]),
+      MAIN_IDENTITY,
+      { runningTurnId: null, isStreaming: false },
+    );
+
+    expect(rows.map((r) => r.kind)).toEqual(["automated_input", "agent"]);
+    expect(rows[0]).toEqual({
+      kind: "automated_input",
+      key: "automated-input:t1",
+      source,
+      turnId: "t1",
+    });
+  });
+});
+
 describe("isLastTurnFailed", () => {
   const trace = (sessionId: string, turnId: string, turnStatus?: "completed" | "error") =>
     mk(sessionId, "trace", turnId, [], {
@@ -290,6 +346,26 @@ describe("isAwaitingGuardian", () => {
   });
   const awaiting = (main: ChatMessage[], runningTurnId?: string) =>
     isAwaitingGuardian(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY), runningTurnId);
+
+  it("is false while the last message is a widget, which nothing answers", () => {
+    const widget = {
+      type: "widget",
+      toolUseId: "w_0",
+      appId: "meals",
+      componentId: "today",
+      text: "Showing today's meals.",
+    };
+    const main = [
+      mk(MAIN, "user", "t1", [{ type: "text", content: "what did I eat today?" }]),
+      mk(MAIN, "assistant", "t1", [widget]),
+    ];
+
+    expect(awaiting(main)).toBe(false);
+    expect(awaiting(main, "t1")).toBe(false);
+    expect(isLockedByCard(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY), "t1")).toBe(
+      false,
+    );
+  });
 
   it("is true while the last message is an unanswered card", () => {
     expect(

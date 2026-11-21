@@ -1,4 +1,7 @@
+import { widgetEventRoutes } from "./routes/widget-events.js";
 import { devicesRoutes } from "./routes/devices.js";
+import { personalDataRoutes } from "../personal-data/routes.js";
+import { deviceConnectionRoutes } from "./routes/device-connections.js";
 import type { Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -7,18 +10,21 @@ import { serve, type ServerType } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createLogger } from "../logger.js";
 import { renderAppIdentity, renderSocialMeta } from "../lib/social-meta.js";
+import { SHARE_ROBOTS } from "../lib/share-robots.js";
 import { buildAppIdentity } from "./app-home-screen.js";
 import { buildAppSocialCard } from "./app-social-card.js";
+import { buildShareSocialCard } from "./share-social-card.js";
 import { attachTerminalServer } from "../terminal-server.js";
 import { attachLiveEventsServer } from "../live-events-server.js";
-import { attachNodeConsoleServer } from "../node-console-server.js";
-import { attachDesktopProxy } from "../desktop-proxy-server.js";
-import { attachAppWebSocket } from "../apps/websocket-server.js";
+import { attachNodeConsoleServer } from "../desktops/node-console-server.js";
+import { attachDesktopProxy } from "../desktops/desktop-proxy-server.js";
+import { attachAppWebSocket } from "./routes/app-websocket-server.js";
+import { attachVoiceInputServer, NO_VOICE_INPUT } from "../voice-input/index.js";
+import { voiceInputRoutes } from "./routes/voice-input.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
-import { wechatAppRoutes } from "./routes/wechat-app.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
-import { sessionActorMiddleware } from "../lib/session-actor.js";
+import { sessionActorMiddleware } from "../access/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
 import { aiToolsRoutes } from "./routes/ai-tools.js";
 import { actionsRoutes } from "./routes/actions.js";
@@ -33,19 +39,19 @@ import { setupsRoutes } from "./routes/setups.js";
 import { approvalsRoutes } from "./routes/approvals.js";
 import { appApiDashboardRoutes, appApiPublicRoutes } from "./routes/app-api.js";
 import { webhookRoutes } from "./routes/webhooks.js";
-import { send } from "../connections/send.js";
+import { send } from "../chats/send.js";
+import { ownPlatforms } from "../webchat/send.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
 import { conciergeRoutes } from "./routes/concierge.js";
+import { chatTaskListRoutes, ownsConciergeChat, subscribeChatTasks } from "./routes/task-list.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { appKeysRoutes } from "./routes/app-keys.js";
+import { vaultRoutes } from "./routes/vault.js";
 import { uptimeRoutes } from "./routes/uptime.js";
 import { buildInfoRoutes } from "./routes/build-info.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { feedbackRoutes } from "./routes/feedback.js";
 import { systemUpgradeRoutes } from "./routes/system-upgrade.js";
-import { accountsRoutes } from "./routes/accounts.js";
-import { accountDecisionRoutes } from "./routes/account-decisions.js";
-import { peopleRoutes } from "./routes/people.js";
 import { assistantsRoutes } from "./routes/assistants.js";
 import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
@@ -60,6 +66,7 @@ import { cloudLoginRoutes } from "./routes/cloud-login.js";
 import { visitorAuthRoutes } from "./routes/visitor-auth.js";
 import { oauthRoutes } from "./routes/oauth.js";
 import { integrationsRoutes } from "./routes/integrations.js";
+import { assetsRoutes } from "./routes/assets.js";
 import { memoryFilesRoutes } from "./routes/memory-files.js";
 import { projectsFilesRoutes } from "./routes/projects-files.js";
 import { syncRoutes } from "./routes/sync.js";
@@ -83,7 +90,7 @@ import { ConnectedAccountsRepository } from "../db/repositories/connected-accoun
 import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";
 import { byChannel, readAccountAgent } from "../chats/connected-accounts/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
-import { canOpenChat } from "../concierge/privacy.js";
+import { canOpenChat } from "../webchat/privacy.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
 const log = createLogger("api");
@@ -148,7 +155,7 @@ export function buildApp(
 
   // Annotate-only (never gates): expose the request's session actor ambiently
   // so any action run during the request is stamped with who triggered it —
-  // see lib/session-actor.ts and `action_executions.actor`.
+  // see access/session-actor.ts and `action_executions.actor`.
   api.use("*", sessionActorMiddleware(deps.db));
 
   api.route("/", healthRoutes(deps));
@@ -156,7 +163,9 @@ export function buildApp(
   api.route("/", buildInfoRoutes(deps));
   api.route("/", diagnosisRoutes(deps));
   api.route("/", computerUseRoutes(deps));
-  api.route("/", wechatAppRoutes(deps));
+  for (const kind of deps.connectionKinds) {
+    if (kind.routes) api.route("/", kind.routes);
+  }
   api.route("/", feedbackRoutes(deps));
   api.route("/", systemUpgradeRoutes(deps));
   api.route("/", authRoutes(deps));
@@ -190,20 +199,24 @@ export function buildApp(
   api.route("/", chatSettingsRoutes(deps));
   api.route("/", approvalsRoutes(deps));
   api.route("/", settingsRoutes(deps));
+  api.route("/", voiceInputRoutes(deps));
   api.route("/", conciergeRoutes(deps));
+  api.route("/", chatTaskListRoutes(deps));
   api.route("/", devicesRoutes(deps));
+  api.route("/", personalDataRoutes(deps));
+  api.route("/", deviceConnectionRoutes(deps));
   api.route("/", appKeysRoutes(deps));
+  api.route("/", vaultRoutes(deps));
   api.route("/", routinesRoutes(deps));
   api.route("/", eventCatalogRoutes(deps));
-  api.route("/", peopleRoutes(deps));
+  for (const feature of deps.features ?? []) api.route("/", feature.routes);
   api.route("/", assistantsRoutes(deps));
-  api.route("/", accountsRoutes(deps));
-  api.route("/", accountDecisionRoutes(deps));
   api.route("/", sentinelLogRoutes(deps));
   api.route("/", webhookInvocationsRoutes(deps));
   api.route("/", actionExecutionsRoutes(deps));
   api.route("/", terminalRoutes());
   api.route("/", memoryFilesRoutes());
+  api.route("/", assetsRoutes());
   api.route("/", projectsFilesRoutes(deps));
   api.route("/", syncRoutes(deps));
   api.route("/", shareRoutes(deps));
@@ -232,6 +245,16 @@ export function buildApp(
 
   const { routes: webchatRoutesApp, runtime: webchatRuntime } = createWebchatRuntime(deps);
   api.route("/", webchatRoutesApp);
+  // A widget's event goes back through the API, so the turn or the app call
+  // it becomes passes every check a direct call would.
+  api.route(
+    "/",
+    widgetEventRoutes({
+      webchatRepo: deps.webchatRepo,
+      forward: (request, env) => app.fetch(request, env),
+      chatAudience: (chatId) => deps.placeAudience({ channel: "webchat", threadId: chatId }),
+    }),
+  );
   // The backend-turn orchestrator is the single holder of the webchat runtime
   // for all backend session tasks (defer + approvals). It's constructed before
   // buildApp runs, so the runtime is bound after the fact, like the rest of the
@@ -239,9 +262,10 @@ export function buildApp(
   deps.backendTurnRunner.setWebchatRuntime(webchatRuntime);
   // Concierge is built before the API layer too. Its sends are Chats' own,
   // with the dashboard taking those into its chats.
+  const sendDeps = { ...deps, ownPlatforms: ownPlatforms(webchatRuntime) };
   deps.concierge?.attachDashboard({
     chats: webchatRuntime,
-    send: (place, body, as) => send({ ...deps, dashboard: webchatRuntime }, place, body, as),
+    send: (place, body, as) => send(sendDeps, place, body, as),
   });
 
   app.route("/api", api);
@@ -266,7 +290,7 @@ export function buildApp(
 function mountSpa(
   app: Hono,
   webRoot: string,
-  deps: Pick<ApiDeps, "appCatalog" | "ogImageStore">,
+  deps: Pick<ApiDeps, "appCatalog" | "ogImageStore" | "webchatRepo">,
 ): void {
   // App document routes get the shell with per-app social meta and
   // home-screen identity. Registered before `serveStatic` so the static
@@ -283,6 +307,22 @@ function mountSpa(
   };
   app.get("/apps/*", appDocument);
   app.get("/full/apps/*", appDocument);
+
+  // A shared chat's page is public but not for search engines. Caddy sets the
+  // same header for external traffic.
+  app.use("/share/*", async (c, next) => {
+    await next();
+    c.header("X-Robots-Tag", SHARE_ROBOTS);
+  });
+
+  // A shared chat's page gets a card titled by the share. A revoked or unknown
+  // token keeps the generic card, so nothing of the share leaks through it.
+  app.get("/share/*", async (c) => {
+    const card = await buildShareSocialCard(deps, c.req.raw);
+    return c.html(renderSocialMeta(readIndexHtml(webRoot), card), 200, {
+      "Cache-Control": "no-cache",
+    });
+  });
 
   // Serve hashed assets + public files. `serveStatic` calls next() on
   // miss, so unknown paths fall through to the SPA fallback below.
@@ -322,6 +362,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             nodeConsole.close();
             desktopProxy.close();
             appWebSocket.close();
+            voiceInput.close();
             await webchatRuntime.flushAll();
             // Force-close any active HTTP connections so shutdown is not
             // blocked by in-flight requests (e.g. long-lived SSE streams).
@@ -332,11 +373,16 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           },
         });
       });
-      const terminalServer = attachTerminalServer(server as Server, deps.db, {
-        onAuthCommandExit: () => {
-          void deps.modelAccounts.refresh().catch(() => {});
+      const terminalServer = attachTerminalServer(
+        server as Server,
+        deps.db,
+        deps.dashboardAccessState,
+        {
+          onAuthCommandExit: () => {
+            void deps.modelAccounts.refresh().catch(() => {});
+          },
         },
-      });
+      );
       const liveEvents = attachLiveEventsServer(
         server as Server,
         deps.db,
@@ -349,14 +395,26 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
-          subscribeConciergeTasks: (owner, emit) =>
-            deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
+          subscribeConciergeActivity: (owner, emit) =>
+            deps.concierge?.activity?.subscribe(owner, emit) ?? (() => {}),
+          hasChatTasks: async (chatId, owner) =>
+            deps.concierge ? ownsConciergeChat(deps.concierge, chatId, owner) : false,
+          subscribeChatTasks: (chatId, owner, emit) =>
+            subscribeChatTasks(deps, chatId, owner, emit),
         },
         deps.phoneWatching,
+        deps.dashboardActivity,
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
-      const desktopProxy = attachDesktopProxy(server as Server, deps.db);
+      const desktopProxy = attachDesktopProxy(server as Server, deps.db, deps.dashboardAccessState);
       const appWebSocket = attachAppWebSocket(server as Server, deps);
+      const voiceInput = attachVoiceInputServer(
+        server as Server,
+        deps.db,
+        deps.voiceInput ?? NO_VOICE_INPUT,
+        deps.transcriptionUsage ?? null,
+        deps.dashboardAccessState,
+      );
       server.on("error", (err) => {
         log.error("api server error", { error: err.message });
         reject(err);

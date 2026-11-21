@@ -15,7 +15,8 @@ const HOVER_CHIP =
   "rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 hover:text-foreground";
 
 // A tap on any of these belongs to the thing tapped, not to the bubble.
-const INTERACTIVE = "a,button,input,textarea,select,summary,label,[role=button],[role=link]";
+const INTERACTIVE =
+  "a,button,input,textarea,select,summary,label,[role=button],[role=link],[data-rmiz]";
 
 // Every bubble shrinks to its content up to this share of the column, so even
 // the widest leaves a gap on the other side that tells whose it is.
@@ -29,11 +30,12 @@ const BUBBLE_MAX_WIDTH = "max-w-[90%]";
  * - With a pointer that can hover, the details are a small toolbar that floats
  *   over the bubble's top edge on hover or keyboard focus, aligned to the
  *   bubble's outer corner and running past its inner side when the bubble is
- *   narrower. It is 26px tall: 12px over the bubble's border, top padding, and
- *   the space above its first line, and 14px above, over the 4px gap and the
- *   bubble above's bottom padding. Two grouped bubbles of body text leave
- *   exactly that between their lines, so it covers no text. The overlap also
- *   bridges the pointer from the bubble to the toolbar. The toolbar takes no
+ *   narrower. It is 26px tall: 8px over the bubble's top border and padding,
+ *   which hold no text whatever the first line is, and 18px above, within the
+ *   group's 8px gap, the bubble above's 8px bottom padding, and the half
+ *   leading under its last line. The overlap also bridges the pointer from the
+ *   bubble to the toolbar.
+ *   The toolbar takes no
  *   pointer events while hidden, and stays visible while the feedback form it
  *   opens is open.
  * - Without hover, tapping the bubble toggles a row of the same details under
@@ -43,8 +45,11 @@ const BUBBLE_MAX_WIDTH = "max-w-[90%]";
  *
  * `side` is the edge the bubble aligns to: `start` for the agent, `end` for the
  * guardian. `reply` is what the Reply button quotes. `anchorId` makes
- * the bubble the target of a jump from a quote of it. `arrival` marks a bubble
- * that enters while the chat is open.
+ * the bubble the target of a jump from a quote of it. `partOf` names the
+ * message every bubble of a message belongs to, so landing on the message
+ * tints all of them. `arrival` marks a bubble
+ * that enters while the chat is open. `className` adds to the outer box, as
+ * the room a guardian bubble keeps above it for its reaction.
  */
 export const ConciergeBubble = memo(function ConciergeBubble({
   side,
@@ -53,7 +58,9 @@ export const ConciergeBubble = memo(function ConciergeBubble({
   feedbackTurn,
   reply = null,
   anchorId,
+  partOf,
   arrival,
+  className,
   children,
 }: {
   side: "start" | "end";
@@ -62,7 +69,9 @@ export const ConciergeBubble = memo(function ConciergeBubble({
   feedbackTurn: { sessionId: string; turnId: string } | null;
   reply?: ReplySource | null;
   anchorId?: string;
+  partOf?: string;
   arrival?: number;
+  className?: string;
   children: ReactNode;
 }) {
   const { t } = useTranslation("chat");
@@ -84,15 +93,20 @@ export const ConciergeBubble = memo(function ConciergeBubble({
 
   return (
     <div
+      // Every bubble, a message's later ones included.
+      data-concierge-bubble-part
       data-timeline-anchor={anchorId}
+      data-message-part={partOf}
       data-arrival={arrival}
       className={cn(
         "flex min-w-0 flex-col",
         BUBBLE_MAX_WIDTH,
         side === "end" ? "items-end" : "items-start",
+        className,
       )}
     >
       <div
+        data-bubble-box
         className={cn(
           "group/bubble relative flex min-w-0 max-w-full",
           side === "end" && "justify-end",
@@ -124,7 +138,7 @@ export const ConciergeBubble = memo(function ConciergeBubble({
           <div
             data-bubble-toolbar
             className={cn(
-              "absolute bottom-full flex w-max translate-y-3 items-center rounded-8 border border-border bg-surface shadow-4",
+              "absolute bottom-full flex w-max translate-y-2 items-center rounded-8 border border-border bg-surface shadow-4",
               side === "start" ? "left-0" : "right-0",
               "pointer-events-none opacity-0 transition-opacity group-focus-within/bubble:pointer-events-auto group-focus-within/bubble:opacity-100 group-hover/bubble:pointer-events-auto group-hover/bubble:opacity-100 has-data-[state=open]:pointer-events-auto has-data-[state=open]:opacity-100 motion-reduce:transition-none",
             )}

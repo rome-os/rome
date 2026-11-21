@@ -1,8 +1,17 @@
-import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
+import { useQueryClient } from "@tanstack/react-query";
+import { markChatSessionReadInCache } from "@/hooks/use-chat-sessions";
+import { CONCIERGE_CHAT_ID, markConciergeChatReadInCache } from "@/hooks/use-concierge";
+import {
+  cardKey,
+  chatCardSettledSchema,
+  type LiveTaskCards,
+  LiveTaskCardsProvider,
+} from "./entries/live-task-cards";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
 import { flushSync } from "react-dom";
 import {
   useCallback,
+  useContext,
   useEffect,
   useId,
   useMemo,
@@ -18,35 +27,36 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
-  MoreHorizontal,
+  Cpu,
+  FileOutput,
+  FolderOpen,
+  PanelRightOpen,
+  Pencil,
   Pin,
   PinOff,
-  PanelRightOpen,
   Share2,
   Trash2,
 } from "lucide-react";
 import { z } from "zod";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import type { MessageWritingEvent } from "@rome/api-types/concierge";
+import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
-import { SlotContent } from "@/components/slot";
+import { SlotContent, SlotOutlet } from "@/components/slot";
 import "react-medium-image-zoom/dist/styles.css";
 import { cn } from "@/lib/utils";
 import { usePresentationMode } from "@/lib/presentation-mode";
-import { dataTransferHasFiles, extractFilesFromDataTransfer } from "@/lib/clipboard-files";
+import { extractFilesFromDataTransfer } from "@/lib/clipboard-files";
+import { useFileDropArea } from "@/hooks/use-file-drop-area";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { TraceDrawer, type TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
-import { SessionAvatar } from "@/components/chat/SessionAvatar";
-import { SessionLoadingTitle } from "@/components/chat/SessionLoadingTitle";
+import { modelDisplayName } from "@/lib/model-display";
 import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
+import { TaskChatContext } from "@/components/chat/task-chat";
+import { TaskLinksScope } from "@/components/chat/task-link/task-links";
 import {
   prettyAgentName,
   mainAgentDisplayName as resolveMainAgentDisplayName,
@@ -62,6 +72,11 @@ import {
   type AgentIdentity,
 } from "@/components/chat/chat-view";
 import { ShareBar } from "@/components/chat/ShareBar";
+import { ChatEdgeBlur } from "@/components/chat/ChatEdgeBlur";
+import {
+  MessageSharingContext,
+  type SharedMessageTurn,
+} from "@/components/chat/ShareMessageButton";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells } from "@/pages/free/use-free-cells";
 import { useToolTrace } from "@/pages/free/tool-trace";
@@ -73,10 +88,10 @@ import type {
 } from "@rome/api-types/trace-segments";
 import { useStableMap } from "@/hooks/use-stable-map";
 import { HOLD_STICK_EVENT, useStickToBottom } from "@/hooks/use-stick-to-bottom";
-import { ChatPendingCardJump } from "@/components/chat/ChatPendingCardJump";
+import { ChatPendingCardJump, ConciergeCardJump } from "@/components/chat/ChatPendingCardJump";
 import {
-  CHAT_PAGE_TURNS,
-  CONCIERGE_PAGE_TURNS,
+  CHAT_PAGE_SIZE,
+  CONCIERGE_PAGE_SIZE,
   useOlderMessages,
 } from "@/components/chat/use-older-messages";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
@@ -86,9 +101,14 @@ import {
   useReplyDraftState,
 } from "@/components/chat/reply/reply-draft";
 import { findMessageAnchor } from "@/components/chat/reply/reply-source";
+import { LANDING_MS, playLanding } from "@/components/chat/reply/thread-anchor";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useChatTabStatus } from "@/hooks/use-tab-status";
+import {
+  type WidgetHost,
+  WidgetHostContext,
+} from "@/components/chat/entries/widget-ui/turn-fields";
 import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import { MessageList, type BlockActions, type ChatVariant } from "@/components/chat/MessageList";
@@ -100,20 +120,61 @@ import {
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import {
+  type LiveMessageStatuses,
+  LiveMessageStatusesProvider,
+  type LiveReactions,
+  LiveReactionsProvider,
+  messageReactionSchema,
+  messageStatusSchema,
+} from "@/components/chat/reaction";
+import { ConciergeUnreadPill } from "@/components/chat/ConciergeUnreadPill";
+import { summarizeUnread, useUnreadAtOpen } from "@/components/chat/concierge-unread";
+import {
   ConciergeEmptyState,
   ConciergeTopicEmptyState,
 } from "@/components/chat/ConciergeEmptyState";
 import { onConciergeJump } from "@/components/concierge/concierge-jump";
-import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
+import {
+  CONCIERGE_LEADING_SLOT,
+  CONCIERGE_TITLEBAR_SLOT,
+  BackToConciergeChat,
+  ConciergeHeaderStatus,
+  FLOATING_SURFACE,
+} from "@/components/concierge/ConciergeHeaderStatus";
+import {
+  ChatHeaderActions,
+  type HeaderMenu,
+  type HeaderMenuItem,
+} from "@/components/concierge/ChatHeaderActions";
+import { RomeInputDialog } from "@/components/rome-input-dialog";
+import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
+import { useChatTaskList } from "@/components/concierge/TaskList";
+import { useTaskList } from "@/components/concierge/TaskListPane";
+import { useOutputsPane } from "./outputs/OutputsPane";
+import {
+  chatOutputsKey,
+  chatOutputsQuery,
+  OutputLinksContext,
+  type OutputLinks,
+  outputOfLink,
+} from "./outputs/chat-outputs";
+import { useTopicChatArchive } from "@/components/concierge/TopicChatArchiveDialog";
+import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
+import { useToolTasks } from "@/pages/free/tool-tasks";
+import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
   AgentMention,
+  ChatErrorCode,
   ChatErrorNotice,
+  ChatErrorProvider,
+  ChatErrorReason,
   ChatMessage,
   CreateTurnResponse,
   DoneEventData,
 } from "@/lib/chat-types";
 import { buildOptimisticUserText } from "@/lib/chat-helpers";
+import { isUpgradeUnderWay } from "@/lib/upgrade-under-way";
 import {
   parseSSEEvents,
   STREAM_STALL_TIMEOUT_MS,
@@ -123,40 +184,44 @@ import {
 import {
   mergeChatMessage,
   mergeLatestMessagePage,
-  orderChatMessages,
   startsNewHistory,
-} from "@/lib/chat-message-ordering";
+} from "@/lib/chat-message-merge";
 import {
   ChatApiError,
   createSession,
   deleteSession,
   interruptTurn,
+  isUnreachableStatus,
   listChatAgents,
   listSessionMessagePage,
   listSessionTurns,
   markSessionRead as apiMarkSessionRead,
   openTurnStream,
+  plainErrorText,
   postSessionTurn,
   postSessionTurnJson,
   type PostTurnResult,
+  pinSession,
+  renameSession,
   updateSessionModel,
 } from "@/lib/chat-api";
-import { useArchiveSession, usePinSession } from "@/lib/session-events";
+import { emitSessionsChanged, useArchiveSession } from "@/lib/session-events";
+import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import {
   snapshotWorkspaceForSend,
   useWorkspaceContextRegistry,
 } from "@/pages/free/workspace-context";
 import { applyAgentPlacement } from "@/pages/free/use-free-cells";
 import { randomUUID } from "@/lib/random-uuid";
-import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
+import { DEFAULT_LARGE_MODEL_SELECTION, DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
 const TIMELINE_JUMP_OFFSET_PX = 24;
-// How long the landed-on question stays tinted.
-const TIMELINE_LANDING_MS = 900;
 /** How many older pages a jump to a Concierge message loads before it gives up. */
 const MAX_JUMP_PAGES = 20;
+/** How many older pages a click on a quote loads before it gives up. */
+const QUOTE_JUMP_PAGES = 10;
 
 // Chat Component
 
@@ -199,6 +264,12 @@ const traceSummarySchema: z.ZodType<TraceSummary> = z.lazy(() =>
     invocationCounts: z.record(z.string(), z.number()),
     stoppedByUser: z.boolean().optional(),
     terminalError: z.string().optional(),
+    // Any string, so a code a newer server adds still parses and reads as raw text.
+    terminalErrorCode: z.custom<ChatErrorCode>((value) => typeof value === "string").optional(),
+    terminalErrorProvider: z
+      .custom<ChatErrorProvider>((value) => typeof value === "string")
+      .optional(),
+    terminalErrorReason: z.custom<ChatErrorReason>((value) => typeof value === "string").optional(),
     plan: agentPlanSchema.optional(),
     model: z.string().optional(),
   }),
@@ -221,19 +292,39 @@ const sessionNameSchema = z.object({
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
 
+/** How the running turn shows the typing dots (`message_writing`). */
+const messageWritingSchema: z.ZodType<MessageWritingEvent> = z.object({
+  sessionId: z.string(),
+  turnId: z.string(),
+  mode: z.enum(["exact", "simulated"]),
+  writing: z.boolean(),
+});
+
 interface ChatSessionEventsProps {
   sessionId: string;
   onMessageInsert: (sessionId: string, message: ChatMessage) => void;
+  /** The Concierge changed the reaction on a guardian message of its chat. */
+  onMessageReaction?: (event: z.infer<typeof messageReactionSchema>) => void;
+  /** Rome changed the status on a guardian message of a Concierge chat. */
+  onMessageStatus?: (event: z.infer<typeof messageStatusSchema>) => void;
+  /** A question or approval a task card shows settled. */
+  onChatCardSettled?: (event: z.infer<typeof chatCardSettledSchema>) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
   onSessionRunning: (event: z.infer<typeof sessionRunningSchema>) => void;
+  /** How the running turn shows the typing dots changed. */
+  onMessageWriting?: (event: MessageWritingEvent) => void;
   onReconnect: (sessionId: string) => void;
 }
 
 function ChatSessionEvents({
   sessionId,
   onMessageInsert,
+  onMessageReaction,
+  onMessageStatus,
+  onChatCardSettled,
   onSessionName,
   onSessionRunning,
+  onMessageWriting,
   onReconnect,
 }: ChatSessionEventsProps) {
   useLiveEvents(
@@ -247,10 +338,34 @@ function ChatSessionEvents({
         schema: sessionNameSchema,
         fn: (event) => onSessionName(sessionId, event),
       },
+      message_reaction: {
+        schema: messageReactionSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onMessageReaction?.(event);
+        },
+      },
+      message_status: {
+        schema: messageStatusSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onMessageStatus?.(event);
+        },
+      },
+      chat_card_settled: {
+        schema: chatCardSettledSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onChatCardSettled?.(event);
+        },
+      },
       session_running: {
         schema: sessionRunningSchema,
         fn: (event) => {
           if (event.sessionId === sessionId) onSessionRunning(event);
+        },
+      },
+      message_writing: {
+        schema: messageWritingSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onMessageWriting?.(event);
         },
       },
     },
@@ -295,6 +410,13 @@ export interface ChatProps {
    * once more.
    */
   recoverMissingSession?: (sessionId: string) => Promise<boolean>;
+  /**
+   * Resolves with the chat's read mark, as the server holds it before this chat
+   * marks itself read, or null when it has none. Only a Concierge chat needs
+   * it: the chat waits for the answer before its read mark, and draws a divider
+   * where the unread messages start. Without it the chat does neither.
+   */
+  loadReadMark?: (chatId: string) => Promise<string | null>;
   onSessionMessage?: (message: SessionMessage) => void;
   /**
    * Called with a session's saved workspace layout (`null` when none) when its
@@ -339,7 +461,7 @@ export interface ChatProps {
   variant?: ChatVariant;
   /** The signed-in person's main Concierge chat, which shows the starters a topic chat does not. The guardian's by default. */
   conciergeMainChatId?: string;
-  /** What the main Concierge chat is called in its title, in place of the session name the server stores. */
+  /** The Concierge's name, which every Concierge chat's header shows in place of the chat's own name. */
   conciergeName?: string;
 }
 
@@ -361,6 +483,7 @@ export function Chat({
   onSessionsChanged,
   onSessionNotFound,
   recoverMissingSession,
+  loadReadMark,
   onSessionMessage,
   onSessionLayout,
   onSessionCreated,
@@ -377,7 +500,7 @@ export function Chat({
   conciergeName,
 }: ChatProps) {
   const concierge = variant === "concierge";
-  const pageTurns = concierge ? CONCIERGE_PAGE_TURNS : CHAT_PAGE_TURNS;
+  const pageSize = concierge ? CONCIERGE_PAGE_SIZE : CHAT_PAGE_SIZE;
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
   const presentationMode = usePresentationMode();
@@ -444,6 +567,40 @@ export function Chat({
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  // The header's Rename asks for the new name in a dialog.
+  const [renameOpen, setRenameOpen] = useState(false);
+  // Reactions live events changed since the messages loaded. A
+  // reconnect reloads the messages, which then say how each stands.
+  const [liveReactions, setLiveReactions] = useState<LiveReactions>(new Map());
+  const handleMessageReaction = useCallback(
+    ({ messageId, reaction }: z.infer<typeof messageReactionSchema>) =>
+      setLiveReactions((prev) => new Map(prev).set(messageId, reaction)),
+    [],
+  );
+  // Statuses live events changed since the messages loaded, likewise.
+  const [liveStatuses, setLiveStatuses] = useState<LiveMessageStatuses>(new Map());
+  const handleMessageStatus = useCallback(
+    ({ messageId, status }: z.infer<typeof messageStatusSchema>) =>
+      setLiveStatuses((prev) => new Map(prev).set(messageId, status)),
+    [],
+  );
+  // How each chat's running turn shows the typing dots, its latest word.
+  const [liveWriting, setLiveWriting] = useState<ReadonlyMap<string, MessageWritingEvent>>(
+    new Map(),
+  );
+  const handleMessageWriting = useCallback(
+    (event: MessageWritingEvent) =>
+      setLiveWriting((prev) => new Map(prev).set(event.sessionId, event)),
+    [],
+  );
+  // Task cards' questions and approvals live events settled since the
+  // messages loaded. A reconnect reloads the messages, which carry them.
+  const [liveCards, setLiveCards] = useState<LiveTaskCards>(new Map());
+  const handleChatCardSettled = useCallback(
+    ({ card }: z.infer<typeof chatCardSettledSchema>) =>
+      setLiveCards((prev) => new Map(prev).set(cardKey(card), card)),
+    [],
+  );
   // Inline share flow: pick turns directly on the transcript.
   const [shareMode, setShareMode] = useState(false);
   const [selectedShareTurns, setSelectedShareTurns] = useState<Set<string>>(new Set());
@@ -456,12 +613,18 @@ export function Chat({
     sessionName,
     model,
     largeModelSelection: storedModelSelection,
-    isSideChat,
-    reasoningEffort,
+    isForkChat,
     pinnedAgentMention: identityAgentMention,
     archivedAt,
     pinnedAt,
+    forkable,
+    isTaskChat,
+    taskOf,
+    projectPath,
+    isConciergeSession,
   } = useSessionIdentity(mainSessionId);
+  // The main chat is never archived or deleted, so its menu offers neither.
+  const isMainChat = concierge && mainSessionId === conciergeMainChatId;
   // The open chat's model pick, shown as soon as the guardian makes it. It is
   // stored on the chat and the next turn runs on it.
   const [pickedModel, setPickedModel] = useState<{ sessionId: string; value: string } | null>(null);
@@ -491,7 +654,6 @@ export function Chat({
   const [archivedOverride, setArchivedOverride] = useState<boolean | undefined>(undefined);
   const isArchived = archivedOverride ?? archivedAt != null;
   const setArchived = useArchiveSession();
-  const setPinned = usePinSession();
   // The override is only a momentary optimistic flip for the navbar handlers.
   // Once the session read reflects the server's archived state (including an
   // archive/unarchive triggered from the sidebar, which refetches via the
@@ -504,7 +666,6 @@ export function Chat({
   const ownComposerRef = useRef<ChatComposerHandle>(null);
   const composerRef = hostComposerRef ?? ownComposerRef;
   const creatingSessionRef = useRef(false);
-  const dragDepthRef = useRef(0);
   const loadedSessionsRef = useRef<Set<string>>(new Set());
   const localOptimisticMessageIdsRef = useRef<Map<string, Set<string>>>(new Map());
   const locallyStreamingSessionIdsRef = useRef<Set<string>>(new Set());
@@ -554,7 +715,15 @@ export function Chat({
     [stickContentRef],
   );
 
-  // The main session loads its newest turns first and pages older ones in as
+  // What was unread when this Concierge chat opened. It stays put while the
+  // chat is open, so the divider outlives the read mark and ignores arrivals.
+  const {
+    unread: unreadAtOpen,
+    noteOpened,
+    pendingMark,
+  } = useUnreadAtOpen({ chatId: sessionId, loadReadMark });
+
+  // The main session loads its newest messages first and pages older ones in as
   // the transcript scrolls toward the top.
   const {
     setCursor: setOlderCursor,
@@ -562,7 +731,7 @@ export function Chat({
     sentinelRef: olderSentinelRef,
     loadOlder,
   } = useOlderMessages(mainSessionId || null, {
-    pageTurns,
+    pageSize,
     scroller: scrollerEl,
     pinned: isAtBottom,
     setMessages,
@@ -587,12 +756,17 @@ export function Chat({
     [messages, mainSessionId, mainIdentity],
   );
   const { displayMessages, identityBySession, interactionResults } = view;
+  const olderRemains = mainSessionId ? hasOlder(mainSessionId) : false;
+  const unread = useMemo(
+    () => (unreadAtOpen ? summarizeUnread(displayMessages, unreadAtOpen, olderRemains) : null),
+    [displayMessages, unreadAtOpen, olderRemains],
+  );
   // The main session's id, empty while a draft has none. Keys the running turn
   // and live stream (send, stop, reattach, live trace, onSessionMessage).
   const activeSessionId = mainSessionId ?? "";
-  // A side chat promoted to a chat still runs on its branch (#1384), whose
+  // A fork chat promoted to a chat still runs on its branch (#1384), whose
   // model the picker does not hold.
-  const chatModelPickable = !!mainSessionId && !isSideChat;
+  const chatModelPickable = !!mainSessionId && !isForkChat;
 
   // Ordered, unique turn ids of the main session — the selectable share unit.
   const mainTurnIds = useMemo(() => {
@@ -616,6 +790,43 @@ export function Chat({
 
   const landingTimerRef = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(landingTimerRef.current), []);
+  // Tints a message's row for a moment, so the eye finds it.
+  const landOn = useCallback((scroller: HTMLElement, anchor: HTMLElement) => {
+    window.clearTimeout(landingTimerRef.current);
+    for (const el of scroller.querySelectorAll("[data-timeline-landed]")) {
+      if (el !== anchor) el.removeAttribute("data-timeline-landed");
+    }
+    playLanding(anchor);
+    landingTimerRef.current = window.setTimeout(() => {
+      anchor.removeAttribute("data-timeline-landed");
+    }, LANDING_MS);
+  }, []);
+
+  // Scrolls `anchor` to the top of the transcript.
+  const scrollToAnchor = useCallback((scroller: HTMLElement, anchor: HTMLElement) => {
+    const top =
+      anchor.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top +
+      scroller.scrollTop;
+    // A jump that follows loading older pages comes long after the click, so
+    // the pin would read it as drift and snap back to the bottom.
+    anchor.dispatchEvent(new Event(HOLD_STICK_EVENT, { bubbles: true }));
+    // `auto`, not `smooth`, and deliberately so. use-stick-to-bottom treats a
+    // scroll outside its 300ms user-gesture window as accidental drift and
+    // snaps back to the bottom while pinned; an instant scroll emits its one
+    // event on the frame right after this click's pointerdown, safely inside
+    // that window, so the hook releases the pin for us. A smooth scroll's
+    // later frames fall outside it. Instant also reads better here: you land
+    // and start reading rather than watching half a second of blur.
+    // The scroller's own scroll padding keeps it clear of what floats over
+    // the messages, such as a Concierge chat's header; a manual scroll does
+    // not apply it, so it is added here.
+    const clear = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
+    scroller.scrollTo({
+      top: Math.max(top - clear - TIMELINE_JUMP_OFFSET_PX, 0),
+      behavior: "auto",
+    });
+  }, []);
 
   // Scrolls to a message and tints it. An anchor names one message id, or
   // every id of an agent turn separated by spaces.
@@ -625,38 +836,16 @@ export function Chat({
       if (!scroller) return;
       const anchor = findMessageAnchor(scroller, messageId);
       if (!anchor) return;
-      const top =
-        anchor.getBoundingClientRect().top -
-        scroller.getBoundingClientRect().top +
-        scroller.scrollTop;
-      // A jump that follows loading older pages comes long after the click, so
-      // the pin would read it as drift and snap back to the bottom.
-      anchor.dispatchEvent(new Event(HOLD_STICK_EVENT, { bubbles: true }));
-      // `auto`, not `smooth`, and deliberately so. use-stick-to-bottom treats a
-      // scroll outside its 300ms user-gesture window as accidental drift and
-      // snaps back to the bottom while pinned; an instant scroll emits its one
-      // event on the frame right after this click's pointerdown, safely inside
-      // that window, so the hook releases the pin for us. A smooth scroll's
-      // later frames fall outside it. Instant also reads better here: you land
-      // and start reading rather than watching half a second of blur.
-      scroller.scrollTo({ top: Math.max(top - TIMELINE_JUMP_OFFSET_PX, 0), behavior: "auto" });
-
+      scrollToAnchor(scroller, anchor);
       // Every user bubble is the same tint, so without this you cannot tell
       // whether the jump landed on the question you picked.
-      window.clearTimeout(landingTimerRef.current);
-      for (const el of scroller.querySelectorAll("[data-timeline-landed]")) {
-        el.removeAttribute("data-timeline-landed");
-      }
-      anchor.setAttribute("data-timeline-landed", "");
-      landingTimerRef.current = window.setTimeout(() => {
-        anchor.removeAttribute("data-timeline-landed");
-      }, TIMELINE_LANDING_MS);
+      landOn(scroller, anchor);
     },
-    [scrollerEl],
+    [scrollerEl, landOn, scrollToAnchor],
   );
 
-  // A row of the task panel points to a Concierge message that may sit pages
-  // above the loaded ones, so the jump pages older history in until it renders.
+  // A jump to a message, a quote's original or the unread divider may point
+  // above the loaded pages, so each reads history in until it renders.
   const olderRef = useRef({ hasOlder, loadOlder });
   olderRef.current = { hasOlder, loadOlder };
   const shownCountRef = useRef(0);
@@ -664,63 +853,137 @@ export function Chat({
     shownCountRef.current = displayMessages.length;
   }, [displayMessages]);
   const findingMessageRef = useRef(false);
-  const showSourceMessage = useCallback(
-    async (messageId: string) => {
-      const scroller = scrollerEl;
-      if (!scroller || !mainSessionId || findingMessageRef.current) return;
-      if (findMessageAnchor(scroller, messageId)) {
-        jumpToMessage(messageId);
-        return;
+  // Pages older history in until `find` returns an element, then hands it to
+  // `reveal`. When the search runs out, or reaches `maxPages`, it says
+  // `missing` in a toast, or ends without a word when that is null. With
+  // `through`, the message it looks for, one read brings the history down to
+  // it instead of a page at a time. Only one search runs at a time. Resolves
+  // whether it revealed it.
+  const revealWhenLoaded = useCallback(
+    async (
+      find: () => HTMLElement | null,
+      reveal: () => void | Promise<void>,
+      missing: string | null,
+      options: { through?: string; maxPages?: number } = {},
+    ): Promise<boolean> => {
+      const { through, maxPages = MAX_JUMP_PAGES } = options;
+      if (!mainSessionId || findingMessageRef.current) return false;
+      if (find()) {
+        await reveal();
+        return true;
       }
       findingMessageRef.current = true;
-      const loading = toast.loading(t("concierge.tasks.findingMessage"));
+      const loading =
+        missing === null ? undefined : toast.loading(t("concierge.tasks.findingMessage"));
       try {
         let stalled = 0;
-        for (let page = 0; page < MAX_JUMP_PAGES; page++) {
+        for (let page = 0; page < (through ? 1 : maxPages); page++) {
           if (!olderRef.current.hasOlder(mainSessionId)) break;
           const before = shownCountRef.current;
-          await olderRef.current.loadOlder(mainSessionId);
+          await olderRef.current.loadOlder(mainSessionId, through ? { through } : undefined);
           // The page lands in state first and renders a moment later.
           for (let wait = 0; wait < 40 && shownCountRef.current === before; wait++) {
             await new Promise((resolve) => setTimeout(resolve, 25));
           }
-          if (findMessageAnchor(scroller, messageId)) {
-            jumpToMessage(messageId);
-            return;
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          if (find()) {
+            await reveal();
+            return true;
           }
           // A page that fails to load changes nothing; two in a row end the search.
           stalled = shownCountRef.current === before ? stalled + 1 : 0;
           if (stalled >= 2) break;
         }
-        toast.error(t("concierge.tasks.sourceMissing"));
+        if (missing !== null) toast.error(missing);
+        return false;
       } finally {
-        toast.dismiss(loading);
+        if (loading !== undefined) toast.dismiss(loading);
         findingMessageRef.current = false;
       }
     },
-    [scrollerEl, mainSessionId, jumpToMessage, t],
+    [mainSessionId, t],
   );
+  // Respond in the Tasks panel points to a Concierge message that may sit
+  // pages above the loaded ones, so the jump reads history down through it in
+  // one page.
+  const showSourceMessage = useCallback(
+    (messageId: string) => {
+      const scroller = scrollerEl;
+      if (!scroller) return Promise.resolve(false);
+      return revealWhenLoaded(
+        () => findMessageAnchor(scroller, messageId),
+        () => jumpToMessage(messageId),
+        t("concierge.tasks.sourceMissing"),
+        { through: messageId },
+      );
+    },
+    [scrollerEl, revealWhenLoaded, jumpToMessage, t],
+  );
+  // A click on a quote goes to the original: older pages load until it is
+  // there, up to QUOTE_JUMP_PAGES, and a search that finds nothing ends quietly.
+  const showQuotedMessage = useCallback(
+    (messageId: string) => {
+      const scroller = scrollerEl;
+      if (!scroller) return;
+      void revealWhenLoaded(
+        () => findMessageAnchor(scroller, messageId),
+        () => jumpToMessage(messageId),
+        null,
+        { maxPages: QUOTE_JUMP_PAGES },
+      );
+    },
+    [scrollerEl, revealWhenLoaded, jumpToMessage],
+  );
+  // The unread divider's pill: scrolls to the divider, paging in older
+  // messages first when it is still on one.
+  const showUnreadDivider = useCallback(() => {
+    const scroller = scrollerEl;
+    if (!scroller) return;
+    const find = () => scroller.querySelector<HTMLElement>("[data-concierge-unread-divider]");
+    void revealWhenLoaded(
+      find,
+      () => {
+        const divider = find();
+        if (divider) scrollToAnchor(scroller, divider);
+      },
+      t("concierge.newMessagesMissing"),
+    );
+  }, [scrollerEl, revealWhenLoaded, scrollToAnchor, t]);
   useEffect(() => {
     if (!concierge) return;
-    return onConciergeJump((messageId) => void showSourceMessage(messageId));
+    return onConciergeJump(showSourceMessage);
   }, [concierge, showSourceMessage]);
 
-  const displayedMessageIds = useMemo(
-    () => new Set(displayMessages.map((message) => message.id)),
-    [displayMessages],
-  );
   const replyDraft = useReplyDraftState({
     chatId: mainSessionId ?? undefined,
     sessionId: mainSessionId ?? null,
-    messageIds: displayedMessageIds,
-    jump: jumpToMessage,
+    jump: showQuotedMessage,
     focusComposer: () => composerRef.current?.focus(),
   });
 
+  // Share chat picks every turn in a common chat. A Concierge chat holds its
+  // owner's private history, so there it starts with none picked.
   const enterShareMode = useCallback(() => {
-    setSelectedShareTurns(new Set(mainTurnIds));
+    setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
     setShareMode(true);
-  }, [mainTurnIds]);
+  }, [concierge, mainTurnIds]);
+
+  // Share on a message: the same share mode, with only that message's turn
+  // selected. A message outside the chat's own turns selects nothing. Read
+  // through the ref so the shortcut keeps one identity while messages arrive.
+  const shareMessageTurn = useCallback(
+    (messageId: string, turn?: SharedMessageTurn) => {
+      // The loaded timeline first; else the turn the message's own view knows,
+      // for a message the timeline has not loaded.
+      const turnId = mainSessionId
+        ? (messagesRef.current.get(mainSessionId)?.find((m) => m.id === messageId)?.turnId ??
+          (turn?.sessionId === mainSessionId ? turn.turnId : undefined))
+        : undefined;
+      setSelectedShareTurns(new Set(turnId ? [turnId] : []));
+      setShareMode(true);
+    },
+    [mainSessionId],
+  );
 
   const exitShareMode = useCallback(() => {
     setShareMode(false);
@@ -789,6 +1052,7 @@ export function Chat({
     () => new Set(currentReplyMessages(view, runningTurnId).map((message) => message.id)),
     [view, runningTurnId],
   );
+
   const lastTurnFailed = useMemo(() => isLastTurnFailed(view), [view]);
   // The latest assistant text block. The live row follows it (and smooths it
   // into typing, see LiveTail); the chat does not render for it.
@@ -836,6 +1100,7 @@ export function Chat({
     }
   }, []);
 
+  const queryClient = useQueryClient();
   const isMountedRef = useRef(true);
   useEffect(() => {
     isMountedRef.current = true;
@@ -853,18 +1118,29 @@ export function Chat({
   const hiddenReadsRef = useRef(new Set<string>());
   const markSessionRead = useCallback(
     async (id: string) => {
+      // Marking the chat read first would erase the read mark the divider needs.
+      const waiting = pendingMark();
+      if (waiting) {
+        await waiting;
+        // The chat may have closed, or moved on, while it waited. A read mark
+        // then would clear messages the guardian never saw.
+        if (!isMountedRef.current || id !== mainSessionIdRef.current) return;
+      }
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
         hiddenReadsRef.current.add(id);
         return;
       }
       try {
         await apiMarkSessionRead(id);
-        notifySessionsChanged();
+        // A read changes only this chat's unread mark: clear it in the cached
+        // lists rather than refetch every list that holds it.
+        void markChatSessionReadInCache(queryClient, id);
+        void markConciergeChatReadInCache(queryClient, id);
       } catch {
         // Best effort. The next successful active-session load can retry.
       }
     },
-    [notifySessionsChanged],
+    [queryClient, pendingMark],
   );
   useEffect(() => {
     const flush = () => {
@@ -878,51 +1154,83 @@ export function Chat({
   }, [markSessionRead]);
 
   // Delete the current chat from the navbar's "⋯" menu, then refresh the
-  // sidebar list and drop back to a fresh chat.
-  const handleDeleteSession = useCallback(async () => {
-    setDeleteConfirmOpen(false);
-    if (!mainSessionId) return;
-    try {
-      await deleteSession(mainSessionId);
-    } catch {
-      // best-effort — the list refresh below reconciles either way
-    }
-    notifySessionsChanged();
-    navigate("/chat");
-  }, [mainSessionId, notifySessionsChanged, navigate]);
+  // sidebar list and drop back to a fresh chat. `stopWork` ends a topic
+  // chat's follows and open tasks instead of moving them to the main chat.
+  const handleDeleteSession = useCallback(
+    async (stopWork?: boolean) => {
+      setDeleteConfirmOpen(false);
+      if (!mainSessionId) return;
+      try {
+        if (stopWork) await deleteSession(mainSessionId, { followsAndTasks: "stop" });
+        else await deleteSession(mainSessionId);
+      } catch {
+        // best-effort — the list refresh below reconciles either way
+      }
+      notifySessionsChanged();
+      // `forkable` holds for a common or fork chat, the ordinary chats. Leaving
+      // one for the main chat's page would switch the chat list to Concierge.
+      navigate(forkable ? "/chat" : MAIN_CHAT_PATH);
+    },
+    [forkable, mainSessionId, notifySessionsChanged, navigate],
+  );
 
   // Archive (read-only soft-hide) or restore the current chat. Archiving does
   // not navigate away — the transcript stays open, read-only. The override flips
   // the composer immediately; the sidebar reconciles via the changed event.
-  const handleArchive = useCallback(async () => {
-    if (!mainSessionId) return;
-    setArchivedOverride(true);
-    try {
-      // Archive mutation PATCHes and broadcasts the sessions-changed event.
-      await setArchived(mainSessionId, true);
-    } catch {
-      setArchivedOverride(false);
-    }
-  }, [mainSessionId, setArchived]);
-
-  const handleUnarchive = useCallback(async () => {
-    if (!mainSessionId) return;
-    setArchivedOverride(false);
-    try {
-      await setArchived(mainSessionId, false);
-    } catch {
+  // `stopWork` ends a topic chat's follows and open tasks instead of moving
+  // them to the main chat; `moveFollowsBack` moves back the follows its
+  // archive moved there.
+  const handleArchive = useCallback(
+    async (stopWork = false) => {
+      if (!mainSessionId) return;
       setArchivedOverride(true);
-    }
-  }, [mainSessionId, setArchived]);
+      try {
+        // Archive mutation PATCHes and broadcasts the sessions-changed event.
+        await setArchived(mainSessionId, true, stopWork ? { followsAndTasks: "stop" } : {});
+      } catch {
+        setArchivedOverride(false);
+      }
+    },
+    [mainSessionId, setArchived],
+  );
 
-  const handlePin = useCallback(async () => {
+  const handleUnarchive = useCallback(
+    async (moveFollowsBack = false) => {
+      if (!mainSessionId) return;
+      setArchivedOverride(false);
+      try {
+        await setArchived(mainSessionId, false, moveFollowsBack ? { follows: "moveBack" } : {});
+      } catch {
+        setArchivedOverride(true);
+      }
+    },
+    [mainSessionId, setArchived],
+  );
+
+  // An archived topic chat is in no active list, so it opens as an ordinary
+  // chat: the session itself says it is a topic chat.
+  const isTopicChat =
+    !isMainChat && mainSessionId !== conciergeMainChatId && (concierge || isConciergeSession);
+  // Pins or unpins the open topic chat; the chat list and this header read it again.
+  const togglePin = useCallback(async () => {
     if (!mainSessionId) return;
     try {
-      await setPinned(mainSessionId, !pinnedAt);
+      await pinSession(mainSessionId, !pinnedAt);
     } catch {
-      // Server truth remains unchanged; the next sessions event reconciles.
+      toast.error(t("recentChats.pinFailed", { ns: "common" }));
     }
-  }, [mainSessionId, pinnedAt, setPinned]);
+    emitSessionsChanged();
+  }, [mainSessionId, pinnedAt, t]);
+  // A topic chat asks, as the sidebar does, what becomes of its follows and
+  // open tasks when it is archived, and of the follows that moved when it is
+  // unarchived.
+  const topicArchive = useTopicChatArchive({
+    chatId: mainSessionId ?? null,
+    name: sessionName?.trim() || t("recentChats.newChat", { ns: "common" }),
+    topic: isTopicChat,
+    onArchive: (stopWork) => void handleArchive(stopWork),
+    onUnarchive: (moveBack) => void handleUnarchive(moveBack),
+  });
 
   useEffect(() => {
     onSessionMessageRef.current?.({ sessionId: activeSessionId, turnId: activeStreamTurnId });
@@ -935,8 +1243,14 @@ export function Chat({
       // Only mark loaded once we have data in hand. Marking before the await
       // permanently suppressed retries on any failure — the user would land in
       // a silently-empty chat with no recovery short of a page refresh.
+      // The local rows a fetch may stand in for are the ones sent before it
+      // asked. A row sent while it is on the way is newer than the page it
+      // brings, so it stays until a later fetch holds it.
+      const localBeforeFetch = options.dropLocalOptimistic
+        ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
+        : undefined;
       try {
-        const fetchPage = () => listSessionMessagePage(id, { limit: pageTurns });
+        const fetchPage = () => listSessionMessagePage(id, { limit: pageSize });
         let page = await fetchPage();
         if (page === null && (await recoverMissingSessionRef.current?.(id)))
           page = await fetchPage();
@@ -947,17 +1261,22 @@ export function Chat({
           onSessionNotFoundRef.current?.(id);
           return;
         }
-        const fetchedMessages = orderChatMessages(page.messages);
+        const newestMessages = page.messages;
         const restart = startsNewHistory(messagesRef.current.get(id) ?? [], {
-          messages: fetchedMessages,
+          messages: newestMessages,
           hasOlder: page.nextCursor !== null,
         });
+        const fetchedMessages = page.messages;
         if (fetchedMessages.some((message) => message.traceArchived))
           traceArchivedSessionsRef.current.add(id);
         else traceArchivedSessionsRef.current.delete(id);
-        const dropMessageIds = options.dropLocalOptimistic
-          ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
-          : undefined;
+        const dropMessageIds = localBeforeFetch;
+        // A row sent while the page was on the way stays when the history starts over.
+        const keepMessageIds = new Set(
+          [...(localOptimisticMessageIdsRef.current.get(id) ?? [])].filter(
+            (messageId) => !localBeforeFetch?.has(messageId),
+          ),
+        );
         const commitMessages = () =>
           setMessages((prev) => {
             const next = new Map(prev);
@@ -966,6 +1285,7 @@ export function Chat({
               mergeLatestMessagePage(next.get(id) ?? [], fetchedMessages, {
                 restart,
                 dropMessageIds,
+                keepMessageIds,
               }),
             );
             return next;
@@ -985,8 +1305,13 @@ export function Chat({
         // A refetch of the newest page leaves older loaded pages, and the
         // cursor that reaches past them, as they are.
         if (!loadedSessionsRef.current.has(id) || restart) setOlderCursor(id, page.nextCursor);
-        if (options.dropLocalOptimistic) {
-          localOptimisticMessageIdsRef.current.delete(id);
+        if (localBeforeFetch) {
+          const local = localOptimisticMessageIdsRef.current.get(id);
+          for (const messageId of localBeforeFetch) local?.delete(messageId);
+          if (local?.size === 0) localOptimisticMessageIdsRef.current.delete(id);
+        }
+        if (!loadedSessionsRef.current.has(id) && isReadVisibleSession(id)) {
+          noteOpened(newestMessages);
         }
         loadedSessionsRef.current.add(id);
         if (isReadVisibleSession(id)) {
@@ -997,7 +1322,7 @@ export function Chat({
         // refresh) can retry on the next trigger.
       }
     },
-    [isReadVisibleSession, markSessionRead, pageTurns, setOlderCursor],
+    [shareMode, isReadVisibleSession, markSessionRead, noteOpened, pageSize, setOlderCursor],
   );
 
   // A new message reactivates every turn's steps. Fetch server truth once,
@@ -1344,7 +1669,14 @@ export function Chat({
           } else if (sessionId === mainSessionIdRef.current) {
             // The composer banner belongs to the chat's own turn; a background
             // turn retries quietly.
-            shownError = t("stream.errors.reconnectStatus", { status: res.status });
+            // Rome answering nothing behind its proxy is a dropped
+            // connection, and this loop already reconnects. It is named an
+            // upgrade only when this page knows one is under way.
+            shownError = isUnreachableStatus(res.status)
+              ? isUpgradeUnderWay()
+                ? t("stream.errors.updatingReconnecting")
+                : t("stream.errors.reconnecting")
+              : t("stream.errors.reconnectStatus", { status: res.status });
             setStreamError(shownError);
           }
         } catch {
@@ -1436,14 +1768,29 @@ export function Chat({
   );
   const handleSessionRunning = useCallback(
     (event: z.infer<typeof sessionRunningSchema>) => {
+      if (event.sessionId !== mainSessionIdRef.current) return;
       // A turn queued or ended with the chat still running is one to follow.
-      if (event.running && event.sessionId === mainSessionIdRef.current) kickTurnPoll();
+      if (event.running) kickTurnPoll();
+      // The chat stopped: what its last turn left, such as an error, may have
+      // come after the last read, and no message event announces it.
+      else resyncSessionMessages(event.sessionId);
     },
-    [kickTurnPoll],
+    [kickTurnPoll, resyncSessionMessages],
   );
   // Events missed while the stream was down may include a turn's start.
   const handleSessionEventsReconnect = useCallback(
     (sid: string) => {
+      setLiveReactions(new Map());
+      setLiveStatuses(new Map());
+      setLiveCards(new Map());
+      // The word before the drop may be stale; the server replays the latest
+      // to the new subscription.
+      setLiveWriting((prev) => {
+        if (!prev.has(sid)) return prev;
+        const next = new Map(prev);
+        next.delete(sid);
+        return next;
+      });
       resyncSessionMessages(sid);
       if (sid === mainSessionIdRef.current) kickTurnPoll();
     },
@@ -1485,8 +1832,10 @@ export function Chat({
         localOptimisticMessageIdsRef.current.set(sendingSessionId, localIds);
         setMessages((prev) => {
           const next = new Map(prev);
-          const existing = (next.get(sendingSessionId) ?? []).filter((m) => m.id !== replacesId);
-          next.set(sendingSessionId, mergeChatMessage(existing, message));
+          next.set(
+            sendingSessionId,
+            mergeChatMessage(next.get(sendingSessionId) ?? [], message, replacesId),
+          );
           return next;
         });
       };
@@ -1543,7 +1892,9 @@ export function Chat({
           result.message ||
           (result.status === 0
             ? t("stream.errors.sendInvalidResponse")
-            : t("stream.errors.sendStatus", { status: result.status }));
+            : isUnreachableStatus(result.status)
+              ? t(isUpgradeUnderWay() ? "stream.errors.updating" : "stream.errors.unreachable")
+              : t("stream.errors.sendStatus", { status: result.status }));
         setStreamError({
           message,
           ...(result.code ? { code: result.code } : {}),
@@ -1564,7 +1915,9 @@ export function Chat({
         turnId: pendingTurnId,
         inputState: createResp.inputState ?? (createResp.inputId ? "queued" : undefined),
         role: "user",
-        content: optimisticUserContent,
+        // The stored message, as a reload shows it: an upload's line links its
+        // asset, which the text built before the POST cannot.
+        content: createResp.content ?? optimisticUserContent,
         createdAt: sentAt,
         sender: viewerSenderRef.current,
       };
@@ -1686,7 +2039,7 @@ export function Chat({
             baseOptimisticText.trim() ? ` ${baseOptimisticText}` : ""
           }`
         : baseOptimisticText;
-      const replyTo = snapshot.replyTo;
+      const { replyTo } = snapshot;
       // The quote shows at once; the accepted row carries the server's snapshot of it.
       const optimisticContent = JSON.stringify([
         ...(replyTo
@@ -1714,6 +2067,8 @@ export function Chat({
             formData.set("largeModelSelection", snapshot.largeModelSelection);
           formData.set("reasoningEffort", snapshot.reasoningEffort);
           if (concierge) formData.set("priority", "now");
+          // The reply names its message, the one the quote above shows, and the
+          // server stores it as given.
           if (replyTo) {
             for (const [name, value] of Object.entries(replyFormFields(replyTo))) {
               formData.set(name, value);
@@ -1727,10 +2082,11 @@ export function Chat({
           if (ws) formData.set("workspace", JSON.stringify(ws));
           // POST returns JSON `{ turnId }`. SSE lives on a
           // separate GET keyed by turnId.
-          return postSessionTurn(sendingSessionId, formData, {
+          const accepted = await postSessionTurn(sendingSessionId, formData, {
             onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
             signal: controls.signal,
           });
+          return accepted;
         },
         optimisticContent,
         // A text-only send shows its bubble at once. An upload keeps its text
@@ -1776,6 +2132,35 @@ export function Chat({
       );
     },
     [runTurnLifecycle, workspaceContextRegistry],
+  );
+
+  // The chat's own turn fields, which a widget sends with every event: core
+  // uses them only when the event starts a turn.
+  const widgetTurnFields = useCallback(() => {
+    const meta = composerRef.current?.getMetadataSnapshot();
+    const turn: Record<string, unknown> = {};
+    if (meta) {
+      if (meta.personaId) turn.personaId = meta.personaId;
+      turn.reasoningEffort = meta.reasoningEffort;
+    }
+    const ws = snapshotWorkspaceForSend(workspaceContextRegistry);
+    if (ws) turn.workspace = ws;
+    return turn;
+  }, [workspaceContextRegistry]);
+
+  // A widget's event may start a turn that ends before the poll sees it run,
+  // and the guardian's own answer is never announced: read the chat again.
+  const widgetHost = useMemo<WidgetHost>(
+    () => ({
+      turnFields: widgetTurnFields,
+      onSettled: () => {
+        const sid = mainSessionIdRef.current;
+        if (!sid) return;
+        resyncSessionMessages(sid);
+        kickTurnPoll();
+      },
+    }),
+    [widgetTurnFields, resyncSessionMessages, kickTurnPoll],
   );
 
   const handleDismissAppComponent = useCallback(
@@ -1824,8 +2209,13 @@ export function Chat({
         // within moments; the grace-period check only fires on a dead one.
         forceReleaseIfStuck(STOP_FORCE_RELEASE_GRACE_MS);
       } else {
-        const message = await res.text().catch(() => "");
-        setStreamError(message || t("stream.errors.stopStatus", { status: res.status }));
+        const message = plainErrorText(await res.text().catch(() => ""));
+        setStreamError(
+          message ||
+            (isUnreachableStatus(res.status)
+              ? t(isUpgradeUnderWay() ? "stream.errors.updating" : "stream.errors.unreachable")
+              : t("stream.errors.stopStatus", { status: res.status })),
+        );
       }
     } catch {
       setStreamError(t("stream.errors.stopFallback"));
@@ -1868,39 +2258,30 @@ export function Chat({
     turnEnds,
   );
 
-  const handleDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    dragDepthRef.current += 1;
-    event.dataTransfer.dropEffect = "copy";
-    setIsDraggingFiles(true);
-  }, []);
-
-  const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-  }, []);
-
-  const handleDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) return;
-    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
-    if (dragDepthRef.current === 0) {
-      setIsDraggingFiles(false);
-    }
-  }, []);
-
-  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!dataTransferHasFiles(event.dataTransfer)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    dragDepthRef.current = 0;
-    setIsDraggingFiles(false);
-    const files = extractFilesFromDataTransfer(event.dataTransfer);
-    if (files.length === 0) return;
-    composerRef.current?.addFiles(files);
-    composerRef.current?.focus();
-  }, []);
+  // Share mode hides the composer, so it takes no dropped file: the drop is
+  // refused rather than filed into a draft no one sees.
+  const sharingRef = useRef(false);
+  sharingRef.current = shareMode && Boolean(mainSessionId);
+  // A narrow workspace shows the open tool pane in place of the chat.
+  const toolTasksHost = useToolTasks();
+  const paneCoversChat = toolTrace.paneOpen && Boolean(toolTasksHost?.compact);
+  // Either one stops listening: no one could see it listen.
+  const composerHidden = sharingRef.current || paneCoversChat;
+  useEffect(() => {
+    if (composerHidden) composerRef.current?.stopVoiceInput();
+  }, [composerHidden, composerRef]);
+  // A shared chat takes no files: the composer is hidden while sharing.
+  const fileDrop = useFileDropArea({
+    onActiveChange: setIsDraggingFiles,
+    refuse: () => sharingRef.current,
+    onDrop: (event) => {
+      event.stopPropagation();
+      const files = extractFilesFromDataTransfer(event.dataTransfer);
+      if (files.length === 0) return;
+      composerRef.current?.addFiles(files);
+      composerRef.current?.focus();
+    },
+  });
 
   const refreshActiveSession = useCallback(() => {
     if (mainSessionId) {
@@ -2035,80 +2416,227 @@ export function Chat({
   }, [setToolTrace, traceOwner, traceOpen, traceStreaming]);
   useEffect(() => () => setToolTrace(traceOwner, null), [setToolTrace, traceOwner]);
 
-  const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
+  // Read through context, not the throwing hook: a chat may render outside a workspace.
+  const workspaceStore = useContext(WorkspaceStoreContext);
 
-  const navbar = (
+  const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
+  // The header's Tasks button opens the chat's task list: what runs for it.
+  const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
+  // A dot on the header's Tasks button says a task chat needs its owner.
+  const { needsYou: tasksNeedYou } = useChatTaskList(concierge ? (mainSessionId ?? null) : null);
+  // On a narrow screen the task list's sheet covers the composer.
+  useEffect(() => {
+    if (taskList.sheetOpen) composerRef.current?.stopVoiceInput();
+  }, [taskList.sheetOpen, composerRef]);
+  // The files the chat's agent produced, opened from the header's button or
+  // from a message's link to one of them. docs/domains/chats.md#outputs
+  // Every chat has them, from its header's ⋯ menu.
+  const outputsChatId = mainSessionId ?? null;
+  const outputsPane = useOutputsPane(outputsChatId, { taskChats: concierge });
+  useEffect(() => {
+    if (outputsPane.sheetOpen) composerRef.current?.stopVoiceInput();
+  }, [outputsPane.sheetOpen, composerRef]);
+  // A finished turn may have written or shown a file.
+  useEffect(() => {
+    if (turnEnds > 0 && outputsChatId) {
+      void queryClient.invalidateQueries({ queryKey: chatOutputsKey(outputsChatId) });
+    }
+  }, [turnEnds, outputsChatId, queryClient]);
+  // Read through a ref, so the context stays the same object and the
+  // memoized transcript does not draw again when the list or pane changes.
+  const outputsLatest = useRef({ chatId: outputsChatId, open: outputsPane.open });
+  outputsLatest.current = { chatId: outputsChatId, open: outputsPane.open };
+  const outputLinks = useMemo<OutputLinks>(
+    () => ({
+      open: async (path) => {
+        const { chatId, open } = outputsLatest.current;
+        if (!chatId) return false;
+        try {
+          // The list is read only when a link asks, and kept briefly for the next one.
+          const list = await queryClient.fetchQuery({
+            ...chatOutputsQuery(chatId),
+            staleTime: 30_000,
+          });
+          const output = outputOfLink(list.outputs, path);
+          if (!output) return false;
+          open(output.id);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    }),
+    [queryClient],
+  );
+  // The header's buttons sit on round badges like its name tag, except in the
+  // Mac app's title bar, where they are any window's.
+  const floating = !navbarSlot;
+  const actionBadge = floating
+    ? cn("rounded-full text-foreground", FLOATING_SURFACE)
+    : "text-muted-foreground hover:text-foreground";
+  // The name the header shows for the Concierge, which a share of this chat
+  // labels its turns by too.
+  const conciergeDisplayName = resolveMainAgentDisplayName(conciergeName);
+  // A topic chat before its first message. It has no tasks yet, and its
+  // header's status capsule welcomes the guardian instead of staying hidden.
+  const blankTopicChat = conciergeEmpty && !isMainChat;
+  // A chat started in a project the guardian chose names it in the menu. The
+  // default project is where a chat goes when none was chosen.
+  const chosenProject =
+    !concierge && projectPath && projectPath !== DEFAULT_PROJECT_NAME ? projectPath : null;
+  const openProject = (path: string) => {
+    const logical = `/projects/${path}`;
+    // Where the pane would cover the chat, the Projects page opens instead.
+    if (toolTasksHost?.compact) {
+      navigate(logical);
+      return;
+    }
+    workspaceEventBus?.emit("projects:opened", { paths: [logical], force: true });
+    workspaceStore?.set("followTargetPath", logical);
+  };
+  // The header's ⋯ menu, in three parts: what opens in the side pane (Outputs,
+  // the chosen project), what is done to the
+  // chat (the main chat is only shared), and the model that answered last.
+  // Its Tasks have a button of their own beside it.
+  const opens: HeaderMenuItem[] = [
+    {
+      key: "outputs",
+      icon: <FileOutput />,
+      label: t("concierge.menu.outputs"),
+      run: () => outputsPane.open(),
+    },
+    ...(chosenProject
+      ? [
+          {
+            key: "project",
+            icon: <FolderOpen />,
+            label: t("chatHeader.project", {
+              name: chosenProject.split("/").filter(Boolean).at(-1) ?? chosenProject,
+            }),
+            run: () => openProject(chosenProject),
+          },
+        ]
+      : []),
+  ];
+  const actions: HeaderMenuItem[] = [
+    ...(isMainChat
+      ? []
+      : [
+          {
+            key: "rename",
+            icon: <Pencil />,
+            label: t("recentChats.rename", { ns: "common" }),
+            run: () => setRenameOpen(true),
+          },
+        ]),
+    // Only a topic chat is pinned, and an archived one shows no pin.
+    ...(isTopicChat && mainSessionId && !isArchived
+      ? [
+          {
+            key: "pin",
+            icon: pinnedAt ? <PinOff /> : <Pin />,
+            label: pinnedAt
+              ? t("recentChats.unpin", { ns: "common" })
+              : t("recentChats.pin", { ns: "common" }),
+            run: () => void togglePin(),
+          },
+        ]
+      : []),
+    {
+      key: "share",
+      icon: <Share2 />,
+      label: t("share.title", "Share chat"),
+      run: () => enterShareMode(),
+    },
+    ...(isMainChat
+      ? []
+      : [
+          isArchived
+            ? {
+                key: "unarchive",
+                icon: <ArchiveRestore />,
+                label: t("navbar.unarchive"),
+                run: () => void topicArchive.unarchive(),
+              }
+            : {
+                key: "archive",
+                icon: <Archive />,
+                label: t("navbar.archive"),
+                run: () => void topicArchive.archive(),
+              },
+          {
+            key: "delete",
+            icon: <Trash2 />,
+            label: t("navbar.delete"),
+            destructive: true,
+            run: () => setDeleteConfirmOpen(true),
+          },
+        ]),
+  ];
+  const headerMenu: HeaderMenu = {
+    sections: [opens, actions],
+    caption: model ? (
+      <span
+        className="flex min-w-0 items-center gap-2"
+        title={t("chatHeader.lastModel", { model })}
+      >
+        <Cpu aria-hidden />
+        <span className="truncate">{modelDisplayName(model)}</span>
+      </span>
+    ) : undefined,
+  };
+  const headerBadge = concierge ? (
+    // One header for a blank topic chat and the chat its first send makes, so
+    // the badge, the name and the capsule stay put as the first message lands.
+    <ConciergeHeaderStatus
+      // Every Concierge chat, main or topic, goes by the Concierge's name
+      // here; a topic chat's own name is in the chat list.
+      name={conciergeDisplayName}
+      activity={conciergeActivity}
+      // The main chat with no messages yet draws its own large mascot.
+      badge={!conciergeEmpty || blankTopicChat}
+      // Until its first message, a topic chat's capsule asks what's on the
+      // guardian's mind; any activity, and then idle, take over from there.
+      idleText={blankTopicChat ? t("concierge.topicEmpty.welcome") : undefined}
+    />
+  ) : (
+    <ConciergeHeaderStatus
+      // Nothing while the chat's name loads, so "New chat" never flashes first.
+      name={sessionLoading ? null : sessionName?.trim() || t("sidebar.newChat")}
+      // The same mascot as the Concierge's; the tag names the chat instead.
+      // A chat bound to an app's agent shows that app's icon, as its agent.
+      avatar={
+        pinnedAgentMention?.iconUrl ? (
+          <AgentAvatar
+            iconUrl={pinnedAgentMention.iconUrl}
+            label={pinnedAgentMention.appLabel}
+            size="sm"
+          />
+        ) : undefined
+      }
+      showsActivity={false}
+    />
+  );
+
+  const navbarActions = (
     <>
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        {untitledEmptyChat ? null : (
-          <>
-            <SessionAvatar
-              iconUrl={pinnedAgentMention?.iconUrl}
-              label={pinnedAgentMention?.appLabel}
-              model={model}
-              reasoningEffort={reasoningEffort}
-            />
-            {sessionLoading ? (
-              <SessionLoadingTitle />
-            ) : (
-              <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
-                {(concierge && mainSessionId === conciergeMainChatId && conciergeName) ||
-                  sessionName?.trim() ||
-                  pinnedAgentMention?.appLabel ||
-                  t("sidebar.newChat")}
-              </span>
-            )}
-            {concierge ? <ConciergeTasksPill chatId={mainSessionId ?? null} /> : null}
-            {/* The agent's app beside a titled chat. The Concierge's is always
-                Rome, so it shows none. */}
-            {!concierge && sessionName?.trim() && pinnedAgentMention && (
-              <span className="shrink-0 truncate text-aux text-muted-foreground">
-                {pinnedAgentMention.appLabel}
-              </span>
-            )}
-          </>
-        )}
-      </div>
       {mainSessionId && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <IconButton
-              size="sm"
-              label={t("navbar.more")}
-              icon={<MoreHorizontal />}
-              className="text-muted-foreground hover:text-foreground"
-            />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => void handlePin()}>
-              {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-              {pinnedAt ? t("navbar.unpin") : t("navbar.pin")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => enterShareMode()}>
-              <Share2 className="size-4" />
-              {t("share.title", "Share chat")}
-            </DropdownMenuItem>
-            {isArchived ? (
-              <DropdownMenuItem onSelect={() => void handleUnarchive()}>
-                <ArchiveRestore className="size-4" />
-                {t("navbar.unarchive")}
-              </DropdownMenuItem>
-            ) : (
-              <DropdownMenuItem onSelect={() => void handleArchive()}>
-                <Archive className="size-4" />
-                {t("navbar.archive")}
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem variant="destructive" onSelect={() => setDeleteConfirmOpen(true)}>
-              <Trash2 className="size-4" />
-              {t("navbar.delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <ChatHeaderActions
+          floating={floating}
+          // A Concierge chat's tasks; an ordinary chat, or a topic chat before
+          // its first message, has none.
+          tasks={
+            concierge && !blankTopicChat
+              ? { needsYou: tasksNeedYou, open: () => taskList.open() }
+              : undefined
+          }
+          menu={headerMenu}
+        />
       )}
       {!toolTrace.paneOpen && (
         <IconButton
-          size="sm"
+          size={floating ? "md" : "sm"}
+          className={floating ? actionBadge : undefined}
           data-coach="add-widget"
           aria-expanded={false}
           onClick={() => toolTrace.setPaneCollapsed(false)}
@@ -2129,123 +2657,188 @@ export function Chat({
     </>
   );
 
-  const page = (
-    <TooltipProvider delayDuration={150}>
-      {sessionEventIds.map((sid) => (
-        <ChatSessionEvents
-          key={sid}
-          sessionId={sid}
-          onMessageInsert={handleMessageInsert}
-          onSessionName={handleSessionName}
-          onSessionRunning={handleSessionRunning}
-          onReconnect={handleSessionEventsReconnect}
+  // A Concierge chat's header floats over its messages: no bar, just the
+  // mascot's badge with the name pill under it in the middle, and round
+  // buttons either side, centred on the badge. The equal side columns keep the
+  // middle centred over the chat. Only its pieces take the pointer, so the
+  // messages under the gaps stay reachable.
+  const floatingHeader = (trailing: ReactNode) => (
+    <div
+      data-concierge-header
+      className="pointer-events-none absolute inset-x-0 top-0 z-20 grid grid-cols-[1fr_minmax(0,max-content)_1fr] items-center gap-x-2 px-2 pt-2 max-md:pt-[calc(var(--rome-safe-area-top)+0.5rem)] md:px-3 md:pt-[var(--control-header-pt)]"
+    >
+      <ChatEdgeBlur edge="top" />
+      {/* The phone shell's back and menu buttons move in here, and its bar
+          steps aside. Not while the tool pane covers the chat: the shell's
+          bar is then the only way back from the pane. */}
+      {taskOf ? (
+        // A task chat names the Concierge chat it reports to, and goes back
+        // there. On the phone it takes the place of the chat list's button.
+        <BackToConciergeChat
+          to={taskOf.main ? MAIN_CHAT_PATH : `/chat/${encodeURIComponent(taskOf.conciergeChatId)}`}
+          name={taskOf.main ? t("taskLink.mainChat") : taskOf.conciergeChatName}
         />
-      ))}
-      <div
-        className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas [--background:var(--chat-canvas)]"
-        onDragEnter={handleDragEnter}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
-        {/* ---- Main Chat Area ---- */}
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          {isDraggingFiles && (
-            <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-16 border-2 border-dashed border-info bg-info-bg/85 text-ui text-info-fg md:inset-6">
-              {t("composer.dropFiles")}
-            </div>
+      ) : paneCoversChat ? null : (
+        <SlotOutlet
+          name={CONCIERGE_LEADING_SLOT}
+          className="pointer-events-auto col-start-1 row-start-1 flex items-center gap-1 justify-self-start md:hidden"
+        />
+      )}
+      {headerBadge}
+      <div className="pointer-events-auto col-start-3 row-start-1 flex items-center gap-1 justify-self-end">
+        {trailing}
+      </div>
+    </div>
+  );
+  // In the Mac app the title bar takes the header apart: the buttons go into
+  // the bar like any chat's, and the badge and pill hang from its lower edge.
+  // Not while the tool pane covers the chat, whose mascot it would be.
+  const conciergeHeaderWith = navbarSlot
+    ? (trailing: ReactNode) => (
+        <>
+          <SlotContent name={navbarSlot}>
+            <div className="min-w-0 flex-1" />
+            {trailing}
+          </SlotContent>
+          {paneCoversChat ? null : (
+            <SlotContent name={CONCIERGE_TITLEBAR_SLOT}>{headerBadge}</SlotContent>
           )}
+        </>
+      )
+    : floatingHeader;
+  // Every chat floats the same header: its agent's badge, its name, and its
+  // buttons either side.
+  const chatHeader = (
+    <>
+      {conciergeHeaderWith(navbarActions)}
+      {taskList.sheet}
+    </>
+  );
 
-          {/* No rule under the bar: the chat canvas runs up to the top. A new
+  const page = (
+    <WidgetHostContext.Provider value={widgetHost}>
+      <TooltipProvider delayDuration={150}>
+        {sessionEventIds.map((sid) => (
+          <ChatSessionEvents
+            key={sid}
+            sessionId={sid}
+            onMessageInsert={handleMessageInsert}
+            onMessageReaction={handleMessageReaction}
+            onMessageStatus={handleMessageStatus}
+            onChatCardSettled={handleChatCardSettled}
+            onSessionName={handleSessionName}
+            onSessionRunning={handleSessionRunning}
+            onMessageWriting={handleMessageWriting}
+            onReconnect={handleSessionEventsReconnect}
+          />
+        ))}
+        <div
+          className="@container/chat relative flex h-full overflow-hidden bg-chat-canvas [--background:var(--chat-canvas)]"
+          {...fileDrop.dropAreaProps}
+        >
+          {/* ---- Main Chat Area ---- */}
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            {isDraggingFiles && (
+              <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-16 border-2 border-dashed border-info bg-info-bg/85 text-ui text-info-fg md:inset-6">
+                {t("composer.dropFiles")}
+              </div>
+            )}
+
+            {/* No rule under the bar: the chat canvas runs up to the top. A new
               chat with no app has nothing to name yet, since the welcome below
               says it already, so the bar keeps only its height and controls
               and the page does not move when the first message starts the
               session. */}
-          {navbarSlot ? (
-            <SlotContent name={navbarSlot}>{navbar}</SlotContent>
-          ) : (
-            <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
-              {navbar}
-            </div>
-          )}
-          {/* The message scroller — the ONLY scrolling node in the chat. It is
+            {chatHeader}
+            {/* The message scroller — the ONLY scrolling node in the chat. It is
               bounded by the /chat viewport shell, so message reflow (mermaid,
               late media) stays inside here and never resizes the document or
               moves the sidebar/composer. `overscroll-contain` kills page-level
               rubber-banding/scroll-chaining; momentum scrolling keeps the iPad
               touch feel. */}
-          {/* Positioning + measurement parent for the timeline rail. Its own
+            {/* Positioning + measurement parent for the timeline rail. Its own
               container name matters: `@container/chat` is declared on the outer
               element, which also holds the standalone trace overlay, so a gate
               keyed to it would not follow the transcript column itself. */}
-          <div className="@container/transcript relative flex min-h-0 flex-1 flex-col">
-            {/* The left inset opens the timeline rail's lane. Without it the
+            <div className="@container/transcript relative flex min-h-0 flex-1 flex-col">
+              {/* The left inset opens the timeline rail's lane. Without it the
                 transcript's own `max-w-5xl` body reaches the container edge
                 once the container drops under 1024px, and the markers would land
                 on the bubbles. Padding sits inside the scroller's border box,
                 so the scrollbar does not move — only the content shifts. The
                 query MUST match ChatTimelineRail's visibility gate. */}
-            <div
-              ref={attachScroller}
-              className={cn(
-                "relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
-                // Concierge has no timeline rail, so no lane for it.
-                !concierge && "@min-[48rem]/transcript:pl-8",
-              )}
-            >
-              {conciergeEmpty ? (
-                mainSessionId === conciergeMainChatId ? (
-                  <ConciergeEmptyState
-                    onPick={(prompt) => composerRef.current?.insertText(prompt)}
-                  />
-                ) : (
-                  // A topic chat: its starters send themselves as its first message.
-                  <ConciergeTopicEmptyState
-                    onStart={(prompt) => composerRef.current?.submit(prompt)}
-                  />
-                )
-              ) : mainSessionId ? (
-                <>
-                  {hasOlder(mainSessionId) ? (
-                    <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
-                  ) : null}
-                  <MessageList
-                    rows={rows}
-                    live={{
-                      isStreaming: displayedStreaming,
-                      runningTurnId,
-                      quiet: activeSessionStream?.quiet,
-                      snapshot: currentSnapshot,
-                      textStore: liveTextStore,
-                      blockIx: activeSessionStream?.assistantBlockIx,
-                      textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
-                      identity: mainIdentity,
-                    }}
-                    selection={
-                      shareMode
-                        ? {
-                            selectedTurns: selectedShareTurns,
-                            selectableSessionId: mainSessionId,
-                            onToggleTurn: toggleShareTurn,
+              <div
+                ref={attachScroller}
+                className={cn(
+                  "scrollbar-hover-shown relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
+                  // Concierge has no timeline rail, so no lane for it. Its
+                  // header floats over the messages, so the first one starts
+                  // below it, and a jump to a message stops below it too.
+                  concierge
+                    ? "concierge-header-clear"
+                    : "concierge-header-clear @min-[48rem]/transcript:pl-8",
+                )}
+              >
+                {conciergeEmpty ? (
+                  mainSessionId === conciergeMainChatId ? (
+                    <ConciergeEmptyState
+                      onPick={(prompt) => composerRef.current?.insertText(prompt)}
+                    />
+                  ) : (
+                    // A topic chat: a suggestion goes into the composer, unsent.
+                    <ConciergeTopicEmptyState
+                      onStart={(prompt) => composerRef.current?.insertText(prompt)}
+                    />
+                  )
+                ) : mainSessionId ? (
+                  <>
+                    {hasOlder(mainSessionId) ? (
+                      <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
+                    ) : null}
+                    <TaskLinksScope chatId={concierge ? mainSessionId : null}>
+                      <TaskChatContext.Provider value={isTaskChat}>
+                        <MessageList
+                          rows={rows}
+                          live={{
+                            isStreaming: displayedStreaming,
+                            runningTurnId,
+                            quiet: activeSessionStream?.quiet,
+                            writing: liveWriting.get(activeSessionId) ?? null,
+                            snapshot: currentSnapshot,
+                            textStore: liveTextStore,
+                            blockIx: activeSessionStream?.assistantBlockIx,
+                            textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
+                            identity: mainIdentity,
+                          }}
+                          selection={
+                            shareMode
+                              ? {
+                                  selectedTurns: selectedShareTurns,
+                                  selectableSessionId: mainSessionId,
+                                  onToggleTurn: toggleShareTurn,
+                                }
+                              : undefined
                           }
-                        : undefined
-                    }
-                    contentRef={attachContent}
-                    onOpenLiveTrace={openLiveTraceDrawer}
-                    onOpenStoredTrace={openStoredTraceDrawer}
-                    onOpenSubagentTrace={openSubagentTraceDrawer}
-                    activeTraceTarget={traceDrawerTarget}
-                    subagentIconByName={subagentIconByName}
-                    actions={blockActions}
-                    feedback
-                    variant={variant}
-                  />
-                </>
-              ) : (
-                emptyState
-              )}
+                          contentRef={attachContent}
+                          onOpenLiveTrace={openLiveTraceDrawer}
+                          onOpenStoredTrace={openStoredTraceDrawer}
+                          onOpenSubagentTrace={openSubagentTraceDrawer}
+                          activeTraceTarget={traceDrawerTarget}
+                          subagentIconByName={subagentIconByName}
+                          actions={blockActions}
+                          feedback
+                          fork={forkable}
+                          variant={variant}
+                          unreadFrom={unread?.firstId ?? null}
+                        />
+                      </TaskChatContext.Provider>
+                    </TaskLinksScope>
+                  </>
+                ) : (
+                  emptyState
+                )}
 
-              {/* The single floating composer — a `sticky bottom-0` floor inside the
+                {/* The single floating composer — a `sticky bottom-0` floor inside the
                 message scroller, so messages scroll behind its translucent blur
                 ("scroll under the composer") instead of stopping at a solid dock.
                 In share mode it's swapped for the ShareBar,
@@ -2258,20 +2851,22 @@ export function Chat({
                 also takes pointer events there, so a tap on the canvas cannot
                 land on a link it hides. It stays inside the scroller, so the
                 scroll and keyboard geometry match the desktop layout. */}
-              <div
-                ref={setFloorEl}
-                data-chat-floor
-                className={cn(
-                  "pointer-events-none sticky bottom-0 z-10 px-3 max-md:pointer-events-auto max-md:bg-chat-canvas md:px-6",
-                  // Presentation mode gives the draft's bottom gap 5x its normal
-                  // size so a recording framed on the empty state keeps the
-                  // composer clear of the capture's lower edge.
-                  presentationMode && !mainSessionId
-                    ? "pb-[calc(var(--rome-safe-area-bottom)+5rem)] md:pb-[calc(var(--rome-safe-area-bottom)+7.5rem)]"
-                    : "pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]",
-                )}
-              >
-                {/* Back to the live tail. It rides the sticky floor rather than the
+                <div
+                  ref={setFloorEl}
+                  data-chat-floor
+                  className={cn(
+                    "pointer-events-none sticky bottom-0 px-3 md:px-6",
+                    "z-10 max-md:pointer-events-auto max-md:bg-chat-canvas",
+                    // Presentation mode gives the draft's bottom gap 5x its normal
+                    // size so a recording framed on the empty state keeps the
+                    // composer clear of the capture's lower edge.
+                    presentationMode && !mainSessionId
+                      ? "pb-[calc(var(--rome-safe-area-bottom)+5rem)] md:pb-[calc(var(--rome-safe-area-bottom)+7.5rem)]"
+                      : "pb-[calc(var(--rome-safe-area-bottom)+1rem)] md:pb-[calc(var(--rome-safe-area-bottom)+1.5rem)]",
+                  )}
+                >
+                  <ChatEdgeBlur edge="bottom" />
+                  {/* Back to the live tail. It rides the sticky floor rather than the
                     scroller, so it tracks a composer whose height changes with the
                     draft, and it sits in every floor state — scrolling has nothing
                     to do with which one is showing.
@@ -2289,149 +2884,232 @@ export function Chat({
                     the END of the transition, so the faded-out button stops taking
                     clicks and leaves the tab order instead of lurking invisibly
                     over the transcript. */}
-                <IconButton
-                  size="md"
-                  label={t("jumpToLatest")}
-                  icon={<ArrowDown />}
-                  // IconButton mirrors its label into `title`, which the browser
-                  // renders as a native tooltip. The aria-label already names the
-                  // control, and a lone arrow above the composer needs no gloss.
-                  title={undefined}
-                  onClick={() => scrollToBottom("auto")}
-                  className={cn(
-                    // `touch-target` because this control, unlike the timeline
-                    // rail, has no width gate: it is reachable on a phone, where
-                    // the 36px step is under the 44px floor.
-                    "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
-                    !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
-                  )}
-                />
-                <div className="pointer-events-auto relative mx-auto max-w-5xl">
-                  {/* Sits on the composer's top-right corner, clear of the
+                  <IconButton
+                    size="md"
+                    label={t("jumpToLatest")}
+                    icon={<ArrowDown />}
+                    // IconButton mirrors its label into `title`, which the browser
+                    // renders as a native tooltip. The aria-label already names the
+                    // control, and a lone arrow above the composer needs no gloss.
+                    title={undefined}
+                    onClick={() => scrollToBottom("auto")}
+                    className={cn(
+                      // `touch-target` because this control, unlike the timeline
+                      // rail, has no width gate: it is reachable on a phone, where
+                      // the 36px step is under the 44px floor.
+                      "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
+                      !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
+                    )}
+                  />
+                  <div className="pointer-events-auto relative mx-auto max-w-5xl">
+                    {/* Sits on the composer's top-right corner, clear of the
                       centered jump to latest. */}
-                  {mainSessionId && (
-                    <div className="pointer-events-none absolute right-0 bottom-full mb-2">
-                      <ChatPendingCardJump
-                        scroller={scrollerEl}
-                        content={contentEl}
-                        floor={floorEl}
-                        currentReplyMessageIds={currentReplyMessageIds}
+                    {mainSessionId && (
+                      <div className="pointer-events-none absolute right-0 bottom-full mb-2">
+                        {concierge ? (
+                          <ConciergeCardJump
+                            scroller={scrollerEl}
+                            content={contentEl}
+                            floor={floorEl}
+                            currentReplyMessageIds={currentReplyMessageIds}
+                            messages={view.displayMessages}
+                            liveCards={liveCards}
+                          />
+                        ) : (
+                          <ChatPendingCardJump
+                            scroller={scrollerEl}
+                            content={contentEl}
+                            floor={floorEl}
+                            currentReplyMessageIds={currentReplyMessageIds}
+                          />
+                        )}
+                      </div>
+                    )}
+                    {shareMode && mainSessionId ? (
+                      <ShareBar
+                        sessionId={mainSessionId}
+                        selectedTurnIds={[...selectedShareTurns]}
+                        agentName={concierge ? conciergeDisplayName : mainIdentity.name}
+                        onExit={exitShareMode}
                       />
+                    ) : null}
+                    {/* Share mode hides the composer rather than unmounting it,
+                      so a draft is still there when share mode ends. */}
+                    <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
+                      {isArchived ? (
+                        <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
+                          <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void topicArchive.unarchive()}
+                          >
+                            <ArchiveRestore data-icon="inline-start" className="size-3.5" />
+                            {t("archived.unarchive")}
+                          </Button>
+                        </div>
+                      ) : concierge ? (
+                        <ConciergeComposer
+                          ref={composerRef}
+                          chatId={mainSessionId}
+                          boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                          onSend={handleComposerSend}
+                          isStreaming={displayedStreaming}
+                          onStop={stopComposerTurn}
+                          streamError={streamError}
+                          // An open topic chat names itself in its box.
+                          chatName={isMainChat ? null : sessionName?.trim() || null}
+                          modelSelection={
+                            chatModelPickable
+                              ? { value: chatModelValue, onChange: pickChatModel }
+                              : undefined
+                          }
+                        />
+                      ) : (
+                        <ChatComposer
+                          persistNewChatDraft={!mainSessionId}
+                          chatId={mainSessionId}
+                          ref={composerRef}
+                          // The box look lives on the composer now so the chip row can sit
+                          // outside it; this mount adds the floating blur/translucency.
+                          boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                          onSend={handleComposerSend}
+                          // A draft picks the session's project, model, and agent.
+                          // A session keeps its project and agent, and its model
+                          // can change from the next turn.
+                          showProjectSelector={!mainSessionId}
+                          showModelSelector={!mainSessionId || chatModelPickable}
+                          chatModelSelection={composerModelSelection}
+                          initialProjectName={initialProjectName}
+                          initialDeviceFolder={initialDeviceFolder}
+                          initialAgentMention={initialAgentMention}
+                          isStreaming={displayedStreaming}
+                          onStop={stopComposerTurn}
+                          streamError={streamError}
+                          pinnedAgentMention={pinnedAgentMention}
+                          lockAgentMention={Boolean(mainSessionId)}
+                          // Locks once the turn that saved the card has ended, so
+                          // Stop stays in reach while it still streams.
+                          lockedReason={
+                            lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
+                          }
+                        />
+                      )}
                     </div>
-                  )}
-                  {shareMode && mainSessionId ? (
-                    <ShareBar
-                      sessionId={mainSessionId}
-                      selectedTurnIds={[...selectedShareTurns]}
-                      onExit={exitShareMode}
-                    />
-                  ) : isArchived ? (
-                    <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
-                      <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void handleUnarchive()}
-                      >
-                        <ArchiveRestore data-icon="inline-start" className="size-3.5" />
-                        {t("archived.unarchive")}
-                      </Button>
-                    </div>
-                  ) : concierge ? (
-                    <ConciergeComposer
-                      ref={composerRef}
-                      boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
-                      onSend={handleComposerSend}
-                      isStreaming={displayedStreaming}
-                      onStop={stopComposerTurn}
-                      streamError={streamError}
-                      modelSelection={
-                        chatModelPickable
-                          ? { value: chatModelValue, onChange: pickChatModel }
-                          : undefined
-                      }
-                    />
-                  ) : (
-                    <ChatComposer
-                      persistNewChatDraft={!mainSessionId}
-                      ref={composerRef}
-                      // The box look lives on the composer now so the chip row can sit
-                      // outside it; this mount adds the floating blur/translucency.
-                      boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
-                      onSend={handleComposerSend}
-                      // A draft picks the session's project, model, and agent.
-                      // A session keeps its project and agent, and its model
-                      // can change from the next turn.
-                      showProjectSelector={!mainSessionId}
-                      showModelSelector={!mainSessionId || chatModelPickable}
-                      chatModelSelection={composerModelSelection}
-                      initialProjectName={initialProjectName}
-                      initialDeviceFolder={initialDeviceFolder}
-                      initialAgentMention={initialAgentMention}
-                      isStreaming={displayedStreaming}
-                      onStop={stopComposerTurn}
-                      streamError={streamError}
-                      pinnedAgentMention={pinnedAgentMention}
-                      lockAgentMention={Boolean(mainSessionId)}
-                      // Locks once the turn that saved the card has ended, so
-                      // Stop stays in reach while it still streams.
-                      lockedReason={
-                        lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
-                      }
-                    />
-                  )}
+                  </div>
                 </div>
-              </div>
-              {/* Pairs with the empty state's `md:flex-auto`. Both use auto basis,
+                {/* Pairs with the empty state's `md:flex-auto`. Both use auto basis,
                   so the free space splits evenly above and below the greeting and
                   composer; a 0 basis (`flex-1`) on either side puts them off-center.
                   Phones keep the docked composer, where the keyboard owns the
                   bottom of the screen. */}
-              {centerDraftComposer && !mainSessionId ? (
-                <div aria-hidden data-draft-center-spacer className="hidden flex-auto md:block" />
+                {centerDraftComposer && !mainSessionId ? (
+                  <div aria-hidden data-draft-center-spacer className="hidden flex-auto md:block" />
+                ) : null}
+              </div>
+              {concierge && unread && mainSessionId ? (
+                // Under the floating header, on the transcript's top-right corner.
+                <div className="pointer-events-none absolute top-[calc(var(--rome-concierge-header-offset)+0.5rem)] right-3 z-10 md:right-6">
+                  <ConciergeUnreadPill
+                    scroller={scrollerEl}
+                    content={contentEl}
+                    count={unread.count}
+                    more={unread.more}
+                    anchored={unread.firstId !== null}
+                    onJump={showUnreadDivider}
+                  />
+                </div>
               ) : null}
+              {concierge ? null : (
+                <ChatTimelineRail
+                  scroller={scrollerEl}
+                  content={contentEl}
+                  questions={timelineQuestions}
+                  onJump={jumpToMessage}
+                />
+              )}
             </div>
-            {concierge ? null : (
-              <ChatTimelineRail
-                scroller={scrollerEl}
-                content={contentEl}
-                questions={timelineQuestions}
-                onJump={jumpToMessage}
-              />
-            )}
           </div>
+          <TraceDrawer
+            target={traceDrawerTarget}
+            onClose={closeTraceDrawer}
+            outlet={toolTrace.outlet}
+            renderInlineBlock={(block, key) =>
+              renderSingleEntry(block, key, {
+                onApprovalResolved: refreshActiveSession,
+                compact: true,
+              })
+            }
+            renderRunBlocks={(blocks, live) =>
+              renderFlatEntries(blocks, {
+                onApprovalResolved: refreshActiveSession,
+                compact: true,
+                live,
+              })
+            }
+          />
+          {topicArchive.dialog}
+          {mainSessionId && !isMainChat ? (
+            <RomeInputDialog
+              open={renameOpen}
+              title={t("recentChats.rename", { ns: "common" })}
+              inputLabel={t("recentChats.renameLabel", { ns: "common" })}
+              confirmLabel={t("recentChats.rename", { ns: "common" })}
+              initialValue={sessionName?.trim() ?? ""}
+              onCancel={() => setRenameOpen(false)}
+              onConfirm={(value) => {
+                setRenameOpen(false);
+                const name = value.trim();
+                if (!name || name === sessionName?.trim()) return;
+                // The chat list and this header read the name again.
+                void renameSession(mainSessionId, name)
+                  .catch(() => undefined)
+                  .then(emitSessionsChanged);
+              }}
+            />
+          ) : null}
+          {/* A topic chat asks, as the sidebar does, what becomes of its
+              follows and open tasks. */}
+          {concierge && mainSessionId && !isMainChat ? (
+            <TopicChatDeleteDialog
+              open={deleteConfirmOpen}
+              chatId={mainSessionId}
+              name={sessionName?.trim() || t("recentChats.newChat", { ns: "common" })}
+              archived={isArchived}
+              onCancel={() => setDeleteConfirmOpen(false)}
+              onConfirm={(stopWork) => void handleDeleteSession(stopWork)}
+            />
+          ) : (
+            <RomeConfirmDialog
+              open={deleteConfirmOpen}
+              destructive
+              title={t("navbar.delete")}
+              description={t("navbar.deleteConfirm")}
+              confirmLabel={t("navbar.delete")}
+              onCancel={() => setDeleteConfirmOpen(false)}
+              onConfirm={() => void handleDeleteSession()}
+            />
+          )}
         </div>
-        <TraceDrawer
-          target={traceDrawerTarget}
-          onClose={closeTraceDrawer}
-          outlet={toolTrace.outlet}
-          renderInlineBlock={(block, key) =>
-            renderSingleEntry(block, key, {
-              onApprovalResolved: refreshActiveSession,
-              compact: true,
-            })
-          }
-          renderRunBlocks={(blocks, live) =>
-            renderFlatEntries(blocks, {
-              onApprovalResolved: refreshActiveSession,
-              compact: true,
-              live,
-            })
-          }
-        />
-        <RomeConfirmDialog
-          open={deleteConfirmOpen}
-          destructive
-          title={t("navbar.delete")}
-          description={t("navbar.deleteConfirm")}
-          confirmLabel={t("navbar.delete")}
-          onCancel={() => setDeleteConfirmOpen(false)}
-          onConfirm={() => void handleDeleteSession()}
-        />
-      </div>
-    </TooltipProvider>
+      </TooltipProvider>
+    </WidgetHostContext.Provider>
   );
 
-  return <ReplyDraftProvider value={replyDraft}>{page}</ReplyDraftProvider>;
+  return (
+    <ReplyDraftProvider value={replyDraft}>
+      <MessageSharingContext.Provider value={shareMessageTurn}>
+        <LiveReactionsProvider value={liveReactions}>
+          <LiveMessageStatusesProvider value={liveStatuses}>
+            <LiveTaskCardsProvider value={liveCards}>
+              <OutputLinksContext.Provider value={outputLinks}>
+                {page}
+                {outputsPane.sheet}
+              </OutputLinksContext.Provider>
+            </LiveTaskCardsProvider>
+          </LiveMessageStatusesProvider>
+        </LiveReactionsProvider>
+      </MessageSharingContext.Provider>
+    </ReplyDraftProvider>
+  );
 }

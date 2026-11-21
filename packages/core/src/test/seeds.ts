@@ -1,12 +1,12 @@
 import { platformOf } from "@rome/api-types/platform";
 import { randomUUID } from "node:crypto";
 import type { DrizzleDb } from "../db/index.js";
-import { PeopleRepository } from "../db/repositories/people.js";
-import { ApprovalsRepository } from "../db/repositories/approvals.js";
+import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
+import { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
-import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
-import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
+import { WebhookInvocationsRepository } from "../apps/repositories/webhook-invocations.js";
+import { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
 import { GUARDIAN_PROFILE_PATH } from "../profile-memory.js";
 
 /**
@@ -82,7 +82,7 @@ export async function seedBaseline(db: DrizzleDb): Promise<BaselineIds> {
 // Baseline builders (internal — tests should call seedBaseline instead)
 
 async function seedPersonsBaseline(db: DrizzleDb) {
-  const repo = new PeopleRepository(db);
+  const repo = new DrizzlePeopleRepository(db);
 
   const guardianId = "guardian";
   await repo.createWithId(guardianId, {

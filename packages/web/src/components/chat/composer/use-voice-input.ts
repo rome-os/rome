@@ -1,0 +1,373 @@
+import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { useVoiceInputInfo } from "@/hooks/use-voice-input-info";
+import { shellAllowsMicrophone } from "@/lib/electron-shell";
+import {
+  type Dictation,
+  type DictationDeps,
+  type DictationStop,
+  startDictation,
+} from "@/lib/voice-input/dictation";
+
+export type VoiceInputState = "idle" | "listening" | "finishing";
+
+/** The field's text with the heard words in, and where they sit in it. */
+export interface VoiceInputPreview {
+  value: string;
+  start: number;
+  end: number;
+}
+
+interface Anchor {
+  /** The field as it was when listening started. */
+  original: string;
+  before: string;
+  after: string;
+  start: number;
+  end: number;
+}
+
+const HAN = /\p{Script=Han}/u;
+
+/**
+ * Whether a space belongs between `left` and `right`, as a guardian typing
+ * would add one: before a word, after anything but a space. Chinese takes none.
+ */
+function needsSpace(left: string, right: string): boolean {
+  if (!left || /\s/.test(left) || HAN.test(left) || HAN.test(right)) return false;
+  return /[\p{L}\p{N}]/u.test(right);
+}
+
+/**
+ * The spoken text as it lands between `before` and `after`: a space separates
+ * it from a word right before or right after the cursor. Chinese takes none.
+ */
+export function spokenInsertion(before: string, heard: string, after = ""): string {
+  const text = heard.trim();
+  if (!text) return "";
+  const lead = needsSpace(before.slice(-1), text[0]) ? " " : "";
+  const trail = needsSpace(text.slice(-1), after[0] ?? "") ? " " : "";
+  return lead + text + trail;
+}
+
+/**
+ * Inserts `text` at `el`'s selection the way typing does: the browser fires
+ * the input event and records one undo step. The browser inserts into the
+ * focused element, so this does nothing unless focus reached `el`.
+ */
+function insertNatively(el: HTMLTextAreaElement, text: string): boolean {
+  if (document.activeElement !== el || typeof document.execCommand !== "function") return false;
+  inserting = true;
+  try {
+    return document.execCommand("insertText", false, text);
+  } finally {
+    inserting = false;
+  }
+}
+
+// True while `insertNatively` runs, so its input event is not read as an edit.
+let inserting = false;
+
+/**
+ * Dictation into a composer's textarea. While listening, the heard text shows
+ * at the cursor in `preview`, drawn over the field, and the field is
+ * read-only. The field's own value stays as it was: writing it would clear the
+ * browser's undo history. When listening ends the text is inserted the way
+ * typing inserts it, as one edit, so one undo removes it, earlier edits stay
+ * undoable, and the field's change handler sees it as typed text.
+ *
+ * The draft holds the heard words as they arrive, through `keepDraft`, since
+ * the field's value does not.
+ *
+ * Why listening stopped on its own is the notice, which the caller keeps with
+ * the field's draft. It goes away on the next edit or send. Leaving the chat
+ * or the page while listening stops it, and `keepDraft` saves why at once,
+ * since the field is going away.
+ */
+export function useVoiceInput({
+  textareaRef,
+  value,
+  setValue,
+  notice,
+  setNotice,
+  keepDraft,
+  onSend,
+  deps,
+}: {
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  value: string;
+  setValue: (next: string) => void;
+  notice: DictationStop | null;
+  setNotice: (next: DictationStop | null) => void;
+  /**
+   * Saves `text` as the draft at once without changing the field, with `stop`
+   * when given or else the current notice.
+   */
+  keepDraft: (text: string, stop?: DictationStop) => void;
+  /** Sends the field, for `stopAndSend` once the last words are in. */
+  onSend?: () => void;
+  deps?: DictationDeps;
+}) {
+  const info = useVoiceInputInfo();
+  const [state, setState] = useState<VoiceInputState>("idle");
+  const [preview, setPreview] = useState<VoiceInputPreview | null>(null);
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
+  const [asking, setAsking] = useState(false);
+  const anchorRef = useRef<Anchor | null>(null);
+  const dictationRef = useRef<Dictation | null>(null);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  // Waits for a hidden field to show again, to insert the spoken text natively.
+  const waitingRef = useRef<ResizeObserver | null>(null);
+
+  const setValueRef = useRef(setValue);
+  setValueRef.current = setValue;
+  const onSendRef = useRef(onSend);
+  onSendRef.current = onSend;
+  // Set by `stopAndSend`: the send waits for the last words.
+  const sendWhenDoneRef = useRef(false);
+  const keepDraftRef = useRef(keepDraft);
+  keepDraftRef.current = keepDraft;
+  const setNoticeRef = useRef(setNotice);
+  setNoticeRef.current = setNotice;
+  // A new `keepDraft` can save somewhere new, as when a first send makes the
+  // chat while voice input listens, so the heard words are saved there too.
+  useEffect(() => {
+    if (previewRef.current) keepDraft(previewRef.current.value);
+  }, [keepDraft]);
+  useEffect(() => {
+    // The heard words go into the draft at once, since the field is going
+    // away. A page the browser keeps for Back stays mounted, so the field is
+    // given back here too, with the words in; on unmount these updates do
+    // nothing.
+    const leave = (reason: "left-chat" | "page-reloaded") => {
+      sendWhenDoneRef.current = false;
+      if (!dictationRef.current) return;
+      dictationRef.current.cancel();
+      dictationRef.current = null;
+      const text = previewRef.current?.value ?? anchorRef.current?.original ?? valueRef.current;
+      anchorRef.current = null;
+      keepDraftRef.current(text, { reason });
+      setState("idle");
+      setPreview(null);
+      if (text !== valueRef.current) setValueRef.current(text);
+      setAsking(false);
+      setNoticeRef.current({ reason });
+    };
+    // `persisted`: the page went into the back/forward cache, not away.
+    const onPageHide = (event: PageTransitionEvent) =>
+      leave(event.persisted ? "left-chat" : "page-reloaded");
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      leave("left-chat");
+      waitingRef.current?.disconnect();
+    };
+  }, []);
+
+  const commit = useCallback(
+    (heard: string) => {
+      const anchor = anchorRef.current;
+      anchorRef.current = null;
+      if (!anchor) return;
+      const insertion = spokenInsertion(anchor.before, heard, anchor.after);
+      // The field and selection as they were, so the spoken text replaces
+      // the selection the way typing would, and undo brings it back. The
+      // field is read-only while listening, so its value is still the one
+      // listening started from.
+      flushSync(() => {
+        setState("idle");
+        setPreview(null);
+        if (valueRef.current !== anchor.original) setValue(anchor.original);
+      });
+      const el = textareaRef.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(anchor.start, anchor.end);
+      }
+      // Nothing goes in, so the field's value does not change and the draft
+      // takes it back from the heard words it held.
+      if (!insertion) {
+        keepDraftRef.current(anchor.original);
+        return;
+      }
+      if (el && insertNatively(el, insertion)) return;
+      const spoken = anchor.before + insertion + anchor.after;
+      setValue(spoken);
+      // A hidden field cannot take focus, as when share mode or a card hides
+      // the composer. The draft keeps the text meanwhile, and once the field
+      // shows the text goes in again natively, so one undo still removes it.
+      if (!el || typeof ResizeObserver === "undefined") return;
+      const waiting = new ResizeObserver(() => {
+        if (el.getClientRects().length === 0) return;
+        waiting.disconnect();
+        waitingRef.current = null;
+        // The guardian changed the field first: their edit stands.
+        if (valueRef.current !== spoken) return;
+        flushSync(() => setValue(anchor.original));
+        el.focus();
+        el.setSelectionRange(anchor.start, anchor.end);
+        if (!insertNatively(el, insertion)) setValue(spoken);
+      });
+      waitingRef.current = waiting;
+      waiting.observe(el);
+    },
+    [setValue, textareaRef],
+  );
+
+  const start = useCallback(() => {
+    if (dictationRef.current) return;
+    waitingRef.current?.disconnect();
+    waitingRef.current = null;
+    const el = textareaRef.current;
+    const current = valueRef.current;
+    const startAt = el ? el.selectionStart : current.length;
+    const endAt = el ? el.selectionEnd : current.length;
+    anchorRef.current = {
+      original: current,
+      before: current.slice(0, startAt),
+      after: current.slice(endAt),
+      start: startAt,
+      end: endAt,
+    };
+    setNotice(null);
+    setState("listening");
+    dictationRef.current = startDictation(
+      {
+        onText: (heard) => {
+          const anchor = anchorRef.current;
+          if (!anchor) return;
+          const insertion = spokenInsertion(anchor.before, heard, anchor.after);
+          const next = {
+            value: anchor.before + insertion + anchor.after,
+            start: anchor.before.length,
+            end: anchor.before.length + insertion.length,
+          };
+          // `leave` can run before this renders, and must save these words.
+          previewRef.current = next;
+          setPreview(next);
+          keepDraftRef.current(next.value);
+        },
+        onAsking: setAsking,
+        onDone: (heard, stop) => {
+          dictationRef.current = null;
+          setAsking(false);
+          commit(heard);
+          setState("idle");
+          setPreview(null);
+          setNotice(stop);
+          // A stop of its own, such as a lost connection, sends nothing: the
+          // guardian reads why before sending.
+          if (sendWhenDoneRef.current && !stop) setSendAsked((n) => n + 1);
+          sendWhenDoneRef.current = false;
+        },
+      },
+      deps,
+    );
+  }, [commit, deps, setNotice, setValue, textareaRef]);
+
+  const dismissNotice = useCallback(() => setNotice(null), [setNotice]);
+  // Runs inside the field's React change handler, so the edit's own value
+  // lands in the same render. A native listener rendered first and put the
+  // old value back, dropping the typed character.
+  const noticeEdited = useCallback(() => {
+    if (!inserting) setNotice(null);
+  }, [setNotice]);
+
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const stop = useCallback(() => {
+    if (!dictationRef.current || stateRef.current !== "listening") return;
+    setState("finishing");
+    dictationRef.current.stop();
+  }, []);
+
+  const stopAndSend = useCallback(() => {
+    if (!dictationRef.current) return;
+    sendWhenDoneRef.current = true;
+    stop();
+  }, [stop]);
+
+  // Counts the sends `stopAndSend` asked for. The effect runs after the
+  // render that holds the last words, so the send reads them.
+  const [sendAsked, setSendAsked] = useState(0);
+  useEffect(() => {
+    if (sendAsked > 0) onSendRef.current?.();
+  }, [sendAsked]);
+
+  // A field no one can see does not listen: a closed tab or pane hides it
+  // with `display: none`, which leaves it no boxes.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (state !== "listening" || !el || typeof ResizeObserver === "undefined") return;
+    const watching = new ResizeObserver(() => {
+      if (el.getClientRects().length === 0) stop();
+    });
+    watching.observe(el);
+    return () => watching.disconnect();
+  }, [state, stop, textareaRef]);
+
+  // The screen stays on while voice input is on: a guardian dictating does not
+  // touch the device. The browser drops the lock whenever the page is hidden,
+  // so it is asked for again when the page shows.
+  const on = state !== "idle";
+  useEffect(() => {
+    const wakeLock = typeof navigator === "undefined" ? undefined : navigator.wakeLock;
+    if (!on || !wakeLock) return;
+    let held: WakeLockSentinel | null = null;
+    let ended = false;
+    const hold = () => {
+      if (document.visibilityState !== "visible") return;
+      wakeLock.request("screen").then(
+        (sentinel) => {
+          // Requests made across a hide and show can both resolve; one lock
+          // is kept, so cleanup releases every lock taken.
+          if (ended || (held && !held.released)) void sentinel.release();
+          else held = sentinel;
+        },
+        // A refused lock, as on low battery, leaves dictation as it was.
+        () => {},
+      );
+    };
+    hold();
+    document.addEventListener("visibilitychange", hold);
+    return () => {
+      ended = true;
+      document.removeEventListener("visibilitychange", hold);
+      void held?.release();
+    };
+  }, [on]);
+
+  const level = useCallback(() => dictationRef.current?.level() ?? 0, []);
+
+  return {
+    /**
+     * False hides the voice control: the instance is not signed in to Rome
+     * Cloud, Rome Cloud does not allow the account, or this is a desktop app
+     * too old to give the dashboard the microphone. A dictation under way
+     * keeps its control, so the guardian can always stop it.
+     */
+    available: (Boolean(info.data?.available) && shellAllowsMicrophone()) || state !== "idle",
+    state,
+    /** Why listening last stopped on its own, or null. */
+    notice,
+    /** True while the browser asks the guardian for the microphone. */
+    asking,
+    /** Clears the notice, as a send does. */
+    dismissNotice,
+    /** Call from the field's change handler: an edit clears the notice. */
+    noticeEdited,
+    /** While true, the field is read-only and sending waits. */
+    active: state !== "idle",
+    toggle: state === "listening" ? stop : start,
+    /** Stops listening as the stop control does. Does nothing while idle. */
+    stop,
+    /** Stops listening, then sends once the last words are in the field. Does nothing while idle. */
+    stopAndSend,
+    /** The field's text with the heard words in while voice input is on, or null. */
+    preview,
+    /** The microphone's loudness from 0 to 1 right now, or 0 while it is not open. */
+    level,
+  };
+}

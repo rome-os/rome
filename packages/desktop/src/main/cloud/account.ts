@@ -36,7 +36,7 @@ export interface CloudAccountOptions {
 /**
  * This computer's Rome Cloud sign-in as the desktop app, and the sessions it
  * opens on the user's hosted instances. The protocol lives in
- * `@rome-os/libs/native-auth`, shared with Rome Mobile; this class only wires
+ * `@rome-os/libs/native-auth`; this class only wires
  * it to Electron's keychain, cookies, and browser.
  */
 export class CloudAccount {

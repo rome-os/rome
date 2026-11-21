@@ -62,3 +62,29 @@ it("shows duration only after the live turn settles", () => {
   rerender(<CollapsedTraceButton summary={summary} onClick={() => {}} />);
   expect(screen.getByRole("button").textContent).toBe("0 apps · 2 steps · 40s");
 });
+
+it("names a guided failure without its raw text, and keeps the raw text for any other", () => {
+  const failed: TraceSummary = {
+    distinctApps: [],
+    totalSteps: 0,
+    invocationCounts: {},
+    turnStatus: "error",
+    terminalError: "Overloaded",
+  };
+  const { rerender } = render(
+    <CollapsedTraceButton
+      summary={{ ...failed, terminalErrorCode: "transient" }}
+      onClick={() => {}}
+    />,
+  );
+  expect(screen.getByText("Error: Overloaded")).toBeTruthy();
+
+  rerender(
+    <CollapsedTraceButton
+      summary={{ ...failed, terminalErrorCode: "credits_used_up" }}
+      onClick={() => {}}
+    />,
+  );
+  expect(screen.getByText("Error")).toBeTruthy();
+  expect(screen.queryByText(/Overloaded/)).toBeNull();
+});

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { Hono } from "hono";
 import { diagnosisRoutes } from "./diagnosis.js";
-import type { ResourceProbes } from "../../lib/resource-readings.js";
-import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
+import type { ResourceProbes } from "../../instance/resource-readings.js";
+import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 
 type DiagnosisDeps = Parameters<typeof diagnosisRoutes>[0];
 

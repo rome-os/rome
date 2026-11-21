@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from "react";
  */
 export type TabStatus = "idle" | "working" | "failed" | "needs-you" | "done";
 
-// When several chats share the tab (the main pane plus pinned side chats), the
+// When several chats share the tab (the main pane plus pinned fork chats), the
 // one that most needs the guardian wins.
 const PRIORITY: Record<TabStatus, number> = {
   idle: 0,

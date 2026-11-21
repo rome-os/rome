@@ -16,6 +16,7 @@ A step's value is unitless. Four steps hold a division because a rounded decimal
 | `--rome-line-height-127` | `calc(1.75 / 1.375)` | 14/11 |
 | `--rome-line-height-133` | `calc(4 / 3)` | 4/3 |
 | `--rome-line-height-143` | `calc(1.25 / 0.875)` | 10/7 |
+| `--rome-line-height-175` | `1.75` | 7/4 |
 
 Each division is the target line box in rem over the [font size step](font-size-primitives.md) in rem.
 
@@ -29,6 +30,7 @@ Each division is the target line box in rem over the [font size step](font-size-
 - **The formula picks the step for each size.** Step 123 puts 13px on the grid but puts 14px on 17.2px. `[mech]`
 - **One ratio may serve several sizes.** Step 133 is exact for sizes 15, 18, and 24. `[mech]`
 - **A step holds the exact ratio, not its rounding.** Flat 1.23 and 1.43 values both miss the grid by a hundredth of a pixel. `[mech]`
+- **Chat message prose takes a loose step outside the formula.** Step 175 puts 16px on a 28px box, which stays on the grid. Long answers and CJK text read more easily on it than on the formula's 20px. `[human]`
 - **Wrapped text uses the loosest result.** A CJK glyph nearly fills its em box. The 14px pairing leaves a 20px line box. `[human]`
 
 ## Forbidden usage

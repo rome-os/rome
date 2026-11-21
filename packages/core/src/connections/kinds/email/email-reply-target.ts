@@ -1,4 +1,4 @@
-import type { MailProvider, RomeMailListItem } from "../../../lib/rome-cloud-mail.js";
+import type { MailProvider, RomeMailListItem } from "./rome-cloud-mail.js";
 
 const PAGE_SIZE = 100;
 const MAX_MESSAGES = 2000;
@@ -70,7 +70,7 @@ export async function resolveEmailReplyTarget(
         new Error(
           `Looking up email thread "${threadId}" took longer than ${budgetMs / 1000}s. ` +
             "No email was sent. Retry, or name the email to answer in `inReplyToMessageId` " +
-            "(`replyToMessageId` in send_message).",
+            "(`replyToMessageId` in system:send_message).",
         ),
       );
     }, budgetMs);
@@ -131,7 +131,7 @@ async function scan(
   throw new Error(
     `Cannot resolve email thread "${threadId}" within the reply lookup limits. ` +
       "No email was sent. Name the email to answer in `inReplyToMessageId` " +
-      "(`replyToMessageId` in send_message), " +
+      "(`replyToMessageId` in system:send_message), " +
       "or omit `threadId` and set `to` to start a new email.",
   );
 }

@@ -94,7 +94,7 @@ describe("signer", () => {
     const { socketPath, jkt } = await start();
     expect(await call(socketPath, "GET", "/v1/health")).toEqual({
       status: 200,
-      body: { ok: true, jkt, aud: "https://cloud.example" },
+      body: { ok: true, jkt, aud: "https://cloud.example", vault: 2 },
     });
     expect((await call(socketPath, "GET", "/v1/token")).status).toBe(404);
     expect((await call(socketPath, "POST", "/v1/sign")).status).toBe(404);

@@ -61,4 +61,30 @@ export interface LoginUsageEvent {
   occurredAt: string;
 }
 
-export type UsageEvent = TurnUsageEvent | ActionRunUsageEvent | LoginUsageEvent;
+/**
+ * One listening session of voice input on a Rome Cloud transcription session.
+ * Sessions on the instance's own provider are not reported.
+ */
+export interface TranscriptionUsageEvent {
+  type: "transcription";
+  /** Rome Cloud's session id, which is also `sessionId`: one event per session. */
+  eventId: string;
+  kind: "voice_input";
+  /** The session id Rome Cloud returned with the credential. */
+  sessionId: string;
+  provider: string;
+  model: string;
+  /** Seconds of audio sent to the provider, to a tenth. */
+  seconds: number;
+  /** `ended`, or the reason listening stopped. */
+  status: string;
+  /** Wall time from the start of listening to its end. */
+  durationMs: number;
+  occurredAt: string;
+}
+
+export type UsageEvent =
+  | TurnUsageEvent
+  | ActionRunUsageEvent
+  | LoginUsageEvent
+  | TranscriptionUsageEvent;

@@ -174,10 +174,12 @@ export async function listWatchSources(
       },
     },
   };
-  const watch: WatchSection[] = [];
-  for (const adapter of adapters) {
-    const connected = await adapter.connected(once).catch(() => false);
-    watch.push(await watchSection(once, adapter, connected));
-  }
+  // Each adapter waits on its own service, so they are asked at once, in adapter order.
+  const watch: WatchSection[] = await Promise.all(
+    adapters.map(async (adapter) => {
+      const connected = await adapter.connected(once).catch(() => false);
+      return watchSection(once, adapter, connected);
+    }),
+  );
   return { services, watch };
 }

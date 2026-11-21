@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import type { ExternalAgent, AgentMessagingClient } from "../../lib/rome-cloud-agents.js";
-import { readAccountDirectory } from "../../people/account-directory.js";
+import type {
+  ExternalAgent,
+  AgentMessagingClient,
+} from "../../connections/integrations/rome-cloud-agents.js";
+import { readAccountDirectory } from "../../people/phone-book/index.js";
 import { buildTestDeps, createTestDb, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 import { createAccountNames } from "./account-names.js";

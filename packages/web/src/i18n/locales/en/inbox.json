@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "Inbox",
-    "description": "Where your messages come from, the rules that govern triage, and recent triage activity.",
     "loading": "Loading…",
     "savedFlash": "Saved",
     "saveFailedFallback": "Failed to save. Please try again."
@@ -11,12 +10,11 @@
     "description": "Recent decisions the sentinel made on untrusted incoming messages."
   },
   "policy": {
-    "title": "Triage policy",
-    "description": "Rules that decide which incoming messages Rome trusts, replies to, and reviews."
+    "title": "Triage policy"
   },
   "sources": {
     "title": "Message sources",
-    "description": "Accounts that feed your inbox. Connections are managed in <a>Connections settings</a>.",
+    "description": "Add or remove sources in <a>Connections settings</a>.",
     "status": {
       "connected": "Connected",
       "configured": "Configured",
@@ -27,7 +25,7 @@
     },
     "channels": {
       "telegram": "Telegram",
-      "telegramUser": "Telegram User",
+      "telegramUser": "Telegram user",
       "whatsapp": "WhatsApp",
       "wechat": "WeChat",
       "discord": "Discord",

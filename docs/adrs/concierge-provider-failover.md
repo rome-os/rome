@@ -30,8 +30,8 @@ A move cannot return to a model the same chat left automatically within ten minu
 
 Future diffs must respect:
 
-- Ordinary chats, task chats, routines, summons, side chats, handoffs and subagents still fail closed.
+- Ordinary chats, task chats, routines, summons, fork chats, handoffs and subagents still fail closed.
 - Every automatic move records its reason independently of the agent speaking. A retry alone records no switch notice.
 - A same-provider move or retry keeps the thread once a turn on it has succeeded. A thread whose first turn failed is not on record yet, so its recovery starts a new thread and reads the chat's stored messages. A cross-provider move loses the thread, not Rome's transcript, and carries a continuation notice.
 - Avoiding repeated work relies on the recovery prompt. It requires history and task-list reads, verification, and a guardian question before an unconfirmed side effect repeats.
-- This exception and an explicit guardian selection are the only inputs that move an existing session to another model.
+- This exception, an explicit guardian selection, and the one-time move of a Concierge chat that Rome itself put on an old default model to the same provider's strong model ([model strength](../domains/agents.md#model-strength)) are the only inputs that move an existing session to another model. That move posts no notice: it keeps the provider, and the owner chose nothing it overrides.

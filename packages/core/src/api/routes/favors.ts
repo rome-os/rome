@@ -2,11 +2,8 @@ import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import type { ApiDeps } from "../deps.js";
-import { resolveVisitorSession } from "../../lib/visitor-session.js";
-import {
-  FavorServiceRequestError,
-  FavorServiceUnavailableError,
-} from "../../favors/rome-cloud-service.js";
+import { resolveVisitorSession } from "../../access/visitor-session.js";
+import { FavorServiceRequestError, FavorServiceUnavailableError } from "../../favors/index.js";
 
 function toStatus(err: unknown): ContentfulStatusCode {
   if (err instanceof FavorServiceRequestError) return err.status as ContentfulStatusCode;

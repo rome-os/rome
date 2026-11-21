@@ -9,6 +9,7 @@
 //      stubbed fetch.
 
 import { mkdtemp, rm } from "node:fs/promises";
+import { channelMessageOf } from "../../chats/connected-accounts/channel-message.js";
 import { sendThrough } from "../../chats/connected-accounts/connection-ports.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -267,7 +268,7 @@ describe("wechat inbound delivery", () => {
     statePath = "";
   });
 
-  it("delivers the transport's ChannelMessage as it is, and materializes media from raw", async () => {
+  it("delivers the transport's message as apps receive it, and materializes media from raw", async () => {
     statePath = await mkdtemp(join(tmpdir(), "rome-wechat-delivery-"));
     // A group message that quotes an earlier message and carries an image, so
     // every optional field WeChat sets is present.
@@ -321,7 +322,7 @@ describe("wechat inbound delivery", () => {
     );
     const delivered: unknown[] = [];
     talker.start(
-      (msg) => delivered.push(msg),
+      (msg) => delivered.push(channelMessageOf(msg, "wechat")),
       () => {},
     );
     await rs.waitFor(() => expect(delivered).toHaveLength(1));

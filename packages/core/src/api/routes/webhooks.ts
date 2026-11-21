@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { createLogger } from "../../logger.js";
-import { withoutSessionActor } from "../../lib/session-actor.js";
+import { withoutSessionActor } from "../../access/session-actor.js";
 import { createWebhookAuth } from "../middleware/webhook-auth.js";
 import {
   InvalidAppApiPathError,
@@ -11,9 +11,10 @@ import {
   toWebhookInvocationResponse,
   toWebhookInvocationStatus,
 } from "../helpers.js";
-import type { ActionEngine } from "../../actions/engine.js";
-import type { ActionResult } from "../../actions/types.js";
-import type { WebhookInvocationsRepository } from "../../db/repositories/webhook-invocations.js";
+import { suggestFullId } from "../../apps/actions/registry.js";
+import type { ActionEngine } from "../../apps/actions/engine.js";
+import type { ActionResult } from "../../apps/actions/types.js";
+import type { WebhookInvocationsRepository } from "../../apps/repositories/webhook-invocations.js";
 import type { ApiDeps } from "../deps.js";
 
 const log = createLogger("api:webhooks");
@@ -134,7 +135,16 @@ export function webhookRoutes(deps: ApiDeps, webhookApiKey: string | undefined):
 
     const actionConfig = actionLoader.get(actionName);
     if (!actionConfig) {
-      return c.json({ error: "Action not found", actionName }, 404);
+      // A webhook URL saved with the action's name alone answers with the
+      // full ID of the webhook action it meant.
+      const webhookIds = [...actionLoader.getAllRecords()]
+        .filter(([, record]) => record.config.webhook)
+        .map(([id]) => id);
+      const didYouMean = suggestFullId(webhookIds, actionName);
+      return c.json(
+        { error: "Action not found", actionName, ...(didYouMean && { didYouMean }) },
+        404,
+      );
     }
     if (!actionConfig.webhook) {
       return c.json({ error: "Action is not webhook-enabled", actionName }, 403);

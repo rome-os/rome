@@ -2,14 +2,15 @@ import { createServer, request, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "@rstest/core";
-import { attachDesktopProxy } from "./desktop-proxy-server.js";
+import { attachDesktopProxy } from "./desktops/desktop-proxy-server.js";
 import { attachLiveEventsServer, type LiveEventSources } from "./live-events-server.js";
-import { attachNodeConsoleServer } from "./node-console-server.js";
-import { DashboardAccessState } from "./lib/dashboard-access-state.js";
+import { attachNodeConsoleServer } from "./desktops/node-console-server.js";
+import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { attachTerminalServer } from "./terminal-server.js";
+import { attachVoiceInputServer, type VoiceInputSource } from "./voice-input/index.js";
 import { guardianAuth } from "./db/schema.js";
 import { createTestDb, type TestDb } from "./test/db.js";
-import { createSession } from "./lib/auth.js";
+import { createSession, createVisitorSession } from "./access/auth.js";
 import { createNodeConfig } from "@rome-os/node-core/client";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,17 +30,31 @@ const noSources: LiveEventSources = {
   hasChatSession: async () => false,
   subscribeChatSession: () => () => {},
   subscribeAppCatalog: () => () => {},
-  subscribeConciergeTasks: () => () => {},
+  subscribeConciergeActivity: () => () => {},
+  hasChatTasks: async () => false,
+  subscribeChatTasks: () => () => {},
 };
 
-function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {
+// Signed in to Rome Cloud, so the voice input socket is served.
+const silentSource: VoiceInputSource = {
+  available: () => true,
+  info: async () => ({ available: true, place: null }),
+  open: async () => ({ ok: false, reason: "service-unavailable" }),
+};
+
+function attachAll(
+  server: ReturnType<typeof createServer>,
+  db: TestDb["db"],
+  dashboardAccess = new DashboardAccessState(),
+) {
   const handlers = [
-    attachDesktopProxy(server, db),
-    attachTerminalServer(server, db),
-    attachLiveEventsServer(server, db, new DashboardAccessState(), noSources),
+    attachDesktopProxy(server, db, dashboardAccess),
+    attachTerminalServer(server, db, dashboardAccess),
+    attachLiveEventsServer(server, db, dashboardAccess, noSources),
     attachNodeConsoleServer(server, db, () =>
       createNodeConfig({ directory: join(tmpdir(), "rome-node-console-unconfigured") }),
     ),
+    attachVoiceInputServer(server, db, silentSource, null, new DashboardAccessState()),
   ];
   return { close: () => handlers.forEach((handler) => handler.close()) };
 }
@@ -85,6 +100,7 @@ describe("guardian WebSocket upgrade handlers", () => {
     "/ws/terminal?preset=claude-login",
     "/ws/events",
     "/ws/node",
+    "/ws/voice-input",
   ])("owns socket errors before checking %s", async (path) => {
     const testDb = createTestDb();
     const server = createServer();
@@ -108,7 +124,7 @@ describe("guardian WebSocket upgrade handlers", () => {
     }
   });
 
-  it("blocks anonymous and cross-origin requests before reaching websockify, the terminal, live events, or the node console", async () => {
+  it("blocks anonymous and cross-origin requests before reaching websockify, the terminal, live events, the node console, or voice input", async () => {
     const testDb = createTestDb();
     await testDb.db.insert(guardianAuth).values({
       id: "auth-1",
@@ -134,6 +150,7 @@ describe("guardian WebSocket upgrade handlers", () => {
       "/ws/terminal?preset=claude-login",
       "/ws/events",
       "/ws/node",
+      "/ws/voice-input",
     ];
 
     try {
@@ -151,6 +168,14 @@ describe("guardian WebSocket upgrade handlers", () => {
       ).toBe(101);
       expect(
         await upgrade(port, "/ws/node", { origin: `http://127.0.0.1:${port}` }, { direct: true }),
+      ).toBe(101);
+      expect(
+        await upgrade(
+          port,
+          "/ws/voice-input",
+          { origin: `http://127.0.0.1:${port}` },
+          { direct: true },
+        ),
       ).toBe(101);
 
       const cookie = `rome_session=${createSession("guardian-1")}`;
@@ -173,6 +198,47 @@ describe("guardian WebSocket upgrade handlers", () => {
         }),
       ).toBe(101);
       expect(upstreamConnections).toBe(1);
+    } finally {
+      handlers.close();
+      await close(server);
+      await close(upstream);
+      testDb.close();
+      if (previousPort === undefined) delete process.env.ROME_NOVNC_PORT;
+      else process.env.ROME_NOVNC_PORT = previousPort;
+    }
+  });
+
+  it("admits a dashboard admin to the desktop and the Claude sign-in, but not the node console", async () => {
+    const testDb = createTestDb();
+    const upstream = createServer();
+    upstream.on("upgrade", (_req, socket) => {
+      socket.end(
+        "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+      );
+    });
+    const upstreamPort = await listen(upstream);
+    const previousPort = process.env.ROME_NOVNC_PORT;
+    process.env.ROME_NOVNC_PORT = String(upstreamPort);
+    const dashboardAccess = new DashboardAccessState();
+    dashboardAccess.setCloudEmailAccess(["admin@example.com"]);
+    const server = createServer();
+    const handlers = attachAll(server, testDb.db, dashboardAccess);
+    const as = (email: string) => ({
+      cookie: `rome_visitor=${createVisitorSession("account-1", email)}`,
+      origin: "http://rome.example",
+      "x-forwarded-host": "rome.example",
+      "x-forwarded-proto": "http",
+    });
+
+    try {
+      const port = await listen(server);
+      expect(await upgrade(port, "/desktop-proxy/websockify", as("admin@example.com"))).toBe(101);
+      // Past the gate, an unknown preset is refused without spawning anything.
+      expect(await upgrade(port, "/ws/terminal?preset=none", as("admin@example.com"))).toBe(400);
+      expect(await upgrade(port, "/ws/node", as("admin@example.com"))).toBe(401);
+      for (const path of ["/desktop-proxy/websockify", "/ws/terminal?preset=none"]) {
+        expect(await upgrade(port, path, as("stranger@example.com"))).toBe(401);
+      }
     } finally {
       handlers.close();
       await close(server);

@@ -35,7 +35,7 @@ function migrate(sqlite: Database.Database) {
   for (const statement of migrationSql(TAG)) sqlite.exec(statement);
 }
 
-// Two of Rome's Feishu accounts in one group, and a visitor on the dashboard.
+// Two of Rome's Feishu accounts in one group, and a dashboard admin.
 const GROUP_AND_DASHBOARD = `
   INSERT INTO channels (id, connection_kind, platform, platform_account_id, created_at)
     VALUES ('sales', 'feishu', 'feishu', 'bot-sales', 1), ('support', 'feishu', 'feishu', 'bot-support', 1);

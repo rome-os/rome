@@ -403,8 +403,8 @@ describe("AppsIndexPage reactivity", () => {
     expect(screen.queryByText("Chat")).toBeNull();
   });
 
-  it("uses page tiles for exactly four first-party apps and keeps other app images", async () => {
-    const firstParty = ["briefing", "inbox", "showcases", "skills"];
+  it("uses page tiles for exactly three first-party apps and keeps other app images", async () => {
+    const firstParty = ["inbox", "showcases", "skills"];
     mockBackend({
       installed: [
         ...firstParty.map((id) =>
@@ -425,7 +425,7 @@ describe("AppsIndexPage reactivity", () => {
       ],
     });
     renderPage();
-    await screen.findByText("briefing");
+    await screen.findByText("inbox");
     const section = screen.getByRole("region", { name: "Built-in apps" });
     const memoryTile = within(section)
       .getByText("Memory")
@@ -1140,7 +1140,7 @@ describe("AppsIndexPage ghost tiles", () => {
 
     await user.click(await screen.findByRole("button", { name: "Browse store" }));
 
-    expect(await screen.findByRole("dialog", { name: "App store" })).toBeTruthy();
+    expect(await screen.findByRole("dialog", { name: "App Store" })).toBeTruthy();
   });
 
   it("appends the ghost tile after the real tiles, and hides it while searching", async () => {
@@ -1185,7 +1185,7 @@ describe("AppsIndexPage in the Mac app's title bar", () => {
     await screen.findByText("Weather");
     const bar = within(screen.getByTestId("titlebar"));
     expect(bar.getByRole("heading", { level: 1, name: "Apps" })).toBeTruthy();
-    expect(bar.getByRole("button", { name: "App store" })).toBeTruthy();
+    expect(bar.getByRole("button", { name: "App Store" })).toBeTruthy();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(document.querySelector('[data-slot="page-header"]')).toBeNull();
   });

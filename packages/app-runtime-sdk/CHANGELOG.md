@@ -1,5 +1,44 @@
 # @rome-os/app-runtime
 
+## [0.11.6](https://github.com/rome-os/rome/compare/app-runtime-v0.11.5...app-runtime-v0.11.6) (2026-11-19)
+
+
+### Features
+
+* **app-runtime:** add a Markdown widget component ([#2316](https://github.com/rome-os/rome/issues/2316)) ([78f3467](https://github.com/rome-os/rome/commit/78f3467fab2793d11142b0c939c43cd43a02f34c))
+* **app-runtime:** agent cards gain usual ranges, bar charts, callouts, icons and links ([#2335](https://github.com/rome-os/rome/issues/2335)) ([f7827f2](https://github.com/rome-os/rome/commit/f7827f24c31b4142299ffa9d21cb655d660e2d57))
+* **connector:** add Freshdesk to the connectable Composio toolkits ([#2375](https://github.com/rome-os/rome/issues/2375)) ([822172c](https://github.com/rome-os/rome/commit/822172c8ec40ed4a4fea909cea65792c2e824ec4))
+* **ios:** connect Calendar, synced and read and written live ([#2338](https://github.com/rome-os/rome/issues/2338)) ([4f888c2](https://github.com/rome-os/rome/commit/4f888c2bc8ac978553e513280de01387d9a15871))
+* **vault:** require a guardian PIN, checked by the signer, for grants and secret writes ([#2309](https://github.com/rome-os/rome/issues/2309)) ([fd79e29](https://github.com/rome-os/rome/commit/fd79e29e65dc1f909488cec0ebcccd8cf9785dab))
+
+## [0.11.5](https://github.com/rome-os/rome/compare/app-runtime-v0.11.4...app-runtime-v0.11.5) (2026-11-17)
+
+
+### Features
+
+* **app-runtime:** add a test-only back door that keeps Inbox off the chief of staff's accounts ([#2312](https://github.com/rome-os/rome/issues/2312)) ([fc9e079](https://github.com/rome-os/rome/commit/fc9e0799c67e10267132c05720c5b4f03341493c))
+* **app-runtime:** name who said each message an app's hook hears ([#2262](https://github.com/rome-os/rome/issues/2262)) ([3dea170](https://github.com/rome-os/rome/commit/3dea170796ffa88ccda4d8770827f290b9c4b65a))
+* basic vault for guardian-entered secrets held by the signer ([#2239](https://github.com/rome-os/rome/issues/2239)) ([6a6fd88](https://github.com/rome-os/rome/commit/6a6fd88106f29f730fc607ade6d3de98a62e6121))
+* **concierge:** make a chat thread the reply chain, separate from tasks ([#2285](https://github.com/rome-os/rome/issues/2285)) ([a5bab5d](https://github.com/rome-os/rome/commit/a5bab5d6a354603ec23047ed6b6cd322a1ced0dc))
+
+## [0.11.4](https://github.com/rome-os/rome/compare/app-runtime-v0.11.3...app-runtime-v0.11.4) (2026-11-15)
+
+
+### Features
+
+* **app-runtime:** an app's card described as data can wait for an answer ([#2125](https://github.com/rome-os/rome/issues/2125)) ([db1fc76](https://github.com/rome-os/rome/commit/db1fc766c67cde539e4ab44ac4b6f38b62a029e8))
+* **app-runtime:** describe the ask-user card as data, with inputs and an answer ([#2068](https://github.com/rome-os/rome/issues/2068)) ([4d5c71a](https://github.com/rome-os/rome/commit/4d5c71a63d09e295f988c23c4946c296a4dcccb0))
+* **app-runtime:** let an action describe its chat card as data ([#2065](https://github.com/rome-os/rome/issues/2065)) ([dd9d29b](https://github.com/rome-os/rome/commit/dd9d29b2c9e94a04fd83f5725d4937b417ad30a4))
+* **app-runtime:** let an app action show its card in the dashboard chat without waiting ([#2038](https://github.com/rome-os/rome/issues/2038)) ([98bca00](https://github.com/rome-os/rome/commit/98bca0038c677c34a26075e557f4f55765df2329))
+* **connections:** grant apps bounded Feishu document reads ([#2113](https://github.com/rome-os/rome/issues/2113)) ([8c2f831](https://github.com/rome-os/rome/commit/8c2f831249066b1b0aaa6df6ebf179d0ab1a7acf))
+
+## [0.11.3](https://github.com/rome-os/rome/compare/app-runtime-v0.11.2...app-runtime-v0.11.3) (2026-11-11)
+
+
+### Features
+
+* **concierge:** group a Concierge chat's messages into chat threads, and renew its session when its setup changes ([#1934](https://github.com/rome-os/rome/issues/1934)) ([7c88832](https://github.com/rome-os/rome/commit/7c88832c4e28a15552e0f12e71be201eb5248439))
+
 ## [0.11.2](https://github.com/rome-os/rome/compare/app-runtime-v0.11.1...app-runtime-v0.11.2) (2026-11-08)
 
 

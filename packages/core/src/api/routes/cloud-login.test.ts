@@ -54,14 +54,14 @@ rs.mock("../../profile-memory.js", () => ({
 import { type CloudLoginSeams, cloudLoginRoutes } from "./cloud-login.js";
 import { AGENT_PRESETS } from "../../lib/agent-presets.js";
 import { visitorAuthRoutes } from "./visitor-auth.js";
-import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME, verifySession } from "../../lib/auth.js";
-import { DashboardAccessState } from "../../lib/dashboard-access-state.js";
+import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME, verifySession } from "../../access/auth.js";
+import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import {
   INSTANCE_TOKEN_SETTING_KEY,
   setInstanceTokenInMemory,
-} from "../../lib/instance-identity.js";
+} from "../../instance/instance-identity.js";
 import type { ConciergeService } from "../../concierge/service.js";
-import type { CloudProfileService } from "../../lib/cloud-profile.js";
+import type { CloudProfileService } from "../../instance/cloud-profile.js";
 import { guardianAuth, persons, settings, visitorProfiles } from "../../db/schema.js";
 import { startFakeSigner } from "../../test/fake-signer.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
@@ -1103,7 +1103,7 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
     return app;
   }
 
-  it("dispatches into the dashboard visitor flow and completes it end-to-end", async () => {
+  it("dispatches into the dashboard admin flow and completes it end-to-end", async () => {
     insertGuardian({ accountId: "OWNER" });
     setInstanceTokenInMemory("romeinst_existing");
     const app = await buildApps({ emails: ["invitee@example.com"] });

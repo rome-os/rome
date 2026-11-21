@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { currentSessionActor } from "../../lib/session-actor.js";
+import { currentSessionActor } from "../../access/session-actor.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -10,17 +10,43 @@ const log = createLogger("api:approvals");
 type ApprovalStatus = "pending" | "approved" | "rejected" | "auto_approved";
 const VALID_STATUSES: ApprovalStatus[] = ["pending", "approved", "rejected", "auto_approved"];
 
-async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "reject") {
+/** The one action whose approval needs the guardian's PIN, entered through `POST /vault/grants`. */
+export const VAULT_APPLY_ACTION = "system:vault_apply";
+
+/** The action an approval's payload asks to run, or an empty object when the payload names none. */
+export function approvalCall(approval: { payload: unknown } | null | undefined): {
+  actionName?: unknown;
+  args?: Record<string, unknown>;
+} {
+  return (approval?.payload ?? {}) as { actionName?: unknown; args?: Record<string, unknown> };
+}
+
+type ApprovalResolution = {
+  status: 202 | 404 | 409;
+  body: Record<string, unknown>;
+};
+
+/**
+ * Resolves a pending approval and starts what follows: the action's execution
+ * on approve, its rejection handling on reject. It checks no actor and no
+ * PIN, so the caller decides who may call it.
+ */
+export async function resolveApproval(
+  deps: Pick<ApiDeps, "approvalHandler" | "approvalsRepo">,
+  approvalId: string,
+  action: "approve" | "reject",
+  userId: string,
+): Promise<ApprovalResolution> {
   const { approvalHandler, approvalsRepo } = deps;
-  const approvalId = c.req.param("id") as string;
-  const actor = await currentSessionActor();
-  if (actor?.kind !== "guardian") return c.json({ error: "Guardian authentication required" }, 403);
-  const resolveResult = await approvalsRepo.resolvePending(approvalId, action, actor.userId);
+  const resolveResult = await approvalsRepo.resolvePending(approvalId, action, userId);
   if (resolveResult.outcome === "not_found") {
-    return c.json({ error: "Approval not found" }, 404);
+    return { status: 404, body: { error: "Approval not found" } };
   }
   if (resolveResult.outcome === "already_resolved") {
-    return c.json({ error: "Approval already resolved", approval: resolveResult.approval }, 409);
+    return {
+      status: 409,
+      body: { error: "Approval already resolved", approval: resolveResult.approval },
+    };
   }
 
   const approval = resolveResult.approval;
@@ -42,7 +68,27 @@ async function resolveApproval(c: Context, deps: ApiDeps, action: "approve" | "r
     });
   }
 
-  return c.json({ ok: true, status: "accepted", approvalId, action, approval }, 202);
+  return {
+    status: 202,
+    body: { ok: true, status: "accepted", approvalId, action, approval },
+  };
+}
+
+async function resolveApprovalRoute(c: Context, deps: ApiDeps, action: "approve" | "reject") {
+  const approvalId = c.req.param("id") as string;
+  const actor = await currentSessionActor();
+  if (actor?.kind !== "guardian") return c.json({ error: "Guardian authentication required" }, 403);
+  if (action === "approve") {
+    const approval = await deps.approvalsRepo.findById(approvalId);
+    if (approvalCall(approval).actionName === VAULT_APPLY_ACTION) {
+      return c.json(
+        { error: "Approve this with your PIN in the dashboard.", code: "pin_required" },
+        422,
+      );
+    }
+  }
+  const { status, body } = await resolveApproval(deps, approvalId, action, actor.userId);
+  return c.json(body, status);
 }
 
 export function approvalsRoutes(deps: ApiDeps): Hono {
@@ -86,15 +132,15 @@ export function approvalsRoutes(deps: ApiDeps): Hono {
     if (action !== "approve" && action !== "reject") {
       return c.json({ error: `Invalid action: "${action}". Must be "approve" or "reject".` }, 400);
     }
-    return resolveApproval(c, deps, action);
+    return resolveApprovalRoute(c, deps, action);
   });
 
   app.post("/approvals/:id/approve", async (c) => {
-    return resolveApproval(c, deps, "approve");
+    return resolveApprovalRoute(c, deps, "approve");
   });
 
   app.post("/approvals/:id/reject", async (c) => {
-    return resolveApproval(c, deps, "reject");
+    return resolveApprovalRoute(c, deps, "reject");
   });
 
   app.post("/approvals/:id/retry", async (c) => {

@@ -2,11 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { routinesRoutes } from "./routines.js";
+import { runWithSessionActor } from "../../access/session-actor.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import { RoutineRunsRepository } from "../../db/repositories/routine-runs.js";
+import { RoutinesRepository } from "../../db/repositories/routines.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import { actionExecutions, routineRuns, routines } from "../../db/schema.js";
-import { ActionEngine } from "../../actions/engine.js";
-import { ActionRegistryImpl } from "../../actions/registry.js";
+import { ActionEngine } from "../../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import { RoutineEngine } from "../../routines/engine.js";
 import { EventBusTriggerProvider } from "../../routines/event-bus-trigger-provider.js";
 // The real `manual` trigger provider (distinct from the local schedule double
@@ -15,7 +18,7 @@ import { EventBusTriggerProvider } from "../../routines/event-bus-trigger-provid
 import { ManualTriggerProvider as RealManualTriggerProvider } from "../../routines/manual-trigger-provider.js";
 import { EventBus } from "../../events/event-bus.js";
 import type { TriggerProvider } from "../../routines/trigger-provider.js";
-import type { Action } from "../../actions/types.js";
+import type { Action } from "../../apps/actions/types.js";
 import type { ApiDeps } from "../deps.js";
 import type { Routine, Trigger } from "../../routines/types.js";
 import { FakeClock } from "../../test/kit/index.js";
@@ -143,6 +146,76 @@ describe("Routines API", () => {
     const body = (await res.json()) as { id: string; name: string; trigger: Trigger };
     expect(body.name).toBe("daily-standup");
     expect(body.trigger).toEqual(trigger);
+  });
+
+  it("works for the chat whose card turns it on, the caller's own only", async () => {
+    await new ChatsWebChatRepository(testDb.db).createSession("chat-a", "Topic A");
+    const guardian = { kind: "guardian" as const, userId: "g", via: "cookie" as const };
+    const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+    const turnOn = (
+      as: typeof guardian | typeof visitor,
+      chatId: string,
+      actionName = "anything",
+      args: Record<string, unknown> = {},
+    ) =>
+      runWithSessionActor(as, () =>
+        app.request("/routines", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "wake",
+            trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "17:00" },
+            actionName,
+            args,
+            chatId,
+          }),
+        }),
+      );
+    const repo = new RoutinesRepository(testDb.db);
+
+    // Another owner's chat, or none, does not exist to the caller.
+    expect((await turnOn(visitor, "chat-a")).status).toBe(404);
+    expect((await turnOn(guardian, "no-such-chat")).status).toBe(404);
+    expect(await repo.findByChat("chat-a")).toEqual([]);
+
+    const made = (await (await turnOn(guardian, "chat-a")).json()) as { id: string };
+    // A routine whose args send into a chat works for that one instead.
+    const sends = (await (
+      await turnOn(guardian, "chat-a", "send_message", { threadId: "chat-b", text: "hi" })
+    ).json()) as { id: string };
+    expect((await repo.findByChat("chat-a")).map((row) => row.id)).toEqual([made.id]);
+    expect((await repo.findByChat("chat-b")).map((row) => row.id)).toEqual([sends.id]);
+  });
+
+  it("records who turned a routine on, and answers no route with it", async () => {
+    const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+    const created = await runWithSessionActor(visitor, () =>
+      app.request("/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "remind me",
+          trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "17:00" },
+          actionName: "send_message",
+          args: {},
+        }),
+      }),
+    );
+    const body = (await created.json()) as Record<string, unknown> & { id: string };
+    expect(body).not.toHaveProperty("createdBy");
+    expect(await new RoutinesRepository(testDb.db).creatorOf(body.id)).toEqual(visitor);
+
+    const listed = (await (await app.request("/routines")).json()) as Record<string, unknown>[];
+    expect(listed.length).toBeGreaterThan(0);
+    for (const row of listed) expect(row).not.toHaveProperty("createdBy");
+
+    const patched = await app.request(`/routines/${body.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "remind me later" }),
+    });
+    expect(await patched.json()).not.toHaveProperty("createdBy");
+    expect(JSON.stringify(listed)).not.toContain("v@example.com");
   });
 
   it("stores a caller key and answers a repeat create with 409 and the existing id", async () => {

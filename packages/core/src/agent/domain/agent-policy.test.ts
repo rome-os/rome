@@ -7,11 +7,19 @@ describe("resolveAgentPolicy", () => {
       finalText: "deliver",
       autoTitle: true,
       loadMemory: true,
+      freshSessionOnSetupChange: false,
+      handoffOnRenewal: false,
+      taskChecks: false,
+      delegatesWork: false,
     });
     expect(resolveAgentPolicy({ name: "envoy" })).toEqual({
       finalText: "deliver",
       autoTitle: true,
       loadMemory: false,
+      freshSessionOnSetupChange: false,
+      handoffOnRenewal: false,
+      taskChecks: false,
+      delegatesWork: false,
     });
   });
 
@@ -21,9 +29,20 @@ describe("resolveAgentPolicy", () => {
         name: "concierge",
         policy: { finalText: "private", autoTitle: false },
       }),
-    ).toEqual({ finalText: "private", autoTitle: false, loadMemory: false });
+    ).toEqual({
+      finalText: "private",
+      autoTitle: false,
+      loadMemory: false,
+      freshSessionOnSetupChange: false,
+      handoffOnRenewal: false,
+      taskChecks: false,
+      delegatesWork: false,
+    });
     expect(resolveAgentPolicy({ name: "main", policy: { loadMemory: false } }).loadMemory).toBe(
       false,
+    );
+    expect(resolveAgentPolicy({ name: "concierge", policy: { taskChecks: true } }).taskChecks).toBe(
+      true,
     );
   });
 });

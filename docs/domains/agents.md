@@ -6,7 +6,7 @@ What an agent is and how it runs. This context exists in the code and the docs a
 
 A named Rome agent, such as main, sales or support. Its definition, model selection and capabilities are in [`concepts/agents.md`](../concepts/agents.md). Nothing in the domain language changes what an agent is.
 
-- In a chat, an agent is a participant ([Chats](chats.md#agent)). It speaks through its own account or answers on the guardian's behalf. When it wakes, what it reads and where it speaks is in Chats ([Wake](chats.md#wake), [Projection](chats.md#projection), [Reply](chats.md#reply)).
+- In a chat, an agent is a participant ([Chats](chats.md#agent)). It speaks through its own account or answers on the guardian's behalf. When it wakes, what it reads and where it speaks is in [Participation](participation.md).
 - How an agent remembers what it observes in a chat or its threads is its own decision. Chats describes participants and messages and says nothing about memory.
 - An agent's name is the apps context's [artifact name](../concepts/apps.md#artifact-names-and-references): its canonical id, local name, aliases and legacy names. The agent context uses the name and does not define it.
 - In code an installed agent is `Agent`, and the agents Rome can run are the `AgentCatalog` port, both in [`packages/core/src/agent/domain/agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts). An agent's owner there means only core, or the app that installed it.
@@ -15,7 +15,7 @@ A named Rome agent, such as main, sales or support. Its definition, model select
 
 What an agent declares about itself in its file, in core or in an app. The fields are in [`concepts/agents.md`](../concepts/agents.md). Rome reads a definition and never stores or edits it. A session keeps the definition it opened with, which is why an agent's [policy](#agent-policy) is the same for every session of it.
 
-- In code it is `AgentDefinition` in [`packages/core/src/agent/domain/agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts). `AgentLoader` reads the files when apps change and fills the `AgentCatalog` port.
+- In code it is `AgentDefinition` in [`packages/core/src/agent/domain/agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts). The Apps context's `AgentLoader` in [`packages/core/src/app-host/agent-loader.ts`](../../packages/core/src/app-host/agent-loader.ts) reads the files when apps change and fills the `AgentCatalog` port.
 - One trait comes from Rome, not the file: whether a chat's saved model outranks the session's [model pin](../concepts/sessions.md#model-pin) on a cold resume (`savedSelectionOutranksPin`). Rome names the agents that have it when it loads the catalog, and the rule that reads it is `restoresSavedSelection`. The agent context never names a particular agent.
 
 ## Agent policy
@@ -29,7 +29,7 @@ How a chat treats one agent's turns: whether the agent's text reaches the chat, 
 
 Know-how an agent reads and follows. An agent has the skills its installed apps offer, and a slash command invokes one for a turn. What a skill is, is in [`concepts/skills.md`](../concepts/skills.md).
 
-- In code, `Skill` and the `SkillCatalog` port are in [`packages/core/src/agent/domain/skill.ts`](../../packages/core/src/agent/domain/skill.ts).
+- In code, `Skill` and the `SkillCatalog` port are in [`packages/core/src/agent/domain/skill.ts`](../../packages/core/src/agent/domain/skill.ts). The Apps context's `SkillLoader` in [`packages/core/src/app-host/skill-loader.ts`](../../packages/core/src/app-host/skill-loader.ts) fills it from the installed apps.
 
 ## Rome tools
 
@@ -40,15 +40,17 @@ The tools Rome serves the model during a turn, in four groups: actions, subagent
 
 ## Session tools
 
-The tools a session carries beyond the ones every session of its agent has, such as the Concierge's tools, and `propose_routine` where the widget drawing is card.
+The tools a session carries beyond the ones every session of its agent has, such as the Concierge's tools, `propose_routine` where the widget drawing is card, unless the agent [delegates its work](../concepts/agents.md#agent-policy), and `connect_account`, which shows the connect card for an account Rome connects itself or for a capability a device reported. The Concierge has its own card for the services it follows, so its `connect_account` takes device capabilities alone.
 
 - A fork's session tools are its source's: the model is offered the same tools in the fork as in the source. The fork runs the ones it can run on its own, and refuses the others as unavailable in a forked turn. Until a session's tools are stored, the open session carries the tools its source last opened with. The rule is `forkSessionTools` in [`packages/core/src/agent/domain/session-tools.ts`](../../packages/core/src/agent/domain/session-tools.ts).
+
+- Concierge's session tools may hand an attributed input to a private task through the host's turn-bound input path. The [actor contract](../concepts/actions.md#actor) defines its scope and cancellation. This path grants neither an action outside the receiving agent's catalog nor an approval.
 
 ## Turn middleware
 
 What an installed app puts around producing a turn's reply. A middleware may rewrite the turn's prompt, answer the turn itself, or let the model answer. The model's reply is innermost and runs only when every middleware continues. Apps declare it as a `turn-middleware` hook, and an agent whose turns always come from one is code-backed.
 
-- In code, the `TurnMiddleware` port is in [`packages/core/src/agent/domain/turn-middleware.ts`](../../packages/core/src/agent/domain/turn-middleware.ts), and `AppTurnMiddleware` runs the apps' hooks behind it.
+- In code, the `TurnMiddleware` port is in [`packages/core/src/agent/domain/turn-middleware.ts`](../../packages/core/src/agent/domain/turn-middleware.ts), and the Apps context's `AppTurnMiddleware` in [`packages/core/src/app-host/app-turn-middleware.ts`](../../packages/core/src/app-host/app-turn-middleware.ts) runs the apps' hooks behind it.
 
 ## Subagent
 
@@ -66,11 +68,12 @@ One call a turn makes to a subagent. The subagent's session has that turn as its
 - One turn of the subagent's session answers the call. The session is a fresh one, or one that the same parent started before for the same subagent in the same project. Any other resume is refused.
 - The call ends completed with an output, failed with an error, or cancelled. The output is the turn's structured output when it has one, and its result text when not. A turn that ended interrupted is cancelled.
 - Cancelling the calling turn cancels its open calls.
+- A call is held by the calling session, its turn and the tool use that made it, so one tool use holds at most one call. The subagent's session is listed under the chat the calling turn records in.
 - In code, the rules for the request, a resume and the outcome are in [`packages/core/src/agent/domain/subagent.ts`](../../packages/core/src/agent/domain/subagent.ts).
 
 ## System prompt
 
-What the model reads before the conversation. It is built when a run opens the agent's session, and kept across reopens and forks of the model's session.
+What the model reads before the conversation. It is built when the agent's session opens, and kept across reopens and forks of the model's session.
 
 - An app's agent gets exactly the prompt it declares. A core agent gets its declared prompt, the charter, its identity and what Rome tells every core agent, with memory and project summaries when its [agent policy](#agent-policy) loads them.
 - In code, the rules are in [`packages/core/src/agent/domain/system-prompt.ts`](../../packages/core/src/agent/domain/system-prompt.ts).
@@ -92,21 +95,23 @@ Whose subscription an agent's turns run under: the guardian's Codex (ChatGPT) ac
 - The account reports its own status ([Model provider account status](#model-provider-account-status)), with the usage it read it off. Rome reads the report and derives nothing from it.
 - The account also reports what the provider lets it do: the models its plan withholds, when the provider withholds some, and whether the provider limits its usage, as a subscription is and a billed account is not. Rome keeps no table of plans.
 - A turn the provider refuses, for the credential or for usage, is learned by the provider's adapter, which tells its own account. The account shows it in its next report and holds a usage refusal until its end or until a later usage read shows capacity, since the provider's usage lags the turn it refused. Nothing else in Rome relays it.
-- In code it is the `ModelAccount` port in [`packages/core/src/agent/domain/model-account.ts`](../../packages/core/src/agent/domain/model-account.ts), implemented by the Codex and Claude adapters. It only reports. Authorizing, cancelling and revoking are on the login's ports ([Model provider login](#model-provider-login)). The dashboard calls them. An agent's run never does.
+- In code it is the `ModelAccount` port in [`packages/core/src/agent/domain/model-account.ts`](../../packages/core/src/agent/domain/model-account.ts), implemented by the Codex and Claude adapters. It only reports. Authorizing, cancelling and revoking are on the login's ports ([Model provider login](#model-provider-login)). The dashboard calls them. An agent's turn never does.
 
 ## Model provider account status
 
 Whether the guardian's own account is authorized, expired or absent, and whether it is at its usage limit. The account reports it, and Rome remembers the report. An account is **available**, **unauthorized** (no account authorized), **expired** (authorized once, and the provider stopped accepting it) or its **usage limit is reached**, until a time when one is known. Expired and unauthorized outrank a usage limit. How the account reads its provider's status and usage into one of these, and what it assumes when the provider states no end, is the adapter's, not Rome's.
 
-- Before Rome has read an account, it knows nothing about that provider and a run treats it as available. That is about what Rome knows, not a state of the provider, so it is not a word.
-- A run never tells an account anything. What it learns from a refused turn reaches the status through the account ([Model provider account](#model-provider-account)).
-- Rome remembers the last report so its readers can read it without waiting on the provider's process, and asks again at start, hourly, when the account says it changed and when the dashboard asks. A remembered usage limit whose end has passed reads as available.
+- Before Rome has read an account, it knows nothing about that provider and a turn treats it as available. That is about what Rome knows, not a state of the provider, so it is not a word.
+- A turn never tells an account anything. What it learns from a refused turn reaches the status through the account ([Model provider account](#model-provider-account)).
+- Rome remembers the last report so its readers can read it without waiting on the provider's process, and asks again at start, hourly, when the account says it changed, when two minutes have passed since a stated usage limit ended and when the dashboard asks. A remembered usage limit whose end has passed reads as available.
+- On a ChatGPT subscription login, available ChatGPT credits can cover exhausted subscription windows when the guardian allows it. Every dashboard change from disabled to enabled needs confirmation. Enabling can [continue turns stopped by a usage limit](../concepts/sessions.md#continuation). Workspace spending limits and provider refusals still apply.
+- Automatic provider and model switches never target capacity that requires ChatGPT credits. An eligible stopped turn can continue on its existing provider using allowed credits.
 - Whatever asks about the guardian's own account reads the status, such as the dashboard and a tier restricted to one provider.
 - In code the words and the reader's rules are in [`packages/core/src/agent/domain/model-account-report.ts`](../../packages/core/src/agent/domain/model-account-report.ts). `ModelAccounts` in [`packages/core/src/agent/application/model-accounts.ts`](../../packages/core/src/agent/application/model-accounts.ts) remembers the accounts' reports and decides when to ask. The reading of a provider's status, usage and refused turns into a report is `account-report.ts` beside the adapters. The usage switch, which says where a session may move when its provider is at its limit, is `usage-switch.ts` beside the rules.
 
 ## Model provider availability
 
-Whether a run can use a model provider now, read from the [login](#model-provider-login) in effect: available, expired, usage limit reached, or unauthorized only when the provider has no login at all. On Rome credits, Codex is available, whatever the guardian's account says.
+Whether a turn can use a model provider now, read from the [login](#model-provider-login) in effect: available, expired, usage limit reached, or unauthorized only when the provider has no login at all. On Rome credits, Codex is available, whatever the guardian's account says.
 
 - The resolver is its one reader. A reader that asks about the guardian's own account reads the [account status](#model-provider-account-status) instead.
 - In code it is `providerAvailability` in [`packages/core/src/agent/domain/provider-availability.ts`](../../packages/core/src/agent/domain/provider-availability.ts), a pure function over the account's report and the login.
@@ -123,16 +128,26 @@ How Rome is let in to a model provider. A login has one of three kinds, named by
 
 ## Model resolution
 
-Which provider and model a run uses. The ask is the most specific of the chat's [selection](#model-selection), the session's pin, the agent's own model and the agent's tier, and the resolution is the answer. A selection, a pin and an agent's own model are exact asks, and an exact ask resolves to exactly that model or fails, never to a substitute.
+Which provider and model a turn uses. The ask is the most specific of the chat's [selection](#model-selection), the session's pin, the agent's own model and the agent's tier, and the resolution is the answer. A selection, a pin and an agent's own model are exact asks, and an exact ask resolves to exactly that model or fails, never to a substitute.
 
 - A provider is **usable** when its [availability](#model-provider-availability) is available, or Rome has not read it yet. Resolution checks that first, and then whether the [login](#model-provider-login) in effect allows the model. So a failure is either an unavailable provider or a model the login does not allow.
-- A tier resolves on the first usable provider in order (Codex on the guardian's account, Claude, Codex on Rome credits, then the mock) to that provider's model for the tier. When the login there does not allow that model, the ask fails rather than moving on to the next provider.
+- A tier resolves on the first usable provider in order (Codex subscription capacity, Claude, Codex on allowed ChatGPT credits, Codex on Rome credits, then the mock) to that provider's model for the tier. When the login there does not allow that model, the ask fails rather than moving on to the next provider. ChatGPT credits keep the account's model restrictions. Exact requests and tiers restricted to Codex can use allowed ChatGPT credits even when Claude has capacity.
 - A tier restricted to one provider asks about the guardian's own account, so Rome credits do not count for it.
 - **Tier models** are the guardian's choice of model for each tier and provider. A provider with none chosen uses Rome's default for the tier. The stored setting keeps its older name, `tierModelMappings`.
 - In code the ask is `ModelResolutionRequest` and the rule is `resolveModel` in [`packages/core/src/agent/domain/model-resolution.ts`](../../packages/core/src/agent/domain/model-resolution.ts), a pure function over the facts the resolver reads. `ModelResolver` in [`packages/core/src/agent/application/model-resolver.ts`](../../packages/core/src/agent/application/model-resolver.ts) reads them and words a failure for the wire.
+
+## Model strength
+
+How strong a model a chat runs on, per provider: **fast** is the provider's quick model (Sonnet on Claude, Luna on Codex), **strong** its best (Opus on Claude, Sol on Codex). On Codex each falls back to Terra when the account may not use it.
+
+- A Concierge chat starts on the strong model of the owner's Claude login, else of Codex. An automatic move to the other provider lands on that provider's strong model, so the chat keeps its strength.
+- The Concierge picks fast or strong for each task chat it starts, on its own chat's provider, and stores it as the task chat's [selection](#model-selection) together with the task's reasoning effort. A task started with neither runs as any chat does, by its agent's tier at the dashboard's effort.
+- A task chat's strength is an exact selection, so it fails closed: when its provider runs out or logs out, the task's turns stop with a usage-limit error, and only a Concierge chat moves to the other provider. The loss against tier routing is narrow, since any chat's session already fails closed on its [model pin](../concepts/sessions.md#model-pin) after its first turn. It shows where a session opens: a task's brief, and a renewed session, run on the other provider when tier-routed but not with a strength. Moving task chats too would take more than the Concierge's move: their cold resumes would have to take the chat's selection over the session's pin, which today only the Concierge agent does (`savedSelectionOutranksPin`), and a failed turn would need a recovery of its own.
+- In code it is `ModelStrength` in [`packages/core/src/agent/domain/model-strength.ts`](../../packages/core/src/agent/domain/model-strength.ts).
 
 ## Model selection
 
 A model a guardian picks by name for a chat, such as `claude-sonnet` or `gpt-6-luna`, and the provider that serves it. It is one of a fixed list the agent context owns. Leaving the choice to Rome ("auto" in the dashboard) is not a selection but the absence of one, so the resolver picks by [tier](../concepts/agents.md#model-selection) instead.
 
+- A chat's selection records who made it: its **owner**, from the model menu or a first message that named a model, or Rome (**auto**), as for a Concierge chat's default, a task chat's [strength](#model-strength) or a quota failover. A change of Rome's default moves only selections Rome made, never the owner's.
 - In code it is `ModelSelection` in [`packages/core/src/agent/domain/model-selection.ts`](../../packages/core/src/agent/domain/model-selection.ts). The webchat settings that store a guardian's pick read it from there.

@@ -77,7 +77,7 @@ export interface ModelResolver {
 }
 
 export interface CreateModelResolverOptions {
-  accounts: Pick<ModelAccounts, "read" | "refresh">;
+  accounts: Pick<ModelAccounts, "read"> & { refresh(provider?: ProviderId): Promise<unknown> };
   providers: ModelProvider[];
   tierModels?: TierModelsSetting;
   codexLogins?: Pick<CodexLogins, "login">;

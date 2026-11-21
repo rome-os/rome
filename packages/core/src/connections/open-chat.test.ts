@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { channelChatId } from "../db/session-kind.js";
 import { createTestDb, type TestDb } from "../test/db.js";
-import { chatsWiring } from "../chats-wiring.js";
+import { testChatsWiring } from "../test/helpers.js";
 import { ChannelWithoutAccount } from "./chat-adapter.js";
 import { ChatAddresses } from "./chat-addresses.js";
 import { openChannelChat, type OpenChannelChatDeps } from "./open-chat.js";
-import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { SessionRecords } from "../sessions/session-records.js";
 
 describe("openChannelChat as a speaker", () => {
   let testDb: TestDb;
-  let wired: ReturnType<typeof chatsWiring>;
+  let wired: ReturnType<typeof testChatsWiring>;
   let deps: OpenChannelChatDeps;
 
   let telegramAccount: string;
@@ -17,14 +17,14 @@ describe("openChannelChat as a speaker", () => {
   beforeEach(() => {
     testDb = createTestDb();
     telegramAccount = "111";
-    wired = chatsWiring(testDb.db, {
+    wired = testChatsWiring(testDb.db, {
       accountOf: (channel) =>
         channel === "telegram" ? { platform: "telegram", id: telegramAccount } : null,
       platformOfChannel: (name) => name,
       channelsOn: (platform) => [platform],
     });
     deps = {
-      webchatRepo: new ChatsWebChatRepository(testDb.db),
+      records: new SessionRecords(testDb.db, { triggerKindUnder: () => null }),
       speakers: { chats: wired.chats, adapters: wired.adapters, speakers: wired.speakers },
     };
   });

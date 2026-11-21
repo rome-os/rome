@@ -275,3 +275,26 @@ describe("ChatMarkdown collapsible blocks", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 });
+
+describe("ChatMarkdown task conclusion markers", () => {
+  // A task chat ends its final answer with a conclusion between two HTML
+  // comments, which the Concierge reads (core: concierge/conclusion.ts).
+  const answer =
+    "The full report.\n\n<!-- rome:conclusion -->\nFound 3 flights. Which one?\n<!-- /rome:conclusion -->";
+
+  it("hides the markers and shows the conclusion as a paragraph of its own", () => {
+    const { container } = render(<Message text={answer} />);
+    expect(container.textContent).not.toContain("rome:conclusion");
+    expect(container.textContent).not.toContain("<!--");
+    const paragraphs = [...container.querySelectorAll("p")].map((p) => p.textContent);
+    expect(paragraphs).toEqual(["The full report.", "Found 3 flights. Which one?"]);
+  });
+
+  it("hides them when the model puts the section on one line", () => {
+    const { container } = render(
+      <Message text={"Details.\n\n<!-- rome:conclusion -->Done.<!-- /rome:conclusion -->"} />,
+    );
+    expect(container.textContent).not.toContain("rome:conclusion");
+    expect(container.textContent).toContain("Done.");
+  });
+});

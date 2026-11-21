@@ -1,14 +1,16 @@
+import type { MessageWritingEvent } from "@rome/api-types/concierge";
 import { memo, type ReactNode, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check } from "lucide-react";
 import type {
   TraceSegment,
   TraceSnapshot,
   TraceSubagentSummary,
+  TraceSummary,
 } from "@rome/api-types/trace-segments";
 import { CollapsedTraceButton } from "@/components/agent-trace/AgentTrace";
 import type { TraceDrawerTarget } from "@/components/agent-trace/TraceDrawer";
 import { renderFlatEntries } from "@/components/chat/entries";
+import { ErrorEventView, hasGuidedErrorCopy } from "@/components/chat/entries/ErrorEventView";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
@@ -25,6 +27,7 @@ import { lastTextMessage, turnAnswerText } from "@/components/chat/reply/reply-s
 import type { AgentIdentity, ChatRow } from "@/components/chat/chat-view";
 import { EMPTY_LIVE_TEXT, type LiveTextStore } from "@/hooks/live-text";
 import type { ChatMessage } from "@/lib/chat-types";
+import { SelectableRow } from "@/components/chat/SelectableRow";
 
 // The block-level callbacks + resolved-interaction map threaded into
 // renderFlatEntries — a single bag instead of six loose props.
@@ -48,6 +51,8 @@ export interface LivePreview {
   runningTurnId: string | null;
   /** The running turn is housekeeping for the agent, so the Concierge chat holds back its typing indicator. */
   quiet?: boolean;
+  /** How the running turn shows the typing dots, as the server last said (`message_writing`). */
+  writing?: MessageWritingEvent | null;
   snapshot: TraceSnapshot | null;
   /**
    * The text block being typed. A store rather than a string, so each delivery
@@ -85,12 +90,17 @@ export interface MessageListProps {
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
   actions: BlockActions;
-  // Render inline turn actions (feedback + side-chat branch) next to the copy
-  // button under settled agent turns. Guardian-only, so the live chat opts in
-  // while read-only surfaces (public share, sessions viewer) omit them.
+  // Render inline turn actions (feedback, and the fork button where `fork`
+  // allows it) next to the copy button under settled agent turns.
+  // Guardian-only, so the live chat opts in while read-only surfaces (public
+  // share, sessions viewer) omit them.
   feedback?: boolean;
+  /** Offers the fork button under settled turns: only in a common chat or a fork chat. */
+  fork?: boolean;
   /** `concierge` shows a texting transcript (see ConciergeTranscript). Defaults to `default`. */
   variant?: ChatVariant;
+  /** In a `concierge` transcript, the id of the first message that was unread when the chat opened. */
+  unreadFrom?: string | null;
 }
 
 /** How a chat presents itself. `concierge` is the texting-style Concierge chat. */
@@ -112,6 +122,23 @@ function renderTrace(trace: ChatMessage, onOpen: (target: TraceDrawerTarget) => 
       onOpen={onOpen}
     />
   ) : null;
+}
+
+/**
+ * A stored turn that failed with guidance, such as credits used up, shows the
+ * same guidance as the composer banner did while it ran, so a reload keeps the
+ * way to fix it. It sits in the row's body: the trace line above stays one line.
+ */
+function TraceErrorGuidance({ summary }: { summary: TraceSummary | null | undefined }) {
+  if (!summary?.terminalError || !hasGuidedErrorCopy(summary.terminalErrorCode)) return null;
+  return (
+    <ErrorEventView
+      error={summary.terminalError}
+      code={summary.terminalErrorCode}
+      provider={summary.terminalErrorProvider}
+      reason={summary.terminalErrorReason}
+    />
+  );
 }
 
 function renderSubagents(
@@ -163,6 +190,7 @@ const RowView = memo(function RowView({
   activeTraceTarget,
   subagentIconByName,
   feedback = false,
+  fork = false,
 }: {
   row: ChatRow;
   live: LivePreview | null;
@@ -173,9 +201,12 @@ const RowView = memo(function RowView({
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
   feedback?: boolean;
+  fork?: boolean;
 }) {
   if (row.kind === "user") return <UserMessage msg={row.message} />;
   if (row.kind === "model_switch") return <ModelSwitchNotice model={row.model} />;
+  // Only a Concierge chat runs a turn on an automated input; it draws the line itself.
+  if (row.kind === "automated_input") return null;
   const avatar = <AgentAvatar iconUrl={row.identity.iconUrl} label={row.identity.name} />;
   if (row.kind === "trace") {
     const summary = row.message.traceSummary;
@@ -194,6 +225,7 @@ const RowView = memo(function RowView({
         )}
       >
         {row.message.traceArchived ? <ArchivedTraceNote /> : null}
+        <TraceErrorGuidance summary={summary} />
         {plan?.steps.length ? <TurnSummaryGroup plan={plan} live={false} /> : null}
       </MessageRow>
     );
@@ -216,11 +248,16 @@ const RowView = memo(function RowView({
   const feedbackTurn = feedback && !live ? rowTurnRef(row) : null;
   const showFeedback = !!feedbackTurn?.turnId && !!feedbackTurn.sessionId;
   const summary = live?.snapshot?.summary ?? row.trace?.traceSummary;
-  const showBranch = showFeedback && summary?.turnStatus === "completed";
+  const showBranch = fork && showFeedback && summary?.turnStatus === "completed";
   const subagents = summary?.subagents;
   const recapMessageId = row.messages.find((message) =>
     parseMessageEntries(message).some((block) => block.type === "turn_recap"),
   )?.id;
+  // A turn whose error is stored as its own message, as a model that could not
+  // be resolved is, already shows that error with its guidance.
+  const showsError = row.messages.some((message) =>
+    parseMessageEntries(message).some((block) => block.type === "error"),
+  );
   return (
     <MessageRow
       name={row.identity.name}
@@ -266,6 +303,7 @@ const RowView = memo(function RowView({
               {renderFlatEntries(blocks, {
                 ...actions,
                 sessionId: m.sessionId,
+                messageId: m.id,
                 turnId: m.turnId ?? undefined,
                 transcript: { live: !!live },
               })}
@@ -280,6 +318,7 @@ const RowView = memo(function RowView({
             {renderFlatEntries(blocks.slice(0, recapIndex), {
               ...actions,
               sessionId: m.sessionId,
+              messageId: m.id,
               turnId: m.turnId ?? undefined,
               transcript: { live: !!live },
             })}
@@ -300,6 +339,7 @@ const RowView = memo(function RowView({
             {renderFlatEntries(blocks.slice(recapIndex + 1), {
               ...actions,
               sessionId: m.sessionId,
+              messageId: m.id,
               turnId: m.turnId ?? undefined,
               transcript: { live: !!live },
             })}
@@ -307,6 +347,7 @@ const RowView = memo(function RowView({
         );
       })}
       {live ? <LiveTail live={live} actions={actions} /> : null}
+      {live || showsError ? null : <TraceErrorGuidance summary={row.trace?.traceSummary} />}
       {recapMessageId ? null : <TurnSummaryGroup plan={summary?.plan} live={!!live} />}
     </MessageRow>
   );
@@ -354,52 +395,12 @@ function StandaloneLiveTail({
 // selectable.
 function rowTurnRef(row: ChatRow): { turnId: string | null; sessionId: string } {
   if (row.kind === "model_switch") return { turnId: null, sessionId: row.sessionId };
+  if (row.kind === "automated_input") return { turnId: null, sessionId: "" };
   if (row.kind === "user" || row.kind === "trace") {
     return { turnId: row.message.turnId ?? null, sessionId: row.message.sessionId };
   }
   const first = row.messages[0] ?? row.trace;
   return { turnId: first?.turnId ?? null, sessionId: first?.sessionId ?? "" };
-}
-
-// Wraps a transcript row with a checkbox + full-row click target during share
-// selection. The overlay button sits above the row, so in selection mode a
-// click toggles the turn instead of activating links/cards underneath.
-function SelectableRow({
-  selected,
-  onToggle,
-  label,
-  children,
-}: {
-  selected: boolean;
-  onToggle: () => void;
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="relative">
-      <div
-        className={`rounded-8 pl-9 transition-colors ${selected ? "bg-primary/5" : "opacity-60"}`}
-      >
-        {children}
-      </div>
-      <span
-        className={`pointer-events-none absolute left-2 top-3 flex size-5 items-center justify-center rounded-4 border ${
-          selected
-            ? "border-primary bg-primary text-primary-foreground"
-            : "border-border bg-surface"
-        }`}
-      >
-        {selected && <Check className="size-3.5" />}
-      </span>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-pressed={selected}
-        aria-label={label}
-        className="absolute inset-0 rounded-8 ring-primary/40 focus-visible:outline-none focus-visible:ring-2"
-      />
-    </div>
-  );
 }
 
 export function MessageList({
@@ -414,16 +415,20 @@ export function MessageList({
   subagentIconByName,
   actions,
   feedback,
+  fork,
   variant = "default",
+  unreadFrom,
 }: MessageListProps) {
   if (variant === "concierge") {
     return (
       <ConciergeTranscript
         rows={rows}
         live={live}
+        selection={selection}
         actions={actions}
         contentRef={contentRef}
         feedback={feedback}
+        unreadFrom={unreadFrom}
       />
     );
   }
@@ -440,6 +445,7 @@ export function MessageList({
       subagentIconByName={subagentIconByName}
       actions={actions}
       feedback={feedback}
+      fork={fork}
     />
   );
 }
@@ -456,7 +462,8 @@ function TranscriptMessageList({
   subagentIconByName,
   actions,
   feedback,
-}: Omit<MessageListProps, "variant">) {
+  fork,
+}: Omit<MessageListProps, "variant" | "unreadFrom">) {
   const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const blockKey = runningTurnId ? `${runningTurnId}:${live.blockIx ?? 0}` : null;
@@ -512,6 +519,7 @@ function TranscriptMessageList({
               activeTraceTarget={activeTraceTarget}
               subagentIconByName={subagentIconByName}
               feedback={feedback}
+              fork={fork}
             />
           );
           const tail = row === anchorRow ? standalone : null;

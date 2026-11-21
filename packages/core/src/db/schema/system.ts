@@ -11,7 +11,7 @@ import {
 import { sql } from "drizzle-orm";
 import type { AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DeviceFolder } from "@rome/api-types/devices";
-import type { SessionActor } from "../../lib/session-actor.js";
+import type { SessionActor } from "../../access/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
 import {
@@ -51,6 +51,23 @@ export const sessions = sqliteTable(
      *  provider where its transcript lives. Null for legacy rows, which resume
      *  in the default project. */
     workingDir: text("working_dir"),
+    /** A fingerprint of the setup the session opened with: its agent's
+     *  instructions and identity, and its tools. Null for rows written before
+     *  the column existed and for agents that never replace a session on a
+     *  setup change. */
+    setup: text("setup_fingerprint"),
+    /** The session that replaced this one in a reset. Null for a session
+     *  still active, completed another way, or replaced before the column
+     *  existed. */
+    supersededBy: text("superseded_by"),
+    /** Why the reset replaced it: setup, idle, daily or working_dir. */
+    supersededFor: text("superseded_for"),
+    /** The handoff the session it replaced wrote for it in a renewal. Null
+     *  for a session that no renewal handoff started. */
+    handoff: text("handoff"),
+    /** How many tokens the provider's context held at the session's last
+     *  turn that reported it. Null until one does. */
+    contextTokens: integer("context_tokens"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
     status: text("status", {
@@ -354,22 +371,32 @@ export const sentinelLog = sqliteTable("sentinel_log", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
-export const approvals = sqliteTable("approvals", {
-  id: text("id").primaryKey(),
-  type: text("type", { enum: APPROVAL_TYPES }).notNull(),
-  status: text("status", { enum: APPROVAL_STATUSES }).notNull(),
-  executionState: text("execution_state", { enum: APPROVAL_EXECUTION_STATES })
-    .notNull()
-    .default("idle"),
-  requestedBy: text("requested_by").notNull(),
-  description: text("description").notNull(),
-  payload: text("payload", { mode: "json" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  resolvedAt: integer("resolved_at", { mode: "timestamp" }),
-  resolvedBy: text("resolved_by"),
-  executedAt: integer("executed_at", { mode: "timestamp" }),
-  executionError: text("execution_error"),
-});
+export const approvals = sqliteTable(
+  "approvals",
+  {
+    id: text("id").primaryKey(),
+    type: text("type", { enum: APPROVAL_TYPES }).notNull(),
+    status: text("status", { enum: APPROVAL_STATUSES }).notNull(),
+    executionState: text("execution_state", { enum: APPROVAL_EXECUTION_STATES })
+      .notNull()
+      .default("idle"),
+    requestedBy: text("requested_by").notNull(),
+    description: text("description").notNull(),
+    payload: text("payload", { mode: "json" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    resolvedAt: integer("resolved_at", { mode: "timestamp" }),
+    resolvedBy: text("resolved_by"),
+    executedAt: integer("executed_at", { mode: "timestamp" }),
+    executionError: text("execution_error"),
+  },
+  (table) => [
+    // A chat's approvals are found by the chat their payload names: one copy
+    // of that fact, indexed where it is.
+    index("idx_approvals_thread").on(
+      sql`json_extract(${table.payload}, '$.channelContext.threadId')`,
+    ),
+  ],
+);
 
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
@@ -495,11 +522,24 @@ export const romeSessions = sqliteTable(
     name: text("name").notNull(),
     personaId: text("persona_id"),
     largeModelSelection: text("large_model_selection"),
+    // Who set large_model_selection: `owner` from the model menu or a first
+    // message that named a model, `auto` when Rome picked it, as for a
+    // Concierge chat's default or a quota failover. NULL for selections made
+    // before this was kept. A change of Rome's default moves only `auto` ones.
+    largeModelSelectionBy: text("large_model_selection_by").$type<"owner" | "auto">(),
+    // The reasoning effort a message to the chat runs at when it names none,
+    // such as the brief and follow-ups the Concierge sends a task chat. NULL
+    // takes the dashboard's setting.
+    reasoningEffort: text("reasoning_effort"),
     projectName: text("project_name").notNull().default(DEFAULT_WEBCHAT_PROJECT_NAME),
     projectPath: text("project_path"),
     // Folder on a rome-node device the chat works in, set only when the chat
     // is created. NULL for every chat without one and every other session type.
     deviceFolder: text("device_folder", { mode: "json" }).$type<DeviceFolder>(),
+    // The rome-node device the guardian asked from when the Concierge last
+    // handed this task chat work, so the task's live reads ask that device.
+    // NULL for every other chat, and for a task started with no device.
+    askingDeviceId: text("asking_device_id"),
     // Agent the session is bound to. NULL means the default "main" agent.
     // Locked on first turn so the session can't switch agents mid-thread.
     agentName: text("agent_name"),
@@ -620,10 +660,22 @@ export const chatMessages = sqliteTable(
     parts: text("parts").notNull(), // JSON array of blocks, as composed
     // The line this one quotes, when Rome holds it.
     replyToMessageId: integer("reply_to_message_id"),
+    // The first line of the reply chain this line is in
+    // (docs/domains/chats.md#chat-thread). Set when the line is recorded, from
+    // the line it quotes, and never changed. Null for a line that quotes
+    // nothing: it is its own root.
+    rootMessageId: integer("root_message_id"),
+    // The emoji the Concierge reacted to the line with
+    // (docs/domains/chats.md#reaction); null for none.
+    reaction: text("reaction"),
     saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [
     uniqueIndex("idx_chat_messages_key").on(table.chatId, table.key),
+    // A dashboard line by the id clients know it by, such as a widget's.
+    index("idx_chat_messages_by_key").on(table.key),
+    // One chat thread's lines.
+    index("idx_chat_messages_root").on(table.chatId, table.rootMessageId),
     // A place's lines by time. Within one second lines keep the order they
     // were recorded in.
     index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),
@@ -673,65 +725,140 @@ export const chatAddresses = sqliteTable(
 );
 
 /**
- * The Concierge's own todo list (rome-os/rome#1508). Only the Concierge's
- * tools write it, and every state is its own judgement. A row links at most
- * one task chat; deleting the chat leaves the row, unlinked. Times are
- * milliseconds, so "updated after the click" and "dirty before the build" are
- * decided finer than a second.
+ * What the Concierge knows about a task chat that the chat does not: a task
+ * is its task chat (docs/domains/chats.md#task), so this table holds one row
+ * per task chat, keyed by the chat's id, and nothing the chat already says.
+ * The task's name, owner, archive state and creation time are the chat's own.
+ * Deleting the chat deletes the row. Times are milliseconds, so "updated
+ * after the click" and "dirty before the build" are decided finer than a
+ * second.
  */
-export const conciergeTasks = sqliteTable(
-  "concierge_tasks",
+export const taskChats = sqliteTable("task_chats", {
+  sessionId: text("session_id")
+    .primaryKey()
+    .references(() => romeSessions.id, { onDelete: "cascade" }),
+  /**
+   * The Concierge chat the task reports to, where its results go. Null, or a
+   * chat that is gone, is the owner's main chat.
+   */
+  conciergeChatId: text("concierge_chat_id").references(() => romeSessions.id, {
+    onDelete: "set null",
+  }),
+  /**
+   * The Concierge chat message the task points back to, in Chats. Cleared when
+   * the message goes. The text is never copied.
+   */
+  sourceMessageId: integer("source_message_id").references(() => chatMessages.id, {
+    onDelete: "set null",
+  }),
+  /** What the Concierge keeps for its later self about the task. Never shown to the owner. */
+  note: text("note"),
+  /**
+   * When the task was stopped. Cleared when new words take the task up again
+   * (`resume`).
+   */
+  stoppedAt: integer("stopped_at", { mode: "timestamp_ms" }),
+  /**
+   * How the task chat's latest turn ended, or its start failed; or
+   * `done_by_owner` beside `stoppedAt` when its owner marked it done. Rome
+   * writes it.
+   */
+  lastOutcome: text("last_outcome", { enum: ["succeeded", "failed", "stopped", "done_by_owner"] }),
+  /**
+   * Set when the task chat's work ends, cleared once the Concierge reported
+   * it. Kept here so a restart still knows a result was never said.
+   */
+  outcomeUnsaid: integer("outcome_unsaid", { mode: "boolean" }).notNull().default(false),
+  /**
+   * When the wait that ended the task for no response began, once Rome
+   * handled its expiry, so a restart never handles one wait twice.
+   */
+  expiredWaitAt: integer("expired_wait_at", { mode: "timestamp_ms" }),
+  /** Set when the task ended for no response, until a digest of its chat listed it. */
+  noResponseUnlisted: integer("no_response_unlisted", { mode: "boolean" }).notNull().default(false),
+  /**
+   * Set when Rome gave up telling the Concierge the task chat's result, so
+   * its owner was never told; cleared by the next result.
+   */
+  reportGivenUp: integer("report_given_up", { mode: "boolean" }).notNull().default(false),
+  /**
+   * When the task's derived status ended, kept as a fact it follows from
+   * changes and cleared if it opens again. The lists age ended rows by it.
+   */
+  endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+  /** When Rome last wrote the row: a restart finds the task chats active since. */
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/**
+ * Which Concierge turn took each guardian message of a Concierge chat, and
+ * when that turn answered it: its turn ended, or the Concierge answered it
+ * with `say`. A message handed on to a newer turn is that turn's from then
+ * on. A message whose turn its owner stopped before it answered is told to
+ * the next turn once (docs/domains/chats.md#task). A message's status
+ * (docs/domains/chats.md#status) is derived from this and from the status of
+ * the tasks made for it.
+ */
+export const conciergeMessageTurns = sqliteTable(
+  "concierge_message_turns",
   {
-    id: text("id").primaryKey(),
-    title: text("title").notNull(),
-    state: text("state", {
-      enum: ["next", "doing", "watching", "needs_user", "done", "dropped"],
-    }).notNull(),
-    /** One line, the result or the current status. */
-    summary: text("summary"),
-    /** What a `watching` or `needs_user` row waits for. */
-    waitingOn: text("waiting_on"),
-    /** The next check of a `watching` row, or the planned time of a `next` one. */
-    dueAt: integer("due_at", { mode: "timestamp_ms" }),
-    /** Order inside Up next, decided by the Concierge. */
-    rank: integer("rank"),
-    sessionId: text("session_id").references(() => romeSessions.id, { onDelete: "set null" }),
+    /** The Concierge chat the message is in. */
+    chatId: text("chat_id").notNull(),
+    /** The message's key in that chat, as the dashboard names it. */
+    messageKey: text("message_key").notNull(),
+    /** The turn that took it last. */
+    turnId: text("turn_id").notNull(),
+    takenAt: integer("taken_at", { mode: "timestamp_ms" }).notNull(),
+    /** Null while its turn has not answered it. */
+    answeredAt: integer("answered_at", { mode: "timestamp_ms" }),
     /**
-     * The Concierge chat the row came from, where its results go. Null is the
-     * main chat, so a row from a deleted chat reports there.
+     * Set when its owner stopped the turn before it answered, until the next
+     * Concierge turn in the chat is told not to act on it.
      */
-    chatId: text("chat_id").references(() => romeSessions.id, { onDelete: "set null" }),
+    stoppedUntold: integer("stopped_untold", { mode: "boolean" }).notNull().default(false),
     /**
-     * Whose Concierge the row is: "guardian" or "visitor:<account>". Set when
-     * the row is made, from the chat it is made in, and never changed, so it
-     * outlives that chat.
+     * When its turn started to show it working: it called a working tool, or
+     * ran 5 seconds without answering it. Null while it has not.
      */
-    ownerKey: text("owner_key").notNull().default("guardian"),
+    workingAt: integer("working_at", { mode: "timestamp_ms" }),
+    /** Set when the turn that took it failed, by an error or a crash, before it answered it. */
+    turnFailed: integer("turn_failed", { mode: "boolean" }).notNull().default(false),
     /**
-     * The Concierge chat message the row points back to, in Chats. Cleared when
-     * the message goes, and the panel then offers no jump. The text is never
-     * copied.
+     * Set when its turn reacted to it: the turn handled it so, and shows it
+     * neither working nor failed. It is the turn's, so it goes with it.
      */
-    sourceMessageId: integer("source_message_id").references(() => chatMessages.id, {
-      onDelete: "set null",
-    }),
-    /**
-     * The legacy chat row the row pointed back to before the Chats switch,
-     * until the switch's backfill finds that row's message in Chats. Dropped
-     * with the legacy rows.
-     */
-    legacySourceMessageId: text("legacy_source_message_id"),
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-    /** Set while the state is `done` or `dropped`. */
-    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
-    archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+    reacted: integer("reacted", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
-    // A chat belongs to at most one row, so a chat event maps to exactly one row.
-    uniqueIndex("idx_concierge_tasks_session")
-      .on(table.sessionId)
-      .where(sql`${table.sessionId} is not null`),
+    primaryKey({ columns: [table.chatId, table.messageKey] }),
+    index("idx_concierge_message_turns_turn").on(table.chatId, table.turnId),
+  ],
+);
+
+/**
+ * The tasks made for each guardian message of a Concierge chat: the tasks it
+ * started, and the ones its words were passed on to. A row goes with its task.
+ */
+export const conciergeMessageTasks = sqliteTable(
+  "concierge_message_tasks",
+  {
+    taskChatId: text("task_chat_id")
+      .notNull()
+      .references(() => taskChats.sessionId, { onDelete: "cascade" }),
+    chatId: text("chat_id").notNull(),
+    messageKey: text("message_key").notNull(),
+    /** The order it was made in, raised each time it is made again: a task follows its highest. */
+    seq: integer("seq").notNull().default(0),
+    /**
+     * How the task ended for this message once it ended with its result told,
+     * after which the task's later work leaves the message alone; null while
+     * the message follows it.
+     */
+    endedAs: text("ended_as"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.taskChatId, table.chatId, table.messageKey] }),
+    index("idx_concierge_message_tasks_message").on(table.chatId, table.messageKey),
   ],
 );
 
@@ -1007,6 +1134,43 @@ export const romeAgentTraceBlocks = sqliteTable(
   ],
 );
 
+// A chat's outputs: the files its agent wrote or showed, one row each time it
+// did. Vocabulary: docs/domains/chats.md#outputs. Not a FK, as with the trace
+// blocks above: rows are recorded with the trace, whose session row may not
+// exist yet, and session-scoped deletes remove them explicitly.
+export const chatOutputs = sqliteTable(
+  "chat_outputs",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id").notNull(),
+    turnId: text("turn_id"),
+    // The rome_agent_messages row that records it: the turn's trace, or the
+    // reply that links a shown file.
+    messageId: text("message_id"),
+    // What recorded it, unique within the chat, so a backfill or a replay
+    // records it once: the tool call's id, or `link:<message id>:<url>`.
+    sourceKey: text("source_key").notNull(),
+    kind: text("kind", { enum: ["written", "shown"] }).notNull(),
+    // The path written, as the tool named it, or the shown copy's asset URL.
+    path: text("path").notNull(),
+    // The local file a shown copy was made from, when known.
+    sourcePath: text("source_path"),
+    name: text("name").notNull(),
+    mimeType: text("mime_type"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_chat_outputs_source").on(table.sessionId, table.sourceKey),
+    index("idx_chat_outputs_session_created").on(table.sessionId, table.createdAt),
+  ],
+);
+
+// The chats whose outputs from before chat_outputs existed were read back once.
+export const chatOutputBackfills = sqliteTable("chat_output_backfills", {
+  sessionId: text("session_id").primaryKey(),
+  backfilledAt: integer("backfilled_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 // UI-state mirror only — the canonical feedback record ships via OTLP logs
 // to rome-obs, since the user's SQLite never leaves their VM. The session_id
 // FK + ON DELETE CASCADE guarantees feedback can't outlive its session even
@@ -1029,37 +1193,53 @@ export const webchatTurnFeedback = sqliteTable(
   ],
 );
 
-export const routines = sqliteTable("routines", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  // Optional caller-assigned identity. Unique when set (SQLite treats multiple
-  // NULLs as distinct, so most routines can leave it null). Lets a caller make
-  // create_routine idempotent/dedup-able without overloading `name` (the human
-  // title): briefing keys its managed routines `briefing-*` and recreates them
-  // by key. A duplicate key is rejected at create time.
-  key: text("key").unique(),
-  // The app that owns and manages this routine (its appId), e.g. "briefing".
-  // Null for routines a guardian or agent created directly. A managed routine is
-  // the app's to maintain: users can't delete it (the dashboard/DELETE path and
-  // agent's delete_routine both refuse), only the managing app can — so an app
-  // can freely recreate its routines on sync without a user pruning them.
-  managedBy: text("managed_by"),
-  enabled: integer("enabled", { mode: "boolean" }).default(true),
+export const routines = sqliteTable(
+  "routines",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    // Optional caller-assigned identity. Unique when set (SQLite treats multiple
+    // NULLs as distinct, so most routines can leave it null). Lets a caller make
+    // create_routine idempotent/dedup-able without overloading `name` (the human
+    // title): an app can key its managed routines and recreate them by key. A
+    // duplicate key is rejected at create time.
+    key: text("key").unique(),
+    // The app that owns and manages this routine (its appId), e.g. "dream".
+    // Null for routines a guardian or agent created directly. A managed routine is
+    // the app's to maintain: users can't delete it (the dashboard/DELETE path and
+    // agent's delete_routine both refuse), only the managing app can — so an app
+    // can freely recreate its routines on sync without a user pruning them.
+    // Uninstalling the app deletes its routines.
+    managedBy: text("managed_by"),
+    enabled: integer("enabled", { mode: "boolean" }).default(true),
 
-  // Trigger config (JSON, discriminated by trigger.type)
-  trigger: text("trigger", { mode: "json" }).notNull(),
+    // Trigger config (JSON, discriminated by trigger.type)
+    trigger: text("trigger", { mode: "json" }).notNull(),
 
-  actionName: text("action_name").notNull(),
-  args: text("args", { mode: "json" }).notNull(), // JSON array
-  // Whether a run's record keeps the payload that fired it. Off for a routine
-  // whose payloads are private and large, such as a whole mail: its runs then
-  // keep only the payload's size.
-  keepTriggerPayload: integer("keep_trigger_payload", { mode: "boolean" }).notNull().default(true),
+    actionName: text("action_name").notNull(),
+    args: text("args", { mode: "json" }).notNull(), // JSON array
+    // Whether a run's record keeps the payload that fired it. Off for a routine
+    // whose payloads are private and large, such as a whole mail: its runs then
+    // keep only the payload's size.
+    keepTriggerPayload: integer("keep_trigger_payload", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    // The person who created the routine, as a session actor (JSON): its fires
+    // act for them, so a reminder's push reaches the person who asked. Null on
+    // rows from before the column, whose fires act for the chat's owner.
+    createdBy: text("created_by", { mode: "json" }),
 
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  lastFiredAt: integer("last_fired_at", { mode: "timestamp" }),
-  nextRunAt: integer("next_run_at", { mode: "timestamp" }),
-});
+    // The chat the routine works for: the chat its args send into, else the
+    // chat it was made in. Null for a routine of no one chat, such as the
+    // Concierge's follows and digests. A chat's task list reads it.
+    chatId: text("chat_id"),
+
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    lastFiredAt: integer("last_fired_at", { mode: "timestamp" }),
+    nextRunAt: integer("next_run_at", { mode: "timestamp" }),
+  },
+  (table) => [index("idx_routines_chat_id").on(table.chatId)],
+);
 
 export const routineRuns = sqliteTable(
   "routine_runs",
@@ -1294,4 +1474,200 @@ export const connectionGrants = sqliteTable(
       .on(table.platform, table.accountId)
       .where(sql`${table.accountId} IS NOT NULL AND ${table.state} != 'unauthorized'`),
   ],
+);
+
+// Personal data: readings the guardian's devices push to Rome, such as Apple
+// Health. Every row is personal data. Concept: docs/personal-data.md. All access
+// goes through packages/core/src/personal-data/repository.ts.
+
+// One stored reading. A sender's key names it, unique per source and origin,
+// so a repeat of the same key replaces the reading instead of adding one.
+export const personalDataPoints = sqliteTable(
+  "personal_data_points",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    source: text("source").notNull(),
+    origin: text("origin").notNull(),
+    type: text("type").notNull(),
+    shape: text("shape").notNull(), // bucket | sample | record
+    // hour | day for a bucket, null otherwise.
+    resolution: text("resolution"),
+    // Milliseconds since the epoch, UTC.
+    startAt: integer("start_at").notNull(),
+    endAt: integer("end_at").notNull(),
+    // The IANA zone the device was in, so a day bucket keeps its local meaning.
+    tz: text("tz").notNull(),
+    // The sum for a cumulative type, the average for the rest.
+    value: real("value"),
+    unit: text("unit"),
+    fields: text("fields", { mode: "json" }).$type<Record<string, number>>(),
+    metadata: text("metadata", { mode: "json" }).$type<Record<string, unknown>>(),
+    dedupeKey: text("dedupe_key").notNull(),
+    // A hash of the stored fields: an upsert with the same hash changes nothing.
+    contentHash: text("content_hash").notNull(),
+    // The ingest that last wrote the row.
+    ingestId: integer("ingest_id").notNull(),
+    // For a type the device sends as a snapshot of a window: the snapshot
+    // that last sent the row. Its commit deletes the window's rows any other
+    // snapshot sent. Null for a row sent any other way.
+    snapshotId: text("snapshot_id"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_personal_data_points_key").on(table.source, table.origin, table.dedupeKey),
+    index("idx_personal_data_points_query").on(
+      table.source,
+      table.type,
+      table.resolution,
+      table.startAt,
+    ),
+  ],
+);
+
+// The catalog: one row per source, origin and type, kept current by every
+// ingest so reading the catalog never scans points.
+export const personalDataTypes = sqliteTable(
+  "personal_data_types",
+  {
+    source: text("source").notNull(),
+    origin: text("origin").notNull(),
+    type: text("type").notNull(),
+    shape: text("shape").notNull(),
+    unit: text("unit"),
+    resolutions: text("resolutions", { mode: "json" }).$type<string[]>().notNull(),
+    earliestAt: integer("earliest_at"),
+    latestAt: integer("latest_at"),
+    // What the device reports as complete, not the latest point: a day with no
+    // steps still counts as synced.
+    syncedThroughAt: integer("synced_through_at"),
+    // The last committed snapshot, for a type the device sends as one: its
+    // id, the window it holds whole, and when the device read it. Null until
+    // the first commit, and for a type sent any other way.
+    snapshotId: text("snapshot_id"),
+    snapshotStartAt: integer("snapshot_start_at"),
+    snapshotEndAt: integer("snapshot_end_at"),
+    snapshotReadAt: integer("snapshot_read_at"),
+    // The newest snapshot any batch has brought, committed or not, so a late
+    // batch of an older one changes nothing.
+    snapshotSeenId: text("snapshot_seen_id"),
+    snapshotSeenReadAt: integer("snapshot_seen_read_at"),
+    pointCount: integer("point_count").notNull().default(0),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.source, table.origin, table.type] })],
+);
+
+// One row per source and origin: the device that sends it and how its syncs go.
+export const personalDataSources = sqliteTable(
+  "personal_data_sources",
+  {
+    source: text("source").notNull(),
+    origin: text("origin").notNull(),
+    originName: text("origin_name"),
+    platform: text("platform"),
+    appVersion: text("app_version"),
+    state: text("state").notNull(), // active | paused | off
+    firstSyncAt: integer("first_sync_at"),
+    lastSyncAt: integer("last_sync_at"),
+    lastResult: text("last_result"), // ok | partial | error
+    lastErrorCode: text("last_error_code"),
+    // The source's short text for the Agent, written by core, never by the device.
+    note: text("note"),
+    // The device connection that reads the same data live, such as
+    // `<deviceId>:apple_health`, as the device's sync names it. Null for a
+    // source no connection reads, such as an import.
+    connectionId: text("connection_id"),
+  },
+  (table) => [primaryKey({ columns: [table.source, table.origin] })],
+);
+
+// The server's ingest log, kept 90 days. It counts and ranges, and never holds
+// a reading's value.
+export const personalDataIngests = sqliteTable(
+  "personal_data_ingests",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    source: text("source").notNull(),
+    origin: text("origin").notNull(),
+    // Null for a row no batch wrote, such as a delete.
+    batchId: text("batch_id"),
+    trigger: text("trigger"),
+    receivedAt: integer("received_at").notNull(),
+    itemCount: integer("item_count").notNull().default(0),
+    inserted: integer("inserted").notNull().default(0),
+    updated: integer("updated").notNull().default(0),
+    unchanged: integer("unchanged").notNull().default(0),
+    deleted: integer("deleted").notNull().default(0),
+    rejected: integer("rejected").notNull().default(0),
+    rangeStartAt: integer("range_start_at"),
+    rangeEndAt: integer("range_end_at"),
+    durationMs: integer("duration_ms"),
+    status: text("status").notNull(), // ok | partial | deleted
+    errorCode: text("error_code"),
+    // The answer the batch got, returned again for a repeat of the same batch.
+    // It holds counts and rejected item codes, never a value.
+    response: text("response", { mode: "json" }).$type<Record<string, unknown>>(),
+  },
+  (table) => [
+    uniqueIndex("uq_personal_data_ingests_batch").on(table.source, table.origin, table.batchId),
+    index("idx_personal_data_ingests_received").on(table.source, table.receivedAt),
+  ],
+);
+
+// Device connections: what each of the guardian's devices lets Agents reach
+// live over rome-node, one row per device and capability, as the device last
+// reported it. Holds nothing of personal data or sync. Concept:
+// docs/domains/connections.md#device-connection. All access goes through
+// packages/core/src/connections/device/repository.ts.
+export const deviceConnections = sqliteTable(
+  "device_connections",
+  {
+    // The rome-node device id.
+    deviceId: text("device_id").notNull(),
+    // The device's own id for the capability, such as `apple_health`.
+    capability: text("capability").notNull(),
+    deviceName: text("device_name"),
+    platform: text("platform"),
+    title: text("title").notNull(),
+    // The command prefix, without the dot, such as `health`.
+    prefix: text("prefix").notNull(),
+    personal: integer("personal", { mode: "boolean" }).notNull(),
+    // Each operation as the device reports it: name, access, and the optional
+    // description, input schema and examples.
+    operations: text("operations", { mode: "json" })
+      .$type<
+        {
+          name: string;
+          access: "read" | "write";
+          description?: string;
+          input?: Record<string, unknown>;
+          examples?: Record<string, unknown>[];
+        }[]
+      >()
+      .notNull(),
+    permission: text("permission").notNull(), // granted | denied | not_needed | unknown
+    // The device's Live access switch.
+    live: integer("live", { mode: "boolean" }).notNull(),
+    // What the capability also syncs to, as the device names it, such as
+    // `apple_health`: opaque here, so a reader of that data can find the
+    // connection before the first sync. Null when it syncs nothing.
+    feeds: text("feeds"),
+    // What the capability lets Rome do, in English, as the device's page says.
+    // Null for an app that reports none.
+    summary: text("summary"),
+    // Its name and summary by language (`en`, `zh-CN`), as the device has
+    // them, so a connect card reads in the guardian's language.
+    labels: text("labels", { mode: "json" }).$type<
+      Record<string, { title: string; summary?: string }>
+    >(),
+    // The icon for its card, by a name the readers draw, such as `calendar`.
+    icon: text("icon"),
+    // The personal-data origin of the app install that reports the row, which
+    // stays the same across its sign-ins while the device id does not. Null
+    // for an app that reports none.
+    originId: text("origin_id"),
+    // When a report last listed the row.
+    lastSeenAt: integer("last_seen_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.deviceId, table.capability] })],
 );

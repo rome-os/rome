@@ -20,7 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { buildApp } from "../index.js";
-import { COOKIE_NAME, JWT_SECRET } from "../../lib/auth.js";
+import { COOKIE_NAME, JWT_SECRET } from "../../access/auth.js";
 import type { ApiConfig, ApiDeps } from "../deps.js";
 import type { AppCatalog } from "../../apps/catalog.js";
 import type { AppView, ResolvedApp } from "../../apps/state.js";

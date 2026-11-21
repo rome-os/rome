@@ -1,15 +1,16 @@
 // What the Concierge follows for the guardian. What can be followed belongs to
 // the connections: the connector app answers which services it connects and,
 // for each one it can watch, its status, kinds and options
-// (`connector_watch_sources`), subscribes at the source
-// (`connector_watch_ensure`), and puts each raw event in the common shape
-// (`connector_watch_normalize`). Core never names a source. It keeps the
+// (`connector:connector_watch_sources`), subscribes at the source
+// (`connector:connector_watch_ensure`), and puts each raw event in the common shape
+// (`connector:connector_watch_normalize`). Core never names a source. It keeps the
 // follows and one event-bus routine per raw event a follow listens on. Events
 // are batched, triaged by the `concierge-triage` agent (triage.ts), and what
 // triage kept reaches the Concierge as quiet system turns: important ones after
-// each batch, in the Concierge chat each follow reports to, and digest ones at
-// the guardian's digest times, in the main chat (alerts.ts).
+// each batch, and digest ones at the guardian's digest times, each in the
+// Concierge chat its follow reports to (alerts.ts).
 
+import { withoutSessionActor } from "../access/session-actor.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   CONCIERGE_FOLLOW_DEFAULT_RULES,
@@ -23,15 +24,19 @@ import {
   type ConciergeFollowOptionDto,
   type ConciergeFollowRules,
 } from "@rome/api-types/concierge";
+import type { TaskListFollowItem } from "@rome/api-types/task-list";
 import type { ConnectionView } from "../api/routes/connections.js";
-import { actionExecutionContext } from "../actions/context.js";
-import type { Action } from "../actions/types.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
+import type { Action } from "../apps/actions/types.js";
 import type { AgentRunnerInterface } from "../core/types.js";
-import type { ConciergeFollowItemsRepository } from "../db/repositories/concierge-follow-items.js";
+import type {
+  ConciergeFollowItemRow,
+  ConciergeFollowItemsRepository,
+} from "../db/repositories/concierge-follow-items.js";
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { RoutineEngine } from "../routines/engine.js";
-import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
+import { resolveGuardianTimezone } from "../instance/timezone.js";
 import { createLogger } from "../logger.js";
 import {
   FollowBatcher,
@@ -42,11 +47,17 @@ import {
   renderDigestTurn,
   renderImportantTurn,
 } from "./alerts.js";
-import { mergeConnectors, type ProviderService, type ProviderWatchSection } from "./connectors.js";
+import {
+  agentViewOf,
+  mergeConnectors,
+  type ProviderService,
+  type ProviderWatchSection,
+} from "./connectors.js";
 import { addressedToOf, cleanLabels } from "./event-shape.js";
 import { optionValue, renderOptions } from "./follow-options.js";
-import type { ConciergeService } from "./service.js";
-import { type ConciergeOwner, GUARDIAN_OWNER, mainChatIdOf, storedChatId } from "./owner.js";
+import type { ConciergeService, DigestTaskNotes } from "./service.js";
+import { type ConciergeOwner, GUARDIAN_OWNER, storedChatId } from "../webchat/owner.js";
+import { MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
 import {
   type FollowEvent,
   MAX_EVENTS_PER_TRIAGE,
@@ -156,6 +167,15 @@ export interface WatchSource extends ProviderWatchSectionWithTriggers {
   provider: WatchProvider;
 }
 
+/** The kind of events `items` are, as their replies' label names it, when they are all one kind. */
+function oneKind(
+  items: readonly { source: string; kind: string }[],
+  kindLabel: (source: string, kind: string) => string,
+): string | null {
+  const kinds = new Set(items.map((item) => kindLabel(item.source, item.kind)));
+  return kinds.size === 1 ? ([...kinds][0] ?? null) : null;
+}
+
 const kindLabelsOf = (sources: WatchSource[]) => (source: string, kind: string) =>
   sources.find((s) => s.source === source)?.kinds.find((k) => k.kind === kind)?.label ?? kind;
 
@@ -181,7 +201,21 @@ interface FollowRecord {
    * follows made before owners were kept, which are their chat's owner's.
    */
   owner?: ConciergeOwner;
+  /** When it was made, epoch milliseconds. Absent on follows made before it was kept. */
+  createdAt?: number;
+  /**
+   * The topic chat whose archive moved it to the main chat, while it is still
+   * there: restoring that chat can move it back. Dropped once it moves again.
+   */
+  movedFrom?: string;
 }
+
+/** `next`, without where an archive moved it from once it reports to another chat than `before`. */
+const keepMovedFrom = (before: FollowRecord, next: FollowRecord): FollowRecord => {
+  if (next.chat === before.chat || next.movedFrom === undefined) return next;
+  const { movedFrom: _, ...moved } = next;
+  return moved;
+};
 
 /** A visitor's own rules, and the time zone their browser reported. */
 interface PersonRules extends Partial<ConciergeFollowRules> {
@@ -230,6 +264,8 @@ export interface ConciergeFollowingDeps {
   >;
   /** Runs the triage agent. */
   agentRunner: AgentRunnerInterface;
+  /** Tells what else runs at an owner's local times that their zone moved. */
+  timezoneMoved?: (owner: ConciergeOwner, timezone: string) => Promise<void>;
   /** Where triage runs are recorded, so Sessions shows them. */
   triageRecord?: TriageRecordStore;
   now?: () => number;
@@ -266,6 +302,8 @@ export interface ConciergeFollowing {
    */
   unfollow(source: string, target: string, owner?: ConciergeOwner): Promise<{ removed: boolean }>;
   rules(owner?: ConciergeOwner): Promise<ConciergeFollowRules>;
+  /** When `owner`'s quiet window `at` falls in ends, in their time zone, or null outside quiet hours. */
+  quietUntil(at: number, owner: ConciergeOwner): Promise<number | null>;
   /** Changes the fields given and answers the rules as stored. */
   setRules(
     input: Partial<ConciergeFollowRules>,
@@ -273,13 +311,52 @@ export interface ConciergeFollowing {
   ): Promise<ConciergeFollowRules>;
   /** Keeps a visitor's time zone, as their browser reports it. The guardian's is their own setting. */
   setTimezone(owner: ConciergeOwner, timezone: string): Promise<void>;
+  /** Where an owner is: their time zone, else the guardian's. */
+  timezone(owner: ConciergeOwner): Promise<string>;
   /** Subscribes every follow again, for one whose subscription another app removed. */
   reconcile(): Promise<void>;
   /**
    * Moves the follows and owed events of Concierge chat `chatId` to its
-   * owner's main chat `to` (null for the guardian's). Answers how many follows moved.
+   * owner's main chat `to` (null for the guardian's). Answers how many follows
+   * moved. `archived` marks each follow as moved by the chat's archive, so
+   * restoring the chat can move it back.
    */
-  moveToMainChat(chatId: string, to?: string | null): Promise<number>;
+  moveToMainChat(chatId: string, to?: string | null, archived?: boolean): Promise<number>;
+  /**
+   * The follows of `owner` that archiving topic chat `chatId` moved to their
+   * main chat `mainChat` (null for the guardian's) and that still report
+   * there, with each source's label.
+   */
+  followsMovedFrom(
+    chatId: string,
+    mainChat: string | null,
+    owner: ConciergeOwner,
+  ): Promise<{ source: string; label: string; target: string }[]>;
+  /**
+   * Topic chat `chatId` is restored. The follows its archive moved to main
+   * chat `mainChat` that still report there move back to it when `moveBack`
+   * says so, and stay otherwise. Either way they are no longer marked as
+   * moved. Answers how many moved back.
+   */
+  restoreToChat(
+    chatId: string,
+    mainChat: string | null,
+    owner: ConciergeOwner,
+    moveBack: boolean,
+  ): Promise<number>;
+  /**
+   * The owner's follows whose alerts go to Concierge chat `chatId`, with the
+   * owner's digest times, read without asking the sources again. A follow of
+   * a chat that is archived or gone counts as its owner's main chat's.
+   */
+  followsIn?(chatId: string, owner: ConciergeOwner): Promise<TaskListFollowItem[]>;
+  /** Calls `listener` whenever a follow or the rules are written. Returns the unsubscribe. */
+  onChange?(listener: () => void): () => void;
+  /** What `owner` follows that reports to Concierge chat `chatId`, with each source's label. */
+  followsOfChat(
+    chatId: string,
+    owner: ConciergeOwner,
+  ): Promise<{ source: string; label: string; target: string }[]>;
 }
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -323,6 +400,10 @@ function parseFollows(value: unknown): FollowRecord[] {
         preference: typeof f.preference === "string" && f.preference ? f.preference : null,
         chat: typeof f.chat === "string" && f.chat ? f.chat : null,
         ...(typeof f.owner === "string" && f.owner ? { owner: f.owner } : {}),
+        ...(typeof f.createdAt === "number" && Number.isFinite(f.createdAt)
+          ? { createdAt: f.createdAt }
+          : {}),
+        ...(typeof f.movedFrom === "string" && f.movedFrom ? { movedFrom: f.movedFrom } : {}),
       },
     ];
   });
@@ -437,8 +518,16 @@ export function startConciergeFollowing(
         : {}),
     };
   };
+  const changeListeners = new Set<() => void>();
   const writeStored = async (next: StoredFollowing) => {
     await deps.settings.set(CONCIERGE_FOLLOWING_SETTING_KEY, next);
+    for (const listener of changeListeners) {
+      try {
+        listener();
+      } catch (error) {
+        log.warn("following change listener failed", { error: messageOf(error) });
+      }
+    }
   };
 
   /** An owner's rules: the guardian's top-level ones, a visitor's own with the defaults. */
@@ -535,7 +624,7 @@ export function startConciergeFollowing(
     const live = chatId ? await service.conciergeChat(chatId) : null;
     if (live) return live;
     const main = mainChatIdOf(owner);
-    return (await service.conciergeChat(main)) ?? { id: main, name: "Concierge", main: true };
+    return (await service.conciergeChat(main)) ?? { id: main, name: MAIN_CHAT_NAME, main: true };
   };
 
   /**
@@ -589,6 +678,12 @@ export function startConciergeFollowing(
         (await service.runSystemTurn(chatId, renderImportantTurn(items, held, at, kindLabel), {
           quiet: true,
           inputLabel: `Following · important (${items.length})`,
+          // Its replies are labelled with what it follows: the kind of
+          // events, when they are all of one kind.
+          inputSource: {
+            type: "following",
+            name: oneKind(items, kindLabel),
+          },
           pushLevel: "active",
         }));
       // Items the Concierge never had stay owed, and the delivery tries again.
@@ -613,7 +708,7 @@ export function startConciergeFollowing(
       byOwner.set(owner, [...(byOwner.get(owner) ?? []), event]);
     }
     for (const [owner, ownerEvents] of byOwner) {
-      // A visitor dropped from the dashboard allow-list keeps their follows,
+      // A dashboard admin dropped from the allow-list keeps their follows,
       // but their events are not triaged or kept until they are back.
       if (!(await service.isServed(owner))) {
         log.info("following skipped an owner no longer served", { events: ownerEvents.length });
@@ -727,45 +822,91 @@ export function startConciergeFollowing(
     flush: (events) => outsideAction(() => triageBatch(events)),
   });
 
-  /** Hands the owed digest to the Concierge as one turn, an empty one included. */
-  /** Hands an owner's owed digest to their main chat as one turn, an empty one included. */
+  /**
+   * Hands an owner's owed digest to the Concierge as one turn in each chat that
+   * has items or task notes, and an empty one in the main chat when nothing is
+   * owed at all. A chat's items and notes are marked once its own turn ran to
+   * its end, so one chat's failure leaves only its own owed.
+   */
   const deliverDigest = async (owner: ConciergeOwner): Promise<{ items: number }> => {
     if (!(await service.isServed(owner))) return { items: 0 };
-    // An empty digest still runs, with count="0", so the person hears that
-    // nothing new came in.
     const owed = await deps.items.owedToDigest(owner);
-    const chatId = await service.findChatId(owner);
     const at = guardianNow(now(), await timezoneOf(owner));
     const kindLabel = kindLabelsOf(await readSources().catch(() => [] as WatchSource[]));
-    // The digest goes to the main chat and groups every chat's items under it.
-    const chats = new Map<string, ConciergeChatRef>();
+    // A chat that is gone or archived hands its items to the main chat.
+    const resolved = new Map<string, string | null>();
+    const perChat = new Map<string | null, ConciergeFollowItemRow[]>();
     for (const item of owed) {
       const key = item.chatId ?? "";
-      if (!chats.has(key)) chats.set(key, await chatRefOf(item.chatId, owner));
+      if (!resolved.has(key)) resolved.set(key, await service.deliveryChat(item.chatId, owner));
+      const chatId = resolved.get(key) ?? null;
+      perChat.set(chatId, [...(perChat.get(chatId) ?? []), item]);
     }
-    const ran =
-      chatId !== null &&
-      (await outsideAction(() =>
-        service.runSystemTurn(
-          chatId,
-          renderDigestTurn(owed, at, (item) => chats.get(item.chatId ?? ""), kindLabel),
-          {
-            quiet: true,
-            inputLabel: `Following · digest (${owed.length})`,
-            // A digest is expected at its time, so it arrives without an alert.
-            pushLevel: "passive",
-          },
-        ),
-      ));
-    log.info("following digest", { items: owed.length, delivered: ran });
-    // A digest that did not run to its end leaves its items for the next one.
-    if (!ran) return { items: 0 };
-    await deps.items.markDigested(
-      owed.map((item) => item.id),
-      new Date(now()),
-    );
-    await deps.items.prune(new Date(now() - KEEP_DELIVERED_MS));
-    return { items: owed.length };
+    // A chat's digest also says which of its tasks to bring up again, and a
+    // chat with such notes gets one even with no items. An archived chat's
+    // tasks read as the main chat's, so their notes go there.
+    const notes = new Map<string, DigestTaskNotes>();
+    const chats = await service.listChats(owner).catch((error: unknown) => {
+      log.warn("digest could not list the chats", { error: messageOf(error) });
+      return [];
+    });
+    const chatIds = new Set([
+      ...chats.map((chat) => chat.id),
+      ...[...perChat.keys()].filter((id): id is string => id !== null),
+    ]);
+    for (const chatId of chatIds) {
+      const read = await Promise.resolve()
+        .then(() => service.digestTaskNotes(chatId, owner))
+        .catch((error: unknown) => {
+          log.warn("digest task notes failed", { chatId, error: messageOf(error) });
+          return null;
+        });
+      if (!read?.text) continue;
+      notes.set(chatId, read);
+      if (!perChat.has(chatId)) perChat.set(chatId, []);
+    }
+    // An empty digest still runs, with count="0", so the person hears that
+    // nothing new came in anywhere: no item and no task note in any chat.
+    if (perChat.size === 0) perChat.set(await service.findChatId(owner), []);
+    let delivered = 0;
+    let turns = 0;
+    for (const [chatId, items] of perChat) {
+      let ok = false;
+      const note = chatId === null ? undefined : notes.get(chatId);
+      const turn = renderDigestTurn(items, at, kindLabel);
+      const prompt = note ? `${turn}\n${note.text}` : turn;
+      try {
+        ok =
+          chatId !== null &&
+          (await outsideAction(() =>
+            service.runSystemTurn(chatId, prompt, {
+              quiet: true,
+              inputLabel: `Following · digest (${items.length})`,
+              inputSource: { type: "digest", name: null },
+              // A digest is expected at its time, so it arrives without an alert.
+              pushLevel: "passive",
+            }),
+          ));
+      } catch (error) {
+        log.warn("digest turn threw; its items stay owed", { chatId, error: messageOf(error) });
+      }
+      log.info("following digest", { chatId, items: items.length, delivered: ok });
+      // A digest that did not run to its end leaves its items and notes for the next one.
+      if (!ok) continue;
+      await deps.items.markDigested(
+        items.map((item) => item.id),
+        new Date(now()),
+      );
+      if (note) {
+        await service.markTaskNotesListed(note).catch((error: unknown) => {
+          log.warn("failed to mark digest task notes listed", { chatId, error: messageOf(error) });
+        });
+      }
+      delivered += items.length;
+      turns++;
+    }
+    if (turns > 0) await deps.items.prune(new Date(now() - KEEP_DELIVERED_MS));
+    return { items: delivered };
   };
 
   /** Follow routines made before they kept no payload stop keeping it. */
@@ -817,11 +958,16 @@ export function startConciergeFollowing(
       const id = existing
         ? existing.id
         : await deps.routines.create({
-            name: `Concierge digest at ${localTime}`,
+            name: `Digest at ${localTime}`,
             key,
+            // Shared by every chat of its owner.
+            chatId: null,
             trigger,
             actionName: CONCIERGE_DIGEST_ACTION,
             args,
+            // It acts for the person whose Concierge it serves, whoever's
+            // request set the digest times.
+            createdBy: { owner },
           });
       if (existing) await deps.routines.update(id, { trigger, args, enabled: true });
       await reactivate(id);
@@ -894,12 +1040,18 @@ export function startConciergeFollowing(
       } else {
         // An event's payload (a whole mail, say) stays out of the run history.
         id = await deps.routines.create({
-          name: `Concierge follows ${follow.target} (${source.label})`,
+          name: `Follow ${follow.target} (${source.label})`,
           key,
+          // Shared by every owner who follows the target.
+          chatId: null,
           trigger: routineTrigger,
           actionName: CONCIERGE_FOLLOW_ACTION,
           args,
           keepTriggerPayload: false,
+          // One watcher serves every owner who follows this target, so it
+          // acts for no one person. What it finds goes to each owner's own
+          // Concierge chat, which is private to them.
+          createdBy: { kind: "anonymous" },
         });
       }
       await reactivate(id);
@@ -1110,14 +1262,15 @@ export function startConciergeFollowing(
         preference: null,
         chat: await chatForNewFollow(change.chatId, owner),
         owner,
+        createdAt: Date.now(),
       };
-      const next = {
+      const next = keepMovedFrom(base, {
         ...applyChange(source, base, change),
         account,
         owner,
         // One that exists moves only when the change names a chat.
         ...(existing && change.chatId ? { chat: await storedChatOf(change.chatId, owner) } : {}),
-      };
+      });
       // Check first, so a refusal (no admin rights for a webhook) leaves nothing behind.
       await ensure(source.provider, next, true);
       await ensure(source.provider, next, false);
@@ -1140,11 +1293,11 @@ export function startConciergeFollowing(
         (f) => f.source === source.source && f.target === target,
       );
       if (!existing) return null;
-      const next = {
+      const next = keepMovedFrom(existing, {
         ...applyChange(source, existing, change),
         owner,
         ...(change.chatId ? { chat: await storedChatOf(change.chatId, owner) } : {}),
-      };
+      });
       const added = next.kinds.filter((k) => !existing.kinds.includes(k));
       if (added.length > 0 && source.status === "ready") {
         await ensure(source.provider, { ...next, kinds: added }, false);
@@ -1206,6 +1359,8 @@ export function startConciergeFollowing(
 
     rules: async (owner = GUARDIAN_OWNER) => rulesOf(await readStored(), owner),
 
+    quietUntil,
+
     async setRules(change, owner = GUARDIAN_OWNER) {
       const stored = await readStored();
       const next = parseFollowRules({ ...rulesOf(stored, owner), ...change });
@@ -1223,6 +1378,7 @@ export function startConciergeFollowing(
       return next;
     },
 
+    timezone: (owner) => timezoneOf(owner),
     async setTimezone(owner, timezone) {
       if (owner === GUARDIAN_OWNER) return;
       const stored = await readStored();
@@ -1231,20 +1387,68 @@ export function startConciergeFollowing(
         ...stored,
         people: { ...stored.people, [owner]: { ...stored.people?.[owner], timezone } },
       });
-      // A visitor's digest runs at their own local times.
+      // A visitor's digest, and their scheduled tasks, run at their own local times.
       await syncDigest();
+      await deps.timezoneMoved?.(owner, timezone);
     },
 
-    async moveToMainChat(chatId, to = null) {
+    // Read outside the write queue: the labels may ask the providers, and a
+    // slow one must not hold up an archive, unarchive or delete behind it.
+    async followsOfChat(chatId, owner) {
+      const follows = followsOf(await readStored(), owner).filter((f) => f.chat === chatId);
+      if (follows.length === 0) return [];
+      // A source that cannot be read now is named by its id.
+      const sources = await readSources().catch(() => [] as WatchSource[]);
+      return follows.map(({ source, target }) => ({
+        source,
+        label: sources.find((s) => s.source === source)?.label ?? source,
+        target,
+      }));
+    },
+
+    async moveToMainChat(chatId, to = null, archived = false) {
       const stored = await readStored();
       const moved = stored.follows.filter((f) => f.chat === chatId).length;
       if (moved > 0) {
         await writeStored({
           ...stored,
-          follows: stored.follows.map((f) => (f.chat === chatId ? { ...f, chat: to } : f)),
+          follows: stored.follows.map((f) =>
+            f.chat === chatId ? { ...f, chat: to, ...(archived ? { movedFrom: chatId } : {}) } : f,
+          ),
         });
       }
       await deps.items.moveToMainChat(chatId, to);
+      return moved;
+    },
+
+    async followsMovedFrom(chatId, mainChat, owner) {
+      const follows = followsOf(await readStored(), owner).filter(
+        (f) => f.movedFrom === chatId && f.chat === mainChat,
+      );
+      if (follows.length === 0) return [];
+      const sources = await readSources().catch(() => [] as WatchSource[]);
+      return follows.map(({ source, target }) => ({
+        source,
+        label: sources.find((s) => s.source === source)?.label ?? source,
+        target,
+      }));
+    },
+
+    async restoreToChat(chatId, mainChat, owner, moveBack) {
+      const stored = await readStored();
+      const marked = (f: FollowRecord) => f.movedFrom === chatId && ownerOfFollow(f) === owner;
+      if (!stored.follows.some(marked)) return 0;
+      let moved = 0;
+      await writeStored({
+        ...stored,
+        follows: stored.follows.map((f) => {
+          if (!marked(f)) return f;
+          const { movedFrom: _, ...unmarked } = f;
+          if (!moveBack || f.chat !== mainChat) return unmarked;
+          moved += 1;
+          return { ...unmarked, chat: chatId };
+        }),
+      });
       return moved;
     },
 
@@ -1269,13 +1473,68 @@ export function startConciergeFollowing(
   };
   const following: ConciergeFollowing = {
     ...unserialized,
+    async followsIn(chatId, owner) {
+      // The panel reads only what is stored: asking the providers costs a
+      // round trip to each service, so this never reads the sources. A label
+      // comes from sources read before. Sources read within their TTL also
+      // say whether each source can deliver now, for clients that do not read
+      // `GET /concierge/connectors`; past it, a follow reads off or active.
+      const stored = await readStored();
+      const known = sourcesCache?.watch ?? [];
+      const fresh = sourcesCache !== null && now() - sourcesCache.at < SOURCES_TTL_MS;
+      const { digestTimes } = rulesOf(stored, owner);
+      // When the owner's next digest comes: the soonest of their digest routines.
+      const digestKeys = new Set(
+        digestTimes.map((localTime) =>
+          owner === GUARDIAN_OWNER
+            ? `${DIGEST_KEY_PREFIX}${localTime}`
+            : `${DIGEST_KEY_PREFIX}${mainChatIdOf(owner)}:${localTime}`,
+        ),
+      );
+      let nextAt: number | null = null;
+      for (const routine of await deps.routines.listRoutines()) {
+        if (!routine.enabled || !routine.key || !digestKeys.has(routine.key)) continue;
+        const at = routine.nextRunAt?.getTime();
+        if (at !== undefined && (nextAt === null || at < nextAt)) nextAt = at;
+      }
+      const items: TaskListFollowItem[] = [];
+      for (const follow of followsOf(stored, owner)) {
+        if ((await chatRefOf(follow.chat, owner)).id !== chatId) continue;
+        const source = known.find((s) => s.source === follow.source);
+        const stored = follow.kinds.length === 0 ? "off" : "active";
+        items.push({
+          kind: "follow",
+          source: follow.source,
+          label: source?.label ?? follow.source,
+          target: follow.target,
+          state: !fresh
+            ? stored
+            : source
+              ? toDto(source, follow, { id: chatId, name: "", main: false }).state
+              : "unavailable",
+          digestTimes,
+          nextAt,
+          ...(follow.createdAt !== undefined ? { createdAt: follow.createdAt } : {}),
+        });
+      }
+      return items;
+    },
+    onChange(listener) {
+      changeListeners.add(listener);
+      return () => {
+        changeListeners.delete(listener);
+      };
+    },
     follow: (change, owner) => exclusive(() => unserialized.follow(change, owner)),
     configure: (change, owner) => exclusive(() => unserialized.configure(change, owner)),
     unfollow: (source, target, owner) =>
       exclusive(() => unserialized.unfollow(source, target, owner)),
     setRules: (change, owner) => exclusive(() => unserialized.setRules(change, owner)),
     setTimezone: (owner, timezone) => exclusive(() => unserialized.setTimezone(owner, timezone)),
-    moveToMainChat: (chatId, to) => exclusive(() => unserialized.moveToMainChat(chatId, to)),
+    moveToMainChat: (chatId, to, archived) =>
+      exclusive(() => unserialized.moveToMainChat(chatId, to, archived)),
+    restoreToChat: (chatId, mainChat, owner, moveBack) =>
+      exclusive(() => unserialized.restoreToChat(chatId, mainChat, owner, moveBack)),
   };
   service.attachFollowing(following);
 
@@ -1375,8 +1634,10 @@ export function startConciergeFollowing(
     void following
       .reconcile()
       .catch((error: unknown) => log.warn("follow reconcile failed", { error: messageOf(error) }));
-  const firstReconcile = setTimeout(runReconcile, RECONCILE_DELAY_MS);
-  const reconcileTimer = setInterval(runReconcile, RECONCILE_INTERVAL_MS);
+  const firstReconcile = withoutSessionActor(() => setTimeout(runReconcile, RECONCILE_DELAY_MS));
+  const reconcileTimer = withoutSessionActor(() =>
+    setInterval(runReconcile, RECONCILE_INTERVAL_MS),
+  );
   firstReconcile.unref?.();
   reconcileTimer.unref?.();
   // Important items owed from before a restart.
@@ -1464,7 +1725,7 @@ const CHANGE_SCHEMA_PROPERTIES = {
 
 /**
  * The four follow operations as actions. They run in main (the coordination
- * list in actions/engine.ts); every call to the connector goes through
+ * list in apps/actions/engine.ts); every call to the connector goes through
  * `run`, outside the action's own async context.
  */
 function registerFollowingActions(
@@ -1476,13 +1737,25 @@ function registerFollowingActions(
   actions.register({
     config: followingActionConfig(
       CONCIERGE_FOLLOWING_ACTIONS.list,
-      "Everything about what the Concierge follows for the guardian, in one structure: every source (ready or not, with what is missing), its account, target format, kinds and options, what is followed there with its current settings, and the rules. Call it first for anything about following.",
+      "Everything about what the Concierge follows for the guardian, in one structure: every service (connected or not, with what is missing), its account, what is followed there with its current settings, and the rules. Pass service for that service's watch catalog too: its target format, kinds and options, which a follow card is built from.",
       "read-only",
     ),
-    inputSchema: { type: "object", properties: {} },
-    execute: async () => {
+    inputSchema: {
+      type: "object",
+      properties: {
+        service: {
+          type: "string",
+          description: "One service, as the list names it, with its watch catalog.",
+        },
+      },
+    },
+    execute: async (args) => {
       try {
-        return { status: "ok", data: await following.list(await callingOwner()) };
+        const service = typeof args.service === "string" && args.service ? args.service : undefined;
+        return {
+          status: "ok",
+          data: agentViewOf(await following.list(await callingOwner()), service),
+        };
       } catch (error) {
         return errorOf(error);
       }

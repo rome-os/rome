@@ -118,7 +118,6 @@ const draftOf = (): ReplyDraft => ({
   set: rs.fn(),
   clear: rs.fn(),
   restore: rs.fn(),
-  has: () => true,
   jump: rs.fn(),
 });
 
@@ -629,34 +628,18 @@ describe("Concierge forwarded report", () => {
       ...extra,
     });
   const bubbles = () => Array.from(document.querySelectorAll<HTMLElement>("div.rounded-16"));
-  const chip = () => screen.getByRole("link", { name: "Open task chat Flights to Lisbon" });
 
-  it("is one bubble with a quote's gray left edge, the chip at its top, and the report cut inside", () => {
+  it("is one bubble with the report cut inside, no task header and no quote edge", () => {
     render(transcript([agentRow(agent("a1", [forwarded()]))]));
 
     expect(bubbles()).toHaveLength(1);
     const [bubble] = bubbles();
-    expect(bubble.className).toContain("border-l-3");
-    expect(bubble.className).toContain("border-l-muted-foreground");
-    // No card inside the bubble.
-    expect(bubble.querySelector("div.rounded-8.border-l-3")).toBeNull();
-    expect(bubble.firstElementChild?.contains(chip())).toBe(true);
+    expect(bubble.className).toContain("bg-surface-muted");
+    expect(bubble.className).not.toContain("border-l-3");
+    // The label under the message names its task; the bubble has no header.
+    expect(screen.queryByRole("link", { name: /Flights to Lisbon/ })).toBeNull();
     expect(bubble.contains(toggles()[0])).toBe(true);
     expect(bubble.contains(screen.getByText(/^Line 1\.+$/))).toBe(true);
-  });
-
-  it("names the task chat in a small chip, and opens it", () => {
-    render(transcript([agentRow(agent("a1", [forwarded()]))]));
-
-    expect(chip().textContent).toBe("Flights to Lisbon");
-    expect(chip().getAttribute("href")).toBe("/chat/task-7");
-    expect(chip().querySelector("svg.lucide-chevron-right")).not.toBeNull();
-    // The title is cut with an ellipsis when it does not fit.
-    expect(within(chip()).getByText("Flights to Lisbon").className).toContain("truncate");
-
-    fireEvent.click(chip());
-
-    expect(screen.getByTestId("location").textContent).toBe("/chat/task-7");
   });
 
   it("shows the lead-in as a bubble of its own above the report", () => {
@@ -665,9 +648,7 @@ describe("Concierge forwarded report", () => {
     expect(bubbles()).toHaveLength(2);
     const [lead, report] = bubbles();
     expect(lead.textContent).toBe("Here it is");
-    expect(lead.className).not.toContain("border-l-3");
-    expect(lead.contains(chip())).toBe(false);
-    expect(report.contains(chip())).toBe(true);
+    expect(report.contains(screen.getByText(/^Line 1\.+$/))).toBe(true);
   });
 
   it("replies to each bubble with its own text", () => {
@@ -707,11 +688,10 @@ describe("Concierge forwarded report", () => {
     expect(bubbles()).toHaveLength(1);
   });
 
-  it("has no chip and no quote edge on a message that was not forwarded", () => {
+  it("has no chip on a message that was not forwarded", () => {
     render(transcript([agentRow(agent("a1", [text(LONG, { format: "long" })]))]));
 
     expect(screen.queryByRole("link")).toBeNull();
-    expect(bubbles()[0].className).not.toContain("border-l-3");
     // The same cut and the same button as the forwarded report's.
     expect(toggles()).toHaveLength(1);
   });

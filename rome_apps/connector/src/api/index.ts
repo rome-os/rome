@@ -26,6 +26,7 @@ import {
   startCliLogin,
 } from "./composio-login.js";
 import { buildCallbackResponse } from "./callback-response.js";
+import { CONNECT_CARD_PATH, type ConnectAnswer, toolkitName } from "../connect-widget.js";
 import { type ConnectOrigin, CsrfStore, randomToken } from "./csrf.js";
 import { EventsRepo, EMITTED_EVENTS_RING_CAP } from "./events-repo.js";
 import {
@@ -166,6 +167,10 @@ class ComposioApiHandler implements RomeAppApiHandler {
       }
       if (method === "GET" && path === "callback") {
         return await this.handleCallback(request);
+      }
+      if (request.path[0] === CONNECT_CARD_PATH && request.path.length === 2) {
+        if (method === "GET") return await this.handleConnectCardStatus(request.path[1]);
+        if (method === "POST") return await this.handleConnectCardEvent(request, request.path[1]);
       }
       if (method === "GET" && path === "connectors") {
         return await this.handleListConnectors();
@@ -576,7 +581,32 @@ class ComposioApiHandler implements RomeAppApiHandler {
     const body = parseJsonBody<ConnectorBody>(request.body);
     const provider = body?.provider?.trim();
     if (!provider) return jsonError(400, "missing_provider", "provider is required");
+    // Only an inline chat-transcript card sends `webchat`; everything else (the
+    // dashboard, an omitted field) lands on the dashboard, which stays the safe
+    // default for any client that doesn't name its origin.
+    const origin: ConnectOrigin = body?.origin === "webchat" ? "webchat" : "dashboard";
+    const started = await this.startConnection(request, provider, origin, body?.callbackUrl);
+    if (started instanceof Response) return started;
+    // Already connected — nothing to authorize, so don't hand back a redirect;
+    // the dashboard just refreshes its connection list.
+    if (started.kind === "existing") return Response.json({ provider, alreadyConnected: true });
+    return Response.json({
+      authorizationUrl: started.url,
+      csrfToken: started.csrfToken,
+      provider,
+    });
+  }
 
+  /** Starts Composio's OAuth for `provider`, or reports it connected. An error
+   *  comes back as the response to send. */
+  private async startConnection(
+    request: RomeAppApiRequest,
+    provider: string,
+    origin: ConnectOrigin,
+    callbackUrlOverride?: string,
+  ): Promise<
+    Response | { kind: "existing" } | { kind: "redirect"; url: string; csrfToken: string }
+  > {
     // Rome-brokered toolkits (e.g. GitHub) are connected in Settings → Connections
     // and bridged into Composio by core. Refuse a Composio OAuth here even though
     // the UI and agent actions already route away — so a stale bundle, replayed
@@ -613,14 +643,9 @@ class ComposioApiHandler implements RomeAppApiHandler {
 
     const authConfigId = await client.ensureAuthConfig(provider);
 
-    // Only an inline chat-transcript card sends `webchat`; everything else (the
-    // dashboard, an omitted field) lands on the dashboard, which stays the safe
-    // default for any client that doesn't name its origin.
-    const origin: ConnectOrigin = body?.origin === "webchat" ? "webchat" : "dashboard";
-
     const csrfToken = randomToken();
     const callbackUrl =
-      body?.callbackUrl?.trim() ?? this.resolveDashboardCallbackUrl(request, csrfToken);
+      callbackUrlOverride?.trim() ?? this.resolveDashboardCallbackUrl(request, csrfToken);
 
     const outcome = await client.ensureConnection(
       ROME_USER_ID,
@@ -628,19 +653,57 @@ class ComposioApiHandler implements RomeAppApiHandler {
       provider,
       callbackUrl,
     );
-
-    // Already connected — nothing to authorize, so don't register a CSRF token
-    // or hand back a redirect; the dashboard just refreshes its connection list.
-    if (outcome.kind === "existing") {
-      return Response.json({ provider, alreadyConnected: true });
-    }
+    if (outcome.kind === "existing") return { kind: "existing" };
 
     this.csrf.put(csrfToken, provider, origin);
+    return { kind: "redirect", url: outcome.url, csrfToken };
+  }
+
+  /** What the connect card shows under its title: whether the toolkit is
+   *  connected yet. */
+  private async handleConnectCardStatus(toolkit: string): Promise<Response> {
+    const name = toolkitName(toolkit);
+    const client = await this.loadClient();
+    if (!client) return Response.json({ note: "Sign in to Composio to connect." });
+    const found = await client.findActiveConnectedAccount(ROME_USER_ID, toolkit);
     return Response.json({
-      authorizationUrl: outcome.url,
-      csrfToken,
-      provider,
+      note:
+        found.kind === "ok"
+          ? `${name} is connected.`
+          : `${name} isn't connected yet. Press Connect, authorize it in the tab that opens, then press I've authorized.`,
     });
+  }
+
+  /** A press on the connect card. Connect opens Composio's authorization page,
+   *  or answers the agent when the toolkit is connected already; Check answers
+   *  it once the toolkit is connected; Dismiss answers that the guardian
+   *  declined. */
+  private async handleConnectCardEvent(
+    request: RomeAppApiRequest,
+    event: string,
+  ): Promise<Response> {
+    const toolkit = parseJsonBody<{ toolkit?: string }>(request.body)?.toolkit?.trim();
+    if (!toolkit) return jsonError(400, "missing_toolkit", "toolkit is required");
+    const connected = (): Response =>
+      Response.json({ answer: { toolkit, status: "connected" } satisfies ConnectAnswer });
+
+    if (event === "dismiss") {
+      return Response.json({ answer: { toolkit, dismissed: true } satisfies ConnectAnswer });
+    }
+    if (event === "connect") {
+      const started = await this.startConnection(request, toolkit, "webchat");
+      if (started instanceof Response) return started;
+      if (started.kind === "existing") return connected();
+      return Response.json({ open: started.url });
+    }
+    if (event === "check") {
+      const client = await this.loadClient();
+      if (!client) return jsonError(409, "no_api_key", "Log in to Composio first");
+      const found = await client.findActiveConnectedAccount(ROME_USER_ID, toolkit);
+      if (found.kind === "ok") return connected();
+      return Response.json({ ok: true });
+    }
+    return jsonError(404, "not_found", `Unknown connect card event: ${event}`);
   }
 
   private resolveDashboardCallbackUrl(request: RomeAppApiRequest, csrfToken: string): string {
@@ -822,7 +885,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
     // Rome Mail rides the same relay/webhook transport but is not a
     // Composio webhook. Rome Cloud stamps `x-rome-mail-source: agentmail` on the
     // deposit (the relay strips only `x-rome-internal-*`, so this marker
-    // survives replay). Route those straight into core's `email_inbound` action,
+    // survives replay). Route those straight into core's `system:email_inbound` action,
     // which verifies the per-inbox HMAC before trusting the body — this branch
     // is pure transport and never authenticates anything itself.
     if (rawHeader(request.headers, "x-rome-mail-source") === "agentmail") {
@@ -832,7 +895,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
     // Rome's own GitHub webhook (no Composio): GitHub stamps `X-GitHub-Event` on
     // every delivery. This rides the same relay/`/webhook` transport as Composio
     // (custom headers survive replay, like `x-rome-mail-source`), but verifies
-    // GitHub's own HMAC scheme against the secret `connector_github_subscribe`
+    // GitHub's own HMAC scheme against the secret `connector:connector_github_subscribe`
     // registered — never Composio's.
     if (rawHeader(request.headers, GITHUB_EVENT_HEADER)) {
       return await this.handleGithubWebhook(request);
@@ -912,7 +975,7 @@ class ComposioApiHandler implements RomeAppApiHandler {
   /**
    * Ingest a verified GitHub webhook delivery — Rome's own GitHub event path,
    * zero Composio. Verifies the `X-Hub-Signature-256` HMAC against the secret
-   * `connector_github_subscribe` minted and registered on the hook, then emits
+   * `connector:connector_github_subscribe` minted and registered on the hook, then emits
    * `provider:event:github.<event>` onto the bus (deduped on GitHub's delivery
    * GUID) so a routine's event-bus trigger fires. A `ping` (GitHub's creation
    * test delivery) is acked without emitting.
@@ -976,8 +1039,8 @@ class ComposioApiHandler implements RomeAppApiHandler {
   }
 
   // Transport-only bridge for inbound Rome Mail: hand the raw deposit body and
-  // its HMAC to core's `email_inbound` action. We never verify or interpret the
-  // mail here — `email_inbound`/EmailAdapter own the per-inbox HMAC check and
+  // its HMAC to core's `system:email_inbound` action. We never verify or interpret the
+  // mail here — `system:email_inbound`/EmailAdapter own the per-inbox HMAC check and
   // all email semantics. Always ACK 200: a missing/disabled email channel or a
   // bad signature is handled (and dropped) downstream, and a relay retry would
   // not change the outcome.
@@ -985,9 +1048,9 @@ class ComposioApiHandler implements RomeAppApiHandler {
     const signature = rawHeader(request.headers, "x-rome-mail-signature") ?? "";
     const rawBody = new TextDecoder().decode(request.body ?? new Uint8Array(0));
     try {
-      await this.ctx.runAction("email_inbound", { rawBody, signature });
+      await this.ctx.runAction("system:email_inbound", { rawBody, signature });
     } catch (err) {
-      this.ctx.log.error("email_inbound transport failed", {
+      this.ctx.log.error("system:email_inbound transport failed", {
         error: err instanceof Error ? err.message : String(err),
       });
     }

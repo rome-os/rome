@@ -2,6 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChannelMessage, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
+import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
+import type * as connections from "../../../connections/message.js";
 import { DISCORD_USER, DiscordPeer } from "./discord.js";
 import type { Peer } from "./peer.js";
 import { TELEGRAM_CHAT, TelegramPeer } from "./telegram.js";
@@ -28,7 +30,7 @@ export interface TestChannel {
 
 interface Adapter {
   send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt>;
-  onInbound(handler: (message: ChannelMessage) => Promise<void>): void;
+  onInbound(handler: (message: connections.Message) => Promise<void>): void;
   stop(): Promise<void>;
 }
 
@@ -66,15 +68,16 @@ async function assemble(
 }
 
 /**
- * The messages the adapter delivers, in arrival order. `receive` takes the
+ * The messages the adapter delivers, as apps receive them on channel
+ * `channel`, in arrival order. `receive` takes the
  * oldest, waiting up to 3 s for one, and teardown fails on any left untaken,
  * so a duplicate or stray delivery cannot pass unnoticed.
  */
-function inbox(adapter: Adapter, timeoutMs = 3_000) {
+function inbox(adapter: Adapter, channel: Platform, timeoutMs = 3_000) {
   const delivered: ChannelMessage[] = [];
   let wake: (() => void) | undefined;
   adapter.onInbound(async (message) => {
-    delivered.push(message);
+    delivered.push(channelMessageOf(message, channel));
     wake?.();
   });
   return {
@@ -103,7 +106,7 @@ const telegram = () =>
     const peer = await TelegramPeer.start();
     undo(() => peer.close());
     const adapter = peer.createAdapter();
-    const heard = inbox(adapter);
+    const heard = inbox(adapter, "telegram");
     undo(() => heard.assertTaken());
     // Registered first, so an adapter that fails to start is still stopped.
     undo(() => adapter.stop());
@@ -135,7 +138,7 @@ const wechat = () =>
       globalThis.fetch = originalFetch;
     });
     const adapter = peer.createAdapter(statePath);
-    const heard = inbox(adapter);
+    const heard = inbox(adapter, "wechat");
     undo(() => heard.assertTaken());
     // Registered first, so an adapter that fails to start is still stopped.
     undo(() => adapter.stop());
@@ -155,7 +158,7 @@ const discord = () =>
     const peer = await DiscordPeer.start();
     undo(() => peer.close());
     const adapter = peer.createAdapter();
-    const heard = inbox(adapter);
+    const heard = inbox(adapter, "discord");
     undo(() => heard.assertTaken());
     // Registered first, so an adapter that fails to start is still stopped.
     undo(() => adapter.stop());

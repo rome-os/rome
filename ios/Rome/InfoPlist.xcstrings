@@ -1,6 +1,24 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "NSCalendarsFullAccessUsageDescription" : {
+      "comment" : "Asked when Calendar is first connected",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome sends your calendar events to your Rome and your AI model, whose terms apply, so your Agent can tell you what's on and when you're free, and adds or changes events when you ask it to."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 会把你的日历事件发送到你的 Rome 和你的 AI 模型（适用其条款），让你的 Agent 能告诉你有哪些安排、什么时候有空，并在你要求时添加或修改事件。"
+          }
+        }
+      }
+    },
     "NSCameraUsageDescription" : {
       "comment" : "Asked before the first photo from the composer's camera",
       "extractionState" : "manual",
@@ -15,6 +33,78 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rome 用相机拍摄你在聊天中发送的照片。"
+          }
+        }
+      }
+    },
+    "NSHealthShareUsageDescription" : {
+      "comment" : "Asked when Apple Health is first connected",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome sends the Health data you allow, such as your steps, sleep and heart rate, to your Rome and your AI model, whose terms apply, so your Agent can answer questions about your health."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 会把你允许的健康数据（例如步数、睡眠和心率）发送到你的 Rome 和你的 AI 模型（适用其条款），让你的 Agent 能回答与你健康有关的问题。"
+          }
+        }
+      }
+    },
+    "NSHealthUpdateUsageDescription" : {
+      "comment" : "Required by Apple alongside HealthKit; the app never writes to Health",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome only reads the Health data you allow. It never writes to Apple Health."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 只读取你允许的健康数据，不会写入 Apple 健康。"
+          }
+        }
+      }
+    },
+    "NSLocationWhenInUseUsageDescription" : {
+      "comment" : "Asked the first time the guardian presses Share on a share-location card",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When your Agent needs it to answer you, Rome sends your current location to your Rome and your AI model, for that answer only."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当你的 Agent 需要用你的位置来回答你时，Rome 会把你当前的位置发送给你的 Rome 和你的 AI 模型，只用于这一次回答。"
+          }
+        }
+      }
+    },
+    "NSMicrophoneUsageDescription" : {
+      "comment" : "Asked before the first voice input in a message field",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome uses the microphone to turn your speech into text"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 使用麦克风将你的语音转成文字"
           }
         }
       }

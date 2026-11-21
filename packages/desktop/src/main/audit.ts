@@ -9,7 +9,7 @@ import { handleTrusted } from "./ipc-trust";
 const AUDIT_PATH = join(homedir(), ".rome-desktop", "audit", "audit.db");
 
 /** What a caller this Mac refused is told to do. */
-const DESKTOP_AUDIT_HINT = "Open Rome → Audit Log… on that Mac.";
+const DESKTOP_AUDIT_HINT = "Open Rome → Computer Use Log… on that Mac.";
 
 /** The detail view shows this much of a payload. */
 const PREVIEW_BYTES = 256 * 1024;

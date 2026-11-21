@@ -1,14 +1,13 @@
 /**
- * Native app sign-in to Rome Cloud and to the user's hosted Rome, shared by
- * Rome Mobile and the desktop app so both apps validate the same responses
- * the same way.
+ * Native app sign-in to Rome Cloud and to the user's hosted Rome, used by the
+ * desktop app. The iOS app (`ios/`) ports the same protocol to Swift.
  *
  * The flow: an OAuth code with PKCE gets a Cloud credential, the credential
  * lists the hosted instances, and the instance, Cloud, and app then trade a
  * one-time code for a `rome_session` the app installs in its web view.
  *
- * Runtime-neutral: global `fetch` and `URL` only, so it runs under Hermes and
- * in Electron's main process. Each host injects its own fetch, secure storage,
+ * Runtime-neutral: global `fetch` and `URL` only, so it runs in Electron's
+ * main process and in tests. Each host injects its own fetch, secure storage,
  * and cookie store.
  */
 export { CloudApi } from "./cloud-api.js";

@@ -1,7 +1,7 @@
 import type { QuotaSwitchPart } from "@rome/api-types/chat";
 import { useTranslation } from "react-i18next";
 import { modelDisplayName } from "@/lib/model-display";
-import { cn } from "@/lib/utils";
+import { ChatNotice } from "@/components/chat/ChatNotice";
 
 /** A small centered line where the chat moved to another model. */
 export function ModelSwitchNotice({
@@ -15,7 +15,7 @@ export function ModelSwitchNotice({
 }) {
   const { t } = useTranslation("chat");
   return (
-    <p role="note" className={cn("mb-4 text-center text-aux text-muted-foreground", className)}>
+    <ChatNotice className={className}>
       {quota
         ? t(`modelSwitch.${quota.from === quota.to ? "model_limit" : (quota.reason ?? "quota")}`, {
             from: quota.from === "openai" ? "Codex" : "Claude",
@@ -24,6 +24,6 @@ export function ModelSwitchNotice({
             toModel: modelDisplayName(quota.model),
           })
         : t("modelSwitch.notice", { model: modelDisplayName(model) })}
-    </p>
+    </ChatNotice>
   );
 }

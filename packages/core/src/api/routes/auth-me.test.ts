@@ -14,7 +14,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "@rstest/core";
 import jwt from "jsonwebtoken";
 import { buildApp } from "../index.js";
-import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME } from "../../lib/auth.js";
+import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME } from "../../access/auth.js";
 import type { ApiConfig } from "../deps.js";
 import { guardianAuth, settings } from "../../db/schema.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";

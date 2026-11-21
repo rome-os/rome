@@ -9,7 +9,7 @@
 import { textMessageContent, transcriptMessageId } from "../core/agent-trace-recorder.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { AddressedTo } from "./event-shape.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 
 export const TRIAGE_AGENT = "core:concierge-triage";
 /**

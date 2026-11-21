@@ -1,20 +1,20 @@
 import { type Context, Hono } from "hono";
 import { getCookie } from "hono/cookie";
-import { COOKIE_NAME, issueGuardianSession, verifySession } from "../../lib/auth.js";
-import { getGuardianAuthState } from "../../lib/guardian-auth-state.js";
-import { resolveGuardianSession } from "../../lib/guardian-session.js";
+import { COOKIE_NAME, issueGuardianSession, verifySession } from "../../access/auth.js";
+import { getGuardianAuthState } from "../../access/guardian-auth-state.js";
+import { resolveGuardianSession } from "../../access/guardian-session.js";
 import {
   getEnabledOAuthProviders,
   isEnabledOAuthProvider,
   normalizeShopifyShopDomain,
   OAUTH_PROVIDER_DESCRIPTORS,
   SHOPIFY_INSTALL_URL,
-} from "../../lib/oauth-providers.js";
+} from "../../connections/oauth/oauth-providers.js";
 import {
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,
   redeemRomeCloudOAuthHandoff,
-} from "../../lib/rome-cloud-oauth.js";
+} from "../../connections/oauth/rome-cloud-oauth.js";
 import { importProviderBundle } from "../../connections/providers-import.js";
 import type { OAuthAttemptIntent } from "../../db/schema.js";
 import type { ApiDeps } from "../deps.js";

@@ -32,6 +32,74 @@ async function packWorkspace(workspaceRoot: string): Promise<string> {
   return result.outDir;
 }
 
+function agentYaml(options: { legacyOutputSchema?: boolean } = {}): string {
+  return [
+    "name: synthesizer",
+    "description: Unrelated app agent",
+    "tier: large",
+    "systemPromptPrefix: Test prompt.",
+    "tools: []",
+    "permissionMode: default",
+    "outputSchema:",
+    "  type: object",
+    "  properties:",
+    "    ok:",
+    "      type: boolean",
+    "  required: [ok]",
+    ...(options.legacyOutputSchema ? [] : ["  additionalProperties: false"]),
+    "",
+  ].join("\n");
+}
+
+async function writeAgentApp(root: string): Promise<void> {
+  await mkdir(join(root, "agents"), { recursive: true });
+  await writeFile(
+    join(root, "app.yaml"),
+    [
+      "formatVersion: 1",
+      "id: agentapp",
+      "version: 1.0.0",
+      "description: Unrelated app",
+      "agents:",
+      "  - agents/synthesizer.yaml",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(join(root, "agents", "synthesizer.yaml"), agentYaml());
+}
+
+async function writeRemixApp(root: string, actionName: string): Promise<void> {
+  await mkdir(join(root, "actions", "run"), { recursive: true });
+  await writeFile(
+    join(root, "app.yaml"),
+    [
+      "formatVersion: 1",
+      "id: remixapp",
+      "version: 1.0.0",
+      "description: Remix target",
+      "remix:",
+      "  listing: '@source/calendar'",
+      "  version: 1.0.0",
+      "actions:",
+      "  - actions/run",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    join(root, "actions", "run", "action.yaml"),
+    [
+      `name: ${actionName}`,
+      "type: custom",
+      "description: Remix target action",
+      "complexity: simple",
+      "speed: fast",
+      "reliability: high",
+      "sideEffects: read-only",
+      "",
+    ].join("\n"),
+  );
+}
+
 async function listInstalledHashDirs(harness: TestAppsHarness, appId: string): Promise<string[]> {
   const appDir = join(harness.installedRoot, appId);
   const entries = await readdir(appDir, { withFileTypes: true });
@@ -298,6 +366,51 @@ describe("AppManager", () => {
       message: expect.stringContaining("REMIX_ARTIFACT_CONFLICT"),
     });
     expect((await readLockfile(harness)).apps.remixapp).toBeUndefined();
+  });
+
+  it("installs a remix beside an unrelated app whose installed agent predates the current schema", async () => {
+    const unrelatedRoot = join(harness.profileRoot, "unrelated-agent-app");
+    await writeAgentApp(unrelatedRoot);
+    await harness.appManager.install({
+      source: { mode: "bundle", path: await packWorkspace(unrelatedRoot) },
+    });
+
+    const installedAgent = harness.catalog.get("agentapp") as ResolvedApp;
+    const agentPath = installedAgent.artifacts.agent[0]?.absolutePath;
+    expect(agentPath).toBeTruthy();
+    await writeFile(agentPath!, agentYaml({ legacyOutputSchema: true }));
+
+    const remixRoot = join(harness.profileRoot, "remix-target");
+    await writeRemixApp(remixRoot, "remix_action");
+    const result = await harness.appManager.install({
+      source: { mode: "bundle", path: await packWorkspace(remixRoot) },
+    });
+
+    expect(result.state).toBe("installed");
+    expect(harness.catalog.get("agentapp")?.state).toBe("installed");
+  });
+
+  it("installs a remix beside a disabled app whose installed agent predates the current schema", async () => {
+    const unrelatedRoot = join(harness.profileRoot, "unrelated-disabled-agent-app");
+    await writeAgentApp(unrelatedRoot);
+    await harness.appManager.install({
+      source: { mode: "bundle", path: await packWorkspace(unrelatedRoot) },
+    });
+
+    const installedAgent = harness.catalog.get("agentapp") as ResolvedApp;
+    const agentPath = installedAgent.artifacts.agent[0]?.absolutePath;
+    expect(agentPath).toBeTruthy();
+    await writeFile(agentPath!, agentYaml({ legacyOutputSchema: true }));
+    await harness.appManager.setEnabled("agentapp", false);
+
+    const remixRoot = join(harness.profileRoot, "remix-target");
+    await writeRemixApp(remixRoot, "remix_action");
+    const result = await harness.appManager.install({
+      source: { mode: "bundle", path: await packWorkspace(remixRoot) },
+    });
+
+    expect(result.state).toBe("installed");
+    expect(harness.catalog.get("agentapp")?.enabled).toBe(false);
   });
 
   it("rejects a packed artifact whose declared web bundle is missing (corrupted after pack)", async () => {

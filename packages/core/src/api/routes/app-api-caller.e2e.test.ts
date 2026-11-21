@@ -22,7 +22,7 @@ import {
   VISITOR_COOKIE_NAME,
   createSession,
   createVisitorSession,
-} from "../../lib/auth.js";
+} from "../../access/auth.js";
 import type { ApiDeps } from "../deps.js";
 import type { AppCatalog } from "../../apps/catalog.js";
 import type { AppView, ResolvedApp } from "../../apps/state.js";

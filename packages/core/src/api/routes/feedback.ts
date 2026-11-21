@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import type { ApiDeps } from "../deps.js";
-import { FEEDBACK_BODY_MAX } from "../../lib/feedback.js";
+import { FEEDBACK_BODY_MAX } from "../../instance/feedback.js";
 
 // Guardian-facing "share feedback" relay. The dashboard POSTs free text plus the
 // context it owns (`client`); the instance attaches the diagnostics it measures

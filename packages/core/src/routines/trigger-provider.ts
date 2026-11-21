@@ -8,10 +8,13 @@ export interface TriggerProvider {
   readonly type: string;
 
   /** Start watching for this routine's trigger. Resolves once persistent
-   * activation state (e.g. nextRunAt) has been committed. */
+   * activation state (e.g. nextRunAt) has been committed. A provider that
+   * stores state after a fire (a schedule's next run) calls `settled` once it
+   * has, so whoever reads the routine then reads it whole. */
   activate(
     routine: Routine,
     fire: (payload: Record<string, unknown>) => Promise<void>,
+    settled?: () => void,
   ): Promise<void>;
 
   /** Stop watching for a specific routine. */

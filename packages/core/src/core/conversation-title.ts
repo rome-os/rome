@@ -89,6 +89,9 @@ const TITLE_TURN: TurnFacts = {
   threadContext: () => undefined,
   sharedContext: () => undefined,
   pushLevel: () => undefined,
+  actor: () => undefined,
+  audience: () => "shared",
+  reportedTask: () => undefined,
   inTurn: (fn) => fn(),
 };
 
@@ -120,6 +123,8 @@ export function createConversationTitleGenerator(
             actions: {
               list: () => [],
               permits: () => false,
+              appOf: () => undefined,
+              find: () => undefined,
               run: async () => {
                 throw new Error("Conversation title generation cannot execute actions");
               },

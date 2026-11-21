@@ -76,6 +76,30 @@ describe("useLiveEvents", () => {
     rs.restoreAllMocks();
   });
 
+  it("ignores unknown events, so older clients tolerate new event kinds", () => {
+    const fn = rs.fn();
+    const client = socketClient();
+    render(client, fn);
+    const socket = FakeWebSocket.latest();
+    act(() => {
+      socket.open();
+      socket.receive({ type: "subscribed", topic: topic.topic });
+      socket.receive({
+        type: "event",
+        topic: topic.topic,
+        event: "agent_name_changed",
+        data: { agentName: "Pebble" },
+      });
+      socket.receive({
+        type: "event",
+        topic: topic.topic,
+        event: "session_name",
+        data: { sessionId: "s1", name: "Chat" },
+      });
+    });
+    expect(fn).toHaveBeenCalledExactlyOnceWith({ sessionId: "s1", name: "Chat" });
+  });
+
   it("streams the topic over the socket, validating each payload, and opens no EventSource", () => {
     const error = rs.spyOn(console, "error").mockImplementation(() => {});
     const fn = rs.fn();

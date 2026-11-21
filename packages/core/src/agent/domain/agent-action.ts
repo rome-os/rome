@@ -1,7 +1,12 @@
 // An action as the agent finds it and what a tool call on one hands back.
 // Agent model: docs/concepts/agents.md.
 
-import type { ActionConfig, ActionResult } from "@rome-os/app-runtime";
+import {
+  type ActionConfig,
+  type ActionResult,
+  checkWidgetUi,
+  type ShownUi,
+} from "@rome-os/app-runtime";
 import { createSearchMatcher, normalizeSearchLimit } from "./catalog-search.js";
 import type { TurnFacts } from "./turn-facts.js";
 
@@ -25,6 +30,9 @@ export interface AgentActions {
   list(turn: TurnFacts): readonly AgentAction[];
   /** Whether the turn's agent may call action `name`, under any of its names. */
   permits(turn: TurnFacts, name: string): boolean;
+  /** The action the turn's agent may call by `name`, under any of its names,
+   *  or undefined for a name it may not call. */
+  find(turn: TurnFacts, name: string): AgentAction | undefined;
   /**
    * Runs an action the turn's agent may call, attributed to the turn. Resolves
    * with the action's result, its domain rejections included. Throws
@@ -32,6 +40,9 @@ export interface AgentActions {
    * either becomes an error result.
    */
   run(turn: TurnFacts, name: string, input: unknown): Promise<ActionResult>;
+  /** The app that owns action `name`, under any of its names, or undefined
+   *  for an action Rome owns or one it does not know. */
+  appOf(name: string): string | undefined;
 }
 
 interface ActionArgumentSummary {
@@ -211,12 +222,58 @@ export function searchActions(
 
 /**
  * What a tool call on an action hands back, read by two parties: the model,
- * and the webchat drain, which mounts cards from `pendingInteraction`, `appId`,
- * `render` and `placeWidget`. Those field names are a contract with the drain.
- * An `error` result passes through as data and reaches the model as an
- * ordinary tool result, not an error one.
+ * and the webchat drain, which mounts cards from `pendingInteraction`,
+ * `showWidget`, `appId`, `render`, `componentId`, `props`, `ui`, `bind`,
+ * `text` and `placeWidget`.
+ * Those field names are a contract with the drain. An `error` result passes
+ * through as data and reaches the model as an ordinary tool result, not an
+ * error one. `appId` is the app that owns the action; a `show_widget` card is
+ * that app's, and an action no app owns shows none.
  */
-export function actionToolOutput(result: ActionResult, widgetsShow: boolean): unknown {
+export function actionToolOutput(
+  result: ActionResult,
+  widgetsShow: boolean,
+  appId?: string,
+): unknown {
+  if (result.status === "show_widget") {
+    if ("ui" in result.widget) return shownUiOutput(result.widget, widgetsShow, appId);
+    const { componentId, props, text, waits } = result.widget;
+    if (!appId) {
+      return {
+        message: `No card was shown: only an app's action can show one. ${text}`,
+      };
+    }
+    // A widget that waits is the same card as a pending interaction, and
+    // stores the same part, so the iOS app and stored messages read it as one.
+    if (waits === true) {
+      return actionToolOutput(
+        {
+          status: "pending_interaction",
+          interaction: {
+            appId,
+            promptText: text,
+            render: { kind: "inline", componentId, ...(props ? { props } : {}) },
+          },
+        },
+        widgetsShow,
+      );
+    }
+    if (!widgetsShow) {
+      return {
+        message:
+          `The "${componentId}" card could not be shown, because this conversation cannot ` +
+          `show cards. Tell the guardian what it would have shown, in a message: ${text}`,
+      };
+    }
+    return {
+      showWidget: true,
+      appId,
+      componentId,
+      ...(props ? { props } : {}),
+      text,
+      message: `${text} The card is shown in your message. Continue your turn as normal.`,
+    };
+  }
   if (result.status === "pending_approval") {
     return {
       pendingApproval: true,
@@ -282,4 +339,50 @@ export function actionToolOutput(result: ActionResult, widgetsShow: boolean): un
     return result;
   }
   return result.data ?? result;
+}
+
+function shownUiOutput(widget: ShownUi, widgetsShow: boolean, appId?: string): unknown {
+  const { ui, bind, text } = widget;
+  if (!appId) {
+    return { message: `No card was shown: only an app's action can show one. ${text}` };
+  }
+  const problems = checkWidgetUi(ui, bind ?? {});
+  if (problems.length > 0) {
+    return {
+      message:
+        `No card was shown, because the card's description is not valid (${problems.join("; ")}). ` +
+        `Tell the guardian what it would have shown, in a message: ${text}`,
+    };
+  }
+  if (!widgetsShow) {
+    return {
+      message:
+        "The card could not be shown, because this conversation cannot show cards. " +
+        `Tell the guardian what it would have shown, in a message: ${text}` +
+        (widget.waits === true ? " Then wait for their reply before doing anything else." : ""),
+    };
+  }
+  if (widget.waits === true) {
+    // The card answers the agent through one of its events, which the app
+    // handles; the answer arrives as the next turn, so the model stops here.
+    return {
+      showWidget: true,
+      waits: true,
+      appId,
+      ui,
+      ...(bind ? { bind } : {}),
+      text,
+      message:
+        `${text} The card has been shown to the guardian, and their answer will arrive as the ` +
+        `next turn's prompt — do not call any further tools or send another message until then.`,
+    };
+  }
+  return {
+    showWidget: true,
+    appId,
+    ui,
+    ...(bind ? { bind } : {}),
+    text,
+    message: `${text} The card is shown in your message. Continue your turn as normal.`,
+  };
 }

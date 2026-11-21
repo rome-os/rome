@@ -339,7 +339,7 @@ export function AuditPage() {
   const menu = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <IconButton label="Audit log actions" icon={<Ellipsis />} size="sm" />
+        <IconButton label="Computer use log actions" icon={<Ellipsis />} size="sm" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onSelect={() => void auditApi?.reveal()}>
@@ -376,11 +376,11 @@ export function AuditPage() {
       <NodeActivityView
         device={{
           id: "this-mac",
-          name: "Audit log",
+          name: "Computer use log",
           platform: "macos",
           status: usable ? "connected" : "not_connected",
         }}
-        title="Audit log"
+        title="Computer use log"
         subtitle="This Mac"
         actions={menu}
         notice={alerts}

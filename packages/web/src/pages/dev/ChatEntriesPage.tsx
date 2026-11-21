@@ -16,6 +16,8 @@
  * animates, or reads the clock needs a frozen fixture before it belongs here.
  */
 
+import { LOCATION_CARD_ID, locationCardUi } from "@rome/api-types/location-card";
+import { type Question, questionCardUi } from "@rome/api-types/question-card";
 import type { ChatEntry } from "@/lib/chat-types";
 import { interactionResultKey } from "@/components/chat/chat-view";
 import { renderSingleEntry, type RenderEntryOptions } from "@/components/chat/entries/render";
@@ -26,14 +28,35 @@ const noop = () => {};
 const SESSION_ID = "dev-chat-entries";
 
 /**
- * A pending `ask_question` card. `appId` is the "core" sentinel and `builtin`
- * is what routes it to rome-web's own QuestionCard instead of an app bundle.
+ * A pending `ask_question` card as core stores it: the questions, and the card
+ * described from them. `appId` is the "core" sentinel and `builtin` routes it
+ * to the question card instead of an app bundle.
  */
-const askQuestion = (toolUseId: string, questions: unknown[]): ChatEntry => ({
+const askQuestion = (toolUseId: string, questions: Question[]): ChatEntry => ({
   type: "pending_interaction",
   toolUseId,
   appId: "core",
-  render: { kind: "inline", componentId: "question-card", builtin: true, props: { questions } },
+  render: {
+    kind: "inline",
+    componentId: "question-card",
+    builtin: true,
+    props: { questions },
+    ui: questionCardUi(questions),
+  },
+});
+
+/** A pending `share_location` card as core stores it. */
+const shareLocation = (toolUseId: string): ChatEntry => ({
+  type: "pending_interaction",
+  toolUseId,
+  appId: "core",
+  render: {
+    kind: "inline",
+    componentId: LOCATION_CARD_ID,
+    builtin: true,
+    props: { reason: "To find coffee shops near you" },
+    ui: locationCardUi("To find coffee shops near you"),
+  },
 });
 
 interface Specimen {
@@ -50,7 +73,7 @@ export const CHAT_ENTRY_SPECIMENS: Specimen[] = [
   {
     id: "question-card-compact",
     title: "QuestionCard — compact options",
-    note: "Every option is short, so the chips and the free-text field share one wrapped row. This is the branch where a Control-member height disagreement shows up.",
+    note: "Every option is short, so the options share one wrapped row above the free-text field.",
     block: askQuestion("dev-ask-compact", [
       {
         id: "tone",
@@ -64,7 +87,7 @@ export const CHAT_ENTRY_SPECIMENS: Specimen[] = [
   {
     id: "question-card-stacked",
     title: "QuestionCard — stacked options",
-    note: "One option passes the 32-character threshold, so every option becomes a full-width wrapping row and the free-text field goes below them rather than beside.",
+    note: "One option passes the 32-character threshold, so every option becomes a full-width wrapping row.",
     block: askQuestion("dev-ask-stacked", [
       {
         id: "keep",
@@ -182,7 +205,7 @@ export const CHAT_ENTRY_SPECIMENS: Specimen[] = [
   {
     id: "question-card-text",
     title: "QuestionCard — free-text question",
-    note: "The Textarea branch, and the one question kind that may be left blank without blocking Send.",
+    note: "A text question gets a Textarea; an optional one may be left blank without blocking Send.",
     block: askQuestion("dev-ask-text", [
       { id: "avoid", question: "Anything to avoid?", type: "text", optional: true },
     ]),
@@ -190,7 +213,7 @@ export const CHAT_ENTRY_SPECIMENS: Specimen[] = [
   {
     id: "question-card-resolved",
     title: "QuestionCard — resolved",
-    note: "Answered through the card: the fieldset is disabled, the actions are gone, and the footer reads back the outcome.",
+    note: "Answered through the card: the inputs are disabled, the actions are gone, and the card shows what was sent.",
     block: askQuestion("dev-ask-resolved", [
       {
         id: "tone",
@@ -200,7 +223,50 @@ export const CHAT_ENTRY_SPECIMENS: Specimen[] = [
         freeText: true,
       },
     ]),
-    result: { answers: [{ questionId: "tone", value: "Warm" }] },
+    result: {
+      answers: [{ questionId: "tone", value: "Warm" }],
+      card: [{ values: ["Warm"], text: "" }],
+    },
+  },
+  {
+    id: "location-card-open",
+    title: "Share location — open",
+    note: "The agent waits on the card: Share reads the browser's position on the press; Not now declines.",
+    block: shareLocation("dev-location-open"),
+  },
+  {
+    id: "location-card-shared",
+    title: "Share location — shared",
+    note: "Answered with a position: the buttons are gone and the card says how precise it was.",
+    block: shareLocation("dev-location-shared"),
+    result: {
+      status: "shared",
+      latitude: 31.23,
+      longitude: 121.47,
+      accuracyMeters: 18,
+      fixedAt: "2026-11-14T08:00:00.000Z",
+    },
+  },
+  {
+    id: "location-card-auto",
+    title: "Share location — shared by itself",
+    note: "The browser already allowed it on a turn the guardian started: one centered line across the transcript, no card.",
+    block: shareLocation("dev-location-auto"),
+    result: {
+      status: "shared",
+      latitude: 31.23,
+      longitude: 121.47,
+      accuracyMeters: 37,
+      fixedAt: "2026-11-14T08:00:00.000Z",
+      auto: true,
+    },
+  },
+  {
+    id: "location-card-declined",
+    title: "Share location — not shared",
+    note: "Declined with Not now, or skipped by a typed message.",
+    block: shareLocation("dev-location-declined"),
+    result: { status: "declined", dismissed: true },
   },
 ];
 
@@ -257,6 +323,8 @@ export function ChatEntryPreview({
 
   return renderSingleEntry(block, toolUseId ?? "chat-block-preview", {
     sessionId,
+    // A specimen stands in for a stored message; its widget id is its tool-use id.
+    messageId: toolUseId,
     interactionResults: results,
     onSubmitAppComponent,
     onDismissAppComponent,

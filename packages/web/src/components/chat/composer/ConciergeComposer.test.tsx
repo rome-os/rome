@@ -72,17 +72,33 @@ function renderComposer(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  render(
+  const tree = (next: Partial<ConciergeComposerProps>) => (
     <QueryClientProvider client={client}>
       <ReplyDraftHarness initial={reply}>
-        <ConciergeComposer ref={ref} onSend={onSend} {...props} />
+        <ConciergeComposer ref={ref} onSend={onSend} {...next} />
       </ReplyDraftHarness>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return { onSend };
+  const view = render(tree(props));
+  return {
+    onSend,
+    rerenderWith: (next: Partial<ConciergeComposerProps>) => view.rerender(tree(next)),
+  };
 }
 
 describe("ConciergeComposer", () => {
+  it("says a topic chat's name in its placeholder, and follows a rename", () => {
+    const { rerenderWith } = renderComposer({ chatName: "Trip to Lisbon" });
+    expect(screen.getByPlaceholderText("Message in Trip to Lisbon")).toBeTruthy();
+    rerenderWith({ chatName: "Lisbon flights" });
+    expect(screen.getByPlaceholderText("Message in Lisbon flights")).toBeTruthy();
+  });
+
+  it("keeps the plain placeholder without a chat name", () => {
+    renderComposer({ chatName: null });
+    expect(screen.getByPlaceholderText("Message")).toBeTruthy();
+  });
+
   it("picks a scoped skill, sends a chip-only turn, and clears the chip", async () => {
     const { onSend } = renderComposer();
     const box = screen.getByRole("textbox") as HTMLTextAreaElement;
@@ -257,6 +273,18 @@ describe("ConciergeComposer reply", () => {
       replyTo: reply,
     });
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+  });
+
+  it("drops a picked reply on Esc", async () => {
+    const { onSend } = renderComposer({}, reply);
+    await screen.findByRole("button", { name: "Cancel reply" });
+
+    await userEvent.type(screen.getByPlaceholderText("Message"), "{Escape}");
+    expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+    await userEvent.type(screen.getByPlaceholderText("Message"), "ok{Enter}");
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0][0].replyTo).toBeUndefined();
   });
 
   it("puts the reply back when the send fails", async () => {

@@ -19,19 +19,19 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 // keep them off the real disk / `gh` binary (which would clobber a developer's
 // real gh auth on revoke). Custody firing itself is covered in
 // registry-lifecycle.test.ts.
-rs.mock("../lib/github-shell-integration.js", () => ({
+rs.mock("./integrations/github-shell-integration.js", () => ({
   syncGithubShellIntegrationForProvider: rs.fn(async () => {}),
   clearGithubShellIntegrationForProvider: rs.fn(async () => {}),
 }));
-rs.mock("../lib/provider-token-files.js", () => ({
+rs.mock("./oauth/provider-token-files.js", () => ({
   syncProviderTokenFile: rs.fn(async () => {}),
   clearProviderTokenFile: rs.fn(async () => {}),
 }));
 
 import { createTestDb } from "../test/db.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { OAuthProvider } from "../lib/oauth-providers.js";
-import type { OAuthTokenBundle } from "../lib/oauth-token-bundle.js";
+import type { OAuthProvider } from "./oauth/oauth-providers.js";
+import type { OAuthTokenBundle } from "./oauth/oauth-token-bundle.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import {

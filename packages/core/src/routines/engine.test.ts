@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { RoutineEngine } from "./engine.js";
+import { runWithSessionActor } from "../access/session-actor.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
-import type { ActionEngine } from "../actions/engine.js";
+import type { ActionEngine } from "../apps/actions/engine.js";
 import { systemClock, type Clock } from "../lib/clock.js";
 import type { TriggerProvider } from "./trigger-provider.js";
 import type { Trigger } from "./types.js";
-import { actionExecutionContext, type ActionExecutionStore } from "../actions/context.js";
-import { replayContext, type ReplayStore } from "../actions/replay.js";
+import { actionExecutionContext, type ActionExecutionStore } from "../apps/actions/context.js";
+import { replayContext, type ReplayStore } from "../apps/actions/replay.js";
 import { currentSessionId, runWithSession } from "../telemetry-context.js";
 
 // reactivateFloating only touches routinesRepo + activate(); the other ctor
@@ -128,12 +129,41 @@ describe("RoutineEngine run records", () => {
     await engine.start();
 
     await fire?.({});
+    await runWithSessionActor({ kind: "guardian", userId: "g", via: "cookie" }, () =>
+      engine.runNow(id),
+    );
+    // Run now with no person pressing it: the agent, or a CLI over loopback.
     await engine.runNow(id);
 
     const recorded = await runs.findByRoutineId(id);
     const firedBy = await Promise.all(recorded.map((run) => runs.findFiredBy(run.executionId)));
-    expect(firedBy.sort()).toEqual(["run_now", "schedule"]);
+    expect(firedBy.sort()).toEqual(["run_now", "run_now_background", "schedule"]);
   });
+  it("tells its listeners once a run now settles, failed or not, with its run recorded", async () => {
+    const routines = new RoutinesRepository(testDb.db);
+    const runs = new RoutineRunsRepository(testDb.db);
+    const actionEngine = {
+      run: async () => ({ status: "error", error: "boom" }),
+    } as unknown as ActionEngine;
+    const engine = new RoutineEngine(routines, runs, actionEngine, 0, systemClock);
+    const id = await routines.create({
+      name: "digest",
+      trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "09:00" },
+      actionName: "noop",
+      args: {},
+    });
+    const told: Array<{ id: string; runs: number }> = [];
+    engine.onChange((changed) => {
+      void runs
+        .findByRoutineId(changed)
+        .then((found) => told.push({ id: changed, runs: found.length }));
+    });
+
+    await engine.runNow(id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(told).toEqual([{ id, runs: 1 }]);
+  });
+
   it("keeps no trigger payload in the run or the action's record when the routine says so", async () => {
     const routines = new RoutinesRepository(testDb.db);
     const runs = new RoutineRunsRepository(testDb.db);
@@ -233,6 +263,57 @@ describe("RoutineEngine worker admission", () => {
       "noop",
       expect.anything(),
       expect.objectContaining({ whenWorkersBusy: "queue" }),
+    );
+  });
+});
+
+describe("RoutineEngine fire audience", () => {
+  let testDb: TestDb;
+  beforeEach(() => {
+    testDb = createTestDb();
+  });
+  afterEach(() => testDb.close());
+
+  it("fires with the audience of the routine's chat, and shared for a routine of no chat", async () => {
+    const routines = new RoutinesRepository(testDb.db, async (chatId) =>
+      chatId === "guardian-chat" ? "private" : "shared",
+    );
+    const run = rs.fn(async () => ({ status: "ok", data: null }));
+    const engine = new RoutineEngine(
+      routines,
+      new RoutineRunsRepository(testDb.db),
+      { run } as unknown as ActionEngine,
+      0,
+      systemClock,
+    );
+    const inChat = await routines.create({
+      name: "steps",
+      trigger: { type: "manual" },
+      actionName: "core:personal_data_query",
+      args: { source: "apple_health", type: "stepCount" },
+      madeIn: "guardian-chat",
+    });
+    const nowhere = await routines.create({
+      name: "noop",
+      trigger: { type: "manual" },
+      actionName: "noop",
+      args: {},
+    });
+
+    await engine.runNow(inChat);
+    await engine.runNow(nowhere);
+
+    expect(run).toHaveBeenNthCalledWith(
+      1,
+      "core:personal_data_query",
+      expect.anything(),
+      expect.objectContaining({ audience: "private" }),
+    );
+    expect(run).toHaveBeenNthCalledWith(
+      2,
+      "noop",
+      expect.anything(),
+      expect.objectContaining({ audience: "shared" }),
     );
   });
 });

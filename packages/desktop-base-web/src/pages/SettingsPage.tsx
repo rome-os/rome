@@ -17,6 +17,9 @@ import {
   type UpdateStatus,
 } from "@/lib/rome-api";
 
+/** The app's setting for showing Rome Cloud's notifications. On unless it is "false". */
+const NOTIFICATIONS_KEY = "notifications.enabled";
+
 const BUSY_PHASES: RuntimePhase[] = ["starting_rome", "waiting_for_health"];
 
 type Tone = "muted" | "success" | "destructive";
@@ -75,6 +78,32 @@ export function SettingsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [retryBusy, setRetryBusy] = useState(false);
+  const [notifications, setNotifications] = useState(true);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    romeApi.settings
+      .get(NOTIFICATIONS_KEY)
+      .then((value) => {
+        if (!cancelled) setNotifications(value !== "false");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleNotificationsToggle = useCallback(async (enabled: boolean) => {
+    setNotificationsError(null);
+    setNotifications(enabled);
+    try {
+      await romeApi.settings.set(NOTIFICATIONS_KEY, enabled ? "true" : "false");
+    } catch (err) {
+      setNotifications(!enabled);
+      setNotificationsError(errorMessage(err));
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -347,6 +376,24 @@ export function SettingsPage() {
                     }}
                   />
                 </label>
+
+                <label
+                  className="flex items-center justify-between gap-4"
+                  htmlFor="notifications-enabled"
+                >
+                  <span className="text-sm">Notifications</span>
+                  <Switch
+                    id="notifications-enabled"
+                    checked={notifications}
+                    onCheckedChange={(checked) => {
+                      handleNotificationsToggle(checked).catch(console.error);
+                    }}
+                  />
+                </label>
+
+                {notificationsError && (
+                  <p className="text-sm text-destructive">{notificationsError}</p>
+                )}
               </CardContent>
             </Card>
           </>

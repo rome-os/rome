@@ -10,15 +10,15 @@ import {
 import { messageCursor, parseMessageCursor, type Message } from "@rome/api-types/message";
 import { timelinePageLimit, type TimelinePage } from "@rome/api-types/people";
 import { AGENTS_KIND } from "../../connections/integrations/agents.js";
-import { isAgentId } from "../../lib/rome-cloud-agents.js";
+import { isAgentId } from "../../connections/integrations/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
 import type { SaidMessage } from "../../chats/storage/message.js";
 import type { MessageCursor, MessagePage } from "../../chats/storage/message-repository.js";
 import { chatKey, placeIn } from "../../chats/storage/place.js";
-import { send } from "../../connections/send.js";
-import { directPlace } from "../../people/send.js";
+import { send } from "../../chats/send.js";
+import { directPlace } from "../../people/person-history/index.js";
 import type { ApiDeps } from "../deps.js";
-import { respondToSend } from "./people.js";
+import { respondToSend } from "../../people/person-history/index.js";
 
 const log = createLogger("assistants-api");
 

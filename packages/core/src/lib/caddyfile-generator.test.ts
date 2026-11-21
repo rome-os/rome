@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { generateCaddyfile, resolveWebRoot } from "./caddyfile-generator.js";
-import { normalizePublicAccessConfig } from "./public-access-config.js";
 
 const RUNTIME_CONFIG_HANDLE = "handle /runtime-config.js {";
 
@@ -43,7 +42,7 @@ describe("generateCaddyfile runtime-config.js delivery", () => {
 describe("generateCaddyfile app document routes", () => {
   it("proxies /apps and /full/apps documents to Hono, after the asset handlers", () => {
     const caddyfile = generateCaddyfile();
-    expect(caddyfile).toContain("@appDocs path /apps /apps/* /full/apps /full/apps/*");
+    expect(caddyfile).toContain("@appDocs path /apps /apps/* /full/apps /full/apps/* /share/*");
     const appDocsAt = caddyfile.indexOf("handle @appDocs {");
     const missingAssetsAt = caddyfile.indexOf("handle @missingSpaAssets {");
     const fallbackAt = caddyfile.lastIndexOf("try_files {path} /index.html");
@@ -53,6 +52,15 @@ describe("generateCaddyfile app document routes", () => {
     expect(body).toContain("reverse_proxy 127.0.0.1:");
     expect(body).toContain("encode zstd gzip");
     expect(body).not.toContain("forward_auth");
+  });
+});
+
+describe("generateCaddyfile shared chats", () => {
+  it("tells crawlers not to index a share page or its API reads, and nothing else", () => {
+    const caddyfile = generateCaddyfile();
+    expect(caddyfile).toContain("@sharePages path /share /share/* /api/share /api/share/*");
+    expect(caddyfile).toContain('header @sharePages X-Robots-Tag "noindex, nofollow"');
+    expect(caddyfile.match(/X-Robots-Tag/g)).toHaveLength(1);
   });
 });
 
@@ -97,21 +105,6 @@ describe("canonical path guard", () => {
 // the dashboard and login stay reachable, and per-app sharing is decided per
 // request by the `/api/auth/verify` probe behind `forward_auth`.
 describe("generateCaddyfile with a persisted legacy enableAccessControl flag", () => {
-  const persisted = {
-    enableAccessControl: true,
-    allowedApps: ["morning-brief"],
-    cloudEmailAccess: { "night-brief": ["a@b.co"] },
-  };
-
-  it("normalizes without the flag and keeps the app policy", () => {
-    const config = normalizePublicAccessConfig(persisted);
-    expect(config).toEqual({
-      allowedApps: ["morning-brief"],
-      cloudEmailAccess: { "night-brief": ["a@b.co"] },
-    });
-    expect("enableAccessControl" in config).toBe(false);
-  });
-
   it("still produces the normal dashboard-reachable Caddyfile", () => {
     const caddyfile = generateCaddyfile();
     expect(caddyfile).toContain("forward_auth 127.0.0.1:4141 {");
@@ -121,5 +114,30 @@ describe("generateCaddyfile with a persisted legacy enableAccessControl flag", (
     expect(caddyfile).not.toContain("not_public");
     expect(caddyfile).not.toContain("gateway");
     expect(caddyfile).toContain("try_files {path} /index.html");
+  });
+});
+
+// Behind a proxy that ends TLS, the page is https while Caddy is reached on
+// http. The same-origin check on WebSocket upgrades needs the page's scheme.
+describe("generateCaddyfile behind a proxy that ends TLS", () => {
+  it("passes the page's scheme to Hono on every proxy", () => {
+    const caddyfile = generateCaddyfile();
+    const proxies = caddyfile.match(/reverse_proxy 127\.0\.0\.1:4141 \{\n[^}]*\}/g) ?? [];
+    expect(proxies).toHaveLength(3);
+    for (const proxy of proxies) {
+      expect(proxy).toContain("header_up X-Forwarded-Proto {forwarded_proto}");
+    }
+  });
+
+  // Hono makes login cookies Secure unless the scheme says http, and a
+  // browser drops a Secure cookie on plain http.
+  it("sends http when the incoming header is absent or anything but https", () => {
+    const caddyfile = generateCaddyfile();
+    const map =
+      caddyfile.match(
+        /map \{http\.request\.header\.X-Forwarded-Proto\} \{forwarded_proto\} \{\n[^}]*\}/,
+      )?.[0] ?? "";
+    expect(map).toContain("~^https(,|$) https");
+    expect(map).toContain("default http");
   });
 });

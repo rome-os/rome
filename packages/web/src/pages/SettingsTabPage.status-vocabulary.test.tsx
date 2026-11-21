@@ -7,12 +7,12 @@ import i18n from "@/i18n";
 import SettingsPage from "./SettingsTabPage";
 
 rs.mock("@/components/system-upgrade-section", () => ({
-  SystemUpgradeSection: () => null,
+  SystemVersionRow: () => null,
 }));
 
 // The relay status renders in the diagnosis sheet; the mock shows it inline.
 rs.mock("@/components/system-diagnosis-section", () => ({
-  SystemDiagnosisSection: ({ details }: { details?: React.ReactNode }) => details,
+  SystemDiagnosisRow: ({ details }: { details?: React.ReactNode }) => details,
 }));
 
 beforeAll(async () => {
@@ -57,8 +57,8 @@ function renderAdvanced(relay: Record<string, unknown> | null) {
 }
 
 async function expectStatusIndicator(label: string) {
-  const indicator = await screen.findByText(label);
-  expect(indicator.querySelector('span[aria-hidden="true"]')).not.toBeNull();
+  const indicator = (await screen.findByText(label)).closest('[data-slot="status-indicator"]');
+  expect(indicator?.querySelector('[aria-hidden="true"]')).not.toBeNull();
 }
 
 describe("Settings connection status vocabulary", () => {

@@ -1,6 +1,6 @@
 # Releases
 
-Rome ships two kinds of release artifacts: the **runtime Docker image** (the product) and **npm SDK packages** (for app authors). They have independent versioning and independent pipelines.
+Rome ships three kinds of release artifacts: the **runtime Docker image** (the product), the **Mac app**, and **npm SDK packages** (for app authors). They have independent versioning and independent pipelines.
 
 ## Rome runtime image (Docker Hub)
 
@@ -46,9 +46,48 @@ The invariants behind that table, each enforced by the workflow rather than by c
 
 The workflow freezes `ROME_VERSION` (tag with `v` stripped — always equal to the image's docker tag), `ROME_BUILD_SHA`, and `ROME_BUILD_TIME` into the image as env vars. The runtime reports them via `getBuildInfo()` → `/api/build-info`. `version` is `null` on non-release builds (local/source runs), and consumers degrade gracefully on null rather than guessing.
 
+### GitHub release
+
+After the image is published, the workflow's last job creates a GitHub release for the tag, titled `Rome vX.Y.Z`. [`scripts/docker/release-notes.mjs`](../scripts/docker/release-notes.mjs) writes its notes, and they hold:
+
+- The image name and version, and the commit it was built from.
+- The commits since the previous release, grouped as Breaking changes (a `!` after the type, or a `BREAKING CHANGE:` footer), New (`feat`), Fixes (`fix`, `perf`, `revert`) and Other changes (subjects that are not Conventional Commits). Every other type goes in a collapsed Internal changes list.
+- A link to the full comparison.
+
+The previous release is the highest stable version below this one on Docker Hub, so the changes of a tag whose build never shipped roll into the next release. A prerelease counts from the stable version before it.
+
+A commit is listed only when it touches a file the image is built from. [`scripts/docker/runtime-inputs.mjs`](../scripts/docker/runtime-inputs.mjs) holds those rules, and [`prepare-runtime-workspace.mjs`](../scripts/docker/prepare-runtime-workspace.mjs) copies the build context by the same rules, so the notes and the image cannot disagree. The shipped docs are the one exception. The agent answers from them, but a commit whose only shipped files are docs is left out, since it changes no behavior.
+
+The release also carries `release-notes.json`, the same changes for instances to read. It holds the version, the previous release's version, the publish date, the release URL, and the Breaking changes, New and Fixes entries. Each entry has the commit's scope, its subject without the pull request suffix, and the pull request number. Internal changes and Other changes are a count only. A published release's file never changes, except when a backfill replaces it.
+
+The file also holds `highlights`: up to five user-facing lines in English and Chinese, which the web upgrade dialog shows instead of the entries. [`release-highlights.mjs`](../scripts/docker/release-highlights.mjs) asks DeepSeek (`deepseek-flash` with thinking off, using the `DEEPSEEK_API_KEY` secret) to write them from the entries and the squash commit bodies, which hold each pull request's description as merged. The prompt leaves out internal work, anything behind a feature gate, and the details of security fixes. A highlight must cite one of the release's own pull requests, or it is dropped. When the key is missing or the call or its answer fails, the highlights are empty and the release goes on. A failed call, or highlights dropped by the checks, shows as a warning on the workflow run.
+
+To attach the file to releases that predate it, or to rewrite it, write the files and print the upload commands:
+
+```bash
+git fetch --tags
+DEEPSEEK_API_KEY=… IMAGE_NAME=yunfanye/rome GITHUB_REPOSITORY=rome-os/rome node scripts/docker/release-notes.mjs backfill /tmp/rome-release-notes v1.1.200 v1.1.201
+```
+
+Check the files, then run the printed `gh release upload … --clobber` commands.
+
+A prerelease tag gets a prerelease. The release never takes the **Latest** badge from the package releases. The job fails when a release for the tag already exists. If it fails after the image went out, rerun that job alone.
+
 ### Rehearsing the pipeline
 
-`.github/workflows/docker-publish-test.yml` publishes to `zoolsher/rome` with separate `TEST_DOCKERHUB_*` secrets on manual dispatch and twice-daily schedules. It exercises the multi-arch build and manifest publish without creating production release tags. It does not use the production weekday schedule, CI gate, or version allocation. It is a copy, not a shared workflow — when changing the release pipeline, update both or note the drift.
+`.github/workflows/docker-publish-test.yml` publishes to `zoolsher/rome` with separate `TEST_DOCKERHUB_*` secrets on manual dispatch and twice-daily schedules. It exercises the multi-arch build and manifest publish without creating production release tags. It does not use the production weekday schedule, CI gate, or version allocation, and creates no GitHub release. It is a copy, not a shared workflow — when changing the release pipeline, update both or note the drift.
+
+## Mac app
+
+The Mac app ships in three steps:
+
+1. Push a `desktop-vMAJOR.MINOR.PATCH` tag. [`.github/workflows/desktop-build.yml`](../.github/workflows/desktop-build.yml) builds, signs, and notarizes the app at that version, and keeps the DMG, ZIP, and `latest-mac.yml` as a run artifact. The tag must be plain semver and newer than every other `desktop-v*` tag. A tagged build that cannot be signed fails.
+2. Test the build.
+3. Run [`.github/workflows/desktop-publish-updates.yml`](../.github/workflows/desktop-publish-updates.yml) with the build's run ID and `qa_approved` checked. Its first job copies the artifact to the update feed the installed apps read, and never rolls the feed back. When the channel is `stable`, a second job then creates the GitHub release for the tag.
+
+The GitHub release is titled `Rome for Mac X.Y.Z` and carries the DMG and a `SHA256SUMS` file for it. Its notes list the commits since the previous Mac app release that touch the packages the app is built from: `packages/desktop`, `packages/desktop-base-web`, `packages/rome-node-core`, and `packages/lib`. Keep that list in the workflow in step with the app's workspace dependencies. The release never takes the **Latest** badge from the package releases.
+
+Only the release job writes to the repository, and it does not see the update feed's deploy secrets. It fails when a release for the tag already exists. If it fails after the feed went out, rerun that job alone.
 
 ## npm packages (via release-please)
 
@@ -183,6 +222,7 @@ reusable workflow calls are authorized against the caller workflow, so
 - `.release-please-manifest.json` — Current version per package path. release-please updates this in the release PR. Never edit by hand.
 - `.github/workflows/release.yml` — Single publish entrypoint: push events run `release-please` and automatic npm publish. Manual dispatches retry/publish selected packages under the same npm Trusted Publisher identity.
 - `.github/workflows/sdk-publish.yml` — Reusable implementation called by `release.yml`. Do not run it directly.
+- `.github/workflows/desktop-build.yml` and `.github/workflows/desktop-publish-updates.yml` — Mac app build, update feed, and GitHub release. See [Mac app](#mac-app).
 - `scripts/check-publish-targets.test.mjs` (`pnpm test:release:targets`, part of `test:unit:rest`) — Holds the three package lists together: the `all` dispatch target, the dispatch menu, and `release-please-config.json`. It also asserts every released package declares `repository`.
 - The `lint` job in `.github/workflows/ci.yml` + `scripts/check-pr-title.sh` — PR-time gate on the Conventional Commit title that becomes the squash commit. It is the job's first step, ahead of the toolchain install, so a bad title reports in seconds. Read the note below before making it a required check.
 

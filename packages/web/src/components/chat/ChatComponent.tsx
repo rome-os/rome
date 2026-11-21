@@ -12,12 +12,15 @@ import type {
 } from "@rome-os/rome-web-components/news-item/schema";
 import type { ChatComposerHandle } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
+import { getSession } from "@/lib/chat-api";
+import { readChatListMode, readLastConciergeChatId } from "@/lib/chat-list-mode";
+import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { useSettings } from "@/hooks/use-settings";
 import {
   CONCIERGE_CHAT_ID,
   ensureConciergeChat,
-  CONCIERGE_CHATS_QUERY_KEY,
+  refreshTopicChats,
   startConciergeTopicChat,
   useConciergeChat,
   useConciergeChats,
@@ -25,19 +28,29 @@ import {
 } from "@/hooks/use-concierge";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import type { AgentMention } from "@/lib/chat-types";
+import { readStored, writeStored } from "@/lib/stored-preference";
 
 export type { SessionMessage };
+
+/**
+ * The chat's read mark before the chat marks itself read. The chat's identity
+ * asks for the same session at the same moment, and in-flight reads are shared,
+ * so this adds no request. It never rejects: a chat with no mark has no divider.
+ */
+async function loadReadMark(chatId: string): Promise<string | null> {
+  try {
+    return (await getSession(chatId))?.lastSeenActivityAt ?? null;
+  } catch {
+    return null;
+  }
+}
 
 // The home's last known layout, so a reload starts where the previous visit
 // ended instead of moving the composer once its sessions arrive.
 export const GREETING_ONLY_HOME_KEY = "rome.chat.greeting-only-home";
 
 function readGreetingOnlyHome(): boolean {
-  try {
-    return window.localStorage.getItem(GREETING_ONLY_HOME_KEY) !== "false";
-  } catch {
-    return true;
-  }
+  return readStored(GREETING_ONLY_HOME_KEY) !== "false";
 }
 
 export interface ChatComponentProps {
@@ -182,7 +195,13 @@ export function ChatComponent({
         onSessionNotFound();
         return;
       }
-      navigate(hideSidebar ? "/chat?hideSidebar=1" : "/chat", { replace: true });
+      // In Agent mode, or for the Concierge chat last opened, a missing chat
+      // lands on the main chat, so the list stays in Agent mode; in Chat mode
+      // it lands on a blank chat.
+      const concierge =
+        readChatListMode() === "concierge" || readLastConciergeChatId() === missingSessionId;
+      const home = concierge ? MAIN_CHAT_PATH : "/chat";
+      navigate(hideSidebar ? `${home}?hideSidebar=1` : home, { replace: true });
     },
     [sessionId, onSessionNotFound, navigate, hideSidebar],
   );
@@ -224,11 +243,8 @@ export function ChatComponent({
   const greetingOnlyHome = newsSettled ? loadedGreetingOnly : rememberedGreetingOnly;
   useEffect(() => {
     if (!newsSettled) return;
-    try {
-      window.localStorage.setItem(GREETING_ONLY_HOME_KEY, String(loadedGreetingOnly));
-    } catch {
-      // Storage can be unavailable; the layout then just starts centered.
-    }
+    // When storage is unavailable, the layout just starts centered.
+    writeStored(GREETING_ONLY_HOME_KEY, String(loadedGreetingOnly));
   }, [newsSettled, loadedGreetingOnly]);
 
   // Full URL the App Store sheet embeds when an app-store quick entry is picked;
@@ -270,9 +286,13 @@ export function ChatComponent({
   // first and 404; the chat waits for the creation and asks again.
   const queryClient = useQueryClient();
   const isConcierge = isListedConcierge || topicDraft;
+  // A Concierge topic chat opened from a cold start is not in the list yet, so
+  // until the list loads any chat might be one. A loaded list rules every
+  // other chat out, and those do no pre-read work.
+  const mayBeConcierge = isConcierge || conciergeChats.length === 0;
   const startTopicChat = useCallback(async () => {
     const chat = await startConciergeTopicChat();
-    void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
+    void refreshTopicChats(queryClient);
     return chat.id;
   }, [queryClient]);
   const recoverMissingSession = useCallback(
@@ -304,6 +324,7 @@ export function ChatComponent({
         composerRef={composerRef}
         navbarSlot={navbarSlot}
         recoverMissingSession={isConcierge ? recoverMissingSession : undefined}
+        loadReadMark={mayBeConcierge ? loadReadMark : undefined}
         variant={isConcierge ? "concierge" : "default"}
         conciergeMainChatId={concierge.chatId ?? CONCIERGE_CHAT_ID}
         conciergeName={conciergeName}

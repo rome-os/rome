@@ -48,6 +48,15 @@ A core or app agent may declare how a chat treats its turns in an optional `poli
 | `finalText` | `deliver` sends the model's text to the chat. `private` keeps it, narration and final reply alike, in the trace, so the agent reaches the guardian only through its tools. A `private` agent gets no Claude Code reminder to update the guardian, and `defer` does not ask it for a confirmation line. | `deliver` |
 | `autoTitle` | Whether the chat's first message names the chat. | `true` |
 | `loadMemory` | Whether a core agent's system prompt carries the memory index, project summaries, and runtime paths. | `true` for `main` only |
+| `freshSessionOnSetupChange` | Whether a session opened by continuity key is replaced by a fresh one when the agent's [setup](sessions.md#setup) changed since it opened. | `false` |
+| `handoffOnRenewal` | Whether a renewed session starts from a [handoff](sessions.md#handoff). | `false` |
+| `delegatesWork` | Whether the agent hands its work to other chats rather than doing it. Its system prompt then leaves out the command line tools and the runtime context beyond where memory and the docs are, and its sessions carry no `propose_routine`. | `false` |
+
+## Own turns
+
+Deprecated, and to be removed: Rome is not keeping a way for an app to run its agent's turns past the Inbox app.
+
+An app agent may declare `runsOwnTurns: true` when its own app runs its turns. On an account linked to it, the Inbox app answers no message, so no [wake gate](../domains/participation.md#wake-gate), sentinel or [send gate](../domains/participation.md#send-gate) judges what the agent hears or sends. Rome honours the field only for the first-party apps in `DEPRECATED_RUNS_OWN_TURNS_APPS` (`packages/core/src/app-host/deprecated-runs-own-turns.ts`) and ignores it on any other agent. Rome reads it as `deprecatedRunsOwnTurns`. The key keeps its name, so an app that sets it still loads on older Rome hosts. Its earlier name `unsafeTestOnlyBypassInbox` still loads too.
 
 ## Builtin tools
 
@@ -63,7 +72,8 @@ Both providers use one set of names: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `G
 - Codex has one shell for reading files, searching, and running commands. Any of `Read`, `Glob`, `Grep`, or `Bash` gives the agent that shell, and the shell can write files. An agent that must not run commands on Codex declares none of the four.
 - Codex offers its patch tool on every thread. An agent with no `Write`, `Edit`, or shell name runs in Codex's read-only sandbox, which rejects every patch.
 - Some Codex models carry collaboration tools that spawn Codex agents, and no setting removes them. A spawned Codex agent gets the same builtin tools as the agent that spawned it.
-- Codex's plan tool stays on for every agent, because Rome renders plan updates from it. `WebFetch` and `TodoWrite` grant nothing on Codex.
+- Codex's plan tool stays on for every agent, because Rome renders plan updates from it. `TodoWrite` grants nothing on Codex.
+- ChatGPT's apps open web pages and reach the accounts linked in ChatGPT, so only `WebFetch` grants them. An agent that declares `WebSearch` alone gets Codex's search and none of the apps.
 - Codex's bundled skills are off, so an agent sees only Rome's [skills](skills.md). The exception is `imagegen`, Codex's guide to its image tool, which an agent that declares `ImageGeneration` gets too.
 
 | Declared on Codex | Codex capability |
@@ -72,6 +82,7 @@ Both providers use one set of names: `Read`, `Write`, `Edit`, `Bash`, `Glob`, `G
 | `Read` | Viewing a local image |
 | `Write`, `Edit`, `Read`, `Glob`, `Grep`, or `Bash` | Patches that write files |
 | `WebSearch` | Web search |
+| `WebFetch` | ChatGPT's apps, which open web pages and reach the accounts linked in ChatGPT |
 | `Task` | Codex's multi-agent tools, on models without collaboration tools |
 | `ImageGeneration` | Image generation, and Codex's `imagegen` skill |
 
@@ -102,4 +113,4 @@ provider's native structured-output API.
 
 ## Agent hierarchy
 
-Agents form a hierarchy with one orchestrator: the **main agent** handles trusted messages directly or delegates to role-restricted subagents (quick tasks, read-only exploration, coding). The coding agent is a subagent, so the chat shows its progress while it runs, and a follow-up in the same chat continues its session. Routines, workflows, and agents that do not list the coding subagent start the same agent through the `coding:coding_task` [action](actions.md). The coding agent plans its own work before it edits code. Two agents sit outside the delegation tree as gates: the [sentinel](messaging.md#sentinel) triages untrusted inbound messages, and the **envoy** validates outgoing messages before they are sent.
+Agents form a hierarchy with one orchestrator: the **main agent** handles trusted messages directly or delegates to role-restricted subagents (quick tasks, read-only exploration, building Rome apps). The coding agent builds and installs apps only, so the main agent does other coding work itself. The coding agent is a subagent, so the chat shows its progress while it runs, and a follow-up in the same chat continues its session. Routines, workflows, and agents that do not list the coding subagent start the same agent through the `coding:coding_task` [action](actions.md). The coding agent plans its own work before it edits code. Two agents sit outside the delegation tree as gates: the [sentinel](messaging.md#sentinel) triages untrusted inbound messages, and the **envoy** validates outgoing messages before they are sent.

@@ -12,7 +12,7 @@
  * matches.
  */
 
-import { agentLabel } from "../../lib/rome-cloud-agents.js";
+import { agentLabel } from "../../connections/integrations/rome-cloud-agents.js";
 import type { ExternalAgents } from "./agents-accounts.js";
 
 export type AgentNameResolution =

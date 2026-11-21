@@ -1,6 +1,6 @@
 {
   "name": "@rome-os/ui",
-  "version": "0.3.9",
+  "version": "0.3.13",
   "description": "Shared React component kit for the Rome dashboard and Rome apps",
   "repository": {
     "type": "git",
@@ -95,6 +95,14 @@
       "types": "./dist/input.d.ts",
       "default": "./dist/input.js"
     },
+    "./input-otp": {
+      "types": "./dist/input-otp.d.ts",
+      "default": "./dist/input-otp.js"
+    },
+    "./keyboard-submit": {
+      "types": "./dist/keyboard-submit.d.ts",
+      "default": "./dist/keyboard-submit.js"
+    },
     "./layout-form": {
       "types": "./dist/layout-form.d.ts",
       "default": "./dist/layout-form.js"
@@ -118,6 +126,10 @@
     "./popover": {
       "types": "./dist/popover.d.ts",
       "default": "./dist/popover.js"
+    },
+    "./progressive-blur": {
+      "types": "./dist/progressive-blur.d.ts",
+      "default": "./dist/progressive-blur.js"
     },
     "./radio-group": {
       "types": "./dist/radio-group.d.ts",
@@ -229,6 +241,7 @@
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",
     "cmdk": "^1.1.1",
+    "input-otp": "^1.4.2",
     "katex": "^0.16.27",
     "lucide-react": ">=0.468.0",
     "pele": "^1.8.0",
@@ -246,6 +259,9 @@
       "optional": true
     },
     "cmdk": {
+      "optional": true
+    },
+    "input-otp": {
       "optional": true
     },
     "katex": {
@@ -274,6 +290,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "cmdk": "^1.1.1",
+    "input-otp": "^1.4.2",
     "jsdom": "^29.1.1",
     "katex": "^0.16.27",
     "lucide-react": "^0.468.0",

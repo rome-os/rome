@@ -4,7 +4,7 @@ import { useSessionsChanged } from "@/lib/session-events";
 
 /**
  * Names of the given chat sessions, keyed by session id, for labelling the
- * side-chat tabs. Re-read whenever the set of ids changes or a session changes
+ * fork-chat tabs. Re-read whenever the set of ids changes or a session changes
  * (a rename, or a new chat getting its title). A session that is unnamed, gone,
  * or not loaded yet has no entry, so the caller keeps its generic label. A
  * failed read keeps the name already shown.

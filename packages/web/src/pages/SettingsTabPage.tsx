@@ -8,7 +8,8 @@ import {
   SectionTitle,
 } from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
-import { ComputerUseSection } from "@/components/computer-use-section";
+import { VoiceInputRow } from "@/components/voice-input-row";
+import { ComputerUseRow } from "@/components/computer-use-section";
 import { SpokenRecapsRows } from "@/components/spoken-recaps-section";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, Navigate, useParams } from "react-router-dom";
@@ -24,7 +25,6 @@ import type {
   FavorRechargePackList,
   FavorRechargePackView,
 } from "@rome/api-types/favors";
-import { isElectronShell } from "@/lib/electron-shell";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { apiErrorMessageFrom, getApiErrorMessage } from "@/lib/api-error";
 import { fetchJson } from "@/lib/fetch-json";
@@ -63,14 +63,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
@@ -99,14 +92,12 @@ import {
   ADVANCED_EASTER_EGG_INITIAL_SEQUENCE,
   advanceAdvancedEasterEggSequence,
 } from "@/lib/advanced-easter-egg";
-import { AppKeysSection } from "@/components/app-keys-section";
+import { AppKeysRow, VaultRow } from "@/components/app-keys-section";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
-import { ChannelsSettingsPage } from "@/components/channels/channels-settings-page";
 import { AiToolsPanel } from "@/components/ai-tools-panel";
-import { SystemUpgradeSection } from "@/components/system-upgrade-section";
-import { SystemDiagnosisSection } from "@/components/system-diagnosis-section";
+import { SystemVersionRow } from "@/components/system-upgrade-section";
+import { SystemDiagnosisRow } from "@/components/system-diagnosis-section";
 import { useInvalidateSettings } from "@/hooks/use-settings";
-import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useTheme } from "@/hooks/use-theme";
 import { parseEmailTextarea } from "@/lib/email-list";
 import { StatusIndicator } from "@/lib/connection-status";
@@ -117,12 +108,14 @@ import {
   DASHBOARD_ACCESS_MAX_EMAIL_LENGTH,
   DASHBOARD_ACCESS_MAX_EMAILS,
 } from "@rome/api-types/dashboard-access";
-import { Page, PageHeader, PageHeading, PageNav, PageNavLink, PageTitle } from "@rome-os/ui/page";
+import { Page } from "@rome-os/ui/page";
 import {
   CONNECTIONS_REFRESH_INTERVAL_MS,
   fetchConnections,
   type ApiConnection,
 } from "@/lib/connections-api";
+import { useCopyFeedback } from "@/hooks/use-copy-feedback";
+import { isImeCompositionEvent } from "@rome-os/ui/keyboard-submit";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -146,7 +139,6 @@ export const TABS = [
   "Appearance",
   "Connections",
   "Devices",
-  "Channels",
   "AI Tools",
   "Favors",
   "Advanced",
@@ -155,12 +147,12 @@ export const TABS = [
 type Tab = (typeof TABS)[number];
 
 // Only these tabs read what `loadAll` fetches (/api/settings). Connections,
-// Devices, Channels and Favors own their requests, and Appearance reads the theme/i18n context, so neither the initial settings load
+// Devices and Favors own their requests, and Appearance reads the theme/i18n context, so neither the initial settings load
 // nor a settings failure has anything to say about them — gating every tab on one
 // request would strand a guardian on a healthy tab.
 const SETTINGS_BACKED_TABS: ReadonlySet<Tab> = new Set<Tab>(["AI Tools", "Advanced"]);
 
-function tabToSlug(tab: Tab): string {
+export function tabToSlug(tab: Tab): string {
   return tab.toLowerCase().replace(/\s+/g, "-");
 }
 
@@ -176,7 +168,6 @@ export default function SettingsPage() {
   const params = useParams<{ tab?: string }>();
   const normalizedTab = normalizeTab(params.tab ?? null);
   const activeTab = normalizedTab ?? TABS[0];
-  useDocumentTitle([t(`tabs.${activeTab}` as const), t("page.title")]);
 
   const invalidateSettings = useInvalidateSettings();
   const [settings, setSettings] = useState<SettingsData>({});
@@ -288,6 +279,10 @@ export default function SettingsPage() {
 
   // Unknown settings slugs are not pages. Redirect them to the canonical
   // default instead of rendering Appearance under a stale URL.
+  // Chat rules moved from their own tab onto each connection's page.
+  if (params.tab === "channels") {
+    return <Navigate to="/settings/connections" replace />;
+  }
   if (params.tab && !normalizedTab) {
     return <Navigate to="/settings/appearance" replace />;
   }
@@ -299,20 +294,6 @@ export default function SettingsPage() {
 
   return (
     <Page>
-      <PageHeader>
-        <PageHeading>
-          <PageTitle>{t("page.title")}</PageTitle>
-        </PageHeading>
-      </PageHeader>
-
-      <PageNav aria-label={t("page.title")}>
-        {TABS.map((tab) => (
-          <PageNavLink asChild key={tab} active={tab === activeTab}>
-            <Link to={`/settings/${tabToSlug(tab)}`}>{t(`tabs.${tab}` as const)}</Link>
-          </PageNavLink>
-        ))}
-      </PageNav>
-
       {tabNeedsSettings && loading ? (
         <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
       ) : tabNeedsSettings && loadError ? (
@@ -343,11 +324,6 @@ export default function SettingsPage() {
           {activeTab === "Devices" && (
             <Measure>
               <DevicesSection />
-            </Measure>
-          )}
-          {activeTab === "Channels" && (
-            <Measure>
-              <ChannelsSettingsPage />
             </Measure>
           )}
           {activeTab === "Favors" && (
@@ -564,7 +540,9 @@ function FavorRequestRow({
             <dl className="mt-3 grid gap-2 text-ui sm:grid-cols-2">
               {fields.map((field) => (
                 <div key={`${request.id}:${field.label}`} className="min-w-0">
-                  <dt className="text-aux uppercase text-muted-foreground">{field.label}</dt>
+                  <dt className="text-aux text-muted-foreground first-letter:uppercase">
+                    {field.label}
+                  </dt>
                   <dd className="truncate text-foreground" title={field.value}>
                     {field.value}
                   </dd>
@@ -928,24 +906,15 @@ function AdvancedSection({
           <SectionHeader>
             <SectionTitle>{t("system.title")}</SectionTitle>
           </SectionHeader>
-          {/* Not rendered in the Mac app. Its check and upgrade actions relay to
-            Rome Cloud, which resolves them against the account's *hosted*
-            instance — a machine other than the one showing the page. The version
-            card above them is read from the local build and is correct on
-            desktop, but it is not worth splitting the section to keep: the Mac
-            app has its own version surface, and a panel whose only button acts
-            on somewhere else is worse than an absent one.
-
-            This is a mitigation. It keys on which window is rendering, not on
-            what kind of backend is behind the page, so the same dashboard opened
-            in a browser at the loopback port still shows it. */}
-          {!isElectronShell() && <SystemUpgradeSection />}
-          <SystemDiagnosisSection details={<RelayHealthSection />} />
+          <FormRows>
+            <SystemVersionRow />
+            <SystemDiagnosisRow details={<RelayHealthSection />} />
+            <ComputerUseRow />
+            <VoiceInputRow />
+          </FormRows>
         </Section>
-        <AppKeysSection />
         <FeaturesSection />
         <AccessControlSection settings={settings} onSave={onSave} saving={saving} />
-        <ComputerUseSection />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
         {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
       </Section>
@@ -1309,24 +1278,16 @@ function RelayHealthRow({ label, children }: { label: string; children: ReactNod
 
 function CopyValueButton({ value }: { value: string }) {
   const { t } = useTranslation("settings");
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1_500);
-    } catch {
-      // Clipboard unavailable (e.g. non-secure context); the value is selectable text.
-    }
-  }
+  // When the clipboard is unavailable, the value is still selectable text.
+  const { copiedText, copy } = useCopyFeedback();
+  const copied = copiedText !== null;
 
   return (
     <IconButton
       size="sm"
       label={copied ? t("advanced.relayHealth.copied") : t("advanced.relayHealth.copy")}
       icon={copied ? <Check className="text-success-fg" /> : <Copy />}
-      onClick={() => void copy()}
+      onClick={() => void copy(value)}
     />
   );
 }
@@ -1532,8 +1493,9 @@ function AccessControlSection({
       <SectionHeader>
         <SectionTitle>{t("publicAccess.title")}</SectionTitle>
       </SectionHeader>
-      <AllowedCloudEmailsSection />
       <FormRows>
+        <AppKeysRow />
+        <VaultRow />
         <SettingsToggleRow
           title={t("advanced.feedback.agentReports.title")}
           description={t("advanced.feedback.agentReports.description")}
@@ -1542,6 +1504,7 @@ function AccessControlSection({
           onChange={(enabled) => void onSave({ "feedback.agentReportsEnabled": enabled })}
           disabled={saving}
         />
+        <AllowedCloudEmailsRows />
       </FormRows>
     </Section>
   );
@@ -1551,7 +1514,10 @@ interface DashboardAccessConfig {
   cloudEmailAccess: string[];
 }
 
-function AllowedCloudEmailsSection() {
+/** Admins as rows of the Access and privacy group: a heading row with
+ * the count, the add field, then one row per address. Last in the group, so a
+ * long list grows at the bottom rather than pushing the other settings down. */
+function AllowedCloudEmailsRows() {
   const { t } = useTranslation("settings");
   const [emails, setEmails] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
@@ -1649,19 +1615,19 @@ function AllowedCloudEmailsSection() {
   if (!loaded) return null;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("publicAccess.dashboardEmails.title")}</CardTitle>
-        <CardDescription>{t("publicAccess.dashboardEmails.description")}</CardDescription>
-        <CardAction>
+    <>
+      <FormRow>
+        <FormRowHeading>
+          <FormRowLabel>{t("publicAccess.dashboardEmails.title")}</FormRowLabel>
+          <FormRowDescription>{t("publicAccess.dashboardEmails.description")}</FormRowDescription>
+        </FormRowHeading>
+        <FormRowControl>
           <Badge variant="muted">
-            {t("publicAccess.dashboardEmails.accountCount", {
-              count: emails.length,
-            })}
+            {t("publicAccess.dashboardEmails.accountCount", { count: emails.length })}
           </Badge>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
+        </FormRowControl>
+      </FormRow>
+      <div className="px-4 py-3">
         <div className="flex gap-2">
           <div className="flex-1">
             <Input
@@ -1675,7 +1641,7 @@ function AllowedCloudEmailsSection() {
                 if (draftError) setDraftError("");
               }}
               onKeyDown={(event) => {
-                if (event.key !== "Enter") return;
+                if (event.key !== "Enter" || isImeCompositionEvent(event)) return;
                 event.preventDefault();
                 commitDraft(draft);
               }}
@@ -1699,37 +1665,33 @@ function AllowedCloudEmailsSection() {
           </Button>
         </div>
         {draftError && <p className="mt-2 text-aux text-destructive-fg">{draftError}</p>}
-
-        {emails.length > 0 ? (
-          <ul className="mt-4 space-y-2">
-            {emails.map((email) => (
-              <li
-                key={email}
-                className="flex items-center gap-3 rounded-8 border border-border px-3 py-2"
-              >
-                <Avatar>
-                  <AvatarFallback className="bg-primary/15 text-primary">
-                    {email[0]?.toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="min-w-0 flex-1 truncate text-ui text-foreground">{email}</span>
-                <IconButton
-                  size="sm"
-                  label={t("publicAccess.dashboardEmails.remove", { email })}
-                  icon={<X />}
-                  className="text-muted-foreground hover:text-foreground"
-                  disabled={saving}
-                  onClick={() => removeEmail(email)}
-                />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-4 rounded-12 border border-dashed border-border px-3 py-3 text-ui text-muted-foreground">
-            {t("publicAccess.dashboardEmails.empty")}
-          </p>
-        )}
-      </CardContent>
-    </Card>
+      </div>
+      {emails.length > 0 ? (
+        <ul aria-label={t("publicAccess.dashboardEmails.title")} className="divide-y divide-border">
+          {emails.map((email) => (
+            <li key={email} className="flex items-center gap-3 px-4 py-3">
+              <Avatar size="sm">
+                <AvatarFallback className="bg-primary/15 text-primary">
+                  {email[0]?.toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <span className="min-w-0 flex-1 truncate text-ui text-foreground">{email}</span>
+              <IconButton
+                size="sm"
+                label={t("publicAccess.dashboardEmails.remove", { email })}
+                icon={<X />}
+                className="text-muted-foreground hover:text-foreground"
+                disabled={saving}
+                onClick={() => removeEmail(email)}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="px-4 py-3 text-ui text-muted-foreground">
+          {t("publicAccess.dashboardEmails.empty")}
+        </p>
+      )}
+    </>
   );
 }

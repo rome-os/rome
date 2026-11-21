@@ -2,7 +2,8 @@ import { romeToolPorts } from "../../core/rome-tool-ports.js";
 import { createLogger } from "../../logger.js";
 import { sessionOpeningFor } from "../../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../../concierge/agent-traits.js";
-import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../../agent/index.js";
+import { readAnswerShape, romeSessionTracing } from "../../agent/index.js";
+import { TurnUsageReporter } from "../../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../../paths.js";
 import { mkdtempSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -29,33 +30,35 @@ import { channelList } from "../../chats/connected-accounts/connected-account-li
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
 import type { DrizzleDb } from "../../db/index.js";
-import { ApprovalsRepository } from "../../db/repositories/approvals.js";
-import { ExecutionJournalRepository } from "../../db/repositories/execution-journal.js";
-import { ActionExecutionsRepository } from "../../db/repositories/action-executions.js";
+import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
+import { ExecutionJournalRepository } from "../../apps/repositories/execution-journal.js";
+import { ActionExecutionsRepository } from "../../apps/repositories/action-executions.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
-import { PeopleRepository } from "../../db/repositories/people.js";
+import { DrizzlePeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import { PoliciesRepository } from "../../db/repositories/policies.js";
-import { ActionRegistryImpl } from "../../actions/registry.js";
-import { ActionEngine, type ApprovalCreatedEvent } from "../../actions/engine.js";
-import { ApprovalHandler } from "../../actions/approval-handler.js";
-import { createBackendTurnRunner } from "../../actions/backend-turn.js";
+import { ActionRegistryImpl } from "../../apps/actions/registry.js";
+import { ActionEngine, type ApprovalCreatedEvent } from "../../apps/actions/engine.js";
+import { ApprovalHandler, executionRequester } from "../../apps/actions/approval-handler.js";
+import { createBackendTurnRunner } from "../../app-host/backend-turn.js";
 import { chatsWiring } from "../../chats-wiring.js";
 import { openChannelChat } from "../../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
-import type { Action } from "../../actions/types.js";
-import { AgentLoader } from "../../agent/index.js";
+import type { Action } from "../../apps/actions/types.js";
+import { AgentLoader } from "../../app-host/agent-loader.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../../agent/index.js";
 import { createTestSystemPrompts } from "../system-prompts.js";
 import { createModelResolver } from "../../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./model-accounts.js";
-import { createAgentSessionManager } from "../../agent/index.js";
-import { AppTurnHooks, TurnListeners } from "../../agent/index.js";
-import { SkillLoader } from "../../agent/index.js";
+import { createSessions } from "../../agent/index.js";
+import { TurnListeners } from "../../agent/index.js";
+import { AppTurnHooks } from "../../app-host/app-turn-hooks.js";
+import { SkillLoader } from "../../app-host/skill-loader.js";
 import { AgentRunner } from "../../core/agent-runner.js";
 import type { RunParams } from "../../core/types.js";
 import type { AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
-import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";
+import type { ActionSubprocessRunner } from "../../apps/actions/action-subprocess.js";
 import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
 import { testChannelSurface } from "../channel-surface.js";
 
@@ -218,9 +221,9 @@ async function buildHarness(
   const db = testDb.db;
 
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-  const people = new PeopleRepository(db);
+  const people = new DrizzlePeopleRepository(db);
   const repos: TestRomeRepos = {
-    sessions: new DrizzleSessionRepository(db, artifactIdentity),
+    sessions: new DrizzleSessionRepository(db),
     approvals: new ApprovalsRepository(db),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),
@@ -276,7 +279,7 @@ async function buildHarness(
   );
 
   const systemPrompts = createTestSystemPrompts();
-  const agentSessionManager = createAgentSessionManager(
+  const agentSessionManager = createSessions(
     {
       agentLoader,
       sessionRepository: repos.sessions,
@@ -338,7 +341,7 @@ async function buildHarness(
       ensureChannelChat: (input) =>
         openChannelChat(
           {
-            webchatRepo: new ChatsWebChatRepository(db, {
+            records: new ChatsWebChatRepository(db, {
               chats: chatsWired.chats,
               lines: chatsWired.messages,
               links: chatsWired.links,
@@ -360,6 +363,9 @@ async function buildHarness(
     actionEngine,
     agentRunner,
     backendTurnRunner,
+    undefined,
+    undefined,
+    executionRequester(repos.actionExecutions),
   );
 
   let cleaned = false;

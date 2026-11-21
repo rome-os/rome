@@ -1,7 +1,7 @@
 // Discord connection integration. Channel contract: docs/architecture/channels.md.
 //
 // Discord is a Talker with a single `bot` grant (a pasted bot token). The
-// transport core — gateway lifecycle, the inbound `ChannelMessage`, slash
+// transport core — gateway lifecycle, the inbound `Message`, slash
 // commands, send formatting — is `DiscordAdapter`
 // (packages/core/src/connections/kinds/discord/discord.ts), wrapped here so the runtime's
 // grant-epoch lifecycle and fault→grant-state mapping (registry.ts) drive it.
@@ -18,14 +18,15 @@ import { z } from "zod";
 import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures } from "../types.js";
 import { DiscordAdapter } from "../kinds/discord/discord.js";
-import type { PeopleRepository } from "../../db/repositories/people.js";
-import type { ChatSettingsService } from "../../chat-settings/service.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
 import { directoryPage } from "./talk-features.js";
 import { requireOnFirstUse } from "../../lib/require-on-first-use.js";
+import type { ChatSettingsPort } from "../types.js";
+import { DISCORD_CHAT_RULES } from "@rome/api-types/chat-rules";
 
 const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
 
@@ -105,7 +106,7 @@ export function isDiscordAuthError(err: unknown): boolean {
  * validation + autocomplete).
  */
 export interface DiscordDeps {
-  chatSettings: ChatSettingsService;
+  chatSettings: ChatSettingsPort;
   chatStop?: ChatStopHandler;
   peopleRepo: PeopleRepository;
   listAgents: () => string[];
@@ -245,6 +246,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
     accountIdOf: (record) => (typeof record.botId === "string" && record.botId) || null,
     link: "own_account",
     grant: "bot",
+    chatRules: DISCORD_CHAT_RULES,
     auth: botScheme,
     capabilities: {
       talker: {

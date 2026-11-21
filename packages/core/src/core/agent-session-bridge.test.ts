@@ -1,5 +1,5 @@
 import type { RunLineDeps } from "../connections/speaker-messages.js";
-import { testTurnHandle } from "../test/turn-handle.js";
+import { testTurnHandle, submitStartingTurn } from "../test/turn-handle.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -9,18 +9,13 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId, StreamAgentEvent } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createChatTurns } from "./chat-turns.js";
-import type {
-  AgentSession,
-  AgentSessionInit,
-  AgentSessionManager,
-  AgentTurnHandle,
-} from "../agent/index.js";
+import type { AgentSession, SessionOpening, Sessions, AgentTurnHandle } from "../agent/index.js";
 import type { ChatResetPolicy } from "./chat-reset-policy.js";
 import type { SessionOpeningFor } from "./session-opening.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
-import { canOpen } from "../concierge/privacy.js";
-import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { canOpen } from "../webchat/privacy.js";
+import { IpcRpc, createChildProcessTransport } from "../apps/actions/ipc.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { createTestDb } from "../test/db.js";
 import { sessions } from "../db/schema.js";
 import { eq } from "drizzle-orm";
@@ -60,12 +55,13 @@ describe("AgentSessionBridge turn routing", () => {
     const session = {
       key: { agentName: "main", channelThreadKey: "discord:channel-1" },
       sessionId: "session-1",
-      sendTurn: () => testTurnHandle({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
+      submit: submitStartingTurn,
+      startTurn: () => testTurnHandle({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
-      acquire: async () => session,
-      peek: () => session,
-    } as unknown as AgentSessionManager;
+      open: async () => session,
+      find: () => session,
+    } as unknown as Sessions;
     const turns = createAgentTurnStreamRegistry();
     const chatTurns = createChatTurns();
     const child = new FakeChild();
@@ -149,11 +145,9 @@ describe("AgentSessionBridge conversation", () => {
       const session = {
         key: { agentName: "main", channelThreadKey: "discord:channel-1" },
         sessionId: "session-1",
-        sendTurn: (_input: unknown, options: TurnRef) => {
-          sent.push({
-            romeSessionId: options.romeSessionId,
-            romeSessionType: options.romeSessionType,
-          });
+        submit: submitStartingTurn,
+        startTurn: (_input: unknown, options: TurnRef) => {
+          sent.push({ romeSessionId: options.romeSessionId });
           return testTurnHandle({
             turnId: "turn-1",
             events: (async function* (): AsyncIterable<StreamAgentEvent> {
@@ -171,9 +165,10 @@ describe("AgentSessionBridge conversation", () => {
         },
       } as unknown as AgentSession;
       const manager = {
-        acquire: async () => session,
-        peek: () => session,
-      } as unknown as AgentSessionManager;
+        open: async () => session,
+        resume: async () => session,
+        find: () => session,
+      } as unknown as Sessions;
       const child = new FakeChild();
       new AgentSessionBridge(manager, repo).attach(
         new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
@@ -191,8 +186,18 @@ describe("AgentSessionBridge conversation", () => {
         },
       });
 
+      await rs.waitFor(() => expect(sent).toEqual([{ romeSessionId: "child-chat" }]));
+      // The response names the chat's type the turn records under.
       await rs.waitFor(() =>
-        expect(sent).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]),
+        expect(child.sent).toContainEqual(
+          expect.objectContaining({
+            type: "rpc_response",
+            reqId: "request-1",
+            result: expect.objectContaining({
+              romeSession: { _romeSessionId: "child-chat", _type: "subagent" },
+            }),
+          }),
+        ),
       );
       await rs.waitFor(async () => {
         const roles = (await repo.getMessages("child-chat")).map((m) => m.role);
@@ -223,7 +228,8 @@ describe("AgentSessionBridge resuming a session by its id", () => {
       const session = {
         key: { agentName: "core:concierge", channelThreadKey: "webchat:concierge" },
         sessionId: "guardian-runtime",
-        sendTurn: (input: unknown) => {
+        submit: submitStartingTurn,
+        startTurn: (input: unknown) => {
           sent.push(input);
           return testTurnHandle({
             turnId: `turn-${sent.length}`,
@@ -233,10 +239,10 @@ describe("AgentSessionBridge resuming a session by its id", () => {
         },
       } as unknown as AgentSession;
       const manager = {
-        acquire: async () => session,
-        acquireBySessionId: async () => session,
-        peek: () => session,
-      } as unknown as AgentSessionManager;
+        open: async () => session,
+        resume: async () => session,
+        find: () => session,
+      } as unknown as Sessions;
       const child = new FakeChild();
       new AgentSessionBridge(manager, repo).attach(
         new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
@@ -312,7 +318,8 @@ describe("AgentSessionBridge chat link on resume", () => {
         ({
           key: { agentName: "main", channelThreadKey: "telegram:t1" },
           sessionId: "runtime-1",
-          sendTurn: (input: unknown) => {
+          submit: submitStartingTurn,
+          startTurn: (input: unknown) => {
             sent.push(input);
             return testTurnHandle({
               turnId: `turn-${sent.length}`,
@@ -323,10 +330,9 @@ describe("AgentSessionBridge chat link on resume", () => {
         }) as unknown as AgentSession;
       // Each resume reopens the session, as a cold open would.
       const manager = {
-        acquire: async () => open(),
-        acquireBySessionId: async () => open(),
-        peek: () => undefined,
-      } as unknown as AgentSessionManager;
+        open: async () => open(),
+        find: () => undefined,
+      } as unknown as Sessions;
       const child = new FakeChild();
       new AgentSessionBridge(manager, repo).attach(
         new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
@@ -391,7 +397,8 @@ describe("AgentSessionBridge fresh run started from a chat", () => {
       const session = {
         key: { agentName: "main", channelThreadKey: "summon:exec-1" },
         sessionId: "summon-runtime",
-        sendTurn: () =>
+        submit: submitStartingTurn,
+        startTurn: () =>
           testTurnHandle({
             turnId: "summon-turn",
             events: (async function* (): AsyncIterable<StreamAgentEvent> {
@@ -408,9 +415,10 @@ describe("AgentSessionBridge fresh run started from a chat", () => {
           }) as unknown as AgentTurnHandle,
       } as unknown as AgentSession;
       const manager = {
-        acquire: async () => session,
-        peek: () => session,
-      } as unknown as AgentSessionManager;
+        open: async () => session,
+        resume: async () => session,
+        find: () => session,
+      } as unknown as Sessions;
       const child = new FakeChild();
       new AgentSessionBridge(manager, repo).attach(
         new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
@@ -458,11 +466,12 @@ describe("AgentSessionBridge working dir", () => {
     const projectsRoot = realpathSync(mkdtempSync(join(tmpdir(), "rome-bridge-projects-")));
     tempDirs.push(projectsRoot);
     mkdirSync(join(projectsRoot, "landingpage"));
-    const acquired: AgentSessionInit[] = [];
+    const acquired: SessionOpening[] = [];
     const session = {
       key: { agentName: "coder", channelThreadKey: "coder:1" },
       sessionId: "summoned-1",
-      sendTurn: () =>
+      submit: submitStartingTurn,
+      startTurn: () =>
         testTurnHandle({
           turnId: "turn-1",
           events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
@@ -470,17 +479,17 @@ describe("AgentSessionBridge working dir", () => {
         }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
-      acquire: async (_key: unknown, init: AgentSessionInit) => {
+      open: async (_key: unknown, init: SessionOpening) => {
         acquired.push(init);
         return session;
       },
-      acquireBySessionId: async (_id: string, _agent: string, init: AgentSessionInit) => {
+      resume: async (_session: unknown, init: SessionOpening) => {
         acquired.push(init);
         return session;
       },
-      peek: () => undefined,
+      find: () => undefined,
       findWorkingDirBySessionId: (id: string) => callerWorkingDirs[id],
-    } as unknown as AgentSessionManager;
+    } as unknown as Sessions;
     const child = new FakeChild();
     new AgentSessionBridge(
       manager,
@@ -562,8 +571,9 @@ describe("AgentSessionBridge working dir", () => {
       guardianFacing: true,
       toolEnv: { ROME_CHANNEL: "telegram" },
       spanAttributes: { "channel.name": "telegram" },
+      audience: "shared" as const,
     };
-    const { acquired, runTurn } = setup({}, undefined, () => stated);
+    const { acquired, runTurn } = setup({}, undefined, async () => stated);
     const forged = {
       drawsCards: true,
       guardianFacing: false,
@@ -662,15 +672,16 @@ describe("AgentSessionBridge worker disconnect", () => {
     const session = {
       key: { agentName: "main", channelThreadKey: "discord:channel-1" },
       sessionId: "session-1",
-      sendTurn: () => queue.shift()!,
+      submit: submitStartingTurn,
+      startTurn: () => queue.shift()!,
     } as unknown as AgentSession;
     const manager = {
-      acquire: async () => {
+      open: async () => {
         await options.beforeAcquire?.();
         return session;
       },
-      peek: () => session,
-    } as unknown as AgentSessionManager;
+      find: () => session,
+    } as unknown as Sessions;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
     new AgentSessionBridge(manager, options.webchatRepo, undefined, turns).attach(
@@ -849,9 +860,10 @@ describe("AgentSessionBridge answer recording", () => {
     const session = {
       key: { agentName: "main", channelThreadKey: "telegram:chat-1" },
       sessionId: "session-1",
-      sendTurn: () => testTurnHandle({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
+      submit: submitStartingTurn,
+      startTurn: () => testTurnHandle({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
-    const manager = { acquire: async () => session } as unknown as AgentSessionManager;
+    const manager = { open: async () => session } as unknown as Sessions;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
     new AgentSessionBridge(manager, repo, undefined, turns, undefined, runLineDeps).attach(
@@ -946,5 +958,52 @@ describe("AgentSessionBridge answer recording", () => {
 
     await rs.waitFor(() => expect(turnEnd()).toBeDefined());
     expect(JSON.stringify(turnEnd())).not.toContain("replyDelivery");
+  });
+});
+
+describe("AgentSessionBridge turn audience", () => {
+  async function runFrom(callerActionContext: Record<string, unknown> | undefined) {
+    const started: Array<{ parentAudience?: string }> = [];
+    const session = {
+      key: { agentName: "main", channelThreadKey: "telegram:dm" },
+      sessionId: "session-1",
+      submit: submitStartingTurn,
+      startTurn: (_input: unknown, options: { parentAudience?: string }) => {
+        started.push(options);
+        return testTurnHandle({
+          turnId: "turn-1",
+          events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
+        }) as unknown as AgentTurnHandle;
+      },
+    } as unknown as AgentSession;
+    const manager = { open: async () => session, find: () => session } as unknown as Sessions;
+    const child = new FakeChild();
+    new AgentSessionBridge(manager).attach(
+      new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
+      child as unknown as ChildProcess,
+    );
+    child.emit("message", {
+      type: "rpc_request",
+      reqId: "request-1",
+      method: "agent.session.runTurn",
+      ...(callerActionContext ? { callerActionContext } : {}),
+      params: {
+        key: session.key,
+        input: { prompt: "how many steps today?" },
+        init: { threadContext: { channel: "telegram", threadId: "dm" } },
+      },
+    });
+    await rs.waitFor(() => expect(started).toHaveLength(1));
+    return started[0].parentAudience;
+  }
+
+  it("keeps the audience main read for the action that asked, such as a guardian's direct message", async () => {
+    expect(await runFrom({ audience: "private" })).toBe("private");
+    expect(await runFrom({ audience: "shared" })).toBe("shared");
+  });
+
+  it("reads a turn as shared when main read no audience for its caller", async () => {
+    expect(await runFrom({ actor: { kind: "guardian", userId: "seat" } })).toBe("shared");
+    expect(await runFrom(undefined)).toBe("shared");
   });
 });

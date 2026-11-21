@@ -6,6 +6,7 @@ import {
 } from "@rome/api-types/anthropic-compatible-providers";
 import { http, HttpResponse } from "msw";
 import type { ComputerUseStatus } from "@rome/api-types/computer-use";
+import type { VoiceInputInfo } from "@rome/api-types/voice-input";
 import {
   DEFAULT_RECAP_SETTINGS,
   type RecapSettings,
@@ -357,6 +358,10 @@ export const settingsHandlers = [
     statusDevices.splice(index, 1);
     return new HttpResponse(null, { status: 204 });
   }),
+  // Mock mode has no dictation socket, so it reports no transcription provider.
+  http.get("/api/voice-input", () =>
+    HttpResponse.json({ available: false, place: null } satisfies VoiceInputInfo),
+  ),
   http.get("/api/computer-use", () =>
     HttpResponse.json({
       daemon: { status: "running", version: "1.8.8" },

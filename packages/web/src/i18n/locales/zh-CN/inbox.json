@@ -1,7 +1,6 @@
 {
   "page": {
     "title": "收件箱",
-    "description": "消息的来源渠道、甄别治理规则，以及近期的甄别活动。",
     "loading": "加载中…",
     "savedFlash": "已保存",
     "saveFailedFallback": "保存失败，请重试。"
@@ -11,12 +10,11 @@
     "description": "Sentinel 近期对不受信任的进站消息所做的处理。"
   },
   "policy": {
-    "title": "甄别策略",
-    "description": "决定 Rome 信任、回复、复核哪些进站消息的规则。"
+    "title": "甄别策略"
   },
   "sources": {
     "title": "消息来源",
-    "description": "为收件箱供给消息的账号。连接管理请前往<a>连接设置</a>。",
+    "description": "在<a>连接设置</a>中添加或移除来源。",
     "status": {
       "connected": "已连接",
       "configured": "已配置",

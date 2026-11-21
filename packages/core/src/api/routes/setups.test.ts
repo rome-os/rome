@@ -15,11 +15,11 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 // the grant off the real disk / `gh` binary AND deterministic — an un-mocked
 // `gh` spawn (ENOENT) is slow enough on a loaded CI runner to push the `done`
 // transition past the poll's default timeout (the terminal write awaits custody).
-rs.mock("../../lib/github-shell-integration.js", () => ({
+rs.mock("../../connections/integrations/github-shell-integration.js", () => ({
   syncGithubShellIntegrationForProvider: rs.fn(async () => {}),
   clearGithubShellIntegrationForProvider: rs.fn(async () => {}),
 }));
-rs.mock("../../lib/provider-token-files.js", () => ({
+rs.mock("../../connections/oauth/provider-token-files.js", () => ({
   syncProviderTokenFile: rs.fn(async () => {}),
   clearProviderTokenFile: rs.fn(async () => {}),
 }));
@@ -32,14 +32,14 @@ import { makePasteTalk } from "../../connections/test-fixtures.js";
 import {
   createFeishuDescriptor,
   type FeishuPendingMaterial,
-} from "../../connections/integrations/feishu.js";
+} from "../../connections/kinds/feishu/descriptor.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { Credential, ProfileRecord } from "../../connections/types.js";
-import { PeopleRepository } from "../../db/repositories/people.js";
+import type { PeopleRepository } from "../../people/model/people-repository.js";
 import { createTestDb } from "../../test/db.js";
 import type { ApiDeps } from "../deps.js";
 import { setupsRoutes } from "./setups.js";
-import { ApprovalsRepository } from "../../db/repositories/approvals.js";
+import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
 import { connectionsRoutes } from "./connections.js";
 
 const SAME_ORIGIN = { "content-type": "application/json", "sec-fetch-site": "same-origin" };

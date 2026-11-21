@@ -14,10 +14,10 @@ import type {
   SubscriberHandler,
   Unsubscribe,
 } from "../../apps/state.js";
-import { ActionLoader } from "../../actions/loader.js";
+import { ActionLoader } from "../../apps/actions/loader.js";
 import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
-import { AgentLoader } from "../../agent/index.js";
-import { COOKIE_NAME, createSession } from "../../lib/auth.js";
+import { AgentLoader } from "../../app-host/agent-loader.js";
+import { COOKIE_NAME, createSession } from "../../access/auth.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 
 function buildResolvedApp(

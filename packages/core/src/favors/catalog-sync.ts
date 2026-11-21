@@ -1,6 +1,6 @@
 import type { AppCatalog } from "../apps/catalog.js";
 import { type AppId, isResolvedApp, type ResolvedApp } from "../apps/state.js";
-import type { Action } from "../actions/types.js";
+import type { Action } from "../apps/actions/types.js";
 import type { ArtifactMetadata } from "../apps/types.js";
 import type { Logger } from "../logger.js";
 import type { FavorService } from "./types.js";

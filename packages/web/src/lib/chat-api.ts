@@ -1,3 +1,4 @@
+import { clearChatDraft } from "./chat-draft-storage";
 import type { DeviceFilesResponse } from "@rome/api-types/devices";
 import type {
   AgentCatalogGroup,
@@ -49,6 +50,24 @@ export class ChatApiError extends Error {
   }
 }
 
+/**
+ * A non-JSON error body as text the chat can show, or "" for a web page. While
+ * Rome restarts, the proxy in front of it answers with its own HTML error page,
+ * and its markup is not a message.
+ */
+export function plainErrorText(raw: string): string {
+  const text = raw.trim();
+  return text.startsWith("<") ? "" : text.slice(0, 200);
+}
+
+/**
+ * The statuses a proxy answers with when Rome behind it does not, as during a
+ * restart: bad gateway, unavailable, gateway timeout, and Cloudflare's 52x.
+ */
+export function isUnreachableStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504 || (status >= 520 && status <= 530);
+}
+
 async function readErrorPayload(res: Response): Promise<unknown> {
   try {
     const raw = (await res.text()).trim();
@@ -56,7 +75,8 @@ async function readErrorPayload(res: Response): Promise<unknown> {
     try {
       return JSON.parse(raw);
     } catch {
-      return { error: raw.slice(0, 200) };
+      const text = plainErrorText(raw);
+      return text ? { error: text } : null;
     }
   } catch {
     return null;
@@ -102,18 +122,33 @@ export async function searchChatMessages(query: string): Promise<ChatSearchMessa
   return jsonOrThrow<ChatSearchMessageMatch[]>(res);
 }
 
+/**
+ * What archiving or unarchiving a topic chat does with its follows and open
+ * tasks. `followsAndTasks: "stop"` ends them when it is archived; without it
+ * they move to the main chat. `follows: "moveBack"` moves the follows its
+ * archive moved back to it when it is unarchived; without it they stay.
+ */
+export interface ArchiveSessionOptions {
+  followsAndTasks?: "stop";
+  follows?: "moveBack";
+}
+
 /** Archive (soft-hide) or unarchive a top-level webchat session. */
-export async function archiveSession(sessionId: string, archived: boolean): Promise<ChatSession> {
+export async function archiveSession(
+  sessionId: string,
+  archived: boolean,
+  options: ArchiveSessionOptions = {},
+): Promise<ChatSession> {
   const res = await fetch(`/api/chat/sessions/${sessionId}/archive`, {
     method: "PATCH",
     credentials: "include",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ archived }),
+    body: JSON.stringify({ archived, ...options }),
   });
   return jsonOrThrow<ChatSession>(res);
 }
 
-/** Pin or unpin a top-level guardian chat. */
+/** Pin or unpin a topic chat, which keeps it at the top of the chat list. */
 export async function pinSession(sessionId: string, pinned: boolean): Promise<ChatSession> {
   const res = await fetch(`/api/chat/sessions/${sessionId}/pin`, {
     method: "PATCH",
@@ -188,10 +223,10 @@ export async function listSessionMessages(sessionId: string): Promise<ChatMessag
   return jsonOrThrow<ChatMessage[]>(res);
 }
 
-/** One page of a session's history: whole turns, oldest first within the page. */
+/** One page of a session's history: messages in the order they were said, with the trace rows of their turns. */
 export interface ChatMessagePage {
   messages: ChatMessage[];
-  /** Pass as `before` for the page of older turns; null when this page reaches the start. */
+  /** Pass as `before` for the page of older messages; null when this page reaches the start. */
   nextCursor: string | null;
   /**
    * The session's saved workspace layout, as `GET /layout` returns it. Sent on
@@ -202,15 +237,21 @@ export interface ChatMessagePage {
 }
 
 /**
- * The newest `limit` turns of a session, or the `limit` turns before `before`.
- * `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
+ * The newest `limit` messages of a session, or the `limit` messages before
+ * `before`, with the trace rows of their turns. `null` means the session doesn't exist (HTTP 404), as for `listSessionMessages`.
  */
 export async function listSessionMessagePage(
   sessionId: string,
-  options: { limit: number; before?: string | null },
+  options: {
+    limit: number;
+    before?: string | null;
+    /** A message the page must reach, however far back: one read lands on it. */
+    through?: string;
+  },
 ): Promise<ChatMessagePage | null> {
   const params = new URLSearchParams({ limit: String(options.limit) });
   if (options.before) params.set("before", options.before);
+  if (options.through) params.set("through", options.through);
   const res = await fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, {
     credentials: "include",
   });
@@ -416,11 +457,27 @@ export async function updateSessionProject(
   return jsonOrThrow<ChatSession>(res);
 }
 
-export async function deleteSession(sessionId: string): Promise<void> {
-  await fetch(`/api/chat/sessions/${sessionId}`, {
+/**
+ * Deletes a chat. For a topic chat, `followsAndTasks: "stop"` ends its follows
+ * and stops its open tasks; without it they move to the main chat.
+ */
+/** Fired on `window` once a delete has gone through, with the chat's id as `detail`. */
+export const CHAT_SESSION_DELETED_EVENT = "rome:chat-session-deleted";
+
+export async function deleteSession(
+  sessionId: string,
+  options: { followsAndTasks?: "stop" } = {},
+): Promise<void> {
+  const query = options.followsAndTasks ? `?followsAndTasks=${options.followsAndTasks}` : "";
+  const res = await fetch(`/api/chat/sessions/${sessionId}${query}`, {
     method: "DELETE",
     credentials: "include",
   });
+  // A chat that was already gone is gone too, for every list that still shows it.
+  if (res.ok || res.status === 404) {
+    clearChatDraft(sessionId);
+    window.dispatchEvent(new CustomEvent(CHAT_SESSION_DELETED_EVENT, { detail: sessionId }));
+  }
 }
 
 export async function markSessionRead(
@@ -475,6 +532,57 @@ export async function listSessionTurns(sessionId: string): Promise<TurnInfo[] | 
   return (await res.json()) as TurnInfo[];
 }
 
+/** Where a client sends every event a widget fires. A widget is a message of
+ *  its own, so `widgetId` is its message's id; core routes the event to the
+ *  widget's app, or answers the agent waiting on it. */
+export const widgetEventPath = (widgetId: string) =>
+  `/api/chat/widgets/${encodeURIComponent(widgetId)}/events`;
+
+/** What core said to an event: whether it took it, its status when not,
+ *  whether the event answered the agent waiting on the widget, and a link the
+ *  reply asks the client to open. */
+export interface WidgetEventOutcome {
+  ok: boolean;
+  status: number;
+  answered?: boolean;
+  open?: string;
+  /** Why core or the widget's owner refused the event, to show the guardian. */
+  error?: string;
+}
+
+/** Sends an event a widget fired to core, which decides what it means. `turn`
+ *  is the chat's own turn fields, used only when the event starts a turn. */
+export async function postWidgetEvent(
+  widgetId: string,
+  body: { name: string; context?: unknown; turn?: Record<string, unknown> },
+): Promise<WidgetEventOutcome> {
+  const res = await fetch(widgetEventPath(widgetId), {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ...body, turn: { inputId: randomUUID(), ...body.turn } }),
+  });
+  const reply = (await res.json().catch(() => null)) as {
+    answered?: unknown;
+    open?: unknown;
+    error?: unknown;
+  } | null;
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      ...(typeof reply?.error === "string" ? { error: reply.error } : {}),
+    };
+  }
+  return {
+    ok: true,
+    status: res.status,
+    answered: reply?.answered === true,
+    // Core vets the link it sends; the client opens it as given.
+    ...(typeof reply?.open === "string" ? { open: reply.open } : {}),
+  };
+}
+
 export async function postSessionTurnJson(
   sessionId: string,
   body: Record<string, unknown>,
@@ -516,7 +624,7 @@ function parseTurnResponseText(status: number, ok: boolean, raw: string): PostTu
       provider = payload.provider;
       reason = payload.reason;
     } catch {
-      message = trimmed.slice(0, 200);
+      message = plainErrorText(trimmed);
     }
   }
   return {
@@ -672,6 +780,8 @@ export interface CreateRoutinePayload {
    * (other prefixes belong to apps' managed routines). A repeat create with
    * the same key returns the routine that already holds it, not a duplicate. */
   key?: string;
+  /** The chat whose card turns it on. */
+  chatId?: string;
 }
 
 export interface CreateRoutineResult {
@@ -767,6 +877,8 @@ export async function saveSetting(key: string, value: unknown): Promise<boolean>
 
 export interface ChatShareSnapshot {
   mainSessionId: string;
+  /** The name the chat showed for its main agent; absent on older shares. */
+  agentName?: string;
   messages: ChatMessage[];
   traces: Record<string, TraceSnapshot>;
 }
@@ -787,6 +899,8 @@ export interface ShareSummary {
 
 export interface CreateShareInput {
   turnIds: string[];
+  /** The name the chat shows for its main agent, frozen for the shared page. */
+  agentName?: string;
   title?: string;
   layout?: WidgetPlacement[];
 }

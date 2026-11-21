@@ -31,9 +31,15 @@ import Testing
         #expect(PushRoute.decide(PushTarget(instanceId: "b"), currentInstanceID: "a", instances: instances) == .switchTo(instances[1]))
     }
 
-    @Test func unknownOrStoppedInstanceStaysOnTheOpenOne() {
+    @Test func unknownInstanceStaysOnTheOpenOne() {
         #expect(PushRoute.decide(PushTarget(instanceId: "gone"), currentInstanceID: "a", instances: instances) == .openConcierge)
-        #expect(PushRoute.decide(PushTarget(instanceId: "c"), currentInstanceID: "a", instances: instances) == .openConcierge)
+    }
+
+    /// A push from a stopped instance shows its stopped page, not the open
+    /// instance's Chat. Fails before the change, which stayed on "a".
+    @Test func stoppedInstanceShowsItsStoppedPage() {
+        #expect(PushRoute.decide(PushTarget(instanceId: "c"), currentInstanceID: "a", instances: instances) == .showStopped(instances[2]))
+        #expect(PushRoute.decide(PushTarget(instanceId: "c"), currentInstanceID: nil, instances: instances) == .showStopped(instances[2]))
     }
 }
 
@@ -182,6 +188,39 @@ import Testing
         await push.signOut { registry.calls.append("clear") }
         #expect(registry.calls == ["unregister ee", "clear"])
         #expect(store.load() == nil)
+    }
+}
+
+/// A visitor's pushes name their own chats: their main chat goes by its own
+/// id (`concierge-v-…`), their topic chats by theirs.
+@Suite struct VisitorPushTests {
+    let main = "concierge-v-acc1"
+    let topics = [ConciergeChat(id: "concierge-v-acc1", name: "", main: true, unread: 0), ConciergeChat(id: "t-9", name: "Trip", main: false, unread: 0)]
+
+    @Test func aTapOpensTheVisitorsChat() {
+        #expect(PushRoute.topicChat(for: PushTarget(instanceId: "i", chatId: main), topics: topics) == nil)
+        #expect(PushRoute.topicChat(for: PushTarget(instanceId: "i", chatId: "t-9"), topics: topics) == "t-9")
+    }
+
+    /// The phone watches the chat on screen by the id the server knows it by.
+    @Test func theWatchNamesTheVisitorsMainChat() {
+        #expect(PushPresentation.serverChat(conciergeChatID, mainServerID: main) == main)
+        #expect(PushPresentation.serverChat("t-9", mainServerID: main) == "t-9")
+        var watch = ChatWatch()
+        let frames = watch.move(to: PushPresentation.serverChat(conciergeChatID, mainServerID: main))
+        #expect(frames.map(\.topic) == ["chat.watch:\(main)"])
+    }
+
+    /// A push for the chat on screen shows no banner, and opening a chat
+    /// clears its delivered pushes, a visitor's main chat included.
+    @Test func theChatOnScreenHoldsAndClearsItsPushes() {
+        let push: [AnyHashable: Any] = ["rome": ["instanceId": "i", "chatId": main]]
+        #expect(!PushPresentation.shows(PushTarget(userInfo: push), visibleChat: conciergeChatID, instanceID: "i", mainServerID: main))
+        #expect(PushPresentation.shows(PushTarget(userInfo: push), visibleChat: "t-9", instanceID: "i", mainServerID: main))
+        #expect(PushPresentation.belongs(push, to: conciergeChatID, instanceID: "i", mainServerID: main))
+        #expect(!PushPresentation.belongs(push, to: "t-9", instanceID: "i", mainServerID: main))
+        // The same chat id on another instance is another chat.
+        #expect(!PushPresentation.belongs(push, to: conciergeChatID, instanceID: "j", mainServerID: main))
     }
 }
 

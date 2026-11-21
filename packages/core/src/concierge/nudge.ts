@@ -1,4 +1,4 @@
-import type { FailoverReason } from "./failover-reason.js";
+import type { FailoverReason } from "../agent/index.js";
 import type { AgentTurnStatus } from "@rome-os/app-runtime";
 
 /**
@@ -25,7 +25,7 @@ export function quotaRecoveryPrompt(
       ? "Check this thread before retrying. "
       : "This thread may not have the earlier conversation. ") +
     "First read it with system:fetch_channel_history " +
-    "(limit 20, this thread's channel and id), and check task_list and chat_list. " +
+    "(limit 20, this thread's channel and id), and check chat_list. " +
     "Check the actual state of the work and verify anything uncertain. Do only what remains. " +
     "If a side-effecting action cannot be confirmed, ask the guardian rather than redo it. " +
     "Speak only through say, then end with done.</quota_recovery>"

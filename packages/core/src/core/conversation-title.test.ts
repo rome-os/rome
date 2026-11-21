@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { validatePortableOutputSchema } from "../apps/packaging/output-schema-validator.js";
+import { validatePortableOutputSchema } from "../lib/output-schema-validator.js";
 import type { ModelProvider, ModelSession, ModelSessionParams } from "./agent-runner.js";
 import { executeActionTool } from "../test/tool-calls.js";
 import {

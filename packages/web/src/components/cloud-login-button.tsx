@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
+import { AuthActionButton } from "@/components/auth-screen";
 import { beginCloudLogin } from "@/lib/cloud-login";
 
-// "Sign in with Rome Cloud" affordance shared by /login and /connect;
+// "Continue with Rome Cloud", the primary action shared by /login and /connect;
 // rendered only when the backend reports `cloudAuthEnabled`. On success the
 // browser navigates to Rome Cloud, so this only re-enables itself on a start
 // failure. Callback failures come back as ?cloud=error&reason=… and are surfaced
@@ -38,16 +38,13 @@ export function CloudLoginButton({
   }, [autoStart, start]);
 
   return (
-    <Button
-      type="button"
-      size="md"
-      variant="outline"
-      className="w-full touch-target"
-      disabled={starting}
+    <AuthActionButton
+      busy={starting}
+      busyLabel={t("cloud.connecting")}
       onClick={() => void start()}
     >
-      {starting ? t("cloud.connecting") : t("cloud.signIn")}
-    </Button>
+      {t("cloud.signIn")}
+    </AuthActionButton>
   );
 }
 

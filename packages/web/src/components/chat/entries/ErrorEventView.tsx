@@ -86,6 +86,17 @@ function getGuidedErrorCopy(
   };
 }
 
+/** Whether an error with `code` gets guided copy and a way to fix it, rather than its raw text. */
+export function hasGuidedErrorCopy(code: ChatErrorCode | undefined): boolean {
+  return (
+    code === "model_provider_unavailable" ||
+    code === "model_unavailable" ||
+    code === "no_model_provider_available" ||
+    code === "auth_revoked" ||
+    code === "credits_used_up"
+  );
+}
+
 export function ErrorEventView({
   error,
   code,
@@ -95,14 +106,7 @@ export function ErrorEventView({
   className,
 }: ErrorEventViewProps) {
   const { t } = useTranslation("chat");
-  const isModelResolutionError =
-    code === "model_provider_unavailable" ||
-    code === "model_unavailable" ||
-    code === "no_model_provider_available";
-  const isAuthRevokedError = code === "auth_revoked";
-  const isCreditsUsedUpError = code === "credits_used_up";
-
-  if (isModelResolutionError || isAuthRevokedError || isCreditsUsedUpError) {
+  if (hasGuidedErrorCopy(code)) {
     const copy = getGuidedErrorCopy(t, code, provider, reason);
 
     if (presentation === "status") {

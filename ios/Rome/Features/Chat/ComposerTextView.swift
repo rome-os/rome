@@ -8,24 +8,51 @@ struct ComposerTextView: UIViewRepresentable {
     @Binding var text: String
     @Binding var focused: Bool
     let placeholder: String
+    /// Set when `placeholder` names something: a long name is shortened to fit.
+    var named: NamedPlaceholder? = nil
     /// Gets the pasteboard's image items; nil leaves images alone.
     var onPasteImages: (([NSItemProvider]) -> Void)?
     /// The text without what an input method is still composing.
     var committedText: Binding<String>? = nil
+    /// Gets the UIKit view, for voice input to type into.
+    var handle: ComposerTextHandle? = nil
+    /// False while voice input listens: the field shows the words as they come.
+    var editable = true
+    /// Set while voice input listens: Return on a hardware keyboard calls it,
+    /// and the field holds keyboard focus so that Return reaches it.
+    var onReturn: (() -> Void)? = nil
+    /// Called on each change the guardian makes, typed, pasted or deleted. Text
+    /// the app sets (a restored draft, a send clearing the field) is not one.
+    var onEdit: () -> Void = {}
+
+    var expanded = false
+    var compactWidth: CGFloat = 240
+    var onMeasure: (Bool, CGFloat, Bool) -> Void = { _, _, _ in }
 
     static let maxLines = 6
+
+    static func heightLimit(lineHeight: CGFloat, inset: CGFloat, expanded: Bool) -> CGFloat {
+        // Leave room for the keyboard and conversation at large text sizes.
+        max(lineHeight + inset * 2, min(expanded ? 280 : 160,
+            lineHeight * CGFloat(expanded ? 12 : maxLines) + inset * 2))
+    }
 
     func makeUIView(context: Context) -> PastingTextView {
         let view = PastingTextView()
         view.delegate = context.coordinator
         view.backgroundColor = .clear
-        view.textContainerInset = UIEdgeInsets(top: 14, left: 0, bottom: 14, right: 0)
         view.textContainer.lineFragmentPadding = 0
+        let inset = Self.verticalInset(lineHeight: Self.font(for: context.environment.dynamicTypeSize).lineHeight)
+        view.textContainerInset = UIEdgeInsets(top: inset, left: 0, bottom: inset, right: 0)
         view.isScrollEnabled = false
         view.tintColor = UIColor(Palette.primary)
         view.textColor = UIColor(Palette.fg)
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The placeholder is fitted to the width: draw it again when that changes.
+        view.contentMode = .redraw
         view.accessibilityLabel = placeholder
+        view.accessibilityIdentifier = "message-field"
+        handle?.view = view
         return view
     }
 
@@ -33,12 +60,30 @@ struct ComposerTextView: UIViewRepresentable {
         context.coordinator.parent = self
         let font = Self.font(for: context.environment.dynamicTypeSize)
         if view.font != font { view.font = font }
-        if view.text != text { view.text = text }
-        view.placeholder = placeholder
+        let inset = Self.verticalInset(lineHeight: font.lineHeight)
+        if view.textContainerInset.top != inset {
+            view.textContainerInset = UIEdgeInsets(top: inset, left: 0, bottom: inset, right: 0)
+        }
+        // While voice input listens, the view shows the words before the binding has them.
+        if editable, view.text != text {
+            // Only the guardian's typing can put the field ahead of the binding.
+            if view.isFirstResponder { context.coordinator.showBinding(in: view) } else { view.text = text }
+        }
+        view.named = named
+        if view.placeholder != placeholder { view.placeholder = placeholder }
         view.accessibilityLabel = placeholder
         view.onPasteImages = onPasteImages
+        view.onReturn = onReturn
+        handle?.view = view
+        if view.isEditable != editable { view.isEditable = editable }
         if let committedText, view.markedTextRange == nil, committedText.wrappedValue != text {
-            DispatchQueue.main.async { committedText.wrappedValue = text }
+            // Read when it runs: the text here may be from before the latest keys.
+            let coordinator = context.coordinator
+            DispatchQueue.main.async {
+                if view.markedTextRange == nil, committedText.wrappedValue != coordinator.parent.text {
+                    committedText.wrappedValue = coordinator.parent.text
+                }
+            }
         }
         // Disabled (a blank chat while it is being created): focus goes now,
         // through UIKit. A disabled field loses focus silently otherwise and
@@ -46,6 +91,11 @@ struct ComposerTextView: UIViewRepresentable {
         guard context.environment.isEnabled else {
             if view.isFirstResponder { view.resignFirstResponder() }
             if focused { DispatchQueue.main.async { focused = false } }
+            return
+        }
+        // A read-only field shows no keyboard, so focus here costs nothing on screen.
+        if onReturn != nil {
+            if !view.isFirstResponder { DispatchQueue.main.async { view.becomeFirstResponder() } }
             return
         }
         // Focus follows the binding both ways; the change waits a turn so it
@@ -61,10 +111,20 @@ struct ComposerTextView: UIViewRepresentable {
         let width = proposal.width ?? 240
         let fitting = view.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
         let lineHeight = (view.font ?? Self.font(for: context.environment.dynamicTypeSize)).lineHeight
-        let cap = lineHeight * CGFloat(Self.maxLines) + view.textContainerInset.top + view.textContainerInset.bottom
+        let cap = Self.heightLimit(lineHeight: lineHeight, inset: view.textContainerInset.top, expanded: expanded)
+        let compact = width == compactWidth ? fitting
+            : view.sizeThatFits(CGSize(width: max(1, compactWidth), height: .greatestFiniteMagnitude))
+        let multiline = compact.height > lineHeight + view.textContainerInset.top * 2 + lineHeight / 2
+        let height = min(fitting.height, cap)
+        let foldedCap = Self.heightLimit(lineHeight: lineHeight, inset: view.textContainerInset.top, expanded: false)
+        DispatchQueue.main.async { onMeasure(multiline, height, fitting.height > foldedCap + 0.5) }
         let scrolls = fitting.height > cap
         if view.isScrollEnabled != scrolls {
-            DispatchQueue.main.async { view.isScrollEnabled = scrolls }
+            DispatchQueue.main.async {
+                view.isScrollEnabled = scrolls
+                if scrolls { view.scrollRangeToVisible(view.selectedRange) }
+                else { view.setContentOffset(.zero, animated: false) }
+            }
         }
         return CGSize(width: width, height: min(fitting.height, cap))
     }
@@ -76,16 +136,52 @@ struct ComposerTextView: UIViewRepresentable {
         .systemFont(ofSize: ScaledFont.scaled(16, for: size))
     }
 
+    /// The composer's height with one line of text, at the default text size.
+    static let minHeight: CGFloat = 50
+
+    /// Space above and below the text: one line fills `minHeight` exactly,
+    /// centered, and a larger text size keeps at least 14 pt.
+    static func verticalInset(lineHeight: CGFloat) -> CGFloat {
+        max(14, (minHeight - lineHeight) / 2)
+    }
+
+    /// The gap under a control of `height` beside the field, so it is
+    /// centered on the field's last line: on the only line it is centered in
+    /// the composer, at every text size.
+    static func controlBottomPadding(height: CGFloat, size: DynamicTypeSize) -> CGFloat {
+        let lineHeight = font(for: size).lineHeight
+        return verticalInset(lineHeight: lineHeight) + lineHeight / 2 - height / 2
+    }
+
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: ComposerTextView
 
+        private var showing = false
+
         init(parent: ComposerTextView) { self.parent = parent }
+
+        /// Puts the binding's text in the field a turn later. While the guardian
+        /// types, a redraw of the composer alone (its measure changed on a key)
+        /// hands the field the binding from before the latest keys; written then,
+        /// it dropped them and sent the caret to the end. Once the update is over
+        /// the binding reads as it is now: still different only when the app set
+        /// the text.
+        func showBinding(in view: PastingTextView) {
+            guard !showing else { return }
+            showing = true
+            DispatchQueue.main.async { [weak view] in
+                self.showing = false
+                guard let view, self.parent.editable, view.text != self.parent.text else { return }
+                view.text = self.parent.text
+                view.invalidateIntrinsicContentSize()
+            }
+        }
 
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
             parent.committedText?.wrappedValue = Self.committed(in: textView)
+            parent.onEdit()
             (textView as? PastingTextView)?.setNeedsDisplay()
-            // Past six lines it scrolls: keep the caret in view.
             if textView.isScrollEnabled { textView.scrollRangeToVisible(textView.selectedRange) }
         }
 
@@ -98,6 +194,12 @@ struct ComposerTextView: UIViewRepresentable {
             return text.replacingCharacters(in: NSRange(location: start, length: length), with: "")
         }
 
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            // Only the guardian's own: text the app sets moves the selection too.
+            guard textView.isFirstResponder else { return }
+            parent.handle?.caret = textView.selectedRange
+        }
+
         func textViewDidBeginEditing(_ textView: UITextView) {
             if !parent.focused { parent.focused = true }
         }
@@ -108,15 +210,51 @@ struct ComposerTextView: UIViewRepresentable {
     }
 }
 
+/// A placeholder that names something, such as a topic chat. A long name is
+/// shortened with "…" until the whole sentence fits on one line, so the words
+/// around it stay, as on the web.
+struct NamedPlaceholder {
+    let name: String
+    /// The sentence with `name` in it.
+    let text: (String) -> String
+}
+
 /// A text view that pastes images out of the field and shows a placeholder.
 final class PastingTextView: UITextView {
     var onPasteImages: (([NSItemProvider]) -> Void)?
+    /// Takes Return from a hardware keyboard instead of a new line; nil types it.
+    var onReturn: (() -> Void)?
     var placeholder = "" { didSet { setNeedsDisplay() } }
+    /// Set with `placeholder` when it names something; its name is shortened to fit.
+    var named: NamedPlaceholder?
     /// The general pasteboard; tests give it their own.
     var pasteboard: UIPasteboard = .general
+    private var laidOutSize: CGSize = .zero
 
     override var text: String! { didSet { setNeedsDisplay() } }
     override var font: UIFont? { didSet { setNeedsDisplay() } }
+    /// Spoken text is drawn as attributed text once a frame, so the
+    /// placeholder redraws only when the field turns empty or stops being so.
+    override var attributedText: NSAttributedString! {
+        didSet { if (oldValue?.length ?? 0 == 0) != (attributedText?.length ?? 0 == 0) { setNeedsDisplay() } }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.size != laidOutSize else { return }
+        laidOutSize = bounds.size
+        // Reveal the caret after a resize, even if scrolling stays enabled.
+        if isScrollEnabled { scrollRangeToVisible(selectedRange) }
+    }
+
+    override var keyCommands: [UIKeyCommand]? {
+        guard onReturn != nil else { return super.keyCommands }
+        let command = UIKeyCommand(input: "\r", modifierFlags: [], action: #selector(returnPressed))
+        command.wantsPriorityOverSystemBehavior = true
+        return (super.keyCommands ?? []) + [command]
+    }
+
+    @objc func returnPressed() { onReturn?() }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(paste(_:)), onPasteImages != nil, pasteboard.hasImages { return true }
@@ -134,14 +272,42 @@ final class PastingTextView: UITextView {
         super.paste(sender)
     }
 
+    /// The placeholder on one line: a named one shortens its name to fit, and
+    /// any other long one ends in "…" instead of running past the field.
     override func draw(_ rect: CGRect) {
         super.draw(rect)
         guard text.isEmpty, !placeholder.isEmpty else { return }
+        let font = self.font ?? .systemFont(ofSize: 16)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font ?? .systemFont(ofSize: 16),
+            .font: font,
             .foregroundColor: UIColor.placeholderText,
+            .paragraphStyle: paragraph,
         ]
-        let origin = CGPoint(x: textContainerInset.left + textContainer.lineFragmentPadding, y: textContainerInset.top)
-        (placeholder as NSString).draw(at: origin, withAttributes: attributes)
+        let left = textContainerInset.left + textContainer.lineFragmentPadding
+        let right = textContainerInset.right + textContainer.lineFragmentPadding
+        // The tail truncation keeps it to one line; the height only has to hold it.
+        let line = CGRect(x: left, y: textContainerInset.top, width: max(0, bounds.width - left - right), height: max(font.lineHeight, bounds.height - textContainerInset.top))
+        let shown = named.map { Self.fitted($0, width: line.width, attributes: attributes) } ?? placeholder
+        (shown as NSString).draw(with: line, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes, context: nil)
+    }
+
+    /// The named sentence with the longest start of the name, plus "…", that
+    /// fits `width`. Swift's characters are whole graphemes, so an emoji is
+    /// never split.
+    static func fitted(_ named: NamedPlaceholder, width: CGFloat, attributes: [NSAttributedString.Key: Any]) -> String {
+        let fits = { (text: String) in (text as NSString).size(withAttributes: attributes).width <= width }
+        let full = named.text(named.name)
+        if fits(full) { return full }
+        let characters = Array(named.name)
+        let cut = { (count: Int) in named.text(String(characters.prefix(count)).trimmingCharacters(in: .whitespaces) + "…") }
+        var low = 0
+        var high = characters.count
+        while low < high {
+            let mid = (low + high + 1) / 2
+            if fits(cut(mid)) { low = mid } else { high = mid - 1 }
+        }
+        return cut(low)
     }
 }

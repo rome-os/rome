@@ -48,7 +48,7 @@ rs.mock("@/components/chat/ChatComposer", () => ({
   ChatComposer: ({ onSend, disabled }: { onSend: (s: unknown) => void; disabled?: boolean }) => (
     <button
       type="button"
-      data-testid="side-chat-composer"
+      data-testid="fork-chat-composer"
       disabled={disabled}
       onClick={() =>
         onSend({
@@ -261,6 +261,8 @@ beforeEach(() => {
   rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     if (url === "/api/approvals") return Response.json(approvals);
+    if (url === "/api/approvals?status=pending")
+      return Response.json(approvals.filter((approval) => approval.status === "pending"));
     if (url.startsWith("/api/action-executions") || url.startsWith("/api/webhook-invocations"))
       return Response.json([]);
     return realFetch(input, init);
@@ -632,7 +634,7 @@ describe("SessionsPage live fork details", () => {
     renderDetail();
 
     await screen.findByTestId("session-messages");
-    expect(screen.queryByTestId("side-chat-composer")).toBeNull();
+    expect(screen.queryByTestId("fork-chat-composer")).toBeNull();
     expect(emitSessionsChanged).not.toHaveBeenCalled();
   });
 });
@@ -988,9 +990,14 @@ describe("Activity page tabs", () => {
     renderWithProbe("/sessions/all");
     await screen.findByRole("radio", { name: "Events" });
     await waitFor(() =>
-      expect(globalThis.fetch).toHaveBeenCalledWith("/api/approvals", expect.anything()),
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/approvals?status=pending",
+        expect.anything(),
+      ),
     );
     expect(screen.queryByRole("button", { name: /pending approval/ })).toBeNull();
+    // It counts from the pending ones alone, and loads no decided approval to do so.
+    expect(globalThis.fetch).not.toHaveBeenCalledWith("/api/approvals", expect.anything());
   });
 
   it("gives the full-mode Events tab one main with the safe-area frame", async () => {

@@ -1,94 +1,25 @@
 import CoreGraphics
 import Foundation
 import Testing
+import UIKit
 @testable import Rome
 
-private func task(_ id: String, _ state: TaskState, updated: Double, completed: Double? = nil, archived: Double? = nil, rank: Double? = nil) -> ConciergeTask {
-    ConciergeTask(
-        id: id, title: id, state: state, summary: nil, waitingOn: nil, dueAt: nil, rank: rank, chat: nil,
-        sourceMessageId: nil, createdAt: updated, updatedAt: updated, completedAt: completed, archivedAt: archived, notSynced: nil
-    )
-}
-
-@Suite struct TaskGroupingTests {
-    let now = Date(timeIntervalSince1970: 1_800_000_000)
-    var nowMs: Double { now.timeIntervalSince1970 * 1000 }
-
-    @Test func twoGroupsInOrderWithoutArchived() {
-        let groups = TasksStore.group([
-            task("done", .done, updated: nowMs, completed: nowMs),
-            task("needs", .needsUser, updated: nowMs - 60_000),
-            task("gone", .doing, updated: nowMs, archived: nowMs),
-            task("doing", .doing, updated: nowMs),
-            task("next", .next, updated: nowMs - 120_000),
-            task("watching", .watching, updated: nowMs - 30_000),
-        ], showAllDone: false, now: now)
-        #expect(groups.map(\.key) == [.inProgress, .done])
-        // Waiting on the guardian first, then the latest update.
-        #expect(groups[0].tasks.map(\.id) == ["needs", "doing", "watching", "next"])
-        #expect(groups[1].tasks.map(\.id) == ["done"])
-    }
-
-    @Test func onlyDoneLeavesTheProgressGroupOut() {
-        let groups = TasksStore.group([task("done", .done, updated: nowMs, completed: nowMs)], showAllDone: false, now: now)
-        #expect(groups.map(\.key) == [.done])
-    }
-
-    @Test func oldFinishedRowsHideBehindShowMore() {
-        let old = nowMs - 10 * 86_400_000
-        let groups = TasksStore.group([
-            task("recent", .done, updated: nowMs, completed: nowMs),
-            task("old", .done, updated: old, completed: old),
-            task("dropped", .dropped, updated: old, completed: old),
-        ], showAllDone: false, now: now)
-        #expect(groups.first?.tasks.map(\.id) == ["recent"])
-        #expect(groups.first?.hidden == 2)
-        let all = TasksStore.group([task("old", .done, updated: old, completed: old)], showAllDone: true, now: now)
-        #expect(all.first?.tasks.map(\.id) == ["old"])
-    }
-
-    @Test func severalWaitingOnesSortByLatestUpdate() {
-        let groups = TasksStore.group([
-            task("old", .needsUser, updated: 1),
-            task("doing", .doing, updated: 5),
-            task("new", .needsUser, updated: 3),
-        ], showAllDone: false, now: now)
-        #expect(groups.first?.tasks.map(\.id) == ["new", "old", "doing"])
-    }
-
-    @Test func theMutedLineSaysOneThing() {
-        let waiting = task("w", .needsUser, updated: nowMs - 2 * 3_600_000)
-        #expect(TasksStore.rowLine(waiting, status: .waiting, now: now) == "Waiting on you")
-        let failed = task("f", .doing, updated: nowMs)
-        #expect(TasksStore.rowLine(failed, status: .failed, now: now) == "Didn't finish")
-        let doing = task("d", .doing, updated: nowMs - 2 * 3_600_000)
-        #expect(TasksStore.rowLine(doing, status: .plain, now: now) == RelativeTime.ago(Date(timeIntervalSince1970: (nowMs - 2 * 3_600_000) / 1000), now: now))
-        // A finished row counts from when it finished.
-        let done = task("x", .done, updated: nowMs, completed: nowMs - 86_400_000)
-        #expect(TasksStore.rowLine(done, status: .plain, now: now) == RelativeTime.ago(Date(timeIntervalSince1970: (nowMs - 86_400_000) / 1000), now: now))
-    }
-
-    @Test func rowStatusIsWaitingFailedOrPlain() {
-        let failedChat = ChatSession(id: "c", name: "c", running: false, lastTurnFailed: true)
-        let runningChat = ChatSession(id: "c", name: "c", running: true, lastTurnFailed: true)
-        #expect(TasksStore.rowStatus(task("w", .needsUser, updated: 1), chat: nil) == .waiting)
-        #expect(TasksStore.rowStatus(task("f", .doing, updated: 1), chat: failedChat) == .failed)
-        #expect(TasksStore.rowStatus(task("r", .doing, updated: 1), chat: runningChat) == .plain)
-        #expect(TasksStore.rowStatus(task("n", .next, updated: 1), chat: nil) == .plain)
-        #expect(TasksStore.rowStatus(task("d", .done, updated: 1, completed: 1), chat: failedChat) == .plain)
-    }
-
-    @MainActor @Test func olderUpsertsAreIgnoredAndArchivedRowsLeave() {
-        let store = TasksStore(backend: StubBackend())
-        store.apply(task("x", .doing, updated: 10))
-        store.apply(task("x", .needsUser, updated: 5))
-        #expect(store.tasks.first?.state == .doing)
-        store.apply(task("x", .done, updated: 20, archived: 20))
-        #expect(store.tasks.isEmpty)
-    }
-}
-
 @Suite struct MarkdownTests {
+    // A chat card's Markdown opens and loads nothing.
+    @Test func textOnlyDropsLinksAndImages() {
+        let blocks = MarkdownParser.withoutImages(MarkdownParser.parse("""
+        Read [the CDC](https://cdc.gov).
+
+        ![a chart](https://example.com/a.png)
+
+        ![](https://example.com/b.png)
+        """))
+        #expect(blocks == [.paragraph("Read [the CDC](https://cdc.gov)."), .paragraph("a chart")])
+        let line = MarkdownParser.inline("Read [the CDC](https://cdc.gov).", linksAsText: true)
+        #expect(String(line.characters) == "Read the CDC.")
+        #expect(line.runs.allSatisfy { $0.link == nil })
+    }
+
     @Test func parsesBlocks() {
         let blocks = MarkdownParser.parse("""
         # Title
@@ -120,12 +51,237 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
         ])
     }
 
+    @Test func aNestedBulletSitsUnderItsItem() {
+        let blocks = MarkdownParser.parse("""
+        - a
+          - a1
+          - a2
+        - b
+        """)
+        #expect(blocks == [
+            .list(ordered: false, start: 1, items: [
+                ListItem(text: "a", children: [.list(ordered: false, start: 1, items: ["a1", "a2"])]),
+                "b",
+            ]),
+        ])
+    }
+
+    @Test func listsNestThreeLevelsAndStepBackOut() {
+        let blocks = MarkdownParser.parse("""
+        - a
+            - b
+                - c
+            - d
+        - e
+        """)
+        let c = ListItem(text: "b", children: [.list(ordered: false, start: 1, items: ["c"])])
+        #expect(blocks == [
+            .list(ordered: false, start: 1, items: [
+                ListItem(text: "a", children: [.list(ordered: false, start: 1, items: [c, "d"])]),
+                "e",
+            ]),
+        ])
+    }
+
+    @Test func orderedAndBulletListsNestInEachOther() {
+        let blocks = MarkdownParser.parse("""
+        1. Pack
+           - passport
+           - charger
+        2. Leave
+           3. taxi
+           4. train
+        """)
+        #expect(blocks == [
+            .list(ordered: true, start: 1, items: [
+                ListItem(text: "Pack", children: [.list(ordered: false, start: 1, items: ["passport", "charger"])]),
+                ListItem(text: "Leave", children: [.list(ordered: true, start: 3, items: ["taxi", "train"])]),
+            ]),
+        ])
+    }
+
+    @Test func aTabNestsAnItem() {
+        #expect(MarkdownParser.parse("- a\n\t- b") == [
+            .list(ordered: false, start: 1, items: [ListItem(text: "a", children: [.list(ordered: false, start: 1, items: ["b"])])]),
+        ])
+    }
+
+    @Test func theOtherMarkerUnderAnItemStartsASecondNestedList() {
+        let blocks = MarkdownParser.parse("""
+        - a
+          - b
+          1. c
+        """)
+        #expect(blocks == [
+            .list(ordered: false, start: 1, items: [
+                ListItem(text: "a", children: [
+                    .list(ordered: false, start: 1, items: ["b"]),
+                    .list(ordered: true, start: 1, items: ["c"]),
+                ]),
+            ]),
+        ])
+    }
+
+    @Test func aContinuationJoinsTheInnermostItem() {
+        let blocks = MarkdownParser.parse("""
+        - a
+          - b
+            more
+        - c
+        """)
+        #expect(blocks == [
+            .list(ordered: false, start: 1, items: [
+                ListItem(text: "a", children: [.list(ordered: false, start: 1, items: ["b more"])]),
+                "c",
+            ]),
+        ])
+    }
+
+    @Test func aListThatStartsIndentedStaysOneLevel() {
+        #expect(MarkdownParser.parse("  - a\n  - b") == [.list(ordered: false, start: 1, items: ["a", "b"])])
+    }
+
+    @Test func blankLinesBetweenItemsKeepTheListAndItsNesting() {
+        #expect(MarkdownParser.parse("- a\n\n  - b\n\n- c\n\nAfter") == [
+            .list(ordered: false, start: 1, items: [ListItem(text: "a", children: [.list(ordered: false, start: 1, items: ["b"])]), "c"]),
+            .paragraph("After"),
+        ])
+    }
+
+    @Test func aCommentLineShowsNothingAndSeparatesBlocks() {
+        let blocks = MarkdownParser.parse("""
+        Details.
+        <!-- rome:conclusion -->
+        Found 3 flights. Which one?
+        <!-- /rome:conclusion -->
+        """)
+        #expect(blocks == [.paragraph("Details."), .paragraph("Found 3 flights. Which one?")])
+    }
+
+    @Test func theConclusionMarkersShowNothingAndTheirLineKeepsTheRest() {
+        #expect(MarkdownParser.parse("<!-- rome:conclusion -->Done.<!-- /rome:conclusion -->") == [.paragraph("Done.")])
+        #expect(MarkdownParser.parse("<!--rome:conclusion-->Done.") == [.paragraph("Done.")])
+        #expect(MarkdownParser.parse("<!--  /rome:conclusion  -->") == [])
+    }
+
+    @Test func otherCommentsStayAsTheyAre() {
+        #expect(MarkdownParser.parse("Keep <!-- keep --> this.") == [.paragraph("Keep <!-- keep --> this.")])
+        #expect(MarkdownParser.parse("Use `<!-- keep -->` here.") == [.paragraph("Use `<!-- keep -->` here.")])
+        #expect(MarkdownParser.parse("<!-- keep -->") == [.paragraph("<!-- keep -->")])
+    }
+
+    @Test func aMarkerInsideACodeBlockStaysLiteral() {
+        #expect(MarkdownParser.parse("```\n<!-- rome:conclusion -->\n```") == [.code(language: nil, text: "<!-- rome:conclusion -->")])
+    }
+
     @Test func unterminatedCodeStillRenders() {
         #expect(MarkdownParser.parse("```\nabc") == [.code(language: nil, text: "abc")])
     }
 
     @Test func plainDropsMarks() {
         #expect(MarkdownParser.plain("**bold** and `code`") == "bold and code")
+    }
+
+    @Test func aTableReadsItsAlignmentsAndRows() {
+        let blocks = MarkdownParser.parse("""
+        Prices:
+
+        | Model | Price | Hours |
+        | :--- | ---: | :---: |
+        | **Sony** | ¥2,499 | 30 |
+        | [Bose](https://bose.com) | `¥2,299` |
+        | Max | ¥3,999 | 20 | extra |
+
+        After.
+        """)
+        #expect(blocks == [
+            .paragraph("Prices:"),
+            .table(header: ["Model", "Price", "Hours"], alignments: [.leading, .trailing, .center], rows: [
+                ["**Sony**", "¥2,499", "30"],
+                // A short row is padded, a long one cut, to the header's width.
+                ["[Bose](https://bose.com)", "`¥2,299`", ""],
+                ["Max", "¥3,999", "20"],
+            ]),
+            .paragraph("After."),
+        ])
+        // Cells keep their inline marks.
+        #expect(String(MarkdownParser.inline("**Sony**").characters) == "Sony")
+    }
+
+    @Test func aTableWithoutOuterPipesAndWithEscapedPipes() {
+        #expect(MarkdownParser.parse("a | b\n--- | ---\nx \\| y | z") == [
+            .table(header: ["a", "b"], alignments: [.leading, .leading], rows: [["x | y", "z"]]),
+        ])
+        #expect(MarkdownParser.tableCells(#"| a \| b | c |"#) == ["a | b", "c"])
+    }
+
+    @Test func pipesWithoutADelimiterRowStayText() {
+        // No delimiter row: a paragraph.
+        #expect(MarkdownParser.parse("| a | b |\n| c | d |") == [.paragraph("| a | b |\n| c | d |")])
+        // A delimiter row with another number of cells than the header.
+        #expect(MarkdownParser.parse("| a | b |\n| --- |") == [.paragraph("| a | b |\n| --- |")])
+        // A rule is still a rule.
+        #expect(MarkdownParser.parse("a\n\n---\n\nb") == [.paragraph("a"), .rule, .paragraph("b")])
+        #expect(MarkdownParser.delimiterRow("|:-:|-x-|") == nil)
+    }
+
+    @Test func aTableRowIsSpokenWithItsHeaders() {
+        #expect(MarkdownTable.spoken(["**Sony**", "¥2,499"], header: ["Model", "Price"]) == "Model: Sony, Price: ¥2,499")
+    }
+
+    /// The ranges with an intent, as plain strings.
+    private func spans(_ text: String, _ intent: InlinePresentationIntent) -> [String] {
+        let result = MarkdownParser.inline(text)
+        return result.runs.compactMap { run in
+            run.inlinePresentationIntent?.contains(intent) == true ? String(result[run.range].characters) : nil
+        }
+    }
+
+    @Test func boldClosesAfterCJKPunctuation() {
+        let text = "**今晚要注意保暖、防霜冻。**渭南市…"
+        #expect(String(MarkdownParser.inline(text).characters) == "今晚要注意保暖、防霜冻。渭南市…")
+        #expect(spans(text, .stronglyEmphasized) == ["今晚要注意保暖、防霜冻。"])
+    }
+
+    @Test func boldOpensBeforeCJKPunctuation() {
+        let text = "明天：**「降温」**提醒"
+        #expect(String(MarkdownParser.inline(text).characters) == "明天：「降温」提醒")
+        #expect(spans(text, .stronglyEmphasized) == ["「降温」"])
+    }
+
+    @Test func italicAndBoldItalicBesideCJK() {
+        #expect(spans("注意*保暖。*今晚", .emphasized) == ["保暖。"])
+        let both = MarkdownParser.inline("***防霜冻。***渭南")
+        #expect(String(both.characters) == "防霜冻。渭南")
+        #expect(both.runs.first?.inlinePresentationIntent?.isSuperset(of: [.stronglyEmphasized, .emphasized]) == true)
+    }
+
+    @Test func cjkBoldKeepsCodeAndLinks() {
+        let result = MarkdownParser.inline("**提醒。**看 `a*b` 和 [链接](https://example.com)")
+        #expect(String(result.characters) == "提醒。看 a*b 和 链接")
+        #expect(result.runs.contains { $0.link != nil })
+    }
+
+    /// Asterisks in a link's destination, an autolink or a bare URL are the
+    /// URL's, never emphasis.
+    @Test func cjkBoldLeavesURLsAlone() {
+        let link = MarkdownParser.inline("**中文。** [link](https://example.com/a*b*c)")
+        #expect(String(link.characters) == "中文。 link")
+        #expect(link.runs.contains { $0.link?.absoluteString == "https://example.com/a*b*c" })
+        #expect(spans("**中文。** [link](https://example.com/a*b*c)", .stronglyEmphasized) == ["中文。"])
+        let bare = MarkdownParser.inline("**看这里。**https://example.com/x*y*z 好")
+        #expect(String(bare.characters).contains("https://example.com/x*y*z"))
+        let auto = MarkdownParser.inline("**看这里。**<https://example.com/x*y*z>")
+        #expect(String(auto.characters).contains("x*y*z"))
+        // A Latin pair beside a CJK one is left to the parser as it is.
+        #expect(spans("**粗体。**和 *italic* 字", .emphasized) == ["italic"])
+    }
+
+    @Test func latinEmphasisUnchanged() {
+        #expect(spans("Some **bold** and *italic* text", .stronglyEmphasized) == ["bold"])
+        #expect(spans("Some **bold** and *italic* text", .emphasized) == ["italic"])
+        #expect(String(MarkdownParser.inline("2 * 3 * 4 and a**b").characters) == "2 * 3 * 4 and a**b")
+        #expect(String(MarkdownParser.inline("**bold**word").characters) == "boldword")
     }
 }
 
@@ -194,17 +350,17 @@ final class StubBackend: RomeBackend {
     func startTopicChat() async throws -> ConciergeChat { throw APIError.network }
     func renameChat(_ id: String, to name: String) async throws {}
     func archiveChat(_ id: String) async throws {}
+    func deleteChat(_ id: String) async throws {}
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage { .init(messages: []) }
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn { .init() }
     func asset(path: String) async throws -> Data { throw APIError.notFound }
     func apiFile(path: String, query: String?) async throws -> Data { throw APIError.notFound }
     var origin: URL? { nil }
-    func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {}
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws -> WidgetEventReply { WidgetEventReply() }
     func markRead(sessionId: String) async {}
     func sessions() async throws -> [ChatSession] { [] }
     func activeTurns(sessionId: String) async throws -> [ActiveTurn] { [] }
     func interrupt(turnId: String) async throws {}
-    func tasks() async throws -> [ConciergeTask] { [] }
     func approval(id: String) async throws -> ApprovalRecord { .init(id: id, status: "pending") }
     func resolveApproval(id: String, approve: Bool) async throws {}
     func toolCalls(traceMessageId: String) async throws -> [ToolCall] { [] }
@@ -392,6 +548,29 @@ final class StubBackend: RomeBackend {
     }
 }
 
+/// The chat on screen, which Chat's read marks, the server's watch and push
+/// banners all go by.
+@MainActor
+@Suite struct VisibleChatTests {
+    @Test func aCoveringSheetHidesTheChat() {
+        #expect(MainShell.visibleChat(section: .chat, path: [], covered: false) == conciergeChatID)
+        // An instance page's sheet over Chat: nothing reads as seen.
+        // Fails before the change, which marked Chat read under the sheet.
+        #expect(MainShell.visibleChat(section: .chat, path: [], covered: true) == nil)
+        #expect(MainShell.visibleChat(section: .topic("t1"), path: [], covered: false) == "t1")
+        #expect(MainShell.visibleChat(section: .chat, path: [.taskChat(chatId: "c-1", title: "T")], covered: false) == "c-1")
+        #expect(MainShell.visibleChat(section: .apps, path: [], covered: false) == nil)
+    }
+
+    /// Over everything, the Agent page shows no chat of its own; a task chat
+    /// pushed inside it is the one on screen until a sheet covers it.
+    @Test func aTaskChatInsideTheAgentPageIsOnScreen() {
+        #expect(MainShell.visibleChat(agentPath: [], covered: false) == nil)
+        #expect(MainShell.visibleChat(agentPath: [.taskChat(chatId: "c-1", title: "T")], covered: false) == "c-1")
+        #expect(MainShell.visibleChat(agentPath: [.taskChat(chatId: "c-1", title: "T")], covered: true) == nil)
+    }
+}
+
 @Suite struct ChatWatchTests {
     /// The watch follows the chat on screen: one chat at a time, none under a sheet.
     @Test func followsTheChatOnScreen() {
@@ -485,6 +664,281 @@ final class StubBackend: RomeBackend {
     }
 }
 
+/// The widget's copy, written by the app: SVGs drawn, a changed icon
+/// replaced and an unchanged one left alone, and nothing written by a
+/// workspace that has been left or an account that has ended.
+@MainActor
+@Suite struct WidgetShelfTests {
+    private final class Owner {}
+    private let svg = Data(##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#d97757"/></svg>"##.utf8)
+    private func png(_ color: UIColor) -> Data {
+        UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }.pngData()!
+    }
+    private func shelf() -> WidgetShelf {
+        WidgetShelf(store: AppShelfStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-shelf-\(UUID().uuidString)", directoryHint: .isDirectory), suite: "rome-shelf-\(UUID().uuidString)"))
+    }
+    private func app(_ id: String, version: String = "1") -> InstalledApp {
+        InstalledApp(id: id, iconUrl: "/api/apps/\(id)/icon", version: version)
+    }
+
+    /// Fails before the fix: an SVG icon was dropped and the widget drew a letter.
+    @Test func anSVGIconIsDrawnForTheWidget() async {
+        let backend = FakeBackend()
+        backend.apiFiles = ["/apps/a/icon": svg]
+        let shelf = shelf(), owner = Owner()
+        defer { shelf.clear() }
+        shelf.hand(to: owner, instanceId: "i")
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let written = try? Data(contentsOf: shelf.store!.iconURL("a"))
+        #expect(written.flatMap(UIImage.init(data:)) != nil)
+    }
+
+    @Test func onlyANewOrMissingIconIsFetched() async {
+        let backend = FakeBackend()
+        backend.apiFiles = ["/apps/a/icon": png(.red)]
+        let shelf = shelf(), owner = Owner()
+        let store = shelf.store!
+        defer { shelf.clear() }
+        shelf.hand(to: owner, instanceId: "i")
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let first = try? Data(contentsOf: store.iconURL("a"))
+        #expect(first != nil && backend.apiFileRequests.count == 1)
+        // The same app again: its icon is kept, not fetched.
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        #expect(backend.apiFileRequests.count == 1)
+        // A new version brings a new icon, written over the old one.
+        backend.apiFiles["/apps/a/icon"] = png(.blue)
+        shelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let second = try? Data(contentsOf: store.iconURL("a"))
+        #expect(backend.apiFileRequests.count == 2 && second != nil && second != first)
+        // Gone from the group, the same list fills it in again.
+        try? FileManager.default.removeItem(at: store.iconURL("a"))
+        shelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        #expect(store.hasIconFile("a"))
+    }
+
+    /// An icon fetch cut short by the next pass, or one that failed, is
+    /// tried again: its new key is kept only once its file is written.
+    /// Fails before the fix: the key was saved with the list.
+    @Test(arguments: ["cancelled", "failed"])
+    func anIconNotWrittenIsFetchedAgain(_ how: String) async {
+        let backend = FakeBackend()
+        backend.apiFiles = ["/apps/a/icon": png(.red)]
+        let shelf = shelf(), owner = Owner()
+        let store = shelf.store!
+        defer { shelf.clear() }
+        shelf.hand(to: owner, instanceId: "i")
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let first = try? Data(contentsOf: store.iconURL("a"))
+        // Version 2 does not land: its fetch is cut short, or fails.
+        if how == "cancelled" {
+            backend.apiFiles["/apps/a/icon"] = png(.blue)
+            backend.duringApiFile = { shelf.hand(to: owner, instanceId: "i") }
+        } else {
+            backend.apiFiles["/apps/a/icon"] = nil
+        }
+        shelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        #expect((try? Data(contentsOf: store.iconURL("a"))) == first)
+        // The next pass fetches it again and writes it.
+        backend.duringApiFile = nil
+        backend.apiFiles["/apps/a/icon"] = png(.blue)
+        shelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let second = try? Data(contentsOf: store.iconURL("a"))
+        #expect(second != nil && second != first)
+    }
+
+    /// A list from the workspace left behind, after a switch or a sign-out,
+    /// writes nothing.
+    @Test func aLateListIsDropped() {
+        let backend = FakeBackend()
+        let shelf = shelf(), old = Owner(), new = Owner()
+        defer { shelf.clear() }
+        shelf.hand(to: old, instanceId: "i1")
+        shelf.hand(to: new, instanceId: "i2")
+        shelf.shelve([app("a")], instanceId: "i2", backend: backend, account: .unchecked, by: new)
+        shelf.shelve([app("old")], instanceId: "i1", backend: backend, account: .unchecked, by: old)
+        #expect(shelf.store!.read()?.instanceId == "i2")
+        #expect(shelf.store!.read()?.apps.map(\.id) == ["a"])
+
+        shelf.clear()
+        shelf.shelve([app("a")], instanceId: "i2", backend: backend, account: .unchecked, by: new)
+        #expect(shelf.store!.read() == nil)
+
+        // An account that has ended writes nothing either.
+        let accounts = AccountGeneration()
+        let stamp = accounts.stamp()
+        accounts.end()
+        shelf.hand(to: new, instanceId: "i2")
+        shelf.shelve([app("a")], instanceId: "i2", backend: backend, account: stamp, by: new)
+        #expect(shelf.store!.read() == nil)
+    }
+
+    /// An icon that arrives after a switch or a sign-out is not written.
+    @Test(arguments: ["switch", "signOut"])
+    func aLateIconIsDropped(_ leave: String) async {
+        let backend = FakeBackend()
+        backend.apiFiles = ["/apps/a/icon": png(.red)]
+        let shelf = shelf(), owner = Owner()
+        defer { shelf.clear() }
+        shelf.hand(to: owner, instanceId: "i")
+        backend.duringApiFile = {
+            if leave == "switch" { shelf.hand(to: Owner(), instanceId: "other") } else { shelf.clear() }
+        }
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        #expect(!shelf.store!.hasIconFile("a"))
+    }
+
+    /// Sign-out forgets the apps opened last with the rest.
+    @Test func clearingForgetsTheAppsOpenedLast() {
+        let shelf = shelf(), owner = Owner()
+        shelf.hand(to: owner, instanceId: "i")
+        shelf.recordOpen(appId: "a", instanceId: "i")
+        #expect(shelf.store!.recent(instanceId: "i") == ["a"])
+        shelf.clear()
+        #expect(shelf.store!.recent(instanceId: "i").isEmpty)
+    }
+}
+
+@Suite struct WidgetSlotsTests {
+    private static func app(_ id: String, opens: Bool = true) -> ShelfApp {
+        ShelfApp(id: id, name: id.capitalized, opens: opens, hasIcon: false)
+    }
+
+    private static let list = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map { app($0) }
+
+    /// Picked apps first in their order, then the ones opened last, then the rest.
+    @Test func pickedThenRecentThenTheRest() {
+        #expect(WidgetSlots.choose(picked: ["c"], recent: ["e"], apps: Self.list).map(\.id) == ["c", "e", "a", "b"])
+        #expect(WidgetSlots.choose(picked: ["c", "a"], recent: ["e", "b"], apps: Self.list).map(\.id) == ["c", "a", "e", "b"])
+        // More picks than spots: the first four win.
+        #expect(WidgetSlots.choose(picked: ["j", "i", "h", "g", "f"], recent: ["a"], apps: Self.list).map(\.id) == ["j", "i", "h", "g"])
+    }
+
+    /// Each app once, four at most, and only apps the list still has.
+    @Test func dedupedCappedAndCurrent() {
+        let chosen = WidgetSlots.choose(picked: ["b", "gone", "b"], recent: ["b", "a", "gone"], apps: Self.list)
+        #expect(chosen.map(\.id) == ["b", "a", "c", "d"])
+        #expect(WidgetSlots.small == 4)
+        #expect(Set(chosen.map(\.id)).count == chosen.count)
+        #expect(WidgetSlots.choose(picked: [], recent: [], apps: Array(Self.list.prefix(3))).map(\.id) == ["a", "b", "c"])
+        #expect(WidgetSlots.choose(picked: ["a"], recent: [], apps: []).isEmpty)
+    }
+
+    @Test func shortcutsKeepPickedOrderAlongsideApps() {
+        let chosen = WidgetSlots.choose(
+            picked: [WidgetShortcut.chat.rawValue, "c", WidgetShortcut.apps.rawValue],
+            recent: ["e", "a"], apps: Self.list
+        )
+        #expect(chosen == [.shortcut(.chat), .app(Self.app("c")), .shortcut(.apps), .app(Self.app("e"))])
+    }
+
+    @Test func shortcutsAndAppsAreDedupedAndCapped() {
+        let picked = [WidgetShortcut.apps.rawValue, "b", WidgetShortcut.apps.rawValue, "gone", WidgetShortcut.chat.rawValue, "b", "c"]
+        let chosen = WidgetSlots.choose(picked: picked, recent: ["b", "a"], apps: Self.list)
+        #expect(chosen == [.shortcut(.apps), .app(Self.app("b")), .shortcut(.chat), .app(Self.app("c"))])
+        #expect(WidgetSlots.choose(picked: picked, recent: ["a"], apps: Self.list, limit: 2) == [.shortcut(.apps), .app(Self.app("b"))])
+        #expect(WidgetSlots.choose(picked: picked, recent: [], apps: Self.list, limit: 0).isEmpty)
+    }
+
+    @Test func shortcutsNeedNoShelfAppsAndNeverFillAutomatically() {
+        #expect(WidgetSlots.choose(picked: ["gone", WidgetShortcut.apps.rawValue, WidgetShortcut.chat.rawValue], recent: [], apps: []) == [.shortcut(.apps), .shortcut(.chat)])
+        #expect(WidgetSlots.choose(picked: [], recent: WidgetShortcut.allCases.map(\.rawValue), apps: []).isEmpty)
+        #expect(WidgetSlots.choose(picked: [], recent: WidgetShortcut.allCases.map(\.rawValue), apps: Self.list).map(\.id) == ["a", "b", "c", "d"])
+        #expect(WidgetSlots.choose(picked: [], recent: [], apps: []).isEmpty)
+    }
+
+    @Test func scopedAndShortcutIdsStayDistinct() {
+        let apps = [Self.app("chat"), Self.app("apps"), Self.app("@rome/chat")]
+        let chosen = WidgetSlots.choose(picked: [WidgetShortcut.chat.rawValue, "chat", "@rome/chat"], recent: ["apps"], apps: apps)
+        #expect(chosen == [.shortcut(.chat), .app(apps[0]), .app(apps[2]), .app(apps[1])])
+    }
+
+    /// Opening an app puts it first among the recent ones, once.
+    @Test func recentOpensComeFirst() throws {
+        let suite = "rome-tests-\(UUID().uuidString)"
+        let root = FileManager.default.temporaryDirectory.appending(path: suite, directoryHint: .isDirectory)
+        let store = AppShelfStore(root: root, suite: suite)
+        defer {
+            UserDefaults().removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        store.recordOpen(instanceId: "i1", appId: "a")
+        store.recordOpen(instanceId: "i1", appId: "b")
+        store.recordOpen(instanceId: "i1", appId: "a")
+        store.recordOpen(instanceId: "i2", appId: "z")
+        #expect(store.recent(instanceId: "i1") == ["a", "b"])
+        #expect(store.recent(instanceId: "i2") == ["z"])
+
+        let shelf = Shelf(instanceId: "i1", apps: [Self.app("a")])
+        #expect(store.write(shelf))
+        #expect(!store.write(shelf))
+        #expect(store.read() == shelf)
+        store.clear()
+        #expect(store.read() == nil)
+    }
+}
+
+@Suite struct WidgetLinkTests {
+    /// An app's link names its instance and app, and reads back the same.
+    @Test func anAppLinkRoundTrips() throws {
+        let link = WidgetLink.app(instanceId: "inst-1", appId: "habits")
+        let url = link.url(scheme: "rome")
+        #expect(url.absoluteString == "rome://app/inst-1/habits")
+        #expect(WidgetLink(url: url) == link)
+        #expect(WidgetLink(url: link.url(scheme: "rome-dev")) == link)
+        // An id with a slash or a space survives the trip.
+        let odd = WidgetLink.app(instanceId: "i 2", appId: "a/b")
+        #expect(WidgetLink(url: odd.url(scheme: "rome")) == odd)
+    }
+
+    @Test func theChatPageRoundTrips() throws {
+        #expect(WidgetLink.chat.instanceId == nil)
+        for scheme in ["rome", "rome-dev"] {
+            let url = WidgetLink.chat.url(scheme: scheme)
+            #expect(url.absoluteString == "\(scheme)://chat")
+            #expect(url.host == "chat")
+            #expect(url.path.isEmpty)
+            #expect(WidgetLink(url: url) == .chat)
+        }
+        #expect(WidgetLink(url: try #require(URL(string: "rome://chat/x"))) == nil)
+    }
+
+    @Test func theAppsPageAndNewApp() throws {
+        #expect(WidgetLink(url: try #require(URL(string: "rome://apps"))) == .apps)
+        #expect(WidgetLink(url: try #require(URL(string: "rome-dev://new-app"))) == .newApp)
+        #expect(WidgetLink.newApp.url(scheme: "rome").absoluteString == "rome://new-app")
+    }
+
+    /// Anything else is not a widget link.
+    @Test func otherURLsAreRefused() throws {
+        for text in ["https://romeos.cc/app/a/b", "rome://app/only-one", "rome://app//b", "rome://app/a/b/c", "rome://apps/x", "rome://chat/", "rome://chat/x", "other://app/a/b"] {
+            #expect(WidgetLink(url: try #require(URL(string: text))) == nil, "\(text)")
+        }
+    }
+
+    /// A link to another running instance switches to it first, as a push
+    /// does; a stopped one is named as such, and the widget then opens Apps.
+    @Test func anotherInstanceIsSwitchedTo() {
+        let other = CloudInstance(id: "i2", name: "Team", slug: "team", origin: "https://team.romeos.cc", status: "running")
+        let stopped = CloudInstance(id: "i3", name: "Old", slug: "old", origin: "https://old.romeos.cc", status: "stopped")
+        #expect(PushRoute.decide(instanceId: "i2", currentInstanceID: "i1", instances: [other]) == .switchTo(other))
+        #expect(PushRoute.decide(instanceId: "i1", currentInstanceID: "i1", instances: [other]) == .openConcierge)
+        #expect(PushRoute.decide(instanceId: "i3", currentInstanceID: "i1", instances: [stopped]) == .showStopped(stopped))
+    }
+}
+
 @Suite struct ChatLinkTests {
     private static let origin = URL(string: "https://me.romeos.cc")!
     private static let apps = [
@@ -516,6 +970,10 @@ final class StubBackend: RomeBackend {
         #expect(try link("/apps") == .page(URL(string: "https://me.romeos.cc/apps")!))
         #expect(try link("/apps/a/b") == .page(URL(string: "https://me.romeos.cc/apps/a/b")!))
         #expect(try link("https://me.romeos.cc/chat/123") == .page(URL(string: "https://me.romeos.cc/chat/123")!))
+        // A stored file (a pdf, a video) opens in the same web view, which has the session.
+        let stored = "/api/assets/0123456789abcdef0123456789abcdef.pdf"
+        #expect(try link(stored) == .page(URL(string: "https://me.romeos.cc" + stored)!))
+        #expect(try link("https://me.romeos.cc" + stored) == .page(URL(string: "https://me.romeos.cc" + stored)!))
         // No origin (demo data): a page has nowhere to resolve.
         #expect(try link("/settings", origin: nil) == .system)
         #expect(try link("/apps/habit-tracker", origin: nil) == .app(id: "habit-tracker", page: nil))
@@ -597,5 +1055,11 @@ final class StubBackend: RomeBackend {
         // The top-left pixel, drawn into a 1×1 context.
         context.draw(cgImage, in: CGRect(x: 0, y: -CGFloat(cgImage.height - 1), width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
         #expect(pixel[0] > 200 && pixel[1] < 60 && pixel[3] > 200, "top-left pixel \(pixel)")
+    }
+}
+
+extension ListItem: ExpressibleByStringLiteral {
+    public init(stringLiteral text: String) {
+        self.init(text: text)
     }
 }

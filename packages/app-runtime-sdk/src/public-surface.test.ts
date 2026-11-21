@@ -25,6 +25,7 @@ describe("public surface", () => {
     const detail = {
       code: "access_denied" as const,
       message: "not granted",
+      reason: "provider_scope_required",
       retryable: false,
     };
     const err = new sdk.AppConnectionError(detail);

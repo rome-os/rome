@@ -7,12 +7,26 @@ enum Palette {
     static let bg = dynamic(0xF4F3EF, 0x0B0907)
     static let sheet = dynamic(0xF4F3EF, 0x120F0D)
     static let elevated = dynamic(0xFFFFFF, 0x191513)
+    /// The status mark's badge: lighter than the page in dark mode, so the emoji reads.
+    static let markFill = dynamic(0xFFFFFF, 0x4B433C)
     static let bubble = dynamic(0xEBE4DA, 0x1C1916)
     static let fill = dynamic(0xEFE9E1, 0x272320)
+    /// Behind a task link's name: the text colour, faint, so it reads on any
+    /// bubble, as the web's chip does (foreground at 7%). `fill` is nearly
+    /// the Agent's bubble in light, and the chip vanished on it.
+    static let taskChip = dynamic(rgba: (0x1A130F, 0.09), (0xFFFFFF, 0.12))
     static let fillStrong = dynamic(0xE8E1D7, 0x2A2523)
     static let pressed = dynamic(0xF1ECE5, 0x221E1C)
     static let drawer = dynamic(0xECE7DF, 0x050404)
     static let drawerField = dynamic(0xE3DCD1, 0x1E1A17)
+    /// A second-level page (Settings, an app, Apple Health): a sheet over
+    /// Chat or Apps. Gray in light, so white cards stand out; a step above
+    /// the black first level in dark, so its top edge reads.
+    static let secondaryPage = dynamic(0xEBE8E2, 0x1C1916)
+    /// A card on a second-level page: a step above `secondaryPage`.
+    static let secondaryCard = dynamic(0xFFFFFF, 0x2A2623)
+    /// An icon tile or a track inside a `secondaryCard`.
+    static let secondaryFill = dynamic(0xEFE9E1, 0x3A3430)
 
     static let fg = dynamic(0x1A130F, 0xF4F3EF)
     static let sub = dynamic(0x7A6857, 0xB0A294)
@@ -25,6 +39,8 @@ enum Palette {
     static let drawerPage = dynamic(0xE4DED4, 0x151210)
     static let cardShadow = dynamic(rgba: (0x3C2814, 0.16), (0x000000, 0.5))
     static let softShadow = dynamic(rgba: (0x1A130F, 0.06), (0x000000, 0.3))
+    /// Under the chat header's avatar, name tag and status capsule.
+    static let avatarShadow = dynamic(rgba: (0x3C2814, 0.18), (0x000000, 0.35))
 
     static let primary = dynamic(0xD86F4C, 0xD86F4C)
     static let primaryIcon = dynamic(0xD86F4C, 0xE07C5A)
@@ -41,17 +57,31 @@ enum Palette {
     static let runningText = dynamic(0x0069CA, 0x58B0FF)
     static let runningSoft = dynamic(rgba: (0x0089ED, 0.10), (0x39A3FF, 0.16))
     static let success = dynamic(0x5B7A4A, 0x4AC06C)
+    /// A chart's plain bars, beside the highlighted ones.
+    static let chartBar = dynamic(0xE3DBCF, 0x45403B)
+    static let successSoft = dynamic(rgba: (0x5B7A4A, 0.12), (0x4AC06C, 0.14))
+    /// Apple's Health pink (system pink): only the heart on the Apple Health page wears it.
+    static let healthPink = dynamic(0xFF2D55, 0xFF375F)
 
     /// Letter tiles of apps with no icon, one per app by its name
-    /// (`AppTile.colorIndex`). White letters read on each, light and dark.
-    static let appTiles: [Color] = [
-        dynamic(0xD86F4C, 0xC4603F), // ember
-        dynamic(0x2E8F84, 0x2A8075), // teal
-        dynamic(0x3B74C9, 0x3768B5), // blue
-        dynamic(0x8460C8, 0x7655B4), // violet
-        dynamic(0x4E8B47, 0x467D40), // green
-        dynamic(0xC9506F, 0xB44864), // rose
-    ]
+    /// (`AppTile.colorIndex`), shared with the widget.
+    static let appTiles: [Color] = AppTile.colors
+
+    /// The stacking game: its three block tiers from light to deep, the
+    /// base's stone, the ground under it, and the dusk its page shifts to
+    /// as the tower rises.
+    static let stackAction = dynamic(0xE2C79C, 0xB39466)
+    static let stackSkill = dynamic(0xB9784F, 0x95583A)
+    static let stackApp = primary
+    static let stackStone = dynamic(0xCBC2B4, 0x3B342E)
+    static let stackGround = dynamic(0xE7E1D7, 0x16120F)
+    static let stackDusk = dynamic(0xF0DCCB, 0x1C1114)
+    /// The giant "Rome" on the ground: a quiet neutral that reads clearly
+    /// against the ground.
+    static let stackWordmark = dynamic(0xD9D1C4, 0x28221E)
+    /// The Colosseum on the game's horizon: a few steps off the sky, at
+    /// any height of its dusk.
+    static let stackHorizon = dynamic(rgba: (0x1A130F, 0.06), (0xF4F3EF, 0.055))
 
     /// `from` blended toward `to` by `amount` (0…1), in each appearance.
     static func blend(_ from: Color, _ to: Color, _ amount: CGFloat) -> Color {
@@ -88,11 +118,106 @@ enum Palette {
 enum Metrics {
     static let pagePadding: CGFloat = 16
     static let bubbleRadius: CGFloat = 20
-    static let bubbleTight: CGFloat = 6
+    static let bubbleTight: CGFloat = 4
     static let cardRadius: CGFloat = 18
     static let groupRadius: CGFloat = 16
-    static let bigCardRadius: CGFloat = 22
+    static let bigCardRadius: CGFloat = 18
     static let bubbleMaxWidthRatio: CGFloat = 0.78
+    /// The room an agent's bubble leaves free on the right, so a long one
+    /// stops short of the column's edge. Every card stops there too.
+    static let bubbleInset: CGFloat = 64
+    /// The widest a conversation runs, its page padding included. On a phone
+    /// the screen is narrower; on an iPad the column stays this wide and
+    /// centered, so a line never runs across the whole screen.
+    static let readableWidth: CGFloat = 720
+    /// The widest a full-width button grows, as on the largest phone; an
+    /// iPad's page keeps its buttons this wide and centered.
+    static let buttonWidth: CGFloat = 400
+
+    /// The width a conversation's column takes in a container this wide.
+    static func column(_ container: CGFloat) -> CGFloat {
+        min(container, readableWidth)
+    }
+}
+
+extension View {
+    /// The one width rule of a transcript: left aligned, never wider than an
+    /// agent's bubble can run, so the right edges of cards and long bubbles
+    /// line up. A light card or a bubble hugs its content inside this
+    /// width; an interactive card also asks `fillsBubbleWidth()` and takes all
+    /// of it. Bubbles and cards both go through `Metrics.bubbleInset`. A
+    /// tinted message's tint goes on before the width, so it hugs the bubble.
+    func bubbleWidth(full: Bool = false) -> some View {
+        modifier(BubbleWidth(full: full))
+    }
+
+    /// Put before a card's background: the card takes the whole width
+    /// `bubbleWidth()` leaves it.
+    func fillsBubbleWidth() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Keeps a conversation's rows, composer and banners in one centered
+    /// column of `Metrics.readableWidth` at most (DESIGN.md 4).
+    func readableColumn() -> some View {
+        frame(maxWidth: Metrics.readableWidth).frame(maxWidth: .infinity)
+    }
+}
+
+private struct BubbleWidth: ViewModifier {
+    /// The chat's whole width, as an agent card takes it, rather than a bubble's.
+    let full: Bool
+    @Environment(\.rowTinted) private var tinted
+
+    func body(content: Content) -> some View {
+        content
+            .tinted(tinted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, full ? 0 : Metrics.bubbleInset)
+    }
+}
+
+/// One scale for every card a chat draws, kept at the size of the chat's
+/// own text: a card's title is the bubble's size and only bolder, its body
+/// a step smaller, so a card never speaks louder than the conversation
+/// (DESIGN.md 3 and 4).
+enum CardScale {
+    /// The card's title, semibold: the bubble's body size.
+    static let title: CGFloat = 16
+    /// Body text, option labels, field values.
+    static let body: CGFloat = 15
+    /// The small grey label above a title ("Needs approval", "Task"), regular.
+    static let label: CGFloat = 12
+    /// Secondary lines and field labels.
+    static let caption: CGFloat = 13
+    /// Inside a card's edge.
+    static let paddingH: CGFloat = 14
+    static let paddingV: CGFloat = 12
+    /// A box inside a card: a card's fields, a question's options.
+    static let fieldCorner: CGFloat = 12
+    /// Above and below each row of fields.
+    static let fieldRowPadding: CGFloat = 8
+    /// The square behind a card's glyph, and the glyph.
+    static let iconBox: CGFloat = 30
+    static let iconGlyph: CGFloat = 15
+    static let iconCorner: CGFloat = 9
+    /// A service's mark on a connect card.
+    static let connectMark: CGFloat = 32
+    /// A card's main buttons (Approve, Reject).
+    static let buttonHeight: CGFloat = 40
+    static let buttonFont: CGFloat = 16
+    /// A question's option row.
+    static let optionMinHeight: CGFloat = 40
+    /// A small action beside a row (Connect, Open).
+    static let actionHeight: CGFloat = 32
+    static let actionFont: CGFloat = 14
+}
+
+extension View {
+    /// A card's padding on the shared scale.
+    func cardPadding() -> some View {
+        padding(.horizontal, CardScale.paddingH).padding(.vertical, CardScale.paddingV)
+    }
 }
 
 extension EnvironmentValues {
@@ -113,6 +238,13 @@ private struct PageBackground: ViewModifier {
 extension View {
     /// The page background of a page that can sit beside the drawer.
     func pageBackground() -> some View { modifier(PageBackground()) }
+
+    /// The background of a second-level page, which covers Chat or Apps from
+    /// the bottom (DESIGN.md 12). Its header's fade takes the same color.
+    func secondaryPageBackground() -> some View {
+        background(Palette.secondaryPage.ignoresSafeArea())
+            .environment(\.pageBackground, Palette.secondaryPage)
+    }
 
     /// The design's "soft" elevation: a hairline ring plus a faint two-layer drop shadow.
     func softElevation(radius: CGFloat) -> some View {

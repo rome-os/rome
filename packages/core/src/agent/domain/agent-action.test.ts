@@ -148,4 +148,132 @@ describe("actionToolOutput", () => {
     expect(output).not.toHaveProperty("placeWidget");
     expect(output.message).toContain("could not be shown");
   });
+
+  describe("show_widget", () => {
+    const shown = (waits?: boolean): ActionResult => ({
+      status: "show_widget",
+      widget: {
+        componentId: "today",
+        props: { date: "2026-11-11" },
+        text: "Showing today's meals as a card.",
+        ...(waits === undefined ? {} : { waits }),
+      },
+    });
+
+    it("shows the owner app's card and lets the turn go on", () => {
+      const output = actionToolOutput(shown(), true, "meals") as Record<string, unknown>;
+
+      expect(output).toMatchObject({
+        showWidget: true,
+        appId: "meals",
+        componentId: "today",
+        props: { date: "2026-11-11" },
+        text: "Showing today's meals as a card.",
+      });
+      expect(output).not.toHaveProperty("pendingInteraction");
+      expect(output.message).toContain("Showing today's meals as a card.");
+      expect(output.message).not.toContain("do not call any further tools");
+    });
+
+    it("gives a widget that waits the same output as a pending interaction", () => {
+      const legacy: ActionResult = {
+        status: "pending_interaction",
+        interaction: {
+          appId: "meals",
+          promptText: "Showing today's meals as a card.",
+          render: { kind: "inline", componentId: "today", props: { date: "2026-11-11" } },
+        },
+      };
+
+      expect(actionToolOutput(shown(true), true, "meals")).toEqual(actionToolOutput(legacy, true));
+      expect(actionToolOutput(shown(true), false, "meals")).toEqual(
+        actionToolOutput(legacy, false),
+      );
+    });
+
+    it("tells the model no card showed where none can", () => {
+      const output = actionToolOutput(shown(), false, "meals") as Record<string, unknown>;
+
+      expect(output).not.toHaveProperty("showWidget");
+      expect(output.message).toContain("could not be shown");
+      expect(output.message).toContain("Showing today's meals as a card.");
+    });
+
+    describe("described as data", () => {
+      const ui = {
+        components: [
+          {
+            id: "root",
+            component: "Stat" as const,
+            label: "Calories",
+            value: { path: "/today/calories" },
+          },
+        ],
+      };
+      const described = (u: unknown = ui): ActionResult => ({
+        status: "show_widget",
+        widget: {
+          ui: u as typeof ui,
+          bind: { "/today": "days/2026-11-11" },
+          text: "Showing today's meals.",
+        },
+      });
+
+      it("hands the drain the owner app's card and its bindings", () => {
+        const output = actionToolOutput(described(), true, "meals") as Record<string, unknown>;
+
+        expect(output).toMatchObject({
+          showWidget: true,
+          appId: "meals",
+          ui,
+          bind: { "/today": "days/2026-11-11" },
+          text: "Showing today's meals.",
+        });
+        expect(output).not.toHaveProperty("componentId");
+      });
+
+      it("parks the agent on a described card that waits", () => {
+        const waiting: ActionResult = {
+          status: "show_widget",
+          widget: { ui, text: "Asking which meal to log.", waits: true },
+        };
+        const output = actionToolOutput(waiting, true, "meals") as Record<string, unknown>;
+        expect(output).toMatchObject({ showWidget: true, waits: true, appId: "meals", ui });
+        expect(output.message).toContain("do not call any further tools");
+      });
+
+      it("tells the model to wait for the reply where a card that waits cannot show", () => {
+        const waiting: ActionResult = {
+          status: "show_widget",
+          widget: { ui, text: "Asking which meal to log.", waits: true },
+        };
+        const output = actionToolOutput(waiting, false, "meals") as Record<string, unknown>;
+        expect(output).not.toHaveProperty("showWidget");
+        expect(output.message).toContain("wait for their reply");
+      });
+
+      it("tells the model why a card that fails the check showed nowhere", () => {
+        const bad = { components: [{ id: "top", component: "Text", text: "a" }] };
+        const output = actionToolOutput(described(bad), true, "meals") as Record<string, unknown>;
+
+        expect(output).not.toHaveProperty("showWidget");
+        expect(output.message).toContain('"root"');
+        expect(output.message).toContain("Showing today's meals.");
+      });
+
+      it("tells the model no card showed where none can", () => {
+        const output = actionToolOutput(described(), false, "meals") as Record<string, unknown>;
+
+        expect(output).not.toHaveProperty("showWidget");
+        expect(output.message).toContain("could not be shown");
+      });
+    });
+
+    it("shows no card for an action no app owns", () => {
+      const output = actionToolOutput(shown(), true, undefined) as Record<string, unknown>;
+
+      expect(output).not.toHaveProperty("showWidget");
+      expect(output).not.toHaveProperty("appId");
+    });
+  });
 });

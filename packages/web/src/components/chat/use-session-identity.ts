@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentMention } from "@/lib/chat-types";
+import { chatKind, isProjectChat } from "@/lib/chat-session";
 import { getSession, listChatAgents } from "@/lib/chat-api";
 import { artifactOwnerId } from "@/lib/artifact-name";
 import { prettyAgentName } from "@/lib/agent-name";
@@ -17,16 +18,32 @@ export interface SessionIdentity {
   model: string | null;
   /** The model picked for this chat, or null when it follows its pin. */
   largeModelSelection: string | null;
-  /** A side chat promoted to a chat: it still runs on its branch. */
-  isSideChat: boolean;
+  /** A fork chat promoted to a chat: it still runs on its branch. */
+  isForkChat: boolean;
   /** Provider-reported effort of the session's last successful turn, or null when unknown. */
   reasoningEffort: string | null;
   /** The session's locked agent, resolved to its owning app's label + icon. */
   pinnedAgentMention: AgentMention | null;
   /** ISO timestamp when the session was archived, or null when not archived. */
   archivedAt: string | null;
-  /** ISO timestamp when the session was pinned, or null when not pinned. */
+  /** ISO timestamp when its owner pinned the chat, or null when not pinned. */
   pinnedAt: string | null;
+  /**
+   * Whether a turn of this chat can be forked: in a common chat or a fork
+   * chat, and not in a main, topic or task chat.
+   */
+  forkable: boolean;
+  /** A task chat the Concierge started. */
+  isTaskChat: boolean;
+  /** For a task chat: the Concierge chat it reports to, or null. */
+  taskOf: { conciergeChatId: string; conciergeChatName: string; main: boolean } | null;
+  /** The chat's project, as the chat list names it, or null while loading. */
+  projectPath: string | null;
+  /**
+   * Whether the session is a Concierge chat, read from the session itself, so
+   * an archived topic chat, which no active list holds, counts too.
+   */
+  isConciergeSession: boolean;
 }
 
 /**
@@ -46,12 +63,17 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   const sessionGeneration = useRef(0);
   const [model, setModel] = useState<string | null>(null);
   const [largeModelSelection, setLargeModelSelection] = useState<string | null>(null);
-  const [isSideChat, setIsSideChat] = useState(false);
+  const [isForkChat, setIsForkChat] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [pinnedAgentMention, setPinnedAgentMention] = useState<AgentMention | null>(null);
   const [archivedAt, setArchivedAt] = useState<string | null>(null);
   const [pinnedAt, setPinnedAt] = useState<string | null>(null);
+  const [forkable, setForkable] = useState(false);
+  const [isTaskChat, setIsTaskChat] = useState(false);
+  const [taskOf, setTaskOf] = useState<SessionIdentity["taskOf"]>(null);
+  const [projectPath, setProjectPath] = useState<string | null>(null);
+  const [isConciergeSession, setIsConciergeSession] = useState(false);
   // The session id whose first fetch has settled (success or failure). Keyed by
   // id so switching sessions is "loading" again with no reset-effect flash.
   const [settledSessionId, setSettledSessionId] = useState<string | null>(null);
@@ -62,16 +84,19 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
       setPinnedAgentMention(null);
       setModel(null);
       setLargeModelSelection(null);
-      setIsSideChat(false);
+      setIsForkChat(false);
       setReasoningEffort(null);
       setSessionName(null);
       setArchivedAt(null);
       setPinnedAt(null);
+      setForkable(false);
+      setProjectPath(null);
+      setIsConciergeSession(false);
       return;
     }
     setModel(null);
     setLargeModelSelection(null);
-    setIsSideChat(false);
+    setIsForkChat(false);
     setReasoningEffort(null);
     // Drop the previous session's identity so it never shows under the new id.
     setSessionName(null);
@@ -88,10 +113,15 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setSessionName(session?.name ?? null);
         setModel(session?.model ?? null);
         setLargeModelSelection(session?.largeModelSelection ?? null);
-        setIsSideChat(!!session?.parentSessionId);
+        setIsForkChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
         setPinnedAt(session?.pinnedAt ?? null);
+        setForkable(!!session && isProjectChat(chatKind(session)));
+        setIsTaskChat(!!session && chatKind(session) === "task");
+        setTaskOf(session?.taskOf ?? null);
+        setProjectPath(session?.projectPath ?? null);
+        setIsConciergeSession(!!session && chatKind(session) === "topic");
         const agentName = session?.agentName ?? null;
         if (!agentName) {
           setPinnedAgentMention(null);
@@ -114,12 +144,16 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
           setSettledSessionId(sessionId);
           setModel(null);
           setLargeModelSelection(null);
-          setIsSideChat(false);
+          setIsForkChat(false);
           setReasoningEffort(null);
           setSessionName(null);
           setPinnedAgentMention(null);
           setArchivedAt(null);
           setPinnedAt(null);
+          setForkable(false);
+          setIsTaskChat(false);
+          setTaskOf(null);
+          setIsConciergeSession(false);
         }
       }
     })();
@@ -129,7 +163,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     };
   }, [sessionId]);
 
-  // Keep the archived flag (and name) in sync when EITHER archive entry point
+  // Keep the archived and pinned flags (and name) in sync when EITHER archive entry point
   // mutates sessions — the navbar handlers here or the sidebar's row actions,
   // which both emit the sessions-changed event. Without this, archiving the
   // currently open chat from the sidebar would leave this view editable until
@@ -145,10 +179,15 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setSessionName(session?.name ?? null);
         setModel(session?.model ?? null);
         setLargeModelSelection(session?.largeModelSelection ?? null);
-        setIsSideChat(!!session?.parentSessionId);
+        setIsForkChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
         setPinnedAt(session?.pinnedAt ?? null);
+        setForkable(!!session && isProjectChat(chatKind(session)));
+        setIsTaskChat(!!session && chatKind(session) === "task");
+        setTaskOf(session?.taskOf ?? null);
+        setProjectPath(session?.projectPath ?? null);
+        setIsConciergeSession(!!session && chatKind(session) === "topic");
       } catch {
         // Best effort; the next mount / event reconciles.
       }
@@ -160,10 +199,15 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     sessionName,
     model,
     largeModelSelection,
-    isSideChat,
+    isForkChat,
     reasoningEffort,
     pinnedAgentMention: presentationMode ? null : pinnedAgentMention,
     archivedAt,
     pinnedAt,
+    forkable,
+    isTaskChat,
+    taskOf,
+    projectPath,
+    isConciergeSession,
   };
 }

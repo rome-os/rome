@@ -1,5 +1,13 @@
 import { describe, expect, it } from "@rstest/core";
-import { askQuestionToolOutput, parseAskQuestionInput, type Question } from "./ask-question.js";
+import { checkWidgetUi } from "@rome-os/app-runtime";
+import {
+  answersFromQuestionCard,
+  askQuestionToolOutput,
+  questionCardFromAnswers,
+  parseAskQuestionInput,
+  type Question,
+  questionCardUi,
+} from "./ask-question.js";
 
 const single = (options: unknown) => ({
   questions: [{ id: "q1", question: "Pick one", type: "single", options }],
@@ -188,5 +196,90 @@ describe("askQuestionToolOutput", () => {
     expect(output).toContain("Ask the guardian the following as a plain message");
     expect(output).toContain("Which day?\n- Mon\n- Tue\n- (or describe your own)");
     expect(output).toContain("Anything else? (optional)");
+  });
+});
+
+describe("the question card described as data", () => {
+  const questions: Question[] = [
+    {
+      id: "tone",
+      question: "Which tone?",
+      type: "single",
+      options: ["Warm", "Plain"],
+      freeText: true,
+      defaults: ["Warm"],
+    },
+    { id: "parts", question: "Which parts?", type: "multi", options: ["Intro", "A, B"] },
+    { id: "note", question: "Anything else?", type: "text", optional: true },
+  ];
+
+  it("is a card every client can draw, whose events are its own", () => {
+    const ui = questionCardUi(questions);
+    // Send and Dismiss are the card's own events, which core handles as its owner.
+    expect(checkWidgetUi(ui)).toEqual([]);
+    expect(ui.data).toEqual({
+      answers: [
+        { values: ["Warm"], text: "" },
+        { values: [], text: "" },
+        { values: [], text: "" },
+      ],
+    });
+  });
+
+  it("stays out of the tool result the agent reads", () => {
+    const output = askQuestionToolOutput(questions, true) as {
+      render: { componentId: string; props: unknown };
+    };
+    expect(output.render.componentId).toBe("question-card");
+    expect(output.render.props).toEqual({ questions });
+    expect(output.render).not.toHaveProperty("ui");
+  });
+
+  it("turns what the card sends into the answers the card has always sent", () => {
+    const sent = {
+      answers: [
+        { values: ["Warm"], text: "Friendly" },
+        { values: ["Intro", "A, B", "Not an option"], text: "" },
+        { values: [], text: "  " },
+      ],
+    };
+    expect(answersFromQuestionCard(questions, sent)).toEqual({
+      answers: [
+        { questionId: "tone", value: "Friendly" },
+        { questionId: "parts", value: "Intro, A, B", values: ["Intro", "A, B"] },
+      ],
+    });
+  });
+
+  it("leaves answers already in the card's own shape alone", () => {
+    expect(
+      answersFromQuestionCard(questions, { answers: [{ questionId: "tone", value: "Warm" }] }),
+    ).toBeNull();
+    expect(answersFromQuestionCard(questions, { dismissed: true })).toBeNull();
+  });
+
+  it("lets a pick and typed text on a single choice clear each other, so the last edit wins", () => {
+    const ui = questionCardUi(questions);
+    const pick = ui.components.find((c) => c.id === "q0-pick");
+    const own = ui.components.find((c) => c.id === "q0-own");
+    expect(pick).toMatchObject({ clears: { path: "/answers/0/text" } });
+    expect(own).toMatchObject({ clears: { path: "/answers/0/values" } });
+    expect(ui.components.find((c) => c.id === "q1-pick")).not.toHaveProperty("clears");
+  });
+
+  it("turns answers a reader sent in the card's own shape back into what the card holds", () => {
+    expect(
+      questionCardFromAnswers(questions, {
+        answers: [
+          { questionId: "tone", value: "Friendly" },
+          { questionId: "parts", value: "Intro, A, B", values: ["Intro", "A, B"] },
+        ],
+      }),
+    ).toEqual([
+      { values: [], text: "Friendly" },
+      { values: ["Intro", "A, B"], text: "" },
+      { values: [], text: "" },
+    ]);
+    expect(questionCardFromAnswers(questions, { answers: [{ values: [] }] })).toBeNull();
   });
 });

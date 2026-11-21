@@ -85,12 +85,63 @@ describe("Share chat", () => {
     const publicApp = shareRoutes(deps);
     const readRes = await publicApp.request(`/share/${created.id}`);
     expect(readRes.status).toBe(200);
+    expect(readRes.headers.get("x-robots-tag")).toBe("noindex, nofollow");
     const payload = (await readRes.json()) as PublicSharePayload;
     expect(payload.title).toBe("My chat");
     expect(payload.snapshot.mainSessionId).toBe(sessionId);
     const turnIds = new Set(payload.snapshot.messages.map((m) => m.turnId));
     expect(turnIds).toEqual(new Set(["turn-1"]));
     expect(payload.snapshot.messages).toHaveLength(2);
+  });
+
+  it("freezes no trace into a common chat's share either", async () => {
+    const sessionId = await seedTwoTurnSession();
+    await deps.webchatRepo.addMessage(
+      "m1t",
+      sessionId,
+      "trace",
+      JSON.stringify([
+        { type: "tool_use", id: "read", tool: "Read", input: { file_path: "/PRIVATE-PATH" } },
+      ]),
+      "turn-1",
+    );
+    const manage = createWebchatRuntime(deps).routes;
+    const { id } = (await (
+      await manage.request(`/chat/sessions/${sessionId}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          turnIds: ["turn-1"],
+          layout: [{ id: "w9", type: "trace", content: "PRIVATE-PANE", order: 9 }],
+        }),
+      })
+    ).json()) as { id: string };
+    const payload = (await (
+      await shareRoutes(deps).request(`/share/${id}`)
+    ).json()) as PublicSharePayload;
+    expect(payload.snapshot.messages.map((m) => m.id)).toEqual(["m1u", "m1a"]);
+    expect(payload.snapshot.traces).toEqual({});
+    expect(payload.layout).toEqual([]);
+    expect(JSON.stringify(payload)).not.toMatch(/PRIVATE-/);
+  });
+
+  it("titles a share by the client's title, else a common chat by its name", async () => {
+    const sessionId = await seedTwoTurnSession();
+    const manage = createWebchatRuntime(deps).routes;
+    const share = async (body: Record<string, unknown>) =>
+      (
+        (await (
+          await manage.request(`/chat/sessions/${sessionId}/share`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ turnIds: ["turn-2"], ...body }),
+          })
+        ).json()) as { title: string }
+      ).title;
+    expect(await share({})).toBe("My chat");
+    expect(await share({ title: "  Picked by me " })).toBe("Picked by me");
+    await deps.webchatRepo.updateSessionName(sessionId, "");
+    expect(await share({})).toBe("second question");
   });
 
   it("strips browser (desktop) widgets from the frozen layout", async () => {
@@ -432,5 +483,88 @@ describe("Share chat", () => {
 
     const missing = await shareRoutes(deps).request("/share/does-not-exist");
     expect(missing.status).toBe(404);
+    expect(missing.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+  });
+
+  it("shares a Concierge chat's turns without their traces, with its agent's name, and has no one-message route", async () => {
+    await deps.webchatRepo.createSession(
+      "topic",
+      "Trip to Lisbon",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await deps.webchatRepo.addMessage(
+      "topic-u",
+      "topic",
+      "user",
+      JSON.stringify([{ type: "text", content: "Plan my trip" }]),
+      "topic-turn",
+    );
+    await deps.webchatRepo.addMessage(
+      "topic-a",
+      "topic",
+      "assistant",
+      JSON.stringify([{ type: "text", content: "Day one: the Alfama." }]),
+      "topic-turn",
+    );
+    // The Concierge's private work: a tool call and its result.
+    await deps.webchatRepo.addMessage(
+      "topic-trace",
+      "topic",
+      "trace",
+      JSON.stringify([
+        {
+          type: "tool_use",
+          id: "read",
+          tool: "Read",
+          input: { file_path: "/private/PRIVATE-TRACE-PATH" },
+        },
+        { type: "tool_result", toolUseId: "read", content: "PRIVATE-TRACE-RESULT" },
+      ]),
+      "topic-turn",
+    );
+    const manage = createWebchatRuntime(deps).routes;
+
+    const created = await manage.request("/chat/sessions/topic/share", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        turnIds: ["topic-turn"],
+        agentName: "  Milo ",
+        layout: [
+          { id: "w1", type: "app", targetId: "studio", order: 1 },
+          { id: "w2", type: "trace", content: "PRIVATE-LAYOUT-TRACE", order: 2 },
+        ],
+      }),
+    });
+    expect(created.status).toBe(201);
+    const { id, title } = (await created.json()) as { id: string; title: string };
+    // Named by its first message, never by the chat's name.
+    expect(title).toBe("Plan my trip");
+    expect((await deps.webchatRepo.listSharedChatsBySession("topic"))[0]?.title).toBe(
+      "Plan my trip",
+    );
+    const payload = (await (
+      await shareRoutes(deps).request(`/share/${id}`)
+    ).json()) as PublicSharePayload;
+    // A share carries messages only: the trace stays behind.
+    expect(payload.snapshot.messages.map((m) => m.id)).toEqual(["topic-u", "topic-a"]);
+    expect(payload.snapshot.traces).toEqual({});
+    expect(payload.snapshot.messages.some((m) => m.traceSummary)).toBe(false);
+    expect(payload.layout).toEqual([{ id: "w1", type: "app", targetId: "studio", order: 1 }]);
+    expect(JSON.stringify(payload)).not.toMatch(/PRIVATE-/);
+    // The name the chat showed for its agent, for the shared page's speaker.
+    expect(payload.snapshot.agentName).toBe("Milo");
+
+    const oneMessage = await manage.request("/chat/sessions/topic/messages/topic-a/share", {
+      method: "POST",
+    });
+    expect(oneMessage.status).toBe(404);
   });
 });

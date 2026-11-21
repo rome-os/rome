@@ -9,11 +9,13 @@ import type {
 } from "@rome-os/app-runtime";
 import { eq } from "drizzle-orm";
 import { chatsWiring } from "../chats-wiring.js";
+import { SenderLabels } from "../chats/sender-labels.js";
+import type { Person } from "../people/model/person.js";
 import { ChatEvents } from "../chats/storage/events.js";
 import { messageToRome } from "../chats/storage/message.js";
 import { chatKey, placeIn } from "../chats/storage/place.js";
 import { inboundRecording } from "../connections/inbound-recording.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { chatMessages, romeSessions } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { messagesSaid } from "./messages-said.js";
@@ -22,10 +24,11 @@ import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 // Recording what reaches Rome in Chats' tables, then Agents hearing it. What
 // these pin: a message is on record in its chat before the hook hears it, the
-// hook hears it through the session of the account that heard it, a
+// hook hears it through the session of the account that heard it, a message
+// two of Rome's accounts heard is recorded once and heard once for each, a
 // redelivery is neither recorded nor heard twice, even after a restart, a
-// message is held out of catch-up until every hook that heard it decided its
-// wake, a session catches up on what its account said there before it, a place's messages are heard one at a time whichever account
+// message is held out of catch-up until every hook and account that heard it
+// decided its wake, a session catches up on what its account said there before it, a place's messages are heard one at a time whichever account
 // heard them, and nothing is recorded until a hook subscribes.
 
 const BOT: Account = { platform: "telegram", id: "rome-bot" };
@@ -97,12 +100,15 @@ describe("messagesSaid", () => {
     overrides: {
       sessions?: Pick<WebChatRepository, "ensureChannelChat">;
       wakes?: Pick<TurnLinks, "wakeUndecided" | "wakeDecided">;
+      labels?: Pick<SenderLabels, "sender">;
+      /** More channels to record, such as an account's new one. */
+      channels?: readonly Channel[];
     } = {},
   ) {
     events = new ChatEvents();
     const recording = inboundRecording(
       { chats: wiring.chats, messages: wiring.messages, events, adapters: wiring.adapters },
-      [telegram.channel, second.channel],
+      [telegram.channel, second.channel, ...(overrides.channels ?? [])],
     );
     return messagesSaid({
       chats: wiring.chats,
@@ -110,16 +116,23 @@ describe("messagesSaid", () => {
       recording,
       events,
       wakes: overrides.wakes ?? wiring.links,
+      ...(overrides.labels ? { labels: overrides.labels } : {}),
     });
   }
 
   beforeEach(() => {
     testDb = createTestDb();
-    const accounts: Record<string, Account> = { telegram: BOT, "telegram-2": SECOND };
+    // `telegram-again` is the first account's channel once it is connected
+    // again; only the case that reconnects records it.
+    const accounts: Record<string, Account> = {
+      telegram: BOT,
+      "telegram-2": SECOND,
+      "telegram-again": BOT,
+    };
     wiring = chatsWiring(testDb.db, {
       accountOf: (channel) => accounts[channel] ?? null,
       platformOfChannel: () => "telegram",
-      channelsOn: () => Object.keys(accounts),
+      channelsOn: () => ["telegram", "telegram-2"],
     });
     telegram = fakeChannel("telegram");
     second = fakeChannel("telegram-2");
@@ -194,7 +207,7 @@ describe("messagesSaid", () => {
     expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["Hello"]);
   });
 
-  it("raises a line two of Rome's accounts heard for the first to hear it, recorded once", async () => {
+  it("raises a line two of Rome's accounts heard once for each, recorded once", async () => {
     const heard: SaidInboundEvent[] = [];
     said.subscribe(async (event) => {
       heard.push(event);
@@ -206,10 +219,88 @@ describe("messagesSaid", () => {
     await second.deliver(message({ ...supergroup, account: SECOND, channel: "telegram-2" }));
     await settled();
 
-    // Which of Rome's accounts heard a message is not kept yet, so the
-    // second account hears nothing.
+    // Each account decides its own wake, through its own session; the
+    // second account's redelivery raises nothing.
     expect(lines()).toHaveLength(1);
+    expect(heard.map((event) => event.message.channel)).toEqual(["telegram", "telegram-2"]);
+    expect(new Set(heard.map((event) => event.recorded.messageId)).size).toBe(1);
+    expect(new Set(heard.map((event) => event.recorded.chatRecordId)).size).toBe(2);
+  });
+
+  it("holds a line two of Rome's accounts heard until both have decided its wake", async () => {
+    const heard: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event);
+    });
+    const supergroup = { chatId: "-1001234567890" as ChatId };
+    const later = { ...supergroup, timestamp: new Date(Date.now() + 60_000) };
+    await telegram.deliver(message(later));
+    await second.deliver(message({ ...later, account: SECOND, channel: "telegram-2" }));
+    await settled();
+    const [first, other] = heard;
+    if (!first || !other) throw new Error("not heard by both");
+    const session = first.recorded.chatRecordId;
+
+    await said.decided(first.recorded);
+    expect(wiring.links.unseen(session)).toHaveLength(0);
+    await said.decided(other.recorded);
+    expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["Hello"]);
+  });
+
+  it("raises a shared line for the second account with who said it as that account knows them", async () => {
+    said.subscribe(async () => undefined);
+    const senders: string[] = [];
+    events.subscribe((event) => {
+      if (event.type === "MessageSaid") senders.push(event.message.saidBy.account.id);
+    });
+    const supergroup = { chatId: "-1001234567890" as ChatId };
+    await telegram.deliver(message({ ...supergroup, senderId: "alice-to-first" }));
+    await second.deliver(
+      message({
+        ...supergroup,
+        senderId: "alice-to-second",
+        account: SECOND,
+        channel: "telegram-2",
+      }),
+    );
+    await settled();
+    expect(senders).toEqual(["alice-to-first", "alice-to-second"]);
+  });
+
+  it("raises nothing when an account connected again hears a line it heard already", async () => {
+    const again = fakeChannel("telegram-again");
+    said = build({ channels: [again.channel] });
+    const heard: SaidInboundEvent[] = [];
+    said.subscribe(async (event) => {
+      heard.push(event);
+    });
+    const supergroup = { chatId: "-1001234567890" as ChatId };
+    await telegram.deliver(message(supergroup));
+    await again.deliver(message({ ...supergroup, channel: "telegram-again" }));
+    await settled();
+    await wiring.adapters.of(again.channel).settled();
     expect(heard.map((event) => event.message.channel)).toEqual(["telegram"]);
+  });
+
+  it("raises nothing for a second account that hears a line only after a restart", async () => {
+    const leave = said.subscribe(async () => undefined);
+    const supergroup = { chatId: "-1001234567890" as ChatId };
+    await telegram.deliver(message(supergroup));
+    await settled();
+    leave();
+
+    // A new process does not know which accounts heard the line, so it
+    // cannot tell the second account's first hearing from a redelivery.
+    const restarted = build();
+    const heardAgain: SaidInboundEvent[] = [];
+    restarted.subscribe(async (event) => {
+      heardAgain.push(event);
+    });
+    await second.deliver(message({ ...supergroup, account: SECOND, channel: "telegram-2" }));
+    await settled();
+
+    expect(heardAgain).toHaveLength(0);
+    expect(lines()).toHaveLength(1);
   });
 
   it("decides the wake of a message whose session could not be opened", async () => {
@@ -482,7 +573,7 @@ describe("messagesSaid", () => {
     expect(wiring.links.unseen(session)).toEqual([]);
   });
 
-  it("raises a shared line with its quote, once", async () => {
+  it("raises a shared line with its quote, for each account that heard it", async () => {
     said.subscribe(async () => undefined);
     const quotes: (number | undefined)[] = [];
     events.subscribe((event) => {
@@ -499,7 +590,7 @@ describe("messagesSaid", () => {
 
     const quoted = lines().find((line) => line.key.endsWith("tg-0"))?.id;
     expect(quoted).toBeDefined();
-    expect(quotes).toEqual([undefined, quoted]);
+    expect(quotes).toEqual([undefined, quoted, quoted]);
   });
 
   it("hands nothing to a hook that left while its session opened", async () => {
@@ -548,5 +639,126 @@ describe("messagesSaid", () => {
     expect(wiring.links.unseen(session)).toHaveLength(0);
     await said.decided(heardOther.recorded);
     expect(wiring.links.unseen(session).map((line) => line.text)).toEqual(["Hello"]);
+  });
+
+  describe("who said it", () => {
+    const at = new Date("2026-11-16T00:00:00Z");
+    const ALICE: Person = {
+      id: "p-alice",
+      displayName: "Alice Liddell",
+      bondLevel: "inner-circle",
+      profilePath: null,
+      createdAt: at,
+      links: [
+        { platform: "telegram", id: "alice-tg" },
+        { platform: "telegram", id: "alice-tg-2" },
+        { platform: "telegram", id: "alice-bot", delegate: true },
+      ],
+    };
+    /** People, answering Alice for her accounts and nobody for any other,
+     *  and counting each question. */
+    function people() {
+      const asked: string[] = [];
+      const labels = new SenderLabels({
+        byAccount: async (account) => {
+          asked.push(account.id);
+          return ALICE.links.some((link) => link.id === account.id) ? ALICE : null;
+        },
+      });
+      return { labels, asked };
+    }
+    async function hear(
+      labels: Pick<SenderLabels, "sender"> | undefined,
+      ...said: Partial<ChannelMessage>[]
+    ): Promise<SaidInboundEvent[]> {
+      const port = build(labels ? { labels } : {});
+      const heard: SaidInboundEvent[] = [];
+      port.subscribe(async (event) => {
+        heard.push(event);
+      });
+      for (const [i, overrides] of (said.length > 0 ? said : [{}]).entries()) {
+        await telegram.deliver(message({ messageId: `tg-${i}`, ...overrides }));
+      }
+      await settled();
+      return heard;
+    }
+
+    it("names the person and bond level behind a linked account, apart from the shown name", async () => {
+      const [event] = await hear(people().labels, { senderDisplayName: "Ally" });
+
+      expect(event?.message.senderDisplayName).toBe("Ally");
+      expect(event?.sender).toEqual({
+        person: { id: "p-alice", name: "Alice Liddell", bondLevel: "inner-circle" },
+        delegate: false,
+        label: "Alice Liddell, inner circle",
+      });
+    });
+
+    it("names nobody for an account linked to no one, whatever name it shows", async () => {
+      const [event] = await hear(people().labels, {
+        senderId: "mallory-tg",
+        senderDisplayName: "Alice Liddell",
+      });
+
+      expect(event?.sender).toEqual({ person: null, delegate: false, label: "not linked" });
+    });
+
+    it("names the same person for both of one person's accounts", async () => {
+      const heard = await hear(
+        people().labels,
+        { senderId: "alice-tg" },
+        { senderId: "alice-tg-2", senderDisplayName: "A." },
+      );
+
+      expect(heard.map((event) => event.sender?.person?.id)).toEqual(["p-alice", "p-alice"]);
+    });
+
+    it("says a message from a delegate link comes from the person's agent", async () => {
+      const [event] = await hear(people().labels, { senderId: "alice-bot" });
+
+      expect(event?.sender).toEqual({
+        person: { id: "p-alice", name: "Alice Liddell", bondLevel: "inner-circle" },
+        delegate: true,
+        label: "agent acting for Alice Liddell, inner circle",
+      });
+    });
+
+    it("asks People once for a message every hook hears", async () => {
+      const { labels, asked } = people();
+      const port = build({ labels });
+      const heard: SaidInboundEvent[] = [];
+      port.subscribe(async (event) => {
+        heard.push(event);
+      });
+      port.subscribe(async (event) => {
+        heard.push(event);
+      });
+      await telegram.deliver(message());
+      await settled();
+
+      expect(heard.map((event) => event.sender?.label)).toEqual([
+        "Alice Liddell, inner circle",
+        "Alice Liddell, inner circle",
+      ]);
+      expect(asked).toEqual(["alice-tg"]);
+    });
+
+    it("hands the message over without a sender on a host that cannot say who said it", async () => {
+      const [event] = await hear(undefined);
+
+      expect(event?.message.text).toBe("Hello");
+      expect(event && "sender" in event).toBe(false);
+    });
+
+    it("hands the message over without a sender when People cannot be asked", async () => {
+      const [event] = await hear({
+        sender: async () => {
+          throw new Error("database is locked");
+        },
+      });
+
+      expect(event?.message.text).toBe("Hello");
+      expect(event && "sender" in event).toBe(false);
+    });
   });
 });
