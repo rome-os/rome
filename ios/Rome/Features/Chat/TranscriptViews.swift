@@ -399,6 +399,10 @@ struct AgentBubble: View {
         )
     }
 
+    private var selecting: Bool { selection?.isSelecting(row: rowID, text: text) == true }
+    /// How far a selection handle's knob reaches past the text.
+    private static let handleRoom: CGFloat = 24
+
     private var folds: Bool { Self.folds(height: fullHeight, size: dynamicTypeSize) }
     /// Held to the folded height until it is measured, so a long reply is
     /// folded from its first frame. Unfolded first, it shrank by hundreds of
@@ -413,11 +417,12 @@ struct AgentBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            MarkdownText(source: text, selectable: selection?.isSelecting(row: rowID, text: text) == true)
+            MarkdownText(source: text, selectable: selecting)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
                 .frame(maxHeight: capped ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
-                .clipped()
+                // Unfolded, the clip leaves room for the selection's handles.
+                .clipShape(Rectangle().inset(by: selecting && !capped ? -Self.handleRoom : 0))
                 .overlay(alignment: .bottom) {
                     // Folded, the chevron sits on the fade over the last
                     // lines, so the bubble does not grow for it.

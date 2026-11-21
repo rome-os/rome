@@ -770,9 +770,9 @@ struct MarkdownText: View {
         let first = segments.firstIndex { if case .block = $0 { false } else { true } }
         ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
             switch segment {
-            case .text(let text, let quotes):
-                SelectableTextView(text: text, quotes: quotes, selectsAll: index == first)
-                    .padding(.top, SelectableText.topSpace(text))
+            case .text(let run):
+                SelectableTextView(text: run.text, quotes: run.quotes, markers: run.markers, selectsAll: index == first)
+                    .padding(.top, SelectableText.topSpace(run.text))
             case .code(let text):
                 ScrollView(.horizontal, showsIndicators: false) {
                     SelectableTextView(text: text, wraps: false, selectsAll: index == first)

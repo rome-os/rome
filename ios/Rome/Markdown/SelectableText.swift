@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreText
 import UIKit
 
 // A message's text in select mode (`TextSelection`): the same blocks as
@@ -9,14 +10,33 @@ import UIKit
 /// One piece of a message in select mode, top to bottom.
 enum SelectableSegment {
     /// A run of text blocks (paragraphs, headings, lists, quotes) in one text
-    /// view, so a selection can cross them. `quotes` are the quote blocks'
-    /// ranges, which draw their bar beside them.
-    case text(NSAttributedString, quotes: [NSRange])
+    /// view, so a selection can cross them.
+    case text(SelectableRun)
     /// A fenced code block: its own text view, unwrapped, which scrolls sideways.
     case code(NSAttributedString)
     /// A block that is not text (a table, an image, a picture set, a rule),
     /// drawn as outside select mode. `position` is its place in the message.
     case block(position: Int, MarkdownBlock)
+}
+
+/// A run of text blocks as one string, and what is drawn beside the text.
+struct SelectableRun {
+    var text: NSAttributedString
+    /// The quote blocks' ranges, which draw their bar beside them.
+    var quotes: [NSRange] = []
+    /// The list items' markers, drawn in the indent before each item's
+    /// first line. Kept out of the text, so an item breaks its lines as
+    /// `Text` does and Copy takes the item's words alone.
+    var markers: [ListMarker] = []
+}
+
+/// A list item's number or bullet.
+struct ListMarker: Equatable {
+    /// Where its item's text starts.
+    let location: Int
+    let text: NSAttributedString
+    /// Its right edge, from the text view's leading edge.
+    let trailing: CGFloat
 }
 
 /// The type a message's text is set in, as `MarkdownText` takes it.
@@ -46,12 +66,14 @@ enum SelectableText {
     /// The guardian's own message: plain text, no Markdown.
     static func plain(_ text: String, style: SelectableTextStyle) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
+        // As `Text` breaks lines: no lone short word on the last line.
+        paragraph.lineBreakStrategy = .standard
         paragraph.lineSpacing = style.lineSpacing
-        return NSAttributedString(string: lineBreaks(text), attributes: [
+        return FallbackAdvances.matched(NSAttributedString(string: lineBreaks(text), attributes: [
             .font: UIFont.systemFont(ofSize: style.scaled(style.fontSize)),
             .foregroundColor: style.color,
             .paragraphStyle: paragraph,
-        ])
+        ]))
     }
 
     /// The message's blocks as segments: each run of text blocks one text
@@ -61,8 +83,7 @@ enum SelectableText {
         var run: [MarkdownBlock] = []
         func flush() {
             guard !run.isEmpty else { return }
-            let (text, quotes) = attributed(run, style: style, tasks: tasks)
-            segments.append(.text(text, quotes: quotes))
+            segments.append(.text(attributed(run, style: style, tasks: tasks)))
             run = []
         }
         for (position, block) in blocks.enumerated() {
@@ -81,8 +102,8 @@ enum SelectableText {
         return segments
     }
 
-    /// A run of text blocks as one string, with its quotes' ranges.
-    static func attributed(_ blocks: [MarkdownBlock], style: SelectableTextStyle, tasks: TaskLinkStore? = nil) -> (NSAttributedString, [NSRange]) {
+    /// A run of text blocks as one string, with its quotes and list markers.
+    static func attributed(_ blocks: [MarkdownBlock], style: SelectableTextStyle, tasks: TaskLinkStore? = nil) -> SelectableRun {
         var pieces: [Piece] = []
         var quoteIndices: [Int] = []
         for block in blocks {
@@ -115,10 +136,14 @@ enum SelectableText {
 
         let out = NSMutableAttributedString()
         var quotes: [NSRange] = []
+        var markers: [ListMarker] = []
         for (index, piece) in pieces.enumerated() {
             let start = out.length
             out.append(piece.text)
             if quoteIndices.contains(index) { quotes.append(NSRange(location: start, length: piece.text.length)) }
+            if let marker = piece.marker {
+                markers.append(ListMarker(location: start, text: marker.text, trailing: marker.trailing))
+            }
             // A paragraph's style covers its closing newline too.
             if index < pieces.count - 1 {
                 // In the font of the line it ends, so it adds no height.
@@ -127,7 +152,7 @@ enum SelectableText {
             }
             out.addAttribute(.paragraphStyle, value: piece.style, range: NSRange(location: start, length: out.length - start))
         }
-        return (out, quotes)
+        return SelectableRun(text: FallbackAdvances.matched(out), quotes: quotes, markers: markers)
     }
 
     /// The space above the first paragraph a text view leaves out, which a
@@ -140,29 +165,35 @@ enum SelectableText {
     /// A fenced block's text, as `MarkdownText` sets it.
     static func code(_ text: String, style: SelectableTextStyle) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
+        // As `Text` breaks lines: no lone short word on the last line.
+        paragraph.lineBreakStrategy = .standard
         paragraph.lineSpacing = 4
-        return NSAttributedString(string: lineBreaks(text), attributes: [
+        return FallbackAdvances.matched(NSAttributedString(string: lineBreaks(text), attributes: [
             .font: UIFont.monospacedSystemFont(ofSize: style.scaled(13), weight: .regular),
             .foregroundColor: style.color,
             .paragraphStyle: paragraph,
-        ])
+        ]))
     }
 
     /// One paragraph of the run, before they are joined.
     private struct Piece {
         var text: NSAttributedString
         var style: NSMutableParagraphStyle
+        /// A list item's marker, and its right edge.
+        var marker: (text: NSAttributedString, trailing: CGFloat)?
     }
 
     private static func paragraphStyle(lineSpacing: CGFloat) -> NSMutableParagraphStyle {
         let paragraph = NSMutableParagraphStyle()
+        // As `Text` breaks lines: no lone short word on the last line.
+        paragraph.lineBreakStrategy = .standard
         paragraph.lineSpacing = lineSpacing
         return paragraph
     }
 
-    /// A list's items, each one paragraph: its marker right-aligned in a
-    /// column of at least `markerColumn`, its text past the marker, and its
-    /// nested lists under that text.
+    /// A list's items, each one paragraph past its marker, which sits
+    /// right-aligned in a column of at least `markerColumn`; nested lists
+    /// under the item's text.
     private static func list(
         ordered: Bool, start: Int, items: [ListItem], indent: CGFloat,
         style: SelectableTextStyle, tasks: TaskLinkStore?, into pieces: inout [Piece]
@@ -174,18 +205,12 @@ enum SelectableText {
             let width = max(markerColumn, (marker as NSString).size(withAttributes: [.font: markerFont]).width)
             let textStart = indent + width + markerGap
             let paragraph = paragraphStyle(lineSpacing: style.lineSpacing)
-            paragraph.firstLineHeadIndent = indent
+            paragraph.firstLineHeadIndent = textStart
             paragraph.headIndent = textStart
-            paragraph.tabStops = [
-                NSTextTab(textAlignment: .right, location: indent + width),
-                NSTextTab(textAlignment: .left, location: textStart),
-            ]
             paragraph.paragraphSpacing = itemSpacing
-            let line = NSMutableAttributedString(string: "\t", attributes: [.font: UIFont.systemFont(ofSize: size)])
-            line.append(NSAttributedString(string: marker, attributes: [.font: markerFont, .foregroundColor: UIColor(Palette.sub)]))
-            line.append(NSAttributedString(string: "\t", attributes: [.font: UIFont.systemFont(ofSize: size)]))
-            line.append(inline(item.text, size: size, weight: .regular, color: style.color, tasks: tasks))
-            pieces.append(Piece(text: line, style: paragraph))
+            let drawn = NSAttributedString(string: marker, attributes: [.font: markerFont, .foregroundColor: UIColor(Palette.sub)])
+            pieces.append(Piece(text: inline(item.text, size: size, weight: .regular, color: style.color, tasks: tasks),
+                                style: paragraph, marker: (drawn, indent + width)))
             for child in item.children {
                 if case .list(let ordered, let start, let items) = child {
                     list(ordered: ordered, start: start, items: items, indent: textStart, style: style, tasks: tasks, into: &pieces)
@@ -234,18 +259,10 @@ enum SelectableText {
         return out
     }
 
-    /// What Copy writes for `text` taken from these strings: line breaks as
-    /// newlines, and a list item as its marker, a space and its text.
+    /// What Copy writes for `text` taken from these strings: its line
+    /// breaks as newlines.
     nonisolated static func copied(_ text: String) -> String {
         text.replacingOccurrences(of: "\u{2028}", with: "\n")
-            .components(separatedBy: "\n")
-            .map { line in
-                guard line.hasPrefix("\t") else { return line }
-                let item = line.dropFirst()
-                guard let tab = item.firstIndex(of: "\t") else { return String(item) }
-                return item[..<tab] + " " + item[item.index(after: tab)...]
-            }
-            .joined(separator: "\n")
     }
 
     /// A line break inside a block breaks the line, not the paragraph, so it
@@ -267,6 +284,49 @@ enum SelectableText {
     }
 }
 
+/// Gives characters the advances SwiftUI's `Text` gives them. CoreText, which
+/// `Text` lays out with, tracks a fallback font (Chinese, Japanese) tighter
+/// at small sizes than TextKit 1 does: PingFang at 16 pt is 15.88 pt a
+/// character against 15.95, so a Chinese line fitted one character less and
+/// the bubble came out wider. Each character outside ASCII gets the
+/// difference as kerning; the system font's own match already.
+@MainActor
+enum FallbackAdvances {
+    private struct Key: Hashable {
+        let font: String
+        let size: CGFloat
+        let character: String
+    }
+    private static var cache: [Key: CGFloat] = [:]
+
+    static func matched(_ text: NSAttributedString) -> NSAttributedString {
+        let out = NSMutableAttributedString(attributedString: text)
+        let string = text.string as NSString
+        text.enumerateAttribute(.font, in: NSRange(location: 0, length: text.length)) { value, range, _ in
+            guard let font = value as? UIFont else { return }
+            string.enumerateSubstrings(in: range, options: .byComposedCharacterSequences) { character, characterRange, _, _ in
+                guard let character, character.unicodeScalars.contains(where: { $0.value > 0x2000 }) else { return }
+                let kern = difference(character, font: font)
+                if kern != 0 { out.addAttribute(.kern, value: kern, range: characterRange) }
+            }
+        }
+        return out
+    }
+
+    /// CoreText's advance for `character` in `font`, less TextKit 1's.
+    static func difference(_ character: String, font: UIFont) -> CGFloat {
+        let key = Key(font: font.fontName, size: font.pointSize, character: character)
+        if let known = cache[key] { return known }
+        let single = NSAttributedString(string: character, attributes: [.font: font])
+        let laid = CGFloat(CTLineGetTypographicBounds(CTLineCreateWithAttributedString(single), nil, nil, nil))
+        let delta = laid - SelectingTextView.measure(single, width: .greatestFiniteMagnitude).width
+        let result = abs(delta) < 0.001 ? 0 : delta
+        if cache.count > 4_000 { cache.removeAll() }
+        cache[key] = result
+        return result
+    }
+}
+
 // MARK: - The text view
 
 /// A read-only text view that selects part of a message's text: the system
@@ -275,6 +335,7 @@ enum SelectableText {
 struct SelectableTextView: UIViewRepresentable {
     let text: NSAttributedString
     var quotes: [NSRange] = []
+    var markers: [ListMarker] = []
     /// Off for code, which keeps its lines and scrolls sideways instead.
     var wraps = true
     /// Opens with all of its text selected and the edit menu up.
@@ -299,6 +360,7 @@ struct SelectableTextView: UIViewRepresentable {
             view.invalidateIntrinsicContentSize()
         }
         view.quotes = quotes
+        view.markers = markers
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: SelectingTextView, context: Context) -> CGSize? {
@@ -348,6 +410,10 @@ final class SelectingTextView: UITextView {
         didSet { if quotes != oldValue { setNeedsLayout() } }
     }
     private var bars: [UIView] = []
+    var markers: [ListMarker] = [] {
+        didSet { if markers != oldValue { setNeedsLayout() } }
+    }
+    private var markerLabels: [UILabel] = []
 
     init(wraps: Bool) {
         self.wraps = wraps
@@ -364,6 +430,8 @@ final class SelectingTextView: UITextView {
         isSelectable = true
         isScrollEnabled = false
         backgroundColor = .clear
+        // Its selection handles reach past the text; a scroll view clips them.
+        clipsToBounds = false
         textContainerInset = .zero
         dataDetectorTypes = []
         // The string carries each link's colour.
@@ -397,7 +465,9 @@ final class SelectingTextView: UITextView {
         container.lineFragmentPadding = 0
         layout.addTextContainer(container)
         layout.ensureLayout(for: container)
-        return layout.usedRect(for: container).size
+        // From the leading edge: an indented paragraph's lines start past it.
+        let used = layout.usedRect(for: container)
+        return CGSize(width: used.maxX, height: used.maxY)
     }
 
     /// Copy writes plain text.
@@ -409,6 +479,32 @@ final class SelectingTextView: UITextView {
     override func layoutSubviews() {
         super.layoutSubviews()
         drawQuoteBars()
+        drawMarkers()
+    }
+
+    /// Each list marker on its item's first baseline, right-aligned at its edge.
+    private func drawMarkers() {
+        while markerLabels.count < markers.count {
+            let label = UILabel()
+            label.isUserInteractionEnabled = false
+            addSubview(label)
+            markerLabels.append(label)
+        }
+        for (index, label) in markerLabels.enumerated() {
+            guard index < markers.count, markers[index].location < textStorage.length else {
+                label.isHidden = true
+                continue
+            }
+            let marker = markers[index]
+            let glyph = layoutManager.glyphIndexForCharacter(at: marker.location)
+            let line = layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+            let baseline = line.minY + layoutManager.location(forGlyphAt: glyph).y
+            label.attributedText = marker.text
+            label.isHidden = false
+            let size = label.intrinsicContentSize
+            let font = marker.text.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+            label.frame = CGRect(x: marker.trailing - size.width, y: baseline - (font?.ascender ?? size.height), width: size.width, height: size.height)
+        }
     }
 
     /// Each quote's bar, as tall as its text, at the leading edge.
@@ -456,14 +552,26 @@ final class SelectingTextView: UITextView {
                 return
             }
             self.selectedRange = NSRange(location: 0, length: self.textStorage.length)
-            self.presentEditMenu()
+            // After the bubble's menu has closed: one shown while it closes
+            // is closed with it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.presentEditMenu() }
         }
     }
 
+    /// The edit menu shown when select mode opens. The text view's own does
+    /// not open when asked, only on a tap on the selection; one of its own
+    /// gathers the same actions (Copy, Look Up, Translate, Share) from the
+    /// text view as first responder.
+    private lazy var openingMenu: UIEditMenuInteraction = {
+        let menu = UIEditMenuInteraction(delegate: nil)
+        addInteraction(menu)
+        return menu
+    }()
+
     private func presentEditMenu() {
-        guard let menu = interactions.compactMap({ $0 as? UIEditMenuInteraction }).first else { return }
+        guard window != nil, isFirstResponder, selectedRange.length > 0 else { return }
         let rect = selectedTextRange.map { firstRect(for: $0) } ?? bounds
         let point = CGPoint(x: rect.isNull ? bounds.midX : rect.midX, y: rect.isNull ? bounds.minY : rect.minY)
-        menu.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: point))
+        openingMenu.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: point))
     }
 }

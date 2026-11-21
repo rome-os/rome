@@ -8,8 +8,13 @@ import UIKit
 @Suite struct SelectableTextTests {
     let style = SelectableTextStyle(color: .black)
 
-    private func string(_ source: String) -> (NSAttributedString, [NSRange]) {
+    private func run(_ source: String) -> SelectableRun {
         SelectableText.attributed(MarkdownParser.parse(source), style: style)
+    }
+
+    private func string(_ source: String) -> (NSAttributedString, [NSRange]) {
+        let run = run(source)
+        return (run.text, run.quotes)
     }
 
     private func paragraph(_ text: NSAttributedString, at location: Int) -> NSParagraphStyle? {
@@ -52,22 +57,26 @@ import UIKit
     }
 
     @Test func aListItemHasItsMarkerAndHangingIndent() throws {
-        let (text, _) = string("- apples\n- pears\n  - green")
-        let lines = text.string.components(separatedBy: "\n")
-        #expect(lines == ["\t•\tapples", "\t•\tpears", "\t•\tgreen"])
-        let first = try #require(paragraph(text, at: 0))
-        #expect(first.firstLineHeadIndent == 0)
+        let run = run("- apples\n- pears\n  - green")
+        // The markers are drawn beside the text, not in it.
+        #expect(run.text.string == "apples\npears\ngreen")
+        #expect(run.markers.map { $0.text.string } == ["•", "•", "•"])
+        #expect(run.markers.map(\.location) == [0, 7, 13])
+        let first = try #require(paragraph(run.text, at: 0))
+        #expect(first.firstLineHeadIndent == first.headIndent)
         #expect(first.headIndent >= SelectableText.markerColumn + SelectableText.markerGap)
         #expect(first.paragraphSpacing == SelectableText.itemSpacing)
-        // The nested item starts where its parent's text does.
-        let nested = try #require(paragraph(text, at: (lines[0] + "\n" + lines[1] + "\n").utf16.count))
-        #expect(nested.firstLineHeadIndent == first.headIndent)
+        #expect(run.markers[0].trailing == first.headIndent - SelectableText.markerGap)
+        // The nested item starts past its parent's text start, its marker in between.
+        let nested = try #require(paragraph(run.text, at: 13))
         #expect(nested.headIndent > first.headIndent)
+        #expect(run.markers[2].trailing > first.headIndent)
     }
 
     @Test func aNumberedListCountsFromItsStart() {
-        let (text, _) = string("3. three\n4. four")
-        #expect(text.string == "\t3.\tthree\n\t4.\tfour")
+        let run = run("3. three\n4. four")
+        #expect(run.text.string == "three\nfour")
+        #expect(run.markers.map { $0.text.string } == ["3.", "4."])
     }
 
     @Test func aQuoteIsIndentedGreyAndReportsItsRange() throws {
@@ -100,7 +109,7 @@ import UIKit
         let segments = SelectableText.segments(MarkdownParser.parse(source), style: style)
         let kinds = segments.map { segment -> String in
             switch segment {
-            case .text(let text, _): return "text:\(text.string)"
+            case .text(let run): return "text:\(run.text.string)"
             case .code(let text): return "code:\(SelectableText.copied(text.string))"
             case .block(_, let block):
                 if case .table = block { return "table" }
@@ -119,9 +128,6 @@ import UIKit
 
     @Test func copyWritesPlainText() {
         #expect(SelectableText.copied("one\u{2028}two") == "one\ntwo")
-        #expect(SelectableText.copied("Steps\n\t1.\tOpen it\n\t•\tpears") == "Steps\n1. Open it\n• pears")
-        // A selection that starts inside an item keeps its text.
-        #expect(SelectableText.copied("pen it\n\t2.\tSend") == "pen it\n2. Send")
     }
 
     @Test func aCodeBlockKeepsItsLinesInOneParagraph() {
@@ -160,6 +166,58 @@ import UIKit
         let difference = measured.selecting - measured.normal
         print("select-text height \(String(format: "%.2f", measured.normal)) → \(String(format: "%.2f", measured.selecting)) (\(String(format: "%+.2f", difference))): \(source.prefix(30))")
         #expect(abs(difference) <= 0.5)
+    }
+
+    /// The hugged size both ways, at a width the bubble offers: its text
+    /// takes only as much width as its lines need.
+    private func hugged(_ source: String, width: CGFloat) -> (normal: CGSize, selecting: CGSize) {
+        func size(_ view: some View) -> CGSize {
+            UIHostingController(rootView: view).sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+        }
+        return (size(MarkdownText(source: source).fixedSize(horizontal: false, vertical: true)),
+                size(MarkdownText(source: source, selectable: true).fixedSize(horizontal: false, vertical: true)))
+    }
+
+    /// The bubble hugs its text, so the width it takes and where its lines
+    /// break must not change either, at every width a bubble may offer.
+    @Test(arguments: [
+        "出版社回信了，说书稿下周一前可以看。",
+        "今天的摘要：三封邮件，一个日程。",
+        "今天的天气很好，适合出去走走。下午三点以后可能有雨，记得带伞。",
+        "降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。",
+        "A reply long enough to wrap onto a few lines in a bubble, so the line spacing counts.",
+        "Mixed **bold**, *italic*, `code` and a [link](https://example.com) in one line that wraps.",
+        "- one item that wraps at narrow widths\n- 第二项也会换行，看看中文",
+        "> A quoted line that runs long enough to wrap at most widths.",
+        "1. Book the flight\n2. Pick a hotel near the station\n   - with breakfast\n   - 安静的房间，最好朝南\n10. Pack",
+    ])
+    func selectModeKeepsTheWidthAndLineBreaks(source: String) {
+        var worst: (width: CGFloat, normal: CGSize, selecting: CGSize)?
+        for width in stride(from: CGFloat(180), through: 340, by: 1) {
+            let measured = hugged(source, width: width)
+            let off = max(abs(measured.normal.width - measured.selecting.width), abs(measured.normal.height - measured.selecting.height))
+            if off > 0.5, worst == nil { worst = (width, measured.normal, measured.selecting) }
+        }
+        if let worst {
+            print("select-text width at \(worst.width): \(worst.normal) → \(worst.selecting): \(source.prefix(20))")
+        }
+        #expect(worst == nil)
+    }
+
+    /// The guardian's own bubble: plain `Text`, white on coral.
+    @Test(arguments: ["海口明天怎么样？我想周末过去玩两天，帮我看看天气。", "Can you check whether the flight on Friday still has window seats left?"])
+    func theOwnBubbleKeepsItsWidthAndLineBreaks(text: String) {
+        for width in stride(from: CGFloat(180), through: 330, by: 1) {
+            func size(_ view: some View) -> CGSize {
+                UIHostingController(rootView: view).sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+            }
+            let normal = size(Text(text).romeFont(16).lineSpacing(5).fixedSize(horizontal: false, vertical: true))
+            let selecting = size(SelectableTextView(text: SelectableText.plain(text, style: SelectableTextStyle(color: .white))).fixedSize(horizontal: false, vertical: true))
+            guard abs(normal.width - selecting.width) <= 0.5, abs(normal.height - selecting.height) <= 0.5 else {
+                Issue.record("at \(width): \(normal) → \(selecting)")
+                return
+            }
+        }
     }
 
     @Test func selectModeKeepsTheHeightAtLargeText() {
