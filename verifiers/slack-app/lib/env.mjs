@@ -93,6 +93,11 @@ function fromEnvironment(raw) {
         stop: i.stop,
         start: i.start,
         oldConnections: i.control?.old_connections,
+        // R10: which of the seeded old rows are still stored, read only.
+        // ctl.sh's own `old-rows` when env.json names none.
+        oldRows:
+          i.control?.old_rows ??
+          (Array.isArray(i.stop) && i.stop[1] === "stop" ? [i.stop[0], "old-rows", i.stop[2]] : undefined),
         // Optional: the connection's port (R9, R14) and Chats' record of a chat.
         // ctl.sh's own port command when env.json names none; dropped at
         // the start of a run if it prints no JSON.

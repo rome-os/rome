@@ -142,12 +142,28 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
       return JSON.parse(last);
     },
 
-    /** The instance's recent log lines, or null when the environment gives no logs command. */
-    async logs() {
+    /**
+     * Which old Slack rows are still stored (R10), read only through the
+     * environment's `old-rows` control. Prints per kind {connection_id,
+     * stored}. Null without the control; throws when it fails.
+     */
+    async oldRows() {
+      const target = inst.control.oldRows;
+      if (!target) return null;
+      return jsonControl(target, [], { name: "old-rows" });
+    },
+
+    /**
+     * The instance's recent log lines, or null when the environment gives no
+     * logs command. `since` (an ISO time) is passed on as `--since <time>`
+     * to an argv command; a command that ignores it shows its last lines.
+     */
+    async logs({ since } = {}) {
       const target = inst.control.logs;
       if (!target) return null;
+      const extra = since ? ["--since", since] : [];
       const { stdout } = Array.isArray(target)
-        ? await run(target[0], target.slice(1), { timeout: 60_000, maxBuffer: 32 << 20 })
+        ? await run(target[0], [...target.slice(1), ...extra], { timeout: 60_000, maxBuffer: 32 << 20 })
         : await run("sh", ["-c", target], { timeout: 60_000, maxBuffer: 32 << 20 });
       return stdout.split("\n");
     },

@@ -26,6 +26,7 @@ The verifier reads one `env.json` and talks to the fake Slack, each instance's A
       "control": {
         "stop": "<URL to POST, or argv, or a shell command>", "start": "...",
         "oldConnections": ["argv"],    // R10: seeds slack_bot and slack; prints {slack_bot, slack, checks}
+        "oldRows": ["argv"],           // R10: read only; prints {slack_bot: {connection_id, stored}, slack: {...}}
         "port": ["argv"],              // optional: the connection's port, below
         "record": ["argv"],            // optional: Chats' record of one chat, below
         "logs": ["argv"]               // optional: recent log lines, for the memory warning
@@ -36,7 +37,7 @@ The verifier reads one `env.json` and talks to the fake Slack, each instance's A
 }
 ```
 
-The verifier also reads the environment's own env.json (`version: 1`, written by `environments/slack-app/tools/write-env-json.mjs`) and maps it to this shape: `commits.rome_cloud`, `agent.model`, `fake_slack.control`, each instance's `url` (plus `/api`), `guardian_cookies_file` (sent as the cookie header), `stop` and `start` argv arrays, `shortened.r6_stop_minutes`, `instances[i].control.old_connections`, `.port`, `.record` and `.logs`, `repos`, and `rome_cloud.query`. When an instance names no `record` or `logs`, the verifier uses ctl.sh's own (`ctl.sh record <instance>`, `ctl.sh logs <instance>`), found beside its stop command. R11 reads `repos` (`rome`, `rome_cloud`, `rome_cloud_base_ref`, `rome_base_ref`, `rome_dependencies`); without them it takes `VERIFIER_ROME_DIR`, `VERIFIER_ROME_CLOUD_DIR` and `VERIFIER_ROME_CLOUD_BASE`, and reports "not checked" without those either.
+The verifier also reads the environment's own env.json (`version: 1`, written by `environments/slack-app/tools/write-env-json.mjs`) and maps it to this shape: `commits.rome_cloud`, `agent.model`, `fake_slack.control`, each instance's `url` (plus `/api`), `guardian_cookies_file` (sent as the cookie header), `stop` and `start` argv arrays, `shortened.r6_stop_minutes`, `instances[i].control.old_connections`, `.old_rows`, `.port`, `.record` and `.logs`, `repos`, and `rome_cloud.query`. When an instance names no `port`, `record`, `old_rows` or `logs`, the verifier uses ctl.sh's own (`ctl.sh port <instance>`, `ctl.sh record <instance>`, `ctl.sh old-rows <instance>`, `ctl.sh logs <instance>`), found beside its stop command. R11 reads `repos` (`rome`, `rome_cloud`, `rome_cloud_base_ref`, `rome_base_ref`, `rome_dependencies`); without them it takes `VERIFIER_ROME_DIR`, `VERIFIER_ROME_CLOUD_DIR` and `VERIFIER_ROME_CLOUD_BASE`, and reports "not checked" without those either.
 
 ## Port and record controls
 
@@ -55,6 +56,12 @@ Both are argv arrays the verifier runs with arguments appended, reading the JSON
 A refusal is `{refused: why}`, or an error object carrying `at` (`rome` or `connector`) with its words in `error`, `reason` or `message`. R14 reads the words of a refusal for a request to approve the app again.
 
 `record '{"chat": "<id>"}'` reads Chats' own record of one chat, read only, with the instance running or stopped. The chat is a D... or C... id, or `C...:<thread ts>` for a thread. It prints `{messages: [{key, text, at, thread?}]}`. If it fails once, the verifier reads the session route below for the rest of the run.
+
+## Old rows and logs (R10)
+
+`old-rows` reads, without changing anything, whether the rows the `old-connections` seed wrote are still stored, with the instance running or stopped. It prints `{slack_bot: {connection_id, stored}, slack: {connection_id, stored}}` (or `{rows: [{connection_id, kind}]}` listing the stored ones). If it fails or is missing, that part of R10 is not checked.
+
+`logs [--since <ISO time>]` prints the instance's log (since that time when given), one entry a line, as `compose logs` does: JSON after the service's prefix, with `level` (a name or pino's number). R10 counts error-level entries, and warnings that name a seeded row's connection id (else its account id, else its kind).
 
 ## Fake Slack control
 

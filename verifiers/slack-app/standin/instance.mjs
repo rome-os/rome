@@ -9,7 +9,7 @@
 // Env: NAME, PORT, CLOUD, SLACK, SECRET, STATE_FILE, BREAK (comma list).
 
 import { randomBytes, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { frameSignature } from "./cloud.mjs";
 import { readBody, send, serve } from "./serve.mjs";
 
@@ -34,6 +34,13 @@ const save = () => {
   if (heldList() !== lastHeld) log(`connections now ${(lastHeld = heldList())}`);
 };
 log(`start: state file ${existsSync(STATE_FILE) ? "read" : "missing"}, connections ${(lastHeld = heldList())}`);
+// Rome's own log, as `compose logs` shows it: one JSON entry a message,
+// after the service's prefix. The environment's logs control reads it.
+const romeLog = (level, msg, fields = {}) =>
+  appendFileSync(
+    STATE_FILE.replace(/\.json$/, "-warnings.log"),
+    `rome-${NAME}-1  | ${JSON.stringify({ level, time: new Date().toISOString(), msg, ...fields })}\n`,
+  );
 const setups = new Map();
 const cloudAuth = { authorization: `Bearer ${SECRET}` };
 
@@ -876,7 +883,18 @@ async function port(op, a) {
         : { refused: r.error };
   switch (op) {
     case "send": {
-      const r = await api(conn.botToken, "chat.postMessage", {
+      // R10: a send that names no sender goes out through Rome's Slack app,
+      // whatever old rows are stored. Broken R10-two-senders counts a stored
+      // old row as a second sender and refuses; R10-sender-choice answers
+      // with the senders to choose from; R10-old-sender sends with the old
+      // bot's token.
+      const old = db.old ?? [];
+      if (old.length && breaks.has("R10-two-senders"))
+        return { refused: `More than one Slack connection can send: ${["slack_app", ...old.map((c) => c.kind)].join(", ")}. Name the one to send from.`, at: "rome" };
+      if (old.length && breaks.has("R10-sender-choice"))
+        return { status: "choose", senders: [{ connection: conn.id, kind: "slack_app" }, ...old.map((c) => ({ connection: c.id, kind: c.kind }))] };
+      const sender = old.length && breaks.has("R10-old-sender") ? old[0].botToken : conn.botToken;
+      const r = await api(sender, "chat.postMessage", {
         channel: a.chat,
         text: a.text,
         ...(a.thread && !breaks.has("R5-top") ? { thread_ts: a.thread } : {}),
@@ -974,6 +992,12 @@ if (db.old?.length) {
   }
   db.oldStarted = true;
   save();
+  // Each stored row of a removed kind is skipped with one warning a start.
+  // Broken R10-no-warn says nothing; R10-log-error logs an error for each.
+  for (const c of db.old.filter(() => NOOLD && !breaks.has("R10-no-warn")))
+    romeLog("warn", "skipping a stored connection of a removed kind", { connectionId: c.id, kind: c.kind });
+  if (breaks.has("R10-log-error"))
+    for (const c of db.old) romeLog("error", "could not start a stored connection", { connectionId: c.id, kind: c.kind });
   // Stand-in mode NOOLD (draft R10): the old kinds are gone, so a stored one
   // is skipped at boot and answers nothing.
   if (!NOOLD)

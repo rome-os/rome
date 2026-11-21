@@ -8,7 +8,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -139,6 +139,17 @@ const control = await serve(async (req, res, url) => {
       slack: out(oauth, db.old[1].id),
       checks: { bot_listed: true, oauth_listed: true },
     });
+  }
+
+  // R10: which seeded old rows are still stored, read from the state file
+  // with the instance running or stopped.
+  const or = url.pathname.match(/^\/instances\/(a|b)\/old-rows$/);
+  if (or && req.method === "POST") {
+    const file = join(workDir, `instance-${or[1]}.json`);
+    const held = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")).old ?? []) : [];
+    const out = {};
+    for (const c of held) out[c.kind] = { connection_id: c.id, stored: true };
+    return send(res, 200, out);
   }
 
   const m = url.pathname.match(/^\/instances\/(a|b)\/(stop|start)$/);
@@ -310,12 +321,13 @@ const env = {
       stop: `${control.url}/instances/${name}/stop`,
       start: `${control.url}/instances/${name}/start`,
       oldConnections: `${control.url}/instances/${name}/old-connections`,
+      oldRows: `${control.url}/instances/${name}/old-rows`,
       // The connection's port and Chats' record, served by the instance
       // itself. Variant no-port gives neither, as the environment on main.
       ...(process.env.STANDIN_NO_PORT
         ? {}
         : { port: `http://127.0.0.1:${ports[name]}/_port`, record: `http://127.0.0.1:${ports[name]}/_record` }),
-      // Warnings the stand-in logs; only R13-short-memory writes any.
+      // Rome's log as the stand-in writes it (R10's warnings and errors).
       logs: `cat ${JSON.stringify(join(workDir, `instance-${name}-warnings.log`))} 2>/dev/null || true`,
     },
     connect: { kind: "slack_app", grant: "bot" },

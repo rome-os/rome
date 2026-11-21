@@ -12,7 +12,7 @@ It refuses to run when this folder has uncommitted changes, so a report always n
 
 Every seeded message carries a tag unique to the message and the run. "On record" means Rome's record of the chat holds a message with that tag: the environment's `record` control when it gives one, else the chat's session. "Arrived" means the fake Slack recorded the post.
 
-Two optional controls decide how much can be seen. The `port` control calls the connection's own port (send, read, thread, groups, any other method). The `record` control reads Chats' own record of a chat. Without the port, R9's send, read and refusal and R14's group work are not checked, and R1's send is Rome's reply.
+Two optional controls decide how much can be seen. The `port` control calls the connection's own port (send, read, thread, groups, any other method). The `record` control reads Chats' own record of a chat. Without the port, R9's send, read and refusal, R14's group work and R10's send naming no sender are not checked, and R1's send is Rome's reply.
 
 | Group | Rule | Run |
 |---|---|---|
@@ -20,7 +20,7 @@ Two optional controls decide how much can be seen. The `port` control calls the 
 | Access | R2 | R1's whole check from a workspace that is not the app's home one. First, with the app's distribution off, Slack refuses the sign-in and nothing connects. |
 | Access | R3 | A second instance connecting workspace A is refused and told why. A direct message to the first is still on record there. |
 | Access | R8 | Slack's removal events mark the connection broken within 1 minute. The same sign-in fixes it into the same connected account, and a direct message is on record again. Disconnecting in Rome makes Slack's auth.test refuse the token. |
-| Access | R10 | Connect lists Rome's Slack app once and offers no old kind. A new slack_bot or old OAuth connect is refused. After the environment seeds a slack_bot and an old `slack` connection, and again after a restart, Rome lists neither, the older bot does not answer, and a direct message to Rome's app is on record. Nothing is posted through either old app, and no call uses the old sign-in's user token. |
+| Access | R10 | Connect lists Rome's Slack app once and offers no old kind. A new slack_bot or old OAuth connect is refused. After the environment seeds a slack_bot and an old `slack` connection, and again after a restart: Rome lists neither, the older bot does not answer, and a direct message to Rome's app is on record. A port send that names no sender is neither refused nor answered with senders to choose from, and arrives from Rome's app with its bot token. Both seeded rows are still stored (the `old-rows` control). Rome's log over that start holds no error-level entry and one warning per seeded row. Nothing is posted through either old app, and no call uses the old sign-in's user token. |
 | Hear | R4 | 20 direct messages one at a time, each on record before the next. Then 10 more: 3, a second's pause, the instance stopped, 7 while it is down: all 10 are on record after the restart, which a connection that acknowledged before recording would fail. Then the fake redelivers one recorded event: still on record once. The order inside Rome Cloud is covered by the product's tests (#2534). |
 | Hear | R5 | 10 mentions from the guardian, 5 at the top of `#general` and 5 in threads a member started: all on record. Where the record shows a thread, each is on record with its own. A send into each thread lands in it: a port send, or Rome's post after the mention. Slack's pace on history reads is off while R5 runs. The "mentioned" fact is covered by the product's tests. |
 | Hear | R6 | The instance stops for `stopSeconds`, 20 direct messages are sent while it is down, and all 20 are on record after the restart. |
@@ -65,6 +65,10 @@ Order: R11, R1, R3, the second binding (workspace B to the second instance), smo
 | `R9-extra-call` | The instance lists the workspace's members on connect. | R9 fails |
 | `R10-two-entries`, `R10-bot-connects`, `R10-oauth-connects` | Connect offers an old kind, or one can be started. | R10 fails |
 | `R10-old-works` | Stored old connections are listed and the older bot answers. | R10 fails |
+| `R10-two-senders`, `R10-sender-choice` | A stored old row counts as a second sender: a send naming none is refused, or answered with senders to choose from. | R10 fails |
+| `R10-old-sender` | A send naming no sender goes out with the older bot's token. | R10 fails |
+| `R10-restart-loses` | The stored old rows are deleted at the restart. | R10 fails |
+| `R10-log-error`, `R10-no-warn` | Rome logs an error for each stored old row, or skips them without a warning. | R10 fails |
 | `own-pace` | Not a break: the port paces reads at one per 90 s and says when to try again. | R9 and R14 pass, having waited |
 | `R14-pace-long` | A thread read is refused with a wait past the verifier's 150 s cap. | R14 fails |
 | `dm-only` | Not a break: the app asks for no group scopes. | R14 not checked |
@@ -72,7 +76,7 @@ Order: R11, R1, R3, the second binding (workspace B to the second instance), smo
 | `R14-no-reapprove` | Under the old scopes the port passes Slack's error through, not a request to approve again. | R14 fails |
 | `R11`, `R11-*` | The relay gains Slack code, core imports an app, or Rome Cloud stores a token, message content or member data. | R11 fails |
 
-It passes when every scored rule passes on the good stand-in, `no-port` gets R9 and R14 not checked with the rest passing, and each break gets its expected result. It writes `out/proof/summary.md`. `PROVE_CASES=good,R5-top` runs only the named cases.
+It passes when every scored rule passes on the good stand-in, `no-port` gets R9, R10 and R14 not checked with the rest passing, and each break gets its expected result. It writes `out/proof/summary.md`. `PROVE_CASES=good,R5-top` runs only the named cases.
 
 ## Limits
 
@@ -81,4 +85,6 @@ It passes when every scored rule passes on the good stand-in, `no-port` gets R9 
 - The verifier trusts the fake Slack's records of what was posted and called.
 - R4 cannot see when Rome Cloud's mailbox is acknowledged. A stop during a burst catches a connection that acknowledges early only when the stop lands between the acknowledgement and the record.
 - Without a record control, Rome's record is the chat's session, which carries no thread, so R5 reports its thread facts as covered by the product's tests.
+- R10 reads Rome's log through the `logs` control, asking for lines since a minute before the seed (`--since <time>`). A control that ignores that shows only its last lines, so R10 reads before the seed and after each start's checks, and reports a start not checked when the lines it last saw have scrolled out.
+- R10's stored rows need the environment's `old-rows` control; without it that part is not checked.
 - R6's stop is `stopSeconds` long: `run.sh --r6-stop <seconds>` (or `VERIFIER_R6_STOP_SECONDS`) wins, then env.json, then 120 s.
