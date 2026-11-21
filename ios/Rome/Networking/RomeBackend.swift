@@ -117,9 +117,9 @@ protocol RomeBackend: AnyObject, Sendable {
     func romeCredits() async throws -> RomeCreditsResponse.Credits?
     /// `showAiToolUsage` in `GET /settings`: on unless the guardian turned it off.
     func showsAIToolUsage() async -> Bool
-    /// The terminal socket that runs Claude's login (`claude-login`); nil
-    /// without a real instance.
-    func claudeLoginSocket() -> URLRequest?
+    /// The terminal socket that runs Claude's login (`claude-login`), opened;
+    /// nil without one.
+    func claudeLoginSocket() -> LoginSocket?
     /// Answers a card the agent waits on, as an `interaction_result` part:
     /// the turn goes on from `output`.
     func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws
@@ -403,12 +403,12 @@ final class LiveBackend: RomeBackend {
         return settings["showAiToolUsage"]?.bool ?? true
     }
 
-    func claudeLoginSocket() -> URLRequest? {
+    func claudeLoginSocket() -> LoginSocket? {
         var request = client.socketRequest("/ws/terminal")
         guard let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
         components.queryItems = [URLQueryItem(name: "preset", value: "claude-login")]
         request.url = components.url
-        return request
+        return WebLoginSocket(request: request)
     }
 
     func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws {
@@ -633,7 +633,7 @@ extension RomeBackend {
     func logOut(_ account: AIAccount) async throws { throw APIError.notFound }
     func romeCredits() async throws -> RomeCreditsResponse.Credits? { nil }
     func showsAIToolUsage() async -> Bool { true }
-    func claudeLoginSocket() -> URLRequest? { nil }
+    func claudeLoginSocket() -> LoginSocket? { nil }
     func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws { throw APIError.notFound }
     func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink { throw APIError.notFound }
     func chatShares(sessionId: String) async throws -> [ChatShareLink] { [] }

@@ -2,6 +2,58 @@
 import Foundation
 import UIKit
 
+/// The demo's Claude login socket: `auth_url` after a beat, then
+/// `auth_error` for the code "wrong" and a login for any other.
+@MainActor
+final class DemoLoginSocket: LoginSocket {
+    private var frames: [String] = []
+    private var waiting: CheckedContinuation<String?, Never>?
+    private var closed = false
+    private let loggedIn: () -> Void
+
+    init(loggedIn: @escaping () -> Void) {
+        self.loggedIn = loggedIn
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.2))
+            self?.push(#"{"type":"auth_url","url":"https://claude.ai/oauth/authorize?code=true&client_id=demo"}"#)
+        }
+    }
+
+    private func push(_ frame: String) {
+        if let waiting {
+            self.waiting = nil
+            waiting.resume(returning: frame)
+        } else {
+            frames.append(frame)
+        }
+    }
+
+    func receive() async throws -> String {
+        if !frames.isEmpty { return frames.removeFirst() }
+        if closed { throw URLError(.networkConnectionLost) }
+        guard let frame = await withCheckedContinuation({ waiting = $0 }) else { throw URLError(.networkConnectionLost) }
+        return frame
+    }
+
+    func send(_ text: String) async throws {
+        guard let frame = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)), frame["type"]?.string == "submit_code" else { return }
+        try? await Task.sleep(for: .seconds(0.8))
+        if frame["code"]?.string?.lowercased() == "wrong" {
+            push(#"{"type":"auth_error","message":"Invalid code"}"#)
+        } else {
+            loggedIn()
+        }
+    }
+
+    func close() {
+        closed = true
+        if let waiting {
+            self.waiting = nil
+            waiting.resume(returning: nil)
+        }
+    }
+}
+
 /// Delivers events inside the app, for the demo backend.
 @MainActor
 final class LocalEventBus: LiveEventSource {
@@ -622,6 +674,8 @@ final class DemoBackend: RomeBackend {
     static var aiModelPreview: AIModelPreview = .ready
     /// Accounts the demo logged out of, and when a device login started.
     private var loggedOut: Set<AIAccount> = []
+    /// Accounts the demo logged in to, whatever the preview says.
+    private var loggedIn: Set<AIAccount> = []
     private var deviceLoginStarted: Date?
 
     func aiTools() async throws -> AIToolsStatus {
@@ -646,15 +700,19 @@ final class DemoBackend: RomeBackend {
             codex = .init(loggedIn: false, quotaExhausted: false)
             provider = Self.aiModelPreview == .credits ? .romeCredits : nil
         }
+        // A device login started here comes in after a few seconds.
+        if let started = deviceLoginStarted, now.timeIntervalSince(started) > 5 {
+            loggedOut.remove(.chatgpt)
+            loggedIn.insert(.chatgpt)
+            deviceLoginStarted = nil
+        }
         if loggedOut.contains(.claude) { claude = .init(loggedIn: false, quotaExhausted: false) }
-        if loggedOut.contains(.chatgpt) {
-            // A device login started here comes in after a few seconds.
-            if let started = deviceLoginStarted, now.timeIntervalSince(started) > 5 {
-                loggedOut.remove(.chatgpt)
-                deviceLoginStarted = nil
-            } else {
-                codex = .init(loggedIn: false, quotaExhausted: false)
-            }
+        if loggedOut.contains(.chatgpt) { codex = .init(loggedIn: false, quotaExhausted: false) }
+        if loggedIn.contains(.claude) { claude = .init(loggedIn: true, usage: .init(fiveHour: .init(usedPercent: 4)), quotaExhausted: false) }
+        if loggedIn.contains(.chatgpt) { codex = .init(loggedIn: true, usage: .init(fiveHour: .init(usedPercent: 3)), quotaExhausted: false) }
+        // The first login replaces no default.
+        if provider == nil || provider == .romeCredits {
+            if codex.loggedIn == true { provider = .openai } else if claude.loggedIn == true { provider = .anthropic }
         }
         if provider == .openai, codex.loggedIn == false, claude.loggedIn == true, Self.aiModelPreview == .ready { provider = .anthropic }
         let code = deviceLoginStarted.map { _ in AIToolsStatus.DeviceLogin(running: true, userCode: "K7QF-2M9D", verificationUrl: "https://auth.openai.com/codex/device") }
@@ -670,7 +728,6 @@ final class DemoBackend: RomeBackend {
 
     func startChatGPTDeviceLogin() async throws -> DeviceLoginCode {
         try await pause(0.6)
-        loggedOut.insert(.chatgpt)
         deviceLoginStarted = .now
         return DeviceLoginCode(userCode: "K7QF-2M9D", verificationUrl: "https://auth.openai.com/codex/device")
     }
@@ -679,7 +736,17 @@ final class DemoBackend: RomeBackend {
 
     func logOut(_ account: AIAccount) async throws {
         try await pause(0.5)
+        loggedIn.remove(account)
         loggedOut.insert(account)
+    }
+
+    /// Claude's login without a terminal: the sign-in page comes after a
+    /// beat, and any code logs in but "wrong", which the login refuses.
+    func claudeLoginSocket() -> LoginSocket? {
+        DemoLoginSocket { [weak self] in
+            self?.loggedOut.remove(.claude)
+            self?.loggedIn.insert(.claude)
+        }
     }
 
     func romeCredits() async throws -> RomeCreditsResponse.Credits? {

@@ -165,7 +165,7 @@ final class ClaudeLoginFlow {
         phase: Phase = .preparing
     ) {
         self.backend = backend
-        self.makeSocket = makeSocket ?? { backend.claudeLoginSocket().map { WebLoginSocket(request: $0) } }
+        self.makeSocket = makeSocket ?? { backend.claudeLoginSocket() }
         self.prepareTimeout = prepareTimeout
         self.pollInterval = pollInterval
         self.phase = phase

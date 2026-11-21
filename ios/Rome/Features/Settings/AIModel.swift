@@ -379,10 +379,15 @@ struct AIAccountRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: account == .chatgpt ? "bubble.left" : "asterisk")
-                .romeFont(15)
+            // The brand marks the web shows, as template images.
+            Image(account == .chatgpt ? "ChatGPTMark" : "ClaudeMark")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 17, height: 17)
                 .foregroundStyle(Palette.fg)
                 .frame(width: 30, height: 30)
+                .accessibilityHidden(true)
                 .background(Palette.secondaryFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {

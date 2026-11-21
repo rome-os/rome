@@ -216,6 +216,20 @@ import Testing
         try await until { flow.phase == .failed(.server("Session timed out (5 min limit)")) }
     }
 
+    @Test func theDemoClaudeLoginRefusesWrongAndTakesAnyOtherCode() async throws {
+        DemoBackend.aiModelPreview = .notSetUp
+        defer { DemoBackend.aiModelPreview = .ready }
+        let backend = DemoBackend()
+        let flow = ClaudeLoginFlow(backend: backend, pollInterval: .milliseconds(50))
+        flow.start()
+        try await until(seconds: 5) { if case .ready = flow.phase { return true } else { return false } }
+        flow.submit("wrong")
+        try await until(seconds: 5) { flow.codeRejected }
+        flow.submit("abc123")
+        try await until(seconds: 5) { flow.phase == .connected }
+        #expect(try await backend.aiTools().defaultProvider?.provider == .anthropic)
+    }
+
     // MARK: Chat's connect card
 
     @Test func theConnectCardIsDrawnHereAndKeepsItsAnswer() {
@@ -239,9 +253,9 @@ import Testing
         #expect(backend.answeredCards.first?.output == .object(["connected": .bool(true)]))
     }
 
-    /// Waits up to two seconds for `condition`.
-    private func until(_ condition: () -> Bool) async throws {
-        for _ in 0..<200 {
+    /// Waits up to two seconds, or `seconds`, for `condition`.
+    private func until(seconds: Int = 2, _ condition: () -> Bool) async throws {
+        for _ in 0..<(seconds * 100) {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(10))
         }
