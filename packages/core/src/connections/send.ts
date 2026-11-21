@@ -20,6 +20,7 @@ import { startChannelChat } from "./channel-chat.js";
 import { platformIdOfMessage, type ChatAdapters } from "./chat-adapter.js";
 import { kindAt } from "./recorded-sends.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
+import type { ConnectionRegistry } from "./registry.js";
 import type { Body, Sender, SendResult } from "../chats/send.js";
 import { addressOf, type Place } from "../chats/place.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
@@ -47,6 +48,27 @@ export function sendersOf(deps: SendDeps, platform: string): string[] {
     deps.sendersOn?.(platform) ??
     channelsOn(deps.channels, deps.platformOfChannel ?? platformOf, platform)
   );
+}
+
+/**
+ * `records.sendersOn`, keeping only the channels whose Connection the registry
+ * runs. A Connection of a kind Rome no longer registers stays in the store, and
+ * its grant still reaches its channel's account, but it backs no channel: boot
+ * skipped it, so it neither counts as a sender nor makes a send ambiguous.
+ */
+export function runningSendersOn(
+  records: Pick<ChannelRecordsRepository, "sendersOn" | "byId">,
+  registry: Pick<ConnectionRegistry, "all">,
+): SendersOn {
+  return (platform) => {
+    const senders = records.sendersOn(platform);
+    if (senders === null) return null;
+    const running = new Set(registry.all().map((connection) => connection.id));
+    return senders.filter((id) => {
+      const connectionId = records.byId(id)?.connectionId;
+      return connectionId != null && running.has(connectionId);
+    });
+  };
 }
 
 /** Where a send is said and recorded: Chats, and each channel's chat

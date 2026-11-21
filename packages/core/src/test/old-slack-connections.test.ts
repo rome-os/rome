@@ -17,6 +17,7 @@ import { listConnectionViews } from "../api/routes/connections.js";
 import { createChannelsService } from "../app-host/accounts-service.js";
 import { romeAccounts } from "../chats/connected-accounts/rome-accounts.js";
 import { recordGrantAccounts } from "../connections/grant-accounts.js";
+import { runningSendersOn } from "../connections/send.js";
 import {
   type BuiltinConnectionDeps,
   registerBuiltinConnections,
@@ -24,6 +25,8 @@ import {
 import { ConnectionRegistry } from "../connections/registry.js";
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { removeUnconnectedAccounts } from "../connections/unconnected-accounts.js";
+import { accountLinkOf } from "../chats/connected-accounts/account-links.js";
+import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import type { Logger } from "../logger.js";
 import { createTestDbFile, type TestDb } from "./db.js";
 
@@ -50,7 +53,11 @@ function storeOld(sqlite: Database.Database, old: (typeof OLD)[number]): void {
       `INSERT INTO connection_grants (custody, state, credential, platform, account_id)
        VALUES (?, 'authorized', ?, 'slack', ?)`,
     )
-    .run(id, JSON.stringify({ token: `xox-of-${id}` }), accountId);
+    .run(
+      id,
+      JSON.stringify({ material: { token: `xox-of-${id}` }, expiresAt: "never" }),
+      accountId,
+    );
   if (!old.chats) return;
   sqlite
     .prepare(
@@ -77,7 +84,7 @@ afterEach(() => {
 
 /** A store holding every old Slack Connection, and a registry over it with
  *  every kind boot registers, loaded as boot loads it. */
-async function bootOverOldRows() {
+async function bootOverOldRows(also?: (sqlite: Database.Database) => void) {
   const dir = mkdtempSync(join(tmpdir(), "old-slack-"));
   const open = createTestDbFile(join(dir, "rome.db"));
   const store: TestDb & { sqlite: Database.Database } = open();
@@ -86,6 +93,7 @@ async function bootOverOldRows() {
     rmSync(dir, { recursive: true, force: true });
   });
   for (const old of OLD) storeOld(store.sqlite, old);
+  also?.(store.sqlite);
 
   const logger = { warn: rs.fn(), error: rs.fn(), info() {}, debug() {} };
   const repository = new DrizzleConnectionsRepository(store.db);
@@ -181,5 +189,21 @@ describe("a stored Connection of an old Slack kind", () => {
         channels.send({ platform: "slack", id: old.account }, "D_ANY" as ChatId, { text: "hi" }),
       ).rejects.toThrow();
     }
+  });
+
+  it("is no sender beside Rome's Slack app, so a send that names none goes out from the app", async () => {
+    const { store, registry } = await bootOverOldRows((sqlite) =>
+      storeOld(sqlite, {
+        id: "conn-slack-app",
+        kind: "slack_app",
+        account: "T_A/U_APP",
+        chats: true,
+      }),
+    );
+    expect(registry.all().map((connection) => connection.connectionKind)).toEqual(["slack_app"]);
+    const records = new ChannelRecordsRepository(store.db, accountLinkOf(registry));
+    // The store alone still reaches the old channel through its kept grant.
+    expect(records.sendersOn("slack")).toHaveLength(OLD.filter((old) => old.chats).length + 1);
+    expect(runningSendersOn(records, registry)("slack")).toEqual(["channel-conn-slack-app"]);
   });
 });
