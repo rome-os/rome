@@ -132,7 +132,7 @@ After approval, the container connects to the account Gateway and appears on
 - Connect or disconnect without removing the stored credential.
 - Toggle **Allow remote execution** (`Computer Use`), switching the host
   between full execution and limited mode (`computer_use_off`).
-- Inspect the local **Computer use log** (`/log`) directly in the Web UI —
+- Inspect the local **Audit log** (`/log`) directly in the Web UI —
   including the 24-hour activity chart, status filters, command/folder search,
   request metadata, and bounded `stdin`/`stdout`/`stderr`/file previews — or
   jump to Rome **Settings → Devices** (or run `rome-node audit` inside the container).

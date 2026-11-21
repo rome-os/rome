@@ -506,13 +506,14 @@ describe("Rome Node Web UI", () => {
     // Switch language to Simplified Chinese and verify Log UI + detail labels translate.
     fireEvent.click(screen.getByRole("button", { name: "Switch language (简体中文)" }));
     expect(screen.getByRole("tab", { name: "日志" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "电脑操作记录" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "审计日志" })).toBeTruthy();
     expect(screen.getByText("未验证")).toBeTruthy();
     expect(screen.getByText("该内容已按保留策略清理。")).toBeTruthy();
 
     // Switch back to English for remaining assertions.
     fireEvent.click(screen.getByRole("button", { name: "切换语言 (English)" }));
     expect(screen.getByRole("tab", { name: "Log" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Audit log" })).toBeTruthy();
 
     // Select the binary transfer row and verify binary notice.
     fireEvent.click(screen.getByRole("button", { name: /\/tmp\/blob\.bin/ }));

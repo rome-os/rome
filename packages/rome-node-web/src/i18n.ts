@@ -117,7 +117,7 @@ export const messages = {
       auditState: "Audit log",
       auditOk: "Healthy",
       auditUnavailable: "Unavailable",
-      auditCloudHint: "Inspect local requests in Computer use log or manage devices in Rome Cloud.",
+      auditCloudHint: "Inspect local requests in Audit log or manage devices in Rome Cloud.",
       viewLog: "View log",
       openCloud: "Open Rome Cloud",
       auditUnavailableTitle: "Audit log unavailable — remote requests are refused",
@@ -171,7 +171,7 @@ export const messages = {
         "Another process connected with the same device credential and replaced this session.",
     },
     log: {
-      title: "Computer use log",
+      title: "Audit log",
       thisNode: "This node",
       storageMeta: (size: string, requests: number, days: number) =>
         `${size} · ${requests.toLocaleString("en")} requests · ${days}d retention`,
@@ -313,7 +313,7 @@ export const messages = {
       auditState: "审计日志",
       auditOk: "正常",
       auditUnavailable: "不可用",
-      auditCloudHint: "可在「电脑操作记录」查看本机完整请求，或在 Rome Cloud 管理设备。",
+      auditCloudHint: "可在「审计日志」查看本机完整请求，或在 Rome Cloud 管理设备。",
       viewLog: "查看日志",
       openCloud: "打开 Rome Cloud",
       auditUnavailableTitle: "审计日志不可用 — 所有远程请求将被拒绝",
@@ -362,7 +362,7 @@ export const messages = {
       supersededNotice: "另一进程使用了相同设备凭证上线，当前连接已被替换。",
     },
     log: {
-      title: "电脑操作记录",
+      title: "审计日志",
       thisNode: "当前节点",
       storageMeta: (size: string, requests: number, days: number) =>
         `${size} · ${requests.toLocaleString("zh-CN")} 条请求 · 保留 ${days} 天`,
