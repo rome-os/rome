@@ -227,23 +227,80 @@ describe("OutputsPanel", () => {
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
-  it("filters by documents, spreadsheets and pages, and keeps other kinds under All", async () => {
+  it("offers All and each kind the chat holds, the most held first", async () => {
     const user = userEvent.setup();
     outputs = [
-      output("notes", { name: "notes.md", mimeType: "text/markdown" }),
-      output("sheet", { name: "sheet.xlsx", mimeType: null }),
       output("pic", { name: "pic.png", mimeType: "image/png", kind: "shown" }),
+      output("map", { name: "map.png", mimeType: "image/png", kind: "shown" }),
+      output("sheet", { name: "sheet.xlsx", mimeType: null }),
+      output("notes", { name: "notes.md", mimeType: "text/markdown" }),
     ];
     renderPanel();
     await screen.findByRole("list", { name: "Today" });
+    // Pictures lead with two; the kinds held once keep their usual order.
+    expect(screen.getAllByRole("radio").map((chip) => chip.textContent)).toEqual([
+      "All",
+      "Pictures",
+      "Documents",
+      "Spreadsheets",
+    ]);
+    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
     await user.click(screen.getByRole("radio", { name: "Spreadsheets" }));
     expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
       expect.stringContaining("Sheet"),
     ]);
-    await user.click(screen.getByRole("radio", { name: "Pages" }));
-    expect(screen.getByText("No outputs of this kind yet.")).toBeTruthy();
     await user.click(screen.getByRole("radio", { name: "All" }));
-    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+  });
+
+  it("puts the kinds past three under More, which names the one it filters by", async () => {
+    const user = userEvent.setup();
+    outputs = [
+      output("notes", { name: "notes.md", mimeType: "text/markdown" }),
+      output("plan", { name: "plan.md", mimeType: "text/markdown" }),
+      output("pic", { name: "pic.png", mimeType: "image/png", kind: "shown" }),
+      output("sheet", { name: "sheet.csv", mimeType: "text/csv" }),
+      output("site", { name: "site.html", mimeType: "text/html" }),
+      output("voice", { name: "voice.wav", mimeType: "audio/wav" }),
+      output("script", { name: "script.ts", mimeType: "text/typescript" }),
+    ];
+    renderPanel();
+    await screen.findByRole("list", { name: "Today" });
+    expect(screen.getAllByRole("radio").map((chip) => chip.textContent)).toEqual([
+      "All",
+      "Documents",
+      "Pictures",
+      "Spreadsheets",
+    ]);
+    await user.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+      "Pages",
+      "Audio",
+      "Code",
+    ]);
+    await user.click(screen.getByRole("menuitemradio", { name: "Audio" }));
+    const more = screen.getByRole("button", { name: "More: Audio" });
+    expect(more.textContent).toBe("Audio");
+    expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Voice"),
+    ]);
+    expect(
+      screen.getAllByRole("radio").some((chip) => chip.getAttribute("aria-checked") === "true"),
+    ).toBe(false);
+    await user.click(screen.getByRole("radio", { name: "All" }));
+    expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
+    expect(screen.getAllByRole("listitem")).toHaveLength(7);
+  });
+
+  it("offers no filters while the chat holds one kind", async () => {
+    outputs = [
+      output("notes", { name: "notes.md", mimeType: "text/markdown" }),
+      output("plan", { name: "plan.txt" }),
+    ];
+    renderPanel();
+    await screen.findByRole("list", { name: "Today" });
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
   it("says a file that moved or went is gone, and offers nothing to open", async () => {
@@ -553,6 +610,11 @@ describe("outputTypeOf and outputTitle", () => {
     expect(outputTypeOf({ name: "a.html", mimeType: "text/html" })).toBe("page");
     expect(outputTypeOf({ name: "a.png", mimeType: "image/png" })).toBe("image");
     expect(outputTypeOf({ name: "a.ts", mimeType: null })).toBe("code");
+    expect(outputTypeOf({ name: "a.pptx", mimeType: null })).toBe("document");
+    expect(outputTypeOf({ name: "a.wav", mimeType: "audio/wav" })).toBe("audio");
+    expect(outputTypeOf({ name: "a.mp4", mimeType: "video/mp4" })).toBe("video");
+    expect(outputTypeOf({ name: "a.diff", mimeType: null })).toBe("code");
+    expect(outputTypeOf({ name: "a.zip", mimeType: "application/zip" })).toBe("file");
     expect(outputTitle("weekly-news_digest.md")).toBe("Weekly news digest");
     expect(outputTitle("Rome 发布摘要.md")).toBe("Rome 发布摘要");
   });

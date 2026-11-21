@@ -801,20 +801,28 @@
     "edit": "Edit",
     "doneEditing": "Done",
     "filterLabel": "Show",
-    "noneOfType": "No outputs of this kind yet.",
+    "more": "More",
+    "moreChosen": "More: {{kind}}",
     "today": "Today",
     "earlier": "Earlier",
     "filters": {
       "all": "All",
       "document": "Documents",
+      "image": "Pictures",
       "spreadsheet": "Spreadsheets",
-      "page": "Pages"
+      "page": "Pages",
+      "audio": "Audio",
+      "video": "Videos",
+      "code": "Code",
+      "file": "Other"
     },
     "types": {
       "document": "Document",
       "spreadsheet": "Spreadsheet",
       "page": "Page",
       "image": "Picture",
+      "audio": "Audio",
+      "video": "Video",
       "code": "Code",
       "file": "File"
     },

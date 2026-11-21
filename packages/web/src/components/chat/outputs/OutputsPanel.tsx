@@ -1,13 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   AppWindow,
+  ChevronDown,
   ChevronLeft,
   Download,
   File as FileIcon,
+  FileAudio,
   FileCode,
   FileImage,
   FileOutput,
   FileText,
+  FileVideo,
   Pencil,
   Sheet,
 } from "lucide-react";
@@ -23,6 +26,13 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import Markdown from "@/components/markdown";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   EmptyState,
   EmptyStateDescription,
@@ -51,7 +61,7 @@ type Preview = "image" | "markdown" | "text" | "file";
 const TEXT_TYPES =
   /^(text\/|application\/(json|xml|javascript|typescript|x-yaml|yaml|toml|sql|x-sh))/;
 const CODE_EXTENSIONS =
-  /\.(c|cc|cpp|cs|css|go|h|java|js|jsx|json|kt|mjs|py|rb|rs|sh|sql|swift|toml|ts|tsx|xml|ya?ml)$/i;
+  /\.(c|cc|cjs|cpp|cs|css|diff|go|h|java|js|jsx|json|kt|mjs|patch|py|rb|rs|sh|sql|swift|toml|ts|tsx|xml|ya?ml)$/i;
 
 /** How the tab previews an output: never as a page that runs. */
 export function previewOf(output: Pick<ChatOutput, "name" | "mimeType">): Preview {
@@ -62,17 +72,55 @@ export function previewOf(output: Pick<ChatOutput, "name" | "mimeType">): Previe
   return "file";
 }
 
-/** What an output is, as the list names it and filters it. */
-export type OutputType = "document" | "spreadsheet" | "page" | "image" | "code" | "file";
+/**
+ * What an output is, as the list names it and filters it. Two kinds a list
+ * holds as many of keep this order: what people come back for first, working
+ * files last.
+ */
+const OUTPUT_TYPES = [
+  "document",
+  "image",
+  "spreadsheet",
+  "page",
+  "audio",
+  "video",
+  "code",
+  "file",
+] as const;
+export type OutputType = (typeof OUTPUT_TYPES)[number];
 
 export function outputTypeOf(output: Pick<ChatOutput, "name" | "mimeType">): OutputType {
   const extension = /\.([a-z0-9]+)$/i.exec(output.name)?.[1]?.toLowerCase() ?? "";
-  if (["md", "markdown", "txt", "pdf", "docx", "doc"].includes(extension)) return "document";
+  const mimeType = output.mimeType ?? "";
+  if (["md", "markdown", "txt", "pdf", "docx", "doc", "pptx", "ppt"].includes(extension)) {
+    return "document";
+  }
   if (["csv", "tsv", "xlsx", "xls"].includes(extension)) return "spreadsheet";
   if (["html", "htm"].includes(extension)) return "page";
-  if ((output.mimeType ?? "").startsWith("image/")) return "image";
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (mimeType.startsWith("video/")) return "video";
   if (CODE_EXTENSIONS.test(output.name)) return "code";
   return "file";
+}
+
+/** How many kinds the filters show as chips after All; the rest wait under More. */
+export const CHIP_KINDS = 3;
+
+/**
+ * The kinds a list holds, the one it holds most of first, for its filters.
+ * None while it holds one kind, which All already shows.
+ */
+export function kindsOf(outputs: readonly Pick<ChatOutput, "name" | "mimeType">[]): OutputType[] {
+  const counts = new Map<OutputType, number>();
+  for (const output of outputs) {
+    const type = outputTypeOf(output);
+    counts.set(type, (counts.get(type) ?? 0) + 1);
+  }
+  if (counts.size < 2) return [];
+  return OUTPUT_TYPES.filter((type) => counts.has(type)).sort(
+    (a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0),
+  );
 }
 
 /** A file name as a title: no extension, words for dashes and underscores, a capital first. */
@@ -85,14 +133,15 @@ export function outputTitle(name: string): string {
   return words.charAt(0).toLocaleUpperCase() + words.slice(1);
 }
 
-const FILTERS = ["all", "document", "spreadsheet", "page"] as const;
-type Filter = (typeof FILTERS)[number];
+type Filter = "all" | OutputType;
 
 const TYPE_ICON: Record<OutputType, { icon: ReactNode; tint: string }> = {
   document: { icon: <FileText />, tint: "bg-primary/10 text-primary" },
   spreadsheet: { icon: <Sheet />, tint: "bg-success-bg text-success-fg" },
   page: { icon: <AppWindow />, tint: "bg-info-bg text-info-fg" },
   image: { icon: <FileImage />, tint: "bg-brand/15 text-brand" },
+  audio: { icon: <FileAudio />, tint: "bg-brand/15 text-brand" },
+  video: { icon: <FileVideo />, tint: "bg-brand/15 text-brand" },
   code: { icon: <FileCode />, tint: "bg-surface-muted text-muted-foreground" },
   file: { icon: <FileIcon />, tint: "bg-surface-muted text-muted-foreground" },
 };
@@ -269,7 +318,10 @@ export function OutputsPanel({
   }
 
   const now = new Date();
-  const shown = list.filter((output) => filter === "all" || outputTypeOf(output) === filter);
+  const kinds = kindsOf(list);
+  // A chosen kind this list does not hold, as another chat's, falls back to All.
+  const active = filter !== "all" && kinds.includes(filter) ? filter : "all";
+  const shown = list.filter((output) => active === "all" || outputTypeOf(output) === active);
   const today = shown.filter((output) => sameDay(new Date(output.at), now));
   const earlier = shown.filter((output) => !sameDay(new Date(output.at), now));
   const group = (key: "today" | "earlier", items: ChatOutput[]) =>
@@ -302,27 +354,84 @@ export function OutputsPanel({
             <span className="text-ui tabular-nums text-muted-foreground">{list.length}</span>
           </h2>
         )}
-        {/* Chips a step tighter than the kit's touch spacing, so the four fit a
-            phone's sheet and scroll only in a narrower pane. */}
-        <div style={{ "--control-filter-px": "var(--rome-space-3)" } as CSSProperties}>
-          <FilterChipGroup<Filter>
-            aria-label={t("outputs.filterLabel")}
-            value={filter}
-            onValueChange={setFilter}
-            options={FILTERS.map((value) => ({ value, label: t(`outputs.filters.${value}`) }))}
-          />
-        </div>
-        {indexingNote}
-        {shown.length === 0 ? (
-          <p className="px-1 text-ui text-muted-foreground">{t("outputs.noneOfType")}</p>
-        ) : (
-          <div className="flex flex-col gap-4">
-            {group("today", today)}
-            {group("earlier", earlier)}
+        {/* Chips a step tighter than the kit's touch spacing, so more of them fit
+            a phone's sheet before the row scrolls. */}
+        {kinds.length > 0 && (
+          <div
+            className="flex min-w-0 items-start gap-2"
+            style={{ "--control-filter-px": "var(--rome-space-3)" } as CSSProperties}
+          >
+            <FilterChipGroup<Filter>
+              aria-label={t("outputs.filterLabel")}
+              value={active}
+              onValueChange={setFilter}
+              options={(["all", ...kinds.slice(0, CHIP_KINDS)] as Filter[]).map((value) => ({
+                value,
+                label: t(`outputs.filters.${value}`),
+              }))}
+            />
+            {kinds.length > CHIP_KINDS && (
+              <MoreKinds kinds={kinds.slice(CHIP_KINDS)} value={active} onValueChange={setFilter} />
+            )}
           </div>
         )}
+        {indexingNote}
+        <div className="flex flex-col gap-4">
+          {group("today", today)}
+          {group("earlier", earlier)}
+        </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The kinds past the chips, under one chip that opens a menu of them. It reads
+ * as chosen, and names the kind, while one of them filters the list.
+ */
+function MoreKinds({
+  kinds,
+  value,
+  onValueChange,
+}: {
+  kinds: OutputType[];
+  value: Filter;
+  onValueChange: (kind: OutputType) => void;
+}) {
+  const { t } = useTranslation("chat");
+  const chosen = kinds.find((kind) => kind === value);
+  const chosenLabel = chosen && t(`outputs.filters.${chosen}`);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={chosenLabel ? t("outputs.moreChosen", { kind: chosenLabel }) : undefined}
+          // The kit's filter chip, as a menu's trigger rather than a radio.
+          className={cn(
+            "inline-flex shrink-0 items-center gap-1 rounded-full border px-[var(--control-filter-px)] py-1 text-badge min-h-[var(--control-min-h)] transition-colors outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 [&_svg]:size-4",
+            chosen
+              ? "border-transparent bg-primary text-primary-foreground"
+              : "border-border-strong bg-surface text-foreground hover:bg-surface-muted",
+          )}
+        >
+          {chosenLabel ?? t("outputs.more")}
+          <ChevronDown aria-hidden />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuRadioGroup
+          value={chosen ?? ""}
+          onValueChange={(next) => onValueChange(next as OutputType)}
+        >
+          {kinds.map((kind) => (
+            <DropdownMenuRadioItem key={kind} value={kind}>
+              {t(`outputs.filters.${kind}`)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

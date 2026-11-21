@@ -801,20 +801,28 @@
     "edit": "编辑",
     "doneEditing": "完成",
     "filterLabel": "显示",
-    "noneOfType": "还没有这类产出。",
+    "more": "更多",
+    "moreChosen": "更多：{{kind}}",
     "today": "今天",
     "earlier": "更早",
     "filters": {
       "all": "全部",
       "document": "文档",
+      "image": "图片",
       "spreadsheet": "表格",
-      "page": "页面"
+      "page": "页面",
+      "audio": "音频",
+      "video": "视频",
+      "code": "代码",
+      "file": "其他"
     },
     "types": {
       "document": "文档",
       "spreadsheet": "表格",
       "page": "页面",
       "image": "图片",
+      "audio": "音频",
+      "video": "视频",
       "code": "代码",
       "file": "文件"
     },
