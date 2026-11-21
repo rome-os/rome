@@ -42,10 +42,21 @@ function output(
   };
 }
 
-/** The main chat lists a file of its own and one from a task chat; every other chat none. */
+/**
+ * The main chat lists files of several kinds, of its own and from a task
+ * chat, so the tab offers a filter for each kind it holds; every other chat none.
+ */
 function outputsOf(chatId: string): ChatOutputDto[] {
   if (chatId !== CONCIERGE_CHAT_ID) return [];
   return [
+    output(chatId, "out-map", {
+      name: "beach-map.png",
+      kind: "shown",
+      mimeType: "image/png",
+      path: "/api/assets/0f3c2a9d7b1e4c6a8d5f2b7e9a1c3d4e.png",
+      link: "/api/assets/0f3c2a9d7b1e4c6a8d5f2b7e9a1c3d4e.png",
+      at: new Date(Date.now() - HOUR / 2).toISOString(),
+    }),
     output(chatId, "out-notes", {
       name: "trip-plan.md",
       kind: "written",
@@ -62,6 +73,34 @@ function outputsOf(chatId: string): ChatOutputDto[] {
       kind: "written",
       mimeType: "text/plain",
       at: new Date(Date.now() - 3 * HOUR).toISOString(),
+    }),
+    output(chatId, "out-budget", {
+      name: "trip-budget.csv",
+      kind: "written",
+      mimeType: "text/csv",
+      at: new Date(Date.now() - 4 * HOUR).toISOString(),
+    }),
+    output(chatId, "out-hotels", {
+      name: "hotel-photos.jpg",
+      kind: "shown",
+      mimeType: "image/jpeg",
+      path: "/api/assets/6b2d8e4f1a3c5e7b9d0f2a4c6e8b1d3f.jpg",
+      link: "/api/assets/6b2d8e4f1a3c5e7b9d0f2a4c6e8b1d3f.jpg",
+      at: new Date(Date.now() - 5 * HOUR).toISOString(),
+    }),
+    output(chatId, "out-voice", {
+      name: "voice-note.wav",
+      kind: "written",
+      mimeType: "audio/wav",
+      at: new Date(Date.now() - 25 * HOUR).toISOString(),
+      from: { chatId: "task-chat-1", name: "Draft the itinerary" },
+    }),
+    output(chatId, "out-script", {
+      name: "fetch-fares.py",
+      kind: "written",
+      mimeType: "text/x-python",
+      at: new Date(Date.now() - 25.5 * HOUR).toISOString(),
+      from: { chatId: "task-chat-1", name: "Draft the itinerary" },
     }),
     output(chatId, "out-old", {
       name: "draft.txt",
