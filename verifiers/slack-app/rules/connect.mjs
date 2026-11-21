@@ -74,6 +74,8 @@ async function signInCheck(ctx, inst, ws, rule) {
     signIns: walk.signIns,
     screens: walk.approveScreens,
     path: walk.visited,
+    ...(walk.presentedLink ? { presentedLink: walk.presentedLink } : {}),
+    ...(walk.landedAt ? { landedAt: walk.landedAt } : {}),
   };
   if (walk.outcome !== "connected") {
     evidence.parts = { connected: "no", reached: "not tried", sent: "not tried" };

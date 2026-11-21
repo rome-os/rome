@@ -89,6 +89,18 @@ const server = await serve(async (req, res, url) => {
           ],
         },
       };
+    } else if (breaks.has("present-link") || breaks.has("present-link-refused")) {
+      // Like Rome on #2553: the setup shows a view with Slack's link, and the
+      // sign-in ends on a page of another origin (Rome Cloud's callback
+      // there; localhost here), never back on the instance.
+      const to = new URL("/slack/connect", CLOUD);
+      to.searchParams.set("instance", NAME);
+      to.searchParams.set("state", state);
+      to.searchParams.set("return", `http://localhost:${PORT}/presented`);
+      setup.state = {
+        status: "presenting",
+        view: { title: "Add Rome to Slack", body: ["Approve Rome's Slack app in Slack."], links: [{ label: "Open Slack", url: to.toString() }], progress: true },
+      };
     } else {
       const to = new URL("/slack/connect", CLOUD);
       to.searchParams.set("instance", NAME);
@@ -103,6 +115,23 @@ const server = await serve(async (req, res, url) => {
   if (poll && req.method === "GET") {
     const s = setups.get(poll[1]);
     return s ? send(res, 200, { state: s.state }) : send(res, 404, { error: "Unknown setup." });
+  }
+  // The callback page of the presenting setup. Broken present-link-refused
+  // answers 409, as Rome Cloud does for a workspace another instance holds.
+  if (p === "/presented" && req.method === "GET") {
+    const q = new URL(req.url, "http://x").searchParams;
+    const setup = [...setups.values()].find((s) => s.oauthState === q.get("state"));
+    if (!setup) return sendPage(res, 400, "This link is not valid.");
+    if (q.get("error")) {
+      setup.state = { status: "failed", reason: q.get("message") ?? q.get("error") };
+      return sendPage(res, 400, q.get("message") ?? q.get("error"));
+    }
+    if (breaks.has("present-link-refused")) {
+      setup.state = { status: "failed", reason: "This Slack workspace is already connected to another Rome." };
+      return sendPage(res, 409, "This Slack workspace is already connected to another Rome.");
+    }
+    setTimeout(() => void redeem(setup, q.get("handoff")), 300);
+    return sendPage(res, 200, "Slack is added. You can close this page.");
   }
   if (p === "/api/setups/return" && req.method === "POST") {
     const body = JSON.parse(await readBody(req));
@@ -121,48 +150,7 @@ const server = await serve(async (req, res, url) => {
       setup.state = { status: "awaiting-redirect", url: to.toString() };
       return send(res, 200, { matched: true, state: setup.state });
     }
-    const got = await fetch(`${CLOUD}/slack/redeem`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...cloudAuth },
-      body: JSON.stringify({ instance: NAME, handoff: body.handoff }),
-    });
-    if (!got.ok) {
-      const why = await got.json().catch(() => ({}));
-      setup.state = { status: "failed", reason: why.message ?? `redeem: ${got.status}` };
-      return send(res, 200, { matched: true, state: setup.state });
-    }
-    const grant = await got.json();
-    const connectionId = `conn_${rand()}`;
-    // A repair of the same workspace replaces its connection and keeps its
-    // channel and connected account, as Rome does. Broken R8-new-account
-    // gives the repair a new connected account.
-    const prior = db.connections.find((c) => c.team === grant.team);
-    db.connections = db.connections.filter((c) => c.team !== grant.team);
-    db.connections.push({
-      id: connectionId,
-      channel: prior?.channel ?? randomUUID(),
-      team: grant.team,
-      botToken: grant.botToken,
-    });
-    const accountId = `${grant.team}:${grant.botUserId}`;
-    const kept = db.accounts.find((a) => a.account.id === accountId);
-    if (kept && !breaks.has("R8-new-account")) kept.connection = connectionId;
-    else {
-      if (kept) kept.connection = null;
-      db.accounts.push({
-        account: {
-          platform: "slack",
-          id: kept ? `${accountId}:${rand()}` : breaks.has("R1-account") ? `bot-${rand()}` : accountId,
-        },
-        name: `Rome in ${grant.team}`,
-        agent: breaks.has("R1-agent") ? null : "core:concierge",
-        connection: connectionId,
-      });
-    }
-    save();
-    // Broken R9-extra-call lists the workspace's members on every connect.
-    if (breaks.has("R9-extra-call")) await api(grant.botToken, "users.list", {});
-    setup.state = { status: "done", grant: { connectionId } };
+    await redeem(setup, body.handoff);
     return send(res, 200, { matched: true, state: setup.state });
   }
   // Rome took GET /api/connected-accounts out (#2527); the accounts show on
@@ -1027,4 +1015,55 @@ process.on("SIGTERM", () => {
 for (;;) {
   await drainOnce().catch(() => {});
   await new Promise((r) => setTimeout(r, 150));
+}
+
+/** Redeems the sign-in's handoff with Rome Cloud and connects the workspace; sets the setup's state. */
+async function redeem(setup, handoff) {
+  const got = await fetch(`${CLOUD}/slack/redeem`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...cloudAuth },
+    body: JSON.stringify({ instance: NAME, handoff }),
+  });
+  if (!got.ok) {
+    const why = await got.json().catch(() => ({}));
+    setup.state = { status: "failed", reason: why.message ?? `redeem: ${got.status}` };
+    return;
+  }
+  const grant = await got.json();
+  const connectionId = `conn_${rand()}`;
+  // A repair of the same workspace replaces its connection and keeps its
+  // channel and connected account, as Rome does. Broken R8-new-account
+  // gives the repair a new connected account.
+  const prior = db.connections.find((c) => c.team === grant.team);
+  db.connections = db.connections.filter((c) => c.team !== grant.team);
+  db.connections.push({
+    id: connectionId,
+    channel: prior?.channel ?? randomUUID(),
+    team: grant.team,
+    botToken: grant.botToken,
+  });
+  const accountId = `${grant.team}:${grant.botUserId}`;
+  const kept = db.accounts.find((a) => a.account.id === accountId);
+  if (kept && !breaks.has("R8-new-account")) kept.connection = connectionId;
+  else {
+    if (kept) kept.connection = null;
+    db.accounts.push({
+      account: {
+        platform: "slack",
+        id: kept ? `${accountId}:${rand()}` : breaks.has("R1-account") ? `bot-${rand()}` : accountId,
+      },
+      name: `Rome in ${grant.team}`,
+      agent: breaks.has("R1-agent") ? null : "core:concierge",
+      connection: connectionId,
+    });
+  }
+  save();
+  // Broken R9-extra-call lists the workspace's members on every connect.
+  if (breaks.has("R9-extra-call")) await api(grant.botToken, "users.list", {});
+  setup.state = { status: "done", grant: { connectionId } };
+}
+
+function sendPage(res, status, words) {
+  res.writeHead(status, { "content-type": "text/html" });
+  res.end(`<html><body><p>${words}</p></body></html>`);
 }

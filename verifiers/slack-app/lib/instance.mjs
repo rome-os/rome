@@ -202,7 +202,7 @@ export function instance(inst, slackOrigin, { restartSeconds = 300, cloudSignIn 
       // v5: the browser lands on Rome Cloud's callback page, not back on this
       // instance; Rome then finds the workspace bound and ends the setup.
       let landed = false;
-      for (let step = 0; step < 60; step++) {
+      for (let step = 0; step < 120; step++) {
         if (state.status === "awaiting-input") {
           walk.setupFields.push(...state.form.fields.map((f) => f.label ?? f.name));
           return {
@@ -211,21 +211,44 @@ export function instance(inst, slackOrigin, { restartSeconds = 300, cloudSignIn 
             reason: `setup asked for ${state.form.fields.length} field(s)`,
           };
         }
-        if (state.status === "awaiting-redirect" && !landed) {
+        // A sign-in starts on a redirect, or (Rome on #2553) on a presenting
+        // view that carries a link to open; either counts as one sign-in.
+        const link =
+          state.status === "awaiting-redirect"
+            ? state.url
+            : state.status === "presenting"
+              ? state.view?.links?.find((l) => l?.url)?.url
+              : null;
+        if (link && !landed) {
           walk.signIns++;
+          if (state.status === "presenting") walk.presentedLink = { title: state.view?.title ?? null, label: state.view.links.find((l) => l?.url).label ?? null };
           // The guardian's Rome Cloud session, as the dashboard's browser holds it.
           if (cloudSignIn && inst.guardianEmail) await browserVisit(`${cloudSignIn}${encodeURIComponent(inst.guardianEmail)}`);
-          const back = await this.browse(state.url, walk);
+          const back = await this.browse(link, walk);
           if (back.error) return { ...walk, outcome: "stuck", reason: back.error };
           if (back.landed) {
             walk.landedAt = back.landed;
-            if (back.landed.status !== 200)
-              return { ...walk, outcome: "refused", reason: `${back.landed.at} answered ${back.landed.status}: ${back.landed.words}` };
+            if (back.landed.status !== 200) {
+              // The setup's own words, when it has failed by now, else the page's.
+              await sleep(500);
+              const after = (await call(`/setups/${cid}`)).data?.state;
+              const reason = after?.status === "failed" ? after.reason : back.landed.words;
+              return { ...walk, outcome: "refused", reason: `${back.landed.at} answered ${back.landed.status}: ${reason}` };
+            }
             landed = true;
+          } else if (state.status === "presenting") {
+            // Back on this instance: the browser opens the page, and the setup moves on by itself.
+            const page = await follow(`${back.stoppedAt}`, {});
+            walk.landedAt = { at: back.stoppedAt.origin + back.stoppedAt.pathname, status: page.status };
+            landed = true;
+          } else {
+            const ret = await call("/setups/return", { method: "POST", body: back.params });
+            state = ret.data?.state ?? { status: "failed", reason: JSON.stringify(ret.data) };
             continue;
           }
-          const ret = await call("/setups/return", { method: "POST", body: back.params });
-          state = ret.data?.state ?? { status: "failed", reason: JSON.stringify(ret.data) };
+          await sleep(500);
+          const polled = await call(`/setups/${cid}`);
+          state = polled.data?.state ?? { status: "failed", reason: `poll: ${polled.status}` };
           continue;
         }
         if (state.status === "done") {
@@ -256,7 +279,7 @@ export function instance(inst, slackOrigin, { restartSeconds = 300, cloudSignIn 
         walk.visited.push(...leg.visited.map((v) => new URL(v).origin + new URL(v).pathname));
         if (leg.stoppedAt) {
           const params = Object.fromEntries(leg.stoppedAt.searchParams);
-          return { params };
+          return { params, stoppedAt: leg.stoppedAt };
         }
         const found = forms(leg.html, leg.url);
         // v5: a page off this instance and off Slack with nothing to press is

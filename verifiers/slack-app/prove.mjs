@@ -72,6 +72,12 @@ const CASES = [
     result: "pass",
     what: "Connect shows a Continue screen of Rome's own, a GET form with nothing to fill",
   },
+  {
+    name: "present-link",
+    breaks: "present-link",
+    expect: "like Rome on #2553, Connect shows a view with Slack's link and the sign-in ends on another origin's page: every scored rule passes",
+  },
+  { name: "present-link-refused", breaks: "present-link-refused", rule: "R1", env: { VERIFIER_ONLY: "R1" }, what: "the presented link's sign-in ends on a page that refuses the workspace" },
   { name: "R1-twice", breaks: "R1-twice", rule: "R1", what: "Connect sends the guardian through the Slack sign-in twice" },
   { name: "R1-kept", breaks: "R1-kept", rule: "R1", what: "Rome Cloud keeps the sign-in's outcome after the instance redeemed it" },
   { name: "R1-account", breaks: "R1-account", rule: "R1", what: "the connection's account does not name the workspace" },
