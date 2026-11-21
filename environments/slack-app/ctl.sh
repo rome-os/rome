@@ -12,6 +12,7 @@
 #   environments/slack-app/ctl.sh product-tests <repo-relative test file>...  (R9)
 #   environments/slack-app/ctl.sh old-rows rome-a|rome-b  (whether old-connections' rows are still stored)
 #   environments/slack-app/ctl.sh logs <service> [--since <RFC 3339 time>] [--tail <lines>]
+#   environments/slack-app/ctl.sh gateway-probe rome-a|rome-b  (the slack-gateway Worker, as that instance)
 #
 # A stopped instance's address refuses connections; Rome Cloud, the relay and
 # the fake Slack keep running, so events for it wait in its mailbox.
@@ -28,6 +29,10 @@
 # (tools/old-connections.mjs) into the stopped instance and starts it again;
 # old-rows says, read-only, whether those rows are still in the database.
 # logs prints the last 500 lines, or what --since and --tail ask for.
+# gateway-probe checks the slack-gateway Worker as the instance, with the
+# instance's signer, in its guardian's workspace (tools/gateway-probe.mjs): it
+# binds that workspace to the instance and drains the instance's mailbox, so
+# stop the instance first for the mailbox check.
 # product-tests runs test files of the rome commit under test, unchanged, in
 # an image of that commit with its dependencies (test-runner/Dockerfile). Like
 # every command here it needs a bring-up first: it reads .state/rome-src.
@@ -43,7 +48,7 @@ compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/comp
 action="${1:-}"
 svc="${2:-}"
 case "$action" in
-  stop | start | status | wipe-chat | record | port | token-file | old-connections | old-rows) case "$svc" in rome-a | rome-b) ;; *)
+  stop | start | status | wipe-chat | record | port | token-file | old-connections | old-rows | gateway-probe) case "$svc" in rome-a | rome-b) ;; *)
     echo "instance must be rome-a or rome-b" >&2
     exit 2
     ;;
@@ -59,7 +64,7 @@ case "$action" in
     exit 2
   } ;;
   *)
-    sed -n '2,34p' "$0"
+    sed -n '2,39p' "$0"
     exit 2
     ;;
 esac
@@ -278,6 +283,26 @@ case "$action" in
       exit 1
     }
     read_only old-rows.mjs --ids "$ids"
+    ;;
+  gateway-probe)
+    grep -q '^SLACK_GATEWAY_PORT=' "$STATE_DIR/compose.env" && [ -n "$(compose ps -q slack-gateway)" ] || {
+      echo '{"error":"the slack-gateway Worker is not running: bring the stack up with a rome-cloud commit that has gateway/wrangler.slack.jsonc"}'
+      exit 1
+    }
+    # The guardian's workspace: rome-a's is the first in config/workspaces.json, rome-b's the second.
+    read -r team user < <(node -e '
+      const w = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).workspaces[process.argv[2] === "rome-a" ? 0 : 1];
+      console.log(w.id, w.members.find((m) => m.is_owner).id);' "$ENV_DIR/config/workspaces.json" "$svc")
+    shared="$(sed -n 's/^GATEWAY_SHARED_SECRET=//p' "$STATE_DIR/secrets.env")"
+    cloud_port="$(sed -n 's/^PANTHEON_PORT=//p' "$STATE_DIR/compose.env")"
+    slack_port="$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
+    probe=(--team "$team" --user "$user" --cloud "http://127.0.0.1:$cloud_port" --slack "http://127.0.0.1:$slack_port")
+    if [ -n "$(compose ps -q --status running "$svc")" ]; then
+      compose exec -T -e GATEWAY_SHARED_SECRET="$shared" "$svc" node --input-type=module - "${probe[@]}" <"$ENV_DIR/tools/gateway-probe.mjs"
+    else
+      compose run --rm --no-deps -T -e GATEWAY_SHARED_SECRET="$shared" --entrypoint node \
+        -v "$ENV_DIR/tools/gateway-probe.mjs:/slackenv/gateway-probe.mjs:ro" "$svc" /slackenv/gateway-probe.mjs "${probe[@]}"
+    fi
     ;;
   distribution)
     # Off, only the app's home workspace can approve it, as on Slack.

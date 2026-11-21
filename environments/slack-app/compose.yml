@@ -116,6 +116,58 @@ services:
     volumes:
       - ${STATE_DIR}:/state
 
+  # Rome's Slack app on Rome Cloud's slack-gateway Worker (gateway/
+  # wrangler.slack.jsonc), when the rome-cloud commit has it. up.sh starts it
+  # with the profile; its secrets are this environment's own test values, in
+  # .dev.vars of the scratch worktree, and its addresses point at the fake
+  # Slack, Rome Cloud and the relay through gateway-tls.
+  slack-gateway:
+    <<: *node
+    profiles: [slack-gateway]
+    working_dir: /state/rome-cloud-src/gateway
+    command:
+      - sh
+      - -c
+      - >-
+        corepack enable --install-directory /state/bin &&
+        pnpm install --frozen-lockfile &&
+        exec pnpm exec wrangler dev -c wrangler.slack.jsonc --ip 0.0.0.0 --port 8788
+        --persist-to /state/slack-gateway-data --log-level info
+    environment:
+      <<: *node-env
+      WRANGLER_SEND_METRICS: "false"
+    volumes:
+      - ${STATE_DIR}:/state
+    ports:
+      - 127.0.0.1:${SLACK_GATEWAY_PORT}:8788
+
+  # The Worker takes https origins only, so inside the network its own name,
+  # Rome Cloud and the relay also answer https, with the environment's
+  # certificate, which every container trusts through NODE_EXTRA_CA_CERTS.
+  # Rome Cloud reaches the Worker by its production name, slack.romeos.io.
+  gateway-tls:
+    <<: *node
+    profiles: [slack-gateway]
+    command:
+      - node
+      - /env/tools/tls-proxy.mjs
+      - /state/tls/tls.crt
+      - /state/tls/tls.key
+      - "443"
+      - slack.romeos.io=slack-gateway:8788
+      - cloud.slackenv.test=pantheon-net:3100
+      - relay.slackenv.test=relay:8787
+    environment:
+      <<: *node-env
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    volumes:
+      - ${STATE_DIR}:/state
+      - ${ENV_DIR}:/env:ro
+    networks:
+      default:
+        aliases: [slack.romeos.io, cloud.slackenv.test, relay.slackenv.test]
+
   # Rome Cloud's own forwarder: inside it, 127.0.0.1:${FAKE_SLACK_PORT} is the
   # fake Slack (the address the browser also uses) and 127.0.0.1:${PANTHEON_PORT}
   # is Rome Cloud itself.

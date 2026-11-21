@@ -91,6 +91,24 @@ console.log(
         rome_dependencies: e.ROME_DEPENDENCIES ?? "not_installed",
       },
       agent: { model, pinned_by: "model-proxy", concierge: "on" },
+      // Rome Cloud's slack-gateway Worker, when the rome-cloud commit has it
+      // (wrangler.slack.jsonc); null otherwise. Inside the network it is
+      // https://slack.romeos.io, and the fake Slack sends its events there.
+      // probe runs its checks as rome-a's or rome-b's instance; secrets are the
+      // environment's own test values, in .state/secrets.env.
+      slack_gateway:
+        e.SLACK_GATEWAY === "on"
+          ? {
+              url: `http://127.0.0.1:${e.SLACK_GATEWAY_PORT}`,
+              network_url: "https://slack.romeos.io",
+              health: "https://slack.romeos.io/health",
+              rome_cloud_url: "https://cloud.slackenv.test",
+              relay_origin: "https://relay.slackenv.test",
+              slack_origin: "https://slack.com",
+              logs: [ctl, "logs", "slack-gateway"],
+              probe: [ctl, "gateway-probe"],
+            }
+          : null,
       fake_slack: {
         url: fakeSlack,
         control: `${fakeSlack}/_control`,

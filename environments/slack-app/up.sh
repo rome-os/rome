@@ -119,6 +119,11 @@ worktree() { # <repo> <sha> <dir>
 }
 worktree "$ROME_CLOUD_DIR" "$ROME_CLOUD_SHA" "$STATE_DIR/rome-cloud-src"
 worktree "$ROME_DIR" "$ROME_SHA" "$STATE_DIR/rome-src"
+# A rome-cloud commit with the slack-gateway Worker runs it in place of Rome
+# Cloud's earlier Slack routes: the fake Slack sends its events to the Worker.
+SLACK_GATEWAY=off
+[ -f "$STATE_DIR/rome-cloud-src/gateway/wrangler.slack.jsonc" ] && SLACK_GATEWAY=on
+export SLACK_GATEWAY
 
 secret() { node -e 'console.log(require("crypto").randomBytes(24).toString("hex"))'; }
 if [ ! -f "$STATE_DIR/secrets.env" ]; then
@@ -141,6 +146,9 @@ if [ ! -f "$STATE_DIR/secrets.env" ]; then
   } >"$STATE_DIR/secrets.env"
   chmod 600 "$STATE_DIR/secrets.env"
 fi
+# Added to a state folder made before the Worker was.
+grep -q '^GATEWAY_SHARED_SECRET=' "$STATE_DIR/secrets.env" ||
+  echo "GATEWAY_SHARED_SECRET=$(secret)" >>"$STATE_DIR/secrets.env"
 set -a
 . "$STATE_DIR/secrets.env"
 set +a
@@ -149,7 +157,9 @@ set +a
 # certificate. SLACKENV_EXTRA_CA adds a CA the host's own network needs.
 # wss-primary.slack.com is where Socket Mode connects (slack_bot). A certificate
 # made for fewer names is made again.
-TLS_NAMES="slack.com api.slack.com wss-primary.slack.com"
+# slack.romeos.io, cloud.slackenv.test and relay.slackenv.test are the
+# slack-gateway Worker, Rome Cloud and the relay over https (gateway-tls).
+TLS_NAMES="slack.com api.slack.com wss-primary.slack.com slack.romeos.io cloud.slackenv.test relay.slackenv.test"
 if [ ! -f "$STATE_DIR/tls/tls.crt" ] || [ "$(cat "$STATE_DIR/tls/names" 2>/dev/null)" != "$TLS_NAMES" ]; then
   # shellcheck disable=SC2086 # one argument per name
   node "$ENV_DIR/tools/make-cert.mjs" "$STATE_DIR/tls" $TLS_NAMES
@@ -166,13 +176,18 @@ export SLACKENV_POSTGRES_IMAGE="${SLACKENV_POSTGRES_IMAGE:-postgres:16-alpine}"
 # digest rome's CI pins for it.
 export SLACKENV_PLAYWRIGHT_VERSION="${SLACKENV_PLAYWRIGHT_VERSION:-1.62.1}"
 export SLACKENV_PLAYWRIGHT_IMAGE="${SLACKENV_PLAYWRIGHT_IMAGE:-mcr.microsoft.com/playwright@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e}"
-export PANTHEON_PORT=47100 FAKE_SLACK_PORT=47200 ROME_A_PORT=47181 ROME_B_PORT=47182 BROWSER_PORT=47190 MODEL_PROXY_HOST_PORT=47191
+export PANTHEON_PORT=47100 FAKE_SLACK_PORT=47200 ROME_A_PORT=47181 ROME_B_PORT=47182 BROWSER_PORT=47190 MODEL_PROXY_HOST_PORT=47191 SLACK_GATEWAY_PORT=47192
 export HOST_UID HOST_GID
 HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
 export ENV_DIR STATE_DIR AGENT_MODEL
 export SLACK_APP_ID=A0SLACKENV1 SLACK_CLIENT_ID=1000000001.2000000002
 export FAKE_SLACK_EVENTS_URL="http://pantheon-net:3100/api/slack/events"
+[ "$SLACK_GATEWAY" = on ] && FAKE_SLACK_EVENTS_URL="https://slack.romeos.io/slack/events"
+# The Worker checks that a deposit address is under its RELAY_ORIGIN, which
+# must be https, so Rome Cloud hands out mailboxes under the same origin.
+RELAY_ORIGIN=http://relay:8787
+[ "$SLACK_GATEWAY" = on ] && RELAY_ORIGIN=https://relay.slackenv.test
 # Slack retries after about 0 s, 1 min and 5 min; shortened here (DIFFERENCES.md).
 export FAKE_SLACK_RETRY_DELAYS_MS="${FAKE_SLACK_RETRY_DELAYS_MS:-1000,10000,30000}"
 export ROME_IMAGE="${SLACKENV_ROME_IMAGE:-slackenv-rome:${ROME_SHA:0:12}}"
@@ -182,7 +197,7 @@ CLOUD="http://127.0.0.1:$PANTHEON_PORT"
 # is left out: only `up` passes it, through this script's environment.
 for v in SLACKENV_PROJECT SLACKENV_NODE_IMAGE SLACKENV_POSTGRES_IMAGE SLACKENV_PLAYWRIGHT_IMAGE \
   SLACKENV_PLAYWRIGHT_VERSION HOST_UID HOST_GID ENV_DIR STATE_DIR \
-  PANTHEON_PORT FAKE_SLACK_PORT ROME_A_PORT ROME_B_PORT BROWSER_PORT MODEL_PROXY_HOST_PORT ROME_IMAGE AGENT_MODEL FAKE_SLACK_EVENTS_URL \
+  PANTHEON_PORT FAKE_SLACK_PORT ROME_A_PORT ROME_B_PORT BROWSER_PORT MODEL_PROXY_HOST_PORT SLACK_GATEWAY_PORT ROME_IMAGE AGENT_MODEL FAKE_SLACK_EVENTS_URL \
   FAKE_SLACK_RETRY_DELAYS_MS SLACK_APP_ID SLACK_CLIENT_ID SLACK_CLIENT_SECRET SLACK_SIGNING_SECRET \
   ROME_A_JWT_SECRET ROME_B_JWT_SECRET; do
   printf '%s=%s\n' "$v" "${!v}"
@@ -206,7 +221,8 @@ DOCKERHUB_USERNAME=slackenv
 DOCKERHUB_TOKEN=unused
 CLICKHOUSE_INSTANCE_USERNAME=unused
 CLICKHOUSE_INSTANCE_PASSWORD=unused
-RELAY_ORIGIN=http://relay:8787
+RELAY_ORIGIN=$RELAY_ORIGIN
+GATEWAY_SHARED_SECRET=$GATEWAY_SHARED_SECRET
 RELAY_SIGNING_KEY=$RELAY_SIGNING_KEY
 SLACK_APP_BASE_URL=http://127.0.0.1:$FAKE_SLACK_PORT
 SLACK_APP_CLIENT_ID=$SLACK_CLIENT_ID
@@ -217,6 +233,22 @@ EOF
 chmod 600 "$STATE_DIR/pantheon.env"
 # The relay reads its trust anchor from .dev.vars in its (scratch) worktree.
 printf "RELAY_PUBLIC_KEY='%s'\n" "$RELAY_PUBLIC_KEY" >"$STATE_DIR/rome-cloud-src/webhook-relay/.dev.vars"
+# The Worker's secrets are this environment's test values, the same the fake
+# Slack and Rome Cloud hold; its vars point at them over https (gateway-tls).
+# The real Slack app's values are never read here.
+if [ "$SLACK_GATEWAY" = on ]; then
+  mkdir -p "$STATE_DIR/slack-gateway-data"
+  cat >"$STATE_DIR/rome-cloud-src/gateway/.dev.vars" <<EOF
+SLACK_CLIENT_ID=$SLACK_CLIENT_ID
+SLACK_CLIENT_SECRET=$SLACK_CLIENT_SECRET
+SLACK_SIGNING_SECRET=$SLACK_SIGNING_SECRET
+GATEWAY_SHARED_SECRET=$GATEWAY_SHARED_SECRET
+ROME_CLOUD_URL=https://cloud.slackenv.test
+RELAY_ORIGIN=https://relay.slackenv.test
+SLACK_ORIGIN=https://slack.com
+EOF
+  chmod 600 "$STATE_DIR/rome-cloud-src/gateway/.dev.vars"
+fi
 
 compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/compose.yml" "$@"; }
 
@@ -232,6 +264,10 @@ compose up -d postgres pantheon-net
 # Recreated on every start: their code lives in the scratch worktree, which a
 # new rome-cloud commit replaces under them.
 compose up -d --force-recreate fake-slack relay pantheon model-proxy
+if [ "$SLACK_GATEWAY" = on ]; then
+  log "starting the slack-gateway Worker"
+  compose --profile slack-gateway up -d --force-recreate slack-gateway gateway-tls
+fi
 
 wait_for() { # <what> <seconds> <command...>
   local what="$1" limit="$2"
@@ -255,6 +291,8 @@ wait_for "the fake Slack" 60 curl -fsS "http://127.0.0.1:$FAKE_SLACK_PORT/_contr
 wait_for "Rome Cloud" 600 curl -fsS -o /dev/null "$CLOUD/api/health"
 # run-server answers plain HTTP once it listens.
 wait_for "the browser" 300 curl -s -o /dev/null "http://127.0.0.1:$BROWSER_PORT/"
+[ "$SLACK_GATEWAY" = off ] ||
+  wait_for "the slack-gateway Worker" 300 compose exec -T gateway-tls node -e 'fetch("https://slack.romeos.io/health").then(r=>process.exit(r.ok?0:1),()=>process.exit(1))'
 wait_for "the relay" 300 compose exec -T relay node -e 'fetch("http://127.0.0.1:8787/").then(r=>process.exit(r.status<500?0:1),()=>process.exit(1))'
 
 # Two guardian accounts, one per instance. Created directly, as the seed
