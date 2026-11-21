@@ -409,7 +409,7 @@ import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
 import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
 import { isSlackFrame } from "./connections/kinds/slack-app/deposit.js";
 import { deliverSlackFrame } from "./connections/kinds/slack-app/drain.js";
-import { drainsWithClaims, MailboxClaims } from "./relay/mailbox-claims.js";
+import { MailboxClaims } from "./relay/mailbox-claims.js";
 import {
   RELAY_SETTING_KEY,
   deriveDepositUrl,
@@ -1824,12 +1824,8 @@ async function main() {
   // the drainer exists, so the reload is bound below.
   let refreshRelayDrains: () => void = () => {};
   const mailboxClaims = new MailboxClaims(() => refreshRelayDrains());
-  const resolveDrains = async (): Promise<RelayDrain[]> =>
-    drainsWithClaims({
-      resolved: await resolveRelayDrains(settingsRepo, appCatalog),
-      setting: await settingsRepo.get<unknown>(RELAY_SETTING_KEY),
-      claimed: mailboxClaims.any,
-    });
+  const resolveDrains = (): Promise<RelayDrain[]> =>
+    resolveRelayDrains(settingsRepo, appCatalog, mailboxClaims);
   const relayDrains = await resolveDrains();
   const relayDispatcher = new AppApiDispatcher(appCatalog, {
     db,
@@ -1987,7 +1983,13 @@ async function main() {
         return typeof relay?.depositUrl === "string" && relay.depositUrl ? relay.depositUrl : null;
       },
       deliveryAttempts: DELIVERY_ATTEMPTS,
-      claimMailbox: () => mailboxClaims.claim(),
+      // A frame the drain gave up on while the connection was down waits at
+      // the head of the mailbox; a connection starting retries it at once.
+      claimMailbox: () => {
+        const release = mailboxClaims.claim();
+        relayDrainer.resumeBlocked();
+        return release;
+      },
       listens: (connectionId) => accountListening.listens(connectionId),
     },
     settingsRepo,
@@ -2547,6 +2549,7 @@ async function main() {
       phoneWatching,
       dashboardActivity,
       relayDrainer,
+      mailboxClaims,
       bootVersionReport,
       favorService,
       appConnections,
@@ -2617,7 +2620,7 @@ async function main() {
         }
       },
       provisionNodeCaller,
-      () => provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer }),
+      () => provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer, mailboxClaims }),
       () => favorDispatchRunner.runOnce(),
       () => syncStoredVisitorAllowList(dashboardAccessStore, visitorAllowListSync),
     ];

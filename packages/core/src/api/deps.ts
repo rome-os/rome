@@ -64,6 +64,7 @@ import type { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
 import type { PhoneWatching } from "../lib/phone-watching.js";
 import type { DashboardActivity } from "../lib/dashboard-activity.js";
 import type { RelayDrainer } from "../relay/drainer.js";
+import type { MailboxClaimed } from "../relay/settings.js";
 import type { BootVersionReport } from "../instance/boot-version-report.js";
 import type { ReleaseNotes } from "../instance/system-upgrade/release-notes.js";
 import type { SystemUpgradeService } from "../instance/system-upgrade/service.js";
@@ -259,6 +260,8 @@ export interface ApiDeps {
   /** Webhook relay drainer — present so the Integrations settings route can
    * hot-reload the live connection when the guardian edits relay credentials. */
   relayDrainer: RelayDrainer;
+  /** Connections running on the relay mailbox, so a reload keeps draining it for them. */
+  mailboxClaims?: MailboxClaimed;
   /** Boot-time comparison of the running release version against the one the
    * previous boot recorded — surfaced via `GET /api/build-info` so the
    * dashboard can show an "upgraded since last boot" notice. */

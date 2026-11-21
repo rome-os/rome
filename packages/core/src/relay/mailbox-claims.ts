@@ -4,12 +4,11 @@
 // such a connection runs. With neither, nothing drains it and a webhook waits
 // there until an app that takes it is installed.
 
-import type { RelayDrain } from "./drainer.js";
-import { isCompleteRelaySetting } from "./settings.js";
+import type { MailboxClaimed } from "./settings.js";
 
 /** Counts the running connections that take frames from the mailbox, and
  *  calls `changed` when the first claim is made or the last one released. */
-export class MailboxClaims {
+export class MailboxClaims implements MailboxClaimed {
   private held = 0;
 
   constructor(private readonly changed: () => void) {}
@@ -28,26 +27,4 @@ export class MailboxClaims {
       if (--this.held === 0) this.changed();
     };
   }
-}
-
-/**
- * The drains to run: those an app's webhooks resolved to, else, while a
- * connection claims the mailbox, the mailbox alone with no app to deliver its
- * webhooks to.
- */
-export function drainsWithClaims(input: {
-  resolved: RelayDrain[];
-  setting: unknown;
-  claimed: boolean;
-}): RelayDrain[] {
-  if (input.resolved.length > 0) return input.resolved;
-  if (!input.claimed || !isCompleteRelaySetting(input.setting)) return [];
-  return [
-    {
-      connectUrl: input.setting.drainUrl,
-      drainKey: input.setting.drainKey,
-      targetAppId: "",
-      targetPath: [],
-    },
-  ];
 }

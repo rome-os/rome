@@ -94,7 +94,9 @@ export function integrationsRoutes(deps: ApiDeps): Hono {
     let reloaded = false;
     let reloadError: string | undefined;
     try {
-      await deps.relayDrainer.reload(await resolveRelayDrains(deps.settingsRepo, deps.appCatalog));
+      await deps.relayDrainer.reload(
+        await resolveRelayDrains(deps.settingsRepo, deps.appCatalog, deps.mailboxClaims),
+      );
       reloaded = true;
     } catch (err) {
       reloadError = err instanceof Error ? err.message : String(err);

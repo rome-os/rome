@@ -257,7 +257,8 @@ export interface SlackAppDescriptorDeps {
   depositUrl: () => Promise<string | null>;
   /** How many times the mailbox's drain delivers one frame before it holds it. */
   deliveryAttempts: number;
-  /** Has the instance's mailbox drained while the connection runs; the
+  /** Has the instance's mailbox drained while the connection runs, and
+   *  retries a frame it gave up on while the connection was down; the
    *  returned function lets go. */
   claimMailbox?: () => () => void;
   /** Whether Rome listens to the account behind a connection. */
@@ -398,7 +399,6 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
               faultSink = fault;
               adapter.onInbound(deliver);
               adapter.start();
-              releaseMailbox = deps.claimMailbox?.() ?? null;
               unregister = kit.registerIngress(async (input) => {
                 const frame = input as Partial<MailboxFrame> | null;
                 return adapter.handleFrame({
@@ -406,6 +406,8 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
                   body: frame?.body ?? null,
                 });
               });
+              // Last, so a frame the mailbox retries at once finds the ingress.
+              releaseMailbox = deps.claimMailbox?.() ?? null;
               void refresh();
             },
             stop() {

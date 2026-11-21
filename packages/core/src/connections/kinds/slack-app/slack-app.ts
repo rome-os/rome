@@ -307,7 +307,7 @@ export class SlackAppAdapter {
     // again; Chats records a message it already holds only once. The drain
     // gives up on a frame after a few retries and waits to be resumed, so the
     // refusal also reports the connection down: the runtime starts it again
-    // after a backoff, with a fresh drain that retries the frame. Recording
+    // after a backoff, and the connection starting resumes the frame. Recording
     // stopping is no fault while the drain's own retries remain: an app
     // swapping its hook stops it for a moment. A stop that outlasts them is.
     if (!this.handler) return { status: 500 };
