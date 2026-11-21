@@ -46,6 +46,8 @@ struct SelectableTextStyle {
     var lineSpacing: CGFloat = 5
     var color: UIColor
     var dynamicTypeSize: DynamicTypeSize = .large
+    /// The screen's pixels per point: `Text` sizes to whole pixels.
+    var displayScale: CGFloat = 2
 
     /// A design size at this text size, as `romeFont` scales it.
     func scaled(_ size: CGFloat) -> CGFloat { ScaledFont.scaled(size, for: dynamicTypeSize) }
@@ -202,7 +204,11 @@ enum SelectableText {
         let markerFont = ordered ? UIFont.monospacedDigitSystemFont(ofSize: size, weight: .regular) : UIFont.systemFont(ofSize: size, weight: .bold)
         for (index, item) in items.enumerated() {
             let marker = ordered ? "\(start + index)." : "•"
-            let width = max(markerColumn, (marker as NSString).size(withAttributes: [.font: markerFont]).width)
+            // The marker's width as `Text` takes it, up to a whole pixel, so
+            // each item's text starts where it does outside select mode.
+            let scale = max(style.displayScale, 1)
+            let measured = ((marker as NSString).size(withAttributes: [.font: markerFont]).width * scale).rounded(.up) / scale
+            let width = max(markerColumn, measured)
             let textStart = indent + width + markerGap
             let paragraph = paragraphStyle(lineSpacing: style.lineSpacing)
             paragraph.firstLineHeadIndent = textStart
@@ -364,7 +370,7 @@ struct SelectableTextView: UIViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: SelectingTextView, context: Context) -> CGSize? {
-        uiView.fittingSize(width: proposal.width)
+        uiView.fittingSize(width: proposal.width, scale: context.environment.displayScale)
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
@@ -446,8 +452,7 @@ final class SelectingTextView: UITextView {
     /// The text's size laid out in `width`: as wide as its widest line, up to
     /// `width`, and as tall as its lines. Rounded up to a pixel, so the text
     /// view, given that width back, breaks its lines in the same places.
-    func fittingSize(width: CGFloat?) -> CGSize {
-        let scale = window?.screen.scale ?? UITraitCollection.current.displayScale
+    func fittingSize(width: CGFloat?, scale: CGFloat) -> CGSize {
         let limit = wraps ? (width.map { $0.isFinite ? $0 : .greatestFiniteMagnitude } ?? .greatestFiniteMagnitude) : .greatestFiniteMagnitude
         let measured = Self.measure(attributedText ?? NSAttributedString(), width: limit)
         func up(_ value: CGFloat) -> CGFloat { (value * max(scale, 1)).rounded(.up) / max(scale, 1) }

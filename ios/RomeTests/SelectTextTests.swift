@@ -170,9 +170,9 @@ import UIKit
 
     /// The hugged size both ways, at a width the bubble offers: its text
     /// takes only as much width as its lines need.
-    private func hugged(_ source: String, width: CGFloat) -> (normal: CGSize, selecting: CGSize) {
+    private func hugged(_ source: String, width: CGFloat, scale: CGFloat) -> (normal: CGSize, selecting: CGSize) {
         func size(_ view: some View) -> CGSize {
-            UIHostingController(rootView: view).sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+            UIHostingController(rootView: view.environment(\.displayScale, scale)).sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
         }
         return (size(MarkdownText(source: source).fixedSize(horizontal: false, vertical: true)),
                 size(MarkdownText(source: source, selectable: true).fixedSize(horizontal: false, vertical: true)))
@@ -183,6 +183,8 @@ import UIKit
     @Test(arguments: [
         "出版社回信了，说书稿下周一前可以看。",
         "今天的摘要：三封邮件，一个日程。",
+        // The long-chat demo's numbered digest: each item a CJK line past its number.
+        (1...12).map { "\($0). 今天的邮件摘要第 \($0) 条：项目进度、会议时间和需要你回复的事项。" }.joined(separator: "\n"),
         "今天的天气很好，适合出去走走。下午三点以后可能有雨，记得带伞。",
         "降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。",
         "A reply long enough to wrap onto a few lines in a bubble, so the line spacing counts.",
@@ -192,14 +194,17 @@ import UIKit
         "1. Book the flight\n2. Pick a hotel near the station\n   - with breakfast\n   - 安静的房间，最好朝南\n10. Pack",
     ])
     func selectModeKeepsTheWidthAndLineBreaks(source: String) {
-        var worst: (width: CGFloat, normal: CGSize, selecting: CGSize)?
-        for width in stride(from: CGFloat(180), through: 340, by: 1) {
-            let measured = hugged(source, width: width)
-            let off = max(abs(measured.normal.width - measured.selecting.width), abs(measured.normal.height - measured.selecting.height))
-            if off > 0.5, worst == nil { worst = (width, measured.normal, measured.selecting) }
+        var worst: (width: CGFloat, scale: CGFloat, normal: CGSize, selecting: CGSize)?
+        // A phone has 3 pixels a point, an iPad and a Mac 2.
+        for scale: CGFloat in [2, 3] {
+            for width in stride(from: CGFloat(180), through: 340, by: 1) where worst == nil {
+                let measured = hugged(source, width: width, scale: scale)
+                let off = max(abs(measured.normal.width - measured.selecting.width), abs(measured.normal.height - measured.selecting.height))
+                if off > 0.5 { worst = (width, scale, measured.normal, measured.selecting) }
+            }
         }
         if let worst {
-            print("select-text width at \(worst.width): \(worst.normal) → \(worst.selecting): \(source.prefix(20))")
+            print("select-text width at \(worst.width)@\(worst.scale)x: \(worst.normal) → \(worst.selecting): \(source.prefix(20))")
         }
         #expect(worst == nil)
     }

@@ -703,6 +703,7 @@ struct MarkdownText: View {
     @Environment(\.taskLinks) private var taskLinks
     @Environment(\.openTaskChat) private var openTaskChat
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.displayScale) private var displayScale
 
     /// The message's images, for paging in the viewer.
     private var gallery: [ViewerImage] {
@@ -765,7 +766,7 @@ struct MarkdownText: View {
     /// of them opening selected.
     @ViewBuilder
     private var selectableBlocks: some View {
-        let style = SelectableTextStyle(fontSize: fontSize, lineSpacing: lineSpacing, color: UIColor(color), dynamicTypeSize: dynamicTypeSize)
+        let style = SelectableTextStyle(fontSize: fontSize, lineSpacing: lineSpacing, color: UIColor(color), dynamicTypeSize: dynamicTypeSize, displayScale: displayScale)
         let segments = SelectableText.segments(blocks, style: style, tasks: textOnly ? nil : taskLinks)
         let first = segments.firstIndex { if case .block = $0 { false } else { true } }
         ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
