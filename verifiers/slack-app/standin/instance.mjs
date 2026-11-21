@@ -195,7 +195,9 @@ const server = await serve(async (req, res, url) => {
           agent: a?.agent ?? null,
         };
       }),
-      ...(db.old ?? []).map((c) => ({ id: c.id, connectionKind: c.kind, label: c.kind, state: "working" })),
+      ...(db.old ?? [])
+        .filter(() => !breaks.has("NOOLD"))
+        .map((c) => ({ id: c.id, connectionKind: c.kind, label: c.kind, state: "working" })),
     ];
     return send(res, 200, { connections: [...held, ...placeholders] });
   }
@@ -233,23 +235,34 @@ const server = await serve(async (req, res, url) => {
   }
   // The dashboard's chat with the Concierge, where its actions run. Like the
   // product, it answers "On it" at once and posts the task's result later.
-  if (p === "/api/chat/sessions/concierge/turns" && req.method === "POST") {
+  // A new Concierge chat, as the dashboard's "new chat" makes one.
+  if (p === "/api/chat/sessions" && req.method === "POST") {
+    const id = `chat-${rand()}`;
+    db.chats ??= {};
+    db.chats[id] = [];
+    save();
+    return send(res, 200, { id });
+  }
+  const turns = p.match(/^\/api\/chat\/sessions\/([^/]+)\/turns$/);
+  if (turns && req.method === "POST") {
+    const sid = turns[1];
     const { text } = JSON.parse(await readBody(req));
-    db.webchat = [
-      ...(db.webchat ?? []),
-      { id: rand(), role: "user", content: text },
-      { id: rand(), role: "assistant", content: "On it." },
-    ];
+    db.chats ??= {};
+    if (sid !== "concierge" && !db.chats[sid]) return send(res, 404, { error: "Session not found" });
+    const log = () => (sid === "concierge" ? (db.webchat ??= []) : db.chats[sid]);
+    log().push({ id: rand(), role: "user", content: text }, { id: rand(), role: "assistant", content: "On it." });
     save();
     setTimeout(async () => {
       const conn = db.connections[0] ?? (db.tokenFile ? { team: db.tokenFile.teamId } : null);
       const reply = (conn && (await act(conn, text ?? "", null))) ?? "Sure, happy to help with that.";
-      db.webchat = [...db.webchat, { id: rand(), role: "assistant", content: reply }];
+      log().push({ id: rand(), role: "assistant", content: reply });
       save();
     }, TASK_DELAY_MS);
-    return send(res, 200, { turnId: rand(), disposition: "started", sessionId: "concierge" });
+    return send(res, 200, { turnId: rand(), disposition: "started", sessionId: sid });
   }
-  if (p === "/api/chat/sessions/concierge/messages") return send(res, 200, db.webchat ?? []);
+  const msgs = p.match(/^\/api\/chat\/sessions\/([^/]+)\/messages$/);
+  if (msgs && req.method === "GET")
+    return msgs[1] === "concierge" ? send(res, 200, db.webchat ?? []) : db.chats?.[msgs[1]] ? send(res, 200, db.chats[msgs[1]]) : send(res, 404, { error: "Session not found" });
   // The old kinds cannot be newly connected. Broken R10-bot-connects lets a
   // slack_bot setup start; R10-oauth-connects sends the OAuth start on to
   // Slack; R10-reconnect allows both once one was disconnected.
@@ -412,10 +425,14 @@ async function act(conn, text, dmChannel) {
     await api(conn.botToken, "reactions.add", { channel, timestamp: h.messages?.[0]?.ts, name: "thumbsup" });
     return "Done.";
   }
+  // Under NOOLD the guardian's old Slack sign-in is gone: a send asked
+  // through it gets a plain answer and nothing is posted.
+  if (send && breaks.has("NOOLD") && /sign-?in/i.test(text))
+    return "Sending through your own Slack sign-in isn't available any more. I can post through Rome's Slack app instead if you like.";
   if (send) {
     // Like the product, the official app sends when connected; an old OAuth
     // slack connection's token file serves when it is alone.
-    const token = conn.botToken ?? db.tokenFile?.botToken;
+    const token = conn.botToken ?? (breaks.has("NOOLD") ? undefined : db.tokenFile?.botToken);
     const channel = id ?? (await byName(send[1]));
     if (!channel) return `I can't find #${send[1]}.`;
     const r = await api(token, "chat.postMessage", { channel, text: send[2] });
@@ -828,7 +845,10 @@ if (db.old?.length) {
   }
   db.oldStarted = true;
   save();
-  for (const c of db.old.filter((x) => x.kind === "slack_bot")) await openSocket(c).catch(() => {});
+  // Stand-in mode NOOLD (draft R10): the old kinds are gone, so a stored one
+  // is skipped at boot and answers nothing.
+  if (!breaks.has("NOOLD"))
+    for (const c of db.old.filter((x) => x.kind === "slack_bot")) await openSocket(c).catch(() => {});
 }
 
 process.on("SIGTERM", () => {

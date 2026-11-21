@@ -14,7 +14,7 @@ import { connectAs, r1, r2, r3 } from "./rules/connect.mjs";
 import { r5, r8, r12, r13 } from "./rules/phase2.mjs";
 import { r14 } from "./rules/groups.mjs";
 import { dedup } from "./rules/dedup.mjs";
-import { r9, r10 } from "./rules/phase3.mjs";
+import { r9, r10, r10NoOld } from "./rules/phase3.mjs";
 import { r11 } from "./rules/structure.mjs";
 
 const RULES = [
@@ -61,11 +61,32 @@ const ORDER = ["R11", "R1", "R3", "bindB", "R4", "R7", "R5", "R12", "R13", "R9",
 // reported apart from the rule set: "dedup" is the check proposed in place of
 // R13 (as R13-dedup, never failing the run); "r9-search" scores R9's
 // searches by the proposed wording (named chat only), and the report names it.
-const DRAFTS_IDS = new Set(["R13-dedup"]);
+const DRAFTS_IDS = new Set(["R13-dedup", "R9-search-draft", "R10-noold-draft"]);
 const DRAFTS = new Set((process.env.VERIFIER_DRAFTS ?? "").split(",").filter(Boolean));
 if (DRAFTS.has("dedup")) {
   RULES.push({ id: "R13-dedup", phase: 2, title: "Draft: no record of its own; a message delivered twice is recorded and answered once", check: dedup, draft: true });
   ORDER.splice(ORDER.indexOf("R13") + 1, 0, "R13-dedup");
+}
+if (DRAFTS.has("r9-search")) {
+  // Its operations run inside R9, which leaves the result on ctx.
+  RULES.push({
+    id: "R9-search-draft",
+    phase: 3,
+    title: "Draft: search within a named chat; across chats is not offered",
+    check: async (c) => c.r9SearchDraft ?? { result: "not checked", reason: "R9 did not run its searches" },
+    draft: true,
+  });
+  ORDER.splice(ORDER.indexOf("R9") + 1, 0, "R9-search-draft");
+}
+if (DRAFTS.has("r10-noold")) {
+  RULES.push({
+    id: "R10-noold-draft",
+    phase: 3,
+    title: "Draft: one Slack entry, Rome's Slack app; the older Slack bot and the old sign-in are removed",
+    check: r10NoOld,
+    draft: true,
+  });
+  ORDER.splice(ORDER.indexOf("R10") + 1, 0, "R10-noold-draft");
 }
 
 const [envPath, outDir, verifierCommit] = process.argv.slice(2);
@@ -243,6 +264,8 @@ function selection(spec) {
     else throw new Error(`--only: no rule or phase named ${part}`);
   }
   if (ids.has("R1")) ids.add("R3");
+  if (ids.has("R9") && RULES.some((r) => r.id === "R9-search-draft")) ids.add("R9-search-draft");
+  if (ids.has("R10") && RULES.some((r) => r.id === "R10-noold-draft")) ids.add("R10-noold-draft");
   return ids;
 }
 

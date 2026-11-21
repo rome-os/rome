@@ -169,15 +169,29 @@ export function instance(inst, slackOrigin, { restartSeconds = 300 } = {}) {
     },
 
     /**
+     * Starts a new dashboard chat with the Concierge, as the dashboard's "new
+     * chat" does (`POST /chat/sessions {agentName}`), and returns its id. A
+     * fresh chat carries nothing an earlier one read. Throws, naming the path
+     * and status, when no id comes back.
+     */
+    async newConciergeChat(name = "Verifier") {
+      const made = await call("/chat/sessions", { method: "POST", body: { agentName: "core:concierge", name } });
+      const id = made.data?.id ?? made.data?.session?.id ?? made.data?.sessionId;
+      if (!made.ok || !id)
+        throw new Error(`POST /api/chat/sessions on ${inst.name} answered ${made.status} without a chat id: ${JSON.stringify(made.data).slice(0, 200)}`);
+      return id;
+    },
+
+    /**
      * Asks the Concierge in the dashboard's own chat, as the guardian
      * (`POST /chat/sessions/concierge/turns`), and returns the text of its
      * replies once they stop changing, with {chat, turnId, at}. Reads the
      * chat through `GET /chat/sessions/{id}/messages`.
      */
-    async askDashboard(text, { timeoutMs = 180_000, settleMs = 5_000 } = {}) {
-      let chat = conciergeChat;
+    async askDashboard(text, { timeoutMs = 180_000, settleMs = 5_000, chat: given } = {}) {
+      let chat = given ?? conciergeChat;
       let sent = await call(`/chat/sessions/${chat}/turns`, { method: "POST", body: { text } });
-      if (sent.status === 404) {
+      if (sent.status === 404 && !given) {
         const made = await call("/chat/sessions", { method: "POST", body: { agentName: "core:concierge" } });
         chat = conciergeChat = made.data?.id ?? made.data?.session?.id ?? chat;
         sent = await call(`/chat/sessions/${chat}/turns`, { method: "POST", body: { text } });

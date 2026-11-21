@@ -5,6 +5,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { request, sleep, Unreachable } from "../lib/http.mjs";
 import { replyAfter } from "../lib/replies.mjs";
+import { connectAs, oneReply } from "./connect.mjs";
 
 // The connector app's existing tests for its Slack actions on main: what R9
 // runs unchanged on the product commit.
@@ -250,9 +251,10 @@ const REFUSALS = [
  * chat is read again for up to answerSeconds: until `right(asked)` holds
  * when given, else until something follows the first reply.
  */
-export async function askConcierge(ctx, inst, text, { right } = {}) {
+export async function askConcierge(ctx, inst, text, { right, chat } = {}) {
   const since = await ctx.slack.seq();
   const asked = await inst.askDashboard(text, {
+    chat,
     timeoutMs: ctx.env.timeouts.replySeconds * 3000,
     settleMs: ctx.env.timeouts.settleSeconds * 1000,
   });
@@ -403,6 +405,7 @@ export async function liveCheck(ctx) {
   const observations = {};
   ctx.dashboardReplies = [];
   ctx.r9Timeline = [];
+  const draftOps = [];
   try {
     const g = { general, news, quiet };
     for (const [i, s] of SENDS.entries())
@@ -459,18 +462,17 @@ export async function liveCheck(ctx) {
     const searchOpts = (q, asks) => ({ asks, methods: null, ids: [news, quiet, dm], judge: async (a) => holds(a.reply, q.found.mark) });
     for (const [i, q] of SEARCHES.entries()) {
       await seed(q);
-      if (!ctx.drafts?.has("r9-search")) {
-        ops.push({ op: `search ${i + 1}`, ...(await operate(ctx, ws, searchOpts(q, SEARCH_ASKS.map((f) => f(q.word))))) });
-        continue;
-      }
+      ops.push({ op: `search ${i + 1}`, ...(await operate(ctx, ws, searchOpts(q, SEARCH_ASKS.map((f) => f(q.word))))) });
+      if (!ctx.drafts?.has("r9-search")) continue;
       // Draft (planner's proposed wording, not scored until Ouou agrees):
       // search works within a named chat, and a search across chats gets a
-      // plain answer that it is not available, with nothing made up.
-      ops.push({
+      // plain answer that it is not available, with nothing made up. Kept
+      // apart from R9's own operations and reported as R9-search-draft.
+      draftOps.push({
         op: `search ${i + 1} in a named chat`,
         ...(await operate(ctx, ws, searchOpts(q, NAMED_SEARCH_ASKS.map((f) => f(q.word, news))))),
       });
-      ops.push(await acrossChats(ctx, q));
+      draftOps.push(await acrossChats(ctx, q));
     }
     // A read and a search after a wipe of Rome's copy of the direct message.
     // A search naming #news after its wipe is R14's.
@@ -552,6 +554,15 @@ export async function liveCheck(ctx) {
     ...ctx.dashboardReplies.map((r) => ({ where: "dashboard chat", text: r.reply })),
   ].filter((l) => outsideMarks.some((m) => holds(l.text, m)));
   ctx.dashboardReplies = undefined;
+  if (ctx.drafts?.has("r9-search")) {
+    const failed = draftOps.filter((o) => o.result === "fail");
+    const open = draftOps.filter((o) => o.result !== "pass" && o.result !== "fail");
+    ctx.r9SearchDraft = {
+      result: failed.length ? "fail" : open.length || !draftOps.length ? "not checked" : "pass",
+      reason: draftOps.length ? draftOps.map((o) => `${o.op} ${o.result} (${o.why})`).join("; ") : "R9's live part did not reach its searches",
+      evidence: { ops: draftOps },
+    };
+  }
   evidence.timeline = ctx.r9Timeline;
   ctx.r9Timeline = undefined;
   evidence.userTokenCalls = userCalls.map((c) => ({ seq: c.seq, method: c.method, teamId: c.teamId }));
@@ -807,7 +818,7 @@ function viaOf(input, depth = 0) {
 }
 
 /** The old OAuth slack sends: a Concierge post to #general arrives from that app. */
-async function oauthSends(ctx, ws, oauth, sentence, markWord, asks = SEND_ASKS) {
+async function oauthSends(ctx, ws, oauth, sentence, markWord, asks = SEND_ASKS, { chat } = {}) {
   const w = (await ctx.slack.state()).workspaces.find((x) => x.id === ws.id);
   const general = w?.groups?.find((g) => g.name === "general")?.id;
   const marked = async (since) =>
@@ -816,6 +827,7 @@ async function oauthSends(ctx, ws, oauth, sentence, markWord, asks = SEND_ASKS) 
   for (const f of asks) {
     const text = f(sentence, { general });
     const asked = await askConcierge(ctx, ctx.b, text, {
+      chat,
       right: async (a) => (await marked(a.since)).length > 0,
     });
     const posts = await marked(asked.since);
@@ -958,4 +970,99 @@ export async function r10(ctx) {
   if (problems.length) return { result: "fail", reason: `${problems.join("; ")}. ${summary}`, evidence };
   if (unchecked.length) return { result: "not checked", reason: `not all checked (${unchecked.join("; ")}). ${summary}`, evidence };
   return { result: "pass", reason: summary, evidence };
+}
+
+
+/**
+ * Draft R10 (planner, 2026-11-21, Ouou: "every old Slack support is gone"),
+ * run with VERIFIER_DRAFTS=r10-noold after R10, never failing the run:
+ * "Connect shows one Slack entry, Rome's Slack app. The older Slack bot and
+ * the old Slack sign-in are removed. A stored connection of either kind is
+ * ignored at start and Rome's Slack app keeps working."
+ *
+ * On the second instance with workspace B: one Slack entry and no old kind
+ * offered; a new slack_bot or slack connect refused or unknown; Rome's Slack
+ * app connected (again, after R10 disconnected it); one stored connection of
+ * each old kind seeded; then, before and after a restart, Rome lists only
+ * Rome's Slack app, the old bot answers nothing, a direct message to Rome's
+ * Slack app is answered, and an ask to post through the guardian's Slack
+ * sign-in gets a plain answer that it is not available, with nothing sent.
+ * The ask goes in a fresh dashboard chat, so it does not lean on an older
+ * chat's list of connections.
+ */
+export async function r10NoOld(ctx) {
+  const inst = ctx.b;
+  const ws = ctx.wsB;
+  const officialKind = ctx.env.instances[1]?.connect?.kind ?? "slack_app";
+  const evidence = {};
+  const problems = [];
+  const unchecked = [];
+  const pickerHolds = (p, when) => {
+    if (p.error) return unchecked.push(`picker ${when}: ${p.error}`);
+    if (p.official !== 1) problems.push(`Connect shows ${p.official} entries of Rome's Slack app ${when}, not 1`);
+    if (p.oldOffered) problems.push(`Connect offers ${p.oldOffered} old Slack kind(s) ${when}`);
+  };
+  pickerHolds((evidence.pickerBefore = await pickerSlack(inst, officialKind)), "before the upgrade");
+  for (const kind of ["slack_bot", "slack"]) {
+    const r = await newConnectRefused(inst, kind);
+    evidence[`newConnect_${kind}`] = r;
+    if (!r.refused) problems.push(`a new ${kind} connection could be started (${r.route} answered ${r.status})`);
+  }
+  // Rome's Slack app on B, which R10 disconnected.
+  if (!(await inst.accounts()).some((x) => x.kind === officialKind)) {
+    const walk = await connectAs(ctx, inst, ws).catch((e) => ({ outcome: "stuck", reason: e.message }));
+    evidence.reconnect = { outcome: walk.outcome, reason: walk.reason ?? null };
+    if (walk.outcome !== "connected")
+      return { result: "not checked", reason: `Rome's Slack app could not be connected to ${ws.id} again: ${walk.reason}`, evidence };
+  }
+  let old;
+  try {
+    old = await inst.seedOldConnections();
+  } catch (err) {
+    return { result: "not checked", reason: `the environment's seed of the old connections failed: ${err.message.slice(0, 300)}`, evidence };
+  }
+  if (!old?.slack_bot || !old?.slack) return { result: "not checked", reason: "the seed named no slack_bot or slack connection", evidence: { ...evidence, seed: old ?? null } };
+  evidence.seed = old;
+  const w = (await ctx.slack.state()).workspaces.find((x) => x.id === ws.id);
+  const general = w?.groups?.find((g) => g.name === "general")?.id;
+  evidence.steps = {};
+  for (const when of ["after the upgrade", "after a restart"]) {
+    if (when === "after a restart") {
+      await inst.stop();
+      await inst.start();
+      const up = Date.now() + ctx.env.timeouts.restartSeconds * 1000;
+      while (Date.now() < up && !(await inst.up())) await sleep(1000);
+      await sleep(ctx.env.timeouts.settleSeconds * 1000);
+    }
+    const step = {};
+    const held = await inst.accounts();
+    step.held = held.map((x) => x.kind);
+    const oldHeld = held.filter((x) => OLD_KINDS.includes(x.kind));
+    if (oldHeld.length) problems.push(`${when}, Rome lists ${oldHeld.map((x) => x.kind).join(", ")}`);
+    if (!held.some((x) => x.kind === officialKind)) problems.push(`${when}, Rome does not list Rome's Slack app`);
+    step.bot = await botSends(ctx, ws, old.slack_bot);
+    if (step.bot.ok) problems.push(`${when}, the older Slack bot still answered`);
+    step.dm = await oneReply(ctx, ws, "R10D");
+    if (!step.dm.ok) problems.push(`${when}, a direct message to Rome's Slack app: ${step.dm.said}`);
+    // The old sign-in: asked in a fresh chat, nothing may be sent through it.
+    const word = when === "after the upgrade" ? "Fallowmere" : "Quintwhistle";
+    const sentence = `The harvest supper is at the ${word} barn.`;
+    const chat = await inst.newConciergeChat(`R10 draft ${when}`);
+    const asked = await askConcierge(ctx, inst, SIGN_IN_SEND_ASKS[0](sentence, { general }), { chat });
+    const posts = (await ctx.slack.posts({ team: ws.id, channel: general, since: asked.since })).filter((p) => holds(p.text, word));
+    const viaOld = posts.filter((p) => p.appId === old.slack.app_id);
+    const plain = NOT_OFFERED.test(asked.reply) || /(sign-?in|signed in)[^.]*\b(gone|removed|no longer)/i.test(asked.reply);
+    step.signIn = { chat, reply: asked.reply.slice(0, 300), posts: posts.map((p) => ({ appId: p.appId ?? null, tokenKind: p.tokenKind })), plain };
+    if (viaOld.length) problems.push(`${when}, a post went out through the old sign-in's app`);
+    else if (posts.length) problems.push(`${when}, an ask to post through the sign-in sent the post anyway (from ${posts.map((p) => p.appId).join(", ")})`);
+    if (!plain) problems.push(`${when}, an ask to post through the sign-in did not get a plain answer that it is not available`);
+    evidence.steps[when] = step;
+  }
+  pickerHolds((evidence.pickerFinal = await pickerSlack(inst, officialKind)), "at the end");
+  const said = Object.entries(evidence.steps)
+    .map(([when, s]) => `${when}: listed ${s.held.join(", ") || "nothing"}; old bot answered ${s.bot.ok ? "yes" : "no"}; DM answered ${s.dm.ok ? "yes" : "no"}; sign-in ask ${s.signIn.posts.length ? `posted (${s.signIn.posts.map((p) => p.appId).join(", ")})` : "posted nothing"}, said "${s.signIn.reply.slice(0, 80)}"`)
+    .join(". ");
+  if (problems.length) return { result: "fail", reason: `${problems.join("; ")}. ${said}`, evidence };
+  if (unchecked.length) return { result: "not checked", reason: `not all checked (${unchecked.join("; ")}). ${said}`, evidence };
+  return { result: "pass", reason: said, evidence };
 }
