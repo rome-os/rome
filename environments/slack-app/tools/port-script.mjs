@@ -7,11 +7,16 @@
 // A port call registers a job (POST /_port on the control port) and sends the
 // message "slackenv-port:<nonce>" in a new dashboard chat. Every model request
 // whose messages hold that marker is answered here and never forwarded:
-// - the turn's request that offers execute_action gets exactly one call to it,
-//   with the job's action and arguments as given;
+// - the agent turn's request that offers execute_action gets exactly one call
+//   to it, with the job's action and arguments as given;
 // - the request that carries that call's result is answered with a short text
 //   that ends the turn, and the result is kept, verbatim, for GET /_port/<nonce>;
-// - any other request with the marker (a title, say) gets the same short text.
+// - any other request with the marker gets the same short text and leaves the
+//   job as it was. Rome asks for the new chat's title at the same time as the
+//   turn, with the same tools but its own system prompt and a structured
+//   answer; that request is told apart from the turn (sideRequest) and never
+//   gets the call, whichever arrives first.
+// Each request the job saw, and what it was given, is kept in its `seen`.
 // A marker naming no job, or a turn that offers no execute_action, fails the
 // request and the job loudly; nothing falls through to a real model.
 
@@ -35,6 +40,7 @@ export function createPortScript({ model }) {
       json_args: jsonArgs,
       state: "waiting",
       requests: 0,
+      seen: [],
       created_at: new Date().toISOString(),
     });
     return { status: 201, body: jobs.get(nonce) };
@@ -48,6 +54,22 @@ export function createPortScript({ model }) {
     const job = jobs.get(nonce);
     if (!job) return failure(`slackenv-port: no job ${nonce} is registered`);
     job.requests += 1;
+    const tools = Array.isArray(request.tools) ? request.tools : [];
+    const tool = tools.find(
+      (t) => t?.name === "execute_action" || String(t?.name).endsWith("__execute_action"),
+    );
+    const side = sideRequest(request);
+    const seen = {
+      n: job.requests,
+      tools: tools.length,
+      execute_action: Boolean(tool),
+      ...(side ? { side } : {}),
+    };
+    job.seen.push(seen);
+    const given = (what, answer) => {
+      seen.given = what;
+      return answer;
+    };
 
     const result = toolResultOf(request.messages, job.tool_use_id);
     if (result) {
@@ -55,22 +77,22 @@ export function createPortScript({ model }) {
         job.state = "done";
         job.result = result;
       }
-      return reply(request, { text: DONE_TEXT });
+      return given("text after the result", reply(request, { text: DONE_TEXT }));
     }
-    const tools = Array.isArray(request.tools) ? request.tools : [];
-    if (!tools.length || job.state !== "waiting") {
-      // A request with no tools is not the turn's own (a title, say); one
-      // after the call already went out is never answered with another call.
-      return reply(request, { text: DONE_TEXT });
+    if (!tools.length || side) {
+      // Not the agent's turn: a title, say. It leaves the job as it was.
+      return given("text", reply(request, { text: DONE_TEXT }));
     }
-    const tool = tools.find(
-      (t) => t?.name === "execute_action" || String(t?.name).endsWith("__execute_action"),
-    );
+    if (job.state !== "waiting") {
+      // The call already went out: never a second one.
+      return given("text, the call already made", reply(request, { text: DONE_TEXT }));
+    }
     if (!tool) {
       job.state = "failed";
       job.error = `the turn offered no execute_action tool (offered: ${tools.map((t) => t?.name).join(", ")})`;
-      return failure(`slackenv-port: ${job.error}`);
+      return given("error", failure(`slackenv-port: ${job.error}`));
     }
+    seen.given = "the execute_action call";
     job.state = "called";
     job.tool_name = tool.name;
     job.tool_use_id = `toolu_slackenv${nonce}${(seq += 1)}`;
@@ -173,6 +195,21 @@ export function createPortScript({ model }) {
     job: (nonce) => jobs.get(nonce) ?? null,
     remove: (nonce) => jobs.delete(nonce),
   };
+}
+
+/** Why a request is not an agent's turn, or null when it may be one: it asks
+ *  for a structured answer, as Rome's conversation title does, or its system
+ *  prompt is the title's. */
+function sideRequest(request) {
+  const tools = Array.isArray(request.tools) ? request.tools : [];
+  if (request.output_format || tools.some((t) => t?.name === "StructuredOutput"))
+    return "structured answer";
+  const system =
+    typeof request.system === "string"
+      ? request.system
+      : (Array.isArray(request.system) ? request.system : []).map((b) => b?.text ?? "").join("\n");
+  if (/short names for chat conversations/i.test(system)) return "conversation title";
+  return null;
 }
 
 /** The result of the call `toolUseId`, as Rome sent it: its text and whether

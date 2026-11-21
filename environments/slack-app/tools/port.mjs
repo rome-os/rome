@@ -96,9 +96,19 @@ try {
 }
 
 if (job?.state !== "done") {
-  fail(1, job?.error ?? `the turn made no call within ${timeoutS} s (job ${job?.state})`, {
-    job,
-  });
+  // Each model request the job saw and what it was given, so a fault reads itself.
+  const seen = (job?.seen ?? [])
+    .map(
+      (r) =>
+        `#${r.n} (${r.side ?? (r.execute_action ? "offers execute_action" : `${r.tools} tools`)}): ${r.given}`,
+    )
+    .join("; ");
+  fail(
+    1,
+    job?.error ??
+      `the turn made no call within ${timeoutS} s (job ${job?.state}; requests: ${seen || "none"})`,
+    { job },
+  );
 }
 const { text, is_error: isError } = job.result;
 let out;

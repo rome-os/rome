@@ -301,3 +301,52 @@ test("ctl.sh port prints the port's answer, and says where a refusal came from",
   const bad = await port("send", { chat: "C1" });
   assert.equal(bad.code, 2);
 });
+
+test("the conversation title, asked beside the turn, never takes the call, in either order", async () => {
+  const control = `http://127.0.0.1:${proxy.control}`;
+  const title = (nonce, variant) => ({
+    stream: true,
+    tools: variant === "structured" ? [...TOOLS, { name: "StructuredOutput" }] : TOOLS,
+    ...(variant === "structured"
+      ? {}
+      : {
+          system: [
+            { type: "text", text: "You create short names for chat conversations. Summarize…" },
+          ],
+        }),
+    messages: [
+      {
+        role: "user",
+        content: `Create a conversation name for this first user message:\n"slackenv-port:${nonce}"`,
+      },
+    ],
+  });
+  const turn = (nonce) => ({
+    stream: true,
+    tools: TOOLS,
+    system: "You are Rome's main agent.",
+    messages: [{ role: "user", content: `slackenv-port:${nonce}` }],
+  });
+  for (const [nonce, order, variant] of [
+    ["titlefirst1", "title first", "prompt"],
+    ["turnfirst12", "turn first", "prompt"],
+    ["structured1", "title first", "structured"],
+  ]) {
+    await fetch(`${control}/_port`, {
+      method: "POST",
+      body: JSON.stringify({ nonce, action_name: "x:y", json_args: { n: nonce } }),
+    });
+    const asks = [modelRequest(title(nonce, variant)), modelRequest(turn(nonce))];
+    if (order === "turn first") asks.reverse();
+    const [a, b] = [await asks[0], await asks[1]];
+    const [titleAnswer, turnAnswer] = order === "turn first" ? [b, a] : [a, b];
+    assert.equal(blocksOf(titleAnswer.text)[0].type, "text", `${order}: the title gets text`);
+    const call = blocksOf(turnAnswer.text)[0];
+    assert.equal(call.type, "tool_use", `${order}: the turn gets the call`);
+    assert.deepEqual(call.input.json_args, { n: nonce });
+    const job = await fetch(`${control}/_port/${nonce}`).then((r) => r.json());
+    assert.equal(job.state, "called");
+    assert.deepEqual(job.seen.map((s) => s.given).sort(), ["text", "the execute_action call"]);
+    assert.ok(job.seen.some((s) => s.side));
+  }
+});
