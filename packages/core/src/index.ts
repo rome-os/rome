@@ -398,7 +398,6 @@ import { createOgImageStore } from "./apps/og/store.js";
 import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./app-host/api.js";
-import { removeRetiredTokenFiles } from "./connections/oauth/provider-token-files.js";
 import { DELIVERY_ATTEMPTS, RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
 import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
 import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
@@ -1946,9 +1945,6 @@ async function main() {
   // that predates accounts.
   const channelAgentOf = byChannel(channelRecords, accountAgentOf);
   const hookAgentOf = byAccount(accounts, accountAgentOf, channelAgentOf);
-  // The Slack sign-in is no longer a kind, so no grant clears the token file
-  // an older build wrote for it. It goes once, at boot.
-  await removeRetiredTokenFiles();
   const { RomeCloudMailProvider } = await import("./connections/kinds/email/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
