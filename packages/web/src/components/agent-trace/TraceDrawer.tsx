@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Cross2Icon, DownloadIcon } from "@radix-ui/react-icons";
+import { Download, X } from "lucide-react";
 import type {
   TraceEventDto,
   TraceSegment,
@@ -351,7 +351,7 @@ export function TraceDrawer({
       aria-label={t("trace.drawer.dumpAriaLabel")}
       title={t("trace.drawer.dumpTitle")}
     >
-      <DownloadIcon className="h-4 w-4" />
+      <Download className="h-4 w-4" />
     </a>
   ) : null;
 
@@ -421,7 +421,7 @@ export function TraceDrawer({
             className="text-muted-foreground"
             aria-label={t("trace.drawer.closeAriaLabel")}
           >
-            <Cross2Icon className="h-4 w-4" />
+            <X className="h-4 w-4" />
           </Button>
         </div>
         {body}

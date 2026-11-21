@@ -1,8 +1,8 @@
-import { HamburgerMenuIcon } from "@radix-ui/react-icons";
 import {
   ChevronLeft,
   ChevronsLeft,
   ChevronsRight,
+  Menu,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -174,7 +174,7 @@ export function RomeShellLayout() {
       <IconButton
         size="md"
         label={t("nav.openSidebar")}
-        icon={<HamburgerMenuIcon aria-hidden />}
+        icon={<Menu aria-hidden />}
         onClick={() => setSidebarOpen(true)}
         className={className}
       />
@@ -679,7 +679,7 @@ export function RomeShellLayout() {
                   <IconButton
                     size="sm"
                     label={t("nav.openSidebar")}
-                    icon={<HamburgerMenuIcon aria-hidden />}
+                    icon={<Menu aria-hidden />}
                     onClick={() => setSidebarOpen(true)}
                     className="text-subtle-foreground hover:text-foreground"
                   />

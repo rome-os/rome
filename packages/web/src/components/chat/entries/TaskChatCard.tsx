@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ChatBubbleIcon } from "@radix-ui/react-icons";
+import { MessageSquare } from "lucide-react";
 import { createContext, useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
@@ -204,7 +204,7 @@ function StaticTaskChatCard({ title }: { title: string }) {
   return (
     <div className="w-full min-w-0 max-w-md rounded-16 border border-border bg-surface px-3 py-2">
       <div className="flex min-w-0 items-center gap-3">
-        <ChatBubbleIcon className="size-4 shrink-0 text-subtle-foreground" aria-hidden />
+        <MessageSquare className="size-4 shrink-0 text-subtle-foreground" aria-hidden />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-ui text-foreground">{title}</span>
           <span className="text-aux text-muted-foreground">{t("concierge.taskChat")}</span>
@@ -268,7 +268,7 @@ function LiveTaskChatCard({
     // question or approval (`data-chat-task-open`) it is as wide as a message.
     <div className="w-full min-w-0 max-w-md space-y-3 rounded-16 border border-border bg-surface px-3 py-2 has-[[data-chat-task-open]]:max-w-[min(100%,var(--container-2xl))]">
       <div className="flex min-w-0 items-center gap-3">
-        <ChatBubbleIcon className="size-4 shrink-0 text-subtle-foreground" aria-hidden />
+        <MessageSquare className="size-4 shrink-0 text-subtle-foreground" aria-hidden />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-ui text-foreground">{session?.name ?? title}</span>
           <span className="text-aux text-muted-foreground">
