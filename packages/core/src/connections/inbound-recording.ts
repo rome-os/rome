@@ -173,11 +173,10 @@ export function inboundRecording(
     const { via } = message;
     // A message still queued when the last listener left is dropped, as it
     // is for any hook swap: nobody is there to hear it, even once a new
-    // hook listens again.
-    if (recording.get(via.channel) !== subscription) {
-      settleInbound(message, new RecordingStopped());
-      return null;
-    }
+    // hook listens again. Its delivery was refused when recording stopped;
+    // a waiter now is a redelivery under the new subscription, which records
+    // it.
+    if (recording.get(via.channel) !== subscription) return null;
     // What reaches an account Rome does not listen to never forms a chat.
     if (deps.listens?.(via.connectionId) === false) {
       settleInbound(message);
