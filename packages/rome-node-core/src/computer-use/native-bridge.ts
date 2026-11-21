@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { link, lstat, mkdir, open, unlink } from "node:fs/promises";
+import { link, lstat, mkdir, open, realpath, unlink } from "node:fs/promises";
 import { connect } from "node:net";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -45,7 +45,7 @@ export function computerUseAppPath(options: NativeBridgeOptions): string {
 }
 
 /** Refuses links and permissive existing paths rather than repairing someone else's state. */
-export async function privateComputerUseDirectory(path: string): Promise<void> {
+export async function privateComputerUseDirectory(path: string): Promise<string> {
   if (!isAbsolute(path))
     throw new ComputerUseError(
       "invalid_state_directory",
@@ -63,6 +63,7 @@ export async function privateComputerUseDirectory(path: string): Promise<void> {
       "unsafe_state_directory",
       "The computer-use state directory must belong to this user and have mode 0700.",
     );
+  return realpath(path);
 }
 
 async function privateToken(stateDir: string): Promise<string> {
@@ -223,25 +224,24 @@ function request(
 /** Every request has its own socket, so cancel does not wait behind an in-flight action. */
 export function createNativeRpcTransport(options: NativeBridgeOptions = {}): ComputerUseNative {
   const stateDir = options.stateDir ?? defaultComputerUseStateDir();
-  let prepared: Promise<string> | undefined;
+  let prepared: Promise<{ socketPath: string; token: string }> | undefined;
   return {
     async call(method, params) {
-      if (Buffer.byteLength(join(stateDir, "helper.sock")) > 103)
-        throw new ComputerUseError(
-          "helper_path_too_long",
-          "The computer-use state directory is too long for a macOS Unix socket.",
-        );
       prepared ??= (async () => {
-        await privateComputerUseDirectory(stateDir);
-        return privateToken(stateDir);
-      })();
-      return request(
-        join(stateDir, "helper.sock"),
-        await prepared,
-        method,
-        params,
-        options.requestTimeoutMs ?? 15_000,
-      );
+        const canonicalDir = await privateComputerUseDirectory(stateDir);
+        const socketPath = join(canonicalDir, "helper.sock");
+        if (Buffer.byteLength(socketPath) > 103)
+          throw new ComputerUseError(
+            "helper_path_too_long",
+            "The computer-use state directory is too long for a macOS Unix socket.",
+          );
+        return { socketPath, token: await privateToken(canonicalDir) };
+      })().catch((error: unknown) => {
+        prepared = undefined;
+        throw error;
+      });
+      const { socketPath, token } = await prepared;
+      return request(socketPath, token, method, params, options.requestTimeoutMs ?? 15_000);
     },
   };
 }
@@ -278,7 +278,7 @@ export function createComputerUseNativeBridge(
   let ready: Promise<ComputerUseApp> | undefined;
   async function initialize(): Promise<ComputerUseApp> {
     const source = await inspectComputerUseApp(computerUseAppPath(options));
-    await privateComputerUseDirectory(stateDir);
+    const canonicalStateDir = await privateComputerUseDirectory(stateDir);
     try {
       assertComputerUseImplementation(await transport.call("hello", {}), source);
       return source;
@@ -289,10 +289,14 @@ export function createComputerUseNativeBridge(
       options.appPath !== undefined || process.env.ROME_COMPUTER_USE_APP !== undefined;
     const until = Date.now() + (options.startupTimeoutMs ?? 10_000);
     try {
-      const app = explicit ? source : await prepareComputerUseApp(source, stateDir);
-      await runFile("/usr/bin/open", ["-g", "-a", app.path, "--args", "--state-dir", stateDir], {
-        timeout: Math.max(1, until - Date.now()),
-      });
+      const app = explicit ? source : await prepareComputerUseApp(source, canonicalStateDir);
+      await runFile(
+        "/usr/bin/open",
+        ["-g", "-a", app.path, "--args", "--state-dir", canonicalStateDir],
+        {
+          timeout: Math.max(1, until - Date.now()),
+        },
+      );
     } catch (error) {
       // Another caller can win the install/service lock after our first hello.
       if (!(error instanceof ComputerUseError) || error.code !== "helper_install_busy") throw error;
@@ -331,7 +335,26 @@ export function createComputerUseNativeBridge(
       return transport.call("stop_status", { sessionId });
     },
     async call(method, params) {
+      const hadReady = ready !== undefined;
       let source = await ensure();
+      // Revalidate the live helper before every non-hello dispatch so a helper replaced
+      // between calls cannot receive actions without matching the verified implementation.
+      if (hadReady && method !== "hello") {
+        try {
+          assertComputerUseImplementation(await transport.call("hello", {}), source);
+        } catch (error) {
+          ready = undefined;
+          if (!unavailable(error)) {
+            if (error instanceof ComputerUseError)
+              throw new ComputerUseError(error.code, error.message, {
+                ...error.details,
+                effectStatus: "not_dispatched",
+              });
+            throw error;
+          }
+          source = await ensure();
+        }
+      }
       let value: unknown;
       try {
         value = await transport.call(method, params);
@@ -342,7 +365,14 @@ export function createComputerUseNativeBridge(
         source = await ensure();
         value = await transport.call(method, params);
       }
-      if (method === "hello") assertComputerUseImplementation(value, source);
+      if (method === "hello") {
+        try {
+          assertComputerUseImplementation(value, source);
+        } catch (error) {
+          ready = undefined;
+          throw error;
+        }
+      }
       return value;
     },
   };

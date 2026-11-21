@@ -77,13 +77,40 @@ function checkedVerification(
   return verifyReceipt(record);
 }
 
+function checkedOutcome(
+  record: Record<string, unknown>,
+  identity: { sessionId: string; actionId: string },
+): {
+  status: DispatchStatus;
+  eventsPosted?: number;
+  operationsDispatched?: number;
+} {
+  if (
+    record.version !== 1 ||
+    record.sessionId !== identity.sessionId ||
+    record.actionId !== identity.actionId
+  )
+    return conflict();
+  return {
+    status: dispatchStatus(record.status),
+    eventsPosted: count(record.eventsPosted),
+    operationsDispatched: count(record.operationsDispatched),
+  };
+}
+
 /** Atomic creation is the cross-process action-id gate. Existing intents are never replayed. */
 export class ComputerUseLedger {
   private prepared: Promise<void> | undefined;
   constructor(private readonly directory: string) {}
 
   private prepare(): Promise<void> {
-    return (this.prepared ??= privateComputerUseDirectory(this.directory));
+    return (this.prepared ??= privateComputerUseDirectory(this.directory).then(
+      () => undefined,
+      (error: unknown) => {
+        this.prepared = undefined;
+        throw error;
+      },
+    ));
   }
 
   private async create(path: string, record: unknown): Promise<boolean> {
@@ -218,7 +245,25 @@ export class ComputerUseLedger {
 
   async outcome(key: string, record: Record<string, unknown>): Promise<void> {
     if (typeof key !== "string" || !KEY.test(key)) return conflict();
-    if (!(await this.create(`${key}.outcome.json`, { ...record, at: Date.now() })))
+    const intent = await this.read(`${key}.intent.json`);
+    if (!intent || intent.version !== 1) return conflict();
+    const identity = actionIdentity(intent);
+    if (
+      (record.sessionId !== undefined && record.sessionId !== identity.sessionId) ||
+      (record.actionId !== undefined && record.actionId !== identity.actionId)
+    )
+      return conflict();
+    dispatchStatus(record.status);
+    count(record.eventsPosted);
+    count(record.operationsDispatched);
+    if (
+      !(await this.create(`${key}.outcome.json`, {
+        ...record,
+        version: 1,
+        ...identity,
+        at: Date.now(),
+      }))
+    )
       throw new ComputerUseError(
         "computer_ledger_conflict",
         "An outcome for this action already exists.",
@@ -304,12 +349,13 @@ export class ComputerUseLedger {
       this.read(`${key}.verification.json`),
       this.read(`${sessionId}.stop-confirmed.json`),
     ]);
-    const status = dispatchStatus(outcome?.status);
+    const parsedOutcome = outcome ? checkedOutcome(outcome, identity) : undefined;
+    const status = parsedOutcome?.status ?? "unknown";
     const recovered: ComputerUseRecovery = { ...identity, status, effectVerified: false };
-    const eventsPosted = count(outcome?.eventsPosted);
-    const operationsDispatched = count(outcome?.operationsDispatched);
-    if (eventsPosted !== undefined) recovered.eventsPosted = eventsPosted;
-    if (operationsDispatched !== undefined) recovered.operationsDispatched = operationsDispatched;
+    if (parsedOutcome?.eventsPosted !== undefined)
+      recovered.eventsPosted = parsedOutcome.eventsPosted;
+    if (parsedOutcome?.operationsDispatched !== undefined)
+      recovered.operationsDispatched = parsedOutcome.operationsDispatched;
     if (verification) {
       const receipt = checkedVerification(verification, identity);
       if (status === "dispatched_unverified") {

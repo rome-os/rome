@@ -18,18 +18,37 @@ export interface BinaryActionResult {
   body: Uint8Array;
 }
 
+const SAFETY_DETAIL_KEYS = [
+  "effectStatus",
+  "terminalCause",
+  "stopConfirmed",
+  "replayAllowed",
+] as const;
+
+function pickSafetyDetails(details: Record<string, unknown>): Record<string, unknown> | undefined {
+  const safe: Record<string, unknown> = {};
+  for (const key of SAFETY_DETAIL_KEYS) {
+    const value = details[key];
+    if (typeof value === "string" || typeof value === "boolean") safe[key] = value;
+  }
+  if (Object.keys(safe).length === 0) return undefined;
+  return Buffer.byteLength(JSON.stringify(safe)) <= 8192 ? safe : undefined;
+}
+
 export function actionError(
   code: string,
   message: string,
   details?: Record<string, unknown>,
 ): ActionResponse {
   let metadata: Record<string, unknown> | undefined;
-  if (details) {
+  if (details && Object.keys(details).length > 0) {
     try {
-      if (Object.keys(details).length > 0 && Buffer.byteLength(JSON.stringify(details)) <= 8192)
-        metadata = details;
+      if (Buffer.byteLength(JSON.stringify(details)) <= 8192) metadata = details;
+      else metadata = pickSafetyDetails(details);
     } catch {
-      // Diagnostics cannot prevent the operation's failure from reaching its caller.
+      // Diagnostics cannot prevent the operation's failure from reaching its caller,
+      // but replay-safety signals must survive oversized or circular diagnostic bags.
+      metadata = pickSafetyDetails(details);
     }
   }
   return {

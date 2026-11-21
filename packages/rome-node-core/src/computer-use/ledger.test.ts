@@ -1,5 +1,16 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { chmod, lstat, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ComputerUseLedger } from "./ledger.js";
@@ -124,13 +135,53 @@ describe.skipIf(process.platform === "win32")("durable computer-use recovery", (
     await expect(ledger.recover(owner, actionId)).rejects.toMatchObject(invalid);
   });
 
+  it("rejects swapped or unversioned outcome receipts during recovery", async () => {
+    const { directory, ledger } = await fixture();
+    const keyA = await ledger.intent(owner, sessionId, "action-a", { operation: "click" });
+    const keyB = await ledger.intent(owner, sessionId, "action-b", { operation: "click" });
+    await ledger.outcome(keyA, { status: "dispatched_unverified", effectVerified: false });
+    await ledger.outcome(keyB, { status: "not_dispatched", effectVerified: false });
+    await copyFile(
+      join(directory, `${keyB}.outcome.json`),
+      join(directory, `${keyA}.outcome.json`),
+    );
+    await expect(ledger.recover(owner, "action-a")).rejects.toMatchObject({
+      code: "computer_ledger_conflict",
+    });
+  });
+
+  it("recovers after a transient unsafe directory permission failure without restarting", async () => {
+    const { directory, ledger } = await fixture();
+    await mkdir(directory, { mode: 0o755 });
+    await chmod(directory, 0o755);
+    await expect(ledger.intent(owner, sessionId, actionId, {})).rejects.toMatchObject({
+      code: "unsafe_state_directory",
+    });
+    await chmod(directory, 0o700);
+    const key = await ledger.intent(owner, sessionId, actionId, { operation: "press" });
+    await ledger.outcome(key, { status: "not_dispatched", effectVerified: false });
+    expect(await ledger.recover(owner, actionId)).toMatchObject({
+      sessionId,
+      actionId,
+      status: "not_dispatched",
+    });
+  });
+
   it("does not follow a link at a receipt path", async () => {
     const { directory, ledger } = await fixture();
     const key = await ledger.intent(owner, sessionId, actionId, {});
     const otherFile = join(directory, "unrelated.json");
-    await writeFile(otherFile, JSON.stringify({ status: "dispatched_unverified", at: 1 }), {
-      mode: 0o600,
-    });
+    await writeFile(
+      otherFile,
+      JSON.stringify({
+        version: 1,
+        sessionId,
+        actionId,
+        status: "dispatched_unverified",
+        at: 1,
+      }),
+      { mode: 0o600 },
+    );
     await symlink(otherFile, join(directory, `${key}.outcome.json`));
     await expect(ledger.recover(owner, actionId)).rejects.toMatchObject({
       code: "computer_ledger_conflict",

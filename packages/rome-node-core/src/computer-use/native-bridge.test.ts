@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { ComputerUseError } from "./protocol.js";
@@ -27,6 +27,7 @@ async function server(
   ) => void,
 ) {
   const stateDir = await mkdtemp("/tmp/rome-cua-rpc-");
+  const canonicalStateDir = await realpath(stateDir);
   const sockets = new Set<Socket>();
   const calls: Array<Record<string, unknown>> = [];
   const service = createServer((socket) => {
@@ -64,6 +65,7 @@ async function server(
   });
   return {
     stateDir,
+    canonicalStateDir,
     calls,
     bridge: createNativeRpcTransport({ stateDir, requestTimeoutMs: 100 }),
   };
@@ -118,7 +120,7 @@ describe("native computer-use transport", () => {
     });
     expect(await bridge.call("hello", {})).toEqual(hello);
     expect(assets.inspect).toHaveBeenCalledWith(source.path);
-    if (mode === "bundle") expect(assets.prepare).toHaveBeenCalledWith(source, f.stateDir);
+    if (mode === "bundle") expect(assets.prepare).toHaveBeenCalledWith(source, f.canonicalStateDir);
     else expect(assets.prepare).not.toHaveBeenCalled();
     expect(assets.launch).toHaveBeenCalledTimes(1);
     const [command, args] = assets.launch.mock.calls[0] as [string, string[]];
@@ -129,8 +131,92 @@ describe("native computer-use transport", () => {
       mode === "bundle" ? installed.path : source.path,
       "--args",
       "--state-dir",
-      f.stateDir,
+      f.canonicalStateDir,
     ]);
+  });
+
+  it("canonicalizes a symlinked state-directory ancestor before installing and launching", async () => {
+    const source = {
+      path: "/bundled/app",
+      requirement: "stable",
+      implementationSha256: "a".repeat(64),
+      executableSha256: "b".repeat(64),
+      architecture: "arm64" as const,
+    };
+    const installed = { ...source, path: "/stable/app" };
+    const hello = {
+      protocolVersion: 1,
+      bundleId: "com.rome.computer-use",
+      permissions: { accessibility: true, screenCapture: true },
+      capabilities: { actions: [] },
+      architecture: "arm64",
+      implementationSha256: source.implementationSha256,
+    };
+    const realParent = await mkdtemp("/tmp/rome-cua-real-");
+    const aliasParent = await mkdtemp("/tmp/rome-cua-alias-");
+    const aliasLink = join(aliasParent, "link");
+    await symlink(realParent, aliasLink);
+    const aliasedStateDir = join(aliasLink, "state");
+    const realStateDir = join(realParent, "state");
+    await mkdir(realStateDir, { mode: 0o700 });
+    const canonicalStateDir = await realpath(realStateDir);
+    const sockets = new Set<Socket>();
+    let absent = true;
+    const service = createServer((socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+      socket.on("error", () => {});
+      let buffer = Buffer.alloc(0);
+      socket.on("data", (chunk: Buffer) => {
+        buffer = Buffer.concat([buffer, chunk]);
+        if (buffer.length < 4 || buffer.length < 4 + buffer.readUInt32LE()) return;
+        const req = JSON.parse(buffer.subarray(4).toString("utf8")) as Record<string, unknown>;
+        const payload = absent
+          ? {
+              id: req.id,
+              ok: false,
+              error: {
+                code: "helper_unavailable",
+                message: "Absent",
+                details: { socketCode: "ENOENT", effectStatus: "not_dispatched" },
+              },
+            }
+          : { id: req.id, ok: true, result: hello };
+        absent = false;
+        const body = Buffer.from(JSON.stringify(payload));
+        const header = Buffer.alloc(4);
+        header.writeUInt32LE(body.length);
+        socket.write(Buffer.concat([header, body]));
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      service.once("error", reject);
+      service.listen(join(canonicalStateDir, "helper.sock"), resolve);
+    });
+    cleanup.push(async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => service.close(() => resolve()));
+      await rm(aliasParent, { recursive: true, force: true });
+      await rm(realParent, { recursive: true, force: true });
+    });
+    assets.inspect.mockResolvedValue(source);
+    assets.prepare.mockResolvedValue(installed);
+    assets.launch.mockImplementation((...args: unknown[]) => {
+      (args.at(-1) as (error: null, stdout: string, stderr: string) => void)(null, "", "");
+    });
+    const bridge = createComputerUseNativeBridge({
+      bundledAppPath: source.path,
+      stateDir: aliasedStateDir,
+    });
+    expect(aliasedStateDir).not.toBe(canonicalStateDir);
+    expect(await bridge.call("hello", {})).toEqual(hello);
+    expect(assets.prepare).toHaveBeenCalledWith(source, canonicalStateDir);
+    expect(assets.launch).toHaveBeenCalledWith(
+      "/usr/bin/open",
+      ["-g", "-a", installed.path, "--args", "--state-dir", canonicalStateDir],
+      expect.any(Object),
+      expect.any(Function),
+    );
   });
 
   it("matches the signed implementation across independent signatures and rejects an unknown service", async () => {
@@ -168,6 +254,45 @@ describe("native computer-use transport", () => {
         code: "helper_update_required",
       });
     }
+  });
+
+  it("revalidates helper identity before non-hello calls when a service is replaced between calls", async () => {
+    const source = {
+      path: "/bundled/app",
+      requirement: "stable",
+      implementationSha256: "a".repeat(64),
+      executableSha256: "b".repeat(64),
+      architecture: "arm64" as const,
+    };
+    const baseHello = {
+      protocolVersion: 1,
+      bundleId: "com.rome.computer-use",
+      permissions: { accessibility: true, screenCapture: true },
+      capabilities: { actions: [] },
+      architecture: "arm64",
+      implementationSha256: source.implementationSha256,
+    };
+    let currentHello = baseHello;
+    const f = await server((request, send) => {
+      if (request.method === "hello") send(currentHello);
+      else send({ ok: true });
+    });
+    assets.inspect.mockResolvedValue(source);
+    const bridge = createComputerUseNativeBridge({
+      stateDir: f.stateDir,
+      bundledAppPath: source.path,
+    });
+    expect(await bridge.call("act", { sessionId: "s1" })).toEqual({ ok: true });
+    expect(f.calls.filter((call) => call.method === "act")).toHaveLength(1);
+
+    // Simulate another Node/Desktop version replacing the helper behind the same socket path.
+    currentHello = { ...baseHello, implementationSha256: "f".repeat(64) };
+    await expect(bridge.call("act", { sessionId: "s1" })).rejects.toMatchObject({
+      code: "helper_update_required",
+      details: { effectStatus: "not_dispatched" },
+    });
+    // The incompatible replacement must never receive the action.
+    expect(f.calls.filter((call) => call.method === "act")).toHaveLength(1);
   });
 
   it.each([
@@ -328,12 +453,15 @@ describe("native computer-use transport", () => {
     expect(f.calls).toHaveLength(1);
   });
 
-  it("refuses an unsafe state directory without connecting", async () => {
-    const f = await server((_request, send) => send({}));
+  it("refuses an unsafe state directory without connecting and recovers once permissions are fixed", async () => {
+    const f = await server((_request, send) => send({ ok: true }));
     await chmod(f.stateDir, 0o755);
     await expect(f.bridge.call("hello", {})).rejects.toMatchObject({
       code: "unsafe_state_directory",
     });
     expect(f.calls).toHaveLength(0);
+    await chmod(f.stateDir, 0o700);
+    expect(await f.bridge.call("hello", {})).toEqual({ ok: true });
+    expect(f.calls).toHaveLength(1);
   });
 });
