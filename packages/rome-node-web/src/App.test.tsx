@@ -823,7 +823,7 @@ describe("Rome Node Web UI", () => {
     expect(seenTextParams.every((q) => q.length <= 256)).toBe(true);
   });
 
-  it("bridges bursts, revalidates unfinished retained rows, avoids gaps during first Load older, and resets cleanly when a burst exceeds the bridge limit", async () => {
+  it("re-fetches loaded pages down to the oldest row without gaps, updates completed older rows, skips list overwrite during Load older, and resets cleanly beyond the page cap", async () => {
     window.history.replaceState(null, "", "/log");
     const now = Date.now();
     const snapshot = makeSnapshot({
@@ -867,10 +867,8 @@ describe("Rome Node Web UI", () => {
     const row290 = makeExecItem(290, "row-290");
     const row200Unfinished = makeExecItem(200, "row-200-running", false);
     const row200Completed = makeExecItem(200, "row-200-running", true);
-    const row310 = makeExecItem(310, "row-310");
     const row500 = makeExecItem(500, "row-500-burst-top");
     const row400 = makeExecItem(400, "row-400-bridge-mid");
-    const row300Bridge = row300;
     const hugeBurstPages = [
       makeExecItem(2000, "row-2000-huge-top"),
       makeExecItem(1800, "row-1800-huge-p2"),
@@ -881,7 +879,7 @@ describe("Rome Node Web UI", () => {
 
     let phase: "initial" | "inflight_load_more" | "bridge_burst" | "huge_burst" = "initial";
     let resolveFirstLoadMore: ((res: Response) => void) | null = null;
-    let revalidatedSeq200 = false;
+    let summaryCalls = 0;
 
     globalThis.fetch = rstest.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -892,6 +890,7 @@ describe("Rome Node Web UI", () => {
         return jsonResponse(snapshot);
       }
       if (url === "/api/audit/summary") {
+        summaryCalls += 1;
         return jsonResponse({
           status: { state: "ok" },
           bytes: 4096,
@@ -920,18 +919,19 @@ describe("Rome Node Web UI", () => {
         }
 
         if (phase === "inflight_load_more" && !beforeSeq) {
-          // One new item arrived, pushing row-290 off page 1 while the first Load older is in flight.
-          return jsonResponse({ items: [row310, row300], hasMore: true });
+          // Should not overwrite items while Load older is in flight.
+          return jsonResponse({ items: [row500], hasMore: true });
         }
 
         if (phase === "bridge_burst") {
           if (!beforeSeq) {
-            // Burst > 1 page: top page stops at 500, above current newest 310.
             return jsonResponse({ items: [row500], hasMore: true });
           }
           if (beforeSeq === "500") {
-            // Bridging page includes intermediate row-400 and overlaps existing row-300.
-            return jsonResponse({ items: [row400, row300Bridge], hasMore: true });
+            return jsonResponse({ items: [row400, row300], hasMore: true });
+          }
+          if (beforeSeq === "300") {
+            return jsonResponse({ items: [row290, row200Completed], hasMore: false });
           }
         }
 
@@ -952,10 +952,6 @@ describe("Rome Node Web UI", () => {
         }
 
         return jsonResponse({ items: [], hasMore: false });
-      }
-      if (url === "/api/audit/items/200") {
-        revalidatedSeq200 = true;
-        return jsonResponse({ item: row200Completed });
       }
       if (url === "/api/audit/items/200/content/stdout") {
         return jsonResponse({
@@ -978,35 +974,35 @@ describe("Rome Node Web UI", () => {
     expect(await screen.findByRole("button", { name: /row-300/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /row-290/ })).toBeTruthy();
 
-    // 1. Start the very first Load older (stays in flight), then a background refresh arrives
-    // with row-310 pushing row-290 off page 1. row-290 must be preserved so no gap forms.
+    // 1. Start the very first Load older (stays in flight), then fire a background focus refresh.
+    // Background refresh updates summary/stats but leaves items intact so no gap forms.
     fireEvent.click(screen.getByRole("button", { name: /Load older/i }));
     await waitFor(() => {
       expect(resolveFirstLoadMore).not.toBeNull();
     });
 
+    const summaryBeforeFocus = summaryCalls;
     phase = "inflight_load_more";
     window.dispatchEvent(new Event("focus"));
-    expect(await screen.findByRole("button", { name: /row-310/ })).toBeTruthy();
+    await waitFor(() => {
+      expect(summaryCalls).toBeGreaterThan(summaryBeforeFocus);
+    });
     expect(screen.getByRole("button", { name: /row-290/ })).toBeTruthy();
 
-    // Now finish the first Load older with an unfinished row-200.
+    // Finish the first Load older with an unfinished row-200.
     const finishFirstLoadMore = resolveFirstLoadMore as unknown as (res: Response) => void;
     finishFirstLoadMore(jsonResponse({ items: [row200Unfinished], hasMore: false }));
     expect(await screen.findByRole("button", { name: /row-200-running/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /row-290/ })).toBeTruthy();
 
-    // Select unfinished older row-200 so we verify both selection retention and revalidation.
+    // Select unfinished older row-200 so we verify selection retention and completion refresh.
     fireEvent.click(screen.getByRole("button", { name: /row-200-running/ }));
     expect(await screen.findByText("req-row-200-running")).toBeTruthy();
 
-    // 2. A >1-page burst arrives (row-500 -> bridge page row-400 + row-300) while row-200 finishes.
-    // Refresh must bridge row-400 without a gap, revalidate row-200, and display its stdout.
+    // 2. A >1-page burst arrives while row-200 finishes. Background refresh re-fetches pages down
+    // to seq 200, updating row-200's end record and displaying stdout with no per-row fan-out.
     phase = "bridge_burst";
     window.dispatchEvent(new Event("focus"));
-    await waitFor(() => {
-      expect(revalidatedSeq200).toBe(true);
-    });
     expect(await screen.findByText(/revalidated/)).toBeTruthy();
 
     fireEvent.keyDown(document, { key: "Escape" });
@@ -1017,8 +1013,7 @@ describe("Rome Node Web UI", () => {
     expect(screen.getByRole("button", { name: /row-400-bridge-mid/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /row-200-running/ })).toBeTruthy();
 
-    // 3. A burst exceeding the 5-page bridge bound (no overlap with row-500) must fall back cleanly
-    // to the fresh first page instead of stitching across a silent gap.
+    // 3. A burst exceeding the 5-page cap falls back cleanly to page 1 with no silent gap.
     phase = "huge_burst";
     window.dispatchEvent(new Event("focus"));
     expect(await screen.findByRole("button", { name: /row-2000-huge-top/ })).toBeTruthy();

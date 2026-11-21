@@ -32,7 +32,6 @@ const PAGE = 200;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_SEARCH_LENGTH = 256;
 const MAX_BACKGROUND_REFRESH_PAGES = 5;
-const MAX_REVALIDATE_UNFINISHED = 20;
 
 type Result = "all" | "running" | "succeeded" | "failed" | "no_result";
 
@@ -397,19 +396,13 @@ export function AuditLogView({
 
   const itemsRef = useRef<AuditItem[]>(items);
   itemsRef.current = items;
-  const selectedIdRef = useRef<number | null>(selectedId);
-  selectedIdRef.current = selectedId;
 
   const refreshAbortRef = useRef<AbortController | null>(null);
   const loadMoreAbortRef = useRef<AbortController | null>(null);
+  const resetInFlightRef = useRef(false);
   const queryGenRef = useRef(0);
   const loadedExtraPagesRef = useRef(false);
   const prevRefreshSignalRef = useRef(refreshSignal);
-
-  const applyItems = useCallback((next: AuditItem[]) => {
-    itemsRef.current = next;
-    setItems(next);
-  }, []);
 
   useEffect(() => {
     const trimmed = search.trim();
@@ -437,15 +430,20 @@ export function AuditLogView({
 
   const refresh = useCallback(
     async (mode: "reset" | "background") => {
+      // Never cancel an in-flight query reset with a background tick or focus event.
+      if (mode === "background" && resetInFlightRef.current) return;
+
       refreshAbortRef.current?.abort();
       const controller = new AbortController();
       refreshAbortRef.current = controller;
 
       if (mode === "reset") {
+        resetInFlightRef.current = true;
         queryGenRef.current += 1;
         loadMoreAbortRef.current?.abort();
         loadMoreAbortRef.current = null;
         loadedExtraPagesRef.current = false;
+        setSelectedId(null);
         setLoadingMore(false);
         setLoading(true);
       }
@@ -460,16 +458,18 @@ export function AuditLogView({
         if (next.status.state !== "ok") {
           setSeries(undefined);
           setCounts(undefined);
-          applyItems([]);
+          itemsRef.current = [];
+          setItems([]);
           setHasMore(false);
           loadedExtraPagesRef.current = false;
           return;
         }
         const since = windowStart(at);
+        const skipListUpdate = mode === "background" && loadMoreAbortRef.current !== null;
         const [stats, page] = await Promise.all([
           api.auditStats(since, since + DAY_MS, BUCKET_MS, controller.signal),
           // Requests never stay "running" in the audit log, so that filter shows none.
-          result === "running"
+          result === "running" || skipListUpdate
             ? Promise.resolve({ items: [], hasMore: false })
             : api.auditItems(queryParams(), controller.signal),
         ]);
@@ -477,90 +477,43 @@ export function AuditLogView({
 
         let freshItems = page.items;
         let freshHasMore = page.hasMore;
-        const freshSeen = new Set(freshItems.map((item) => item.seq));
-        const revalidatedBySeq = new Map<number, AuditItem>();
-        const droppedSeqs = new Set<number>();
 
-        const shouldPreserve = () =>
-          loadedExtraPagesRef.current ||
-          loadMoreAbortRef.current !== null ||
-          (selectedIdRef.current !== null && !freshSeen.has(selectedIdRef.current));
-
-        if (
+        // When extra pages are loaded, re-fetch from the top down to the oldest loaded seq
+        // (capped at MAX_BACKGROUND_REFRESH_PAGES) so gaps close and finished rows update
+        // using the server's authoritative filter semantics.
+        const targetBottomSeq =
           mode === "background" &&
+          !skipListUpdate &&
           result !== "running" &&
-          freshItems.length > 0 &&
-          freshHasMore &&
-          shouldPreserve()
-        ) {
-          const snapshotItems = itemsRef.current;
-          const newestExistingSeq = snapshotItems[0]?.seq;
-          let oldestFreshSeq = freshItems[freshItems.length - 1]!.seq;
-          let fetchedPages = 1;
+          loadedExtraPagesRef.current
+            ? itemsRef.current.at(-1)?.seq
+            : undefined;
 
-          // Bridge bursts larger than one page up to a fixed bound so retained rows stay gapless.
+        if (targetBottomSeq !== undefined && freshItems.length > 0) {
+          const seen = new Set(freshItems.map((item) => item.seq));
+          let pages = 1;
           while (
-            newestExistingSeq !== undefined &&
-            newestExistingSeq < oldestFreshSeq &&
             freshHasMore &&
-            fetchedPages < MAX_BACKGROUND_REFRESH_PAGES
+            freshItems[freshItems.length - 1]!.seq > targetBottomSeq &&
+            pages < MAX_BACKGROUND_REFRESH_PAGES
           ) {
-            const bridge = await api.auditItems(queryParams(oldestFreshSeq), controller.signal);
+            const nextPage = await api.auditItems(
+              queryParams(freshItems[freshItems.length - 1]!.seq),
+              controller.signal,
+            );
             if (controller.signal.aborted || queryGenRef.current !== gen) return;
-            fetchedPages += 1;
-            const added: AuditItem[] = [];
-            for (const item of bridge.items) {
-              if (!freshSeen.has(item.seq)) {
-                freshSeen.add(item.seq);
-                added.push(item);
-              }
-            }
-            if (added.length === 0) {
-              freshHasMore = bridge.hasMore;
-              break;
-            }
+            pages += 1;
+            const added = nextPage.items.filter((item) => !seen.has(item.seq));
+            for (const item of added) seen.add(item.seq);
+            freshHasMore = nextPage.hasMore;
+            if (added.length === 0) break;
             freshItems = [...freshItems, ...added];
-            freshHasMore = bridge.hasMore;
-            oldestFreshSeq = freshItems[freshItems.length - 1]!.seq;
           }
-
-          // Revalidate any retained older rows that were still unfinished when first loaded.
-          const latestSnapshot = itemsRef.current;
-          const latestNewestSeq = latestSnapshot[0]?.seq;
-          if (freshHasMore && latestNewestSeq !== undefined && latestNewestSeq >= oldestFreshSeq) {
-            const unfinished = latestSnapshot
-              .filter(
-                (item) =>
-                  item.seq < oldestFreshSeq && !freshSeen.has(item.seq) && item.end === null,
-              )
-              .slice(0, MAX_REVALIDATE_UNFINISHED);
-            if (unfinished.length > 0) {
-              const settled = await Promise.allSettled(
-                unfinished.map((item) => api.auditItem(item.seq, controller.signal)),
-              );
-              if (controller.signal.aborted || queryGenRef.current !== gen) return;
-              for (let i = 0; i < settled.length; i += 1) {
-                const target = unfinished[i]!;
-                const outcome = settled[i]!;
-                if (outcome.status === "fulfilled") {
-                  const updated = outcome.value.item;
-                  if (result === "no_result" && updated.end !== null) {
-                    droppedSeqs.add(target.seq);
-                  } else {
-                    revalidatedBySeq.set(target.seq, updated);
-                  }
-                } else {
-                  const err = outcome.reason;
-                  if (err instanceof ApiError && err.status === 401) {
-                    onUnauthorized();
-                    return;
-                  }
-                  if (err instanceof ApiError && err.status === 404) {
-                    droppedSeqs.add(target.seq);
-                  }
-                }
-              }
-            }
+          // If the page cap was hit before reaching targetBottomSeq, fall back cleanly to page 1.
+          if (freshHasMore && freshItems[freshItems.length - 1]!.seq > targetBottomSeq) {
+            freshItems = page.items;
+            freshHasMore = page.hasMore;
+            loadedExtraPagesRef.current = false;
           }
         }
 
@@ -572,52 +525,14 @@ export function AuditLogView({
             : { all: 0, running: 0, succeeded: 0, failed: 0, no_result: 0 },
         );
 
-        const current = itemsRef.current;
-        const currentNewestSeq = current[0]?.seq;
-        const oldestFreshSeq = freshItems.at(-1)?.seq;
-
-        if (
-          mode === "background" &&
-          result !== "running" &&
-          oldestFreshSeq !== undefined &&
-          currentNewestSeq !== undefined &&
-          currentNewestSeq >= oldestFreshSeq &&
-          shouldPreserve()
-        ) {
-          if (!freshHasMore) {
-            if (loadMoreAbortRef.current) {
-              loadMoreAbortRef.current.abort();
-              loadMoreAbortRef.current = null;
-              setLoadingMore(false);
-            }
-            applyItems(freshItems);
-            setHasMore(false);
-            loadedExtraPagesRef.current = freshItems.length > page.items.length;
-          } else {
-            const preservedTail = current
-              .filter(
-                (item) =>
-                  item.seq < oldestFreshSeq &&
-                  !freshSeen.has(item.seq) &&
-                  !droppedSeqs.has(item.seq),
-              )
-              .map((item) => revalidatedBySeq.get(item.seq) ?? item);
-            applyItems([...freshItems, ...preservedTail]);
-            if (preservedTail.length === 0) {
-              setHasMore(freshHasMore);
-            }
+        // Leave items untouched if Load older is currently in flight so no gap forms.
+        if (!(mode === "background" && (skipListUpdate || loadMoreAbortRef.current !== null))) {
+          itemsRef.current = freshItems;
+          setItems(freshItems);
+          setHasMore(freshHasMore);
+          if (!freshHasMore && freshItems.length <= page.items.length) {
+            loadedExtraPagesRef.current = false;
           }
-        } else {
-          // Reset cleanly when the filter changed, no extra tail needs preserving, or
-          // a burst exceeded the bridge bound (no overlap with cached rows).
-          if (loadMoreAbortRef.current) {
-            loadMoreAbortRef.current.abort();
-            loadMoreAbortRef.current = null;
-            setLoadingMore(false);
-          }
-          loadedExtraPagesRef.current = false;
-          applyItems(page.items);
-          setHasMore(page.hasMore);
         }
         setNotice(null);
       } catch (err) {
@@ -627,16 +542,20 @@ export function AuditLogView({
           return;
         }
         if (mode === "reset") {
-          applyItems([]);
+          itemsRef.current = [];
+          setItems([]);
           setHasMore(false);
           loadedExtraPagesRef.current = false;
         }
         setNotice(err instanceof Error ? err.message : String(err));
       } finally {
-        if (!controller.signal.aborted && queryGenRef.current === gen) setLoading(false);
+        if (!controller.signal.aborted && queryGenRef.current === gen) {
+          if (mode === "reset") resetInFlightRef.current = false;
+          setLoading(false);
+        }
       }
     },
-    [queryParams, result, onUnauthorized, applyItems],
+    [queryParams, result, onUnauthorized],
   );
 
   useEffect(() => {
@@ -755,7 +674,9 @@ export function AuditLogView({
         const current = itemsRef.current;
         const seen = new Set(current.map((item) => item.seq));
         const appended = page.items.filter((item) => !seen.has(item.seq));
-        applyItems([...current, ...appended]);
+        const nextItems = [...current, ...appended];
+        itemsRef.current = nextItems;
+        setItems(nextItems);
         setHasMore(page.hasMore);
       })
       .catch((err) => {
