@@ -3,7 +3,7 @@
 // The guardian adds Rome to their Slack workspace in one sign-in: Connect,
 // Slack's approve screen, done. Nothing is pasted and no Slack app is made by
 // the guardian. The connection's account is the app's bot in that workspace,
-// named by team id and bot user id as the Slack bot kind names its bots. It
+// named by team id and bot user id. It
 // takes an agent like any bot, and a new one starts with the Concierge.
 //
 // Rome Cloud holds the app's secrets, runs the exchange with Slack, and binds
@@ -11,8 +11,8 @@
 // holds the bot token, drains the workspace's relay mailbox for its events
 // (`kinds/slack-app/slack-app.ts`) and replies through Slack's Web API.
 //
-// This kind is separate from `slack_bot` (a Slack app the guardian makes) and
-// `slack` (Rome Cloud OAuth that acts for the guardian). Both keep working.
+// This kind is separate from `slack` (Rome Cloud OAuth that acts for the
+// guardian), which keeps working.
 
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";

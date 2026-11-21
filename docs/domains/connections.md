@@ -31,7 +31,7 @@ The credential a connection relies on: a Feishu app's id and secret, a bot token
 
 ## Connection kind
 
-What the guardian picks when they connect: the kind of access they hand Rome. A Telegram bot, the guardian's signed-in Telegram, a Feishu app, a Discord bot, a Slack bot, email, WhatsApp and a GitHub sign-in are each a kind of connection.
+What the guardian picks when they connect: the kind of access they hand Rome. A Telegram bot, the guardian's signed-in Telegram, a Feishu app, a Discord bot, Rome's Slack app, email, WhatsApp and a GitHub sign-in are each a kind of connection.
 
 - Each kind has its own setup flow and its own form of grant.
 - What a connection lets Rome do is fixed by its kind: **chat** as the account, **act** on the external system, or **watch** it. The guardian never chooses it per connection.

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
 import { reviveDiscordProfile } from "./integrations/discord.js";
-import { reviveSlackBotProfile } from "./integrations/slack-bot.js";
 import { reviveFeishuProfile } from "./kinds/feishu/descriptor.js";
 import { ownAccountNames } from "./own-account-name.js";
 import type { ProfileDisplay, ProfileRecord } from "./types.js";
@@ -46,11 +45,6 @@ describe("ownAccountNames", () => {
   it("names a Discord account by its bot's username", async () => {
     const profile = { botId: "1", botUsername: "Rome" };
     expect(await ownAccountNames(registry(profile, reviveDiscordProfile))("conn-1")).toBe("Rome");
-  });
-
-  it("names a Slack bot by its username, not its name with the workspace", async () => {
-    const profile = { teamId: "T1", workspaceName: "Acme", botUserId: "U1", botUsername: "rome" };
-    expect(await ownAccountNames(registry(profile, reviveSlackBotProfile))("conn-1")).toBe("rome");
   });
 
   it("answers null for an unknown connection or a profile that names nothing", async () => {

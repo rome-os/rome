@@ -115,19 +115,14 @@ Every channel is connected through **one server-owned setup protocol** ([decisio
 - **A connection's account never changes.** A fix whose sign-in reaches another account ends the connection it fixed and starts a new one to the account that answered, in one transaction. The setup reports the connection it ended, and the dashboard says so. The earlier account keeps its agent and its chats, disconnected. Signing in to Rome is not a fix and never disturbs a connection ([ADR](../adrs/sign-in-links-separate-from-provider-connections.md)): a sign-in that reaches another account than the one the provider's connection reaches grants nothing, and the login goes ahead.
 - **Post-connection configuration is not setup.** Config and feature surfaces that operate *after* a channel is linked — Discord per-channel agent routing, the Telegram personal-account dialog list — live under their own named routes, separate from the setup protocol and never part of connecting.
 
-## Slack bots
+## Slack
 
-A Slack bot is one of Rome's accounts with one agent ([`slack-bot.ts`](../../packages/core/src/connections/integrations/slack-bot.ts)). Slack gives an app exactly one bot in a workspace, so each bot is its own Slack app, and two agents in one workspace are two apps. It is a separate service from `slack`, the Rome Cloud connection that acts in a workspace for the guardian.
+Rome's Slack app is Slack's only chat connection ([`slack-app.ts`](../../packages/core/src/connections/integrations/slack-app.ts)). Rome does not offer `slack_bot`, a Slack app the guardian made and pasted tokens from ([ADR](../adrs/channels-and-connectors-are-one-connection.md#amendment-2026-11-21-the-slack-bot-connection-is-removed)).
 
 ### Invariants
 
-- The guardian creates each app from a link that carries its manifest, installs it, and pastes its bot token and app-level token back. Rome never creates or configures a Slack app, and holds no configuration token. A manifest carries no picture, so the guardian uploads one on the app's settings page.
-- Rome opens its own Socket Mode connection to Slack, so an instance needs no public address and no Cloud relay for Slack's events.
-- Rome hears direct messages to the bot and mentions of it in a channel. It never asks for permission to read a channel's history, so other lines in a channel never reach it.
 - A direct message is one chat, and a Slack channel is one chat. A [thread](../domains/chats.md#thread) lives inside its channel's chat: a mention in a thread is a message of the channel's chat that names the thread it was said in. The reply goes into that thread, and a mention in the channel itself starts a thread under it. A direct message is answered in place.
 - A message's id names the thread it was said in, so a reply finds the thread from the id alone, after a restart too. This holds for the agent's own messages, so a reply to one of them stays in its thread.
-- Reconnecting an account asks for fresh tokens from its own app. A new app is a different bot, so it is a different account: tokens from it end this connection and connect that bot instead.
-- Members of the workspace reach the agent as strangers until the guardian links them, the guardian's own account included ([Unknown senders](#unknown-senders)).
 
 ## LinkedIn replies
 
