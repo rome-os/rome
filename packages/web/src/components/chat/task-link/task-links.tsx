@@ -29,6 +29,8 @@ const taskLinksKey = (chatId: string) => ["chat-task-links", chatId] as const;
 const changedSchema = z.object({ chatId: z.string(), follows: z.literal(true).optional() });
 
 interface TaskLinksValue {
+  /** The Concierge chat the links are drawn in. */
+  chatId: string;
   /** Asks to read task chat `id`'s status. */
   register: (id: string) => void;
   /** The task chats the last read asked about, and what it found. */
@@ -74,7 +76,7 @@ export function TaskLinksProvider({ chatId, children }: { chatId: string; childr
     { [TASK_LIST_CHANGED_EVENT]: { schema: changedSchema, fn: () => void reread() } },
     { onReconnect: () => void reread() },
   );
-  const value = useMemo(() => ({ register, read: data ?? null }), [register, data]);
+  const value = useMemo(() => ({ chatId, register, read: data ?? null }), [chatId, register, data]);
   return <TaskLinksContext.Provider value={value}>{children}</TaskLinksContext.Provider>;
 }
 
@@ -97,6 +99,11 @@ export function useTaskLink(id: string): TaskLinkState {
   const task = links.read?.found.get(id);
   if (task) return { state: "found", task };
   return links.read?.asked.has(id) ? { state: "none" } : { state: "loading" };
+}
+
+/** The Concierge chat a task link is drawn in, or null outside one. */
+export function useTaskLinksChat(): string | null {
+  return useContext(TaskLinksContext)?.chatId ?? null;
 }
 
 /** {@link TaskLinksProvider} for a Concierge chat, and nothing around any other chat. */

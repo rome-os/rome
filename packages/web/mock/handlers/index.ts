@@ -627,6 +627,28 @@ const transcripts: Record<string, ChatMessage[]> = {
       },
     ],
   ),
+  // The main chat's other task chats, so each opens from its task list row.
+  "mock-task-chat-table": turn(
+    "mock-task-chat-table",
+    1,
+    "2026-08-05T08:50:00.000Z",
+    "Book a table for four on Friday evening.",
+    [text("Osteria 23 has a back room for four at 19:00. It needs your approval to hold it.")],
+  ),
+  "mock-task-chat-pr-review": turn(
+    "mock-task-chat-pr-review",
+    1,
+    "2026-08-05T09:05:00.000Z",
+    "Review the open pull requests.",
+    [text("Three are open. I am reading the second one now.")],
+  ),
+  "mock-task-chat-visa": turn(
+    "mock-task-chat-visa",
+    1,
+    "2026-08-05T09:10:00.000Z",
+    "Check the visa appointment.",
+    [text("No earlier slot yet. I will look again in 20 minutes.")],
+  ),
   ...Object.fromEntries(
     curatedChats.map((chat) => [
       chat.id,
@@ -1097,6 +1119,12 @@ const chatSessions: ChatSession[] = [
     awaitingGuardian: true,
     triggerKind: "concierge",
   },
+  { ...session("mock-task-chat-table", "Book a table for Friday"), triggerKind: "concierge" },
+  {
+    ...session("mock-task-chat-pr-review", "Review the open pull requests"),
+    triggerKind: "concierge",
+  },
+  { ...session("mock-task-chat-visa", "Check the visa appointment"), triggerKind: "concierge" },
   // A chat that works in a folder on another computer groups under that folder.
   {
     ...session("mock-chat-device-folder", "Fix the flaky e2e test"),
