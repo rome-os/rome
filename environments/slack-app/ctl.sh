@@ -3,6 +3,7 @@
 #
 #   environments/slack-app/ctl.sh stop|start|status rome-a|rome-b
 #   environments/slack-app/ctl.sh wipe-chat rome-a|rome-b <Slack conversation id> [--text <text>]...
+#   environments/slack-app/ctl.sh record rome-a|rome-b '{"chat":"<conversation id>[:<thread ts>]"}'
 #   environments/slack-app/ctl.sh cloud-query        (SQL on stdin, JSON rows out)
 #   environments/slack-app/ctl.sh distribution on|off   (the app's public distribution)
 #   environments/slack-app/ctl.sh token-file rome-a|rome-b  (the connector's Slack token file)
@@ -13,7 +14,10 @@
 # A stopped instance's address refuses connections; Rome Cloud, the relay and
 # the fake Slack keep running, so events for it wait in its mailbox.
 # wipe-chat stops the instance, wipes Rome's copy of the conversation
-# (tools/wipe-chat.mjs) and starts it again if it was running. cloud-query runs
+# (tools/wipe-chat.mjs) and starts it again if it was running. record prints
+# the messages Chats has on record for a conversation (tools/chat-record.mjs),
+# reading the database without writing it, the instance running or not.
+# cloud-query runs
 # one query on Rome Cloud's database as a role that can only read.
 # old-connections writes the two older Slack connections an upgrade leaves
 # (tools/old-connections.mjs) into the stopped instance and starts it again.
@@ -32,7 +36,7 @@ compose() { docker compose --env-file "$STATE_DIR/compose.env" -f "$ENV_DIR/comp
 action="${1:-}"
 svc="${2:-}"
 case "$action" in
-  stop | start | status | wipe-chat | token-file | old-connections) case "$svc" in rome-a | rome-b) ;; *)
+  stop | start | status | wipe-chat | record | token-file | old-connections) case "$svc" in rome-a | rome-b) ;; *)
     echo "instance must be rome-a or rome-b" >&2
     exit 2
     ;;
@@ -48,7 +52,7 @@ case "$action" in
     exit 2
   } ;;
   *)
-    sed -n '2,22p' "$0"
+    sed -n '2,26p' "$0"
     exit 2
     ;;
 esac
@@ -59,6 +63,19 @@ wait_healthy() {
     sleep 1
   done
   healthy
+}
+
+# The member whose direct message the conversation is, from the fake Slack,
+# so the chat is found by its key as well as by its address.
+member_of() {
+  local port
+  port="$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
+  # shellcheck disable=SC2016 # the backticks are JavaScript
+  CONVERSATION="$1" node -e '
+    fetch(`http://127.0.0.1:${process.argv[1]}/_control/state`).then((r) => r.json()).then((s) => {
+      for (const w of s.workspaces)
+        for (const m of w.members) if (m.im_channel === process.env.CONVERSATION) console.log(m.id);
+    }, () => {});' "$port"
 }
 
 healthy() { compose exec -T "$svc" node -e 'fetch("http://127.0.0.1:9368/health").then(r=>process.exit(r.ok?0:1),()=>process.exit(1))' >/dev/null 2>&1; }
@@ -163,15 +180,7 @@ case "$action" in
       texts+=(--text "$2")
       shift 2
     done
-    # The member whose direct message it is, from the fake Slack, so the chat
-    # is found by its key as well as by its address.
-    port="$(sed -n 's/^FAKE_SLACK_PORT=//p' "$STATE_DIR/compose.env")"
-    # shellcheck disable=SC2016 # the backticks are JavaScript
-    member="$(CONVERSATION="$conversation" node -e '
-      fetch(`http://127.0.0.1:${process.argv[1]}/_control/state`).then((r) => r.json()).then((s) => {
-        for (const w of s.workspaces)
-          for (const m of w.members) if (m.im_channel === process.env.CONVERSATION) console.log(m.id);
-      }, () => {});' "$port")"
+    member="$(member_of "$conversation")"
     running=false
     [ -n "$(compose ps -q --status running "$svc")" ] && running=true
     compose stop -t 30 "$svc" >/dev/null
@@ -193,6 +202,24 @@ case "$action" in
       let wipe; try { wipe = JSON.parse(process.env.RESULT.trim().split("\n").at(-1)); } catch { wipe = { ok: false, error: "no result from the wipe", output: process.env.RESULT }; }
       console.log(JSON.stringify({ instance: process.env.INSTANCE, state: process.env.STATE, ...wipe }));'
     exit "$code"
+    ;;
+  record)
+    chat="$(node -e '
+      try { const c = JSON.parse(process.argv[1] ?? "").chat; if (typeof c === "string") console.log(c); } catch {}' "${3:-}")"
+    [[ "$chat" =~ ^[A-Z0-9]+(:[0-9]+\.[0-9]+)?$ ]] || {
+      echo "usage: ctl.sh record rome-a|rome-b '{\"chat\":\"<conversation id>[:<thread ts>]\"}'" >&2
+      exit 2
+    }
+    member="$(member_of "${chat%%:*}")"
+    tool_args=(--chat "$chat" ${member:+--member "$member"})
+    if [ -n "$(compose ps -q --status running "$svc")" ]; then
+      # Read only, so it runs beside the instance: the script comes in on stdin.
+      compose exec -T "$svc" node --input-type=module - "${tool_args[@]}" <"$ENV_DIR/tools/chat-record.mjs"
+    else
+      compose run --rm --no-deps -T --entrypoint node \
+        -v "$ENV_DIR/tools/chat-record.mjs:/slackenv/chat-record.mjs:ro" \
+        "$svc" /slackenv/chat-record.mjs "${tool_args[@]}"
+    fi
     ;;
   distribution)
     # Off, only the app's home workspace can approve it, as on Slack.

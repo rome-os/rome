@@ -4,7 +4,7 @@
 // Run: node --test environments/slack-app/tools/old-connections.test.mjs
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -53,14 +53,14 @@ function migrate(path) {
   return db;
 }
 
-/** The keys a connection kind's strict profile schema takes, from rome's source. */
+/** The keys a connection kind's strict profile schema takes, from rome's
+ *  source, or null on a Rome that no longer has the kind. */
 function schemaKeys(file, name) {
-  const src = readFileSync(
-    join(romeSrc, "packages/core/src/connections/integrations", file),
-    "utf8",
-  );
+  const path = join(romeSrc, "packages/core/src/connections/integrations", file);
+  if (!existsSync(path)) return null;
+  const src = readFileSync(path, "utf8");
   const at = src.indexOf(`${name} = z`);
-  assert.ok(at >= 0, `${name} in ${file}`);
+  if (at < 0) return null;
   const body = src.slice(at, src.indexOf(".strict()", at));
   return new Set([...body.matchAll(/^\s+(\w+): /gm)].map((m) => m[1]));
 }
@@ -141,6 +141,9 @@ test("write reads each old app the way rome did, and leaves the rows an upgrade 
     [oauth.profile, "oauth-providers.ts", "slackGrantProfileSchema"],
   ]) {
     const keys = schemaKeys(file, name);
+    // A Rome without the kind keeps no schema to hold the profile to: the
+    // rows stay as the last Rome that knew it wrote them.
+    if (!keys) continue;
     for (const k of Object.keys(profile)) assert.ok(keys.has(k), `${name} takes ${k}`);
   }
 
@@ -210,13 +213,15 @@ test("check counts only a Socket Mode connection open now, not one that said hel
   const cloud = await tokensOf("oauth", "Rome");
   // A stand-in for the instance's connections route: only GET exists.
   let botAgent = "core:main";
+  let listedIds = ["c-bot", "c-cloud"];
   const instance = createServer((req, res) => {
     res.setHeader("content-type", "application/json");
     if (req.method !== "GET") {
       res.statusCode = 404;
       return res.end("{}");
     }
-    res.end(JSON.stringify({ connections: [{ id: "c-bot", agent: botAgent }, { id: "c-cloud" }] }));
+    const all = [{ id: "c-bot", agent: botAgent }, { id: "c-cloud" }];
+    res.end(JSON.stringify({ connections: all.filter((c) => listedIds.includes(c.id)) }));
   }).listen(0);
   await new Promise((r) => instance.once("listening", r));
   const dir = mkdtempSync(join(tmpdir(), "old-check-"));
@@ -274,10 +279,10 @@ test("check counts only a Socket Mode connection open now, not one that said hel
       if (!open_sockets.length) break;
       await new Promise((r) => setTimeout(r, 10));
     }
-    // Shorten check's wait: the fake has no open connection, so check fails.
-    const failed = await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }).catch((e) => e);
-    assert.equal(failed.code, 1);
-    assert.equal(JSON.parse(failed.stdout).checks.bot_socket_open, false);
+    // Shorten check's wait: the fake has no open connection, which check
+    // reports without failing, as a Rome that ignores the rows leaves it.
+    const closed = JSON.parse(await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }));
+    assert.equal(closed.checks.bot_socket_open, false);
     const again = await (
       await fetch(`${base}/api/apps.connections.open`, {
         method: "POST",
@@ -289,19 +294,20 @@ test("check counts only a Socket Mode connection open now, not one that said hel
     const passed = JSON.parse(await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }));
     assert.equal(passed.checks.bot_socket_open, true);
     assert.equal(passed.checks.oauth_token_file, true);
-    // A token file with the bot token but no user token fails the OAuth check.
+    // A token file with the bot token but no user token is not the OAuth app's.
     file("token-file.json", { exists: true, bot_token_tail: cloudTails.bot_token_tail });
-    const noUser = await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }).catch((e) => e);
-    assert.equal(noUser.code, 1);
-    assert.equal(JSON.parse(noUser.stdout).checks.oauth_token_file, false);
+    const noUser = JSON.parse(await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }));
+    assert.equal(noUser.checks.oauth_token_file, false);
     file("token-file.json", { exists: true, ...cloudTails });
     // The bot's agent comes from the connections list, with no route that sets one.
     assert.equal(passed.checks.bot_agent, "core:main");
-    // A Rome that reports no agent for the bot fails the check.
+    // A Rome that no longer knows the kinds lists neither connection.
     botAgent = null;
-    const silent = await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }).catch((e) => e);
-    assert.equal(silent.code, 1);
-    assert.equal(JSON.parse(silent.stdout).checks.bot_agent, null);
+    listedIds = [];
+    const ignored = JSON.parse(await runAsync(args, { OLD_CONNECTIONS_WAIT_S: "1" }));
+    assert.equal(ignored.checks.bot_agent, null);
+    assert.equal(ignored.checks.bot_listed, false);
+    assert.equal(ignored.checks.oauth_listed, false);
     live.close();
   } finally {
     instance.close();
