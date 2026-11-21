@@ -1056,7 +1056,7 @@
       "idx": 151,
       "version": "6",
       "when": 1795232470758,
-      "tag": "0151_remove_old_slack_connections",
+      "tag": "0151_remove_slack_bot_connections",
       "breakpoints": true
     }
   ]
