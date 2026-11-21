@@ -1,9 +1,9 @@
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { join } from "node:path";
 import { isRecord } from "@rome-os/node-core";
-import { readPrivateJson, writePrivateJson } from "@rome-os/node-core/storage";
+import { writePrivateJson } from "@rome-os/node-core/storage";
 
 const SESSION_COOKIE = "rome_node_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -41,6 +41,16 @@ type SetupResult =
   | { status: "invalid_token" }
   | { status: "conflict" };
 
+type RateLimitReservation =
+  | {
+      allowed: true;
+      finish(outcome: "success" | "failure" | "abort"): void;
+    }
+  | {
+      allowed: false;
+      retryAfterSeconds: number;
+    };
+
 export interface WebAuth {
   readonly authRequired: boolean;
   readonly passwordSource: PasswordSource;
@@ -50,11 +60,7 @@ export interface WebAuth {
   isTrustedHost(req: IncomingMessage): boolean;
   isAuthenticated(req: IncomingMessage): boolean;
   checkSameOrigin(req: IncomingMessage): boolean;
-  checkLoginRateLimit(
-    remoteAddress: string,
-  ): { allowed: true } | { allowed: false; retryAfterSeconds: number };
-  recordLoginFailure(remoteAddress: string): void;
-  clearLoginFailures(remoteAddress: string): void;
+  reserveLoginAttempt(remoteAddress: string): RateLimitReservation;
   verifyPassword(candidate: string): Promise<boolean>;
   completeSetup(token: string, newPassword: string): Promise<SetupResult>;
   setPassword(newPassword: string): Promise<string>;
@@ -189,14 +195,33 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
     activePassword = await hashPassword(envPassword);
     passwordSource = "env";
   } else if (authPath) {
+    let rawText: string | null = null;
     try {
-      const stored = parseStoredPassword(await readPrivateJson(authPath));
-      if (stored) {
-        activePassword = stored;
-        passwordSource = "file";
+      rawText = await readFile(authPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw new Error(
+          `Failed to read Web UI password file (${authPath}): ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
-    } catch {
-      // Missing or unreadable auth file falls through to bind-based default.
+    }
+    if (rawText !== null) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch {
+        throw new Error(
+          `Web UI password file (${authPath}) is corrupted. Repair or remove it, or set ROME_NODE_UI_PASSWORD.`,
+        );
+      }
+      const stored = parseStoredPassword(parsed);
+      if (!stored) {
+        throw new Error(
+          `Web UI password file (${authPath}) has an invalid format. Repair or remove it, or set ROME_NODE_UI_PASSWORD.`,
+        );
+      }
+      activePassword = stored;
+      passwordSource = "file";
     }
   }
 
@@ -208,6 +233,7 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
 
   const sessions = new Map<string, number>();
   const failures = new Map<string, number[]>();
+  const inFlightAttempts = new Map<string, number>();
 
   function pruneSessions(currentTime: number): void {
     for (const [id, expiresAt] of sessions) {
@@ -293,39 +319,46 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
     }
   }
 
-  function checkLoginRateLimit(
-    remoteAddress: string,
-  ): { allowed: true } | { allowed: false; retryAfterSeconds: number } {
+  function reserveLoginAttempt(remoteAddress: string): RateLimitReservation {
     const key = remoteAddress || "unknown";
     const currentTime = now();
     const cutoff = currentTime - RATE_LIMIT_WINDOW_MS;
     const recent = (failures.get(key) ?? []).filter((at) => at > cutoff);
     if (recent.length === 0) {
       failures.delete(key);
-      return { allowed: true };
+    } else {
+      failures.set(key, recent);
     }
-    failures.set(key, recent);
-    if (recent.length >= RATE_LIMIT_MAX_FAILURES) {
-      const retryAfterSeconds = Math.max(
-        1,
-        Math.ceil((recent[0] + RATE_LIMIT_WINDOW_MS - currentTime) / 1000),
-      );
+    const active = inFlightAttempts.get(key) ?? 0;
+    if (recent.length + active >= RATE_LIMIT_MAX_FAILURES) {
+      const retryAfterSeconds =
+        recent.length > 0
+          ? Math.max(1, Math.ceil((recent[0] + RATE_LIMIT_WINDOW_MS - currentTime) / 1000))
+          : 1;
       return { allowed: false, retryAfterSeconds };
     }
-    return { allowed: true };
-  }
+    inFlightAttempts.set(key, active + 1);
+    let finished = false;
+    return {
+      allowed: true,
+      finish(outcome: "success" | "failure" | "abort") {
+        if (finished) return;
+        finished = true;
+        const remaining = (inFlightAttempts.get(key) ?? 1) - 1;
+        if (remaining <= 0) inFlightAttempts.delete(key);
+        else inFlightAttempts.set(key, remaining);
 
-  function recordLoginFailure(remoteAddress: string): void {
-    const key = remoteAddress || "unknown";
-    const currentTime = now();
-    const cutoff = currentTime - RATE_LIMIT_WINDOW_MS;
-    const recent = (failures.get(key) ?? []).filter((at) => at > cutoff);
-    recent.push(currentTime);
-    failures.set(key, recent);
-  }
-
-  function clearLoginFailures(remoteAddress: string): void {
-    failures.delete(remoteAddress || "unknown");
+        if (outcome === "success") {
+          failures.delete(key);
+        } else if (outcome === "failure") {
+          const failTime = now();
+          const failCutoff = failTime - RATE_LIMIT_WINDOW_MS;
+          const next = (failures.get(key) ?? []).filter((at) => at > failCutoff);
+          next.push(failTime);
+          failures.set(key, next);
+        }
+      },
+    };
   }
 
   function createSession(): string {
@@ -422,9 +455,7 @@ export async function createWebAuth(options: WebAuthOptions): Promise<WebAuth> {
     isTrustedHost,
     isAuthenticated,
     checkSameOrigin,
-    checkLoginRateLimit,
-    recordLoginFailure,
-    clearLoginFailures,
+    reserveLoginAttempt,
     verifyPassword,
     completeSetup,
     setPassword,

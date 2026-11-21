@@ -40,4 +40,4 @@ packages/rome-node-cli/src/**/*.test.tsx
 packages/rome-node-web/src/**/*.test.ts
 packages/rome-node-web/src/**/*.test.tsx
 packages/rome-node-web/src/test/
-packages/rome-node-web/src/generated-ember-theme.css
+packages/rome-node-web/src/generated-theme.css

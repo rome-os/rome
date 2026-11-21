@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { gzipSync } from "node:zlib";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { HostCredential } from "@rome-os/node-core/host";
-import { isLoopbackHost } from "./auth.js";
+import { createFileCredentialStore, type HostCredential } from "@rome-os/node-core/host";
+import { createWebAuth, isLoopbackHost } from "./auth.js";
 import { HostController } from "./host-controller.js";
 import { startWebServer } from "./server.js";
 
@@ -754,13 +754,13 @@ describe("rome-node web server", () => {
   it("does not launch host if cancelled or disposed during credential save, reports final config save failures, and preserves concurrent executionEnabled updates", async () => {
     const validToken = `romedev_${"c".repeat(43)}`;
 
-    // 1. Cancel during credentials.save must NOT launch a host connection.
+    // 1. Cancel during credentials.save must NOT launch a host connection now OR after restart.
     {
       const configDir = await mkdtemp(join(tmpdir(), "rome-node-cancel-save-"));
       cleanup.push(() => rm(configDir, { recursive: true, force: true }));
+      const fileCredentials = createFileCredentialStore(join(configDir, "credential.json"));
       let releaseSave!: () => void;
       const saveEntered = new Promise<void>((resolve) => {
-        // resolved when save starts
         releaseSave = resolve;
       });
       let finishSave!: () => void;
@@ -775,12 +775,13 @@ describe("rome-node web server", () => {
         name: "Cancel During Save",
         deps: {
           credentials: {
-            load: async () => null,
-            save: async () => {
+            load: () => fileCredentials.load(),
+            save: async (credential) => {
               releaseSave();
               await saveGate;
+              await fileCredentials.save(credential);
             },
-            clear: async () => {},
+            clear: () => fileCredentials.clear(),
           },
           loginDeviceCode: async (_cloud, _name, _signal, onPrompt) => {
             onPrompt({
@@ -808,8 +809,33 @@ describe("rome-node web server", () => {
       finishSave();
       const afterCancel = await cancelPromise;
 
-      expect(afterCancel.phase).toBe("unconfigured");
+      expect(afterCancel.configured).toBe(true);
+      expect(afterCancel.deviceId).toBe("dev-cancel-1");
+      expect(afterCancel.phase).toBe("disconnected");
       expect(connectCalls).toBe(0);
+      await controller.dispose();
+
+      // Restarting against the same directory must stay disconnected and NOT auto-launch execution.
+      let restartedConnectCalls = 0;
+      const restarted = new HostController({
+        configDirectory: configDir,
+        cloudUrl: "https://romeos.cc",
+        name: "Cancel During Save",
+        deps: {
+          connectHost: async () => {
+            restartedConnectCalls += 1;
+          },
+          connectLimitedHost: async () => {
+            restartedConnectCalls += 1;
+          },
+        },
+      });
+      cleanup.push(() => restarted.dispose());
+      await restarted.start();
+      expect(restarted.snapshot().configured).toBe(true);
+      expect(restarted.snapshot().deviceId).toBe("dev-cancel-1");
+      expect(restarted.snapshot().phase).toBe("disconnected");
+      expect(restartedConnectCalls).toBe(0);
     }
 
     // 2. dispose() during credentials.save must NOT launch host or use closed audit store.
@@ -992,5 +1018,61 @@ describe("rome-node web server", () => {
       ) as { executionEnabled: boolean };
       expect(persistedConfig.executionEnabled).toBe(false);
     }
+  });
+
+  it("enforces login rate limit across concurrent wrong-password attempts and fails closed on corrupted web-auth.json", async () => {
+    const configDir = await mkdtemp(join(tmpdir(), "rome-node-web-ratelimit-"));
+    cleanup.push(() => rm(configDir, { recursive: true, force: true }));
+    const assetsDir = await createAssetsFixture();
+
+    const web = await startWebServer({
+      host: "127.0.0.1",
+      port: 0,
+      configDirectory: configDir,
+      assetsDir,
+      password: "correct-horse-battery",
+      log: () => {},
+    });
+    cleanup.push(() => web.close());
+
+    const responses = await Promise.all(
+      Array.from({ length: 25 }, () =>
+        fetch(`${web.url}/api/auth/login`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ password: "wrong-password" }),
+        }),
+      ),
+    );
+    const statuses = responses.map((res) => res.status);
+    const unauthorizedCount = statuses.filter((status) => status === 401).length;
+    const rateLimitedCount = statuses.filter((status) => status === 429).length;
+    expect(unauthorizedCount).toBeLessThanOrEqual(10);
+    expect(rateLimitedCount).toBeGreaterThanOrEqual(15);
+    expect(unauthorizedCount + rateLimitedCount).toBe(25);
+
+    const followUp = await fetch(`${web.url}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: "wrong-password" }),
+    });
+    expect(followUp.status).toBe(429);
+    expect(Number(followUp.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+
+    const corruptedDir = await mkdtemp(join(tmpdir(), "rome-node-corrupt-auth-"));
+    cleanup.push(() => rm(corruptedDir, { recursive: true, force: true }));
+    await writeFile(join(corruptedDir, "web-auth.json"), "{not-valid-json", "utf8");
+    await expect(
+      createWebAuth({ host: "127.0.0.1", configDirectory: corruptedDir }),
+    ).rejects.toThrow(/corrupted/i);
+
+    await writeFile(
+      join(corruptedDir, "web-auth.json"),
+      JSON.stringify({ version: 1, salt: "short", hash: "bad" }),
+      "utf8",
+    );
+    await expect(
+      createWebAuth({ host: "127.0.0.1", configDirectory: corruptedDir }),
+    ).rejects.toThrow(/invalid format/i);
   });
 });

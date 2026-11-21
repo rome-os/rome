@@ -120,7 +120,9 @@ volumes:
    custom password on the initial setup screen (persisted as an `scrypt` hash in
    `/var/lib/rome-node/web-auth.json`). When running `rome-node web` directly on
    a loopback bind (`127.0.0.1`), local loopback access is passwordless until
-   you set a password.
+   you set a password. Always set `ROME_NODE_UI_PASSWORD` (or configure a custom
+   password first) before placing any reverse proxy or tunnel in front of the
+   Web UI.
 3. Click **Authorize device**, open the Rome Cloud verification link, confirm
    the user code, and approve the container with your Rome Cloud account.
 
@@ -132,9 +134,9 @@ After approval, the container connects to the account Gateway and appears on
   between full execution and limited mode (`computer_use_off`).
 - Check local audit log health and jump to Rome **Settings → Devices** for full
   device activity and audit history (or run `rome-node audit` inside the container).
-- Set or change the custom Web UI password (stored as an `scrypt` hash in
-  `/var/lib/rome-node/web-auth.json`; removing a password is only permitted on
-  loopback-bound local servers).
+- Set or change the custom Web UI password, stored as an `scrypt` hash in
+  `/var/lib/rome-node/web-auth.json`. Removing a password is only permitted on
+  loopback-bound local servers.
 - Clear the local credential to re-authorize under another identity.
 
 Recreating the container with the same volume keeps the device identity,

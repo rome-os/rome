@@ -530,8 +530,16 @@ export class HostController {
 
   async cancelAuthorization(): Promise<HostSnapshot> {
     return this.enqueue(async () => {
+      const wasAuthorizing = this.authAbort !== null || this.phase === "authorizing";
       await this.stopActiveAuthorization();
-      if (!this.disposed && this.phase === "authorizing") {
+      if (this.disposed) return this.snapshot();
+      if (wasAuthorizing) {
+        const stored = parseStoredCredential(await this.credentials.load().catch(() => null));
+        if (this.disposed) return this.snapshot();
+        this.configured = Boolean(stored);
+        this.deviceId = stored?.deviceId ?? null;
+        await this.updateConfig((current) => ({ ...current, autoConnect: false }));
+        if (this.disposed) return this.snapshot();
         this.setPhase(this.configured ? "disconnected" : "unconfigured", null);
       }
       return this.snapshot();

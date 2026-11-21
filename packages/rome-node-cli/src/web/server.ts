@@ -246,7 +246,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           return;
         }
         const remote = req.socket.remoteAddress ?? "unknown";
-        const limit = auth.checkLoginRateLimit(remote);
+        const limit = auth.reserveLoginAttempt(remote);
         if (!limit.allowed) {
           sendJson(
             res,
@@ -256,28 +256,33 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           );
           return;
         }
-        const body = await readJsonBody(req);
-        const token = typeof body.token === "string" ? body.token.trim() : "";
-        const newPasswordError = validateNewPassword(body.newPassword);
-        if (newPasswordError) {
-          throw new ControllerInputError(newPasswordError);
-        }
-        const result = await auth.completeSetup(token, body.newPassword as string);
-        if (result.status === "invalid_token") {
-          auth.recordLoginFailure(remote);
-          sendJson(res, 401, { error: "Invalid setup token." });
+        try {
+          const body = await readJsonBody(req);
+          const token = typeof body.token === "string" ? body.token.trim() : "";
+          const newPasswordError = validateNewPassword(body.newPassword);
+          if (newPasswordError) {
+            throw new ControllerInputError(newPasswordError);
+          }
+          const result = await auth.completeSetup(token, body.newPassword as string);
+          if (result.status === "invalid_token") {
+            limit.finish("failure");
+            sendJson(res, 401, { error: "Invalid setup token." });
+            return;
+          }
+          if (result.status === "conflict") {
+            limit.finish("abort");
+            sendJson(res, 409, { error: "Initial setup is already complete." });
+            return;
+          }
+          limit.finish("success");
+          closeAllSseClients();
+          sendJson(res, 200, sessionPayload(true), {
+            "set-cookie": auth.sessionCookieHeader(result.sessionId, isSecureRequest(req)),
+          });
           return;
+        } finally {
+          limit.finish("abort");
         }
-        if (result.status === "conflict") {
-          sendJson(res, 409, { error: "Initial setup is already complete." });
-          return;
-        }
-        auth.clearLoginFailures(remote);
-        closeAllSseClients();
-        sendJson(res, 200, sessionPayload(true), {
-          "set-cookie": auth.sessionCookieHeader(result.sessionId, isSecureRequest(req)),
-        });
-        return;
       }
 
       if (pathname === "/api/auth/login" && method === "POST") {
@@ -292,7 +297,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           return;
         }
         const remote = req.socket.remoteAddress ?? "unknown";
-        const limit = auth.checkLoginRateLimit(remote);
+        const limit = auth.reserveLoginAttempt(remote);
         if (!limit.allowed) {
           sendJson(
             res,
@@ -302,19 +307,23 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           );
           return;
         }
-        const body = await readJsonBody(req);
-        const password = typeof body.password === "string" ? body.password : "";
-        if (!(await auth.verifyPassword(password))) {
-          auth.recordLoginFailure(remote);
-          sendJson(res, 401, { error: "Incorrect password." });
+        try {
+          const body = await readJsonBody(req);
+          const password = typeof body.password === "string" ? body.password : "";
+          if (!(await auth.verifyPassword(password))) {
+            limit.finish("failure");
+            sendJson(res, 401, { error: "Incorrect password." });
+            return;
+          }
+          limit.finish("success");
+          const sessionId = auth.createSession();
+          sendJson(res, 200, sessionPayload(true), {
+            "set-cookie": auth.sessionCookieHeader(sessionId, isSecureRequest(req)),
+          });
           return;
+        } finally {
+          limit.finish("abort");
         }
-        auth.clearLoginFailures(remote);
-        const sessionId = auth.createSession();
-        sendJson(res, 200, sessionPayload(true), {
-          "set-cookie": auth.sessionCookieHeader(sessionId, isSecureRequest(req)),
-        });
-        return;
       }
 
       if (!auth.isAuthenticated(req)) {
@@ -329,38 +338,43 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           });
           return;
         }
-        const body = await readJsonBody(req);
-        const newPasswordError = validateNewPassword(body.newPassword);
-        if (newPasswordError) {
-          throw new ControllerInputError(newPasswordError);
+        const requiresCurrentPassword = auth.passwordSource === "file";
+        const remote = req.socket.remoteAddress ?? "unknown";
+        const limit = requiresCurrentPassword ? auth.reserveLoginAttempt(remote) : null;
+        if (limit && !limit.allowed) {
+          sendJson(
+            res,
+            429,
+            { error: "Too many failed password attempts. Try again shortly." },
+            { "retry-after": String(limit.retryAfterSeconds) },
+          );
+          return;
         }
-        if (auth.passwordSource === "file") {
-          const remote = req.socket.remoteAddress ?? "unknown";
-          const limit = auth.checkLoginRateLimit(remote);
-          if (!limit.allowed) {
-            sendJson(
-              res,
-              429,
-              { error: "Too many failed password attempts. Try again shortly." },
-              { "retry-after": String(limit.retryAfterSeconds) },
-            );
-            return;
+        try {
+          const body = await readJsonBody(req);
+          const newPasswordError = validateNewPassword(body.newPassword);
+          if (newPasswordError) {
+            throw new ControllerInputError(newPasswordError);
           }
-          const currentPassword =
-            typeof body.currentPassword === "string" ? body.currentPassword : "";
-          if (!(await auth.verifyPassword(currentPassword))) {
-            auth.recordLoginFailure(remote);
-            sendJson(res, 401, { error: "Current password is incorrect." });
-            return;
+          if (requiresCurrentPassword) {
+            const currentPassword =
+              typeof body.currentPassword === "string" ? body.currentPassword : "";
+            if (!(await auth.verifyPassword(currentPassword))) {
+              limit?.finish("failure");
+              sendJson(res, 401, { error: "Current password is incorrect." });
+              return;
+            }
+            limit?.finish("success");
           }
-          auth.clearLoginFailures(remote);
+          const sessionId = await auth.setPassword(body.newPassword as string);
+          closeAllSseClients();
+          sendJson(res, 200, sessionPayload(true), {
+            "set-cookie": auth.sessionCookieHeader(sessionId, isSecureRequest(req)),
+          });
+          return;
+        } finally {
+          limit?.finish("abort");
         }
-        const sessionId = await auth.setPassword(body.newPassword as string);
-        closeAllSseClients();
-        sendJson(res, 200, sessionPayload(true), {
-          "set-cookie": auth.sessionCookieHeader(sessionId, isSecureRequest(req)),
-        });
-        return;
       }
 
       if (pathname === "/api/auth/password" && method === "DELETE") {
@@ -382,7 +396,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           return;
         }
         const remote = req.socket.remoteAddress ?? "unknown";
-        const limit = auth.checkLoginRateLimit(remote);
+        const limit = auth.reserveLoginAttempt(remote);
         if (!limit.allowed) {
           sendJson(
             res,
@@ -392,21 +406,25 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           );
           return;
         }
-        const body = await readJsonBody(req);
-        const currentPassword =
-          typeof body.currentPassword === "string" ? body.currentPassword : "";
-        if (!(await auth.verifyPassword(currentPassword))) {
-          auth.recordLoginFailure(remote);
-          sendJson(res, 401, { error: "Current password is incorrect." });
+        try {
+          const body = await readJsonBody(req);
+          const currentPassword =
+            typeof body.currentPassword === "string" ? body.currentPassword : "";
+          if (!(await auth.verifyPassword(currentPassword))) {
+            limit.finish("failure");
+            sendJson(res, 401, { error: "Current password is incorrect." });
+            return;
+          }
+          limit.finish("success");
+          await auth.removePassword();
+          closeAllSseClients();
+          sendJson(res, 200, sessionPayload(true), {
+            "set-cookie": auth.clearSessionCookieHeader(isSecureRequest(req)),
+          });
           return;
+        } finally {
+          limit.finish("abort");
         }
-        auth.clearLoginFailures(remote);
-        await auth.removePassword();
-        closeAllSseClients();
-        sendJson(res, 200, sessionPayload(true), {
-          "set-cookie": auth.clearSessionCookieHeader(isSecureRequest(req)),
-        });
-        return;
       }
 
       if (pathname === "/api/auth/logout" && method === "POST") {
@@ -531,7 +549,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     );
   } else {
     log(
-      "Web UI authentication: passwordless for localhost (set a password in the UI or via ROME_NODE_UI_PASSWORD for remote access).",
+      "Web UI authentication: passwordless for localhost only (if exposed behind a reverse proxy or tunnel, set a password in the UI or via ROME_NODE_UI_PASSWORD first).",
     );
   }
 
