@@ -16,7 +16,6 @@ import { kindCrossings, kindRules } from "./rules/kinds.js";
 import { layerRules, listedCrossings } from "./rules/layers.js";
 import { libraryRules } from "./rules/library.js";
 import { wiringCrossings, wiringRules } from "./rules/wiring.js";
-import { slackAppCopyRules } from "./rules/slack-app-copy.js";
 
 /**
  * One import as the rules see it. Paths are relative to the scanned src/
@@ -257,7 +256,6 @@ export function runCli(): number {
     ...contextEntryRules,
     ...libraryRules,
     ...wiringRules,
-    ...slackAppCopyRules,
   ];
   const crossings = [
     ...listedCrossings,

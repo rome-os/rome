@@ -1,14 +1,12 @@
 // What a new session in a Slack app chat reads from before it: the chat's
-// latest messages, read through the connection, whether or not the
-// connection's own copy still holds them. Built in test/ because it crosses
-// the connection and the prompt facts. Rome keeps no record of the chat here
-// at all, and the connection's copy is first full, then wiped and the
-// connection restarted, and the session reads the same both times.
+// latest messages, read through the connection from Slack. Built in test/
+// because it crosses the connection and the prompt facts. Rome keeps no record
+// of the chat here at all, and the connection keeps none of its own, so a
+// session reads the same before and after the connection restarts.
 
-import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { describe, expect, it, rs } from "@rstest/core";
 import type { ThreadContext } from "@rome-os/app-runtime";
 import { SenderLabels } from "../chats/sender-labels.js";
-import { SlackMessageCopyRepository } from "../connections/kinds/slack-app/message-copy.js";
 import type { SlackWireMessage } from "../connections/kinds/slack-app/message.js";
 import { SlackReadGate } from "../connections/kinds/slack-app/read-gate.js";
 import { type MailboxFrame, SlackAppAdapter } from "../connections/kinds/slack-app/slack-app.js";
@@ -19,8 +17,6 @@ import {
   forwardSignature,
 } from "../connections/kinds/slack-app/forward.js";
 import { chatPromptFacts } from "../core/chat-prompt-facts.js";
-import { slackAppMessages } from "../db/schema/system.js";
-import { createTestDb, type TestDb } from "./db.js";
 
 const TEAM = "T_A";
 const BOT = "U_BOT";
@@ -82,13 +78,7 @@ function heard(i: number, ts = tsOf(i)): MailboxFrame {
 }
 
 describe("a new session in a Slack app chat (R13, option b)", () => {
-  let testDb: TestDb;
-  beforeEach(() => {
-    testDb = createTestDb();
-  });
-  afterEach(() => testDb.close());
-
-  it("reads the chat's latest messages the same with the connection's copy full and wiped", async () => {
+  it("reads the chat's latest messages from Slack, the same after the connection restarts", async () => {
     const slack = slackSide();
     for (let i = 1; i <= 6; i++) {
       slack.said.push({
@@ -124,9 +114,8 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
         },
         openMailbox: (_mailbox, handler) => {
           onFrame = handler;
-          return { stop: () => {} };
+          return { stop: () => {}, attempts: 4 };
         },
-        copy: new SlackMessageCopyRepository(testDb.db),
         readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
       });
       adapter.onInbound(() => {});
@@ -146,23 +135,21 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
     const place: ThreadContext = { channel: "slack_app", threadId: CHAT, threadType: "private" };
     const before = new Date("2023-11-14T22:14:00.000Z");
 
-    // The copy full: the connection heard every message of the chat.
+    // The connection heard every message of the chat.
     const first = connect();
     await first.start();
     for (let i = 1; i <= 6; i++) await onFrame!(heard(i));
     for (let i = 7; i <= 23; i++) await onFrame!(heard(i, backlogTs(i)));
-    expect(testDb.db.select().from(slackAppMessages).all()).not.toHaveLength(0);
     const readsBeforeFull = slack.conversationHistory.mock.calls.length;
     const full = await factsOver(first).earlier!(place, before);
     const readsAfterFull = slack.conversationHistory.mock.calls.length;
     await first.stop();
 
-    // The copy wiped, and the connection restarted on it.
-    testDb.db.delete(slackAppMessages).run();
+    // The connection restarted.
     const second = connect();
     await second.start();
-    const readsBeforeWiped = slack.conversationHistory.mock.calls.length;
-    const wiped = await factsOver(second).earlier!(place, before);
+    const readsBeforeRestart = slack.conversationHistory.mock.calls.length;
+    const restarted = await factsOver(second).earlier!(place, before);
     await second.stop();
 
     expect(full?.map((m) => [m.text, m.fromRome])).toEqual([
@@ -173,15 +160,13 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
       ["message 5", false],
       ["message 6", true],
     ]);
-    expect(wiped).toEqual(full);
-    // Each asked Slack once, from the turn's time: a drain's first messages
-    // never say which is the chat's newest, since Slack may be retrying old
-    // ones, so the copy answers only once a read has asked Slack.
+    expect(restarted).toEqual(full);
+    // Each asked Slack once, from the turn's time.
     const latestOf = (calls: typeof slack.conversationHistory.mock.calls) =>
       calls.map(([, input]) => input.latest);
     const calls = slack.conversationHistory.mock.calls;
     expect(latestOf(calls.slice(readsBeforeFull, readsAfterFull))).toEqual(["1700000040.000001"]);
-    expect(latestOf(calls.slice(readsBeforeWiped))).toEqual(["1700000040.000001"]);
+    expect(latestOf(calls.slice(readsBeforeRestart))).toEqual(["1700000040.000001"]);
   });
 
   it("reads what came before the session's first message when more than a page followed it in the same second", async () => {
@@ -214,8 +199,7 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
         conversationHistory: slack.conversationHistory,
         revoke: async () => {},
       },
-      openMailbox: () => ({ stop: () => {} }),
-      copy: new SlackMessageCopyRepository(testDb.db),
+      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
     adapter.onInbound(() => {});
