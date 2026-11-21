@@ -50,7 +50,7 @@ import {
 } from "../../outbound/send-refusals.js";
 import { saveUrlAttachments } from "../../inbound/attachment-files.js";
 import { createReadStream } from "node:fs";
-import { basename, extname } from "node:path";
+import { basename } from "node:path";
 import {
   DISCORD_API_VERSION,
   DISCORD_BROKER_RESPONSE_LIMIT_BYTES,
@@ -62,23 +62,14 @@ import {
   storedAgentChoice,
 } from "../../../chats/connected-accounts/account-agents.js";
 import { isLinkCodeMessage } from "../../../people/link-code/index.js";
+import type { TalkHistoryRead } from "../../types.js";
+import { type DiscordGet, readDiscordHistory, type WireChannel } from "./discord-history.js";
+import { botReadsHistory } from "./discord-permissions.js";
+import { discordAttachment } from "./discord-attachment.js";
 import type * as connections from "../../message.js";
 
 // discord.js loads when a Discord connection first needs it, not with every boot.
 const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
-
-/**
- * The human-readable attachment name as the uploader saw it. Discord sanitizes
- * filenames that contain non-ASCII characters (e.g. "腾讯会议录制转写文件.txt"
- * becomes "580f8fdeeb994c86.txt") and preserves the original — minus extension —
- * in the `title` field. Reconstruct the display name from `title` + the cleaned
- * extension; fall back to `filename` when no title is present.
- */
-function discordAttachmentName(filename: string, title?: string | null): string {
-  if (!title) return filename;
-  const ext = extname(filename);
-  return ext && !title.toLowerCase().endsWith(ext.toLowerCase()) ? `${title}${ext}` : title;
-}
 
 const log = createLogger("discord");
 
@@ -374,6 +365,8 @@ export class DiscordAdapter {
   private readonly rest: REST;
   /** Broker requests that must not survive this credential-owning epoch. */
   private readonly activeApiRequestControllers = new Set<AbortController>();
+  /** Set by `stop`: this epoch's credential sends no further reads. */
+  private stopped = false;
 
   constructor(config: {
     botToken: string;
@@ -1391,6 +1384,7 @@ Use \`/channel agent clear\` to undo.`,
   }
 
   async stop(): Promise<void> {
+    this.stopped = true;
     // Epoch teardown must synchronously invalidate work still queued behind a
     // rate-limit bucket; otherwise it could later dispatch with this manager's
     // retained, now-stale credential.
@@ -1408,6 +1402,98 @@ Use \`/channel agent clear\` to undo.`,
     const channel = await this.client.channels.fetch(address).catch(() => null);
     if (channel) return address;
     return this.directConversationFor(address);
+  }
+
+  /** `chatId`'s history as Discord keeps it, read live through REST
+   *  (discord-history.ts). A DM is read by its own chat id, the one its
+   *  messages carry. */
+  async readHistory(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]> {
+    // A read must not outlive this credential's epoch: `stop` aborts it, and
+    // no request is sent once it has.
+    if (this.stopped) throw new Error("Discord connection has stopped");
+    const controller = new AbortController();
+    this.activeApiRequestControllers.add(controller);
+    const aborted = new Promise<never>((_resolve, reject) => {
+      controller.signal.addEventListener(
+        "abort",
+        () => reject(new Error("Discord connection stopped during the read")),
+        { once: true },
+      );
+    });
+    void aborted.catch(() => undefined);
+    const get: DiscordGet = async (route, query) => {
+      if (controller.signal.aborted) return aborted;
+      const request = this.rest
+        .get(route, { ...(query ? { query } : {}), signal: controller.signal })
+        .catch((err: unknown) => {
+          this.reportRejectedCredential(err);
+          throw err;
+        });
+      // discord.js does not observe the signal while it waits on a bucket.
+      void request.catch(() => undefined);
+      return Promise.race([request, aborted]);
+    };
+    try {
+      return await this.readHistoryWith(get, chatId, read, controller.signal);
+    } finally {
+      // Whatever ended the read, nothing it started sends on.
+      controller.abort();
+      this.activeApiRequestControllers.delete(controller);
+    }
+  }
+
+  private async readHistoryWith(
+    get: DiscordGet,
+    chatId: ChatId,
+    read: TalkHistoryRead,
+    signal: AbortSignal,
+  ): Promise<ChannelMessage[]> {
+    const botUser = this.client.user;
+    const botId = botUser?.id ?? ((await get(discordJs().Routes.user())) as { id: string }).id;
+    return readDiscordHistory(
+      {
+        get,
+        botId,
+        textOf: discordInboundText,
+        readsHistoryIn: (chat) => this.readsHistoryIn(get, chat, botId, signal),
+        nicknameOf: (guildId, userId) =>
+          this.client.guilds.cache.get(guildId)?.members.cache.get(userId)?.nickname ?? undefined,
+      },
+      chatId,
+      read,
+    );
+  }
+
+  /** Whether the bot holds Read Message History in a guild chat or thread,
+   *  read from Discord now through the read's own `get`, so the read's
+   *  cancellation covers it (discord-permissions.ts). Discord refusing the
+   *  chat answers no; a failure that says nothing about access answers null. */
+  private async readsHistoryIn(
+    get: DiscordGet,
+    chat: WireChannel,
+    botId: string,
+    signal: AbortSignal,
+  ): Promise<boolean | null> {
+    try {
+      return await botReadsHistory(get, chat, botId);
+    } catch (err) {
+      const status = (err as { status?: unknown } | null)?.status;
+      // A stopped read, and a 401 (already reported by `get`), end the read.
+      if (signal.aborted || status === 401) throw err;
+      if (status === 403 || status === 404) return false;
+      return null;
+    }
+  }
+
+  /** Reports a 401 from Discord as a rejected credential, as the broker does,
+   *  and says whether it was one. */
+  private reportRejectedCredential(err: unknown): boolean {
+    if ((err as { status?: unknown } | null)?.status !== 401) return false;
+    this.onGatewayFault?.({
+      kind: "credential",
+      cause: new Error("Discord REST API rejected the bot credential"),
+    });
+    return true;
   }
 
   async directConversationFor(channelUserId: string): Promise<string> {
@@ -1561,28 +1647,7 @@ Use \`/channel agent clear\` to undo.`,
   }
 
   private extractAttachments(message: Message): Attachment[] {
-    const attachments: Attachment[] = [];
-    for (const att of message.attachments.values()) {
-      const mimeType = att.contentType ?? undefined;
-      const fileName = att.name
-        ? discordAttachmentName(att.name, att.title)
-        : (att.title ?? undefined);
-      if (mimeType?.startsWith("image/")) {
-        attachments.push({ type: "image", url: att.url, fileName });
-      } else if (mimeType?.startsWith("video/")) {
-        attachments.push({ type: "video", url: att.url, mimeType, fileName });
-      } else if (mimeType?.startsWith("audio/")) {
-        attachments.push({ type: "audio", url: att.url, mimeType, fileName });
-      } else {
-        attachments.push({
-          type: "document",
-          url: att.url,
-          mimeType,
-          fileName,
-        });
-      }
-    }
-    return attachments;
+    return [...message.attachments.values()].map(discordAttachment);
   }
 
   private async sendAttachment(
