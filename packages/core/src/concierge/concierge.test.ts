@@ -55,7 +55,7 @@ import {
 import { ConciergeTasks } from "./tasks.js";
 import { WORKING_GRACE_MS } from "./message-status.js";
 import { buildConciergeTools } from "./tools.js";
-import { CONNECTION_TASK_TOOLS } from "./on-connection.js";
+import { CONNECTION_TOOLS } from "./on-connection.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import {
   reportOf,
@@ -758,7 +758,7 @@ describe("Concierge tools", () => {
       getThreadContext: () => ({ channel: "telegram", threadId: "123", channelUserId: "456" }),
     };
     expect((await buildConciergeTools(on.service, telegram)).map((t) => t.name)).toEqual([
-      ...CONNECTION_TASK_TOOLS,
+      ...CONNECTION_TOOLS,
     ]);
   });
 
@@ -817,6 +817,29 @@ describe("Concierge tools", () => {
       expect(found?.conciergeChat).toMatchObject({ id: chatId, main: false, onConnection: true });
       // Its news goes to that chat while it is live, not to the main chat.
       expect(await s.service.deliveryChat(chatId, "guardian")).toBe(chatId);
+    });
+
+    it("reacts to the guardian's message of the turn through the chat's account", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const reacted: unknown[] = [];
+      s.deps.reactInChat = async (chat, messageId, emoji) => {
+        reacted.push([chat.channel, chat.threadId, messageId, emoji]);
+      };
+      s.deps.webchatRepo.getTurnChatMessages = (async () => [
+        { id: "800000000000000001", role: "user" },
+      ]) as never;
+      const result = await run(there(s, chatId, "guardian"), s, "react", { emoji: "👍" });
+      expect(result.isError).toBeFalsy();
+      expect(reacted).toEqual([["discord_app", "900", "800000000000000001", "👍"]]);
+      // Anyone else's turn gets no reaction, and one cannot be taken back here.
+      expect((await run(there(s, chatId, "other"), s, "react", { emoji: "👍" })).isError).toBe(
+        true,
+      );
+      expect((await run(there(s, chatId, "guardian"), s, "react", { emoji: null })).isError).toBe(
+        true,
+      );
+      expect(reacted).toHaveLength(1);
     });
 
     it("refuses the task tools to anyone but the guardian", async () => {

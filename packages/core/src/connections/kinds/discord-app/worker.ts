@@ -51,6 +51,10 @@ export interface DiscordAppCloud {
   bindings(signal?: AbortSignal): Promise<DiscordAppBindings>;
   removeServer(serverId: string): Promise<{ removed: boolean; left: boolean }>;
   send(input: { channelId: string; content: string; replyTo?: string }): Promise<{ id: string }>;
+  /** Shows the bot typing in a channel, for about ten seconds or until it posts. */
+  typing(channelId: string): Promise<void>;
+  /** Reacts to a message as the bot with a Unicode emoji. */
+  react(input: { channelId: string; messageId: string; emoji: string }): Promise<void>;
   /** Discord's page where the guardian adds the bot to a server. */
   installUrl(): Promise<string>;
 }
@@ -75,6 +79,8 @@ function wordsFor(code: string, status: number): string {
       return "Discord asked Rome to slow down. Try again in a minute.";
     case "discord_rejected":
       return "Discord did not take the message.";
+    case "message_unavailable":
+      return "That Discord message is gone.";
     default:
       return status === 401
         ? "Rome Cloud did not accept this Rome. Link it again in Settings."
@@ -157,6 +163,12 @@ export function romeCloudDiscordApp(fetchImpl: typeof fetch = globalThis.fetch):
         left?: unknown;
       } | null;
       return { removed: data?.removed === true, left: data?.left === true };
+    },
+    async typing(channelId) {
+      await worker("/v1/messages", "POST", { channelId, typing: true });
+    },
+    async react(input) {
+      await worker("/v1/reactions", "POST", input);
     },
     async send(input) {
       const data = (await worker("/v1/messages", "POST", input)) as { id?: unknown } | null;

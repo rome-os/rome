@@ -257,6 +257,14 @@ export interface ConciergeDeps {
    *  channel is, as the inbox routes it. A chat on a connection stores no
    *  agent of its own. Absent, a chat's stored agent is read. */
   channelAgentOf?: (channel: string) => string | null | undefined;
+  /** Reacts to message `messageId` of a chat on a connection with `emoji`, as
+   *  the account. Rejects when the chat's platform takes no reaction. Absent,
+   *  no chat on a connection takes one. */
+  reactInChat?: (
+    chat: { channel: string; threadId: string },
+    messageId: string,
+    emoji: string,
+  ) => Promise<void>;
   accounts: Pick<ModelAccounts, "read">;
   /** The default provider. Absent, none is set, and chats keep their models. */
   defaults?: Pick<DefaultProviders, "current">;
