@@ -1,12 +1,26 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createStaticHandler, resolveWebAssetsDir } from "./assets.js";
 import {
+  createAuditRateLimiter,
+  decodeContentPreview,
+  getContentMeta,
+  parseAuditListParams,
+  parseAuditSeq,
+  parseAuditStatsParams,
+  parseContentName,
+  parseMaxPreviewBytes,
+  sanitizeAuditItem,
+  sanitizeAuditSummary,
+  type AuditContentPreviewResponse,
+} from "./audit-api.js";
+import {
   createWebAuth,
   isSecureRequest,
   validateNewPassword,
   type PasswordSource,
 } from "./auth.js";
 import {
+  AuditUnavailableError,
   ControllerInputError,
   HostController,
   type HostControllerDeps,
@@ -171,6 +185,8 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   }, SSE_HEARTBEAT_MS);
   heartbeat.unref();
 
+  const auditRateLimiter = createAuditRateLimiter(options.deps?.now);
+
   const server = createServer((req, res) => {
     void handleRequest(req, res).catch((error: unknown) => {
       if (res.headersSent) {
@@ -179,6 +195,10 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
       }
       if (error instanceof ControllerInputError) {
         sendJson(res, 400, { error: error.message });
+        return;
+      }
+      if (error instanceof AuditUnavailableError) {
+        sendJson(res, 503, { error: error.message, status: error.auditStatus });
         return;
       }
       sendJson(res, 500, {
@@ -229,7 +249,10 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     }
 
     if (pathname.startsWith("/api/")) {
-      const requireSameOrigin = !auth.authRequired || (method !== "GET" && method !== "HEAD");
+      const requireSameOrigin =
+        !auth.authRequired ||
+        (method !== "GET" && method !== "HEAD") ||
+        pathname.startsWith("/api/audit/");
       if (requireSameOrigin && !auth.checkSameOrigin(req)) {
         sendJson(res, 403, { error: "Cross-origin requests are not allowed." });
         return;
@@ -509,6 +532,125 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
 
       if (pathname === "/api/host/credentials/clear" && method === "POST") {
         sendJson(res, 200, await controller.clearCredentials());
+        return;
+      }
+
+      if (pathname.startsWith("/api/audit/")) {
+        if (method !== "GET") {
+          sendJson(res, 405, { error: "Audit API is read-only." }, { allow: "GET" });
+          return;
+        }
+        const remote = req.socket.remoteAddress ?? "unknown";
+        const limit = auditRateLimiter.consume(remote);
+        if (!limit.allowed) {
+          sendJson(
+            res,
+            429,
+            {
+              error: `Too many audit log requests. Try again in ${limit.retryAfterSeconds}s.`,
+              retryAfterSeconds: limit.retryAfterSeconds,
+            },
+            { "retry-after": String(limit.retryAfterSeconds) },
+          );
+          return;
+        }
+
+        if (pathname === "/api/audit/summary") {
+          const summary = await controller.getAuditSummary();
+          const counts = summary.status.state === "ok" ? await controller.getAuditCounts() : null;
+          sendJson(res, 200, sanitizeAuditSummary(summary, counts));
+          return;
+        }
+
+        if (pathname === "/api/audit/stats") {
+          const { since, until, bucketMs } = parseAuditStatsParams(parsedUrl.searchParams);
+          sendJson(res, 200, await controller.getAuditStats(since, until, bucketMs));
+          return;
+        }
+
+        if (pathname === "/api/audit/items") {
+          const { query, limit: pageSize } = parseAuditListParams(parsedUrl.searchParams);
+          const rows = await controller.listAuditItems(query);
+          const hasMore = rows.length > pageSize;
+          const items = rows.slice(0, pageSize).map((item) => sanitizeAuditItem(item, "list"));
+          sendJson(res, 200, { items, hasMore });
+          return;
+        }
+
+        function decodePathSegment(raw: string): string {
+          try {
+            return decodeURIComponent(raw);
+          } catch {
+            throw new ControllerInputError("Invalid URL path encoding.");
+          }
+        }
+
+        const itemMatch = /^\/api\/audit\/items\/([^/]+)$/.exec(pathname);
+        if (itemMatch) {
+          const seq = parseAuditSeq(decodePathSegment(itemMatch[1]!));
+          const item = await controller.getAuditItem(seq);
+          if (!item) {
+            sendJson(res, 404, { error: "Audit record not found." });
+            return;
+          }
+          sendJson(res, 200, { item: sanitizeAuditItem(item, "detail") });
+          return;
+        }
+
+        const contentMatch = /^\/api\/audit\/items\/([^/]+)\/content\/([^/]+)$/.exec(pathname);
+        if (contentMatch) {
+          const seq = parseAuditSeq(decodePathSegment(contentMatch[1]!));
+          const name = parseContentName(decodePathSegment(contentMatch[2]!));
+          const maxBytes = parseMaxPreviewBytes(parsedUrl.searchParams.get("maxBytes"));
+          const item = await controller.getAuditItem(seq);
+          if (!item) {
+            sendJson(res, 404, { error: "Audit record not found." });
+            return;
+          }
+          const contentInfo = getContentMeta(item, name);
+          if (!contentInfo) {
+            sendJson(res, 404, { error: "Audit content not found." });
+            return;
+          }
+          const preview = await controller.getAuditContentPreview(
+            contentInfo.ownerSeq,
+            name,
+            maxBytes,
+          );
+          if (!preview) {
+            const payload: AuditContentPreviewResponse = {
+              seq: item.seq,
+              name,
+              available: false,
+              size: contentInfo.meta.size,
+              storedBytes: contentInfo.meta.storedBytes,
+              sha256: contentInfo.meta.sha256,
+              previewBytes: 0,
+              truncated: false,
+              isBinary: false,
+              text: null,
+            };
+            sendJson(res, 200, payload);
+            return;
+          }
+          const decoded = decodeContentPreview(preview.preview, preview.truncated);
+          const payload: AuditContentPreviewResponse = {
+            seq: item.seq,
+            name,
+            available: true,
+            size: preview.size,
+            storedBytes: contentInfo.meta.storedBytes,
+            sha256: contentInfo.meta.sha256,
+            previewBytes: decoded.previewBytes,
+            truncated: preview.truncated || decoded.previewBytes < preview.size,
+            isBinary: decoded.isBinary,
+            text: decoded.text,
+          };
+          sendJson(res, 200, payload);
+          return;
+        }
+
+        sendJson(res, 404, { error: "API route not found." });
         return;
       }
 

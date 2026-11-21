@@ -15,6 +15,7 @@
     "test": "../../scripts/test-env.sh rstest"
   },
   "devDependencies": {
+    "@rome-os/node-ui": "workspace:*",
     "@rome-os/ui": "workspace:*",
     "@rsbuild/core": "2.2.3",
     "@rsbuild/plugin-react": "^2.0.1",

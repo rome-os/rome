@@ -10,8 +10,9 @@ const packageDir = dirname(fileURLToPath(import.meta.url));
 const distDir = resolve(packageDir, "dist/web");
 const generatedThemePath = resolve(packageDir, "src/generated-theme.css");
 const COMPRESSIBLE = new Set([".html", ".js", ".mjs", ".css", ".svg", ".json"]);
-// Guardrail so accidental heavy dependencies (charts, markdown, icon packs) fail CI immediately.
-const MAX_TOTAL_GZIP_BYTES = 130 * 1024;
+// Guardrail so accidental heavy dependencies (recharts, zod, markdown, icon packs) fail CI immediately.
+// Baseline with Overview + Computer use log (@rome-os/node-ui/activity) is ~136 KiB gzip.
+const MAX_TOTAL_GZIP_BYTES = 150 * 1024;
 
 function generateDefaultThemeCss(): void {
   const defaultTheme = getThemeDefinitions().find((theme) => theme.id === DEFAULT_THEME_NAME);

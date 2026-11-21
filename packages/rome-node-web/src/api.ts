@@ -1,4 +1,23 @@
-import type { AuthSession, HostSnapshot } from "./types";
+import type {
+  AuditContentName,
+  AuditContentPreviewResponse,
+  AuditItem,
+  AuditItemsResponse,
+  AuditResult,
+  AuditStatsResponse,
+  AuditSummaryResponse,
+  AuthSession,
+  HostSnapshot,
+} from "./types";
+
+export interface AuditItemsParams {
+  limit?: number;
+  beforeSeq?: number;
+  since?: number;
+  until?: number;
+  result?: AuditResult;
+  text?: string;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -70,6 +89,38 @@ export const api = {
     }),
   clearCredentials: () =>
     requestJson<HostSnapshot>("/api/host/credentials/clear", { method: "POST" }),
+  auditSummary: (signal?: AbortSignal) =>
+    requestJson<AuditSummaryResponse>("/api/audit/summary", { signal }),
+  auditStats: (since: number, until: number, bucketMs: number, signal?: AbortSignal) => {
+    const params = new URLSearchParams({
+      since: String(since),
+      until: String(until),
+      bucketMs: String(bucketMs),
+    });
+    return requestJson<AuditStatsResponse>(`/api/audit/stats?${params.toString()}`, { signal });
+  },
+  auditItems: (params: AuditItemsParams = {}, signal?: AbortSignal) => {
+    const search = new URLSearchParams();
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    if (params.beforeSeq !== undefined) search.set("beforeSeq", String(params.beforeSeq));
+    if (params.since !== undefined) search.set("since", String(params.since));
+    if (params.until !== undefined) search.set("until", String(params.until));
+    if (params.result !== undefined) search.set("result", params.result);
+    if (params.text !== undefined) search.set("text", params.text);
+    const qs = search.toString();
+    return requestJson<AuditItemsResponse>(qs ? `/api/audit/items?${qs}` : "/api/audit/items", {
+      signal,
+    });
+  },
+  auditItem: (seq: number, signal?: AbortSignal) =>
+    requestJson<{ item: AuditItem }>(`/api/audit/items/${seq}`, { signal }),
+  auditContent: (seq: number, name: AuditContentName, maxBytes?: number, signal?: AbortSignal) => {
+    const qs = maxBytes !== undefined ? `?maxBytes=${maxBytes}` : "";
+    return requestJson<AuditContentPreviewResponse>(
+      `/api/audit/items/${seq}/content/${name}${qs}`,
+      { signal },
+    );
+  },
 };
 
 export function subscribeEvents(handlers: {
