@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -34,10 +34,13 @@ test(
   async () => {
     await mkdir(join(repo, ".scratch"), { recursive: true });
     const directory = await mkdtemp(join(repo, ".scratch/build-lock-"));
+    const distNative = join(directory, "dist/native");
+    await mkdir(distNative, { recursive: true });
     const alias = `${directory}-alias`;
-    await symlink(directory, alias);
-    const output = join(directory, "Rome Computer Use.app");
+    await symlink(distNative, alias);
+    const output = join(distNative, "Rome Computer Use.app");
     const aliasedOutput = join(alias, "Rome Computer Use.app");
+    const symlinkedBundle = join(distNative, "Alias.app");
     const args = [
       "packages/rome-node-core/scripts/build-computer-use.ts",
       "--output",
@@ -62,6 +65,7 @@ test(
       assert.equal(winners.length, 1, `Expected one winner: ${JSON.stringify(results)}`);
       assert.equal(losers.length, 1, `Expected one locked loser: ${JSON.stringify(results)}`);
       assert.match(losers[0].stderr, /Computer-use build output is locked/);
+      assert.deepEqual(await readdir(distNative), ["Rome Computer Use.app"]);
       const info = await readFile(join(output, "Contents/Info.plist"), "utf8");
       assert.match(
         info,
@@ -69,10 +73,26 @@ test(
           `<key>CFBundleVersion</key><string>${winners[0].build.replace(".", "\\.")}</string>`,
         ),
       );
+
+      // A symlinked output bundle pointing to an existing .app must be rejected rather than bypassing the lock.
+      await symlink(output, symlinkedBundle);
+      const symlinkedResult = await execute([
+        "packages/rome-node-core/scripts/build-computer-use.ts",
+        "--output",
+        symlinkedBundle,
+        "--unsigned",
+        "--build-number",
+        "43.9",
+      ]).done;
+      assert.notEqual(symlinkedResult.code, 0);
+      assert.match(symlinkedResult.stderr, /cannot be a symlink/);
+      await rm(symlinkedBundle, { force: true });
+
       const next = await execute([...args, "--build-number", "43.3"]).done;
       assert.equal(next.code, 0, next.stderr);
       const updatedInfo = await readFile(join(output, "Contents/Info.plist"), "utf8");
       assert.match(updatedInfo, /<key>CFBundleVersion<\/key><string>43\.3<\/string>/);
+      assert.deepEqual(await readdir(distNative), ["Rome Computer Use.app"]);
     } finally {
       if (first.child.exitCode === null) first.child.kill("SIGTERM");
       if (second.child.exitCode === null) second.child.kill("SIGTERM");

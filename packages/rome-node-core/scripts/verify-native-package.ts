@@ -1,10 +1,16 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const app = resolve(root, "dist/native/Rome Computer Use.app");
+const nativeEntries = readdirSync(dirname(app)).sort();
+if (nativeEntries.length !== 1 || nativeEntries[0] !== basename(app)) {
+  throw new Error(
+    `dist/native contains unexpected entries: ${nativeEntries.join(", ")}. Expected only ${basename(app)}.`,
+  );
+}
 const executable = resolve(app, "Contents/MacOS/RomeComputerUse");
 const binary = readFileSync(executable);
 if (

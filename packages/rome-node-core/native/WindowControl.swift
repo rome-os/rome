@@ -1376,11 +1376,8 @@ final class NativeWindow: @unchecked Sendable {
                 try member(node.element, value)
                 let fresh = try value.ax.refresh(node: node, pid: value.binding.pid, bounds: value.viewport.bounds) { try value.alive() }
                 liveNode = fresh
-                guard CFEqual(fresh.element, node.element), fresh.enabled, fresh.role == node.role,
-                      fresh.identifier == node.identifier, fresh.frame == node.frame,
-                      fresh.value == node.value, fresh.metadata["valueType"] as? String == node.metadata["valueType"] as? String,
-                      Self.nodeActions(fresh, semanticOnly: value.semanticOnly).contains(kind), fresh.metadata["secure"] as? Bool != true,
-                      kind != "performAction" || Self.availableAXActions(fresh).contains(raw["action"] as! String) else {
+                guard Self.liveElementMatches(fresh, observed: node, kind: kind, semanticOnly: value.semanticOnly,
+                                              rawAction: raw["action"] as? String) else {
                     throw NativeFailure("element_changed")
                 }
                 if ["key", "type"].contains(kind), let selection = node.metadata["selectedTextRange"] as? [Int],
@@ -1570,6 +1567,21 @@ final class NativeWindow: @unchecked Sendable {
             throw NativeFailure("stale_observation", "Observe the window again before choosing another action.",
                                 details: ["effectStatus": "not_dispatched"])
         }
+    }
+
+    private static func liveElementMatches(_ fresh: WindowAXNode, observed node: WindowAXNode,
+                                           kind: String, semanticOnly: Bool, rawAction: String?) -> Bool {
+        guard CFEqual(fresh.element, node.element), fresh.enabled, fresh.role == node.role,
+              fresh.identifier == node.identifier, fresh.title == node.title, fresh.frame == node.frame,
+              fresh.value == node.value, fresh.metadata["valueType"] as? String == node.metadata["valueType"] as? String,
+              nodeActions(fresh, semanticOnly: semanticOnly).contains(kind), fresh.metadata["secure"] as? Bool != true else {
+            return false
+        }
+        if kind == "performAction" {
+            guard let action = rawAction else { return false }
+            return availableAXActions(fresh).contains(action)
+        }
+        return true
     }
 
     private static func dispatchFeedbackAllowed(confirmedAX: Bool, check: () throws -> Void) throws -> Bool {
@@ -2075,6 +2087,14 @@ final class NativeWindow: @unchecked Sendable {
                                           ["actualWindow": CGWindowID(42)], ["actualPID": pid_t(124)]] {
             try check(!transientWindowRead(NativeFailure("window_binding_changed", details: waiting.merging(replacement) { _, b in b }), pid: 123))
         }
+        let observedButton = WindowAXNode(ref: "btn-1", element: AXUIElementCreateApplication(getpid()), parentRef: nil,
+            role: "AXButton", identifier: "", title: "Save", value: "", frame: CGRect(x: 10, y: 10, width: 60, height: 24),
+            enabled: true, actions: [kAXPressAction], valueSettable: false, metadata: [:])
+        let renamedButton = WindowAXNode(ref: "btn-1", element: observedButton.element, parentRef: nil,
+            role: "AXButton", identifier: "", title: "Delete", value: "", frame: observedButton.frame,
+            enabled: true, actions: [kAXPressAction], valueSettable: false, metadata: [:])
+        try check(liveElementMatches(observedButton, observed: observedButton, kind: "press", semanticOnly: true, rawAction: nil))
+        try check(!liveElementMatches(renamedButton, observed: observedButton, kind: "press", semanticOnly: true, rawAction: nil))
         return count
     }
 

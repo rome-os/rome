@@ -422,7 +422,7 @@ final class NativeEngine: @unchecked Sendable {
         } catch let error as NativeFailure { try check(error.code == "helper_restarting", "Permission recovery must close native admission.") }
         try check(engine.activeSessionCount == 0 && engine.allCapturesStopped,
                   "Permission recovery must terminate old sessions before restart.")
-        return assertions + (try WindowAXState.selfCheck()) + (try WindowAXInvalidation.selfCheck())
+        return assertions + (try RPCServer.selfCheck()) + (try WindowAXState.selfCheck()) + (try WindowAXInvalidation.selfCheck())
             + (try WindowEventFactory.selfCheck()) + (try WindowAction.selfCheck()) + (try WindowEventDispatcher.selfCheck())
             + (try NativeWindow.selfCheck(stopDirectory: engine.stopDirectory)) + (try PointerMotion.selfCheck()) + (try VirtualPointer.selfCheck())
             + (try ControlCapture.selfCheck()) + (try PermissionRecoveryState.selfCheck())

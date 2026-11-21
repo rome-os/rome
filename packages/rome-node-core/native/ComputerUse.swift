@@ -192,9 +192,16 @@ final class RPCServer: @unchecked Sendable {
                     var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
                     let polled = poll(&pfd, 1, 0)
                     let hungUp = polled > 0 && (pfd.revents & Int16(POLLHUP | POLLERR)) != 0
-                    if hungUp || !peer.isAlive() {
+                    var peek: UInt8 = 0
+                    let peeked = recv(fd, &peek, 1, MSG_PEEK | MSG_DONTWAIT)
+                    let eof = peeked == 0 || (peeked < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+                    if hungUp || eof || !peer.isAlive() {
                         disconnectMonitor.cancel()
                         self?.onDisconnect?(peer, sessionId)
+                    } else if peeked > 0 {
+                        // Unexpected pipelined bytes while a request is in flight: stop level-triggered
+                        // read monitoring so the handler does not spin; peer exit remains watched.
+                        disconnectMonitor.cancel()
                     }
                 }
                 disconnectMonitor.resume()
@@ -212,6 +219,89 @@ final class RPCServer: @unchecked Sendable {
             }
         }
     }
+
+    #if ROME_COMPUTER_USE_SELF_TEST
+    static func selfCheck() throws -> Int {
+        var count = 0
+        func check(_ ok: Bool, _ message: String) throws {
+            guard ok else { throw NativeFailure("rpc_self_check_failed", message) }
+            count += 1
+        }
+        let selfPeer = try PeerIdentity.read(getpid())
+        let token = String(repeating: "a", count: 64)
+        let dir = URL(fileURLWithPath: "/private/tmp/rome-cu-rpc-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let tokenFile = dir.appendingPathComponent("token")
+        guard FileManager.default.createFile(atPath: tokenFile.path, contents: Data(token.utf8),
+                                             attributes: [.posixPermissions: 0o600]) else {
+            throw NativeFailure("rpc_self_check_failed", "Could not create test token file.")
+        }
+        func sendFrame(_ object: [String: Any], to fd: Int32) throws {
+            let body = try JSONSerialization.data(withJSONObject: object)
+            var size = UInt32(body.count).littleEndian
+            let frame = withUnsafeBytes(of: &size) { Data($0) } + body
+            let written = frame.withUnsafeBytes { ptr in Darwin.write(fd, ptr.baseAddress, frame.count) }
+            guard written == frame.count else { throw NativeFailure("rpc_self_check_failed", "Could not write test frame.") }
+        }
+        func runCase(sessionId: String, trigger: (inout Int32) throws -> Void, expectDisconnect: Bool) throws {
+            var fds: [Int32] = [-1, -1]
+            guard socketpair(AF_UNIX, SOCK_STREAM, 0, &fds) == 0 else {
+                throw NativeFailure("rpc_self_check_failed", "Could not create test socketpair.")
+            }
+            let serverFd = fds[0]
+            var clientFd = fds[1]
+            var noSignal: Int32 = 1
+            setsockopt(serverFd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout.size(ofValue: noSignal)))
+            setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout.size(ofValue: noSignal)))
+            defer { if clientFd >= 0 { close(clientFd) } }
+            let entered = DispatchSemaphore(value: 0)
+            let release = DispatchSemaphore(value: 0)
+            let disconnected = DispatchSemaphore(value: 0)
+            let served = DispatchSemaphore(value: 0)
+            let stateLock = NSLock()
+            var disconnectSessions: [String?] = []
+            let server = try RPCServer(
+                directory: dir,
+                onDisconnect: { _, id in
+                    stateLock.withLock { disconnectSessions.append(id) }
+                    disconnected.signal()
+                },
+                handler: { _, _ in
+                    entered.signal()
+                    release.wait()
+                    return ["id": "1", "ok": true, "result": [:]]
+                }
+            )
+            DispatchQueue.global(qos: .userInitiated).async {
+                server.serve(serverFd, peer: selfPeer)
+                served.signal()
+            }
+            try sendFrame(["id": "1", "token": token, "method": "act", "params": ["sessionId": sessionId]], to: clientFd)
+            try check(entered.wait(timeout: .now() + 2.0) == .success, "Test RPC handler did not start.")
+            try trigger(&clientFd)
+            if expectDisconnect {
+                try check(disconnected.wait(timeout: .now() + 2.0) == .success, "Live-peer hangup/half-close must trigger onDisconnect.")
+                let observed = stateLock.withLock { disconnectSessions }
+                try check(observed == [sessionId], "Disconnect monitor must report the active session once.")
+            } else {
+                usleep(50_000)
+                let observed = stateLock.withLock { disconnectSessions }
+                try check(observed.isEmpty, "Pipelined data must stop monitor without spurious disconnect.")
+            }
+            release.signal()
+            if clientFd >= 0 { close(clientFd); clientFd = -1 }
+            try check(served.wait(timeout: .now() + 2.0) == .success, "Test RPC server loop did not exit cleanly.")
+        }
+        try runCase(sessionId: "session-hangup", trigger: { fd in close(fd); fd = -1 }, expectDisconnect: true)
+        try runCase(sessionId: "session-halfclose", trigger: { fd in _ = shutdown(fd, SHUT_WR) }, expectDisconnect: true)
+        try runCase(sessionId: "session-pipelined", trigger: { fd in
+            var byte: UInt8 = 0
+            _ = Darwin.write(fd, &byte, 1)
+        }, expectDisconnect: false)
+        return count
+    }
+    #endif
 }
 
 @MainActor final class PermissionWindow: NSObject, NSWindowDelegate {

@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -46,6 +47,13 @@ const requestedOutput = resolve(
 mkdirSync(dirname(requestedOutput), { recursive: true });
 const canonicalParent = realpathSync(dirname(requestedOutput));
 const output = resolve(canonicalParent, basename(requestedOutput));
+try {
+  if (lstatSync(output).isSymbolicLink()) {
+    throw new Error(`Computer-use build output cannot be a symlink: ${output}`);
+  }
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+}
 const identity =
   option("--identity") ??
   process.env.ROME_COMPUTER_USE_SIGNING_IDENTITY ??
@@ -65,9 +73,13 @@ if (!unsigned && (!identity || identity === "-"))
 const build = option("--build-number") ?? "1";
 if (!/^\d+(?:\.\d+)*$/.test(build))
   throw new Error("--build-number must contain numeric version components.");
-// Store the lock beside the canonical output parent so symlink aliases and separate checkouts share one lock.
+// Keep locks outside published dist/native directories while still sharing one lock across aliases and checkouts.
+const lockParent =
+  basename(canonicalParent) === "native" && basename(dirname(canonicalParent)) === "dist"
+    ? dirname(dirname(canonicalParent))
+    : canonicalParent;
 const lockDirectory = resolve(
-  canonicalParent,
+  lockParent,
   `.rome-computer-use-build-lock-${createHash("sha256").update(output).digest("hex").slice(0, 16)}`,
 );
 try {
