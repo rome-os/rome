@@ -1,7 +1,8 @@
 // What agents and apps do with a routine through the system app's routine
 // actions, beyond creating, finding and deleting it: read what its runs did,
-// and pause or resume it. The Routines page reads the same records (runs.ts)
-// and makes the same change (update.ts). The main process runs
+// pause or resume it, and run it now or stop its run. The Routines page reads
+// the same records (runs.ts), makes the same change (update.ts) and calls the
+// same engine. The main process runs
 // these operations; an action worker reaches them over the `routines.control`
 // worker call (app-host/routine-calls.ts).
 
@@ -12,6 +13,7 @@ import type { ThreadContext } from "../core/types.js";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import type { RoutineEngine } from "./engine.js";
+import { startRoutineRun } from "./run-now.js";
 import { type ActionTraceNode, listRoutineRuns, readRoutineRun } from "./runs.js";
 import { changeRefusal, type OwnerOfChat, turnWorksForGuardian } from "./turn-access.js";
 import { updateRoutine } from "./update.js";
@@ -27,7 +29,14 @@ export type RoutineControlResult =
   | { status: "ok"; data: unknown }
   | { status: "error"; error: string };
 
-export const ROUTINE_CONTROL_OPS = ["listRuns", "readRun", "pause", "resume"] as const;
+export const ROUTINE_CONTROL_OPS = [
+  "listRuns",
+  "readRun",
+  "pause",
+  "resume",
+  "runNow",
+  "stop",
+] as const;
 export type RoutineControlOp = (typeof ROUTINE_CONTROL_OPS)[number];
 
 /** Each operation, for the turn that asks for it. */
@@ -59,7 +68,7 @@ export function routineControlService(operations: RoutineOperations): RoutineCon
 
 export interface RoutineOperationDeps {
   routines: Pick<RoutinesRepository, "findById" | "update">;
-  engine: Pick<RoutineEngine, "activate" | "deactivate">;
+  engine: Pick<RoutineEngine, "activate" | "deactivate" | "runNow" | "cancelRun">;
   routineRuns: Pick<RoutineRunsRepository, "findByRoutineId" | "findById">;
   actionExecutions: Pick<ActionExecutionsRepository, "findByRootExecutionIds">;
   ownerOfChat: OwnerOfChat;
@@ -104,6 +113,34 @@ export function routineOperations(deps: RoutineOperationDeps): RoutineOperations
   return {
     pause: (input, turn) => setEnabled(input, turn, false),
     resume: (input, turn) => setEnabled(input, turn, true),
+
+    // Runs its action for real, even when the routine is paused, and answers
+    // once the run has started; the run records its own outcome.
+    runNow: async (input, turn) => {
+      const refusal = changeRefusal(turn);
+      if (refusal) return { status: "error", error: refusal };
+      const args = fieldsOf(input);
+      const routineId = text(args.routineId);
+      const row = routineId ? await deps.routines.findById(routineId) : null;
+      if (!row) return notFound(routineId);
+      const payload =
+        args.input && typeof args.input === "object" && !Array.isArray(args.input)
+          ? (args.input as Record<string, unknown>)
+          : {};
+      const runId = await startRoutineRun(deps.engine, routineId, payload);
+      return { status: "ok", data: { routineId, name: row.name, runId, started: true } };
+    },
+
+    // Ends each running run as cancelled; a run awaiting approval is left.
+    stop: async (input, turn) => {
+      const refusal = changeRefusal(turn);
+      if (refusal) return { status: "error", error: refusal };
+      const routineId = text(fieldsOf(input).routineId);
+      const row = routineId ? await deps.routines.findById(routineId) : null;
+      if (!row) return notFound(routineId);
+      const { stopped } = await deps.engine.cancelRun(routineId);
+      return { status: "ok", data: { routineId, name: row.name, stopped } };
+    },
 
     listRuns: async (input, turn) => {
       if (!(await turnWorksForGuardian(deps.ownerOfChat, turn))) return READ_REFUSED;

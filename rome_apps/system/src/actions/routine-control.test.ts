@@ -4,6 +4,8 @@ import { createAction as listRoutineRuns } from "./list-routine-runs/index.js";
 import { createAction as pauseRoutine } from "./pause-routine/index.js";
 import { createAction as readRoutineRun } from "./read-routine-run/index.js";
 import { createAction as resumeRoutine } from "./resume-routine/index.js";
+import { createAction as runRoutine } from "./run-routine/index.js";
+import { createAction as stopRoutine } from "./stop-routine/index.js";
 import type { RoutineControlDeps } from "./routine-control.js";
 
 type Factory = (config: ActionConfig, deps: AppActionRuntimeDeps<RoutineControlDeps>) => Action;
@@ -14,6 +16,8 @@ const ACTIONS: Array<[string, Factory, string, Record<string, unknown>]> = [
   ["read_routine_run", readRoutineRun, "readRun", { routineId: "r-1", runId: "x" }],
   ["pause_routine", pauseRoutine, "pause", { routineId: "r-1" }],
   ["resume_routine", resumeRoutine, "resume", { routineId: "r-1" }],
+  ["run_routine", runRoutine, "runNow", { routineId: "r-1", input: { repo: "acme/widgets" } }],
+  ["stop_routine", stopRoutine, "stop", { routineId: "r-1" }],
 ];
 
 const config = (name: string) =>

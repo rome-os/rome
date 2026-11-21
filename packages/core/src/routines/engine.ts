@@ -43,6 +43,11 @@ export class RoutineEngine {
   // consults this so a guardian-requested stop is recorded as "cancelled"
   // (not "error") and is never retried.
   private cancellingExecutions = new Set<string>();
+  // rootExecutionIds whose run is recorded but whose root the action engine
+  // cannot cancel yet. A stop in that window has nothing to kill, so it leaves
+  // its marker: dispatch checks it before starting the action, and cancels the
+  // root once the action engine accepts it.
+  private admitting = new Set<string>();
 
   constructor(
     private routinesRepo: RoutinesRepository,
@@ -194,10 +199,14 @@ export class RoutineEngine {
    * `payload` is the trigger payload to dispatch with — empty by default (a
    * "try run now" reproduces a bare fire). A caller can pass one to drive a
    * `manual` routine with input, surfaced to the action under
-   * `__triggerPayload` exactly like a real trigger's payload. */
+   * `__triggerPayload` exactly like a real trigger's payload.
+   *
+   * `onStarted` is told the run's id once its record exists, for a caller that
+   * reports the start rather than waiting for the outcome. */
   async runNow(
     routineId: string,
     payload: Record<string, unknown> = {},
+    onStarted?: (runId: string) => void,
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     const row = await this.routinesRepo.findById(routineId);
     if (!row) throw new Error(`routine not found: ${routineId}`);
@@ -209,6 +218,7 @@ export class RoutineEngine {
     try {
       return await this.dispatch(toRoutine(row), payload, {
         manual: byPerson ? "person" : "background",
+        onStarted,
       });
     } finally {
       this.changed(routineId);
@@ -240,6 +250,8 @@ export class RoutineEngine {
       const killed = await this.actionEngine.cancel(run.executionId);
       if (killed) {
         killedLiveProcess = true;
+      } else if (this.admitting.has(run.executionId)) {
+        // Not started yet: dispatch finds the marker and starts nothing.
       } else {
         // Nothing live to kill (stale run): drop the marker and repair the
         // status ourselves — no dispatch is awaiting to do it.
@@ -264,7 +276,7 @@ export class RoutineEngine {
   private dispatch(
     routine: Routine,
     payload: Record<string, unknown>,
-    opts: { manual?: "person" | "background" } = {},
+    opts: { manual?: "person" | "background"; onStarted?: (runId: string) => void } = {},
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     // A fire is a new root in every sense. The trigger that fires it was
     // registered from inside the action that created the routine, and a timer
@@ -299,7 +311,7 @@ export class RoutineEngine {
   private async dispatchAsRoot(
     routine: Routine,
     payload: Record<string, unknown>,
-    opts: { manual?: "person" | "background" },
+    opts: { manual?: "person" | "background"; onStarted?: (runId: string) => void },
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     if (!opts.manual && this.fireGate && !(await this.fireGate(routine).catch(() => true))) {
       log.info("routine fire turned down", { routineId: routine.id, name: routine.name });
@@ -326,6 +338,8 @@ export class RoutineEngine {
             ? RUN_NOW_IN_BACKGROUND
             : routine.trigger.type,
     });
+    this.admitting.add(rootExecutionId);
+    opts.onStarted?.(runId);
 
     // Captured inside the span callback and returned to the caller so a manual
     // "run now" can report the outcome. Defaults to error so an unexpected throw
@@ -364,11 +378,40 @@ export class RoutineEngine {
           ...(keep ? {} : { omitFromRecord: ["__triggerPayload"] }),
         };
 
+        if (this.cancellingExecutions.delete(rootExecutionId)) {
+          outcome = { status: "cancelled" };
+          log.info("routine run stopped before it started", {
+            routineId: routine.id,
+            name: routine.name,
+          });
+          return;
+        }
+
+        // The action engine records the root before it can cancel it. A stop
+        // in that time is carried out once the root is accepted, after the
+        // engine has registered it (setImmediate runs after that).
+        const accepted = () => {
+          this.admitting.delete(rootExecutionId);
+          if (this.cancellingExecutions.has(rootExecutionId)) {
+            setImmediate(() => void this.actionEngine.cancel(rootExecutionId));
+          }
+        };
+
         try {
           const result = await runWithoutHookInvocationContext(() =>
-            this.actionEngine.run(routine.actionName, mergedArgs, context),
+            this.actionEngine.run(
+              routine.actionName,
+              mergedArgs,
+              context,
+              undefined,
+              undefined,
+              accepted,
+            ),
           );
           const durationMs = this.clock.now().getTime() - startTime;
+          // An action that runs in main cannot be cancelled, so a stop that came
+          // while it was set up did not stop it; its outcome stands.
+          this.cancellingExecutions.delete(rootExecutionId);
 
           // The action engine returns a structured `{status:"error"}` for a
           // domain failure that didn't throw (the catch below handles thrown
@@ -523,7 +566,7 @@ export class RoutineEngine {
           await this.routinesRepo.updateLastFired(routine.id, this.clock.now());
         }
       },
-    );
+    ).finally(() => this.admitting.delete(rootExecutionId));
 
     return { runId, ...outcome };
   }

@@ -45,6 +45,8 @@ actions:
   - actions/read-routine-run
   - actions/pause-routine
   - actions/resume-routine
+  - actions/run-routine
+  - actions/stop-routine
   - actions/request-approval-demo
   - actions/resume-session
   - actions/send-message

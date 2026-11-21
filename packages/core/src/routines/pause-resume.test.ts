@@ -33,7 +33,7 @@ beforeEach(() => {
   routineEngine.deactivate.mockClear();
   ops = routineOperations({
     routines,
-    engine: routineEngine,
+    engine: routineEngine as unknown as Parameters<typeof routineOperations>[0]["engine"],
     routineRuns: new RoutineRunsRepository(testDb.db),
     actionExecutions: new ActionExecutionsRepository(testDb.db),
     ownerOfChat: async () => "guardian",
