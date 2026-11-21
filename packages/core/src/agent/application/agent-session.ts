@@ -28,7 +28,7 @@ import { evaluateProviderSessionReset } from "../domain/session-reset.js";
 import { setupChanged, setupFingerprint } from "../domain/session-setup.js";
 import { ROME_TOOL_GROUPS } from "../domain/rome-tools.js";
 import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
-import { catchUpPrompt } from "../domain/catch-up.js";
+import { CATCH_UP_LIMIT, catchUpPrompt } from "../domain/catch-up.js";
 import {
   handoffSections,
   LIGHT_HANDOFF,
@@ -4140,8 +4140,28 @@ class AgentSessionImpl implements AgentSession {
         const read = named.length > 0 ? await promptFacts.read(named) : [];
         const byId = (id: number | null | undefined) =>
           id == null ? null : (read.find((message) => message.id === id) ?? null);
+        // A thread that starts here knows nothing said before the session
+        // opened, and Rome's record may not hold it: its first turn reads the
+        // chat's latest messages from where the chat lives
+        // (docs/domains/participation.md#projection).
+        const opening =
+          // Not when the unseen messages fill the catch-up already, so a
+          // platform that rations reads, such as Slack, keeps its read.
+          !this.isSubagent &&
+          this.threadFresh &&
+          !this.threadContextInjected &&
+          unseen.length < CATCH_UP_LIMIT &&
+          promptFacts.earlier
+            ? await promptFacts
+                .earlier(
+                  sink.threadContext as ThreadContext,
+                  earliestOf(unseen, byId(sink.currentId)) ?? new Date(),
+                )
+                // A read that fails opens the session as if there were none.
+                .catch(() => null)
+            : null;
         userPrompt = catchUpPrompt(userPrompt, {
-          unseen,
+          unseen: opening ? [...opening, ...unseen] : unseen,
           quoted: byId(sink.quotedId),
           replyTo: sink.replyTo,
           current: byId(sink.currentId),
@@ -4566,4 +4586,10 @@ function subagentsOf(agents: AgentCatalog, config: AgentDefinition): Subagent[] 
     name,
     description: requireAgent(agents, name).definition.description,
   }));
+}
+
+/** When the first of the messages a turn catches up on or answers was said. */
+function earliestOf(unseen: readonly { at: Date }[], current: { at: Date } | null): Date | null {
+  const times = [...unseen, ...(current ? [current] : [])].map((message) => message.at.getTime());
+  return times.length > 0 ? new Date(Math.min(...times)) : null;
 }
