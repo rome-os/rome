@@ -1,6 +1,6 @@
 // Upgrade probe and cutover owner. Process model: docs/architecture/process.md.
 //
-// `checkAndOffer()` is the body of the nightly `system_upgrade` action: it asks
+// `checkAndOffer()` is the body of the nightly `system:system_upgrade` action: it asks
 // Rome Cloud whether a release is pending and,
 // if so, opens the consent countdown on the UpgradeStatusHub. The cutover is the
 // same service relaying the apply request to Rome Cloud, reached two ways: a
@@ -36,7 +36,7 @@ export interface SystemUpgradeOfferResult {
 
 export type UpgradeNowResult = { ok: true } | { ok: false; error: string };
 
-/** The action-facing surface of the service. The `system_upgrade` action runs
+/** The action-facing surface of the service. The `system:system_upgrade` action runs
  * in a worker subprocess, so it depends on this interface — satisfied by the
  * real service in the main process and by `SystemUpgradeServiceProxy` (which
  * RPCs back to main) in a worker. */

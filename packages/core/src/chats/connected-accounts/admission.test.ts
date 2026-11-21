@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
+import type * as connections from "../../connections/message.js";
+import { legacyMessage } from "../../connections/test-fixtures.js";
 import { createTestDb, kindChannelOf, type TestDb } from "../../test/db.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
@@ -17,7 +19,7 @@ describe("a channel's Connection across epochs", () => {
   ])("keeps subscriptions and features on the current epoch with admission=%s", async (gated) => {
     testDb = createTestDb();
     const instances: Array<{
-      deliver?: (message: ChannelMessage) => void;
+      deliver?: (message: connections.Message) => void;
       sends: string[];
       epoch: number;
     }> = [];
@@ -73,16 +75,16 @@ describe("a channel's Connection across epochs", () => {
       material: { token: "first" },
       expiresAt: "never",
     });
-    instances[0]!.deliver?.({
-      channel: "discord",
-      direction: "inbound",
-      messageId: "inbound-1",
-      chatId: "general" as ChatId,
-      senderId: "guardian",
-      text: "hello",
-      attachments: [],
-      timestamp: new Date(0),
-    });
+    instances[0]!.deliver?.(
+      legacyMessage({
+        messageId: "inbound-1",
+        chatId: "general" as ChatId,
+        senderId: "guardian",
+        text: "hello",
+        attachments: [],
+        timestamp: new Date(0),
+      }),
+    );
     await rs.waitFor(() => expect(received).toEqual(["inbound-1"]));
     await rs.waitFor(() => expect(sibling).toEqual(["inbound-1"]));
     // Admission runs once per message, however many subscribe.
@@ -100,30 +102,30 @@ describe("a channel's Connection across epochs", () => {
       material: { token: "second" },
       expiresAt: "never",
     });
-    instances[1]!.deliver?.({
-      channel: "discord",
-      direction: "inbound",
-      messageId: "inbound-2",
-      chatId: "general" as ChatId,
-      senderId: "guardian",
-      text: "hello again",
-      attachments: [],
-      timestamp: new Date(0),
-    });
+    instances[1]!.deliver?.(
+      legacyMessage({
+        messageId: "inbound-2",
+        chatId: "general" as ChatId,
+        senderId: "guardian",
+        text: "hello again",
+        attachments: [],
+        timestamp: new Date(0),
+      }),
+    );
     await rs.waitFor(() => expect(received).toEqual(["inbound-1", "inbound-2"]));
     await rs.waitFor(() => expect(sibling).toEqual(received));
     if (gated) {
       expect(admit).toHaveBeenCalledTimes(2);
-      instances[1]!.deliver?.({
-        channel: "discord",
-        direction: "inbound",
-        messageId: "blocked",
-        chatId: "general" as ChatId,
-        senderId: "unknown",
-        text: "not authorized",
-        attachments: [],
-        timestamp: new Date(),
-      });
+      instances[1]!.deliver?.(
+        legacyMessage({
+          messageId: "blocked",
+          chatId: "general" as ChatId,
+          senderId: "unknown",
+          text: "not authorized",
+          attachments: [],
+          timestamp: new Date(),
+        }),
+      );
       await rs.waitFor(() => expect(admit).toHaveBeenCalledTimes(3));
       expect(received).toEqual(["inbound-1", "inbound-2"]);
     }
@@ -135,7 +137,7 @@ describe("a channel's Connection across epochs", () => {
 
   it("admits a message even before anyone subscribes", async () => {
     testDb = createTestDb();
-    let deliver: ((message: ChannelMessage) => void) | undefined;
+    let deliver: ((message: connections.Message) => void) | undefined;
     const registry = new ConnectionRegistry({
       repository: new DrizzleConnectionsRepository(testDb.db),
     });
@@ -164,16 +166,16 @@ describe("a channel's Connection across epochs", () => {
     });
 
     // Admission runs before the inbox hears the channel.
-    deliver?.({
-      channel: "telegram",
-      direction: "inbound",
-      messageId: "code",
-      chatId: "dm" as ChatId,
-      senderId: "stranger",
-      text: "hello",
-      attachments: [],
-      timestamp: new Date(0),
-    });
+    deliver?.(
+      legacyMessage({
+        messageId: "code",
+        chatId: "dm" as ChatId,
+        senderId: "stranger",
+        text: "hello",
+        attachments: [],
+        timestamp: new Date(0),
+      }),
+    );
     await rs.waitFor(() => expect(admit).toHaveBeenCalledTimes(1));
   });
 });

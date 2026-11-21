@@ -3,7 +3,6 @@ import os
 /// Which message field a voice input start came from.
 enum VoiceInputField: String, Sendable {
     case chat
-    case thread
     case taskChat = "task-chat"
     case topicChat = "topic-chat"
 }

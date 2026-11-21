@@ -6,8 +6,8 @@ description: |
   event-bus trigger binds to and the `triggerInstanceId` (for later teardown).
   This is the step that makes a connector event actually fire — creating a routine
   on the eventName alone does nothing until you subscribe here. Requires being
-  signed in (connector_login) and the toolkit connected (connector_connect). Look
-  up the trigger's `config` schema with connector_event_schema first, then pass the
+  signed in (connector:connector_login) and the toolkit connected (connector:connector_connect). Look
+  up the trigger's `config` schema with connector:connector_event_schema first, then pass the
   owning toolkit slug, the trigger slug, and `config` matching that schema (pass {}
   when the trigger needs no config). Idempotent: re-subscribing the same trigger
   returns the same instance. Fails closed: not signed in, unknown slug, or no

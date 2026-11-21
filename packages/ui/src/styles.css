@@ -166,6 +166,7 @@
   --control-px-start-lg: 16px;
 
   --control-px-center-lg: 18px;
+  --control-px-icon-lg: calc(var(--control-px-center-lg) - 2px);
 
   --badge-h: 22px;
   --badge-px: 9px;
@@ -335,6 +336,8 @@
   --control-h-xs: var(--rome-size-24);
   --control-px-center-xs: var(--rome-space-2);
   --control-min-h: 0px;
+  --button-compact-px-sm: var(--control-px-center-sm);
+  --button-compact-px-md: var(--control-px-center-md);
   --control-filter-px: var(--rome-space-3);
   --calendar-cell: var(--rome-size-28);
   --control-calendar-px: var(--rome-space-2);
@@ -347,8 +350,11 @@
   --switch-width-sm: var(--rome-size-24);
   --switch-hit-inset-x: var(--rome-space-3);
   --field-min-font-size: 0px;
-  --control-action-offset: var(--rome-space-2);
-  --control-action-offset-sm: var(--rome-space-1);
+  /* An action row pulls out by its icon's inset, so the icon itself, not the
+     button around it, sits on the content edge above. 16px and 14px are the
+     glyph sizes IconButton gives `md` and `sm`. */
+  --control-action-offset: calc((var(--control-h-md) - var(--rome-size-16)) / 2);
+  --control-action-offset-sm: calc((var(--control-h-sm) - var(--rome-size-14)) / 2);
   --markdown-action-py: var(--rome-space-1);
   --markdown-zoom-direction: column;
   --markdown-band-height: var(--rome-space-8);
@@ -383,6 +389,8 @@
   --control-h-xs: var(--rome-size-44);
   --control-px-center-xs: var(--rome-space-4);
   --control-min-h: var(--rome-size-44);
+  --button-compact-px-sm: var(--rome-space-2);
+  --button-compact-px-md: var(--rome-space-3);
   --control-filter-px: var(--rome-space-4);
   --calendar-cell: var(--rome-size-44);
   --control-calendar-px: 0px;
@@ -395,8 +403,11 @@
   --switch-width-sm: var(--switch-width-md);
   --switch-hit-inset-x: 0px;
   --field-min-font-size: var(--rome-font-size-16);
-  --control-action-offset: var(--rome-space-4);
-  --control-action-offset-sm: var(--rome-space-3);
+  /* An action row pulls out by its icon's inset, so the icon itself, not the
+     button around it, sits on the content edge above. 16px and 14px are the
+     glyph sizes IconButton gives `md` and `sm`. */
+  --control-action-offset: calc((var(--control-h-md) - var(--rome-size-16)) / 2);
+  --control-action-offset-sm: calc((var(--control-h-sm) - var(--rome-size-14)) / 2);
   --markdown-action-py: 0px;
   --markdown-zoom-direction: row;
   --markdown-band-height: auto;
@@ -405,6 +416,52 @@
   --field-px-lg: var(--control-px-start-lg);
   --row-h-sm: calc(var(--control-h-sm) + var(--rome-space-2));
   --row-h-md: calc(var(--control-h-md) + var(--rome-space-2));
+}
+
+/* Inline chat cards use the card's text scale for headings and actions. */
+[data-ui-typography="inline-card"] {
+  --text-ui: var(--rome-font-size-14);
+  --text-ui--line-height: var(--rome-line-height-143);
+}
+
+@layer components {
+  [data-slot="button"][data-compact][data-size="xs"] {
+    --control-h-xs: var(--rome-size-24);
+    --control-px-center-xs: var(--rome-space-2);
+    --button-compact-h: var(--control-h-xs);
+  }
+
+  [data-slot="button"][data-compact][data-size="sm"] {
+    --control-h-sm: var(--rome-size-28);
+    --control-px-start-sm: var(--button-compact-px-sm);
+    --control-px-center-sm: var(--button-compact-px-sm);
+    --control-px-icon-sm: calc(var(--control-px-center-sm) - 2px);
+    --button-compact-h: var(--control-h-sm);
+  }
+
+  [data-slot="button"][data-compact][data-size="md"] {
+    --control-h-md: var(--rome-size-32);
+    --control-px-start-md: var(--rome-space-3);
+    --control-px-center-md: var(--button-compact-px-md);
+    --control-px-icon-md: calc(var(--control-px-center-md) - 2px);
+    --button-compact-h: var(--control-h-md);
+  }
+
+  /* Keep margin utilities from reclaiming the space each extended target needs. */
+  [data-slot="button"][data-compact]:is([data-size="xs"], [data-size="sm"], [data-size="md"]) {
+    --button-hit-inset: max(0px, calc((var(--control-min-h) - var(--button-compact-h)) / 2));
+    position: relative;
+    min-inline-size: calc(var(--control-min-h) + 2px);
+    margin-block: var(--button-hit-inset) !important;
+  }
+
+  [data-slot="button"][data-compact]:is([data-size="xs"], [data-size="sm"], [data-size="md"])::after {
+    position: absolute;
+    content: "";
+    /* Absolute positioning starts inside the button's 1px border. */
+    inset-block: calc(-1px - var(--button-hit-inset));
+    inset-inline: 0;
+  }
 }
 
 @layer base {
@@ -740,15 +797,14 @@
    older spellings of `md` and `icon-md`. IconButton and Button's `icon-*`
    variants are the square form of the same steps, value-identical at every name.
 
-   `lg` is in the scale but not in that vocabulary, and only the square members
-   carry it: IconButton and Button's `icon-lg`, for a 44px hit area. A labelled
-   Button has no `lg` — every step carries one typography role, so a taller box
-   around one line of text buys air rather than emphasis.
+   Button and IconButton also offer `lg` for a standalone action. A compact
+   labeled Button uses its nominated visible height, with room reserved for
+   the platform touch target when the painted control is smaller.
 
      --control-h-{sm,md,lg}    28 / 32 / 44px   explicit control height
      --control-gap                        6px   glyph gap to its label, every
                                                 size
-     --control-px-icon-{sm,md}         8 / 12px   a glyph's side of centred
+     --control-px-icon-{sm,md,lg}   8 / 12 / 16px   a glyph's side of centred
                                                 content: the centred inset
                                                 less 2px
      --control-r-{sm,md,lg}     8 / 10 / 12px   corner radius

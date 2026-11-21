@@ -1,6 +1,5 @@
 // Connection lifecycle registry. Vocabulary: docs/domains/connections.md.
 
-import type { ChannelMessage } from "@rome-os/app-runtime";
 import type { DrizzleTx } from "../db/index.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import { createLogger, type Logger } from "../logger.js";
@@ -24,6 +23,7 @@ import {
 } from "./connection.js";
 import type { ConnectionEventHandler } from "./events.js";
 import type { ConnectionRecord, ConnectionsRepository } from "./repository.js";
+import type { Message } from "./message.js";
 import {
   AccountAlreadyConnectedError,
   CredentialRejected,
@@ -146,7 +146,7 @@ interface CapabilitySlot {
   epoch: Epoch | null;
   /** Talk/Act/Watch handler registrations for the CURRENT epoch — dropped on
    *  relock so no duplicate listeners survive across epochs. */
-  messageHandlers: Array<(msg: ChannelMessage) => Promise<void>>;
+  messageHandlers: Array<(msg: Message) => Promise<void>>;
   eventHandlers: Array<(event: WatchEvent) => void>;
 }
 
@@ -154,6 +154,13 @@ interface CapabilitySlot {
 interface RegisteredDescriptor {
   readonly descriptor: ConnectionDescriptor;
 }
+
+/** How long a guardian's disconnect waits for each step before a kind takes
+ *  back its access: a renewal in flight, the transports' drain, and the
+ *  take-back at the platform. The kind's connection lock is held across all
+ *  three, so a connect or disconnect of the same kind can wait about three
+ *  times this. */
+const TAKE_BACK_TIMEOUT_MS = 10 * 1000;
 
 export class ConnectionRegistry {
   private readonly store: ConnectionsRepository;
@@ -369,17 +376,16 @@ export class ConnectionRegistry {
     });
   }
 
-  /** End a connection, whatever its kind: remove it and its grant in one
-   *  transaction that raises disconnected, then stop its capabilities and
-   *  clear the grant's custody artifacts. Runs in the grant's section, so it
-   *  never interleaves with a setup's terminal write. A failed write throws
-   *  and leaves the connection as it was. */
-  async disconnect(id: ConnectionId): Promise<void> {
+  /** End a connection, whatever its kind, as {@link ConnectionImpl.disconnectTakingBack}
+   *  does. Runs in the grant's section, so it never interleaves with a setup's
+   *  terminal write. Answers why the platform may still hold the access, when
+   *  taking it back failed; the connection ends either way. */
+  async disconnect(id: ConnectionId): Promise<{ notTakenBack?: string }> {
     const conn = this.connections.get(id);
     if (!conn) throw new Error(`unknown connection "${id}"`);
     const { connectionKind } = conn;
     const grant = conn.descriptor.grant;
-    await this.withGrantSection(connectionKind, grant, () =>
+    return await this.withGrantSection(connectionKind, grant, () =>
       this.connectionMutex.runExclusive(connectionKind, async () => {
         // A disconnect that ran while this one waited may have removed it. A
         // fix that reached another account while this one waited ended it and
@@ -389,9 +395,10 @@ export class ConnectionRegistry {
         while (current && this.connections.get(current.id) !== current) {
           current = this.startedInPlaceOf.get(current);
         }
-        if (!current) return;
-        await current.disconnect(grant);
+        if (!current) return {};
+        const notTakenBack = await current.disconnectTakingBack(grant);
         this.connections.delete(current.id);
+        return notTakenBack === null ? {} : { notTakenBack };
       }),
     );
   }
@@ -749,6 +756,8 @@ class ConnectionImpl implements Connection {
   private readonly renewedSinceGranted = new Set<GrantName>();
   /** In-flight renewal promise per grant (single-flight coalescing). */
   private readonly renewalsInFlight = new Map<GrantName, Promise<void>>();
+  /** The stop() drains of transports torn down without waiting. */
+  private readonly retiring = new Set<Promise<void>>();
   /** Per-grant serialization: the tail of a promise-chain mutex, keyed by grant
    *  name. Every guardian-facing lifecycle mutation (grant, revoke, profile
    *  backfill) runs inside its grant's chain, so two overlapping mutations on the
@@ -1011,7 +1020,7 @@ class ConnectionImpl implements Connection {
     return answer;
   }
 
-  hearTalker(handler: (message: ChannelMessage) => Promise<void>): (() => void) | null {
+  hearTalker(handler: (message: Message) => Promise<void>): (() => void) | null {
     const slot = this.slots.get("chat");
     if (!slot || !slot.epoch) return null;
     slot.messageHandlers.push(handler);
@@ -1167,7 +1176,13 @@ class ConnectionImpl implements Connection {
         slot.kind === "actor"
           ? (epoch.instance as Actor).stop?.()
           : (epoch.instance as Talker | Watcher).stop();
-      if (ret instanceof Promise) ret.catch((err) => this.warnStopThrew(slot, err));
+      if (ret instanceof Promise) {
+        // A disconnect that takes back access waits for this drain too.
+        const draining: Promise<void> = ret
+          .catch((err) => this.warnStopThrew(slot, err))
+          .finally(() => this.retiring.delete(draining));
+        this.retiring.add(draining);
+      }
     } catch (err) {
       this.warnStopThrew(slot, err);
     }
@@ -1214,6 +1229,25 @@ class ConnectionImpl implements Connection {
       slot.messageHandlers = [];
       slot.eventHandlers = [];
     }
+  }
+
+  /** Tear down every capability at once, then wait, at most `ms`, for every
+   *  stop() to drain, including those of transports retired earlier. No capability is live once it returns. Answers false
+   *  when a drain ran out of time; it goes on alone. */
+  private async teardownAllWithin(ms: number): Promise<boolean> {
+    // A transport an earlier rebuild retired may still be draining.
+    const stopping: Promise<void>[] = [...this.retiring];
+    for (const slot of this.slots.values()) {
+      const epoch = slot.epoch;
+      if (!epoch) continue;
+      epoch.dead = true;
+      epoch.backoffGen++; // cancel any in-flight backoff loop
+      slot.epoch = null;
+      slot.messageHandlers = [];
+      slot.eventHandlers = [];
+      stopping.push(this.stopInstanceAwaiting(slot, epoch));
+    }
+    return await within(Promise.all(stopping), ms);
   }
 
   /** Re-evaluate every capability that needs `grant` (or all, when grant is
@@ -1367,6 +1401,135 @@ class ConnectionImpl implements Connection {
     return this.withGrantLock(grant, () => this.revokeLocked(grant, opts));
   }
 
+  /** The guardian's disconnect, under the grant lock so no renewal or fault
+   *  runs beside it. A renewal a fault started asks the platform without the
+   *  lock, so the disconnect lets it land first and takes back what it
+   *  minted. Then: stop every capability and, for a kind with a take-back,
+   *  let it drain (at most {@link TAKE_BACK_TIMEOUT_MS}), so a live transport
+   *  never meets the token being revoked; ask the kind to take back at the platform what the
+   *  grant gave (`onDisconnect`, at most {@link TAKE_BACK_TIMEOUT_MS}); then
+   *  remove the connection as {@link disconnect} does.
+   *
+   *  The take-back comes before the delete so that Rome never forgets a token
+   *  the platform still honours: an instance that dies between the two keeps
+   *  the connection with a revoked token, which reads broken and disconnects
+   *  again cleanly. The cost is that a failed write, after a take-back that
+   *  worked, leaves the same broken connection: it reads broken, its
+   *  capabilities stay stopped, and the error is thrown. Answers why the
+   *  take-back failed or may not hold, or null. */
+  async disconnectTakingBack(grant: GrantName): Promise<string | null> {
+    let renewalWaitedOut = false;
+    for (;;) {
+      // Only a kind that takes back access needs what a renewal mints. It
+      // waits at most TAKE_BACK_TIMEOUT_MS; past that it takes back what it
+      // holds, and a renewal that lands later finds its epoch dead.
+      const takesBack = this.descriptor.onDisconnect !== undefined;
+      const renewal = takesBack ? this.renewalsInFlight.get(grant) : undefined;
+      if (renewal && !renewalWaitedOut) {
+        renewalWaitedOut = !(await within(renewal, TAKE_BACK_TIMEOUT_MS));
+      }
+      const ended = await this.withGrantLock(grant, async () => {
+        // A renewal applies its result under this lock, so one that started
+        // since is waited out with the lock free.
+        if (takesBack && !renewalWaitedOut && this.renewalsInFlight.has(grant)) return undefined;
+        // The kind takes back the token only once no transport uses it, so
+        // its stop() drains first. A kind with nothing to take back does not
+        // wait.
+        // A kind with nothing to take back disconnects as before: the delete
+        // first, and the capabilities stop after it.
+        if (!takesBack) {
+          await this.disconnectLocked(grant, {});
+          return { notTakenBack: null };
+        }
+        if (!(await this.teardownAllWithin(TAKE_BACK_TIMEOUT_MS))) {
+          this.log.warn("a transport did not stop in time; taking back access anyway", {
+            connectionId: this.id,
+          });
+        }
+        const failed = await this.takeBack();
+        // A renewal still running may yet mint a token the take-back never
+        // saw, so the guardian is warned even when the take-back worked.
+        const notTakenBack =
+          failed ??
+          (renewalWaitedOut
+            ? "a renewal of the token was still running, so a token it mints may still work"
+            : null);
+        try {
+          await this.disconnectLocked(grant, {});
+        } catch (err) {
+          if (failed === null) await this.keepBrokenAfterTakeBack(grant);
+          else this.reconcile(grant);
+          throw err;
+        }
+        return { notTakenBack };
+      });
+      if (ended) return ended.notTakenBack;
+    }
+  }
+
+  /** After a take-back that worked and a delete that failed: the connection
+   *  is kept, so the guardian can disconnect again, but it reads broken and
+   *  its capabilities stay stopped, since the platform no longer honours its
+   *  credential. If even that write fails, the grant is broken in memory. */
+  private async keepBrokenAfterTakeBack(grant: GrantName): Promise<void> {
+    try {
+      await this.degradeLocked(
+        grant,
+        "access was taken back, but the disconnect was not saved",
+        () => true,
+      );
+    } catch (err) {
+      this.log.warn("could not mark a taken-back grant broken", {
+        connectionId: this.id,
+        error: errMsg(err),
+      });
+      this.grantState.set(grant, "degraded");
+      this.liveCreds.delete(grant);
+    }
+  }
+
+  /** Null when the kind took back the access or holds nothing to take back;
+   *  otherwise why it failed or did not answer in time, which is logged. The
+   *  time limit covers resolving the material too. A take-back that runs out
+   *  of time never calls the kind later, and the kind's signal aborts, so it
+   *  changes nothing at the platform once the connection is gone. */
+  private async takeBack(): Promise<string | null> {
+    const onDisconnect = this.descriptor.onDisconnect;
+    if (!onDisconnect) return null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stop = new AbortController();
+    try {
+      const held = await this.store.grantOf(this.id);
+      if (!held?.credential) return null;
+      const { material } = fromPersisted(held.credential, this.descriptor.auth);
+      const taking = (async () => {
+        const resolved = typeof material === "function" ? await material() : material;
+        if (stop.signal.aborted) return;
+        await onDisconnect(
+          { material: resolved, profile: held.profile ?? {} },
+          { signal: stop.signal },
+        );
+      })();
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          stop.abort();
+          reject(new Error(`no answer within ${TAKE_BACK_TIMEOUT_MS / 1000}s`));
+        }, TAKE_BACK_TIMEOUT_MS);
+      });
+      await Promise.race([taking, timeout]);
+      return null;
+    } catch (err) {
+      this.log.warn("could not take back access at the platform on disconnect", {
+        connectionId: this.id,
+        error: errMsg(err),
+      });
+      // An empty reason still says the take-back failed.
+      return errMsg(err) || "the service gave no reason";
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** Remove this connection and its grant in one transaction that raises
    *  disconnected, then drop the grant in memory, stop every capability and
    *  clear the custody artifacts. `opts.inTx` joins the transaction, so a fix
@@ -1374,19 +1537,24 @@ class ConnectionImpl implements Connection {
    *  store comes first, so a failed write throws with nothing changed in
    *  memory. */
   disconnect(grant: GrantName, opts: { inTx?: (tx: DrizzleTx) => void } = {}): Promise<void> {
-    return this.withGrantLock(grant, async () => {
-      const connection = { id: this.id, connectionKind: this.connectionKind };
-      this.store.transaction((tx) => {
-        this.store.remove(tx, this.id);
-        this.registry.raise(tx, { kind: "disconnected", connection });
-        opts.inTx?.(tx);
-      });
-      this.grantState.set(grant, "unauthorized");
-      this.liveCreds.delete(grant);
-      this.renewedSinceGranted.delete(grant);
-      this.teardownAll();
-      await this.clearCustody(grant);
+    return this.withGrantLock(grant, () => this.disconnectLocked(grant, opts));
+  }
+
+  private async disconnectLocked(
+    grant: GrantName,
+    opts: { inTx?: (tx: DrizzleTx) => void },
+  ): Promise<void> {
+    const connection = { id: this.id, connectionKind: this.connectionKind };
+    this.store.transaction((tx) => {
+      this.store.remove(tx, this.id);
+      this.registry.raise(tx, { kind: "disconnected", connection });
+      opts.inTx?.(tx);
     });
+    this.grantState.set(grant, "unauthorized");
+    this.liveCreds.delete(grant);
+    this.renewedSinceGranted.delete(grant);
+    this.teardownAll();
+    await this.clearCustody(grant);
   }
 
   private async revokeLocked(
@@ -1533,7 +1701,7 @@ class ConnectionImpl implements Connection {
     return promise;
   }
 
-  /** Attempt a renewal; on success persist + rebuild, on "needs-fix"/throw degrade.
+  /** Attempt renewal. An unavailable answer stays retryable; a refusal degrades.
    *
    *  Store first on the success branch (the store is authoritative).
    *  If the durable write throws, the renewal is NOT applied: the mirror is
@@ -1556,12 +1724,23 @@ class ConnectionImpl implements Connection {
     try {
       renewed = await scheme.renew(cred);
     } catch (err) {
+      if (err instanceof RenewalUnavailable) {
+        // No renewal answer means no authority to mark the grant broken or
+        // consume its one fault-driven renewal attempt.
+        if (stillCurrent()) this.renewedSinceGranted.delete(grant);
+        this.log.warn("fault-driven renewal unavailable; will retry", {
+          connectionId: this.id,
+          grant,
+          error: errMsg(err),
+        });
+        return;
+      }
       await this.degradeGrant(grant, `renew threw (${reason}): ${errMsg(err)}`, stillCurrent);
       return;
     }
     // scheme.renew is the flow's longest await, and runs outside the grant's
-    // lock so a slow renewer never holds up a grant or a disconnect. A
-    // grant completing during it superseded this fault, so the result is
+    // lock so a slow renewer never holds up a grant. A disconnect that takes
+    // back access waits for it, so it takes back what it mints. A grant completing during it superseded this fault, so the result is
     // applied under the lock, and only while the faulting epoch is current.
     if (renewed === "needs-fix") {
       await this.degradeGrant(grant, `renew returned fix (${reason})`, stillCurrent);
@@ -1685,4 +1864,23 @@ class AuthStateImpl implements AuthState {
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Whether `work` settles within `ms`. It goes on alone when it does not. */
+async function within(work: Promise<unknown>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  try {
+    return await Promise.race([
+      work.then(
+        () => true,
+        () => true,
+      ),
+      late,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

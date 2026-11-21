@@ -38,6 +38,7 @@ interface ShellProps {
   embedded: boolean;
   rootLabel: string;
   rootPanelTrigger: boolean;
+  singleFile: boolean;
   sidebarHeading?: string;
   searchPlaceholder: string;
   externalSelection?: ExternalSelection | null;
@@ -54,6 +55,7 @@ export function Shell({
   embedded,
   rootLabel,
   rootPanelTrigger,
+  singleFile,
   sidebarHeading,
   searchPlaceholder,
   externalSelection,
@@ -124,7 +126,7 @@ export function Shell({
   useUrlSelectionSync({ embedded });
   useFileBrowserWatch({ watchEventsUrl });
   useBeforeUnloadGuard();
-  useDocumentLinkInterceptor();
+  useDocumentLinkInterceptor({ handBack: singleFile });
   usePageHideKeepalive();
   useAutoSaveOrchestration();
   useExternalSelection(externalSelection);
@@ -143,6 +145,8 @@ export function Shell({
 
   const fileDrop = useFileDropArea({
     onActiveChange: (active) => store.getState().ui.setIsDragActive(active),
+    // A browser of one file the host chose takes no uploads into the folder.
+    refuse: () => singleFile,
     onDrop: (event) => {
       void getUploadEntriesFromDataTransfer(event.dataTransfer).then((entries) =>
         store.getState().ui.uploadFiles(entries),
@@ -198,7 +202,7 @@ export function Shell({
         </div>
       )}
       <div className="flex flex-1 overflow-hidden">
-        {isBelowMd ? (
+        {singleFile ? null : isBelowMd ? (
           <FilesPane
             className={`${contentActive ? "hidden" : "flex"} w-full flex-1 bg-surface p-4`}
             searchPlaceholder={searchPlaceholder}
@@ -213,7 +217,7 @@ export function Shell({
             contextMenuActions={contextMenuActions}
           />
         )}
-        <Content folderPanel={folderPanel} />
+        <Content folderPanel={folderPanel} singleFile={singleFile} />
       </div>
       {showHistory && <HistoryMobileSheet />}
       <DropOverlay rootLabel={rootLabel} />

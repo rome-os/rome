@@ -45,6 +45,7 @@ import {
 import { Timestamp, TimestampProvider } from "@rome-os/ui/timestamp";
 import { Markdown } from "@rome-os/ui/markdown";
 import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ProgressiveBlur } from "@/components/ui/progressive-blur";
@@ -290,6 +291,19 @@ export function DisplaySection() {
               <Badge asChild variant="outline">
                 <a href="https://github.com/amantru/rome-internal/pull/1234">#1234</a>
               </Badge>
+            </Item>
+          </Row>
+        </Specimen>
+      </Component>
+
+      <Component id="kbd" name="Kbd" source="ui/kbd.tsx">
+        <Specimen label="Kbd — variants">
+          <Row>
+            <Item label="default">
+              <Kbd>⌘K</Kbd>
+            </Item>
+            <Item label="ghost">
+              <Kbd variant="ghost">⌘K</Kbd>
             </Item>
           </Row>
         </Specimen>

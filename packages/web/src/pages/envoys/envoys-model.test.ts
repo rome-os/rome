@@ -227,6 +227,22 @@ describe("connectChoices", () => {
     expect(choice).toMatchObject({ another: true, activeSetupCid: null, taken: false });
   });
 
+  it("offers no Slack app sign-in, which returns to Settings rather than here", () => {
+    const choices = connectChoices([
+      connection({
+        connectionKind: "slack_app",
+        grants: { bot: "unauthorized" },
+        link: "own_account",
+      }),
+      connection({
+        connectionKind: "telegram",
+        grants: { bot: "unauthorized" },
+        link: "own_account",
+      }),
+    ]);
+    expect(choices.map((choice) => choice.service)).toEqual(["telegram"]);
+  });
+
   it("re-attaches the setup of a service that holds one account", () => {
     const [choice] = connectChoices([
       connection({

@@ -53,9 +53,7 @@ export function PersonConversation({ person }: { person: PersonResource }) {
     // at the bottom of the viewport even when the history above it is short.
     <section className="flex flex-1 flex-col">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-section uppercase tracking-wide text-muted-foreground">
-          {t("detail.timeline")}
-        </h2>
+        <h2 className="text-section text-muted-foreground">{t("detail.timeline")}</h2>
         {segments.length > 1 && account && (
           <SegmentedControl
             aria-label={t("send.segments.label")}
@@ -115,7 +113,7 @@ export function PersonConversation({ person }: { person: PersonResource }) {
       ) : (
         days.map((day) => (
           <div key={day.dayStart}>
-            <h3 className="mt-5 mb-1 text-badge uppercase tracking-wide text-subtle-foreground">
+            <h3 className="mt-5 mb-1 text-badge text-subtle-foreground">
               {dayLabel(t, day.dayStart, navigatorLocale())}
             </h3>
             {day.entries.map((entry) => (

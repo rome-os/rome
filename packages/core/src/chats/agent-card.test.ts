@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
-import { AGENT_CARD_MAX_UI_CHARS, agentCardPart, checkAgentCard } from "./agent-card.js";
+import {
+  AGENT_CARD_MAX_UI_CHARS,
+  agentCardIn,
+  agentCardPart,
+  checkAgentCard,
+} from "./agent-card.js";
 
 const NUMBERS = {
   components: [
@@ -10,6 +15,17 @@ const NUMBERS = {
 };
 
 describe("agent card", () => {
+  it("finds Rome's own card among a stored message's parts, and nothing else", () => {
+    const card = { type: "widget", toolUseId: "c1", appId: "core", text: "Rent", ui: NUMBERS };
+    expect(agentCardIn([card])).toEqual(card);
+    expect(agentCardIn([{ type: "text", content: "Rent" }])).toBeUndefined();
+    expect(agentCardIn([{ ...card, appId: "weather" }])).toBeUndefined();
+    expect(agentCardIn([{ ...card, type: "pending_interaction" }])).toBeUndefined();
+    expect(
+      agentCardIn([{ type: "widget", toolUseId: "c2", appId: "core", text: "x" }]),
+    ).toBeUndefined();
+  });
+
   it("takes display components with every value written out", () => {
     expect(checkAgentCard(NUMBERS, "Rent 2400 USD, food 620 USD")).toEqual([]);
     expect(agentCardPart(NUMBERS, "  Rent and food  ", "call-1")).toEqual({

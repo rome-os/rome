@@ -80,7 +80,23 @@ export const SHOW_CARD_INPUT_SCHEMA = {
   },
 } as const;
 
-type AgentCardPart = Extract<MessagePart, { type: "widget" }> & { ui: WidgetUi };
+/** The widget part that stores an agent card. */
+export type AgentCardPart = Extract<MessagePart, { type: "widget" }> & { ui: WidgetUi };
+
+/** The agent card among a stored message's parts, or undefined for none. Only
+ *  Rome's own card is a core widget part with a `ui`: an app's widget names
+ *  its app, and a card that waits on an answer is a pending interaction. */
+export function agentCardIn(parts: readonly unknown[]): AgentCardPart | undefined {
+  return parts.find(
+    (part): part is AgentCardPart =>
+      !!part &&
+      typeof part === "object" &&
+      (part as { type?: unknown }).type === "widget" &&
+      (part as { appId?: unknown }).appId === "core" &&
+      !!(part as { ui?: unknown }).ui &&
+      typeof (part as { text?: unknown }).text === "string",
+  );
+}
 
 /** Where a value reads the card's data model, which an agent card has none of. */
 function pathsIn(value: unknown, at: string, found: string[]): void {

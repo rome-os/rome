@@ -8,21 +8,21 @@
  *
  * @example
  * // Start a new coding session
- * const result = await callAction("summon", {
+ * const result = await callAction("system:summon", {
  *   agentName: "coding",
  *   prompt: "Refactor the database layer to use connection pooling",
  * });
  * // result.data => { result: "...", sessionId: "sess_abc" }
  *
  * // Work in a specific project
- * await callAction("summon", {
+ * await callAction("system:summon", {
  *   agentName: "coding",
  *   prompt: "Fix the failing build",
  *   workingDir: "landingpage/content",
  * });
  *
  * // Resume a previous session
- * await callAction("summon", {
+ * await callAction("system:summon", {
  *   agentName: "coding",
  *   prompt: "Continue with the migration tests",
  *   sessionId: "sess_abc",

@@ -114,6 +114,18 @@ describe("delegated task approval binding", () => {
     ]);
   });
 
+  it("replays a chatless turn's call as that turn, so it reads no more than the turn could", async () => {
+    const s = harness();
+    const payload = s.payload as Record<string, unknown>;
+    delete payload.channelContext;
+    payload.turnId = "turn-7";
+    payload.audience = "shared";
+    await runWithSessionActor(guardian, () => s.handler.onApproved("approval-1"));
+    const context = (s.run.mock.calls[0] as unknown[])[2] as Record<string, unknown>;
+    expect(context).toMatchObject({ turnId: "turn-7", audience: "shared" });
+    expect(context).not.toHaveProperty("channelContext", expect.anything());
+  });
+
   it("does not promote an unattributed requester when the guardian approves", async () => {
     const s = harness(undefined);
     // Explicitly replace the default fixture requester with no recorded actor.

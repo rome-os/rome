@@ -228,7 +228,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         const memoryPrompt = [
           `Today is ${now.toISOString()}. Dream over the past ${windowHours} hours.`,
           "",
-          `- Window: pass windowHours: ${windowHours} to get_webchat_conversations, get_account_chats, and get_action_logs.`,
+          `- Window: pass windowHours: ${windowHours} to dream:get_webchat_conversations, dream:get_account_chats, and dream:get_action_logs.`,
           `- Memory directory: ${memoryDir}`,
           `- Today's journal entry: ${journalPath}`,
         ].join("\n");
@@ -266,7 +266,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
         const practicePrompt = [
           `Today is ${now.toISOString()}. Practice over the past ${windowHours} hours.`,
           "",
-          `- Window: pass windowHours: ${windowHours} to get_webchat_conversations and get_action_logs.`,
+          `- Window: pass windowHours: ${windowHours} to dream:get_webchat_conversations and dream:get_action_logs.`,
           `- Skills staging directory: ${join(staging, "skills")}`,
           `- Guardian's apps directory: ${appsDir}`,
           `- Practice notes file: ${notesPath}`,
@@ -309,7 +309,7 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps<Dr
             staging,
             before,
             async () => {
-              const res = await appContext.runAction("app_management", {
+              const res = await appContext.runAction("system:app_management", {
                 op: "install",
                 source: { mode: "source", path: carrierDir },
               });

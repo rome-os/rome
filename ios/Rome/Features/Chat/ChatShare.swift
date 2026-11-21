@@ -104,11 +104,9 @@ final class ChatShareFlow {
         chat.map { ShareTurns(messages: $0.messages, rows: $0.rows) }
     }
 
-    /// Share mode, with `turn` picked. An open chat thread leaves the screen:
-    /// share mode works on the main timeline. A quoted reply and its draft
-    /// stay as they are.
+    /// Share mode, with `turn` picked. A quoted reply and its draft stay as
+    /// they are.
     func begin(turn: String?) {
-        if chat?.thread != nil { chat?.hideThread() }
         selection = turn.map { [$0] } ?? []
         error = nil
     }

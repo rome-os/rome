@@ -90,12 +90,11 @@ import Testing
 
     /// As on the web, a named chat's composer says which chat a message goes to.
     @Test func theComposerNamesTheChatOnceItHasOne() {
-        #expect(TopicChatsStore.composerPlaceholder(nil, replying: false) == "Message")
+        #expect(TopicChatsStore.composerPlaceholder(nil) == "Message")
         let unnamed = ConciergeChat(id: "topic-1", name: "  ", main: false, unread: 0)
-        #expect(TopicChatsStore.composerPlaceholder(unnamed, replying: false) == "Message")
+        #expect(TopicChatsStore.composerPlaceholder(unnamed) == "Message")
         let named = ConciergeChat(id: "topic-1", name: " Kyoto trip ", main: false, unread: 0)
-        #expect(TopicChatsStore.composerPlaceholder(named, replying: false) == "Message in Kyoto trip")
-        #expect(TopicChatsStore.composerPlaceholder(named, replying: true) == "Reply")
+        #expect(TopicChatsStore.composerPlaceholder(named) == "Message in Kyoto trip")
     }
 
     /// A chat read beside the pinned drawer (iPad) loses its badge at once.
@@ -270,6 +269,69 @@ import Testing
         #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: 2) == 30)
         #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: 44) == 45)
         #expect(TopicChatsStore.shownCount(12, limit: page, openIndex: nil) == 12)
+    }
+
+    /// As on the web: the pinned chats first, the latest pinned on top, then
+    /// the rest by activity, whatever their activity.
+    @Test func theDrawerListsPinnedChatsFirstLatestPinOnTop() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b", "c", "d"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T08:00:00.000Z", pinnedAt: "2026-11-16T08:00:00.000Z"),
+            ChatSession(id: "c", name: "c", activityAt: "2026-11-15T09:00:00.000Z"),
+            ChatSession(id: "d", name: "d", activityAt: "2026-11-15T07:00:00.000Z", pinnedAt: "2026-11-16T09:00:00.000Z"),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.chats.map(\.id) == ["d", "b", "a", "c"])
+        #expect(store.isPinned("d") && store.isPinned("b") && !store.isPinned("a"))
+        // A turn in an unpinned chat moves it up among the unpinned only.
+        backend.sessionRows[2].activityAt = "2026-11-17T09:00:00.000Z"
+        store.refresh()
+        await settle()
+        #expect(store.chats.map(\.id) == ["d", "b", "c", "a"])
+    }
+
+    @Test func pinningMovesTheChatToTheTopAndUnpinningBack() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b", "c"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T09:00:00.000Z"),
+            ChatSession(id: "c", name: "c", activityAt: "2026-11-15T08:00:00.000Z"),
+        ]
+        let workspace = workspace(backend)
+        workspace.topics.start()
+        await settle()
+        #expect(await workspace.pinTopic("c", pinned: true))
+        // At once, before the refetch.
+        #expect(workspace.topics.chats.map(\.id) == ["c", "a", "b"])
+        await settle()
+        #expect(workspace.topics.chats.map(\.id) == ["c", "a", "b"])
+        #expect(await workspace.pinTopic("b", pinned: true))
+        #expect(workspace.topics.chats.map(\.id) == ["b", "c", "a"])
+        #expect(await workspace.pinTopic("c", pinned: false))
+        await settle()
+        #expect(workspace.topics.chats.map(\.id) == ["b", "a", "c"])
+        #expect(backend.calls == ["pin c", "pin b", "unpin c"])
+    }
+
+    @Test func aPinTheServerRefusesChangesNothing() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T09:00:00.000Z"),
+        ]
+        backend.pinFails = true
+        let workspace = workspace(backend)
+        workspace.topics.start()
+        await settle()
+        #expect(await !workspace.pinTopic("b", pinned: true))
+        #expect(workspace.topics.chats.map(\.id) == ["a", "b"])
+        #expect(!workspace.topics.isPinned("b"))
     }
 
     @Test func theOrderWithoutTimesIsNewestStartedFirst() {

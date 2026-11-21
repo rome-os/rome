@@ -119,25 +119,10 @@ function toolCallDurationMs(use: ToolUseBlock, result: ToolResultBlock | null): 
   return delta >= 0 ? delta : undefined;
 }
 
-function Payload({
-  label,
-  value,
-  plainLabel = false,
-}: {
-  label: string;
-  value: unknown;
-  /** Render the label as written (no uppercasing), e.g. "User prompt". */
-  plainLabel?: boolean;
-}) {
+function Payload({ label, value }: { label: string; value: unknown }) {
   return (
     <div className="space-y-1">
-      <div
-        className={`text-aux font-semibold text-subtle-foreground${
-          plainLabel ? "" : " uppercase tracking-wide"
-        }`}
-      >
-        {label}
-      </div>
+      <div className="text-aux font-semibold text-subtle-foreground">{label}</div>
       <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-8 border border-border bg-background p-2 font-mono text-xs leading-relaxed text-foreground">
         {formatPayload(value)}
       </pre>
@@ -272,7 +257,7 @@ export function renderInlineBlock(block: TraceEventDto, key: string): ReactNode 
       const userPrompt = block.userPrompt ? stripThreadContext(block.userPrompt) : "";
       return (
         <div key={key} className="space-y-2 rounded-8 border border-border bg-surface p-2.5">
-          {userPrompt && <Payload label="User prompt" value={userPrompt} plainLabel />}
+          {userPrompt && <Payload label="User prompt" value={userPrompt} />}
         </div>
       );
     }

@@ -78,15 +78,22 @@
       }
     },
     "topicEmpty": {
-      "title": "Start an ongoing topic",
-      "description": "Alerts and tasks here show up only in this chat.",
+      "welcome": "What's on your mind?",
+      "label": "Suggestions",
       "starters": {
-        "life": "Be my life helper: schedule, bills, deliveries and other errands live here",
-        "work": "Keep track of work here: project progress, PRs and meetings",
-        "trip": "Help me plan next month's trip, and keep everything about it here"
-      },
-      "justAsk": "Just asking a question?",
-      "backToMain": "Ask in the main chat →"
+        "life": {
+          "label": "Keep my bills and errands here",
+          "text": "Keep my bills, deliveries and other errands here, and remind me before anything is due"
+        },
+        "work": {
+          "label": "Track my work and meetings",
+          "text": "Track my work here: project progress, PRs and meetings"
+        },
+        "trip": {
+          "label": "Plan next month's trip",
+          "text": "Help me plan next month's trip, and keep everything about it here"
+        }
+      }
     },
     "activity": {
       "idle": "Idle",
@@ -120,10 +127,10 @@
         "needs_you": "Needs you",
         "active": "Active",
         "later": "Later",
-        "on_its_own": "Running on its own",
+        "scheduled": "Scheduled",
         "ended": "Ended"
       },
-      "empty": "Nothing runs here yet.",
+      "empty": "No tasks yet.",
       "loading": "Loading tasks",
       "loadFailed": "Failed to load tasks",
       "showMore": "Show {{count}} more",
@@ -132,16 +139,13 @@
         "waitingApproval": "Waiting for your approval",
         "running": "Running",
         "checksIn": "Checks {{when}}",
-        "notStarted": "Not started",
-        "stopping": "Stopping…",
-        "opening": "Opening…",
         "ended": {
           "done": "Done",
           "failed": "Failed",
           "stopped": "Stopped",
           "no_response": "No response"
         },
-        "notStartedAge": "Not started · Created {{age}}"
+        "active": "Active"
       },
       "schedule": {
         "daily": "Daily at {{time}}",
@@ -157,7 +161,8 @@
       "follow": {
         "digest": "Digest daily at {{times}}",
         "unavailable": "Not available",
-        "off": "Off"
+        "off": "Off",
+        "next": "next {{when}}"
       },
       "routine": {
         "paused": "Paused",
@@ -165,28 +170,55 @@
         "fromTask": "From {{title}}"
       },
       "actions": {
-        "respond": "Respond",
-        "respondTo": "Respond to {{title}}",
+        "more": "More actions for {{title}}",
         "stop": "Stop",
-        "stopTask": "Stop {{title}}",
-        "openChat": "Open the chat for {{title}}"
+        "markDone": "Mark as done",
+        "markDoneTask": "Mark {{title}} as done",
+        "cancel": "Cancel",
+        "unfollow": "Unfollow",
+        "pause": "Pause",
+        "resume": "Resume",
+        "delete": "Delete"
       },
       "failed": {
-        "stop": "Failed to stop the task"
+        "stop": "Failed to stop the task",
+        "markDone": "Failed to mark the task done",
+        "cancel": "Failed to cancel the reminder",
+        "unfollow": "Failed to unfollow",
+        "pause": "Failed to pause the routine",
+        "resume": "Failed to resume the routine",
+        "delete": "Failed to delete the routine"
       },
-      "created": "Created {{when}}",
-      "endedAt": "Ended {{when}}"
+      "endedAt": "Ended {{when}}",
+      "needsYouDot": "A task needs you",
+      "pending": {
+        "stopping": "Stopping…",
+        "finishing": "Marking done…",
+        "cancelling": "Cancelling…",
+        "unfollowing": "Unfollowing…",
+        "pausing": "Pausing…",
+        "resuming": "Resuming…",
+        "deleting": "Deleting…"
+      },
+      "deleteRoutine": {
+        "title": "Delete “{{name}}”?",
+        "description": "It stops running and is removed. This cannot be undone."
+      },
+      "unfollowConfirm": {
+        "title": "Unfollow {{target}}?",
+        "description": "Its alerts and digest entries stop coming here. To follow it again, ask the Concierge."
+      }
     },
     "menu": {
       "tasks": "Tasks",
-      "outputs": "Outputs"
+      "outputs": "Outputs",
+      "needsYouDot": "A task needs you"
     }
   },
   "reply": {
     "action": "Reply",
     "dismiss": "Cancel reply",
-    "jump": "Go to the original message",
-    "openThread": "Open the chat thread"
+    "jump": "Go to the original message"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -199,7 +231,7 @@
   },
   "documentTitle": "{{guardian}} & {{agent}} | Rome",
   "sidebar": {
-    "newChat": "New Chat",
+    "newChat": "New chat",
     "loading": "Loading…",
     "noSessions": "No sessions yet",
     "openSidebar": "Open sidebar"
@@ -221,7 +253,6 @@
     "title": "Share chat",
     "loading": "Loading…",
     "createError": "Couldn't create the link.",
-    "hydrateError": "Couldn't load the whole chat to share.",
     "selectedCount_one": "{{count}} message selected",
     "selectedCount_other": "{{count}} messages selected",
     "createTitle": "Create a share link",
@@ -687,16 +718,6 @@
       "prompt": "Build a morning brief app with frontend design to read my Gmail from the last 24 hours and my upcoming Google Calendar events. Update the dashboard every day at 8:00 AM with the latest priorities, urgent emails, key meetings, deadlines, and recommended next actions. Identify what needs my attention most and send me a short summary on Telegram after each daily update."
     }
   },
-  "thread": {
-    "back": "Back to the chat: {{title}}",
-    "replyPlaceholder": "Reply: {{title}}",
-    "untitled": "Thread",
-    "open": "Open the thread: {{title}}",
-    "stack": "Open the thread, newest: {{preview}}",
-    "stackCount_one": "{{count}} reply",
-    "stackCount_other": "{{count}} replies",
-    "newReplies": "New replies in \"{{title}}\""
-  },
   "automatedInput": {
     "named": "{{kind}} · {{name}}",
     "kinds": {
@@ -777,6 +798,8 @@
     "previewFailed": "Failed to load the file",
     "truncated": "Showing the first {{count}} characters.",
     "back": "Back to outputs",
+    "edit": "Edit",
+    "doneEditing": "Done",
     "filterLabel": "Show",
     "noneOfType": "No outputs of this kind yet.",
     "today": "Today",
@@ -805,5 +828,20 @@
     "menu": "Chat menu",
     "project": "Project · {{name}}",
     "lastModel": "Last answered by {{model}}"
+  },
+  "taskLink": {
+    "status": {
+      "needs_you": "Needs you",
+      "active": "Active",
+      "later": "Later",
+      "done": "Done",
+      "failed": "Failed",
+      "stopped": "Stopped",
+      "no_response": "No response"
+    },
+    "label": "{{name}}, {{status}}",
+    "untitled": "Task",
+    "mainChat": "Main chat",
+    "backTo": "Back to {{name}}"
   }
 }

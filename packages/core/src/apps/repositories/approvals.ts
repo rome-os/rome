@@ -1,3 +1,4 @@
+import { hashArgs } from "../actions/replay.js";
 import { and, eq, or, desc, gte, inArray, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { approvals } from "../../db/schema.js";
@@ -268,6 +269,43 @@ export class ApprovalsRepository {
       )
       .returning({ id: approvals.id });
     return rows.length > 0;
+  }
+
+  /** Claim one exact approved effect before any external write. A replay or
+   * concurrent invocation cannot reuse it, even while its root is running. */
+  async claimApprovedEffect(id: string, actionName: string, argsHash: string): Promise<boolean> {
+    const current = await this.findById(id);
+    if (
+      !current ||
+      current.type !== "action_execution" ||
+      current.status !== "approved" ||
+      current.executionState !== "running"
+    )
+      return false;
+    const payload = current.payload as Record<string, unknown> | null;
+    if (
+      !payload ||
+      payload.actionName !== actionName ||
+      "effectClaimedAt" in payload ||
+      !payload.args ||
+      typeof payload.args !== "object" ||
+      Array.isArray(payload.args)
+    )
+      return false;
+    if (hashArgs(payload.args as Record<string, unknown>) !== argsHash) return false;
+    const claimed = await this.db
+      .update(approvals)
+      .set({ payload: { ...payload, effectClaimedAt: new Date().toISOString() } })
+      .where(
+        and(
+          eq(approvals.id, id),
+          eq(approvals.status, "approved"),
+          eq(approvals.executionState, "running"),
+          eq(approvals.payload, current.payload),
+        ),
+      )
+      .returning({ id: approvals.id });
+    return claimed.length === 1;
   }
 
   async markExecuted(id: string) {

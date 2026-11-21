@@ -5,7 +5,7 @@
 
 import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { AgentTurnFailure, AgentTurnFinishedEvent } from "@rome-os/app-runtime";
-import { CONCIERGE_DONE_DAYS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
+import { CONCIERGE_DONE_DAYS } from "@rome/api-types/concierge";
 import type { AgentTurnFailedBeforeStart, EndedAgentTurn, TurnListeners } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
@@ -15,20 +15,14 @@ import {
   isConciergeAgent,
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
-import { hasText, latestSaid, taskChatPlace } from "./task-chat.js";
+import { finalAnswer, taskChatPlace } from "./task-chat.js";
 import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./task-events.js";
 import { ConciergeActivityTracker } from "./activity.js";
 import { stopHolds, type TaskStatusView } from "./tasks.js";
 import { WaitExpiry } from "./wait-expiry.js";
 import { isConciergeChat } from "../webchat/privacy.js";
 import { openQuestion } from "./transcript.js";
-import {
-  conclusionOf,
-  hasNothingToReport,
-  recurringOf,
-  withoutConclusion,
-  withoutMarkers,
-} from "./conclusion.js";
+import { conclusionOf, recurringOf, withoutConclusion, withoutMarkers } from "./conclusion.js";
 
 import { failoverReason } from "../agent/index.js";
 
@@ -137,31 +131,6 @@ function outcomeOf(status: AgentTurnFinishedEvent["status"]): "succeeded" | "fai
   return end === "done" ? "succeeded" : end;
 }
 
-/**
- * A finished task's one line, from the result its task chat gave: the first
- * sentence of its conclusion, else of its reply, cut short. Null for none.
- */
-export function resultSummary(text: string): string | null {
-  const conclusion = conclusionOf(text);
-  // A conclusion with no news says nothing about the task: its reply does.
-  const body = (
-    conclusion.kind === "found" && !hasNothingToReport(text)
-      ? conclusion.text
-      : withoutMarkers(withoutConclusion(text))
-  )
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/[`*_#>]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!body) return null;
-  // A Latin sentence ends at a stop before a space; a CJK one at its own stop.
-  const sentence = body.match(/^.+?(?:[.!?](?=\s|$)|[。！？])/)?.[0] ?? body;
-  // As long as a summary the Concierge writes may be.
-  return sentence.length <= CONCIERGE_TASK_SUMMARY_MAX_LENGTH
-    ? sentence
-    : `${sentence.slice(0, CONCIERGE_TASK_SUMMARY_MAX_LENGTH - 1).trimEnd()}…`;
-}
-
 function userText(content: string): string {
   try {
     const parts: unknown = JSON.parse(content);
@@ -202,10 +171,7 @@ export async function renderTaskEvents(
   tasks: DirtyTask[],
 ): Promise<TaskEventDelivery[]> {
   const { tasks: store, messages } = service.deps;
-  const byChat = new Map<
-    string,
-    { taskIds: string[]; blocks: string[]; quiet: boolean; owner: string }
-  >();
+  const byChat = new Map<string, { taskIds: string[]; blocks: string[]; owner: string }>();
   for (const task of tasks) {
     const found = await store.repo.getWithChat(task.taskId);
     if (!found) continue;
@@ -214,10 +180,9 @@ export async function renderTaskEvents(
     const status = (await store.statusOf([row], { asReported: true })).get(row.id);
     // The chat the row reports to now: its own while live, else its owner's main chat.
     const key = found.conciergeChat.id;
-    const group = byChat.get(key) ?? { taskIds: [], blocks: [], quiet: true, owner: found.owner };
+    const group = byChat.get(key) ?? { taskIds: [], blocks: [], owner: found.owner };
     byChat.set(key, group);
     group.taskIds.push(task.taskId);
-    group.quiet &&= task.quiet;
     const blocks = group.blocks;
     const changes = task.changes.map((change) => change.kind);
     const lines: string[] = [];
@@ -230,12 +195,13 @@ export async function renderTaskEvents(
     }
     const wantsReply = caughtUp || changes.some((kind) => kind.startsWith("turn_end"));
     if (row.sessionId && wantsReply) {
-      const [latest] = await latestSaid(
-        messages,
-        taskChatPlace(row.sessionId),
-        1,
-        (message) => message.direction === "fromRome" && hasText(message),
-      );
+      const final = await finalAnswer(messages, taskChatPlace(row.sessionId));
+      const latest = final?.answer;
+      // Every card the answer's turn showed is what `card_forward` sends by
+      // id, as it is.
+      for (const { id, card } of final?.cards ?? []) {
+        lines.push(`card id=${id}: ${replyExcerpt(card.text.replace(/\s+/g, " "))}`);
+      }
       if (latest) {
         // The task's own conclusion comes whole, so the Concierge can tell
         // whether the task waits on the guardian. The rest keeps its excerpt.
@@ -251,13 +217,22 @@ export async function renderTaskEvents(
         }
       }
     }
+    // A scheduled task's owner may want only news or a problem: the Concierge
+    // reads it here and judges each run by what it says.
+    if (row.sessionId && wantsReply) {
+      const schedule = await service.deps.schedules?.of(task.taskId);
+      if (schedule?.report === "when_it_matters") lines.push("report: when_it_matters");
+    }
     for (const change of task.changes) {
       if (change.detail) lines.push(change.detail);
     }
     if (changes.includes("chat_deleted")) lines.push("The task chat was deleted.");
     if (changes.includes("stopped_by_owner")) lines.push("The guardian stopped this task.");
+    if (changes.includes("done_by_owner")) {
+      lines.push("The guardian marked this task done and stopped its work.");
+    }
     if (changes.includes("checks_cancelled_by_owner")) {
-      lines.push("The guardian cancelled checks of this task. Read task_list for any left.");
+      lines.push("The guardian cancelled checks of this task. Read chat_list for any left.");
     }
     if (changes.includes("no_response")) {
       lines.push(
@@ -265,25 +240,22 @@ export async function renderTaskEvents(
       );
     }
     const attrs = [
-      `id="${attr(row.id)}"`,
-      row.sessionId ? `chat_id="${attr(row.sessionId)}"` : null,
+      `chat_id="${attr(row.sessionId)}"`,
       found.sourceMessageId ? `start_message_id="${attr(found.sourceMessageId)}"` : null,
       `title="${attr(row.title)}"`,
       status ? `status="${status.status}"` : null,
       status?.endReason ? `end_reason="${status.endReason}"` : null,
       `changes="${attr([...new Set(changes)].join(", "))}"`,
-      task.quiet ? 'quiet="true"' : null,
     ]
       .filter(Boolean)
       .join(" ");
     blocks.push(`<task ${attrs}>\n${lines.join("\n")}\n</task>`);
   }
-  return [...byChat.entries()].map(([chatId, { taskIds, blocks, quiet, owner }]) => ({
+  return [...byChat.entries()].map(([chatId, { taskIds, blocks, owner }]) => ({
     chatId,
     owner,
     taskIds,
     prompt: `<task_events>\n${blocks.join("\n")}\n</task_events>`,
-    quiet,
   }));
 }
 
@@ -301,15 +273,17 @@ export function startConciergeEvents(
   const coalescer = new TaskEventCoalescer({
     now: () => Date.now(),
     render: (dirty) => renderTaskEvents(service, dirty),
-    deliver: async ({ chatId: from, owner, prompt, quiet, taskIds }) => {
+    deliver: async ({ chatId: from, owner, prompt, taskIds }) => {
       // A row whose chat is gone or archived reports to the main chat.
       const chatId = await service.deliveryChat(from, owner);
       if (!chatId) return "failed";
       // A dashboard admin dropped from the allow-list is told nothing; their
       // rows wait, and reach them once they are back.
       if (!(await service.isServed(owner))) return "failed";
+      // Most reports need no word, so the turn shows no sign that it runs
+      // until the Concierge speaks.
       return await service.systemTurnOutcome(chatId, prompt, {
-        quiet,
+        quiet: true,
         pushLevel: "active",
         taskIds,
       });
@@ -651,19 +625,15 @@ export function startConciergeEvents(
     const turnedDownByRome = carriesApproval && answered.byRome;
     const taskId = await taskOf(chatId);
     if (!taskId) return;
-    // A newer turn's result, or none, replaces a result still held.
-    heldSummaries.delete(taskId);
     // The task reads as running until its outcome is written, so its status
     // does not flicker to ended while the turn's stream drains.
     const release = tasks.holdRunning(chatId);
-    let summary: string | null = null;
     try {
-      summary = await onTaskChatTurnHeld(event, chatId, taskId, carriesApproval, turnedDownByRome);
+      await onTaskChatTurnHeld(event, chatId, taskId, carriesApproval, turnedDownByRome);
     } finally {
       release();
       await guard("task status after a turn", tasks.chatChanged(chatId));
     }
-    if (summary) await guard("task result summary", writeResultSummary(taskId, summary));
   };
 
   const reopenAfterExpiry = async (taskId: string) => {
@@ -675,40 +645,13 @@ export function startConciergeEvents(
     await tasks.repo.clearWaitExpired(taskId);
   };
 
-  // A task chat that gave its result keeps its row's line current: the
-  // result's first sentence, until the Concierge writes another. Only a
-  // result that ends the task counts, read once its turn no longer holds it
-  // running. A result can come before the task ends, as an approved action's
-  // does while Rome still marks the approval executed, so it is held until
-  // the task reads ended. A failed or stopped task keeps its line, since the
-  // row says why it ended.
-  const heldSummaries = new Map<string, string>();
-  const writeResultSummary = async (taskId: string, summary: string) => {
-    const row = await tasks.repo.get(taskId);
-    if (!row) return;
-    const status = (await tasks.statusOf([row], { asReported: true })).get(taskId);
-    if (status?.status !== "ended") {
-      heldSummaries.set(taskId, summary);
-      return;
-    }
-    heldSummaries.delete(taskId);
-    if (status.endReason === "done") await tasks.repo.setResultSummary(taskId, summary);
-  };
-  const onTaskStatus = (taskId: string, status: TaskStatusView) => {
-    const summary = heldSummaries.get(taskId);
-    if (summary === undefined || status.status !== "ended") return;
-    heldSummaries.delete(taskId);
-    if (status.endReason !== "done") return;
-    void guard("task result summary", tasks.repo.setResultSummary(taskId, summary));
-  };
-
   const onTaskChatTurnHeld = async (
     event: AgentTurnFinishedEvent,
     chatId: string,
     taskId: string,
     carriesApproval: boolean,
     turnedDownByRome: boolean,
-  ): Promise<string | null> => {
+  ): Promise<void> => {
     await waitForTurnStream(service, chatId, event.turn.turnId);
     const rows = await webchatRepo.getTurnChatMessages(chatId, event.turn.turnId);
     const userRows = rows.filter((row) => row.role === "user");
@@ -716,45 +659,23 @@ export function startConciergeEvents(
     // wait is over, it ends as its new work does. Rome's own turn-down of an
     // approval, and the turn that carries on from it, reopen nothing.
     if (!turnedDownByRome && userRows.length > 0) await reopenAfterExpiry(taskId);
-    // A follow-up the task chat queued or deferred sits under the turn that
-    // answered it, so the turn is Concierge's when any of its inputs was said
-    // as Concierge's account. The guardian answering the task's own card or
-    // approval carries on what the Concierge started, so it counts as the
-    // Concierge's too. Only the guardian's typed words are their own turn.
-    // A scheduled run that reports only when it matters reads as the
-    // system's, like any scheduled turn: one with nothing to ask goes to
-    // the digest rather than a report of its own.
-    const quietRun =
-      userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id) && service.takeQuietRun(chatId);
+    // Who started the turn, as a fact for the Concierge: every turn's end is
+    // told, whoever started it. A follow-up the task chat queued sits under
+    // the turn that answered it, so the turn is Concierge's when any of its
+    // inputs was said as Concierge's account, as a scheduled run's brief is.
+    // The guardian answering the task's own card or approval carries on what
+    // the Concierge started, so it counts as the Concierge's too. The
+    // guardian's typed words are their own turn, and a turn with no input,
+    // such as a wake-up the task chat set itself, is the system's.
     const started =
-      !quietRun &&
-      (carriesApproval ||
-        userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id || answersCard(row.content)));
-    const by = started ? "concierge" : quietRun || userRows.length === 0 ? "system" : "guardian";
+      carriesApproval ||
+      userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id || answersCard(row.content));
+    const by = started ? "concierge" : userRows.length === 0 ? "system" : "guardian";
     // The guardian's own words reach the chat through the user-input path, which
     // announces nothing, so they are read from the rows of the turn they started.
     const words = userRows.map((row) => userText(row.content)).join(" | ");
     const said = by === "guardian" ? `guardian: ${excerpt(words, DETAIL_EXCERPT_CHARS)}` : null;
     const question = event.status === "completed" ? openQuestion(rows) : null;
-    // A scheduled turn that finished with no question, approval or error
-    // needs no word: its result waits for no report.
-    const finalText =
-      event.status === "completed" && !question
-        ? event.output.text?.trim() ||
-          userText(rows.filter((row) => row.role === "assistant").at(-1)?.content ?? "")
-        : "";
-    // A turn that only carries out what the guardian chose on the task's
-    // card or decided on its approval, and says it has nothing to report,
-    // owes no report: the card already shows it, so no Concierge turn hears
-    // of it. Any other turn reports as usual, and so does a wish for the
-    // work to recur, which is news for the Concierge.
-    const carriesOwnersChoice =
-      (carriesApproval && !turnedDownByRome) || userRows.some((row) => answersCard(row.content));
-    const nothingNew =
-      carriesOwnersChoice && hasNothingToReport(finalText) && recurringOf(finalText) === null;
-    const passive =
-      nothingNew ||
-      (by === "system" && event.status === "completed" && !carriesApproval && !question);
     // How the task chat's work ended, once it has nothing left to run: a turn
     // a newer input took over hands its work on, and ends nothing.
     const stillRunning = service.dashboard.chats
@@ -762,7 +683,7 @@ export function startConciergeEvents(
       .filter((id) => id !== event.turn.turnId);
     if (stillRunning.length === 0 && (event as EndedAgentTurn).handedOn !== true) {
       await tasks.repo
-        .setLastOutcome(taskId, outcomeOf(event.status), new Date(), { reported: !passive })
+        .setLastOutcome(taskId, outcomeOf(event.status), new Date())
         .catch((error: unknown) =>
           log.warn("failed to write a task's outcome", {
             taskId,
@@ -783,43 +704,36 @@ export function startConciergeEvents(
         }
       }
     }
-    // The result's first sentence, for the row's line once the task ended.
-    // Work still running in the chat, such as the stream an approved action's
-    // turn runs in, holds it until the task ends; a newer turn replaces it.
-    // The turn's final answer, else its last reply in the chat.
-    const summary = finalText ? resultSummary(finalText) : null;
     if (question) {
-      const options = question.options?.length ? ` (options: ${question.options.join(" | ")})` : "";
+      // The question card itself, by the id `card_forward` takes: forwarded,
+      // it is the same card in the Concierge chat, answered wherever it is.
       coalescer.mark({
         taskId,
         kind: `turn_end:completed question by=${by}`,
         urgent: true,
-        detail: [said, `question: ${question.question}${options}`].filter(Boolean).join("\n"),
+        detail: [said, `card id=${question.messageId}: ${question.line}`]
+          .filter(Boolean)
+          .join("\n"),
       });
-      return null;
+      return;
     }
     // The guardian messages the task worked for read the task's status: its
     // outcome, written above, waits for the Concierge's report, so they
-    // stay working until the turn that reports it ends.
+    // stay working until the turn that reports it ends. Every turn's end is
+    // told, whatever its conclusion says: the Concierge judges it.
     // A failed turn says why, so the Concierge can tell the guardian.
     const { failure, error } = event.output;
-    if (nothingNew) return summary;
     const cause = event.status === "error" ? (failure?.message ?? error) : undefined;
     const why = cause ? `error: ${excerpt(cause, DETAIL_EXCERPT_CHARS)}` : null;
     const detail = [said, why].filter(Boolean);
     coalescer.mark({
       taskId,
       kind: `turn_end:${event.status} by=${by}`,
-      // A result the Concierge asked for, or an error, is worth telling now.
-      // The guardian's own turns, scheduled ones and a stop wait.
-      urgent: event.status === "error" || (event.status === "completed" && started),
-      // A scheduled turn that finished with no question, approval or error
-      // needs no word: its row holds the outcome, and it goes with the next
-      // flush or digest rather than waking a turn of its own.
-      ...(passive ? { passive: true } : {}),
+      // Every turn's end is told within seconds: the Concierge judges from
+      // what it says whether the guardian should hear of it.
+      urgent: true,
       ...(detail.length ? { detail: detail.join("\n") } : {}),
     });
-    return summary;
   };
 
   const onApproval = async (approval: {
@@ -914,13 +828,6 @@ export function startConciergeEvents(
         void guard(`concierge turn handling (${event.turn.turnId})`, handled);
       },
     }),
-    tasks.repo.onChange(({ row }, change) => {
-      // A write settles no news: only a report that carried it does.
-      if (change !== "write") return;
-      // The Concierge wrote the task after its result: its line stands.
-      heldSummaries.delete(row.id);
-    }),
-    tasks.onStatus(onTaskStatus),
     // A task that ended closes the cards it still had open; one that starts again opens them.
     tasks.onEnded((row) => {
       if (row.sessionId) {
@@ -1003,7 +910,7 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
       return found.map((task) => ({
         id: task.row.id,
         title: task.row.title,
-        chatId: task.chat?.id ?? null,
+        chatId: task.chat.id,
         updatedAt: task.row.updatedAt.getTime(),
         status: status.get(task.row.id)?.status ?? "active",
         waitingSince: status.get(task.row.id)?.waitingSince ?? null,
@@ -1055,8 +962,6 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     laterOf: async (taskIds) => (await service.deps.checks?.laterOf(taskIds)) ?? new Map(),
     recurringOf: async (taskIds) =>
       (await service.deps.checks?.recurringOf?.(taskIds)) ?? new Set<string>(),
-    // Whether a waiting task's card shows yet, which keeps its message working.
-    taskChatPartMessages: (chatId, since) => webchatRepo.taskChatPartMessages(chatId, since),
   });
   // What a restart lost from memory, such as a running turn, may have ended a task.
   void guard(tasks.keepEndedAll());
@@ -1090,8 +995,8 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     approvals.onCreated(approvalChanged),
     approvals.onResolved(approvalChanged),
     // A write can move the row to another Concierge chat (a new source
-    // message, a forward): its task chat's answer is read again, and both
-    // chats are refreshed.
+    // message): its task chat's answer is read again, and both chats are
+    // refreshed.
     tasks.repo.onChange(({ row, conciergeChat }) => {
       if (row.sessionId) movedBy.delete(row.sessionId);
       void guard(tracker.taskChanged(row.id, conciergeChat.id));

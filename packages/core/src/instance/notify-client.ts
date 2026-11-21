@@ -41,7 +41,7 @@ export interface NotifyService {
 export type NotifyLevel = "active" | "passive";
 
 /**
- * A push the instance sends on its own, outside the `send_notification`
+ * A push the instance sends on its own, outside the `system:send_notification`
  * action. `level` and `chatId` are routing data for Rome Cloud and the phone:
  * how the push is presented and which chat a tap opens. They are never shown,
  * so `body` stays the only displayed sender content. Main-process only: no
@@ -71,7 +71,7 @@ export interface NotifyClientDeps {
 }
 
 /**
- * Main-process sender for the `send_notification` action and the Concierge's
+ * Main-process sender for the `system:send_notification` action and the Concierge's
  * proactive pushes. Reads the
  * current Rome Cloud bearer and origin **fresh on every call** (never
  * cached, never from `ROME_INSTANCE_TOKEN`) so token rotation/revocation is
