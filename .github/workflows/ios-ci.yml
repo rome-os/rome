@@ -178,8 +178,10 @@ jobs:
             exit 0
           fi
           echo "long=false" >> "$GITHUB_OUTPUT"
-          # The voice control lives in the message field, so the field's files count too.
-          voice='^(ios/Rome/Features/VoiceInput/|ios/Rome(UI)?Tests/VoiceInput|ios/RomeUITests/speech\.wav$|ios/Rome/Features/Chat/(TranscriptViews|ComposerTextView)\.swift$|\.github/workflows/ios-ci\.yml$)'
+          # The voice control lives in the message field, so the field's files count too, as
+          # does Settings' microphone row. The message bubbles sit apart from the field, so a
+          # change to them alone leaves the voice input suite to the nightly run.
+          voice='^(ios/Rome/Features/VoiceInput/|ios/Rome(UI)?Tests/VoiceInput|ios/RomeUITests/speech\.wav$|ios/Rome/Features/Chat/Composer(TextView)?\.swift$|ios/Rome/Features/Settings/MicrophoneRow\.swift$|\.github/workflows/ios-ci\.yml$)'
           if git fetch --quiet --no-tags --depth=1 origin "$BASE" 2>/dev/null &&
              git diff --name-only "$BASE" HEAD | grep -qE "$voice"; then
             echo "voice=true" >> "$GITHUB_OUTPUT"
