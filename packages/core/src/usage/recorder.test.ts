@@ -150,6 +150,55 @@ describe("UsageRecorder", () => {
     ]);
   });
 
+  it("queues one event per Rome Cloud speech session, keyed by its session id", async () => {
+    const { recorder, queued } = setup();
+    await recorder.recordSpeech({
+      sessionId: "speech-1",
+      provider: "soniox",
+      model: "tts-rt-v2",
+      characters: 412,
+      seconds: 61.5,
+    });
+    expect(queued).toEqual([
+      {
+        type: "speech",
+        eventId: "speech-1",
+        kind: "voice_mode",
+        sessionId: "speech-1",
+        provider: "soniox",
+        model: "tts-rt-v2",
+        characters: 412,
+        seconds: 61.5,
+        occurredAt: expect.any(String),
+      },
+    ]);
+  });
+
+  it("tells the speech caller whether its event was queued", async () => {
+    const speech = {
+      sessionId: "speech-1",
+      provider: "soniox",
+      model: "tts-rt-v2",
+      characters: 1,
+      seconds: 1,
+    };
+    const failing = new UsageRecorder({
+      outbox: {
+        enqueue: async () => {
+          throw new Error("disk full");
+        },
+      },
+      attribution: { forTurn: async () => ({ kind: "chat", appId: null, trigger: "user" }) },
+      credential: () => "cred-a",
+    });
+    await expect(failing.recordSpeech(speech)).rejects.toThrow("disk full");
+    await failing.flush();
+
+    const signedOut = setup(null);
+    await signedOut.recorder.recordSpeech(speech);
+    expect(signedOut.queued).toEqual([]);
+  });
+
   it("queues one login event per sign-in, carrying the method as its kind", async () => {
     const { recorder, queued, credentials } = setup();
     recorder.recordLogin("rome_cloud");
