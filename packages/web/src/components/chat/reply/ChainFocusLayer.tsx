@@ -157,7 +157,7 @@ export function ChainFocusLayer({
         >
           <div
             role="status"
-            className="flex items-center gap-2 rounded-md bg-chat-canvas px-3 py-1 text-aux text-muted-foreground"
+            className="flex items-center gap-2 rounded-8 bg-chat-canvas px-3 py-1 text-aux text-muted-foreground"
           >
             {focus.initial === "loading" ? (
               <Spinner size="sm" label={t("reply.loadingChain")} />
