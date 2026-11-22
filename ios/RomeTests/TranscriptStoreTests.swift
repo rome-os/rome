@@ -328,7 +328,35 @@ final class FakeBackend: RomeBackend {
         resolved.append(id)
     }
     func toolCalls(traceMessageId: String) async throws -> [ToolCall] { [] }
-    func aiTools() async throws -> AIToolsStatus { throw APIError.network }
+    /// What the AI status reads answer; nil fails them.
+    var aiStatus: AIToolsStatus?
+    var aiReads = 0
+    var deviceCode = DeviceLoginCode(userCode: "ABCD-1234", verificationUrl: "https://auth.example/device")
+    var deviceLoginCancels = 0
+    var answeredCards: [(sessionId: String, toolUseId: String, output: JSONValue)] = []
+    func aiTools() async throws -> AIToolsStatus {
+        aiReads += 1
+        guard let aiStatus else { throw APIError.network }
+        return aiStatus
+    }
+    func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus { try await aiTools() }
+    func startChatGPTDeviceLogin() async throws -> DeviceLoginCode { deviceCode }
+    func cancelChatGPTDeviceLogin() async { deviceLoginCancels += 1 }
+    func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws {
+        answeredCards.append((sessionId, toolUseId, output))
+    }
+    /// The provider failure buttons sent, as (message id, switch body or nil for continue).
+    var failureCalls: [(messageId: String, change: JSONValue?)] = []
+    /// Set, a failure card's button fails with it.
+    var failureError: APIError?
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws {
+        if let failureError { throw failureError }
+        failureCalls.append((messageId, change))
+    }
+    func continueProviderFailure(messageId: String) async throws {
+        if let failureError { throw failureError }
+        failureCalls.append((messageId, nil))
+    }
     func setConciergeEnabled(_ enabled: Bool) async throws {}
     func search(_ query: String) async throws -> [SearchHit] { [] }
     var identity: Result<AccountIdentity?, Error> = .success(nil)

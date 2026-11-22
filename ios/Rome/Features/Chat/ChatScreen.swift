@@ -48,6 +48,7 @@ struct ChatScreen: View {
         .pageBackground()
         // The task links in its messages draw the task chats' live status.
         .environment(\.taskLinks, workspace.taskLinks(forChat: store.sessionId))
+        .providerFailurePrompts(store, workspace: workspace)
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
         .background { ChatLeaveWatch(store: store) }
@@ -362,8 +363,10 @@ struct ConciergeRow: View, Equatable {
             }
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
-        case .approval, .question, .webOnly, .routineDraft, .tools, .connect, .widgetUI:
+        case .approval, .question, .webOnly, .aiTools, .providerFailure, .routineDraft, .tools, .connect, .widgetUI:
             InteractionRow(row: row, store: store)
+        case .providerOutage(_, let part):
+            ProviderOutageNotice(part: part)
         case .error(_, let error):
             ErrorLine(error: error)
         case .notice(_, let text):

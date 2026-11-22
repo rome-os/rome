@@ -2,6 +2,62 @@
 import Foundation
 import UIKit
 
+/// The demo's Claude login socket: `auth_url` after a beat, then
+/// `auth_error` for the code "wrong" and a login for any other.
+@MainActor
+final class DemoLoginSocket: LoginSocket {
+    private var frames: [String] = []
+    private var waiting: CheckedContinuation<String?, Never>?
+    private var closed = false
+    private let loggedIn: () -> Void
+    /// How long a code takes to check; tests pass zero.
+    private let check: Duration
+
+    /// `beat`: how long the sign-in page takes to come.
+    init(beat: Duration = .seconds(1.2), check: Duration = .seconds(0.8), loggedIn: @escaping () -> Void) {
+        self.loggedIn = loggedIn
+        self.check = check
+        Task { [weak self] in
+            if beat > .zero { try? await Task.sleep(for: beat) }
+            self?.push(#"{"type":"auth_url","url":"https://claude.ai/oauth/authorize?code=true&client_id=demo"}"#)
+        }
+    }
+
+    private func push(_ frame: String) {
+        if let waiting {
+            self.waiting = nil
+            waiting.resume(returning: frame)
+        } else {
+            frames.append(frame)
+        }
+    }
+
+    func receive() async throws -> String {
+        if !frames.isEmpty { return frames.removeFirst() }
+        if closed { throw URLError(.networkConnectionLost) }
+        guard let frame = await withCheckedContinuation({ waiting = $0 }) else { throw URLError(.networkConnectionLost) }
+        return frame
+    }
+
+    func send(_ text: String) async throws {
+        guard let frame = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)), frame["type"]?.string == "submit_code" else { return }
+        if check > .zero { try? await Task.sleep(for: check) }
+        if frame["code"]?.string?.lowercased() == "wrong" {
+            push(#"{"type":"auth_error","message":"Invalid code"}"#)
+        } else {
+            loggedIn()
+        }
+    }
+
+    func close() {
+        closed = true
+        if let waiting {
+            self.waiting = nil
+            waiting.resume(returning: nil)
+        }
+    }
+}
+
 /// Delivers events inside the app, for the demo backend.
 @MainActor
 final class LocalEventBus: LiveEventSource {
@@ -648,12 +704,119 @@ final class DemoBackend: RomeBackend {
         ]
     }
 
+    /// The state the demo's AI model shows, for Settings in each state.
+    enum AIModelPreview { case ready, paused, needsLogin, notSetUp, credits }
+    static var aiModelPreview: AIModelPreview = .ready
+    /// Accounts the demo logged out of, and when a device login started.
+    private var loggedOut: Set<AIAccount> = []
+    /// Accounts the demo logged in to, whatever the preview says.
+    private var loggedIn: Set<AIAccount> = []
+    private var deviceLoginStarted: Date?
+
     func aiTools() async throws -> AIToolsStatus {
         let now = Date.now
+        var claude = AIToolsStatus.Provider(loggedIn: true, usage: .init(fiveHour: .init(usedPercent: 62, resetsAt: RomeDate.string(now.addingTimeInterval(3 * 3600))), sevenDay: nil), quotaExhausted: false)
+        var codex = AIToolsStatus.Provider(loggedIn: true, usage: .init(fiveHour: .init(usedPercent: 12, resetsAt: nil), sevenDay: .init(usedPercent: 8, resetsAt: RomeDate.string(now.addingTimeInterval(5 * 86_400)))), quotaExhausted: false)
+        var provider: DefaultModelProvider? = .openai
+        switch Self.aiModelPreview {
+        case .ready: break
+        case .paused:
+            codex.quotaExhausted = true
+            // 14:20 today, or tomorrow once that has passed.
+            var until = Calendar.current.date(bySettingHour: 14, minute: 20, second: 0, of: now) ?? now
+            if until <= now { until = until.addingTimeInterval(86_400) }
+            codex.quotaExhaustedUntil = RomeDate.string(until)
+        case .needsLogin:
+            codex.loggedIn = false
+            codex.needsReauth = true
+            codex.usage = nil
+        case .notSetUp, .credits:
+            claude = .init(loggedIn: false, quotaExhausted: false)
+            codex = .init(loggedIn: false, quotaExhausted: false)
+            provider = Self.aiModelPreview == .credits ? .romeCredits : nil
+        }
+        // A device login started here comes in after a few seconds.
+        if let started = deviceLoginStarted, now.timeIntervalSince(started) > 5 {
+            loggedOut.remove(.chatgpt)
+            loggedIn.insert(.chatgpt)
+            deviceLoginStarted = nil
+        }
+        if loggedOut.contains(.claude) { claude = .init(loggedIn: false, quotaExhausted: false) }
+        if loggedOut.contains(.chatgpt) { codex = .init(loggedIn: false, quotaExhausted: false) }
+        if loggedIn.contains(.claude) { claude = .init(loggedIn: true, usage: .init(fiveHour: .init(usedPercent: 4)), quotaExhausted: false) }
+        if loggedIn.contains(.chatgpt) { codex = .init(loggedIn: true, usage: .init(fiveHour: .init(usedPercent: 3)), quotaExhausted: false) }
+        // The first login replaces no default.
+        if provider == nil || provider == .romeCredits {
+            if codex.loggedIn == true { provider = .openai } else if claude.loggedIn == true { provider = .anthropic }
+        }
+        if provider == .openai, codex.loggedIn == false, claude.loggedIn == true, Self.aiModelPreview == .ready { provider = .anthropic }
+        let code = deviceLoginStarted.map { _ in AIToolsStatus.DeviceLogin(running: true, userCode: "K7QF-2M9D", verificationUrl: "https://auth.openai.com/codex/device") }
         return AIToolsStatus(
-            claude: .init(loggedIn: true, usage: .init(fiveHour: .init(usedPercent: 62, resetsAt: RomeDate.string(now.addingTimeInterval(3 * 3600))), sevenDay: nil)),
-            codex: .init(loggedIn: true, usage: .init(fiveHour: .init(usedPercent: 12, resetsAt: nil), sevenDay: .init(usedPercent: 30, resetsAt: RomeDate.string(now.addingTimeInterval(5 * 86_400)))))
+            claude: claude,
+            codex: codex,
+            codexDeviceLogin: code,
+            defaultProvider: .init(provider: provider, signedIn: .init(anthropic: claude.loggedIn, openai: codex.loggedIn), romeCreditsUsable: Self.aiModelPreview == .credits)
         )
+    }
+
+    func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus { try await aiTools() }
+
+    func startChatGPTDeviceLogin() async throws -> DeviceLoginCode {
+        try await pause(0.6)
+        deviceLoginStarted = .now
+        return DeviceLoginCode(userCode: "K7QF-2M9D", verificationUrl: "https://auth.openai.com/codex/device")
+    }
+
+    func cancelChatGPTDeviceLogin() async { deviceLoginStarted = nil }
+
+    func logOut(_ account: AIAccount) async throws {
+        try await pause(0.5)
+        loggedIn.remove(account)
+        loggedOut.insert(account)
+    }
+
+    /// Claude's login without a terminal: the sign-in page comes after a
+    /// beat, and any code logs in but "wrong", which the login refuses.
+    func claudeLoginSocket() -> LoginSocket? {
+        DemoLoginSocket { [weak self] in
+            self?.loggedOut.remove(.claude)
+            self?.loggedIn.insert(.claude)
+        }
+    }
+
+    func romeCredits() async throws -> RomeCreditsResponse.Credits? {
+        .init(availableMicros: "2000000", balanceMicros: "2000000", grantedMicros: "5000000", enabled: true)
+    }
+
+    func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws {}
+
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws {
+        let to = change["provider"]?.string.map(DefaultModelProvider.init(wire:))
+        settleFailure(messageId, resolved: .object(["at": .string(RomeDate.string(.now)), "by": .string("switched"), "provider": to.map { .string($0.wire) } ?? .null, "model": change["selection"] ?? .null, "continued": .bool(true)]))
+    }
+
+    func continueProviderFailure(messageId: String) async throws {
+        settleFailure(messageId, resolved: .object(["at": .string(RomeDate.string(.now)), "by": .string("recovered"), "continued": .bool(true)]))
+    }
+
+    /// As the server does once the stopped turn runs again: the card's message
+    /// is rewritten settled, a moment later, and handed out again.
+    private func settleFailure(_ messageId: String, resolved: JSONValue) {
+        Task {
+            try? await pause(1.5)
+            for (sessionId, list) in messages {
+                guard let index = list.firstIndex(where: { $0.id == messageId }),
+                      let data = list[index].content.data(using: .utf8),
+                      case .array(let items)? = try? JSONDecoder().decode(JSONValue.self, from: data) else { continue }
+                let settled: [JSONValue] = items.map { item in
+                    guard item["type"]?.string == "provider_failure", case .object(var fields) = item else { return item }
+                    fields["resolved"] = resolved
+                    return .object(fields)
+                }
+                messages[sessionId]?[index].content = json(settled)
+                if let message = messages[sessionId]?[index] { bus.emit(LiveTopic.chat(sessionId), .messageInsert(message)) }
+            }
+        }
     }
 
     func setConciergeEnabled(_ enabled: Bool) async throws {}
@@ -1117,10 +1280,12 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-cards", name: "周末安排", main: false, unread: 0),
             ConciergeChat(id: "topic-itinerary", name: "东京一日", main: false, unread: 0),
             ConciergeChat(id: "topic-task-links", name: "任务进度", main: false, unread: 0),
+            ConciergeChat(id: "topic-ai", name: "连接 AI", main: false, unread: 0),
+            ConciergeChat(id: "topic-provider", name: "模型出问题", main: false, unread: 0),
         ]
         // Latest first in the drawer: the trip, then the errors, and so on.
         // The cafés come eighth, past the first five, for the drawer over it.
-        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900]
+        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900, "topic-ai": 1000, "topic-provider": 1100]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
         // Archived topic chats, out of the drawer's list: the Archived row's
@@ -1428,6 +1593,33 @@ final class DemoBackend: RomeBackend {
             TaskLinkInfo(id: "chat-blur", name: "iOS 退出 task chat 后头部模糊变实心", status: "active"),
             TaskLinkInfo(id: "chat-reload", name: "iOS 长气泡展开和折叠时图片重新加载，先在 Mac mini 上复现", status: "needs_you"),
         ].map { ($0.id, $0) })
+        // Chat asks to connect an AI account; the card waits on it.
+        messages["topic-ai"] = [
+            user("ai1", "帮我整理一下这周的日程。", at: at(9, 40), session: "topic-ai"),
+            agent("先连接一个 AI 账号，我就能开始。", at: at(9, 41), session: "topic-ai"),
+            parts([.object(["type": .string("pending_interaction"), "toolUseId": .string("ai-connect"), "appId": .string("rome"), "render": .object(["componentId": .string("ai-tools-card"), "builtin": .bool(true)])])], at: at(9, 41), session: "topic-ai"),
+        ]
+        // Provider failure cards of each kind, a settled one, and the outage notice.
+        let provider = "topic-provider"
+        var pauseEnd = Calendar.current.date(bySettingHour: 14, minute: 20, second: 0, of: .now) ?? .now
+        if pauseEnd <= .now { pauseEnd = pauseEnd.addingTimeInterval(86_400) }
+        func failure(_ fields: [String: JSONValue]) -> JSONValue {
+            var part: [String: JSONValue] = ["type": .string("provider_failure"), "chatId": .string(provider), "followsDefault": .bool(true), "alternatives": .array([])]
+            part.merge(fields) { _, new in new }
+            return .object(part)
+        }
+        messages[provider] = [
+            user("pf1", "把这周的会议纪要整理成一页。", at: at(10, 0), session: provider),
+            parts([failure(["provider": .string("anthropic"), "reason": .string("temporary"), "card": .string("wait")])], at: at(10, 1), session: provider),
+            user("pf2", "再试一次。", at: at(10, 5), session: provider),
+            parts([failure(["provider": .string("openai"), "reason": .string("login"), "card": .string("account"), "alternatives": .array([.string("anthropic")]), "detail": .string("401 Unauthorized: token expired")])], at: at(10, 6), session: provider),
+            user("pf3", "用 Sol 写。", at: at(10, 10), session: provider),
+            parts([failure(["provider": .string("openai"), "reason": .string("model_unavailable"), "card": .string("model"), "model": .string("gpt-6-sol"), "replacement": .object(["selection": .string("gpt-6-luna"), "model": .string("gpt-6-luna")])])], at: at(10, 11), session: provider),
+            user("pf4", "那换一个问题：明天几点开会？", at: at(10, 15), session: provider),
+            parts([failure(["provider": .string("openai"), "reason": .string("quota"), "card": .string("wait"), "until": .string(RomeDate.string(pauseEnd)), "alternatives": .array([.string("anthropic")])])], at: at(10, 16), session: provider),
+            parts([failure(["provider": .string("openai"), "reason": .string("quota"), "card": .string("wait"), "resolved": .object(["at": .string(RomeDate.string(.now)), "by": .string("switched"), "provider": .string("anthropic"), "continued": .bool(true)])])], at: at(10, 17), session: provider),
+            parts([.object(["type": .string("provider_outage"), "outageId": .string("out-1"), "provider": .string("openai"), "reason": .string("quota"), "until": .string(RomeDate.string(pauseEnd)), "chatIds": .array([.string("chat-site"), .string("chat-price")])])], at: at(10, 18), session: provider),
+        ]
         messages["topic-task-links"] = [
             user("tl1", "我的任务都怎么样了？", at: at(9, 30), session: "topic-task-links"),
             agent("[官网首页双语文案](#rome-task=chat-site) 还在逐段翻译，好了告诉你。其余的：\n\n- [价格追踪：发提醒邮件](#rome-task=chat-price) 等你批准\n- [修复登录页样式](#rome-task=chat-login) 改好了\n- [导出季度报表](#rome-task=chat-export) 没导出来，表格权限不够\n- [抓取供应商报价](#rome-task=chat-quotes) 你停掉了\n- [竞品定价调研](#rome-task=chat-research) 没等到你的回答\n- [每周一整理周报](#rome-task=chat-weekly) 下周一开始", at: at(9, 31), session: "topic-task-links"),

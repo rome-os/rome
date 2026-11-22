@@ -1,3 +1,16 @@
 {
-  "entries": []
+  "entries": [
+    {
+      "tier": "background",
+      "reason": "AI model in Settings: the row and the AI model page read defaultProvider from GET /ai-tools/status (the default model and which accounts count as logged in); an older server sends none, so the row cannot say which provider chats run on.",
+      "pr": 2560,
+      "server": "#2303"
+    },
+    {
+      "tier": "background",
+      "reason": "provider failure cards in chats: their Switch, Continue and Retry buttons call POST /ai-tools/provider-failures/:messageId/switch and /continue; an older server has no such routes and writes no provider_failure or provider_outage parts.",
+      "pr": 2560,
+      "server": "#2303"
+    }
+  ]
 }

@@ -97,6 +97,7 @@ struct TopicChatScreen: View {
         .topicRestore($restoring, workspace: workspace)
         .pageBackground()
         .environment(\.taskLinks, chatId.flatMap { workspace.taskLinks(forChat: $0) })
+        .providerFailurePrompts(store, workspace: workspace)
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onReply: { store?.restoreReply($0) }, prefill: Binding(
             get: { workspace.composerPrefills[chatId ?? draftKey] },
             set: { workspace.composerPrefills[chatId ?? draftKey] = $0 }

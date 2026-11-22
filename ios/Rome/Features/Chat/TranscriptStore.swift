@@ -1248,6 +1248,86 @@ final class TranscriptStore {
         return try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
     }
 
+    /// What a provider failure card asks the chat's screen to show.
+    enum FailurePrompt: Identifiable, Equatable {
+        /// A move to another provider, asked first.
+        case confirm(messageId: String, action: ProviderFailureAction)
+        /// The login of the card's account.
+        case logIn(AIAccount)
+
+        var id: String {
+            switch self {
+            case .confirm(let messageId, _): return "confirm-\(messageId)"
+            case .logIn(let account): return "login-\(account.rawValue)"
+            }
+        }
+    }
+
+    var failurePrompt: FailurePrompt?
+    /// Failure cards whose button the server is acting on, by message id. The
+    /// card waits for the server's settled part; nothing settles it here.
+    private(set) var failurePending: Set<String> = []
+    /// The button that failed on each card, until the next press.
+    private(set) var failureErrors: [String: ProviderFailureAction] = [:]
+    /// How long a pressed card waits for the server to settle it before its
+    /// buttons come back.
+    static var failurePendingLimit: Duration = .seconds(60)
+
+    /// A failure card's button: asks first where the web asks, opens the
+    /// login, or sends it.
+    func press(_ action: ProviderFailureAction, part: ProviderFailurePart, messageId: String) {
+        switch action {
+        case .logIn:
+            if let account = part.provider.account { failurePrompt = .logIn(account) }
+        case _ where action.confirms:
+            failurePrompt = .confirm(messageId: messageId, action: action)
+        default:
+            Task { await send(action, messageId: messageId) }
+        }
+    }
+
+    /// Runs a failure card's button on the server, then reads the chat: the
+    /// card settles once its turn runs again.
+    func send(_ action: ProviderFailureAction, messageId: String) async {
+        guard !failurePending.contains(messageId) else { return }
+        failurePending.insert(messageId)
+        failureErrors[messageId] = nil
+        do {
+            if let change = action.switchBody {
+                try await backend.switchProviderFailure(messageId: messageId, change: change)
+            } else {
+                try await backend.continueProviderFailure(messageId: messageId)
+            }
+        } catch {
+            failurePending.remove(messageId)
+            failureErrors[messageId] = action
+            return
+        }
+        resync()
+        let limit = Self.failurePendingLimit
+        Task { [weak self] in
+            try? await Task.sleep(for: limit)
+            self?.failurePending.remove(messageId)
+        }
+    }
+
+    /// Cards whose answer is on its way, by tool-use id: each is sent once.
+    private(set) var answeringCards: Set<String> = []
+
+    /// Answers a card the turn waits on, such as Chat's connect-AI card once
+    /// an account is logged in; the chat is read again so the answer shows.
+    func answerCard(toolUseId: String, sessionId: String, output: JSONValue) async {
+        guard !answeringCards.contains(toolUseId) else { return }
+        answeringCards.insert(toolUseId)
+        defer { resync() }
+        do {
+            try await backend.answerInteraction(sessionId: sessionId, toolUseId: toolUseId, output: output)
+        } catch {
+            // Sent again the next time the card shows.
+            answeringCards.remove(toolUseId)
+        }
+    }
+
     /// A widget's read of its own app, with this chat's backend.
     func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply {
         try await backend.appCall(appId: appId, method: method, path: path, body: body)

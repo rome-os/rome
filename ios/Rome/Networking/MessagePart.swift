@@ -35,6 +35,10 @@ enum MessagePart: Hashable, Sendable {
     case error(TurnError)
     /// A quiet line, such as the chat moving to another model (`quota_switch`).
     case notice(String)
+    /// The provider a turn needed could not run (`provider_failure`).
+    case providerFailure(ProviderFailurePart)
+    /// Unattended chats one provider failure stopped (`provider_outage`).
+    case providerOutage(ProviderOutagePart)
     /// The message a reply quotes (`reply_to`), drawn inside the reply's bubble.
     case replyTo(ReplyQuote)
     /// Parts the web dashboard does not show in a transcript either (tool
@@ -296,6 +300,10 @@ enum MessagePart: Hashable, Sendable {
                 provider: value["provider"]?.string,
                 reason: value["reason"]?.string
             ))
+        case "provider_failure":
+            return ProviderFailurePart(value).map(MessagePart.providerFailure) ?? .webOnly(.unknown)
+        case "provider_outage":
+            return ProviderOutagePart(value).map(MessagePart.providerOutage) ?? .webOnly(.unknown)
         case "reply_to":
             guard let messageId = value["messageId"]?.string else { return .other(type: type) }
             return .replyTo(ReplyQuote(messageId: messageId, author: value["author"]?.string, name: value["name"]?.string, text: value["text"]?.string ?? ""))
@@ -424,6 +432,7 @@ extension MessagePart {
         switch self {
         case .text(let text, _, _): return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .other, .interactionResult, .replyTo: return false
+        case .providerFailure(let failure): return !failure.drawsNothing
         default: return true
         }
     }

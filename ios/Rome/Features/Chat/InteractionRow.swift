@@ -9,6 +9,10 @@ enum InteractionCard: Equatable {
     case tools
     /// Drawn only on the web dashboard; "Open" goes to this chat there.
     case webOnly
+    /// Chat's card to connect Claude or ChatGPT.
+    case aiTools
+    /// A provider failure card.
+    case providerFailure
     case routineDraft
     case widget
 
@@ -19,6 +23,8 @@ enum InteractionCard: Equatable {
         case .connect: self = .connect
         case .tools: self = .tools
         case .webOnly: self = .webOnly
+        case .aiTools: self = .aiTools
+        case .providerFailure: self = .providerFailure
         case .routineDraft: self = .routineDraft
         case .widgetUI: self = .widget
         default: return nil
@@ -87,6 +93,16 @@ struct InteractionRow: View {
         case .webOnly(_, let kind, let done):
             WebOnlyCard(kind: kind, done: done, sessionId: store.sessionId)
                 .bubbleWidth()
+        case .aiTools(_, let toolUseId, let sessionId, let done) where !isVisitor:
+            AIToolsCard(toolUseId: toolUseId, sessionId: sessionId, done: done, store: store)
+                .bubbleWidth()
+        case .aiTools(_, _, _, let done):
+            // The guardian's accounts: a visitor's chat only points at the web.
+            WebOnlyCard(kind: .aiTools, done: done, sessionId: store.sessionId)
+                .bubbleWidth()
+        case .providerFailure(_, let part, let messageId):
+            ProviderFailureCardView(part: part, messageId: messageId, store: store)
+                .bubbleWidth()
         case .routineDraft(_, let part):
             RoutineDraftCardView(part: part, status: store.routineStatus(part), canTurnOn: !isVisitor, sessionId: store.sessionId)
                 .task { if !isVisitor { await store.loadRoutines() } }
@@ -94,5 +110,63 @@ struct InteractionRow: View {
         default:
             EmptyView()
         }
+    }
+}
+
+/// Chat's card to connect Claude or ChatGPT (`ai-tools-card`): Connect opens
+/// Settings at the AI Tools page. As on the web, the card answers itself
+/// with `connected` once an account is logged in, and the turn goes on.
+struct AIToolsCard: View {
+    let toolUseId: String
+    let sessionId: String
+    let done: Bool
+    let store: TranscriptStore
+    @Environment(AppModel.self) private var model
+
+    private var connected: Bool { model.workspace?.aiModel.hasLoggedInAccount == true }
+    private var answering: Bool { store.answeringCards.contains(toolUseId) }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "sparkles")
+                .romeFont(CardScale.iconGlyph)
+                .foregroundStyle(Palette.fg)
+                .frame(width: CardScale.iconBox, height: CardScale.iconBox)
+                .background(Palette.fill, in: RoundedRectangle(cornerRadius: CardScale.iconCorner, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Connect Claude or ChatGPT")
+                    .romeFont(CardScale.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                if done || answering || connected {
+                    Text(done ? "Done" : "Connected")
+                        .romeFont(CardScale.caption)
+                        .foregroundStyle(Palette.sub)
+                }
+            }
+            Spacer(minLength: 0)
+            if !done, !answering, !connected {
+                Button("Connect") { model.openAIModel() }
+                    .romeFont(CardScale.actionFont, .semibold)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .frame(height: CardScale.actionHeight)
+                    .background(Palette.primary, in: Capsule())
+                    .buttonStyle(PressScaleStyle())
+            }
+        }
+        .cardPadding()
+        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+        .hairline(radius: Metrics.groupRadius)
+        .task(id: done) {
+            guard !done else { return }
+            await model.workspace?.aiModel.refresh()
+            answerIfConnected()
+        }
+        .onChange(of: connected) { answerIfConnected() }
+    }
+
+    private func answerIfConnected() {
+        guard !done, connected else { return }
+        Task { await store.answerCard(toolUseId: toolUseId, sessionId: sessionId, output: .object(["connected": .bool(true)])) }
     }
 }

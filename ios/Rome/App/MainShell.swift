@@ -29,6 +29,9 @@ enum SettingsRoute: Hashable {
     case liveReads(String)
     /// A synced connection's Sync history, by its personal-data source.
     case syncHistory(String)
+    /// The default model and the AI accounts; `login` opens that account's
+    /// login sheet over it.
+    case aiModel(login: AIAccount?)
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
@@ -92,6 +95,7 @@ struct MainShell: View {
     @State private var appPreview: InstalledApp?
     @State private var connectPreview: String?
     @State private var archivedPreview = false
+    @State private var loginPreview: AIAccount?
     #endif
 
     /// The drawer pinned beside the page rather than pushed aside.
@@ -189,6 +193,8 @@ struct MainShell: View {
                 connectPreview = id
             case .archivedSheet(let open):
                 archivedPreview = open
+            case .aiLoginSheet(let account):
+                loginPreview = account
             case .composerPhotos, .appIdeas, nil: break
             }
         }
@@ -342,6 +348,23 @@ struct MainShell: View {
                     archivedSheet
                         .frame(height: 420)
                         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
+                }
+                .ignoresSafeArea(edges: .bottom)
+            }
+            if let loginPreview {
+                ZStack(alignment: .bottom) {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    Group {
+                        switch loginPreview {
+                        case .chatgpt:
+                            ChatGPTLoginSheet(backend: workspace.backend, preview: .code("K7QF-2M9D", URL(string: "https://auth.openai.com/codex/device")))
+                        case .claude:
+                            ClaudeLoginSheet(backend: workspace.backend, preview: .ready(URL(string: "https://claude.ai/oauth/authorize")!), previewRejected: true)
+                        }
+                    }
+                    .frame(height: 560)
+                    .background(Palette.sheet)
+                    .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
                 }
                 .ignoresSafeArea(edges: .bottom)
             }
@@ -654,6 +677,7 @@ struct MainShell: View {
                 workspace: workspace,
                 onInstances: { settingsPath.append(.instances) },
                 onConnections: { settingsPath.append(.connections) },
+                onAIModel: { settingsPath.append(.aiModel(login: nil)) },
                 onClose: { showSettings = false }
             )
             .navigationDestination(for: SettingsRoute.self) { route in
@@ -679,6 +703,8 @@ struct MainShell: View {
                     NodeRequestsScreen(capability: id)
                 case .syncHistory(let source):
                     SyncHistoryScreen(source: source)
+                case .aiModel(let login):
+                    AIModelScreen(store: workspace.aiModel, backend: workspace.backend, opening: login)
                 }
             }
         }

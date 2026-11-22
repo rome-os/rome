@@ -153,6 +153,11 @@ final class APIClient: Sendable {
         return try await send(request)
     }
 
+    /// A POST with a query, as `/ai-tools/refresh?provider=` takes one.
+    func post<T: Decodable>(_ path: String, query: [URLQueryItem], as type: T.Type) async throws -> T {
+        try decode(try await send(request(path, query: query, method: "POST")))
+    }
+
     func post<T: Decodable>(_ path: String, json: JSONValue? = nil, as type: T.Type) async throws -> T {
         try decode(try await post(path, json: json))
     }

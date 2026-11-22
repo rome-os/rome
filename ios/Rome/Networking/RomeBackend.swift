@@ -110,6 +110,30 @@ protocol RomeBackend: AnyObject, Sendable {
     func resolveApproval(id: String, approve: Bool) async throws
     func toolCalls(traceMessageId: String) async throws -> [ToolCall]
     func aiTools() async throws -> AIToolsStatus
+    /// `POST /ai-tools/refresh?provider=`: one account read again now, not
+    /// the remembered report. A login watches it to see the account arrive.
+    func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus
+    /// Starts a ChatGPT device-code login: the code and the page to enter it on.
+    func startChatGPTDeviceLogin() async throws -> DeviceLoginCode
+    /// Cancels a ChatGPT login still in progress.
+    func cancelChatGPTDeviceLogin() async
+    /// Logs Rome out of the account, on this instance only.
+    func logOut(_ account: AIAccount) async throws
+    /// The account's Rome credits; nil when the instance has none.
+    func romeCredits() async throws -> RomeCreditsResponse.Credits?
+    /// `showAiToolUsage` in `GET /settings`: on unless the guardian turned it off.
+    func showsAIToolUsage() async -> Bool
+    /// The terminal socket that runs Claude's login (`claude-login`), opened;
+    /// nil without one.
+    func claudeLoginSocket() -> LoginSocket?
+    /// Answers a card the agent waits on, as an `interaction_result` part:
+    /// the turn goes on from `output`.
+    func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws
+    /// A provider failure card's switch (`change` as the web sends it): the
+    /// chat moves and the stopped turn runs again.
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws
+    /// A provider failure card's Retry or Continue: the stopped turn runs again where it ran.
+    func continueProviderFailure(messageId: String) async throws
     func setConciergeEnabled(_ enabled: Bool) async throws
     func search(_ query: String) async throws -> [SearchHit]
     /// The guardian's display name on this instance.
@@ -376,6 +400,54 @@ final class LiveBackend: RomeBackend {
         try await client.get("/ai-tools/status")
     }
 
+    func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus {
+        try await client.post("/ai-tools/refresh", query: [URLQueryItem(name: "provider", value: provider.wire)], as: AIToolsStatus.self)
+    }
+
+    func startChatGPTDeviceLogin() async throws -> DeviceLoginCode {
+        try await client.post("/ai-tools/codex/device-login/start", as: DeviceLoginCode.self)
+    }
+
+    func cancelChatGPTDeviceLogin() async {
+        _ = try? await client.post("/ai-tools/codex/device-login/cancel")
+    }
+
+    func logOut(_ account: AIAccount) async throws {
+        _ = try await client.post("/ai-tools/\(account.routeSegment)/logout")
+    }
+
+    func romeCredits() async throws -> RomeCreditsResponse.Credits? {
+        let response: RomeCreditsResponse = try await client.get("/ai-tools/rome-credits", reportsUnauthorized: false)
+        return response.credits
+    }
+
+    func showsAIToolUsage() async -> Bool {
+        guard let settings: JSONValue = try? await client.get("/settings", reportsUnauthorized: false) else { return true }
+        return settings["showAiToolUsage"]?.bool ?? true
+    }
+
+    func claudeLoginSocket() -> LoginSocket? {
+        var request = client.socketRequest("/ws/terminal")
+        guard let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.queryItems = [URLQueryItem(name: "preset", value: "claude-login")]
+        request.url = components.url
+        return WebLoginSocket(request: request)
+    }
+
+    func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws {
+        let part: JSONValue = .object(["type": .string("interaction_result"), "toolUseId": .string(toolUseId), "output": output])
+        let body: JSONValue = .object(["inputId": .string(UUID().uuidString.lowercased()), "parts": .array([part])])
+        _ = try await client.post("/chat/sessions/\(escape(sessionId))/turns", json: body)
+    }
+
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws {
+        _ = try await client.post("/ai-tools/provider-failures/\(escape(messageId))/switch", json: change)
+    }
+
+    func continueProviderFailure(messageId: String) async throws {
+        _ = try await client.post("/ai-tools/provider-failures/\(escape(messageId))/continue")
+    }
+
     func setConciergeEnabled(_ enabled: Bool) async throws {
         try await client.put("/settings", json: .object(["experimentalConcierge": .bool(enabled)]))
     }
@@ -589,6 +661,16 @@ extension RomeBackend {
     func voiceInputSocket() -> URLRequest? { nil }
     func apps() async throws -> [InstalledApp] { [] }
     func webSessionCookie() -> HTTPCookie? { nil }
+    func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus { try await aiTools() }
+    func startChatGPTDeviceLogin() async throws -> DeviceLoginCode { throw APIError.notFound }
+    func cancelChatGPTDeviceLogin() async {}
+    func logOut(_ account: AIAccount) async throws { throw APIError.notFound }
+    func romeCredits() async throws -> RomeCreditsResponse.Credits? { nil }
+    func showsAIToolUsage() async -> Bool { true }
+    func claudeLoginSocket() -> LoginSocket? { nil }
+    func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws { throw APIError.notFound }
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws { throw APIError.notFound }
+    func continueProviderFailure(messageId: String) async throws { throw APIError.notFound }
     func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink { throw APIError.notFound }
     func chatShares(sessionId: String) async throws -> [ChatShareLink] { [] }
     func revokeShare(id: String) async throws {}

@@ -34,6 +34,7 @@ struct TaskChatScreen: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .providerFailurePrompts(store, workspace: workspace)
         .floatingTopBar { header }
         .overlay(alignment: .top) {
             TranscriptBanners(store: store)
@@ -203,7 +204,7 @@ private struct TaskChatRow: View, Equatable {
     static func draws(_ row: TranscriptRow, briefID: String?) -> Bool {
         switch row {
         case .separator(let id, _): briefID.map { id != "sep-\($0)" } ?? true
-        case .taskAsk, .sourceLabel, .sessionRenewal, .unreadDivider: false
+        case .taskAsk, .sourceLabel, .sessionRenewal, .unreadDivider, .providerOutage: false
         default: true
         }
     }
@@ -230,8 +231,11 @@ private struct TaskChatRow: View, Equatable {
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, menu: menu)
-        case .tools, .approval, .question, .webOnly, .routineDraft, .connect, .widgetUI:
+        case .tools, .approval, .question, .webOnly, .aiTools, .providerFailure, .routineDraft, .connect, .widgetUI:
             InteractionRow(row: row, store: store)
+        case .providerOutage:
+            // Only the main Chat gets the notice.
+            EmptyView()
         case .error(_, let error):
             ErrorLine(error: error)
         case .notice(_, let text):
