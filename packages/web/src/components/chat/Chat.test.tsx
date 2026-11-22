@@ -642,6 +642,45 @@ afterEach(() => {
   MockEventSource.instances = [];
 });
 
+describe("the sibling composer floor's wheel path", () => {
+  it("scrolls the list for a wheel over the floor but leaves zoom and horizontal gestures alone", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    const floor = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-chat-floor]");
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    const scroller = document.querySelector<HTMLElement>("[data-chat-scroller]")!;
+    const scrollBy = rs.fn();
+    scroller.scrollBy = scrollBy;
+    expect(fireEvent.wheel(floor, { deltaY: -120, cancelable: true })).toBe(false);
+    expect(scrollBy).toHaveBeenCalledWith({ top: -120 });
+    scrollBy.mockClear();
+    expect(fireEvent.wheel(floor, { deltaY: -120, ctrlKey: true, cancelable: true })).toBe(true);
+    expect(fireEvent.wheel(floor, { deltaY: 1, deltaX: 120, cancelable: true })).toBe(true);
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  it("lets a scrollable input consume its wheel, then scrolls the list at the input's edge", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(document.querySelector("[data-chat-floor]")).not.toBeNull());
+    const floor = document.querySelector<HTMLElement>("[data-chat-floor]")!;
+    const scroller = document.querySelector<HTMLElement>("[data-chat-scroller]")!;
+    const scrollBy = rs.fn();
+    scroller.scrollBy = scrollBy;
+    const input = document.createElement("textarea");
+    input.style.overflowY = "auto";
+    Object.defineProperties(input, { scrollHeight: { value: 200 }, clientHeight: { value: 30 } });
+    floor.append(input);
+    input.scrollTop = 50;
+    expect(fireEvent.wheel(input, { deltaY: 40, cancelable: true })).toBe(true);
+    expect(scrollBy).not.toHaveBeenCalled();
+    input.scrollTop = 170;
+    expect(fireEvent.wheel(input, { deltaY: 40, cancelable: true })).toBe(false);
+    expect(scrollBy).toHaveBeenCalledWith({ top: 40 });
+  });
+});
+
 describe("Chat missing-session detection", () => {
   it("reports a confirmed missing session", async () => {
     rs.mocked(listSessionMessages).mockResolvedValueOnce(null);
@@ -3773,6 +3812,39 @@ describe("Chat Concierge jump to a message", () => {
       const form = rs.mocked(postSessionTurn).mock.calls[0][1] as FormData;
       expect(form.get("replyToMessageId")).toBe("a2");
       expect(form.get("replyQuote")).toBe("Lisbon");
+    });
+
+    it("routes a floor wheel to the focused chain, not the hidden main scroller", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        nextCursor: null,
+      });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      fireEvent.click(await screen.findByTestId("quote-jump"));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+      const main = document.querySelector<HTMLElement>("[data-chat-scroller]")!;
+      const layer = document.querySelector<HTMLElement>("[data-chain-layer] > div")!;
+      const mainScroll = rs.fn(),
+        layerScroll = rs.fn();
+      main.scrollBy = mainScroll;
+      layer.scrollBy = layerScroll;
+      const floor = document.querySelector<HTMLElement>("[data-chat-floor]")!;
+      fireEvent.wheel(floor, { deltaY: -80, cancelable: true });
+      expect(layerScroll).toHaveBeenCalledWith({ top: -80 });
+      expect(mainScroll).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "reply.closeChain" }));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
+      fireEvent.wheel(floor, { deltaY: -80, cancelable: true });
+      expect(mainScroll).toHaveBeenCalledWith({ top: -80 });
     });
 
     it("uses one round back arrow in the header's leading column, keeping the phone outlet registered", async () => {

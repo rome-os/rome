@@ -48,6 +48,7 @@ import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { SlotContent, SlotOutlet } from "@/components/slot";
 import "react-medium-image-zoom/dist/styles.css";
 import { cn } from "@/lib/utils";
+import { allowsVerticalScroll } from "@/lib/scroll-container";
 import { usePresentationMode } from "@/lib/presentation-mode";
 import { extractFilesFromDataTransfer } from "@/lib/clipboard-files";
 import { useFileDropArea } from "@/hooks/use-file-drop-area";
@@ -985,6 +986,46 @@ export function Chat({
     fallback: showQuotedMessage,
   });
   chainFocusedRef.current = chain.focus !== null;
+  // The sibling floor has no native scroll path to the list. Keep wheel
+  // gestures over it scrolling the chat, unless an inner field owns them.
+  useEffect(() => {
+    if (!floorEl || !mainSessionId) return;
+    const wheel = (event: WheelEvent) => {
+      if (event.defaultPrevented || event.ctrlKey || event.shiftKey || !event.deltaY) return;
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      const scroller = chain.layer.current ?? scrollerEl;
+      if (!scroller) return;
+      for (
+        let el = event.target as HTMLElement | null;
+        el && el !== floorEl;
+        el = el.parentElement
+      ) {
+        const style = getComputedStyle(el);
+        if (!allowsVerticalScroll(style.overflowY) || el.scrollHeight <= el.clientHeight) continue;
+        const canScroll =
+          event.deltaY < 0
+            ? el.scrollTop > 0
+            : el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+        if (
+          canScroll ||
+          style.overscrollBehaviorY === "contain" ||
+          style.overscrollBehaviorY === "none"
+        )
+          return;
+      }
+      const unit =
+        event.deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? 16
+          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? scroller.clientHeight
+            : 1;
+      event.preventDefault();
+      scroller.scrollBy({ top: event.deltaY * unit });
+    };
+    floorEl.addEventListener("wheel", wheel, { passive: false });
+    return () => floorEl.removeEventListener("wheel", wheel);
+  }, [floorEl, mainSessionId, scrollerEl, chain.layer]);
+
   const replyDraft = useReplyDraftState({
     chatId: mainSessionId ?? undefined,
     sessionId: mainSessionId ?? null,
@@ -2871,7 +2912,7 @@ export function Chat({
                 ref={chain.scope}
                 data-message-list
                 className={cn(
-                  "relative z-0 flex min-h-0 flex-1 flex-col overflow-hidden",
+                  "relative z-0 flex min-h-0 flex-1 flex-col overflow-clip",
                   !mainSessionId && "hidden",
                 )}
               >
@@ -2883,6 +2924,7 @@ export function Chat({
                 query MUST match ChatTimelineRail's visibility gate. */}
                 <div
                   ref={attachScroller}
+                  data-chat-scroller
                   className={cn(
                     "scrollbar-hover-shown relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
                     // Concierge has no timeline rail, so no lane for it. Its
