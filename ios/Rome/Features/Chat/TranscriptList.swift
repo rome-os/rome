@@ -352,6 +352,10 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
         coordinator.onDividerAbove = onDividerAbove
         coordinator.scroll = scroll
         coordinator.selection = selection
+        coordinator.initialThread = thread
+        coordinator.initialRows = rows
+        view.accessibilityIdentifier = thread == nil ? "transcript" : "reply-chain-transcript"
+        if thread != nil && !coordinator.positionedThread { view.alpha = 0 }
         coordinator.suspended = suspended
         view.accessibilityElementsHidden = suspended
         view.isUserInteractionEnabled = !suspended
@@ -381,8 +385,11 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     var onBlankTap: (() -> Void)?
     var focusHitAreas: ThreadFocusHitAreas?
     var suspended = false
-    private var positionedThread = false
+    private(set) var positionedThread = false
+    var initialThread: ThreadFocus?
+    var initialRows: [TranscriptRow] = []
     private var positioningThread = false
+    private var applyingRows = false
     private var askedNewer: ContinuousClock.Instant?
     var onDividerAbove: (Bool) -> Void = { _ in }
     weak var scroll: TranscriptScroll?
@@ -432,7 +439,11 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         layout.keepContentOffsetAtBottomOnBatchUpdates = true
         layout.keepContentAtBottomOfVisibleArea = !alignTop
         layout.supportSelfSizingInvalidation = true
-        let view = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        let view = TranscriptCollectionView(frame: .zero, collectionViewLayout: layout)
+        view.onLayout = { [weak self] in
+            guard let self, let thread = self.initialThread else { return }
+            self.positionThread(thread, rows: self.initialRows)
+        }
         view.backgroundColor = .clear
         view.contentInsetAdjustmentBehavior = .never
         view.keyboardDismissMode = .interactive
@@ -474,6 +485,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         let registration = UICollectionView.CellRegistration<TranscriptCell, String> { [weak self] cell, _, id in
             guard let self else { return }
             PerfProbe.count("cellConfigure")
+            cell.accessibilityIdentifier = id
             cell.contentConfiguration = self.configuration(for: id, in: cell)
             cell.backgroundConfiguration = .clear()
         }
@@ -522,6 +534,8 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     // MARK: Content
 
     func apply(rows: [TranscriptRow], hasOlder: Bool, footer: Bool) {
+        applyingRows = true
+        defer { applyingRows = false }
         var next: [String] = []
         next.reserveCapacity(rows.count + 2)
         if hasOlder { next.append(ItemID.older) }
@@ -550,13 +564,13 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         snapshot.appendSections([0])
         snapshot.appendItems(next)
         if first {
-            dataSource.applySnapshotUsingReloadData(snapshot) { self.items = next }
+            dataSource.applySnapshotUsingReloadData(snapshot) { self.items = next; view.setNeedsLayout() }
             view.layoutIfNeeded()
             restoreToBottom()
             warmRowsAbove()
         } else {
             UIView.performWithoutAnimation {
-                dataSource.apply(snapshot, animatingDifferences: false) { self.items = next }
+                dataSource.apply(snapshot, animatingDifferences: false) { self.items = next; view.setNeedsLayout() }
                 view.layoutIfNeeded()
             }
             // New rows at the end land below the screen; a list on the
@@ -747,8 +761,10 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         let distance = BackToBottom.distance(contentHeight: view.contentSize.height, offset: view.contentOffset.y, viewHeight: view.bounds.height, bottomInset: view.contentInset.bottom)
         scroll.set(atBottom: distance < 7, far: BackToBottom.shows(scroll.far, distance: distance, height: height))
         let fromTop = view.contentOffset.y + view.contentInset.top
-        if items.first == ItemID.older, height > 0, !scrollingToTop, fromTop < height * 4 { askOlder() }
-        if distance < height, let onNearBottom {
+        let mayPage = initialThread == nil || (positionedThread && isUserScrolling)
+        let ahead = initialThread == nil ? height * 4 : height
+        if mayPage, items.first == ItemID.older, height > 0, !scrollingToTop, fromTop < ahead { askOlder() }
+        if mayPage, distance < height, let onNearBottom {
             let now = ContinuousClock.now
             if askedNewer == nil || now - askedNewer! > .seconds(1) {
                 askedNewer = now
@@ -903,7 +919,9 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func positionThread(_ thread: ThreadFocus, rows: [TranscriptRow]) {
-        guard !positionedThread, let view, view.bounds.height > 0,
+        // The first snapshot restores its bottom after laying out. Position
+        // only after that whole apply, or its restore overwrites this one.
+        guard !applyingRows, !positionedThread, let view, view.window != nil, view.bounds.height > 0,
               let index = rows.firstIndex(where: { $0.id == thread.row }),
               let item = items.firstIndex(of: thread.row) else { return }
         positionedThread = true
@@ -911,7 +929,10 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         view.alpha = 0
         scroll?.set(following: false)
         let gap = TranscriptSpacing.top(rows[index], after: index > 0 ? rows[index - 1] : nil)
-        let y = thread.bubbleY.map { view.convert(CGPoint(x: 0, y: $0), from: nil).y - gap } ?? screenInsets.top
+        // A scroll view's local coordinates include contentOffset. Convert
+        // its bounds origin to get the viewport's window origin instead.
+        let originY = view.convert(view.bounds.origin, to: nil).y
+        let y = thread.bubbleY.map { $0 - originY - gap } ?? screenInsets.top
         // Insets allow an anchor near either end of a short chain to keep
         // its window position without moving the mounted main list.
         view.contentInset.top = max(screenInsets.top, view.bounds.height)
@@ -1141,5 +1162,16 @@ private final class TouchDownRecorder: UIGestureRecognizer {
             onTouchDown(touch.location(in: window))
         }
         state = .failed
+    }
+}
+
+
+/// SwiftUI can update a representable while its bounds are still zero. The
+/// first nonzero UIKit layout, not a queued main-thread block, places focus.
+private final class TranscriptCollectionView: UICollectionView {
+    var onLayout: (() -> Void)?
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        onLayout?()
     }
 }

@@ -1121,6 +1121,9 @@ final class TranscriptStore {
                     pending[index].state = .sent
                 }
                 if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: inputId) }
+                if let focus = threadFocus, !focus.hasNewer {
+                    Task { await focus.load(.after, reconcile: true) }
+                }
                 // The server does not announce the guardian's own input, so fetch it,
                 // and once more if that fetch fails.
                 Task {

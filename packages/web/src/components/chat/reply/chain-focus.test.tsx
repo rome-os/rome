@@ -525,7 +525,7 @@ describe("the view transition", () => {
 
 describe("newest-page catch-up in focus", () => {
   it("brings the guardian's own stored send in after a shared boundary, without appending across a gap", async () => {
-    thread.mockResolvedValueOnce(page(chain));
+    thread.mockResolvedValueOnce(page(chain)).mockResolvedValueOnce(page([]));
     const seen = renderChat();
     await act(async () => {
       await seen.chain!.open("g1", "a2");
@@ -534,7 +534,7 @@ describe("newest-page catch-up in focus", () => {
       root: "g1",
       replyTo: ["g2", "The cheaper one"],
     });
-    act(() => seen.chain!.onPage([sent]));
+    await act(async () => seen.chain!.onPage([sent]));
     expect(seen.chain!.focus!.messages.map((message) => message.id)).not.toContain("g3");
     act(() => seen.chain!.onPage([g2, sent]));
     expect(seen.chain!.focus!.messages.map((message) => message.id)).toEqual([
@@ -585,4 +585,94 @@ it("catches up a new turn's trace after the guardian's own send", async () => {
     "g3",
     "trace3",
   ]);
+});
+
+it("reconciles an old chain's own send before an answer that already arrived live", async () => {
+  const sent = say("g3", "user", "Book it", 7, { root: "g1" });
+  const answer = say("a3", "assistant", "Booked", 8, { root: "g1" });
+  thread.mockResolvedValueOnce(page(chain)).mockResolvedValueOnce(page([sent, answer]));
+  const seen = renderChat();
+  await act(async () => {
+    await seen.chain!.open("g1", "a2");
+  });
+  act(() => seen.chain!.onLive(answer));
+  await act(async () => seen.chain!.onPage([sent, answer]));
+  expect(thread).toHaveBeenLastCalledWith("concierge", "a2", { limit: 20, after: "g2" });
+  expect(seen.chain!.focus!.messages.map((message) => message.id)).toEqual([
+    "g1",
+    "a1",
+    "a2",
+    "g2",
+    "g3",
+    "a3",
+  ]);
+});
+
+it("keeps a live arrival after the earlier server page while reconciling an old chain", async () => {
+  const sent = say("g3", "user", "Book it", 7, { root: "g1" });
+  const answer = say("a3", "assistant", "Booked", 8, { root: "g1" });
+  let resolve!: (value: ReturnType<typeof page>) => void;
+  thread.mockResolvedValueOnce(page(chain)).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const seen = renderChat();
+  await act(async () => {
+    await seen.chain!.open("g1", "a2");
+  });
+  act(() => seen.chain!.onPage([sent]));
+  act(() => seen.chain!.onLive(answer));
+  await act(async () => resolve(page([sent])));
+  expect(seen.chain!.focus!.messages.map((message) => message.id)).toEqual([
+    "g1",
+    "a1",
+    "a2",
+    "g2",
+    "g3",
+    "a3",
+  ]);
+});
+
+it("reads a focused own send at acceptance, without waiting for the answer to finish", async () => {
+  const sent = say("g3", "user", "Book it", 7, { root: "g1" });
+  thread.mockResolvedValueOnce(page(chain)).mockResolvedValueOnce(page([sent]));
+  const seen = renderChat();
+  await act(async () => {
+    await seen.chain!.open("g1", "a2");
+  });
+  await act(async () => {
+    await seen.chain!.reconcile();
+  });
+  expect(thread).toHaveBeenLastCalledWith("concierge", "a2", { limit: 20, after: "g2" });
+  expect(seen.chain!.focus!.messages.at(-1)?.id).toBe("g3");
+});
+
+it("coalesces an accepted-send refresh while another thread page is in flight", async () => {
+  const first = say("g3", "user", "First", 7, { root: "g1" });
+  const second = say("g4", "user", "Second", 8, { root: "g1" });
+  let finish!: (value: ReturnType<typeof page>) => void;
+  thread
+    .mockResolvedValueOnce(page(chain))
+    .mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          finish = done;
+        }),
+    )
+    .mockResolvedValueOnce(page([second]));
+  const seen = renderChat();
+  await act(async () => {
+    await seen.chain!.open("g1", "a2");
+  });
+  act(() => {
+    void seen.chain!.reconcile();
+  });
+  await act(async () => {
+    await seen.chain!.reconcile();
+  });
+  await act(async () => finish(page([first])));
+  await waitFor(() => expect(seen.chain!.focus!.messages.at(-1)?.id).toBe("g4"));
+  expect(thread).toHaveBeenLastCalledWith("concierge", "a2", { limit: 20, after: "g3" });
 });

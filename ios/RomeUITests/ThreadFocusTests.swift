@@ -54,16 +54,17 @@ final class ThreadFocusUITests: XCTestCase {
         let target = app.staticTexts["Add both flights to my calendar."].firstMatch
         XCTAssertTrue(target.waitForExistence(timeout: 30))
         let y = target.frame.minY
-        let quote = app.buttons.matching(identifier: "reply-quote").allElementsBoundByIndex
-            .min { abs($0.frame.maxY - y) < abs($1.frame.maxY - y) }
-        XCTAssertNotNil(quote)
+        let quote = app.cells["5eedc4a1-0000-4000-8000-000000000047:1"].buttons["reply-quote"]
+        XCTAssertTrue(quote.waitForExistence(timeout: 5))
         keep("seeded-reply-chain-before")
-        quote?.tap()
+        quote.tap()
         let close = app.buttons["close-reply-chain"]
         XCTAssertTrue(close.waitForExistence(timeout: 10))
         sleep(1)
-        print("RCF seeded anchor y before=\(y) focused=\(target.frame.minY)")
-        XCTAssertEqual(target.frame.minY, y, accuracy: 1)
+        let focusedTarget = app.collectionViews["reply-chain-transcript"].staticTexts["Add both flights to my calendar."].firstMatch
+        XCTAssertTrue(focusedTarget.waitForExistence(timeout: 5))
+        print("RCF seeded anchor y before=\(y) focused=\(focusedTarget.frame.minY)")
+        XCTAssertEqual(focusedTarget.frame.minY, y, accuracy: 1)
         keep("seeded-reply-chain-open")
         close.tap()
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: close)

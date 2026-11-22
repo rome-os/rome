@@ -1965,6 +1965,9 @@ export function Chat({
         sender: viewerSenderRef.current,
       };
       putUserMessage(userMsg, immediateInputId);
+      // Guardian inputs have no live insert event. Read the focused chain
+      // at acceptance, not after a potentially long-running answer ends.
+      if (sendingSessionId === mainSessionIdRef.current) void chain.reconcile();
 
       // Appending input does not own a second stream or replace the live tail.
       // Late follow-up turns are discovered by the existing reattach loop.
@@ -2018,6 +2021,7 @@ export function Chat({
       t,
       scrollToBottom,
       refreshArchivedSession,
+      chain.reconcile,
     ],
   );
 

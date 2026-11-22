@@ -23,6 +23,7 @@ export interface ChainFocus {
   messages: ChatMessage[];
   hasOlder: boolean;
   hasNewer: boolean;
+  fetchedThrough?: string;
 }
 
 type ViewTransitionDocument = Document & {
@@ -134,6 +135,7 @@ export function useChainFocus({
   // A motion or a page read runs.
   const busy = useRef(false);
   const reading = useRef(false);
+  const afterRead = useRef<(() => void) | null>(null);
   const epoch = useRef(0);
   useEffect(() => {
     setFocus(null);
@@ -155,6 +157,7 @@ export function useChainFocus({
       const next = {
         root: page.messages.find((message) => message.id === from)?.chatThreadId ?? from,
         anchor: from,
+        fetchedThrough: edgeIds(page.messages).last,
         ...page,
       };
       const ids = new Set(page.messages.map((message) => message.id));
@@ -192,11 +195,11 @@ export function useChainFocus({
   }, []);
 
   /** Reads the next `limit` messages above or below the loaded ones, keeping the view where it is. */
-  const more = useCallback(async (side: "before" | "after") => {
+  const more = useCallback(async (side: "before" | "after", confirmedCursor?: string) => {
     const { focus, sessionId } = latest.current;
     if (!focus || !sessionId || reading.current) return;
     const { first, last } = edgeIds(focus.messages);
-    const cursor = side === "before" ? first : last;
+    const cursor = confirmedCursor ?? (side === "before" ? first : last);
     if (!cursor) return;
     reading.current = true;
     try {
@@ -215,12 +218,19 @@ export function useChainFocus({
               messages:
                 side === "before"
                   ? prependChatMessages(held.messages, page.messages)
-                  : [
-                      ...held.messages.filter(
-                        (message) => !page.messages.some((next) => next.id === message.id),
-                      ),
-                      ...page.messages,
-                    ],
+                  : (() => {
+                      const split = held.messages.findIndex((message) => message.id === cursor) + 1;
+                      const unlisted = (message: ChatMessage) =>
+                        !page.messages.some((next) => next.id === message.id);
+                      return [
+                        ...held.messages.slice(0, split).filter(unlisted),
+                        ...page.messages,
+                        ...held.messages.slice(split).filter(unlisted),
+                      ];
+                    })(),
+              ...(side === "after"
+                ? { fetchedThrough: edgeIds(page.messages).last ?? held.fetchedThrough }
+                : {}),
               ...(side === "before" ? { hasOlder: page.hasOlder } : { hasNewer: page.hasNewer }),
             },
         ),
@@ -238,6 +248,9 @@ export function useChainFocus({
       setBlank(bottom, px(bottom) + added);
     } finally {
       reading.current = false;
+      const pending = afterRead.current;
+      afterRead.current = null;
+      pending?.();
     }
   }, []);
 
@@ -260,26 +273,58 @@ export function useChainFocus({
     });
   }, []);
 
-  const onPage = useCallback((messages: ChatMessage[]) => {
-    setFocus((held) => {
-      if (!held) return held;
-      const byId = new Map(messages.map((message) => [message.id, message]));
-      let next = held.messages.map((message) => byId.get(message.id) ?? message);
-      const last = held.messages.filter((message) => message.role !== "trace").at(-1);
-      const at = last ? messages.findIndex((message) => message.id === last.id) : -1;
-      if (!held.hasNewer && at >= 0) {
-        for (const message of messages.slice(at + 1)) {
-          const traceOfChain =
-            message.role === "trace" &&
-            message.turnId != null &&
-            next.some((held) => held.turnId === message.turnId);
-          if (message.chatThreadId === held.root || traceOfChain)
-            next = mergeChatMessage(next, message);
+  const reconcile: () => Promise<void> = useCallback(async () => {
+    if (reading.current) {
+      afterRead.current = () => {
+        const held = latest.current.focus;
+        if (held && !held.hasNewer)
+          void more("after", held.fetchedThrough ?? edgeIds(held.messages).last);
+      };
+      return;
+    }
+    const held = latest.current.focus;
+    if (held && !held.hasNewer)
+      await more("after", held.fetchedThrough ?? edgeIds(held.messages).last);
+  }, [more]);
+
+  const onPage = useCallback(
+    (messages: ChatMessage[]) => {
+      const current = latest.current.focus;
+      if (current && !current.hasNewer) {
+        const known = new Set(current.messages.map((message) => message.id));
+        const at = messages.findIndex((message) => message.id === edgeIds(current.messages).last);
+        if (
+          messages.some(
+            (message, index) =>
+              message.chatThreadId === current.root &&
+              !known.has(message.id) &&
+              (at < 0 || index <= at),
+          )
+        ) {
+          void more("after", current.fetchedThrough ?? edgeIds(current.messages).last);
         }
       }
-      return { ...held, messages: next };
-    });
-  }, []);
+      setFocus((held) => {
+        if (!held) return held;
+        const byId = new Map(messages.map((message) => [message.id, message]));
+        let next = held.messages.map((message) => byId.get(message.id) ?? message);
+        const last = held.messages.filter((message) => message.role !== "trace").at(-1);
+        const at = last ? messages.findIndex((message) => message.id === last.id) : -1;
+        if (!held.hasNewer && at >= 0) {
+          for (const message of messages.slice(at + 1)) {
+            const traceOfChain =
+              message.role === "trace" &&
+              message.turnId != null &&
+              next.some((held) => held.turnId === message.turnId);
+            if (message.chatThreadId === held.root || traceOfChain)
+              next = mergeChatMessage(next, message);
+          }
+        }
+        return { ...held, messages: next };
+      });
+    },
+    [more],
+  );
 
   const focused = focus !== null;
   // Esc closes the focus, unless what has focus used the key first.
@@ -292,5 +337,5 @@ export function useChainFocus({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [focused, close]);
 
-  return { focus, layer, open, close, more, onLive, onPage };
+  return { focus, layer, open, close, more, onLive, onPage, reconcile };
 }

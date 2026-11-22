@@ -15,6 +15,8 @@ final class ThreadFocus {
     private(set) var hasOlder: Bool
     private(set) var hasNewer: Bool
     private(set) var loading = false
+    private var fetchedThrough: String?
+    private var reconcilePending = false
     @ObservationIgnored private let backend: RomeBackend
     @ObservationIgnored private let sessionId: String
 
@@ -29,6 +31,7 @@ final class ThreadFocus {
         self.backend = backend
         transcript = TranscriptStore(sessionId: sessionId, kind: .concierge, backend: backend)
         transcript.holdThreadMessages(page.messages)
+        fetchedThrough = page.messages.last(where: { !$0.isTrace })?.id
     }
 
     var reply: ChatMessage? {
@@ -37,12 +40,22 @@ final class ThreadFocus {
         }
     }
 
-    func load(_ side: Side) async {
-        guard !loading, side == .before ? hasOlder : hasNewer else { return }
+    func load(_ side: Side, reconcile: Bool = false) async {
+        guard !loading else {
+            if reconcile { reconcilePending = true }
+            return
+        }
+        guard reconcile || (side == .before ? hasOlder : hasNewer) else { return }
         let said = transcript.messages.filter { !$0.isTrace }
-        guard let cursor = side == .before ? said.first?.id : said.last?.id else { return }
+        guard let cursor = reconcile ? fetchedThrough : (side == .before ? said.first?.id : said.last?.id) else { return }
         loading = true
-        defer { loading = false }
+        defer {
+            loading = false
+            if reconcilePending {
+                reconcilePending = false
+                if !hasNewer { Task { await self.load(.after, reconcile: true) } }
+            }
+        }
         guard let page = try? await backend.threadPage(sessionId: sessionId, anchor: anchor, before: side == .before ? cursor : nil, after: side == .after ? cursor : nil, limit: 20), !Task.isCancelled else { return }
         let ids = Set(page.messages.map(\.id))
         if side == .before {
@@ -51,7 +64,10 @@ final class ThreadFocus {
         } else {
             // Traces may occur on both pages. Their new copy takes their
             // server-specified position, as on the main transcript.
-            transcript.holdThreadMessages(transcript.messages.filter { !ids.contains($0.id) } + page.messages)
+            let held = transcript.messages
+            let split = held.firstIndex(where: { $0.id == cursor }).map { $0 + 1 } ?? held.count
+            transcript.holdThreadMessages(held[..<split].filter { !ids.contains($0.id) } + page.messages + held[split...].filter { !ids.contains($0.id) })
+            fetchedThrough = page.messages.last(where: { !$0.isTrace })?.id ?? fetchedThrough
             hasNewer = page.hasNewer
         }
     }
@@ -90,9 +106,18 @@ final class ThreadFocus {
     /// live insert. Only append beyond a shared message, never across a gap.
     func catchUp(_ messages: [ChatMessage]) {
         updateHeld(messages)
-        guard !hasNewer, let last = transcript.messages.last(where: { !$0.isTrace }),
-              let index = messages.firstIndex(where: { $0.id == last.id }) else { return }
-        for message in messages.dropFirst(index + 1) { receive(message) }
+        guard !hasNewer, let last = transcript.messages.last(where: { !$0.isTrace }) else { return }
+        let known = Set(transcript.messages.map(\.id))
+        let unknown = messages.indices.filter { messages[$0].chatThreadId == root && !known.contains(messages[$0].id) }
+        let at = messages.firstIndex(where: { $0.id == last.id })
+        // An old chain can be absent from the newest main-chat page. A live
+        // answer can also arrive before that page brings the guardian's send.
+        // Reconcile from the thread API's last confirmed cursor, not that answer.
+        if !unknown.isEmpty, at == nil || unknown.contains(where: { $0 <= at! }) {
+            Task { await self.load(.after, reconcile: true) }
+            return
+        }
+        if let at { for message in messages.dropFirst(at + 1) { receive(message) } }
     }
 }
 

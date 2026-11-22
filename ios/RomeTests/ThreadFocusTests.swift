@@ -126,6 +126,59 @@ import Testing
         #expect(window.transcript.message("m")?.status == "working")
     }
 
+    @Test func oldChainReconcilesOwnSendBeforeAlreadyLiveAnswer() async {
+        let backend = FakeBackend()
+        let window = focus([message("m")], backend: backend)
+        let sent = message("sent", role: "user")
+        let answer = message("answer")
+        window.receive(answer)
+        backend.threadPages["after:m"] = ThreadPage(messages: [sent, answer], hasOlder: true, hasNewer: false)
+        window.catchUp([sent, answer])
+        for _ in 0..<20 { await Task.yield() }
+        #expect(backend.threadReads.first?.after == "m")
+        #expect(window.transcript.messages.map(\.id) == ["m", "sent", "answer"])
+    }
+
+    @Test func liveArrivalDuringReconciliationStaysAfterTheEarlierPage() async {
+        let backend = FakeBackend()
+        let window = focus([message("m")], backend: backend)
+        let sent = message("sent", role: "user")
+        let answer = message("answer")
+        backend.threadPages["after:m"] = ThreadPage(messages: [sent], hasOlder: true, hasNewer: false)
+        backend.duringThreadFetch = { window.receive(answer) }
+        window.catchUp([sent])
+        for _ in 0..<20 { await Task.yield() }
+        #expect(window.transcript.messages.map(\.id) == ["m", "sent", "answer"])
+    }
+
+    @Test func acceptedOwnSendReadsFocusBeforeTheDelayedMainRefresh() async {
+        let backend = FakeBackend()
+        backend.sendSucceeds = true
+        backend.threadPages["open"] = ThreadPage(messages: [message("m")], hasOlder: false, hasNewer: false)
+        backend.threadPages["after:m"] = ThreadPage(messages: [message("sent", role: "user")], hasOlder: true, hasNewer: false)
+        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
+        await store.openThread(from: "m", row: "m:0", original: "m")
+        _ = store.send("next", reply: store.composerReply)
+        for _ in 0..<30 { await Task.yield() }
+        #expect(backend.threadReads.contains { $0.after == "m" })
+        #expect(store.threadFocus?.transcript.messages.last?.id == "sent")
+    }
+
+    @Test func reconciliationWaitsForAnInFlightPage() async {
+        let backend = FakeBackend()
+        let window = focus([message("m")], older: true, backend: backend)
+        backend.threadPages["before:m"] = ThreadPage(messages: [message("older")], hasOlder: false, hasNewer: true)
+        backend.threadPages["after:m"] = ThreadPage(messages: [message("sent", role: "user")], hasOlder: true, hasNewer: false)
+        backend.duringThreadFetch = {
+            backend.duringThreadFetch = nil
+            await window.load(.after, reconcile: true)
+        }
+        await window.load(.before)
+        for _ in 0..<30 { await Task.yield() }
+        #expect(window.transcript.messages.map(\.id) == ["older", "m", "sent"])
+        #expect(backend.threadReads.count == 2)
+    }
+
     @Test func closeReleasesFocusTranscript() {
         let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: FakeBackend())
         weak var child: TranscriptStore?
