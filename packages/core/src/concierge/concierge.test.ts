@@ -904,11 +904,16 @@ describe("Concierge tools", () => {
       expect(
         (await run(there(s, chatId, "acquaintance"), s, "say", { text: "Hi" })).isError,
       ).toBeFalsy();
-      // A task's report, which no one sent, answers the guardian who started the task.
+      // A turn with no sender that Rome does not run is anyone's: Envoy checks it.
+      expect(
+        (await run(there(s, chatId, undefined), s, "say", { text: "Hm" })).isError,
+      ).toBeFalsy();
+      // A task's report, which Rome runs, answers the guardian who started the task.
+      s.service.runsSystemTurnIn = (id: string) => id === chatId;
       expect(
         (await run(there(s, chatId, undefined), s, "say", { text: "Done" })).isError,
       ).toBeFalsy();
-      expect(recipients).toEqual(["acquaintance", "guardian"]);
+      expect(recipients).toEqual(["acquaintance", "other", "guardian"]);
     });
 
     it("refuses private there, and tells the model what the send gate held back", async () => {
@@ -1055,11 +1060,28 @@ describe("Concierge tools", () => {
       expect(result.content[0]!.text).toContain("Only the guardian");
     });
 
-    it("lets a task's report, which no one sent, read the chat's tasks", async () => {
+    it("counts a turn it runs there, such as a report, as Rome's own only while it runs", async () => {
       const s = setup();
       const chatId = await connectionChat(s);
-      const result = await run(there(s, chatId, undefined), s, "chat_list", { here: true });
-      expect(result.isError).toBeFalsy();
+      let during = false;
+      s.onBackendTurn(() => {
+        during = s.service.runsSystemTurnIn(chatId);
+        return "completed";
+      });
+      expect(await s.service.runSystemTurn(chatId, "report")).toBe(true);
+      expect(during).toBe(true);
+      expect(s.service.runsSystemTurnIn(chatId)).toBe(false);
+    });
+
+    it("lets a task's report, which Rome runs, read the chat's tasks, and no other turn without a sender", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      // A turn with no sender that Rome does not run is anyone's.
+      const stray = await run(there(s, chatId, undefined), s, "chat_list", { here: true });
+      expect(stray.isError).toBe(true);
+      s.service.runsSystemTurnIn = (id: string) => id === chatId;
+      const report = await run(there(s, chatId, undefined), s, "chat_list", { here: true });
+      expect(report.isError).toBeFalsy();
     });
 
     it("never takes a dashboard chat, also a channel row, for a chat on a connection", async () => {

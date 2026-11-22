@@ -665,9 +665,17 @@ export async function buildConciergeTools(
     return guardian.length === 1 ? guardian[0] : undefined;
   };
 
+  // The bond level of the turn's sender on a connection. A turn Rome runs
+  // there, such as a task's report or a reminder, has none and acts for the
+  // guardian, who started the task. Any other turn without one is anyone's.
+  const bondHere = (chatId: string): string => {
+    const bond = context.getThreadContext()?.senderBondLevel;
+    if (bond !== undefined) return bond;
+    return service.runsSystemTurnIn(chatId) ? "guardian" : "other";
+  };
+
   // The turn's message on a connection, which a message said there answers:
-  // its sender as People knows them, and what they said. A task's report has
-  // no sender: it answers the guardian, who started the task.
+  // its sender as People knows them, and what they said.
   const connectionRecipient = async (chatId: string, turnId: string) => {
     const thread = context.getThreadContext();
     const asked = (await webchatRepo.getTurnChatMessages(chatId, turnId))
@@ -681,7 +689,7 @@ export async function buildConciergeTools(
       // Plain text already.
     }
     return {
-      bondLevel: (thread?.senderBondLevel ?? "guardian") as BondLevel,
+      bondLevel: bondHere(chatId) as BondLevel,
       shownName: thread?.channelUserId ?? "someone",
       said,
     };
@@ -1721,12 +1729,9 @@ export async function buildConciergeTools(
   ];
   if (!onConnection) return tools;
   // On a connection, a reaction and the task tools act for the guardian. A
-  // message from anyone else may not use them; a report, which no one sent,
-  // may. Anyone's turn may say something.
-  const othersRefused = () => {
-    const bond = context.getThreadContext()?.senderBondLevel;
-    return bond !== undefined && bond !== "guardian";
-  };
+  // message from anyone else may not use them; a turn Rome runs there, such as
+  // a task's report, may. Anyone's turn may say something.
+  const othersRefused = () => bondHere(currentTurn().chatId) !== "guardian";
   return tools
     .filter((tool) => (CONNECTION_TOOLS as readonly string[]).includes(tool.name))
     .map(

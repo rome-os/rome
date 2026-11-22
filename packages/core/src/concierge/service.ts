@@ -378,6 +378,8 @@ export class ConciergeService {
   private readonly handedOnPrompts = new Map<string, string[]>();
   /** What each Concierge turn said, by its parts, task and answered messages: a repeat is the same message. */
   private readonly saidByKey = new Map<string, Map<string, string>>();
+  /** Per chat on a connection, how many turns of Rome's own run there now. */
+  private readonly systemTurns = new Map<string, number>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
@@ -1196,7 +1198,18 @@ export class ConciergeService {
       ...(options.taskIds ? { taskIds: options.taskIds } : {}),
       ...(reportedTask ? { reportedTask } : {}),
     };
-    const outcome = (await this.deps.runBackendTurn(params, options)) ?? "failed";
+    // A turn Rome runs there, such as a task's report or a reminder, has no
+    // sender: while it runs, its tools act for the guardian, who started the
+    // task. No other turn without a sender does.
+    this.systemTurns.set(chat.id, (this.systemTurns.get(chat.id) ?? 0) + 1);
+    let outcome: "completed" | "stopped" | "interrupted" | "failed";
+    try {
+      outcome = (await this.deps.runBackendTurn(params, options)) ?? "failed";
+    } finally {
+      const left = (this.systemTurns.get(chat.id) ?? 1) - 1;
+      if (left > 0) this.systemTurns.set(chat.id, left);
+      else this.systemTurns.delete(chat.id);
+    }
     if (outcome === "interrupted") {
       const carried = await this.ownTasks(taskIds, chat.id);
       if (carried.length > 0) this.carriedReports.set(chat.id, carried);
@@ -1264,6 +1277,11 @@ export class ConciergeService {
       },
       end: () => {},
     };
+  }
+
+  /** Whether Rome runs a turn of its own, such as a report, in chat `chatId` on a connection now. */
+  runsSystemTurnIn(chatId: string): boolean {
+    return this.systemTurns.has(chatId);
   }
 
   /** Whether Concierge turn `turnId` has said any message yet. */
