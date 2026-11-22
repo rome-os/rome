@@ -1931,6 +1931,42 @@ export class WebChatRepository {
    * The kept chats: a change of the default that moves existing chats lets
    * them follow it again.
    */
+  /**
+   * The chats among `ids` that exist, with the model each stored and who
+   * chose it, in one read.
+   */
+  async modelSelectionsOf(ids: readonly string[]): Promise<
+    Map<
+      string,
+      {
+        agentName: string | null;
+        largeModelSelection: string | null;
+        largeModelSelectionBy: ModelSelectionBy | null;
+      }
+    >
+  > {
+    const out = new Map<
+      string,
+      {
+        agentName: string | null;
+        largeModelSelection: string | null;
+        largeModelSelectionBy: ModelSelectionBy | null;
+      }
+    >();
+    if (ids.length === 0) return out;
+    const rows = await this.db
+      .select({
+        id: romeSessions.id,
+        agentName: romeSessions.agentName,
+        largeModelSelection: romeSessions.largeModelSelection,
+        largeModelSelectionBy: romeSessions.largeModelSelectionBy,
+      })
+      .from(romeSessions)
+      .where(inArray(romeSessions.id, [...new Set(ids)]));
+    for (const { id, ...row } of rows) out.set(id, row);
+    return out;
+  }
+
   async keptChats(): Promise<string[]> {
     const rows = await this.db
       .select({ id: romeSessions.id })

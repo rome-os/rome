@@ -312,6 +312,18 @@ describe("an unchecked move keeps every existing chat", () => {
     expect(providers.heldProvider("webchat:picked")).toBe("anthropic");
   });
 
+  it("a model pick on another provider takes the hold there, so subagents follow the chat", async () => {
+    const { providers } = await setup();
+    await providers.beforeDefaultChange(unchecked);
+    expect(providers.heldProvider("webchat:fast:subagent:abc")).toBe("anthropic");
+    await providers.picked("fast", "openai");
+    expect(providers.heldProvider("webchat:fast")).toBe("openai");
+    expect(providers.heldProvider("webchat:fast:subagent:abc")).toBe("openai");
+    // A chat that is not held stays unheld.
+    await providers.picked("empty", "openai");
+    expect(providers.heldProvider("webchat:empty")).toBeUndefined();
+  });
+
   it("holds only conversations active in the last 30 days", async () => {
     const asked: Date[] = [];
     const { providers } = await setup({ ran: { anthropic: ["telegram:42"] }, asked });

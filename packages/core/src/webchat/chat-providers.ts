@@ -27,6 +27,8 @@ import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger } from "../logger.js";
 import type { WebChatRepository } from "./repository.js";
 
+const WEBCHAT = "webchat:";
+
 /** The conversations held on a provider, by their root session key. */
 export const HELD_SESSIONS_SETTING_KEY = "heldSessions";
 
@@ -95,6 +97,7 @@ export interface ChatProvidersDeps {
     | "getSession"
     | "followingChats"
     | "keptChats"
+    | "modelSelectionsOf"
     | "releaseKeptChats"
     | "updateSessionLargeModelSelection"
   >;
@@ -154,6 +157,11 @@ export interface ChatProviders {
    * For a chat that is deleted, or whose owner chose Auto or Rome credits.
    */
   release(chatId: string): Promise<void>;
+  /**
+   * The chat's owner picked a model on `provider`: a conversation held
+   * elsewhere moves its hold there, so its subagents stay with it.
+   */
+  picked(chatId: string, provider: AccountedProviderId): Promise<void>;
   /**
    * How many chats a change of the default that moves existing chats would
    * move: those that follow it, the kept ones it lets follow it again, and
@@ -269,9 +277,10 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
       if (!change.from || change.from === "rome_credits") return;
       const provider = providerOfDefault(change.from);
       const chats = await deps.webchatRepo.followingChats();
+      const agents = await deps.webchatRepo.modelSelectionsOf(chats.map((chat) => chat.id));
       for (const chat of chats) {
-        const row = await deps.webchatRepo.getSession(chat.id);
-        await keepOn(chat.id, row?.agentName ?? null, chat.largeModelSelection, provider);
+        const agentName = agents.get(chat.id)?.agentName ?? null;
+        await keepOn(chat.id, agentName, chat.largeModelSelection, provider);
       }
       // Every other conversation active lately stays on the old default too:
       // a fork, a channel's chat, and the subagents under them and under the
@@ -286,12 +295,15 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
       // runs, so its subagents stay with it. A fork whose model Rome chose is
       // kept on the old default, as a chat that follows it is.
       const holdOn = new Map<string, AccountedProviderId>();
-      for (const root of ran) {
-        if (following.has(root) || held.has(root)) continue;
+      const roots = [...ran].filter((root) => !following.has(root) && !held.has(root));
+      const rows = await deps.webchatRepo.modelSelectionsOf(
+        roots.filter((root) => root.startsWith(WEBCHAT)).map((root) => root.slice(WEBCHAT.length)),
+      );
+      for (const root of roots) {
         holdOn.set(root, provider);
-        if (!root.startsWith("webchat:")) continue;
-        const chatId = root.slice("webchat:".length);
-        const chat = await deps.webchatRepo.getSession(chatId);
+        if (!root.startsWith(WEBCHAT)) continue;
+        const chatId = root.slice(WEBCHAT.length);
+        const chat = rows.get(chatId);
         const stored = chat?.largeModelSelection ?? null;
         if (!chat || !isModelSelectionId(stored)) continue;
         if (chat.largeModelSelectionBy === "auto") {
@@ -357,6 +369,12 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
     async release(chatId) {
       await changeHeld((map) => map.delete(webchatSessionKey(chatId)));
     },
+    async picked(chatId, provider) {
+      const key = webchatSessionKey(chatId);
+      await changeHeld((map) => {
+        if (map.has(key)) map.set(key, provider);
+      });
+    },
     async followingCount() {
       await loaded;
       const [following, kept] = await Promise.all([
@@ -369,11 +387,16 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
       // The other conversations a checked change would move: those held, and
       // those active lately, which follow the default. A fork chat counts; a
       // chat its owner picked a model for never moves with the default.
+      const keys = [...new Set([...held.keys(), ...(await conversationsSince())])].filter(
+        (key) => !counted.has(key),
+      );
+      const rows = await deps.webchatRepo.modelSelectionsOf(
+        keys.filter((key) => key.startsWith(WEBCHAT)).map((key) => key.slice(WEBCHAT.length)),
+      );
       let others = 0;
-      for (const key of new Set([...held.keys(), ...(await conversationsSince())])) {
-        if (counted.has(key)) continue;
-        if (key.startsWith("webchat:")) {
-          const chat = await deps.webchatRepo.getSession(key.slice("webchat:".length));
+      for (const key of keys) {
+        if (key.startsWith(WEBCHAT)) {
+          const chat = rows.get(key.slice(WEBCHAT.length));
           if (!chat || pinnedModelOf(chat)?.by === "owner") continue;
         }
         others++;

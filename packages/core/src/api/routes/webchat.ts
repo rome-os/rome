@@ -3418,7 +3418,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       "owner",
     );
     // Auto follows the default: a conversation held on a provider is let go.
+    // A pick on another provider takes the hold there, so subagents follow it.
     if (!selection) await deps.chatProviders?.release(sessionId);
+    else if (selection.providerId === "anthropic" || selection.providerId === "openai") {
+      await deps.chatProviders?.picked(sessionId, selection.providerId);
+    }
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);

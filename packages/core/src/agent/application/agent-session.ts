@@ -3479,16 +3479,20 @@ class AgentSessionImpl implements AgentSession {
     contextTokens?: number,
   ): Promise<void> {
     try {
-      // A swapped turn records the session's own model, so a cold resume
-      // runs that one again and not the one the swap lent it.
-      const own =
-        this.runsOneTurnSelection && this.sessionPin?.providerId === session.providerId
-          ? this.sessionPin.model
-          : session.model;
+      // A swapped turn's model lives only in that turn: the row keeps the
+      // model it named before (none when the turn moved it to another
+      // provider's thread), and the pin stays as it was, so the next turn and
+      // a cold resume resolve what they would have without the swap.
+      const swapped = this.runsOneTurnSelection;
+      const model = !swapped
+        ? session.model
+        : this.session.provider === session.providerId
+          ? (this.session.model ?? undefined)
+          : undefined;
       this.session.recordTurn({
         provider: session.providerId,
         modelThreadId: session.modelThreadId,
-        model: own,
+        model,
         reasoningEffort,
         checkpoint: position ? { turnId, checkpointId: position.checkpointId } : undefined,
         ...(contextTokens !== undefined ? { contextTokens } : {}),
@@ -3496,8 +3500,8 @@ class AgentSessionImpl implements AgentSession {
       await this.deps.sessionRepository.save(this.session);
       // The pin becomes readable only once recorded: later turns of this live
       // session now resolve exactly this model, matching what a cold resume
-      // of the row would do. A swapped turn's model is not the session's.
-      this.sessionPin = { providerId: session.providerId, model: own };
+      // of the row would do.
+      if (!swapped) this.sessionPin = { providerId: session.providerId, model: session.model };
     } catch (err) {
       this.log.warn("failed to persist session turn", {
         sessionId: this.sessionId,

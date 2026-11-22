@@ -71,7 +71,7 @@ function harness(
   const swaps: string[] = [];
   const kept: Array<{ chatId: string; provider: string }> = [];
   const followed: string[] = [];
-  const released: string[] = [];
+  const picked: Array<{ chatId: string; provider: string }> = [];
   const chose: Array<{ provider: string; moveExisting?: boolean }> = [];
   const selected: Array<{ chatId: string; selection: string | null }> = [];
   const accountListeners = new Set<
@@ -110,8 +110,8 @@ function harness(
         followed.push(chatId);
         return null;
       },
-      release: async (chatId) => {
-        released.push(chatId);
+      picked: async (chatId, provider) => {
+        picked.push({ chatId, provider });
       },
     },
     webchatRepo: {
@@ -240,7 +240,7 @@ function harness(
     swaps,
     kept,
     followed,
-    released,
+    picked,
     chose,
     selected,
     accountChanged,
@@ -937,19 +937,7 @@ describe("a card's options stay as written, and Retry is on every card", () => {
     });
   });
 
-  it("Use Rome credits on a held chat's card lets it follow them", async () => {
-    const h = harness(
-      { chat: {} },
-      { anthropic: reportOf("unauthorized"), openai: reportOf("unauthorized") },
-      { defaultProvider: "rome_credits", signedIn: noAccount, credits: true, held: ["chat"] },
-    );
-    await h.fail("chat", notLoggedIn);
-    const [card] = await h.failures.cards();
-    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "rome_credits" });
-    expect(h.followed).toEqual(["chat"]);
-  });
-
-  it("Use Rome credits on a held owner-picked chat keeps the owner's pick", async () => {
+  it("Use Rome credits on a held chat's card moves existing chats, held ones included", async () => {
     const chats: Record<string, Row> = {
       chat: { largeModelSelection: "claude-haiku", largeModelSelectionBy: "owner" },
     };
@@ -961,12 +949,27 @@ describe("a card's options stay as written, and Retry is on every card", () => {
     await h.fail("chat", notLoggedIn);
     const [card] = await h.failures.cards();
     await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "rome_credits" });
-    expect(h.released).toEqual(["chat"]);
-    expect(h.followed).toEqual([]);
+    // Choosing them with Move existing chats too releases every held conversation.
+    expect(h.chose).toEqual([{ provider: "rome_credits", moveExisting: true }]);
+    // An owner's pick stays theirs.
     expect(chats.chat).toMatchObject({
       largeModelSelection: "claude-haiku",
       largeModelSelectionBy: "owner",
     });
+  });
+
+  it("a card's switch of an owner's pick moves its conversation's hold with it", async () => {
+    const chats: Record<string, Row> = {
+      chat: { largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "owner" },
+    };
+    const h = harness(chats, {
+      anthropic: reportOf("usage_limit_reached"),
+      openai: reportOf("available"),
+    });
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
+    expect(h.picked).toEqual([{ chatId: "chat", provider: "openai" }]);
   });
 
   it("an error other than a logged-out provider stays an error, not a fresh card", async () => {

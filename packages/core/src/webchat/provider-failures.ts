@@ -140,7 +140,7 @@ export interface ProviderFailuresDeps {
   /** `refresh`, when given, reads a provider's account again, as for a reset time a card lacks. */
   accounts: Pick<ModelAccounts, "read" | "onChanged"> & Partial<Pick<ModelAccounts, "refresh">>;
   defaults: Pick<DefaultProviders, "current" | "signedIn" | "choose">;
-  chats: Pick<ChatProviders, "keep" | "follow" | "release">;
+  chats: Pick<ChatProviders, "keep" | "follow" | "picked">;
   webchatRepo: Pick<
     WebChatRepository,
     "getSession" | "addBackendMessage" | "updateMessageContent" | "updateSessionLargeModelSelection"
@@ -787,13 +787,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       if (!creditsOffered()) throw new StaleOption();
       await choose("rome_credits", true);
       // Rome credits are the instance's, so every chat runs on them without a
-      // checkbox: the card offers them only when no account can run. A chat
-      // held on a logged-out provider is let go too. A kept one follows the
-      // default again; an owner's pick stays theirs, at its strength there.
-      if (deps.held?.(chatId)) {
-        if (ownerPicked(chat)) await deps.chats.release(chatId);
-        else await deps.chats.follow(chatId);
-      }
+      // checkbox: the card offers them only when no account can run. Choosing
+      // them moves existing chats, which lets every held one follow them too.
       return;
     }
     if (!alternatives(card.runsOn).includes(change.provider)) throw new StaleOption();
@@ -812,6 +807,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         await deps.webchatRepo.updateSessionLargeModelSelection(chatId, selection, "owner");
         deps.selectModel?.(chatId, agentName, selection);
       }
+      // A held conversation moves its hold with the pick, so its subagents follow.
+      await deps.chats.picked(chatId, provider);
       return;
     }
     if (change.makeDefault) await deps.chats.follow(chatId);

@@ -1097,6 +1097,7 @@ async function main() {
   let chatProviders: ChatProviders = {
     ready: async () => {},
     release: async () => {},
+    picked: async () => {},
     beforeDefaultChange: async () => {},
     heldProvider: () => undefined,
     keep: async () => null,

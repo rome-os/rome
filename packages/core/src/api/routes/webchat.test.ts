@@ -7622,6 +7622,7 @@ describe("Webchat API", () => {
           return null;
         },
         release: async () => {},
+        picked: async () => {},
         followingCount: async () => 0,
       };
       const app = createWebchatRuntime(deps).routes;

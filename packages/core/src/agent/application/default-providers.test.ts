@@ -20,6 +20,7 @@ function keeper(
     credits?: () => boolean | undefined;
     creditsUsable?: () => boolean;
     seed?: () => Promise<"anthropic" | "openai" | null>;
+    now?: () => Date;
   } = {},
 ) {
   let stored: DefaultProviderState = options.stored ?? { provider: null };
@@ -46,7 +47,7 @@ function keeper(
       changes.push({ ...change, storedBefore: stored });
     },
     ...(options.seed ? { seed: options.seed } : {}),
-    now: () => new Date("2026-11-16T12:00:00.000Z"),
+    now: options.now ?? (() => new Date("2026-11-16T12:00:00.000Z")),
   });
   return { defaults, stored: () => stored, changes };
 }
@@ -350,6 +351,26 @@ describe("the default provider as Rome keeps it", () => {
     reports.openai = reportOf("unauthorized");
     await defaults.reconcile();
     expect(changes.at(-1)).toMatchObject({ to: "anthropic", moveExisting: false });
+  });
+
+  it("drops the logout's choice once it expires, so a later loss hands nothing to credits", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("unauthorized"),
+    };
+    let clock = Date.parse("2026-11-22T12:00:00.000Z");
+    const { defaults } = keeper(reports, {
+      stored: { provider: "anthropic" },
+      credits: () => true,
+      now: () => new Date(clock),
+    });
+    // The logout answered, but another credential kept Claude signed in.
+    defaults.expectLogout("anthropic", { moveExisting: false });
+    await defaults.reconcile();
+    clock += 3 * 60_000;
+    reports.anthropic = reportOf("unauthorized");
+    await defaults.reconcile();
+    expect(defaults.current()).toBe("anthropic");
   });
 
   it("choosing the default again with Move existing chats too lets every held chat follow", async () => {

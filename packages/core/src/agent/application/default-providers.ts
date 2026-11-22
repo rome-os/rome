@@ -54,8 +54,9 @@ export interface DefaultProviders {
    * the default move with it, if the logout moves it. Absent, they move. The
    * choice holds until the returned call, once the logout has ended, so a
    * reconcile that runs first does not spend it. The accounts reading the
-   * provider as logged out spends it. The returned call drops it when the
-   * logout failed.
+   * provider as logged out spends it, and it expires two minutes after the
+   * logout, as when the logout left the provider signed in. The returned call
+   * drops it when the logout failed.
    */
   expectLogout(
     provider: AccountedProviderId,
@@ -104,7 +105,10 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
   let state: DefaultProviderState = { provider: null };
   const listeners = new Set<(change: DefaultProviderChange) => void>();
   // What the guardian chose in the logout dialog, until the logout moves the default.
-  const logouts = new Map<AccountedProviderId, { moveExisting: boolean }>();
+  const logouts = new Map<AccountedProviderId, { moveExisting: boolean; at: number }>();
+  // Long enough for the account read a logout starts to land, short enough
+  // that a logout that left the provider signed in spends nothing later.
+  const LOGOUT_CHOICE_MS = 2 * 60_000;
   // One write at a time, in order, so a reconcile never undoes a choice.
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
@@ -158,6 +162,9 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
       const now_ = signedIn();
       const seeded = state.provider === null ? await options.seed?.().catch(() => null) : null;
       const leaving = state.provider ? providerOfDefault(state.provider) : null;
+      for (const [logout, choice] of logouts) {
+        if (now().getTime() - choice.at > LOGOUT_CHOICE_MS) logouts.delete(logout);
+      }
       // Rome credits take the default over only in the guardian's logout of
       // it, as its dialog said: a later top-up never changes the default.
       const loggingOut = leaving !== null && logouts.has(leaving) && !now_[leaving];
@@ -222,7 +229,7 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
         if (state.note && state.provider) await store({ provider: state.provider });
       }),
     expectLogout(provider, choice) {
-      const token = { moveExisting: choice.moveExisting };
+      const token = { moveExisting: choice.moveExisting, at: now().getTime() };
       logouts.set(provider, token);
       // Queued behind any reconcile already waiting, which may still spend it.
       return () =>
