@@ -1,7 +1,7 @@
 // Opening a reply's chain in place from its quote (docs/domains/chats.md#chat-thread).
 // The chain is a layer over the chat: the main transcript stays mounted under
 // it, so closing needs no scroll restore. The message the reader pressed stays
-// where it is on screen, and the chat changes in one view transition.
+// where it is on screen, and only the message list changes in one native scoped view transition.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -26,7 +26,7 @@ export interface ChainFocus {
   fetchedThrough?: string;
 }
 
-type ViewTransitionDocument = Document & {
+type TransitionElement = HTMLElement & {
   startViewTransition?: (update: () => void) => { finished: Promise<void> };
 };
 
@@ -63,21 +63,18 @@ function nameBubbles(root: HTMLElement, ids: ReadonlySet<string> | null): HTMLEl
  * transitions, or with reduced motion, the update is at once.
  */
 async function swap(
-  scroller: HTMLElement,
+  root: HTMLElement | null,
   update: () => void,
   nameOld: () => HTMLElement[],
   nameNew: () => HTMLElement[],
 ) {
-  const start = (document as ViewTransitionDocument).startViewTransition?.bind(document);
-  if (!start || reducedMotion()) {
+  const start = (root as TransitionElement | null)?.startViewTransition?.bind(root);
+  if (!root || !start || reducedMotion()) {
     update();
     return;
   }
   const named = nameOld();
-  const root = document.documentElement;
   root.dataset.chainTransition = "";
-  const surface = scroller.closest<HTMLElement>("[data-chat-surface]");
-  if (surface) surface.dataset.chainActive = "";
   const motion = start(() => {
     for (const bubble of named.splice(0)) bubble.style.removeProperty(NAME);
     update();
@@ -86,7 +83,6 @@ async function swap(
   await motion.finished.catch(() => {});
   for (const bubble of named) bubble.style.removeProperty(NAME);
   delete root.dataset.chainTransition;
-  if (surface) delete surface.dataset.chainActive;
 }
 
 const px = (el: HTMLElement | null) => el?.offsetHeight ?? 0;
@@ -141,6 +137,7 @@ export function useChainFocus({
   fallback: (quoted: string) => void;
 }) {
   const layer = useRef<HTMLDivElement>(null);
+  const scope = useRef<HTMLDivElement>(null);
   const [focus, setFocus] = useState<ChainFocus | null>(null);
   const latest = useRef({ focus, sessionId, scroller, fallback });
   latest.current = { focus, sessionId, scroller, fallback };
@@ -178,7 +175,7 @@ export function useChainFocus({
       };
       const ids = new Set(page.messages.map((message) => message.id));
       await swap(
-        scroller,
+        scope.current,
         () => {
           flushSync(() => setFocus(next));
           if (layer.current) place(layer.current, from, y);
@@ -198,7 +195,7 @@ export function useChainFocus({
     try {
       const ids = new Set(focus.messages.map((message) => message.id));
       await swap(
-        scroller,
+        scope.current,
         () => flushSync(() => setFocus(null)),
         () => (layer.current ? nameBubbles(layer.current, null) : []),
         () => nameBubbles(scroller, ids),
@@ -351,5 +348,5 @@ export function useChainFocus({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [focused, close]);
 
-  return { focus, layer, open, close, more, onLive, onPage, reconcile };
+  return { focus, layer, scope, open, close, more, onLive, onPage, reconcile };
 }

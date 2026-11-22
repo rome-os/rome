@@ -40,6 +40,7 @@ afterEach(() => {
   rs.restoreAllMocks();
   rs.unstubAllGlobals();
   Reflect.deleteProperty(document, "startViewTransition");
+  Reflect.deleteProperty(Element.prototype, "startViewTransition");
 });
 
 function stubMedia(reduced: boolean) {
@@ -138,7 +139,7 @@ function Harness({ seen }: { seen: Seen }) {
   });
   return (
     <ReplyDraftProvider value={draft}>
-      <div data-chat-surface className="relative">
+      <div ref={focus.scope} data-message-list className="relative">
         <div ref={setScroller} data-testid="main">
           <div className="contents" style={focus.focus ? { visibility: "hidden" } : undefined}>
             <ConciergeTranscript rows={rows} live={idle} actions={actions} contentRef={() => {}} />
@@ -516,14 +517,18 @@ describe("the view transition", () => {
       during: {},
     };
     let end!: () => void;
-    const start = rs.fn((update: () => void) => {
+    const start = rs.fn(function (this: HTMLElement, update: () => void) {
+      expect(this).toBe(mainEl().closest("[data-message-list]"));
       for (const id of ["g1", "a1", "x1"]) seen.before[id] = nameOf(mainEl(), id);
       update();
       for (const id of ["g1", "a1", "x1"])
         seen.during[id] = nameOf(mainEl(), id) ?? nameOf(layer() ?? document, id);
       return { finished: new Promise<void>((resolve) => (end = resolve)) };
     });
-    Object.defineProperty(document, "startViewTransition", { value: start, configurable: true });
+    Object.defineProperty(Element.prototype, "startViewTransition", {
+      value: start,
+      configurable: true,
+    });
     return { start, seen, end: () => end() };
   }
 
@@ -538,12 +543,16 @@ describe("the view transition", () => {
     // Then on the layer's, and no longer on the chat's.
     expect(nameOf(mainEl(), "g1")).toBe("");
     expect(nameOf(layer()!, "g1")).toBe("tm-g1-0");
-    expect(document.documentElement.hasAttribute("data-chain-transition")).toBe(true);
-    expect(mainEl().closest("[data-chat-surface]")!.hasAttribute("data-chain-active")).toBe(true);
+    expect(document.documentElement.hasAttribute("data-chain-transition")).toBe(false);
+    expect(mainEl().closest("[data-message-list]")!.hasAttribute("data-chain-transition")).toBe(
+      true,
+    );
     await act(async () => motion.end());
     await waitFor(() => expect(nameOf(layer()!, "g1")).toBe(""));
     expect(document.documentElement.hasAttribute("data-chain-transition")).toBe(false);
-    expect(mainEl().closest("[data-chat-surface]")!.hasAttribute("data-chain-active")).toBe(false);
+    expect(mainEl().closest("[data-message-list]")!.hasAttribute("data-chain-transition")).toBe(
+      false,
+    );
   });
 
   it("closes the other way: the layer's names go to the chat's messages, and clear when it ends", async () => {
@@ -582,11 +591,18 @@ describe("the view transition", () => {
     expect(nameOf(layer()!, "g1")).toBe("");
   });
 
-  it("switches at once in a browser without view transitions", async () => {
+  it("switches at once without Element support, never falling back to the document API", async () => {
+    const documentStart = rs.fn();
+    Object.defineProperty(document, "startViewTransition", {
+      value: documentStart,
+      configurable: true,
+    });
     thread.mockResolvedValue(page(chain));
     renderChat();
     await pressQuote("a2");
     await waitFor(() => expect(layer()).not.toBeNull());
+    expect(documentStart).not.toHaveBeenCalled();
+    expect(document.querySelector("[data-chain-transition]")).toBeNull();
   });
 });
 

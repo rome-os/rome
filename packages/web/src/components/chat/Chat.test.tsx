@@ -3713,6 +3713,41 @@ describe("Chat Concierge jump to a message", () => {
       expect(seen.outlet).toBe(true);
     });
 
+    it("keeps one persistent message-list scope without capturing or remounting its header or shared composer", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3)],
+        nextCursor: null,
+      });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      await waitFor(() => expect(rows()).toBe(3));
+      const scope = document.querySelector("[data-message-list]")!;
+      const header = document.querySelector("[data-concierge-header]")!;
+      const composer = screen.getByTestId("chat-composer");
+      const floor = composer.closest("[data-chat-floor]");
+      expect(scope.contains(header)).toBe(false);
+      expect(scope.contains(composer)).toBe(false);
+      expect(scope.querySelector("[data-chat-floor-space]")).not.toBeNull();
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      await waitFor(() => expect(scope.querySelector("[data-chain-layer]")).not.toBeNull());
+      expect(document.querySelector("[data-message-list]")).toBe(scope);
+      expect(screen.getByTestId("chat-composer")).toBe(composer);
+      expect(composer.closest("[data-chat-floor]")).toBe(floor);
+      expect(header.isConnected).toBe(true);
+      fireEvent.click(screen.getByRole("button", { name: "reply.closeChain" }));
+      await waitFor(() => expect(scope.querySelector("[data-chain-layer]")).toBeNull());
+      expect(document.querySelector("[data-message-list]")).toBe(scope);
+      expect(screen.getByTestId("chat-composer")).toBe(composer);
+    });
+
     // A message of the guardian's that replies to m-1.
     const reply = (n: number) => ({
       ...message(n),
