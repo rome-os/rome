@@ -76,7 +76,7 @@ final class DemoBackend: RomeBackend {
     /// `longChat`: the full data with a main chat long enough to page, ending
     /// in a long digest that folds: what a cold launch from kept rows meets.
     /// It has more topic chats than the drawer's first page, too.
-    enum Variant { case full, empty, conciergeOff, updateRequired, updateOffered, manyApps, visitor, longChat }
+    enum Variant { case full, empty, conciergeOff, updateRequired, updateOffered, manyApps, visitor, longChat, olderTopics }
     private let variant: Variant
 
     init(variant: Variant = .full) {
@@ -91,6 +91,12 @@ final class DemoBackend: RomeBackend {
         if variant == .longChat {
             lengthenMainChat()
             addOlderTopicChats()
+        }
+        if variant == .olderTopics {
+            let ids: Set<String> = ["topic-home", "topic-trip", "topic-books", "topic-meals", "topic-location", "topic-mail"]
+            topicChats.removeAll { !ids.contains($0.id) }
+            for chat in topicChats { topicActivity[chat.id] = .now.addingTimeInterval(chat.id == "topic-home" ? -60 : -15 * 86400) }
+            topicPins["topic-books"] = .now
         }
     }
 
@@ -696,7 +702,7 @@ final class DemoBackend: RomeBackend {
             InstalledApp(id: "browser-automation", displayName: "Browser", description: "Ships with Rome", fullHref: "/full/apps/browser-automation", origin: "builtin"),
         ]
         switch variant {
-        case .full, .visitor, .updateOffered, .longChat:
+        case .full, .visitor, .updateOffered, .longChat, .olderTopics:
             return few
         case .manyApps:
             let names = ["记账本", "Recipes", "Workout plan", "家庭相册", "Plant care", "Budget", "单词卡片", "Meal planner",
