@@ -10,11 +10,15 @@ final class DemoLoginSocket: LoginSocket {
     private var waiting: CheckedContinuation<String?, Never>?
     private var closed = false
     private let loggedIn: () -> Void
+    /// How long a code takes to check; tests pass zero.
+    private let check: Duration
 
-    init(loggedIn: @escaping () -> Void) {
+    /// `beat`: how long the sign-in page takes to come.
+    init(beat: Duration = .seconds(1.2), check: Duration = .seconds(0.8), loggedIn: @escaping () -> Void) {
         self.loggedIn = loggedIn
+        self.check = check
         Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1.2))
+            if beat > .zero { try? await Task.sleep(for: beat) }
             self?.push(#"{"type":"auth_url","url":"https://claude.ai/oauth/authorize?code=true&client_id=demo"}"#)
         }
     }
@@ -37,7 +41,7 @@ final class DemoLoginSocket: LoginSocket {
 
     func send(_ text: String) async throws {
         guard let frame = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)), frame["type"]?.string == "submit_code" else { return }
-        try? await Task.sleep(for: .seconds(0.8))
+        if check > .zero { try? await Task.sleep(for: check) }
         if frame["code"]?.string?.lowercased() == "wrong" {
             push(#"{"type":"auth_error","message":"Invalid code"}"#)
         } else {

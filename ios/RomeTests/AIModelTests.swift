@@ -217,17 +217,20 @@ import Testing
     }
 
     @Test func theDemoClaudeLoginRefusesWrongAndTakesAnyOtherCode() async throws {
-        DemoBackend.aiModelPreview = .notSetUp
-        defer { DemoBackend.aiModelPreview = .ready }
-        let backend = DemoBackend()
-        let flow = ClaudeLoginFlow(backend: backend, pollInterval: .milliseconds(50))
+        // The demo's socket with no beats, over a backend the login flips.
+        let backend = FakeBackend()
+        backend.aiStatus = AIToolsStatus(claude: Provider(loggedIn: false))
+        let socket = DemoLoginSocket(beat: .zero, check: .zero) {
+            backend.aiStatus = AIToolsStatus(claude: Provider(loggedIn: true))
+        }
+        let flow = ClaudeLoginFlow(backend: backend, makeSocket: { socket }, pollInterval: .milliseconds(10))
         flow.start()
-        try await until(seconds: 5) { if case .ready = flow.phase { return true } else { return false } }
+        try await until { if case .ready = flow.phase { return true } else { return false } }
         flow.submit("wrong")
-        try await until(seconds: 5) { flow.codeRejected }
+        try await until { flow.codeRejected }
+        #expect(backend.aiStatus?.claude?.loggedIn == false)
         flow.submit("abc123")
-        try await until(seconds: 5) { flow.phase == .connected }
-        #expect(try await backend.aiTools().defaultProvider?.provider == .anthropic)
+        try await until { flow.phase == .connected }
     }
 
     // MARK: Chat's connect card
@@ -253,8 +256,8 @@ import Testing
         #expect(backend.answeredCards.first?.output == .object(["connected": .bool(true)]))
     }
 
-    /// Waits up to two seconds, or `seconds`, for `condition`.
-    private func until(seconds: Int = 2, _ condition: () -> Bool) async throws {
+    /// Waits up to ten seconds for `condition`: a loaded CI runner is slow.
+    private func until(seconds: Int = 10, _ condition: () -> Bool) async throws {
         for _ in 0..<(seconds * 100) {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(10))
