@@ -803,22 +803,46 @@ describe("Concierge tools", () => {
       return found.handler(input);
     };
 
-    it("starts a task that reports to that chat, and links it by the dashboard's address", async () => {
+    it("starts a task that reports to that chat, and links it by the dashboard's public address", async () => {
       const s = setup();
       const chatId = await connectionChat(s);
-      const result = await run(there(s, chatId, "guardian"), s, "chat_start", {
-        title: "Flights",
-        brief: "Find flights to Tokyo",
-      });
+      const before = process.env.PANTHEON_INSTANCE_ORIGIN;
+      process.env.PANTHEON_INSTANCE_ORIGIN = "https://ray.romeos.test";
+      let result: Awaited<ReturnType<typeof run>>;
+      try {
+        result = await run(there(s, chatId, "guardian"), s, "chat_start", {
+          title: "Flights",
+          brief: "Find flights to Tokyo",
+        });
+      } finally {
+        if (before === undefined) delete process.env.PANTHEON_INSTANCE_ORIGIN;
+        else process.env.PANTHEON_INSTANCE_ORIGIN = before;
+      }
       expect(result.isError).toBeFalsy();
       const started = JSON.parse(result.content[0]!.text) as { chatId: string; link: string };
-      expect(started.link).toMatch(
-        new RegExp(`^\\[Flights\\]\\(https?://[^)]+/chat/${started.chatId}\\)$`),
-      );
+      expect(started.link).toBe(`[Flights](https://ray.romeos.test/chat/${started.chatId})`);
       const found = await s.taskRepo.getWithChat(started.chatId);
       expect(found?.conciergeChat).toMatchObject({ id: chatId, main: false, onConnection: true });
       // Its news goes to that chat while it is live, not to the main chat.
       expect(await s.service.deliveryChat(chatId, "guardian")).toBe(chatId);
+    });
+
+    it("names the task by its title alone where the dashboard has no public address", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const saved = { ...process.env };
+      for (const key of ["PANTHEON_INSTANCE_ORIGIN", "PANTHEON_DOMAIN", "ROME_INSTANCE_SLUG"]) {
+        delete process.env[key];
+      }
+      try {
+        const result = await run(there(s, chatId, "guardian"), s, "chat_start", {
+          title: "Flights",
+          brief: "Find flights to Tokyo",
+        });
+        expect((JSON.parse(result.content[0]!.text) as { link: string }).link).toBe("Flights");
+      } finally {
+        process.env = saved;
+      }
     });
 
     it("reacts to the guardian's message of the turn through the chat's account", async () => {

@@ -162,8 +162,10 @@ export function chatTaskListRoutes(deps: TaskListApiDeps): Hono {
     const at = await gate(c);
     if (at instanceof Response) return at;
     const taskId = c.req.param("taskId");
-    const found = await at.concierge.deps.tasks.repo.getWithChat(taskId);
-    if (!found || found.owner !== at.owner || found.conciergeChat.id !== at.chatId) {
+    // The chat's list decides, as for Done: the main chat's also holds the
+    // tasks started from a chat on a connection.
+    const { tasks } = await at.list.parts(at.chatId, at.owner);
+    if (!tasks.some((found) => found.task.id === taskId)) {
       return c.json({ error: "No such task in this chat" }, 404);
     }
     await at.concierge.stopTask(taskId, "guardian");

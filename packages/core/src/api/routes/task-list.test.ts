@@ -379,6 +379,23 @@ describe("/chats/:chatId/tasks", () => {
     expect(calls).toEqual([`stop ${flights.id} guardian`]);
   });
 
+  it("stops a task started from a chat on a connection from the main chat's list", async () => {
+    // A Discord chat has no task list of its own: its tasks show in the main chat's.
+    const { id: discordChat } = await chats.ensureChannelChat({
+      channel: "discord_app",
+      threadId: "900",
+      threadType: "private",
+      agentName: "core:concierge",
+    });
+    const flights = await task({ title: "Flights", chatId: discordChat });
+    const stop = (chatId: string) =>
+      app().request(`/chats/${chatId}/tasks/${flights.id}/stop`, { ...guardian, method: "POST" });
+
+    expect((await stop("ann-main")).status).toBe(404);
+    expect((await stop("concierge")).status).toBe(200);
+    expect(calls).toEqual([`stop ${flights.id} guardian`]);
+  });
+
   it("answers a task link for a task chat of any of the caller's own Concierge chats", async () => {
     const flights = await task({ title: "Flights" });
     await chats.createSession(

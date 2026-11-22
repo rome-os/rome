@@ -47,7 +47,7 @@ import { openQuestion } from "./transcript.js";
 import { automatedSource } from "../webchat/automated-source.js";
 import { replyQuoteOf } from "../webchat/reply-quote.js";
 import { GUARDIAN_OWNER, ownerOf } from "../webchat/owner.js";
-import { getInstanceOrigin } from "../instance/rome-cloud-origin.js";
+import { getConfiguredInstanceOrigin } from "../instance/rome-cloud-origin.js";
 import { CONNECTION_TOOLS, conciergePlaceSetup } from "./on-connection.js";
 import { partsText } from "../chats/storage/message.js";
 import type { BondLevel } from "@rome-os/app-runtime";
@@ -295,11 +295,15 @@ export async function buildConciergeTools(
   };
 
   // A task's link as this chat shows it: a chip on the dashboard, and the
-  // dashboard's address on a connection, where a chip means nothing.
-  const linkOf = (title: string, chatId: string) =>
-    onConnection
-      ? `[${title.replace(/[[\]]/g, "")}](${getInstanceOrigin()}/chat/${encodeURIComponent(chatId)})`
-      : taskLink(title, chatId);
+  // dashboard's public address on a connection, where a chip means nothing.
+  // With no public address, only the title: a loopback address opens nowhere
+  // on the guardian's phone.
+  const linkOf = (title: string, chatId: string) => {
+    if (!onConnection) return taskLink(title, chatId);
+    const plain = title.replace(/[[\]]/g, "");
+    const origin = getConfiguredInstanceOrigin();
+    return origin ? `[${plain}](${origin}/chat/${encodeURIComponent(chatId)})` : plain;
+  };
 
   const taskProjectPath = async (project: string | undefined) =>
     project === undefined
