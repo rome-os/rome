@@ -877,6 +877,16 @@
         }
       }
     },
+    "Audio" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音频"
+          }
+        }
+      }
+    },
     "Automatic" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6213,6 +6223,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "通常 %@"
+          }
+        }
+      }
+    },
+    "Video" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "视频"
           }
         }
       }
