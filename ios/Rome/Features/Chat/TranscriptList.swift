@@ -53,12 +53,7 @@ struct TranscriptList<Row: View>: View {
                         }
                     }
                 },
-                onDividerAbove: { [pill = store.unreadPill] in pill.dividerAbove($0) },
-                replyTarget: { [store] row in
-                    guard !store.share.isSelecting, store.info(for: row).canReply, let id = row.messageId else { return nil }
-                    return id
-                },
-                onSwipeReply: { [actions = store.actions] message, row in actions.reply(to: message, row: row) }
+                onDividerAbove: { [pill = store.unreadPill] in pill.dividerAbove($0) }
             )
             .environment(\.shareTurns, store.share.isSelecting ? ShareTurns(messages: store.messages, rows: rows) : nil)
             .environment(\.textSelection, store.textSelection)
@@ -96,7 +91,7 @@ struct TranscriptList<Row: View>: View {
         .onChange(of: store.arrivals) {
             if !scroll.following { scroll.unseen += 1 }
         }
-        // A Reply, from a swipe or the menu: the replied message stays in
+        // A Reply from the menu: the replied message stays in
         // view as the keyboard comes up (`TranscriptScroll.keep`).
         .onChange(of: store.replies) {
             repliedAt = .now
@@ -319,9 +314,6 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
     let row: (TranscriptRow, TranscriptRow?) -> Row
     let onNearTop: () -> Void
     let onDividerAbove: (Bool) -> Void
-    /// The message a swipe on the row replies to; nil where it takes none.
-    let replyTarget: (TranscriptRow) -> String?
-    let onSwipeReply: (_ message: String, _ row: String) -> Void
 
     func makeCoordinator() -> TranscriptCoordinator<Row> {
         TranscriptCoordinator(row: row, alignTop: alignTop)
@@ -342,8 +334,6 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
         coordinator.row = row
         coordinator.onNearTop = onNearTop
         coordinator.onDividerAbove = onDividerAbove
-        coordinator.replyTarget = replyTarget
-        coordinator.swipe.onReply = onSwipeReply
         coordinator.scroll = scroll
         coordinator.selection = selection
         scroll.target = coordinator
@@ -361,8 +351,6 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     var row: (TranscriptRow, TranscriptRow?) -> RowView
     var onNearTop: () -> Void = {}
     var onDividerAbove: (Bool) -> Void = { _ in }
-    var replyTarget: (TranscriptRow) -> String? = { _ in nil }
-    let swipe = SwipeToReply()
     weak var scroll: TranscriptScroll?
     /// The transcript's select mode, which a scroll or a tap outside the message ends.
     weak var selection: TextSelection?
@@ -426,12 +414,6 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
             view.topEdgeEffect.isHidden = true
         }
         view.delegate = self
-        swipe.target = { [weak self] indexPath in
-            guard let self, let id = self.items[safe: indexPath.item], let box = self.boxes[id],
-                  let message = self.replyTarget(box.row) else { return nil }
-            return (message, id)
-        }
-        swipe.attach(to: view)
         let tap = UITapGestureRecognizer(target: self, action: #selector(tappedOutsideSelection))
         tap.cancelsTouchesInView = false
         tap.delegate = self
@@ -1013,8 +995,6 @@ private final class TranscriptCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         taken = 0
-        // A swipe to Reply moves the row by this.
-        contentView.transform = .identity
     }
 
     /// A newer row draws over an older one: a bubble's mark sits half over
