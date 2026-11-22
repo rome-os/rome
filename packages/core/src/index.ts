@@ -1758,6 +1758,11 @@ async function main() {
     },
     // A newer message in the chat answers instead of a card's resumed turn.
     movedOnSince: (chatId, since) => webchatRepo.chatMovedOnSince(chatId, since),
+    // A card still the chat's newest message is rewritten in place on a repeat refusal.
+    newestMessageId: async (chatId) => {
+      const { rows } = await webchatRepo.getMessagesPage(chatId, { limit: 1 });
+      return rows.filter((row) => row.role !== "trace").at(-1)?.id ?? null;
+    },
     // A quota card promises only what the usage-limit continuation will do.
     continuesAfterLimit: (chatId, until) =>
       usageLimitContinuationTakes(webchatRepo, chatId, Date.parse(until), modelAccounts.read()),
