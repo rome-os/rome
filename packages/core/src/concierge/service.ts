@@ -23,7 +23,6 @@ import type { WebChatRepository } from "../webchat/repository.js";
 import type { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { SkillCatalog } from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
-import { selectionOfModel } from "../webchat/chat-providers.js";
 import type { AgentTurnFailedBeforeStart } from "../agent/index.js";
 import type { Sessions } from "../agent/index.js";
 import {
@@ -956,13 +955,8 @@ export class ConciergeService {
       (this.leftModels.get(modelKey(MODEL_SELECTIONS[target.selectionId].model)) ?? 0) > Date.now()
     )
       return null;
-    // A chat with no stored model keeps the one it ran, as Rome's choice, so
-    // the turn after the swap resolves it again rather than the swapped one.
-    const own = stored?.id ?? selectionOfModel(fromModel);
-    if (!stored && own) {
-      await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, own, "auto");
-      session.selectModel(own);
-    }
+    // Nothing is stored: the session's pin keeps its own model, so the turn
+    // after the swap resolves that one again.
     session.selectModelForOneTurn(target.selectionId);
     this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);
     await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [

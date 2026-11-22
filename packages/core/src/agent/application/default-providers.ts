@@ -76,6 +76,12 @@ export interface CreateDefaultProvidersOptions {
    */
   creditsEnabled: () => boolean | undefined;
   /**
+   * Whether Rome credits can be spent now: enabled, linked, with a balance.
+   * Only then does the last logout hand them the default, as its dialog
+   * says. Absent, enabled credits count.
+   */
+  creditsUsable?: () => boolean;
+  /**
    * The provider an upgrade starts from when one is signed in, ahead of the
    * old order: the provider the Concierge main chat already runs on.
    */
@@ -153,6 +159,7 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
         state.provider,
         now_,
         seeded && now_[seeded] ? seeded : legacyDefault(reports, now_),
+        options.creditsUsable?.() ?? true,
       );
       if (!provider || provider === state.provider) return;
       const from = state.provider;

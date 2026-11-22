@@ -1108,6 +1108,8 @@ async function main() {
     accounts: modelAccounts,
     providers: ["anthropic", "openai"],
     creditsEnabled: () => codexLoginChoice.creditsEnabled(),
+    // The last logout hands the default to credits only when they can be spent.
+    creditsUsable: () => codexLoginChoice.creditsUsable(),
     // An upgrade keeps the Concierge where it runs: the provider of the model
     // Rome chose for the guardian's main chat, when it has one.
     seed: async () => {

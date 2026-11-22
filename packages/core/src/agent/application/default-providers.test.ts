@@ -18,6 +18,7 @@ function keeper(
   options: {
     stored?: DefaultProviderState;
     credits?: () => boolean | undefined;
+    creditsUsable?: () => boolean;
     seed?: () => Promise<"anthropic" | "openai" | null>;
   } = {},
 ) {
@@ -40,6 +41,7 @@ function keeper(
     },
     providers: ["anthropic", "openai"],
     creditsEnabled: options.credits ?? (() => false),
+    ...(options.creditsUsable ? { creditsUsable: options.creditsUsable } : {}),
     beforeChange: async (change) => {
       changes.push({ ...change, storedBefore: stored });
     },
@@ -117,6 +119,33 @@ describe("the default provider as Rome keeps it", () => {
     expect(defaults.current()).toBe("rome_credits");
     expect(defaults.note()).toMatchObject({ from: "anthropic", to: "rome_credits" });
     expect(changes.at(-1)).toMatchObject({ to: "rome_credits", by: "removed", moveExisting: true });
+  });
+
+  it("the default stays on the last logout when enabled credits have no balance", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("unauthorized"),
+    };
+    const { defaults, changes } = keeper(reports, {
+      stored: { provider: "anthropic" },
+      credits: () => true,
+      creditsUsable: () => false,
+    });
+    reports.anthropic = reportOf("unauthorized");
+    await defaults.reconcile();
+    // As the logout dialog said: the chats pause, and nothing moves.
+    expect(defaults.current()).toBe("anthropic");
+    expect(changes).toHaveLength(0);
+  });
+
+  it("keeps a default of Rome credits when their balance empties", async () => {
+    const { defaults, changes } = keeper(
+      { anthropic: reportOf("unauthorized"), openai: reportOf("unauthorized") },
+      { stored: { provider: "rome_credits" }, credits: () => true, creditsUsable: () => false },
+    );
+    await defaults.reconcile();
+    expect(defaults.current()).toBe("rome_credits");
+    expect(changes).toHaveLength(0);
   });
 
   it("the default stays on the last logout when Rome credits cannot run either", async () => {

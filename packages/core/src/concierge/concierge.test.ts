@@ -4295,6 +4295,22 @@ describe("Concierge provider recovery", () => {
       ],
     );
   });
+  it("an overload swap lasts one turn: a chat that follows by its tier stores nothing", async () => {
+    const { s } = await prepared({ startEvents: false });
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, null, "auto");
+    s.deps.sessionRepository.current = rs.fn(
+      async () => ({ provider: "anthropic", model: "claude-opus-5-5[1m]" }) as never,
+    );
+    const session = { selectModel: rs.fn(), selectModelForOneTurn: rs.fn() };
+    (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue(session);
+    (s.deps.webchatRepo.updateSessionLargeModelSelection as ReturnType<typeof rs.fn>).mockClear();
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Opus limit")),
+    ).toMatchObject({ selectionId: "claude-sonnet" });
+    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).not.toHaveBeenCalled();
+    expect(session.selectModel).not.toHaveBeenCalled();
+    expect(session.selectModelForOneTurn).toHaveBeenCalledWith("claude-sonnet");
+  });
   it("an overload swap needs the chat's live session, and moves nothing without one", async () => {
     const { s } = await prepared({ startEvents: false });
     (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue(undefined);

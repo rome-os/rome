@@ -3430,7 +3430,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // from its next turn, at the strength it runs now.
   app.post("/chat/sessions/:id/model/follow-default", async (c) => {
     const sessionId = c.req.param("id");
-    const lookup = await getTopLevelWebchatSession(c, sessionId);
+    // A fork chat the guardian can keep talking to is held as any chat is.
+    const lookup = await getContinuableSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     if (!deps.chatProviders) return c.json({ error: "Not available" }, 404);
     await deps.chatProviders.follow(sessionId);
