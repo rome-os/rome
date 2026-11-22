@@ -53,7 +53,7 @@ SETTINGS_FILE="$RUN_DIR/settings"
 # Rome changes merged into the build, in order, separated by spaces. Each is a
 # pull request as #<number>, a remote branch as origin/<branch>, or any commit.
 # Empty builds this branch as it is.
-AGENT_REFS="${COS_AGENT_REF-${SAVED_AGENT_REF-#2173}}"
+AGENT_REFS="${COS_AGENT_REF-${SAVED_AGENT_REF-}}"
 # The chief of staff app, from its own private repository, installed into the
 # running Rome the way a guardian installs an app from source. The devbox's
 # GitHub sign-in fetches it, so no token enters the container.
