@@ -90,6 +90,7 @@ const OUTPUT_TYPES = [
 ] as const;
 export type OutputType = (typeof OUTPUT_TYPES)[number];
 
+/** The iOS app's `ChatOutputType` sorts files the same way: change both together. */
 export function outputTypeOf(output: Pick<ChatOutput, "name" | "mimeType">): OutputType {
   const extension = /\.([a-z0-9]+)$/i.exec(output.name)?.[1]?.toLowerCase() ?? "";
   const mimeType = output.mimeType ?? "";
