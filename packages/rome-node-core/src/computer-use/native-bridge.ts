@@ -338,18 +338,35 @@ function unavailable(error: unknown): boolean {
   );
 }
 
-function assertComputerUseImplementation(value: unknown, asset: ComputerUseApp): void {
+function matchesComputerUseImplementation(value: unknown, asset: ComputerUseApp): boolean {
   const hello = parseComputerUseHello(value);
-  if (
-    hello.bundleId !== "com.rome.computer-use" ||
-    hello.implementationSha256 !== asset.implementationSha256 ||
-    hello.architecture !== asset.architecture
-  )
+  return (
+    hello.bundleId === "com.rome.computer-use" &&
+    hello.implementationSha256 === asset.implementationSha256 &&
+    hello.architecture === asset.architecture
+  );
+}
+
+function assertComputerUseImplementation(value: unknown, asset: ComputerUseApp): void {
+  if (!matchesComputerUseImplementation(value, asset))
     throw new ComputerUseError(
       "helper_update_required",
       "A different or unidentified helper is running. Finish its work and close it before starting this version.",
       { effectStatus: "not_dispatched" },
     );
+}
+
+function isIdleMismatchedHelper(value: unknown, asset: ComputerUseApp): boolean {
+  const hello = parseComputerUseHello(value);
+  return (
+    hello.bundleId === "com.rome.computer-use" &&
+    typeof hello.implementationSha256 === "string" &&
+    (hello.implementationSha256 !== asset.implementationSha256 ||
+      hello.architecture !== asset.architecture) &&
+    hello.activeSessions === 0 &&
+    isRecord(hello.execution) &&
+    hello.execution.busy === false
+  );
 }
 
 /** A default package stages its signed app at a stable per-user path before launching it. */
@@ -371,27 +388,78 @@ export function createComputerUseNativeBridge(
   async function initialize(): Promise<ComputerUseApp> {
     const source = await inspectComputerUseApp(computerUseAppPath(options));
     const canonicalStateDir = await privateComputerUseDirectory(stateDir);
+    const until = Date.now() + (options.startupTimeoutMs ?? 10_000);
+    let handedOff = false;
     try {
-      assertComputerUseImplementation(await callSocket("hello", {}), source);
-      return source;
+      const helloValue = await callSocket("hello", {});
+      try {
+        assertComputerUseImplementation(helloValue, source);
+        return source;
+      } catch (error) {
+        if (!isIdleMismatchedHelper(helloValue, source)) throw error;
+        // The helper is an LSUIElement with no Dock icon; after an auto-update or CLI upgrade,
+        // ask an idle older Rome helper to shut down so we can stage and start this version.
+        try {
+          await callSocket("shutdown", {}, (currentHello) => {
+            if (!isIdleMismatchedHelper(currentHello, source)) {
+              assertComputerUseImplementation(currentHello, source);
+              return false;
+            }
+          });
+        } catch (shutdownError) {
+          if (
+            !(shutdownError instanceof ComputerUseError) ||
+            !["helper_connection_lost", "helper_unavailable"].includes(shutdownError.code)
+          )
+            throw error;
+        }
+        for (;;) {
+          try {
+            const currentHello = await callSocket("hello", {});
+            if (matchesComputerUseImplementation(currentHello, source)) return source;
+          } catch (pollError) {
+            if (unavailable(pollError)) {
+              handedOff = true;
+              break;
+            }
+          }
+          if (Date.now() >= until) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
     } catch (error) {
       if (!unavailable(error)) throw error;
     }
     const explicit =
       options.appPath !== undefined || process.env.ROME_COMPUTER_USE_APP !== undefined;
-    const until = Date.now() + (options.startupTimeoutMs ?? 10_000);
-    try {
-      const app = explicit ? source : await prepareComputerUseApp(source, canonicalStateDir);
-      await runFile(
-        "/usr/bin/open",
-        ["-g", "-a", app.path, "--args", "--state-dir", canonicalStateDir],
-        {
-          timeout: Math.max(1, until - Date.now()),
-        },
-      );
-    } catch (error) {
-      // Another caller can win the install/service lock after our first hello.
-      if (!(error instanceof ComputerUseError) || error.code !== "helper_install_busy") throw error;
+    for (;;) {
+      try {
+        const app = explicit ? source : await prepareComputerUseApp(source, canonicalStateDir);
+        await runFile(
+          "/usr/bin/open",
+          ["-g", "-a", app.path, "--args", "--state-dir", canonicalStateDir],
+          {
+            timeout: Math.max(1, until - Date.now()),
+          },
+        );
+        break;
+      } catch (error) {
+        // Right after idle shutdown, the exiting helper can unlink helper.sock slightly before
+        // closing service.lock; retry briefly before assuming another caller won the lock.
+        if (
+          handedOff &&
+          error instanceof ComputerUseError &&
+          error.code === "helper_install_busy" &&
+          Date.now() < until
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          continue;
+        }
+        // Another caller can win the install/service lock after our first hello.
+        if (!(error instanceof ComputerUseError) || error.code !== "helper_install_busy")
+          throw error;
+        break;
+      }
     }
     for (;;) {
       try {

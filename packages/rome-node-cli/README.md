@@ -160,7 +160,7 @@ foreground for diagnosis. Set `ROME_NODE_CONFIG_DIR` to isolate configurations.
 
 `rome-node watch` subscribes to caller connection changes and prints one JSON
 event per line. It starts the daemon if needed and begins with a snapshot.
-After a connection loss it waits for the daemon and subscribes again. it does
+After a connection loss it waits for the daemon and subscribes again; it does
 not restart a stopped daemon. Ctrl+C closes only the watcher. These events
 report the caller's Gateway connection, not remote device presence.
 

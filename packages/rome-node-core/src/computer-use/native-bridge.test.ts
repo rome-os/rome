@@ -546,4 +546,119 @@ describe("native computer-use transport", () => {
     expect(await f.bridge.call("hello", {})).toEqual({ ok: true });
     expect(f.calls).toHaveLength(1);
   });
+
+  it("hands off an idle older Rome helper via shutdown and stages the new version", async () => {
+    const source = {
+      path: "/bundled/app",
+      requirement: "stable",
+      implementationSha256: "a".repeat(64),
+      executableSha256: "b".repeat(64),
+      architecture: "arm64" as const,
+    };
+    const installed = { ...source, path: "/stable/app" };
+    const oldHello = {
+      protocolVersion: 1,
+      bundleId: "com.rome.computer-use",
+      permissions: { accessibility: true, screenCapture: true },
+      capabilities: { actions: [] },
+      architecture: "arm64",
+      implementationSha256: "9".repeat(64),
+      activeSessions: 0,
+      execution: { busy: false },
+    };
+    const newHello = {
+      ...oldHello,
+      implementationSha256: source.implementationSha256,
+    };
+    let phase: "old" | "down" | "new" = "old";
+    const f = await server((request, send, fail) => {
+      if (phase === "old") {
+        if (request.method === "hello") send(oldHello);
+        else if (request.method === "shutdown") {
+          phase = "down";
+          send({ stopping: true });
+        }
+      } else if (phase === "down") {
+        fail({
+          code: "helper_unavailable",
+          message: "Old helper exited",
+          details: { socketCode: "ENOENT", effectStatus: "not_dispatched" },
+        });
+      } else {
+        send(newHello);
+      }
+    });
+    assets.inspect.mockResolvedValue(source);
+    assets.prepare
+      .mockRejectedValueOnce(new ComputerUseError("helper_install_busy", "Lock still closing"))
+      .mockResolvedValueOnce(installed);
+    assets.launch.mockImplementation((...args: unknown[]) => {
+      phase = "new";
+      (args.at(-1) as (error: null, stdout: string, stderr: string) => void)(null, "", "");
+    });
+    const bridge = createComputerUseNativeBridge({
+      bundledAppPath: source.path,
+      stateDir: f.stateDir,
+      startupTimeoutMs: 2_000,
+    });
+    expect(await bridge.call("hello", {})).toEqual(newHello);
+    expect(f.connections).toEqual([
+      ["hello"],
+      ["hello", "shutdown"],
+      ["hello"],
+      ["hello"],
+      ["hello"],
+    ]);
+    expect(assets.prepare).toHaveBeenCalledTimes(2);
+    expect(assets.launch).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses shutdown and fails closed when a mismatched helper is busy or gains a session", async () => {
+    const source = {
+      path: "/bundled/app",
+      requirement: "stable",
+      implementationSha256: "a".repeat(64),
+      executableSha256: "b".repeat(64),
+      architecture: "arm64" as const,
+    };
+    const oldHello = {
+      protocolVersion: 1,
+      bundleId: "com.rome.computer-use",
+      permissions: { accessibility: true, screenCapture: true },
+      capabilities: { actions: [] },
+      architecture: "arm64",
+      implementationSha256: "9".repeat(64),
+      activeSessions: 0,
+      execution: { busy: false },
+    };
+    let helloCount = 0;
+    let mode: "active_session" | "busy" | "raced" = "active_session";
+    const f = await server((request, send) => {
+      if (request.method === "hello") {
+        helloCount++;
+        if (mode === "active_session") send({ ...oldHello, activeSessions: 1 });
+        else if (mode === "busy") send({ ...oldHello, execution: { busy: true } });
+        else send(helloCount === 1 ? oldHello : { ...oldHello, activeSessions: 1 });
+      } else {
+        send({ stopping: true });
+      }
+    });
+    assets.inspect.mockResolvedValue(source);
+    for (const nextMode of ["active_session", "busy", "raced"] as const) {
+      mode = nextMode;
+      helloCount = 0;
+      const bridge = createComputerUseNativeBridge({
+        bundledAppPath: source.path,
+        stateDir: f.stateDir,
+        startupTimeoutMs: 500,
+      });
+      await expect(bridge.call("hello", {})).rejects.toMatchObject({
+        code: "helper_update_required",
+        details: { effectStatus: "not_dispatched" },
+      });
+    }
+    expect(f.calls.some((call) => call.method === "shutdown")).toBe(false);
+    expect(assets.prepare).not.toHaveBeenCalled();
+    expect(assets.launch).not.toHaveBeenCalled();
+  });
 });
