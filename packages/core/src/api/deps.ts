@@ -251,7 +251,7 @@ export interface ApiDeps {
    */
   chatProviders?: Pick<
     ChatProviders,
-    "followingCount" | "heldProvider" | "follow" | "release" | "picked"
+    "followingCount" | "heldProvider" | "follow" | "release" | "pick"
   >;
   /** Rome credits can be spent now: linked, enabled and with a balance. */
   romeCreditsUsable?: () => boolean;

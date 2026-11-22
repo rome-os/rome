@@ -314,29 +314,30 @@ describe("an unchecked move keeps every existing chat", () => {
   });
 
   it("a model pick on another provider takes the hold there, so subagents follow the chat", async () => {
-    const { providers } = await setup();
+    const { providers, row, selected } = await setup();
     await providers.beforeDefaultChange(unchecked);
     expect(providers.heldProvider("webchat:fast:subagent:abc")).toBe("anthropic");
-    await providers.picked("fast", "openai");
+    await providers.pick("fast", "gpt-6-1-sol");
+    expect(await row("fast")).toEqual({ selection: "gpt-6-1-sol", by: "owner" });
+    expect(selected.at(-1)).toEqual(["fast", "gpt-6-1-sol"]);
     expect(providers.heldProvider("webchat:fast")).toBe("openai");
     expect(providers.heldProvider("webchat:fast:subagent:abc")).toBe("openai");
+    // Auto lets the conversation go.
+    await providers.pick("fast", null);
+    expect(providers.heldProvider("webchat:fast")).toBeUndefined();
     // A chat that is not held stays unheld.
-    await providers.picked("empty", "openai");
+    await providers.pick("empty", "gpt-6-1-sol");
     expect(providers.heldProvider("webchat:empty")).toBeUndefined();
   });
 
-  it("a card's switch and Back to default at once leave the chat in one consistent state", async () => {
-    const { providers, row } = await setup({ currentDefault: "openai", slowWrites: true });
-    await Promise.all([providers.keep("fast", "anthropic"), providers.follow("fast")]);
+  it("an owner's pick and a card's switch at once leave the chat and its hold agreeing", async () => {
+    const { providers, row } = await setup({ slowWrites: true });
+    await providers.beforeDefaultChange(unchecked);
+    await Promise.all([providers.keep("fast", "anthropic"), providers.pick("fast", "gpt-6-1-sol")]);
     const after = await row("fast");
-    // Either order alone: kept on Claude and held there, or following the default and not held.
-    if (after.by === "kept") {
-      expect(MODEL_SELECTIONS[after.selection as "claude-sonnet"].providerId).toBe("anthropic");
-      expect(providers.heldProvider("webchat:fast")).toBe("anthropic");
-    } else {
-      expect(after.by).toBe("auto");
-      expect(providers.heldProvider("webchat:fast")).toBeUndefined();
-    }
+    const on = MODEL_SELECTIONS[after.selection as "gpt-6-1-sol"].providerId;
+    // Whichever ran last, the parent's model and its subagents' hold name one provider.
+    expect(providers.heldProvider("webchat:fast:subagent:abc")).toBe(on);
   });
 
   it("holds only conversations active in the last 30 days", async () => {

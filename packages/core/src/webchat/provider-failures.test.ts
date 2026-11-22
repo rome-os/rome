@@ -71,7 +71,7 @@ function harness(
   const swaps: string[] = [];
   const kept: Array<{ chatId: string; provider: string }> = [];
   const followed: string[] = [];
-  const picked: Array<{ chatId: string; provider: string }> = [];
+  const picked: Array<{ chatId: string; selection: string | null }> = [];
   const chose: Array<{ provider: string; moveExisting?: boolean }> = [];
   const selected: Array<{ chatId: string; selection: string | null }> = [];
   const accountListeners = new Set<
@@ -110,8 +110,12 @@ function harness(
         followed.push(chatId);
         return null;
       },
-      picked: async (chatId, provider) => {
-        picked.push({ chatId, provider });
+      pick: async (chatId, selection) => {
+        picked.push({ chatId, selection });
+        if (chats[chatId]) {
+          chats[chatId].largeModelSelection = selection;
+          chats[chatId].largeModelSelectionBy = "owner";
+        }
       },
     },
     webchatRepo: {
@@ -969,7 +973,7 @@ describe("a card's options stay as written, and Retry is on every card", () => {
     await h.fail("chat", quota);
     const [card] = await h.failures.cards();
     await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
-    expect(h.picked).toEqual([{ chatId: "chat", provider: "openai" }]);
+    expect(h.picked).toEqual([{ chatId: "chat", selection: "gpt-6-1-sol" }]);
   });
 
   it("an error other than a logged-out provider stays an error, not a fresh card", async () => {

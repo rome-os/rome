@@ -158,10 +158,12 @@ export interface ChatProviders {
    */
   release(chatId: string): Promise<void>;
   /**
-   * The chat's owner picked a model on `provider`: a conversation held
-   * elsewhere moves its hold there, so its subagents stay with it.
+   * The chat's owner picks `selection`, or Auto with null, as one transition:
+   * the chat stores it, its live session runs it next, and its hold follows.
+   * Auto lets a held conversation go. A pick on another provider moves the
+   * hold there, so its subagents stay with it.
    */
-  picked(chatId: string, provider: AccountedProviderId): Promise<void>;
+  pick(chatId: string, selection: ModelSelectionId | null): Promise<void>;
   /**
    * How many chats a change of the default that moves existing chats would
    * move: those that follow it, the kept ones it lets follow it again, and
@@ -377,11 +379,19 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
       serial(async () => {
         await changeHeld((map) => map.delete(webchatSessionKey(chatId)));
       }),
-    picked: (chatId, provider) =>
+    pick: (chatId, selection) =>
       serial(async () => {
+        const chat = await deps.webchatRepo.getSession(chatId);
+        if (!chat) return;
+        await deps.webchatRepo.updateSessionLargeModelSelection(chatId, selection, "owner");
+        deps.selectModel(chatId, chat.agentName ?? null, selection);
         const key = webchatSessionKey(chatId);
+        const provider = selection ? MODEL_SELECTIONS[selection].providerId : null;
         await changeHeld((map) => {
-          if (map.has(key)) map.set(key, provider);
+          if (provider === null) map.delete(key);
+          else if (map.has(key) && (provider === "anthropic" || provider === "openai")) {
+            map.set(key, provider);
+          }
         });
       }),
     async followingCount() {
