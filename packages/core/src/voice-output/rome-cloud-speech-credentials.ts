@@ -30,7 +30,8 @@ const RENEW_BEFORE_EXPIRY_MS = 5 * 60_000;
 // A stream opened just before the key expired speaks for up to 5 minutes more,
 // and its usage is counted when its sentence ends.
 const REPORT_AFTER_EXPIRY_MS = 6 * 60_000;
-// How long to wait before reporting again after a report could not be queued.
+// How long to wait before reporting again after a report could not be queued,
+// or the stored sessions could not be read.
 const REPORT_RETRY_MS = 60_000;
 // The longest delay setTimeout takes.
 const MAX_TIMER_MS = 2 ** 31 - 1;
@@ -110,6 +111,13 @@ export function createRomeCloudSpeechCredentials(
     return run;
   };
 
+  // Reports again after a while, while the sessions cannot be read.
+  const retryLater = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => void source.report(), REPORT_RETRY_MS);
+    timer.unref?.();
+  };
+
   const schedule = (list: StoredSpeechSession[]) => {
     if (timer) clearTimeout(timer);
     timer = null;
@@ -125,14 +133,20 @@ export function createRomeCloudSpeechCredentials(
     timer.unref?.();
   };
 
-  const load = async (): Promise<StoredSpeechSession[]> => {
+  // The stored sessions, or null when they cannot be read now. A failed read
+  // is not kept: saving over sessions that were never read would lose their
+  // keys and unreported usage, so the next call reads again.
+  const load = async (): Promise<StoredSpeechSession[] | null> => {
     if (sessions) return sessions;
-    const stored = await deps.settings.get<unknown>(SPEECH_SESSIONS_SETTING_KEY).catch((err) => {
-      log.warn("speech sessions unreadable", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    let stored: unknown;
+    try {
+      stored = await deps.settings.get<unknown>(SPEECH_SESSIONS_SETTING_KEY);
+    } catch {
+      // A database error can quote the stored value, keys and all, so its
+      // message is never logged.
+      log.warn("speech sessions unreadable");
       return null;
-    });
+    }
     sessions = Array.isArray(stored) ? stored.filter(isStoredSession) : [];
     schedule(sessions);
     return sessions;
@@ -143,11 +157,11 @@ export function createRomeCloudSpeechCredentials(
     schedule(list);
     try {
       await deps.settings.set(SPEECH_SESSIONS_SETTING_KEY, list);
-    } catch (err) {
-      // Kept in memory still. A restart then asks for a new session.
-      log.warn("speech sessions not saved", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    } catch {
+      // Kept in memory still. A restart then asks for a new session. A
+      // database error can quote the value written, keys and all, so its
+      // message is never logged.
+      log.warn("speech sessions not saved");
     }
   };
 
@@ -189,6 +203,7 @@ export function createRomeCloudSpeechCredentials(
         const caller = deps.romeCloud();
         if (!caller) return { kind: "signed-out" };
         const loaded = await load();
+        if (!loaded) return { kind: "unavailable", detail: "speech sessions unreadable" };
         const list = await reportDue(loaded);
         if (list !== loaded) await save(list);
         else schedule(list);
@@ -212,8 +227,8 @@ export function createRomeCloudSpeechCredentials(
       if (characters === 0 && seconds === 0) return;
       void serially(async () => {
         const list = await load();
-        const session = list.find((s) => s.sessionId === sessionId);
-        if (!session) {
+        const session = list?.find((s) => s.sessionId === sessionId);
+        if (!list || !session) {
           log.warn("speech usage for a session already reported", { sessionId });
           return;
         }
@@ -226,6 +241,10 @@ export function createRomeCloudSpeechCredentials(
     report: () =>
       serially(async () => {
         const loaded = await load();
+        if (!loaded) {
+          retryLater();
+          return;
+        }
         const list = await reportDue(loaded);
         if (list !== loaded) await save(list);
         else schedule(list);

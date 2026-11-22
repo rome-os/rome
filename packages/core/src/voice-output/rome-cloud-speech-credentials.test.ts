@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { RomeCloudCaller } from "../voice-input/rome-cloud-session.js";
 import {
   createRomeCloudSpeechCredentials,
@@ -58,6 +58,7 @@ function memorySettings(initial: Record<string, unknown> = {}) {
 const sources: RomeCloudSpeechCredentials[] = [];
 afterEach(() => {
   for (const source of sources.splice(0)) source.stop();
+  rs.restoreAllMocks();
 });
 
 function setup(
@@ -102,6 +103,17 @@ function setup(
       failing = fail;
     },
   };
+}
+
+/** Everything written to the console while the test runs, silenced. */
+function captureConsole() {
+  const lines: string[] = [];
+  for (const level of ["log", "info", "warn", "error"] as const) {
+    rs.spyOn(console, level).mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    });
+  }
+  return { text: () => lines.join("\n") };
 }
 
 // Lets the usage counts queued behind earlier work be written.
@@ -324,15 +336,53 @@ describe("speech sessions from Rome Cloud", () => {
     expect(await source.get()).toEqual({ kind: "unavailable", detail: "malformed session" });
   });
 
-  it("still speaks when the session cannot be kept", async () => {
+  it("still speaks when the session cannot be kept, and never logs the error that quotes its key", async () => {
+    const output = captureConsole();
     const settings = memorySettings();
-    settings.set = async () => {
-      throw new Error("disk full");
+    // As a database error does: it quotes the value it could not write.
+    settings.set = async (_key, value) => {
+      throw new Error(`Failed query: insert into settings\nparams: ${JSON.stringify(value)}`);
     };
     const { make, cloud } = setup({ settings });
     const source = make();
     expect((await source.get()).kind).toBe("granted");
     expect((await source.get()).kind).toBe("granted");
+    expect(cloud.requests).toHaveLength(1);
+    expect(output.text()).toContain("speech sessions not saved");
+    expect(output.text()).not.toContain("temporary-1");
+  });
+
+  it("asks nothing and overwrites nothing while the stored sessions cannot be read", async () => {
+    const output = captureConsole();
+    const settings = memorySettings();
+    const { make, cloud, clock } = setup({ settings });
+    await make().get();
+    const stored = structuredClone(settings.data.get(SPEECH_SESSIONS_SETTING_KEY));
+
+    // A restart whose first read fails, with an error that quotes the row.
+    const realGet = settings.get;
+    let failReads = true;
+    settings.get = async <T>(key: string) => {
+      if (failReads) throw new Error(`Failed query: select\nresult: ${JSON.stringify(stored)}`);
+      return realGet<T>(key);
+    };
+    const restarted = make();
+    expect(await restarted.get()).toEqual({
+      kind: "unavailable",
+      detail: "speech sessions unreadable",
+    });
+    clock.advance(70 * MINUTE);
+    await restarted.report();
+    expect(cloud.requests).toHaveLength(1);
+    expect(settings.data.get(SPEECH_SESSIONS_SETTING_KEY)).toEqual(stored);
+    expect(output.text()).toContain("speech sessions unreadable");
+    expect(output.text()).not.toContain("temporary-1");
+
+    // The next call reads again, and finds the session to report.
+    failReads = false;
+    clock.advance(-70 * MINUTE);
+    const outcome = await restarted.get();
+    expect(outcome.kind === "granted" && outcome.credentials.sessionId).toBe("speech-1");
     expect(cloud.requests).toHaveLength(1);
   });
 
