@@ -109,6 +109,8 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
           authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
           postMessage: async () => ({ ts: "9.0" }),
           openDirectMessage: async () => "D_NEW",
+          addReaction: async () => {},
+          removeReaction: async () => {},
           userName: async () => ({ displayName: "Ouou", username: "ouou" }),
           conversationHistory: slack.conversationHistory,
           conversationReplies: async () => ({ messages: [] }),
@@ -198,6 +200,8 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
         authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
         postMessage: async () => ({ ts: "9.0" }),
         openDirectMessage: async () => "D_NEW",
+        addReaction: async () => {},
+        removeReaction: async () => {},
         userName: async () => ({ displayName: "Ouou", username: "ouou" }),
         conversationHistory: slack.conversationHistory,
         conversationReplies: async () => ({ messages: [] }),
@@ -256,6 +260,8 @@ describe("a mention inside a Slack thread (R14)", () => {
         conversationReplies,
         memberChannels: async () => ({ channels: [] }),
         revoke: async () => {},
+        addReaction: async () => {},
+        removeReaction: async () => {},
       },
       openMailbox: (_mailbox, handler) => {
         onFrame = handler;
@@ -334,6 +340,8 @@ describe("a mention inside a Slack thread (R14)", () => {
         conversationReplies: conversationReplies as never,
         memberChannels: async () => ({ channels: [] }),
         revoke: async () => {},
+        addReaction: async () => {},
+        removeReaction: async () => {},
       },
       openMailbox: () => ({ stop: () => {}, attempts: 4 }),
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
@@ -405,6 +413,8 @@ describe("a mention inside a Slack thread (R14)", () => {
         conversationReplies: conversationReplies as never,
         memberChannels: async () => ({ channels: [] }),
         revoke: async () => {},
+        addReaction: async () => {},
+        removeReaction: async () => {},
       },
       openMailbox: () => ({ stop: () => {}, attempts: 4 }),
       // Slack's pacing, scaled down: one thread read per 300 ms.
@@ -460,6 +470,8 @@ describe("a mention inside a Slack thread (R14)", () => {
         conversationReplies: async () => ({ messages: [] }),
         memberChannels: async () => ({ channels: [] }),
         revoke: async () => {},
+        addReaction: async () => {},
+        removeReaction: async () => {},
       },
       openMailbox: (_mailbox, handler) => {
         onFrame = handler;

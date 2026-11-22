@@ -127,6 +127,7 @@ export const CHANNEL_META: Record<string, ChannelMeta> = {
   telegram: { labelKey: "channels.telegram", Glyph: TelegramGlyph },
   telegram_user: { labelKey: "channels.telegram", Glyph: TelegramGlyph },
   discord: { labelKey: "channels.discord", Glyph: DiscordGlyph },
+  discord_app: { labelKey: "channels.discord", Glyph: DiscordGlyph },
   webchat: { labelKey: "channels.webchat", Glyph: WebchatGlyph },
   linkedin: { labelKey: "channels.linkedin", Glyph: LinkedInGlyph },
   wechat: { labelKey: "channels.wechat", Glyph: WeChatIcon },

@@ -42,7 +42,13 @@ export function AccountControls({
   // already under way and cancel it.
   const [adding, setAdding] = useState(false);
   const connected = talkConnected(card);
-  const showLink = card.linkReported && connected && Boolean(card.link);
+  // An account the guardian's own agent answers, such as Rome's Discord bot,
+  // has no agent to show: the kind fixes it.
+  const showLink =
+    card.linkReported &&
+    connected &&
+    Boolean(card.link) &&
+    (card.agent === null || canonicalAgent(card.agent) !== "core:concierge");
   // A second account only makes sense next to a first one that exists.
   const showAdd =
     adding || (card.severalAccounts && connected && CHANNEL_CONFIGS[card.service] !== undefined);

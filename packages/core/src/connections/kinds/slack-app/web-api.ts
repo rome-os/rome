@@ -26,6 +26,20 @@ export interface SlackAppWebApi {
     signal?: AbortSignal,
   ): Promise<{ ts: string }>;
   openDirectMessage(botToken: string, userId: string, signal?: AbortSignal): Promise<string>;
+  /** Reacts to the message at `timestamp` with the emoji named `name`. A
+   *  reaction already there counts as added. */
+  addReaction(
+    botToken: string,
+    input: { channel: string; timestamp: string; name: string },
+    signal?: AbortSignal,
+  ): Promise<void>;
+  /** Takes the bot's reaction named `name` off the message at `timestamp`.
+   *  One that is not there counts as taken off. */
+  removeReaction(
+    botToken: string,
+    input: { channel: string; timestamp: string; name: string },
+    signal?: AbortSignal,
+  ): Promise<void>;
   userName(botToken: string, userId: string, signal?: AbortSignal): Promise<SlackUserName>;
   /** Revoke the bot token, so Slack refuses it from then on. A token Slack
    *  already refuses counts as revoked. */
@@ -198,6 +212,22 @@ export function createSlackAppWebApi(
       const ts = stringField(result.ts);
       if (!ts) throw new SlackApiError("missing_message_id");
       return { ts };
+    },
+    async addReaction(botToken, input, signal) {
+      try {
+        await call(botToken, "reactions.add", input, signal);
+      } catch (error) {
+        if (error instanceof SlackApiError && error.code === "already_reacted") return;
+        throw error;
+      }
+    },
+    async removeReaction(botToken, input, signal) {
+      try {
+        await call(botToken, "reactions.remove", input, signal);
+      } catch (error) {
+        if (error instanceof SlackApiError && error.code === "no_reaction") return;
+        throw error;
+      }
     },
     async openDirectMessage(botToken, userId, signal) {
       const result = await call(botToken, "conversations.open", { users: userId }, signal);

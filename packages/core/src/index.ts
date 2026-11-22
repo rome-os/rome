@@ -88,10 +88,11 @@ import {
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
 import type { Channel, ChannelsService, ChatId, ChatStopHandler } from "@rome-os/app-runtime";
+import { isSendRefused } from "@rome-os/app-runtime";
 import { conciergeChatGuard } from "./concierge/automated-input.js";
 import { resolveAutomatedSender } from "./api/routes/chat-senders.js";
 import { actionExecutionContext } from "./apps/actions/context.js";
-import { isConciergeChat } from "./webchat/privacy.js";
+import { CONCIERGE_AGENT_ID, isConciergeChat } from "./webchat/privacy.js";
 
 const log = createLogger("startup");
 
@@ -204,6 +205,8 @@ import { ActionWorkerCoordinator } from "./apps/actions/action-subprocess.js";
 import { endInterruptedRuns } from "./apps/actions/restart-recovery.js";
 import { WorkerRpcServer } from "./apps/actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./apps/actions/worker-rpc-client.js";
+import { connectionTyping, observeTurnWith } from "./core/connection-typing.js";
+import { ConnectionStatusMarks } from "./concierge/connection-status.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import type { ChatResetPolicy } from "./core/chat-reset-policy.js";
 import {
@@ -278,6 +281,7 @@ import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
 import { agentOfKindIn, conciergePlaceSetup } from "./concierge/on-connection.js";
+import { envoyPrompt, readEnvoyVerdict, sayOnConnection } from "./concierge/connection-say.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -398,6 +402,12 @@ import type { KindMount } from "./connections/kind-mount.js";
 import { guardianOnly } from "./access/guardian-only.js";
 import { feishu } from "./connections/kinds/feishu/index.js";
 import { linkedin } from "./connections/kinds/linkedin/index.js";
+import {
+  deliverDiscordFrame,
+  discordApp,
+  isDiscordFrame,
+  romeCloudDiscordApp,
+} from "./connections/kinds/discord-app/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
@@ -1343,9 +1353,86 @@ async function main() {
     ownerOf: async (taskId) => (await conciergeTasksRepo.getWithChat(taskId))?.owner ?? null,
   });
   const conciergeTasksRepo = new ConciergeTasksRepository(db);
+  // The connection behind a channel, for what its talker offers that no
+  // channel port carries: typing by the dashboard's rule, and reactions.
+  const connectionOfChannel = (channel: string) => {
+    const id = channelRecords.byId(channel)?.connectionId;
+    return id ? connectionRegistry.all().find((connection) => connection.id === id) : undefined;
+  };
   const concierge: ConciergeService = new ConciergeService({
     skillCatalog,
     settingsRepo,
+    reactInChat: async (chat, messageId, emoji) => {
+      const added = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.add(chat.threadId as ChatId, messageId, emoji),
+      );
+      if (!added) throw new Error("This chat's account takes no reaction.");
+      await added;
+    },
+    // What the Concierge says in a chat on a connection goes out as the inbox
+    // sends an agent's reply: past the send gate, and Envoy where it asks, to
+    // the platform through the chat's speaker, which records it.
+    sayInChat: (chat, message) =>
+      sayOnConnection(
+        {
+          gate: guardedSend,
+          connectionOf: (channel) => channelRecords.byId(channel)?.connectionId ?? null,
+          envoy: async (input) => {
+            let verdict: unknown;
+            for await (const event of agentRunner.run({
+              agentName: "envoy",
+              prompt: envoyPrompt(input),
+              initiatedBy: "system",
+            })) {
+              if (event.type === "result") verdict = event.structuredOutput;
+            }
+            return readEnvoyVerdict(verdict);
+          },
+          send: async (target, text, replyTo, turnId) => {
+            const channel = channels.find((candidate) => candidate.name === target.channel);
+            if (!channel) throw new Error(`Channel "${target.channel}" cannot send`);
+            const say = (quoting: string | undefined) =>
+              chatsWired.replies.send(
+                target.id,
+                channel,
+                { text, ...(quoting ? { replyTo: { key: quoting } } : {}) },
+                { turnId, agent: CONCIERGE_AGENT_ID },
+              );
+            let said: Awaited<ReturnType<typeof say>>;
+            try {
+              said = await say(replyTo);
+            } catch (error) {
+              // A platform that cannot quote that message takes it unquoted.
+              if (!replyTo || !isSendRefused(error) || error.reason !== "reply_unaddressable") {
+                throw error;
+              }
+              said = await say(undefined);
+            }
+            if (!said) throw new Error("This chat stands nowhere a message can be said.");
+            return said.sent;
+          },
+          record: async ({ status, description, chat: target, text }) => {
+            await approvalsRepo
+              .create({
+                type: "outgoing_message",
+                requestedBy: CONCIERGE_AGENT_ID,
+                description,
+                payload: { response: text, channel: target.channel, threadId: target.threadId },
+                status,
+              })
+              .catch((error: unknown) =>
+                log.warn("outgoing message not put on record", {
+                  error: error instanceof Error ? error.message : String(error),
+                }),
+              );
+          },
+        },
+        { chat, ...message },
+      ),
+    // Who answers a chat on a connection, as the inbox routes it: the
+    // account's agent (a task started there reports there when it is the
+    // Concierge).
+    channelAgentOf: byChannel(channelRecords, accountAgentResolver(accountAgents, agentLoader)),
     owners: createConciergeOwners({
       settingsRepo,
       visitorProfiles: new VisitorProfilesRepository(db),
@@ -1376,6 +1463,26 @@ async function main() {
     notify: notifyClient,
     phoneWatching,
     dashboardActivity,
+  });
+  // A chat on a connection shows a message's status as the account's own
+  // reaction on it, since the platform draws none (docs/domains/chats.md#status).
+  const connectionStatus = new ConnectionStatusMarks({
+    chatOf: (chatId) => concierge.connectionChat(chatId),
+    add: async (chat, messageKey, emoji) => {
+      const added = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.add(chat.threadId as ChatId, messageKey, emoji),
+      );
+      if (added) await added;
+    },
+    remove: async (chat, messageKey, emoji) => {
+      const removed = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.remove(chat.threadId as ChatId, messageKey, emoji),
+      );
+      if (removed) await removed;
+    },
+  });
+  concierge.onMessageStatus((event) => {
+    void connectionStatus.statusChanged(event.sessionId, event.messageId, event.status);
   });
   const channelSurface: ChannelSurfaces = (channel) => {
     if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
@@ -1512,6 +1619,18 @@ async function main() {
   actionEngine.setActionWorkerCoordinator(actionWorkerCoordinator);
   const chatResetPolicy: ChatResetPolicy = async (chat) =>
     (await chatSettings.get(chat)).effective.session.reset;
+  // Whether an agent's text stays private on a channel: the Concierge's
+  // does everywhere, and it speaks through `say` (docs/architecture/concierge.md).
+  const isTextPrivate = (agentName: string, channel: string) => {
+    const agent = agentLoader.find(agentName);
+    return (
+      agent !== undefined &&
+      policyInPlace(
+        resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }),
+        conciergePlaceSetup(agentName, { channel }),
+      ).finalText === "private"
+    );
+  };
   const agentSessionBridge = new AgentSessionBridge(
     agentSessionManager,
     webchatRepo,
@@ -1522,6 +1641,21 @@ async function main() {
     chatResetPolicy,
     openingFor,
     (chat, turn) => chatTurns.start(chat, turn),
+    observeTurnWith(
+      // A connected chat's typing indicator, by the dashboard's typing-dots rule.
+      connectionTyping({
+        typingOf: (channel) => {
+          const connection = connectionOfChannel(channel);
+          if (!connection?.withTalker((talker) => talker.typing !== undefined)) return null;
+          return (chatId) =>
+            connection.withTalker((talker) => talker.typing?.show(chatId as ChatId)) ??
+            Promise.resolve();
+        },
+      }),
+      // The status of the guardian's message a Concierge turn there works on.
+      (turn) => concierge.observeConnectionTurn(turn),
+    ),
+    isTextPrivate,
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1584,18 +1718,7 @@ async function main() {
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
     replies: chatsWired.replies,
-    // The place can change the agent's policy: on a connection the
-    // Concierge's text is the reply (docs/architecture/concierge.md).
-    isTextPrivate: (agentName, channel) => {
-      const agent = agentLoader.find(agentName);
-      return (
-        agent !== undefined &&
-        policyInPlace(
-          resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }),
-          conciergePlaceSetup(agentName, { channel }),
-        ).finalText === "private"
-      );
-    },
+    isTextPrivate,
   });
 
   // A provider that cannot run shows a card in the chat, and for unattended
@@ -2023,7 +2146,11 @@ async function main() {
     favorService,
     appConnections,
   });
+  // Rome's Discord bot deposits into the instance's own mailbox, marked by its
+  // header: those frames go to its connection, never to the app the mailbox
+  // otherwise serves (connections/kinds/discord-app/drain.ts).
   const relayDrainer = new RelayDrainer(relayDrains, async (drain, event) => {
+    if (isDiscordFrame(event.headers)) return deliverDiscordFrame(connectionRegistry, event);
     const res = await relayDispatcher.dispatch(
       drain.targetAppId,
       buildRelayReplayRequest(drain, event),
@@ -2215,6 +2342,22 @@ async function main() {
       listAgents: () => agentLoader.list().map((agent) => agent.name),
       accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
       hasAgent: (name) => agentLoader.find(name) !== undefined,
+    }),
+    discordApp({
+      cloud: romeCloudDiscordApp(),
+      depositUrl: async () => {
+        const relay = await settingsRepo.get<Partial<RelayDrainSetting>>(RELAY_SETTING_KEY);
+        return typeof relay?.depositUrl === "string" && relay.depositUrl ? relay.depositUrl : null;
+      },
+      // People decides who an account is; each one the Worker forwards the
+      // guardian bound while signed in to this Rome's Rome Cloud account.
+      linkGuardian: async (userId) => {
+        // One more of the guardian's accounts: never re-points another, such
+        // as a second bound account or the guardian's own bot's link.
+        await linkGuardianToAccount(peopleRepo, "discord", userId, { addOnly: true });
+      },
+      nameOf: async (userId) =>
+        (await peopleRepo.byAccount({ platform: "discord", id: userId }))?.displayName,
     }),
     linkedin({
       syncSink: refreshingAfter(
