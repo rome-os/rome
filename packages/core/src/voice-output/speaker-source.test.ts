@@ -202,7 +202,12 @@ describe("speaker source", () => {
     };
     const ended: string[] = [];
     const source = createSpeakerSource({ credentials, enabled: async () => true });
-    const outcome = await source.open({ ...listener, onSentenceEnd: (id) => ended.push(id) });
+    let frames = 0;
+    const outcome = await source.open({
+      ...listener,
+      onAudio: () => frames++,
+      onSentenceEnd: (id) => ended.push(id),
+    });
     if (!outcome.ok) throw new Error(`expected a session, got ${outcome.reason}`);
     opened.push(outcome.session);
 
@@ -210,14 +215,27 @@ describe("speaker source", () => {
     await until(() => ended.length === 1);
     expect(usage).toEqual([{ sessionId: "speech-1", characters: 9, seconds: 1 }]);
 
-    // A sentence stopped before it finished still sent its text.
+    // Sentences stopped before any of their audio came, sent or still
+    // queued, are not counted.
     fake.onMessage = () => {};
     outcome.session.say("b", "再见。");
-    await until(() => fake.received.some((m) => m.text === "再见。"));
+    outcome.session.say("c", "还有。");
+    outcome.session.say("d", "never spoken");
+    await until(() => fake.received.some((m) => m.text === "还有。"));
+    outcome.session.stop();
+    expect(usage).toHaveLength(1);
+
+    // A sentence cut off part-way counts its text and the audio that came.
+    fake.onMessage = (message, reply) => {
+      if (message.text === undefined) return;
+      reply(audioMessage(message.stream_id as string, half));
+    };
+    outcome.session.say("e", "说了一半");
+    await until(() => frames === 3);
     outcome.session.close();
     expect(usage).toEqual([
       { sessionId: "speech-1", characters: 9, seconds: 1 },
-      { sessionId: "speech-1", characters: 3, seconds: 0 },
+      { sessionId: "speech-1", characters: 4, seconds: 0.5 },
     ]);
   });
 });

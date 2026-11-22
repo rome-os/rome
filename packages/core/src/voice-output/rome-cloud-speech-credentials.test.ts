@@ -72,11 +72,17 @@ function setup(
   const settings = options.settings ?? memorySettings();
   const reported: unknown[] = [];
   let caller = options.caller ?? (() => signedIn());
+  let failing = false;
   const make = () => {
     const source = createRomeCloudSpeechCredentials({
       romeCloud: () => caller(),
       settings,
-      usage: { recordSpeech: (event) => reported.push(event) },
+      usage: {
+        recordSpeech: async (event) => {
+          if (failing) throw new Error("database is locked");
+          reported.push(event);
+        },
+      },
       fetch: cloud.fetch,
       now: clock.now,
     });
@@ -91,6 +97,9 @@ function setup(
     make,
     signAs: (next: () => RomeCloudCaller | null) => {
       caller = next;
+    },
+    failReports: (fail: boolean) => {
+      failing = fail;
     },
   };
 }
@@ -217,6 +226,43 @@ describe("speech sessions from Rome Cloud", () => {
     expect(reported).toEqual([
       expect.objectContaining({ sessionId: "speech-1", characters: 42, seconds: 3.5 }),
     ]);
+  });
+
+  it("keeps a session whose report could not be queued, and tries again after a minute", async () => {
+    const { make, clock, reported, settings, failReports } = setup();
+    const source = make();
+    await source.get();
+    source.recordUsage("speech-1", { characters: 20, seconds: 2 });
+    await settled();
+    clock.advance(70 * MINUTE);
+
+    failReports(true);
+    await source.report();
+    expect(reported).toEqual([]);
+    expect(settings.data.get(SPEECH_SESSIONS_SETTING_KEY)).toEqual([
+      expect.objectContaining({ sessionId: "speech-1", characters: 20 }),
+    ]);
+
+    // Kept across a restart too, and not tried again within the minute.
+    failReports(false);
+    await source.report();
+    expect(reported).toEqual([]);
+    clock.advance(MINUTE);
+    await source.report();
+    expect(reported).toEqual([
+      expect.objectContaining({ sessionId: "speech-1", characters: 20, seconds: 2 }),
+    ]);
+    expect(settings.data.get(SPEECH_SESSIONS_SETTING_KEY)).toEqual([]);
+
+    // A new run picks up what an earlier run could not report.
+    failReports(true);
+    await source.get();
+    clock.advance(70 * MINUTE);
+    await source.report();
+    source.stop();
+    failReports(false);
+    await make().report();
+    expect(reported).toHaveLength(2);
   });
 
   it("drops the usage of a session that another sign-in opened", async () => {

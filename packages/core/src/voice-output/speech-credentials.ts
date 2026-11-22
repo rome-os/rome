@@ -29,7 +29,7 @@ export type SpeechCredentialOutcome =
 
 /** What speaking on one credential used. */
 export interface SpeechUsage {
-  /** Characters of text sent to the provider. */
+  /** Characters of the text the provider spoke: a sentence stopped before any of its audio came does not count. */
   characters: number;
   /** Seconds of audio the provider returned. */
   seconds: number;

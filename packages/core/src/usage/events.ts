@@ -96,7 +96,7 @@ export interface SpeechUsageEvent {
   sessionId: string;
   provider: string;
   model: string;
-  /** Characters of text sent to the provider. */
+  /** Characters of the text the provider spoke: a sentence stopped before any of its audio came does not count. */
   characters: number;
   /** Seconds of audio the provider returned, to a tenth. */
   seconds: number;

@@ -99,15 +99,18 @@ export function createSpeakerSource(deps: SpeakerSourceDeps): SpeakerSource {
 }
 
 /**
- * Opens a session that counts the text it sends and the audio it gets back,
- * and hands the count to `record` as each sentence finishes and when the
- * session stops or ends.
+ * Opens a session that counts the text the provider spoke and the audio it
+ * sent back, and hands the count to `record` as each sentence finishes and
+ * when the session stops or ends. A sentence's text counts once its first
+ * audio arrives, so one stopped before it was spoken does not count.
  */
 function metered(
   open: (listener: SpeakerListener) => SpeakerSession,
   listener: SpeakerListener,
   record: (usage: SpeechUsage) => void,
 ): SpeakerSession {
+  // The characters of each sentence said and not yet heard.
+  const unheard = new Map<string, number>();
   let characters = 0;
   let audioBytes = 0;
   const flush = () => {
@@ -119,18 +122,23 @@ function metered(
   };
   const session = open({
     onAudio(frame) {
+      characters += unheard.get(frame.sentenceId) ?? 0;
+      unheard.delete(frame.sentenceId);
       audioBytes += frame.pcm.byteLength;
       listener.onAudio(frame);
     },
     onSentenceEnd(sentenceId) {
+      unheard.delete(sentenceId);
       flush();
       listener.onSentenceEnd(sentenceId);
     },
     onSentenceError(sentenceId, error) {
+      unheard.delete(sentenceId);
       flush();
       listener.onSentenceError(sentenceId, error);
     },
     onClosed(error) {
+      unheard.clear();
       flush();
       listener.onClosed(error);
     },
@@ -141,16 +149,18 @@ function metered(
     },
     say(sentenceId, text) {
       // Code points, so a character outside the BMP counts once.
-      characters += [...text].length;
+      unheard.set(sentenceId, [...text].length);
       session.say(sentenceId, text);
     },
     stop() {
       const stopped = session.stop();
+      for (const sentenceId of stopped) unheard.delete(sentenceId);
       flush();
       return stopped;
     },
     close() {
       session.close();
+      unheard.clear();
       flush();
     },
   };

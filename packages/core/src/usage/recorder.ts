@@ -40,9 +40,15 @@ export interface TranscriptionUsageSink {
   ): void;
 }
 
-/** The seam voice conversation mode hands each expired Rome Cloud speech session to. Never throws. */
+/**
+ * The seam voice conversation mode hands each expired Rome Cloud speech
+ * session to. Resolves once the event is queued, or at once while signed out,
+ * when nothing is recorded. Rejects when the event could not be queued.
+ */
 export interface SpeechUsageSink {
-  recordSpeech(session: Omit<SpeechUsageEvent, "type" | "eventId" | "kind" | "occurredAt">): void;
+  recordSpeech(
+    session: Omit<SpeechUsageEvent, "type" | "eventId" | "kind" | "occurredAt">,
+  ): Promise<void>;
 }
 
 export interface UsageRecorderDeps {
@@ -123,9 +129,11 @@ export class UsageRecorder
     );
   }
 
-  recordSpeech(session: Omit<SpeechUsageEvent, "type" | "eventId" | "kind" | "occurredAt">): void {
+  recordSpeech(
+    session: Omit<SpeechUsageEvent, "type" | "eventId" | "kind" | "occurredAt">,
+  ): Promise<void> {
     const credential = this.deps.credential();
-    if (!credential) return;
+    if (!credential) return Promise.resolve();
     const event: UsageEvent = {
       type: "speech",
       eventId: session.sessionId,
@@ -133,14 +141,19 @@ export class UsageRecorder
       ...session,
       occurredAt: new Date().toISOString(),
     };
+    // The caller keeps the session's counts until this resolves, and tries
+    // again when it rejects. The session id keys the event, so a retry after a
+    // write that did land is not counted twice.
+    const write = this.deps.outbox.enqueue(event, credential);
     this.track(
-      this.deps.outbox.enqueue(event, credential).catch((err: unknown) => {
+      write.catch((err: unknown) => {
         log.warn("failed to queue speech usage", {
           sessionId: session.sessionId,
           error: err instanceof Error ? err.message : String(err),
         });
       }),
     );
+    return write;
   }
 
   /** Resolves once every turn recorded so far is queued or has failed. */

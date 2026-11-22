@@ -30,6 +30,8 @@ const RENEW_BEFORE_EXPIRY_MS = 5 * 60_000;
 // A stream opened just before the key expired speaks for up to 5 minutes more,
 // and its usage is counted when its sentence ends.
 const REPORT_AFTER_EXPIRY_MS = 6 * 60_000;
+// How long to wait before reporting again after a report could not be queued.
+const REPORT_RETRY_MS = 60_000;
 // The longest delay setTimeout takes.
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
@@ -97,6 +99,8 @@ export function createRomeCloudSpeechCredentials(
   const now = deps.now ?? Date.now;
   let sessions: StoredSpeechSession[] | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  // No report is tried before this, after one could not be queued.
+  let retryAt = 0;
   let queue: Promise<unknown> = Promise.resolve();
 
   // One change at a time, so a usage count and a new session never overwrite each other.
@@ -110,7 +114,10 @@ export function createRomeCloudSpeechCredentials(
     if (timer) clearTimeout(timer);
     timer = null;
     if (list.length === 0) return;
-    const next = Math.min(...list.map((s) => s.expiresAt + REPORT_AFTER_EXPIRY_MS));
+    const next = Math.max(
+      retryAt,
+      Math.min(...list.map((s) => s.expiresAt + REPORT_AFTER_EXPIRY_MS)),
+    );
     timer = setTimeout(
       () => void source.report(),
       Math.min(MAX_TIMER_MS, Math.max(0, next - now())),
@@ -145,24 +152,35 @@ export function createRomeCloudSpeechCredentials(
   };
 
   // Reports each session whose time has come, once, and returns the rest. A
+  // session whose report could not be queued stays, to be tried again. A
   // session another sign-in opened is dropped: Rome Cloud would not know it.
-  const reportDue = (list: StoredSpeechSession[]): StoredSpeechSession[] => {
+  const reportDue = async (list: StoredSpeechSession[]): Promise<StoredSpeechSession[]> => {
     const at = now();
+    if (at < retryAt) return list;
     const due = list.filter((s) => at >= s.expiresAt + REPORT_AFTER_EXPIRY_MS);
     if (due.length === 0) return list;
     const caller = deps.romeCloud();
     const asker = caller ? askerOf(caller) : null;
+    const done = new Set<StoredSpeechSession>();
     for (const session of due) {
-      if (session.asker !== asker) continue;
-      deps.usage?.recordSpeech({
-        sessionId: session.sessionId,
-        provider: session.provider,
-        model: session.model,
-        characters: Math.round(session.characters),
-        seconds: Math.round(session.seconds * 10) / 10,
-      });
+      if (session.asker === asker && deps.usage) {
+        try {
+          await deps.usage.recordSpeech({
+            sessionId: session.sessionId,
+            provider: session.provider,
+            model: session.model,
+            characters: Math.round(session.characters),
+            seconds: Math.round(session.seconds * 10) / 10,
+          });
+        } catch {
+          // The recorder logged why.
+          continue;
+        }
+      }
+      done.add(session);
     }
-    return list.filter((s) => !due.includes(s));
+    retryAt = done.size < due.length ? at + REPORT_RETRY_MS : 0;
+    return list.filter((s) => !done.has(s));
   };
 
   const source: RomeCloudSpeechCredentials = {
@@ -171,8 +189,9 @@ export function createRomeCloudSpeechCredentials(
         const caller = deps.romeCloud();
         if (!caller) return { kind: "signed-out" };
         const loaded = await load();
-        const list = reportDue(loaded);
+        const list = await reportDue(loaded);
         if (list !== loaded) await save(list);
+        else schedule(list);
         const asker = askerOf(caller);
         const at = now();
         const usable = list
@@ -207,8 +226,9 @@ export function createRomeCloudSpeechCredentials(
     report: () =>
       serially(async () => {
         const loaded = await load();
-        const list = reportDue(loaded);
+        const list = await reportDue(loaded);
         if (list !== loaded) await save(list);
+        else schedule(list);
       }),
 
     stop() {
