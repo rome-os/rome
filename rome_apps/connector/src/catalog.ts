@@ -56,6 +56,7 @@ const CATALOG_PRESENTATION: Record<string, CatalogPresentation> = {
   neon: { scope: "Manages Postgres projects, branches, databases, and roles.", glyph: "neon" },
   hubspot: { scope: "Tracks your contacts and deals.", glyph: "hubspot" },
   stripe: { scope: "Looks up payments and customers.", glyph: "stripe" },
+  freshdesk: { scope: "Reads and answers your support tickets.", glyph: "freshdesk" },
   shopify: {
     scope: "Updates your store's products and inventory, and reads orders.",
     glyph: "shopify",

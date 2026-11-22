@@ -131,9 +131,9 @@ describe("ConnectionDetailBody — Telegram reference (bot slot)", () => {
     expect(card?.className).not.toContain("border");
     // The bot slot runs the generic setup: the unconnected
     // card offers a single Connect action that starts the setup coroutine — the
-    // bespoke Bot Token field + "Setup steps" accordion are gone.
+    // bespoke bot token field + "Setup steps" accordion are gone.
     expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy();
-    expect(screen.queryByText("Bot Token")).toBeNull();
+    expect(screen.queryByText("Bot token")).toBeNull();
     expect(screen.queryByRole("button", { name: /Setup steps/i })).toBeNull();
   });
 
@@ -423,33 +423,25 @@ describe("ConnectionDetailBody — accounts", () => {
     return { ...result, rerenderCard: (next: ConnectionCard) => result.rerender(tree(next)) };
   }
 
-  it("shows the account's agent and sends changes to its Envoys settings", () => {
+  it("shows the account's agent, read-only", () => {
     renderAccountBody(cardFor([feishu({ agent: "sales:agent" })], "feishu"));
 
     expect(screen.getByText("sales:agent")).toBeTruthy();
     expect(screen.getByText("Speaks as this account")).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
-    expect(screen.getByRole("link", { name: /Change in Envoys/ }).getAttribute("href")).toBe(
-      `/envoys/${encodeURIComponent("sales:agent")}/settings`,
-    );
+    expect(screen.queryByRole("link")).toBeNull();
   });
 
   it("shows main by its short name", () => {
     renderAccountBody(cardFor([feishu({ agent: "main" })], "feishu"));
 
     expect(screen.getByText("main")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Change in Envoys/ }).getAttribute("href")).toBe(
-      `/envoys/${encodeURIComponent("core:main")}/settings`,
-    );
   });
 
-  it("sends an account with no agent to the Envoys list", () => {
+  it("shows an account with no agent", () => {
     renderAccountBody(cardFor([feishu()], "feishu"));
 
     expect(screen.getByText("No agent")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Change in Envoys/ }).getAttribute("href")).toBe(
-      "/envoys",
-    );
   });
 
   it("shows no agent for a kind of connection core reports takes none", () => {
@@ -461,7 +453,7 @@ describe("ConnectionDetailBody — accounts", () => {
   it("hides the agent until the server reports links", () => {
     const { agent: _omitted, ...older } = feishu();
     renderAccountBody(cardFor([older], "feishu"), { onOpenAccount: rs.fn() });
-    expect(screen.queryByRole("link", { name: /Change in Envoys/ })).toBeNull();
+    expect(screen.queryByText("No agent")).toBeNull();
     expect(screen.getByRole("button", { name: "Add another account" })).toBeTruthy();
   });
 
@@ -563,7 +555,7 @@ describe("ConnectionDetailBody — accounts", () => {
     renderAccountBody(cardFor([feishu({ grants: { app: "unauthorized" } })], "feishu"), {
       onOpenAccount: rs.fn(),
     });
-    expect(screen.queryByRole("link", { name: /Change in Envoys/ })).toBeNull();
+    expect(screen.queryByText("No agent")).toBeNull();
     expect(screen.queryByRole("button", { name: "Add another account" })).toBeNull();
   });
 

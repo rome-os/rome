@@ -135,6 +135,8 @@ Feishu and Lark are two platforms, because one account cannot sign in to both. A
 
 ## Amendment (2026-10-21): Rome never picks an account's agent
 
+Narrowed by the 2026-11-20 amendment: a newly connected account of a kind that declares it, today only Rome's Slack app, starts with the Concierge. For every other kind this rule stands.
+
 A newly connected account of a linkable service has no agent, so it is silent until the guardian links one. Connecting an account and linking its agent are two operations, and no step can make them one, so an account always passes through a state with no agent. The 2026-10-16 amendment's "a linkable service's first channel is linked to main when it is made" is withdrawn, and so is the same rule in the 2026-10-20 amendment. An account already connected keeps the agent it has. The boot pass that records a channel for a Connection from before channels were recorded links main, since that account answered as main before accounts took agents, as migration `0081` kept main for the channels recorded then. Where the dashboard asks for an agent is the dashboard's choice.
 
 ### Alternatives
@@ -156,3 +158,33 @@ A connection is Rome's access to one external account ([connections.md](../domai
 ### Alternatives
 
 - **Keep webchat as the one connection with no grant.** Rejected because the rule that a connection holds exactly one grant would need an exception, and the guardian could neither fix nor disconnect it.
+
+## Amendment (2026-11-20): a newly connected Slack app account starts with the Concierge
+
+A connection kind can declare that a newly connected own account of it starts with the Concierge as its agent, so it answers from its first message with no step to link one. Only Rome's own Slack app declares it. Every other kind starts with no agent until the guardian links one, as before. The 2026-10-21 amendment's "Rome never picks an account's agent" stands for every other kind. The account answers as the guardian's Concierge: connections are the instance's, the guardian makes them, and a visitor's Concierge lives only on the dashboard. Someone else who writes to the account reaches that same Concierge, under the bond level and outgoing-message checks every agent on an account already has, and in a shared turn. An account Rome already has a connected account for keeps its agent, unlinked included, so connecting it again or fixing its connection changes nothing. The guardian can still switch or unlink the agent. Connecting and linking stay two operations on two records, and connecting a kind that declares it links the Concierge in the same transaction.
+
+On a connection the Concierge answers in plain text, whether a kind linked it at connect or the guardian linked it by hand. Its tools and actions that need a Concierge chat on the dashboard, to speak, react, start and read task chats, follow things and manage a task's checks, are not given to it there, since there they would act for the guardian whoever wrote. Nor is `defer`, since a reply a wake-up sends skips the outgoing-message check. A renewed session there starts with no handoff, since the handoff's replay names every sender the guardian. Its text is the reply, and it gets its own instructions there in place of the dashboard ones, which tell it to speak through `say` and close each turn with a private `done`. Making a chat on a connection one of the guardian's Concierge chats, with tasks and follows, is later work.
+
+### Alternatives
+
+- **Start every newly connected bot account with the Concierge.** Withdrawn: the guardian closed that change. Only a kind that declares it does.
+- **Keep a newly connected Slack app account silent until the guardian links an agent.** An account that says nothing after setup reads as broken.
+- **Link main.** Rejected because the Concierge is the agent the guardian talks to.
+- **Answer as the Concierge of whoever writes.** Rejected because only a dashboard user has a Concierge, and an account on a platform does not say which dashboard user, if any, a sender is.
+
+## Amendment (2026-11-20): the personal WeChat connection is removed
+
+`wechat`, the official bot service, is WeChat's only connection. Rome does not offer `wechat_user`, the guardian's own account read through a WeChat client in Rome's container. Channel records stored for `wechat_user` stay and still map to the `wechat` platform. Rome skips their Connections at boot, as it skips any Connection whose kind is not registered.
+
+## Amendment (2026-11-21): the kind of connection decides an account's agent
+
+Nobody picks an account's agent, and the dashboard has no page for it. An account of a kind that takes an agent is answered by main, the agent that answered every account before accounts took agents, or by the Concierge when its kind declares it, today only Rome's Slack app. Every such account answers from its first message, and Rome listens to every account. The 2026-10-21 amendment ("Rome never picks an account's agent") is withdrawn, and so are the guardian's link, switch and unlink operations from the 2026-10-16, 2026-10-20 and 2026-11-20 amendments. Own account and delegate still follow from the kind of connection. The connected account keeps the agent column it stored, and nothing reads it to answer, until a later change drops it.
+
+### Alternatives
+
+- **Keep the stored link, start every bot on main, and only remove the page.** Rejected because it keeps a choice nobody can make, and an account Rome left silent stays silent with nothing to fix it.
+- **The Concierge on every account.** Rejected by the guardian: return to what Rome did before accounts took agents.
+
+## Amendment (2026-11-21): the Slack bot connection is removed
+
+Rome's Slack app is Slack's only chat connection. Rome does not offer `slack_bot`, a Slack app the guardian made from a manifest link and connected by pasting its bot token and app-level token. A stored `slack_bot` Connection stays in the store, as the personal WeChat connection's did: its Connection, its grant, which holds its tokens, its channel records, chats, messages, connected accounts and chat rules are all kept. Boot skips it with a warning, as it skips any Connection whose kind is not registered, and every other surface reads Connections through the registry, so nothing lists it, starts or renews it, sends through it, or counts it as Slack being connected. Its tokens are not revoked at Slack: the guardian revokes them there.

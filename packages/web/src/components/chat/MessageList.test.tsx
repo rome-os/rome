@@ -640,7 +640,6 @@ describe("replying to an agent turn", () => {
     set: rs.fn(),
     clear: rs.fn(),
     restore: rs.fn(),
-    has: () => true,
     jump: rs.fn(),
     ...overrides,
   });
@@ -693,7 +692,7 @@ describe("replying to an agent turn", () => {
 });
 
 describe("MessageList model switch notice", () => {
-  it("shows a centered line naming the model the chat moved to", () => {
+  it("shows a centered line naming the provider the chat moved to", () => {
     const turn = (turnId: string, model: string): ChatMessage[] => [
       {
         id: `u-${turnId}`,
@@ -751,7 +750,8 @@ describe("MessageList model switch notice", () => {
       </ThemeProvider>,
     );
     const notes = screen.getAllByRole("note");
-    expect(notes.map((note) => note.textContent)).toEqual(["Switched to GPT-6 Luna"]);
+    // Claude to ChatGPT is a move to another provider, so the line names the provider.
+    expect(notes.map((note) => note.textContent)).toEqual(["Switched to ChatGPT"]);
   });
 });
 
@@ -759,6 +759,7 @@ describe("a turn that failed, read back after a reload", () => {
   const renderFailed = (
     summary: Partial<NonNullable<ChatMessage["traceSummary"]>>,
     before: ChatMessage[] = [],
+    after: ChatMessage[] = [],
   ) => {
     const messages: ChatMessage[] = [
       ...before,
@@ -778,6 +779,7 @@ describe("a turn that failed, read back after a reload", () => {
           ...summary,
         },
       },
+      ...after,
     ];
     const rows = buildRows(messages, new Map([["s-1", IDENTITY]]), IDENTITY, {
       runningTurnId: null,
@@ -817,6 +819,35 @@ describe("a turn that failed, read back after a reload", () => {
       "/settings/ai-tools",
     );
     expect(screen.queryByText(/credit balance is 0/)).toBeNull();
+  });
+
+  it("leaves the raw error out of the trace line when a provider card explains it", () => {
+    renderFailed(
+      { terminalError: "API Error: Request rejected (429) · Claude usage limit reached" },
+      [],
+      [
+        {
+          id: "card",
+          sessionId: "s-1",
+          turnId: "turn-failed",
+          role: "assistant",
+          content: JSON.stringify([
+            {
+              type: "provider_failure",
+              provider: "anthropic",
+              reason: "quota",
+              card: "wait",
+              followsDefault: true,
+              alternatives: ["openai"],
+              chatId: "s-1",
+            },
+          ]),
+          createdAt: "2026-06-13T00:00:02.000Z",
+        },
+      ],
+    );
+    expect(screen.queryByText(/Request rejected/)).toBeNull();
+    expect(screen.getByText(/Claude quota used up/)).toBeTruthy();
   });
 
   it("puts the guidance in the row's body, below its one-line trace header", () => {

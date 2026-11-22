@@ -28,6 +28,7 @@ import type {
   GrantDisplay,
 } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
+import type { ChatSettingField } from "@rome/api-types/chat-settings";
 
 /** The copy key a slot renders under (`connections.cards.<service>.<key>`). */
 export type SlotKey = "bot" | "session" | "user";
@@ -52,6 +53,9 @@ export interface ConnectionSlot {
   /** The kind of link an agent has to this slot's account, or null when its
    *  kind of connection takes none. */
   link: AccountLink | null;
+  /** The chat rules this slot's kind offers on its group chats. Empty or
+   *  absent where it offers none, and the slot then shows no chat rules. */
+  chatRules?: ChatSettingField[];
 }
 
 export interface ConnectionCard {
@@ -97,10 +101,11 @@ const SERVICE_ORDER = [
   "discord",
   "email",
   "feishu",
-  "slack_bot",
+  "slack_app",
   "agents",
   "github",
   "google",
+  "microsoft",
   "slack",
   "shopify",
 ];
@@ -118,13 +123,14 @@ const LABELS: Record<string, string> = {
   webchat: "Webchat",
   github: "GitHub",
   google: "Google",
+  microsoft: "Microsoft",
   slack: "Slack",
-  slack_bot: "Slack bot",
+  slack_app: "Slack",
   shopify: "Shopify",
   composio: "Composio",
 };
 
-const OAUTH_SERVICES = new Set(["github", "google", "slack", "shopify"]);
+const OAUTH_SERVICES = new Set(["github", "google", "microsoft", "slack", "shopify"]);
 
 /** The copy slot key each registry grant renders under. A channel's single
  *  Talk grant is the generic `bot` slot whatever the grant is named; an OAuth
@@ -137,10 +143,11 @@ const SLOT_KEY_BY_GRANT: Record<string, Record<string, SlotKey>> = {
   discord: { bot: "bot" },
   email: { inbox: "bot" },
   feishu: { app: "bot" },
-  slack_bot: { bot: "bot" },
+  slack_app: { bot: "bot" },
   agents: { cloud: "bot" },
   github: { user: "user" },
   google: { user: "user" },
+  microsoft: { user: "user" },
   slack: { workspace: "user" },
   shopify: { store: "user" },
 };
@@ -167,6 +174,7 @@ function toSlots(connection: ApiConnection, key?: SlotKey): ConnectionSlot[] {
       identity: foldIdentity(display),
       activeSetupCid: connection.setups[grant] ?? null,
       link: connection.link ?? null,
+      ...(connection.chatRules ? { chatRules: connection.chatRules } : {}),
     };
   });
 }
@@ -263,11 +271,9 @@ function composioCard(status: ComposioCliStatus): ConnectionCard {
 
 /** Personal-account services that present as a `session` slot on their brand's
  *  card rather than a card of their own. One brand, two credentials: Telegram's
- *  bot and the guardian's own account; WeChat's official bot and the guardian's
- *  own account read off the hosting VM. */
+ *  bot and the guardian's own account. */
 const FOLDED_ACCOUNT_SERVICES: Record<string, string> = {
   telegram_user: "telegram",
-  wechat_user: "wechat",
 };
 
 export function buildConnectionCards(

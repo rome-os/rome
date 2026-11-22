@@ -8,7 +8,7 @@ It plays seven roles:
 - **Identity provider for instances** — authenticates a guardian against their Rome Cloud account when an instance signs in, and issues the durable instance credential ([Instance sign-in](#instance-sign-in)).
 - **Third-party OAuth broker** — runs the start/callback flow for providers like Google or GitHub, then hands the access token to the requesting Rome instance via a PKCE-bound handoff ([OAuth handoff](#oauth-handoff)).
 - **App store backend** — hosts the publicly available [app](apps.md#rome-apps) listings (see [App store](apps.md#app-store)).
-- **Rome credits provider** — serves Codex through an inference gateway that bills the instance's Rome credits while the guardian's ChatGPT login is disconnected and the account has credits to spend ([Rome credits](#rome-credits)).
+- **Rome credits provider** — serves Codex through an inference gateway that bills the instance's Rome credits while the guardian is logged in to no AI account and the account has credits to spend ([Rome credits](#rome-credits)).
 - **Voice input provider** — hands a signed-in instance a short-lived credential for a transcription provider, one per listening session ([Voice input](#voice-input)).
 - **Usage collector** — receives the usage a signed-in instance reports about its own turns, action runs, guardian sign-ins, and listening sessions ([Usage reporting](#usage-reporting)).
 
@@ -73,12 +73,13 @@ Rome credits are an account-wide allowance that Rome Cloud serves through its in
 
 **Contracts:**
 
-- Codex has one [login](../domains/agents.md#model-provider-login) for the whole instance, chosen from the guardian's ChatGPT account and the account's credits. A connected ChatGPT account wins. While it is disconnected, Rome credits are the login when the instance has a Rome Cloud origin and a credential, and the last read of the account's credits found inference enabled and a positive available balance. An account with no grant, a disabled account, and a used-up balance leave Codex on the subscription login with no account behind it, so no request reaches the gateway. A ChatGPT login whose token was revoked, or that Codex rejects, counts as disconnected and shows as needing re-login whichever login Codex runs on. ChatGPT usage limits and quota probes never change the login.
-- Rome reads the account's credits when ChatGPT disconnects, when the credential changes, on each Codex status refresh, and after the gateway refuses a model. Each read can start or stop Rome credits, so a new grant or a used-up balance changes the login at the next status refresh, which runs hourly. A read that cannot reach Rome Cloud keeps the current login.
+- Codex has one [login](../domains/agents.md#model-provider-login) for the whole instance, chosen from the guardian's logins and the account's credits. Rome credits are the login only while the guardian is logged in to no AI account: no ChatGPT login and no Claude login. A login that expired or was revoked still counts, so it does not bring them in: the chat shows a card to log in again. The instance needs a Rome Cloud origin and a credential, and the last read of the account's credits must have found inference enabled and a positive available balance. AI Tools shows Rome credits, with their remaining balance, only while no account is logged in. The first login hides them, and the balance stays in Rome Cloud until the guardian logs out of every account. An account with no grant, a disabled account, and a used-up balance leave Codex on the subscription login with no account behind it, so no request reaches the gateway. A ChatGPT login whose token was revoked, or that Codex rejects, counts as disconnected and shows as needing re-login whichever login Codex runs on. ChatGPT usage limits and quota probes never change the login.
+- Rome reads the account's credits at startup, when the credential changes, on each Codex status refresh, and after the gateway refuses a model. Each read can start or stop Rome credits, so a new grant or a used-up balance changes the login at the next status refresh, which runs hourly. A read that cannot reach Rome Cloud keeps the current login.
 - A login change restarts Codex, which fails the turns running at that moment. A new credential on Rome credits is a login change.
 - A Codex turn waiting to start fails if Codex restarts on another kind of login first.
 - Rome credits and a ChatGPT plan are two logins to Codex. On Rome credits, Rome uses only the Codex models the gateway reports serving the account, and needs no plan entitlement for them. The gateway matches a model name exactly, so a dated or differently spelled name of a served model is not served. Codex reads the list when Rome credits become the login, on each status refresh, and after the gateway refuses a model, so a model the gateway starts serving is picked up at the next status refresh. While the gateway has reported no list, Rome assumes it serves Sol and Luna.
-- A tier resolves under credits as it does under a ChatGPT plan, then falls back to a served model: a tier that would run Sol or Luna runs Terra when the gateway serves only Terra. Credits do not serve a tier when the gateway serves none of its models. A tier prefers a connected Claude login over Rome credits.
+- A tier resolves under credits as it does under a ChatGPT plan, then falls back to a served model: a tier that would run Sol or Luna runs Terra when the gateway serves only Terra. Credits do not serve a tier when the gateway serves none of its models.
+- Moving between Codex on a ChatGPT login and Codex on Rome credits keeps the chat's thread: it is a login change, not a provider switch.
 - A custom tier mapping, a [model pin](sessions.md#model-pin), or a selected model that the current login cannot run fails with `model_unavailable` until the guardian selects another model or the session ends. Under credits that is a model the gateway does not serve. Under a ChatGPT plan it is a model the plan does not include. A pin that one login runs can therefore fail after the login changes.
 - An agent pinned to Codex by tier, such as the image generation agent, still needs the ChatGPT login, because the credits gateway rejects ChatGPT's hosted tools.
 - The gateway answers a used-up balance with `402 insufficient_credits`. The turn fails with `credits_used_up`. The instance does not check the balance before each turn, so a balance used up between reads fails turns this way until the next read ends Rome credits.
@@ -97,6 +98,20 @@ Rome Cloud provides the transcription service behind dictation in message fields
 - A refusal carries a reason code, such as `voice_input_rate_limited`. The message field shows it and keeps the words heard so far.
 - Rome Cloud allows voice input per account. For an account it does not allow, both routes answer 403 `voice_input_not_allowed`, and the dashboard shows no voice control and no voice input row in Settings.
 - An instance that is not signed in has no voice control. One whose credential Rome Cloud refuses asks the guardian to sign in again.
+
+## Voice conversation
+
+Voice conversation mode lets Rome speak its replies. The speaking module in [`packages/core/src/voice-output/`](../../packages/core/src/voice-output/) turns text into audio through a speech provider. It is behind the `voice_mode` feature gate. Rome Cloud does not yet hand out speech credentials, and no chat uses the module.
+
+**Contracts:**
+
+- The `voice_mode` gate is off by default. `FEATURE_GATE_VOICE_MODE=on` turns it on for one instance, with no feature-flag backend.
+- With the gate off, Rome makes no speaker, asks for no credential and opens no connection to a speech provider.
+- With the gate on and no credential source, Rome says speaking is not set up. It does not fall back to a long-lived provider key.
+- The text Rome speaks goes from the instance to the speech provider. It is a new outbound flow that [voice input](#voice-input) does not have.
+- Each sentence is its own stream at the provider, so its audio starts without waiting for later text. A session runs two streams at once by default, and more sentences wait their turn in order. The provider allows three streams at once per account by default. When it has no room for a stream, the session puts that sentence back at the head of its queue, runs no more streams than are running then, and starts the sentence again when one ends. When none of its streams is running, it tries again after 250 ms, 500 ms, 1 s, then every 2 s. A sentence fails with a `busy` error only after those waits add up to 10 s, or when the provider refuses the connection itself as one too many.
+- Stopping speech drops the audio of every running and waiting sentence at once, without waiting for the provider to confirm.
+- Errors and logs never carry the credential.
 
 ## Usage reporting
 

@@ -108,22 +108,25 @@ export interface ConciergeChatStartRequest {
 }
 
 /**
- * `GET /api/concierge/chats/:chatId/follows-and-tasks`: what deleting the
- * caller's topic chat moves to the main chat or, when they choose so, stops.
+ * `GET /api/concierge/chats/:chatId/follows-and-tasks`: what archiving or
+ * deleting the caller's topic chat moves to the main chat or, when they
+ * choose so, stops.
  */
 export interface ConciergeChatWorkResponse {
   /** `label` names the source as the connectors list does. */
   follows: { source: string; label: string; target: string }[];
   openTasks: { id: string; title: string }[];
+  /**
+   * While the chat is archived: the follows its archive moved to the main
+   * chat that still report there, which restoring it can move back. Absent
+   * from an older instance.
+   */
+  movedFollows?: { source: string; label: string; target: string }[];
 }
 
 /** How many days of finished task rows the Concierge reads by default. */
 export const CONCIERGE_DONE_DAYS = 7;
 
-/** The longest `summary` the Concierge writes. */
-export const CONCIERGE_TASK_SUMMARY_MAX_LENGTH = 120;
-
-/** One row of the task panel. Times are epoch milliseconds. */
 /**
  * The card or approval a task chat waits on its owner for: a card by its
  * tool use id, with the message that holds it and how it renders, or a
@@ -140,8 +143,11 @@ export type ConciergeOpenWait =
     }
   | { kind: "approval"; id: string; since: number };
 
+/** One row of the Tasks view. Times are epoch milliseconds. */
 export interface ConciergeTaskDto {
+  /** The task's id, which is its task chat's id. */
   id: string;
+  /** The task chat's current name. */
   title: string;
   /** Mapped from `status` for apps from before it. */
   state: ConciergeTaskState;
@@ -163,12 +169,8 @@ export interface ConciergeTaskDto {
   openWait?: ConciergeOpenWait | null;
   /** When the check scheduled for it is due, while one is pending, epoch milliseconds. */
   laterAt?: number | null;
-  summary: string | null;
-  waitingOn: string | null;
-  dueAt: number | null;
-  rank: number | null;
-  /** The linked task chat, with its current name, or null when the row has none. */
-  chat: { id: string; name: string } | null;
+  /** The task chat: the task is its chat, so this is its id and its current name. */
+  chat: { id: string; name: string };
   /** The Concierge chat the row came from; its results and the panel's buttons go there. */
   conciergeChat: ConciergeChatRef;
   /**

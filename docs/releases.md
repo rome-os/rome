@@ -1,6 +1,8 @@
 # Releases
 
-Rome ships three kinds of release artifacts: the **runtime Docker image** (the product), the **Mac app**, and **npm SDK packages** (for app authors). They have independent versioning and independent pipelines.
+Rome ships the **runtime Docker image** (the product), the **Rome Node image**,
+the **Mac app**, and **npm SDK packages** (for app authors). Each has its own
+release pipeline.
 
 ## Rome runtime image (Docker Hub)
 
@@ -58,11 +60,29 @@ The previous release is the highest stable version below this one on Docker Hub,
 
 A commit is listed only when it touches a file the image is built from. [`scripts/docker/runtime-inputs.mjs`](../scripts/docker/runtime-inputs.mjs) holds those rules, and [`prepare-runtime-workspace.mjs`](../scripts/docker/prepare-runtime-workspace.mjs) copies the build context by the same rules, so the notes and the image cannot disagree. The shipped docs are the one exception. The agent answers from them, but a commit whose only shipped files are docs is left out, since it changes no behavior.
 
+The release also carries `release-notes.json`, the same changes for instances to read. It holds the version, the previous release's version, the publish date, the release URL, and the Breaking changes, New and Fixes entries. Each entry has the commit's scope, its subject without the pull request suffix, and the pull request number. Internal changes and Other changes are a count only. A published release's file never changes, except when a backfill replaces it.
+
+The file also holds `highlights`: up to five user-facing lines in English and Chinese, which the web upgrade dialog shows instead of the entries. [`release-highlights.mjs`](../scripts/docker/release-highlights.mjs) asks DeepSeek (`deepseek-flash` with thinking off, using the `DEEPSEEK_API_KEY` secret) to write them from the entries and the squash commit bodies, which hold each pull request's description as merged. The prompt leaves out internal work, anything behind a feature gate, and the details of security fixes. A highlight must cite one of the release's own pull requests, or it is dropped. When the key is missing or the call or its answer fails, the highlights are empty and the release goes on. A failed call, or highlights dropped by the checks, shows as a warning on the workflow run.
+
+To attach the file to releases that predate it, or to rewrite it, write the files and print the upload commands:
+
+```bash
+git fetch --tags
+DEEPSEEK_API_KEY=… IMAGE_NAME=yunfanye/rome GITHUB_REPOSITORY=rome-os/rome node scripts/docker/release-notes.mjs backfill /tmp/rome-release-notes v1.1.200 v1.1.201
+```
+
+Check the files, then run the printed `gh release upload … --clobber` commands.
+
 A prerelease tag gets a prerelease. The release never takes the **Latest** badge from the package releases. The job fails when a release for the tag already exists. If it fails after the image went out, rerun that job alone.
 
 ### Rehearsing the pipeline
 
 `.github/workflows/docker-publish-test.yml` publishes to `zoolsher/rome` with separate `TEST_DOCKERHUB_*` secrets on manual dispatch and twice-daily schedules. It exercises the multi-arch build and manifest publish without creating production release tags. It does not use the production weekday schedule, CI gate, or version allocation, and creates no GitHub release. It is a copy, not a shared workflow — when changing the release pipeline, update both or note the drift.
+
+## Rome Node image (GitHub Container Registry)
+
+[Release the Rome Node image](rome-node.md#release-the-image) from the
+Rome Node package workflow.
 
 ## Mac app
 

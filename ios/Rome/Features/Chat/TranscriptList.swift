@@ -1,6 +1,7 @@
 import ChatLayout
 import os
 import SwiftUI
+import UIKit.UIGestureRecognizerSubclass
 import UIKit
 
 /// A transcript in a `UICollectionView` laid out by ChatLayout, with each row
@@ -25,6 +26,9 @@ struct TranscriptList<Row: View>: View {
     /// Until then, new rows bring the list to the bottom: the refetch after
     /// a return or a push tap lands a moment after it.
     @State private var catchUpUntil: Date?
+    /// When a Reply last brought the composer up: the list then keeps the
+    /// replied message in view instead of going to the bottom.
+    @State private var repliedAt: Date?
 
     var body: some View {
         let rows = store.rows
@@ -36,6 +40,7 @@ struct TranscriptList<Row: View>: View {
                 insets: proxy.safeAreaInsets,
                 alignTop: alignTop,
                 scroll: scroll,
+                selection: store.textSelection,
                 row: row,
                 onNearTop: {
                     Task {
@@ -48,11 +53,23 @@ struct TranscriptList<Row: View>: View {
                         }
                     }
                 },
-                onDividerAbove: { [pill = store.unreadPill] in pill.dividerAbove($0) }
+                onDividerAbove: { [pill = store.unreadPill] in pill.dividerAbove($0) },
+                replyTarget: { [store] row in
+                    guard !store.share.isSelecting, store.info(for: row).canReply, let id = row.messageId else { return nil }
+                    return id
+                },
+                onSwipeReply: { [actions = store.actions] message, row in actions.reply(to: message, row: row) }
             )
             .environment(\.shareTurns, store.share.isSelecting ? ShareTurns(messages: store.messages, rows: rows) : nil)
+            .environment(\.textSelection, store.textSelection)
             .ignoresSafeArea()
         }
+        // The composer taking focus, or share mode, ends select mode.
+        .onChange(of: composerFocused) { if composerFocused { store.textSelection.end() } }
+        // Leaving the chat ends it: back, the drawer, another chat. The store
+        // outlives the screen, and a press point is no place to come back to.
+        .onDisappear { store.textSelection.end() }
+        .onChange(of: store.share.isSelecting) { if store.share.isSelecting { store.textSelection.end() } }
         .onChange(of: rows.last?.id) {
             if let until = catchUpUntil, Date.now < until { scroll.toBottom() }
         }
@@ -79,7 +96,15 @@ struct TranscriptList<Row: View>: View {
         .onChange(of: store.arrivals) {
             if !scroll.following { scroll.unseen += 1 }
         }
+        // A Reply, from a swipe or the menu: the replied message stays in
+        // view as the keyboard comes up (`TranscriptScroll.keep`).
+        .onChange(of: store.replies) {
+            repliedAt = .now
+            if let row = store.replyRow { scroll.keep(row) }
+        }
         .onChange(of: composerFocused) { _, focused in
+            // Brought up by a Reply, the composer leaves the list where it is.
+            if focused, let repliedAt, Date.now.timeIntervalSince(repliedAt) < 1 { return }
             if focused {
                 Task {
                     try? await Task.sleep(for: .milliseconds(300))
@@ -141,6 +166,12 @@ final class TranscriptScroll {
         target?.reveal(rowId, atTop: atTop)
     }
 
+    /// Keeps a row in view, moving the list as little as it can, now and as
+    /// the keyboard comes up: the message a Reply picked.
+    func keep(_ rowId: String) {
+        target?.keep(rowId)
+    }
+
     fileprivate func set(following: Bool) {
         if self.following != following { self.following = following }
         if following && unseen != 0 { unseen = 0 }
@@ -156,6 +187,22 @@ final class TranscriptScroll {
 private protocol TranscriptScrollTarget: AnyObject {
     func scrollToBottom()
     func reveal(_ rowId: String, atTop: Bool)
+    func keep(_ rowId: String)
+}
+
+/// Where the list goes to keep a row in view: as little a move as shows it
+/// whole, a little clear of the header and the composer, or its top when it
+/// is taller than the space between them.
+enum TranscriptKeep {
+    static let margin: CGFloat = 8
+
+    static func offset(current: CGFloat, row: CGRect, top: CGFloat, bottom: CGFloat, height: CGFloat) -> CGFloat {
+        // The highest offset with the row's top in view, the lowest with its bottom.
+        let showsTop = row.minY - margin - top
+        let showsBottom = row.maxY + margin + bottom - height
+        guard showsBottom <= showsTop else { return showsTop }
+        return min(max(current, showsBottom), showsTop)
+    }
 }
 
 /// When the back-to-bottom button shows: once the newest rows are more than
@@ -268,9 +315,13 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
     let insets: EdgeInsets
     let alignTop: Bool
     let scroll: TranscriptScroll
+    let selection: TextSelection
     let row: (TranscriptRow, TranscriptRow?) -> Row
     let onNearTop: () -> Void
     let onDividerAbove: (Bool) -> Void
+    /// The message a swipe on the row replies to; nil where it takes none.
+    let replyTarget: (TranscriptRow) -> String?
+    let onSwipeReply: (_ message: String, _ row: String) -> Void
 
     func makeCoordinator() -> TranscriptCoordinator<Row> {
         TranscriptCoordinator(row: row, alignTop: alignTop)
@@ -291,7 +342,10 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
         coordinator.row = row
         coordinator.onNearTop = onNearTop
         coordinator.onDividerAbove = onDividerAbove
+        coordinator.replyTarget = replyTarget
+        coordinator.swipe.onReply = onSwipeReply
         coordinator.scroll = scroll
+        coordinator.selection = selection
         scroll.target = coordinator
         PerfProbe.count("listUpdate")
         coordinator.cells.environment = context.environment
@@ -303,11 +357,15 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
 
 /// Keeps the collection view's items, insets and scroll for `ChatCollection`.
 @MainActor
-private final class TranscriptCoordinator<RowView: View>: NSObject, UICollectionViewDelegate, ChatLayoutDelegate, TranscriptScrollTarget {
+private final class TranscriptCoordinator<RowView: View>: NSObject, UICollectionViewDelegate, UIGestureRecognizerDelegate, ChatLayoutDelegate, TranscriptScrollTarget {
     var row: (TranscriptRow, TranscriptRow?) -> RowView
     var onNearTop: () -> Void = {}
     var onDividerAbove: (Bool) -> Void = { _ in }
+    var replyTarget: (TranscriptRow) -> String? = { _ in nil }
+    let swipe = SwipeToReply()
     weak var scroll: TranscriptScroll?
+    /// The transcript's select mode, which a scroll or a tap outside the message ends.
+    weak var selection: TextSelection?
     let cells = CellContext()
     private let alignTop: Bool
     private var boxes: [String: RowBox] = [:]
@@ -331,6 +389,8 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     private var askedOlder: (count: Int, at: ContinuousClock.Instant)?
     /// The last answer given to `onDividerAbove`.
     private var dividerAbove: Bool?
+    /// The row a Reply picked, kept in view until the keyboard has come up.
+    private var keeping: (id: String, until: CFTimeInterval)?
     #if DEBUG
     private let holdProbe = HoldProbe()
     #endif
@@ -358,10 +418,28 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         view.selfSizingInvalidation = .enabled
         // https://openradar.appspot.com/40926834: prefetching keeps stale cells.
         view.isPrefetchingEnabled = false
-        view.delegate = self
         if #available(iOS 26, *) {
-            view.topEdgeEffect.style = .soft
+            // The header draws its own blur behind it (`ChatHeaderBlur`). On a
+            // phone the system's top edge effect for the floating bar drew here
+            // too, as a whitish band with a hard edge where the bar ends; the
+            // simulator never drew it.
+            view.topEdgeEffect.isHidden = true
         }
+        view.delegate = self
+        swipe.target = { [weak self] indexPath in
+            guard let self, let id = self.items[safe: indexPath.item], let box = self.boxes[id],
+                  let message = self.replyTarget(box.row) else { return nil }
+            return (message, id)
+        }
+        swipe.attach(to: view)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(tappedOutsideSelection))
+        tap.cancelsTouchesInView = false
+        tap.delegate = self
+        view.addGestureRecognizer(tap)
+        // Where each touch lands: Select text opens on the paragraph the
+        // long press that opened the menu was on.
+        let touches = TouchDownRecorder { [weak self] point in self?.selection?.touchedDown(at: point) }
+        view.addGestureRecognizer(touches)
         #if DEBUG
         // A fling `ROME_PERF=paging` drives in code is a drag away from the bottom.
         NotificationCenter.default.addObserver(forName: PerfProbe.flingStarted, object: nil, queue: .main) { [weak self] _ in
@@ -630,6 +708,14 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         } else if let anchor, !isUserScrolling {
             layout.restoreContentOffset(with: anchor)
         }
+        // The keyboard a Reply brought up moves the rows with it, as above,
+        // but never past the message replied to.
+        if let keeping, CACurrentMediaTime() < keeping.until, !isUserScrolling,
+           let offset = offset(keeping: keeping.id), abs(offset - view.contentOffset.y) > 0.5 {
+            view.setContentOffset(CGPoint(x: 0, y: offset), animated: false)
+            readScroll()
+            scroll?.set(following: scroll?.atBottom ?? true)
+        }
     }
 
     // MARK: Scrolling
@@ -669,7 +755,11 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // A scroll ends select mode, but not one a selection's own drag
+        // makes as it reaches the edge.
+        if !SelectingTextView.dragging { selection?.end() }
         revealing = nil
+        keeping = nil
         // A drag stops a status-bar scroll short of the top, and UIKit then
         // never reports it reached the top.
         scrollingToTop = false
@@ -689,6 +779,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func scrollViewShouldScrollToTop(_ scrollView: UIScrollView) -> Bool {
+        selection?.end()
         revealing = nil
         // Already on top, the tap moves nothing and nothing reports back.
         scrollingToTop = scrollView.contentOffset.y + scrollView.adjustedContentInset.top > 1
@@ -705,6 +796,10 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         if scroll?.following == true {
             // Rows measured on the way down: land on the newest row exactly.
             restoreToBottom()
+        } else if keeping != nil, revealing == nil {
+            // Kept a replied message in view: on the bottom, the list follows again.
+            readScroll()
+            scroll?.set(following: scroll?.atBottom ?? true)
         } else if let revealing {
             self.revealing = nil
             // Rows near it measured as they came on screen: settle on it.
@@ -716,6 +811,8 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func scrollToBottom() {
+        // A move the list makes itself ends select mode, as a drag does.
+        selection?.end()
         guard let view else { return }
         revealing = nil
         // A fling still gliding would win over the jump: stop it first.
@@ -729,10 +826,39 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func reveal(_ rowId: String, atTop: Bool) {
+        // A move the list makes itself ends select mode, as a drag does.
+        selection?.end()
         guard let view, let offset = offset(revealing: rowId, atTop: atTop) else { return }
         if view.isDecelerating { view.setContentOffset(view.contentOffset, animated: false) }
         revealing = (rowId, atTop)
         view.setContentOffset(CGPoint(x: 0, y: offset), animated: true)
+    }
+
+    func keep(_ rowId: String) {
+        // A move the list makes itself ends select mode, as a drag does.
+        selection?.end()
+        guard let view else { return }
+        // Long enough for the keyboard to come up.
+        keeping = (rowId, CACurrentMediaTime() + 1)
+        guard let offset = offset(keeping: rowId), abs(offset - view.contentOffset.y) > 0.5 else { return }
+        if view.isDecelerating { view.setContentOffset(view.contentOffset, animated: false) }
+        revealing = nil
+        scroll?.set(following: false)
+        view.setContentOffset(CGPoint(x: 0, y: offset), animated: true)
+    }
+
+    /// The offset nearest the current one that shows the whole row between
+    /// the header and the composer, or its top when it is taller than that.
+    private func offset(keeping id: String) -> CGFloat? {
+        guard let view, let index = items.firstIndex(of: id),
+              let frame = layout.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame else { return nil }
+        let low = -view.contentInset.top
+        let high = max(low, view.contentSize.height + view.contentInset.bottom - view.bounds.height)
+        let target = TranscriptKeep.offset(
+            current: view.contentOffset.y, row: frame,
+            top: view.contentInset.top, bottom: view.contentInset.bottom, height: view.bounds.height
+        )
+        return min(max(target, low), high)
     }
 
     /// The offset that shows a row mid-screen, or at the top under the header.
@@ -751,6 +877,29 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         guard let id = items[safe: indexPath.item] else { return }
         heights[id] = cell.bounds.height
+    }
+
+    // MARK: Select mode
+
+    /// A tap on the transcript outside the message in select mode ends it.
+    @objc private func tappedOutsideSelection() {
+        selection?.end()
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard selection?.isActive == true else { return false }
+        // A tap in the text itself moves the selection, and its handles and
+        // links are the text view's.
+        var view = touch.view
+        while let current = view {
+            if current is SelectingTextView { return false }
+            view = current.superview
+        }
+        return true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
     }
 }
 
@@ -864,6 +1013,8 @@ private final class TranscriptCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         taken = 0
+        // A swipe to Reply moves the row by this.
+        contentView.transform = .identity
     }
 
     /// A newer row draws over an older one: a bubble's mark sits half over
@@ -889,5 +1040,26 @@ private final class TranscriptCell: UICollectionViewCell {
 private extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+/// Reports each touch down on its view, in the window, and recognizes
+/// nothing: it fails at once, so it takes no touch from any other gesture.
+private final class TouchDownRecorder: UIGestureRecognizer {
+    private let onTouchDown: (CGPoint) -> Void
+
+    init(onTouchDown: @escaping (CGPoint) -> Void) {
+        self.onTouchDown = onTouchDown
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        if let touch = touches.first, let window = view?.window {
+            onTouchDown(touch.location(in: window))
+        }
+        state = .failed
     }
 }

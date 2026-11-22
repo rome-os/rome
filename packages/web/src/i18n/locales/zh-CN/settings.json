@@ -12,7 +12,6 @@
     "Connections": "连接",
     "Favors": "Favors",
     "Trust": "信任",
-    "Channels": "渠道",
     "AI Tools": "AI 工具",
     "Advanced": "高级",
     "Devices": "设备"
@@ -53,7 +52,10 @@
     "title": "连接 {{title}}",
     "onDevice": "请在{{device}}上连接 {{title}}：打开那台设备上的 Rome App，在“设置 › 连接”里打开它。然后回到聊天，告诉 Agent 已连接。",
     "connected": "{{title}} 已在{{device}}上连接。回到聊天，告诉 Agent 已连接。",
-    "yourDevice": "你的设备"
+    "yourDevice": "你的设备",
+    "retry": "重试",
+    "notAComputer": "这项连接只开启已在用 Rome 的设备上的一项能力，不能添加电脑，也不能让离线的电脑重新上线。",
+    "devicesLink": "在“设置 › 设备”里管理电脑"
   },
   "connections": {
     "loading": "正在加载连接",
@@ -104,7 +106,6 @@
       "endedAnother": "这是另一个账号，所以 Rome 结束了与之前账号的连接，并连接了这个账号。",
       "newAccount": "新账号",
       "noAgent": "无。Rome 不监听此账号。",
-      "changeInEnvoys": "在外派智能体中更改",
       "agentSpeaksAs": "以此账号的身份发言",
       "agentAnswersForYou": "代你在此账号上回复",
       "noAgentTitle": "无智能体",
@@ -206,16 +207,11 @@
           }
         }
       },
-      "slack_bot": {
+      "slack_app": {
         "bot": {
-          "titleFallback": "智能体的 Slack 账号",
+          "title": "Slack 里的 Rome",
           "bullets": {
-            "reply": "有人私信 {{identity}} 或在频道中提及它时自动回复",
-            "start": "收到新消息时启动任务"
-          },
-          "bulletsFallback": {
-            "reply": "有人私信这个账号或在频道中提及它时自动回复",
-            "start": "收到新消息时启动任务"
+            "reply": "在你的 Slack 工作区里以你的 Concierge 身份回复私信"
           }
         }
       },
@@ -263,6 +259,15 @@
             "work": "以你的身份使用你的各项 Google 服务"
           },
           "privacyNote": "你在 Google 上授权访问，随时可以在这里断开。"
+        }
+      },
+      "microsoft": {
+        "user": {
+          "title": "你的 Microsoft 账号",
+          "bullets": {
+            "work": "读取你的 Outlook 邮件，每封邮件经你批准后才发送"
+          },
+          "privacyNote": "你在 Microsoft 上授权访问，随时可以在这里断开。"
         }
       },
       "slack": {
@@ -426,17 +431,7 @@
   },
   "channels": {
     "conversationSettings": {
-      "configure": "配置聊天",
-      "searchPlaceholder": "搜索提供商、工作区或聊天",
-      "allConnections": "所有连接",
-      "anyStatus": "所有状态",
-      "connectionFilterAria": "按连接筛选",
-      "statusFilterAria": "按状态筛选",
-      "status": {
-        "online": "在线",
-        "offline": "离线",
-        "notConnected": "未连接"
-      },
+      "searchPlaceholder": "搜索聊天",
       "kinds": {
         "channel": "频道",
         "group": "群组",
@@ -444,12 +439,8 @@
         "topic": "话题"
       },
       "loading": "正在加载聊天…",
-      "emptyTitle": "未找到可配置的聊天",
-      "emptyDescription": "在受支持的平台上连接一个账号，或发送一条消息让 Rome 发现该聊天。",
+      "emptyTitle": "所有聊天都使用默认规则",
       "loadMore": "加载更多",
-      "overrideCount_one": "{{count}} 项覆盖",
-      "overrideCount_other": "{{count}} 项覆盖",
-      "providerDefaults": "产品默认值",
       "sections": {
         "activation": "触发",
         "replies": "回复",
@@ -466,24 +457,23 @@
         "sessionReset": "提供商会话重置"
       },
       "descriptions": {
-        "sessionReset": "清除模型提供商侧保存的智能体记忆"
-      },
-      "source": {
-        "overridden": "已覆盖"
+        "sessionReset": "清除模型提供商侧保存的智能体记忆。"
       },
       "options": {
-        "mention": "仅被提及时",
         "mentions": "仅提及消息",
         "all": "全部",
         "ignore": "忽略",
         "respond": "响应",
         "thread": "原生话题",
-        "inline": "会话内"
+        "inline": "会话内",
+        "replyRule": {
+          "mention": "仅在对它说话时",
+          "all": "每条消息"
+        }
       },
       "mainAgent": "main（默认）",
       "accountAgent": "{{agent}}（此账号的智能体）",
-      "silentAccount": "此账号有智能体之前，这里的消息不会到达 Rome。",
-      "silentAccountLink": "<account>在账号页面关联</account>。",
+      "silentAccount": "此关联账号有智能体之前，这里的消息不会到达 Rome。",
       "silentAccountOverride": "关联后，此聊天选择的 {{agent}} 将生效。",
       "sessionReset": {
         "never": "永不",
@@ -500,7 +490,38 @@
         "utc": "UTC"
       },
       "saving": "保存中…",
-      "retry": "重试"
+      "retry": "重试",
+      "chatRules": {
+        "title": "聊天规则"
+      },
+      "otherChats": "群聊默认：",
+      "addChat": "添加聊天",
+      "noMatches": "没有匹配的聊天",
+      "findChats": "Rome 在某个聊天中收到消息后，该聊天会出现在这里。",
+      "close": "关闭",
+      "addDialog": {
+        "title": "添加聊天"
+      },
+      "resetToDefaults": "恢复默认",
+      "changed": "已改动默认值",
+      "summary": {
+        "defaults": "使用默认规则",
+        "on": "开启",
+        "off": "关闭",
+        "thread": "在话题中回复",
+        "inline": "直接回复",
+        "agent": "由 {{agent}} 回答",
+        "resetNever": "从不重置",
+        "resetDaily": "每天 {{time}} UTC 重置",
+        "resetIdle": "闲置 {{duration}}后重置",
+        "minutes_one": "{{count}} 分钟",
+        "minutes_other": "{{count}} 分钟",
+        "hours_one": "{{count}} 小时",
+        "hours_other": "{{count}} 小时",
+        "days_one": "{{count}} 天",
+        "days_other": "{{count}} 天"
+      },
+      "allListed": "这里的聊天都已有单独的规则。"
     },
     "restartNeededFallback": "后端不可达 — 需要重启以应用更改",
     "disconnectFailedFallback": "断开失败。",
@@ -576,10 +597,6 @@
     "feishu": {
       "title": "飞书",
       "guardianLinked": "你的飞书账号已绑定为守护者。"
-    },
-    "wechatUser": {
-      "fallbackName": "微信账号",
-      "disconnectFailedFallback": "断开微信账号连接失败。"
     }
   },
   "favors": {
@@ -629,10 +646,7 @@
       "name": "Rome 额度",
       "status": {
         "inUse": "使用中",
-        "ready": "就绪",
-        "standby": "待用",
         "usedUp": "已用完",
-        "usedUpWithClaude": "已用完",
         "paused": "已暂停"
       },
       "ofGranted": "共 {{amount}}",
@@ -658,7 +672,6 @@
       "needsReauth": "需要重新登录",
       "apiKeyActive": "API 密钥生效中",
       "apiKeyNeedsUpdate": "API 密钥需要更新",
-      "comingSoon": "即将推出",
       "signedInWith": "已通过 <1>{{method}}</1> 登录",
       "signedIn": "已登录",
       "accountType": "账号类型：<1>{{type}}</1>"
@@ -738,6 +751,23 @@
           "emptyEnv": "请至少添加一个环境变量。"
         }
       }
+    },
+    "defaultProvider": {
+      "badge": "默认",
+      "setAsDefault": "设为默认",
+      "confirmTitle": "将 {{provider}} 设为默认？",
+      "confirmBody": "进行中的聊天会在下一次回复时切换到 {{provider}}。",
+      "confirmBodyStay": "新聊天使用 {{provider}}，进行中的聊天保留原来的提供方。",
+      "moveExisting": "已有聊天也一起切过去",
+      "confirm": "设为默认",
+      "saveFailed": "未能更改默认提供方",
+      "removedNote": "你已退出 {{from}}，{{to}} 现在是默认。",
+      "dismissNote": "关闭"
+    },
+    "logoutOutcome": {
+      "otherBecomesDefault": "{{provider}} 会成为默认，聊天在下一次回复时切换过去。",
+      "pause": "聊天会暂停，直到你重新登录。",
+      "pauseOrCredits": "聊天会暂停，直到你重新登录，或让所有聊天改用 Rome 额度。"
     }
   },
   "sentinelLog": {
@@ -958,6 +988,22 @@
     "targetChanged": "期间发布了更新的版本（{{version}}）— 请再次确认以升级到该版本。",
     "upgradeFailed": "升级请求失败：{{message}}",
     "upgradeFailedFallback": "升级请求失败。",
+    "notesSingle": "{{version}} 的新内容",
+    "notesRange_one": "新内容：{{from}} → {{to}}（{{count}} 个版本）",
+    "notesRange_other": "新内容：{{from}} → {{to}}（{{count}} 个版本）",
+    "notesRangePending": "新内容：{{from}} → {{to}}",
+    "notesUpTo_one": "截至 {{to}} 的新内容（{{count}} 个版本）",
+    "notesUpTo_other": "截至 {{to}} 的新内容（{{count}} 个版本）",
+    "notesReleased": "发布于 {{date}}",
+    "notesLoading": "正在加载新内容",
+    "notesFailed": "无法加载新内容",
+    "notesMissing": "{{version}} 的发行说明暂不可用。",
+    "notesOnGitHub": "在 GitHub 查看发行说明",
+    "notesPartial": "{{version}} 之前版本的说明不可用，所以这里只列出了本次升级的一部分。",
+    "notesPartialUnknown": "更早版本的说明不可用，所以这里只列出了本次升级的一部分。",
+    "notesShowAll": "显示全部 {{count}} 项",
+    "notesShowFewer": "收起",
+    "notesSeeFull": "在 GitHub 查看完整变更",
     "restartingBody": "正在升级到 {{version}}。",
     "restartTimeoutBody": "{{name}} 在 {{minutes}} 分钟后仍未以 {{version}} 版本恢复。升级可能仍在进行，也可能已失败。",
     "restartTimeoutAction": "前往 Rome Cloud 查看实例状态。",
@@ -1009,8 +1055,17 @@
     "starting": "正在启动…",
     "startFailed": "设备服务启动失败",
     "setup": {
-      "title": "连接电脑",
-      "description": "每台电脑需要单独连接。",
+      "title": "连接设备",
+      "linkDevice": "关联设备",
+      "methods": {
+        "desktop": "应用",
+        "cli": "Rome Node CLI",
+        "container": "Rome Node 容器"
+      },
+      "desktopHelp": "使用同一个 Rome Cloud 账户登录 Rome 应用。在 iOS 上，打开「设置 → 连接」，为希望 Rome 使用的功能开启实时访问。",
+      "desktopDownload": "下载 Rome",
+      "comingSoon": "即将推出",
+      "containerHelp": "使用 Docker Compose 在容器中运行 Rome Node。",
       "commandHelp": "安装 Rome Node 后，在需要让 Rome 使用的电脑终端中运行此命令，而不是在 Rome 服务器上运行。",
       "access": "在浏览器中使用同一个 Rome Cloud 账户批准访问。这允许 Rome 以当前系统用户身份运行程序。请保持终端开启；按 Ctrl+C 断开连接。",
       "instructions": "安装与连接指南"

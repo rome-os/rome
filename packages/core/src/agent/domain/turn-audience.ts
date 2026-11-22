@@ -16,10 +16,9 @@ const DIRECT_MESSAGE_KINDS: ReadonlySet<string> = new Set([
   "whatsapp",
   "discord",
   "wechat",
-  "wechat_user",
   "linkedin",
   "slack",
-  "slack_bot",
+  "slack_app",
   "feishu",
   "lark",
 ]);
@@ -43,7 +42,8 @@ export function messagingAudience(context: ThreadContext, kind: string): Audienc
  * Without it, a direct message is read by its channel id alone and a
  * dashboard chat is shared. A turn that acts for someone other than the
  * guardian is shared. A turn started by another turn (a subagent's, a fork's)
- * is never more private than `parent`.
+ * is never more private than `parent`. A turn with no chat of its own, such
+ * as a summoned agent's, takes `parent`'s audience, and is shared without one.
  */
 export function turnAudience(
   context: ThreadContext | undefined,
@@ -51,7 +51,7 @@ export function turnAudience(
 ): Audience {
   if (facts.parent === "shared") return "shared";
   if (facts.actor && facts.actor.kind !== "guardian") return "shared";
-  if (!context) return "shared";
+  if (!context) return facts.parent ?? "shared";
   if (facts.place) return facts.place;
   if (context.channel === "webchat") return "shared";
   return messagingAudience(context, context.channel);

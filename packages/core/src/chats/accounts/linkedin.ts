@@ -1,7 +1,7 @@
 import type { Account, AccountId, Accounts } from "./accounts.js";
 import { pageAccounts } from "./account-paging.js";
 import { sharedRead } from "./account-snapshot.js";
-import { linkedInMemberIdFromProfileUrl } from "../../connections/kinds/linkedin/linkedin-sync.js";
+import { linkedInMemberIdFromProfileUrl } from "../../connections/kinds/linkedin/index.js";
 import type {
   LinkedInParticipantContactRow,
   LinkedInStoreRepository,

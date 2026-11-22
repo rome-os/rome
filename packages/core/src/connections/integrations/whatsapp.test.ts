@@ -4,6 +4,7 @@
 // threading — without a real Baileys socket.
 
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { channelMessageOf } from "../../chats/connected-accounts/channel-message.js";
 import { sendThrough } from "../../chats/connected-accounts/connection-ports.js";
 import type { ChatId, ChannelMessage, MessageReceipt } from "@rome-os/app-runtime";
 import {
@@ -313,11 +314,11 @@ describe("whatsapp inbound delivery", () => {
     return { talker, handlers };
   }
 
-  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+  it("delivers the transport's message as apps receive it, field for field", async () => {
     const { talker, handlers } = realTalker();
     const delivered: unknown[] = [];
     talker.start(
-      (msg) => delivered.push(msg),
+      (msg) => void delivered.push(channelMessageOf(msg, "whatsapp")),
       () => {},
     );
     await rs.waitFor(() => expect(handlers.has("messages.upsert")).toBe(true));

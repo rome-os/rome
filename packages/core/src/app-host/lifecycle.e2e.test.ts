@@ -613,8 +613,8 @@ describe("App lifecycle e2e", () => {
     it("after install, the app's action is invocable and receives appContext", async () => {
       const appRoot = await buildWorkspaceApp(workspaceParent, "beta", "echo_beta");
       await installWorkspace(harness, "beta", appRoot);
-      await waitFor(() => harness.hasAction("echo_beta"));
-      const result = await harness.invokeAction("echo_beta", { ping: 1 });
+      await waitFor(() => harness.hasAction("beta:echo_beta"));
+      const result = await harness.invokeAction("beta:echo_beta", { ping: 1 });
       expect(result).toMatchObject({
         status: "ok",
         data: { echoed: { ping: 1 }, appId: "beta" },
@@ -624,7 +624,7 @@ describe("App lifecycle e2e", () => {
     it("DELETE removes the app from GET /apps and the action becomes unreachable", async () => {
       const appRoot = await buildWorkspaceApp(workspaceParent, "gamma", "echo_gamma");
       await installWorkspace(harness, "gamma", appRoot);
-      await waitFor(() => harness.hasAction("echo_gamma"));
+      await waitFor(() => harness.hasAction("gamma:echo_gamma"));
 
       const { status, body } = await uninstall(harness, "gamma");
       expect(status).toBe(200);
@@ -632,7 +632,7 @@ describe("App lifecycle e2e", () => {
 
       const cards = await listApps(harness);
       expect(cards.find((c) => c.id === "gamma")).toBeUndefined();
-      expect(harness.hasAction("echo_gamma")).toBe(false);
+      expect(harness.hasAction("gamma:echo_gamma")).toBe(false);
 
       const getRes = await harness.fetch("/apps/gamma");
       expect(getRes.status).toBe(404);
@@ -641,13 +641,13 @@ describe("App lifecycle e2e", () => {
     it("install → uninstall → install loop converges back to invocable action", async () => {
       const appRoot = await buildWorkspaceApp(workspaceParent, "delta", "echo_delta");
       await installWorkspace(harness, "delta", appRoot);
-      await waitFor(() => harness.hasAction("echo_delta"));
+      await waitFor(() => harness.hasAction("delta:echo_delta"));
       await uninstall(harness, "delta");
-      expect(harness.hasAction("echo_delta")).toBe(false);
+      expect(harness.hasAction("delta:echo_delta")).toBe(false);
 
       await installWorkspace(harness, "delta", appRoot);
-      await waitFor(() => harness.hasAction("echo_delta"));
-      const result = await harness.invokeAction("echo_delta", { round: 2 });
+      await waitFor(() => harness.hasAction("delta:echo_delta"));
+      const result = await harness.invokeAction("delta:echo_delta", { round: 2 });
       expect(result).toMatchObject({ data: { echoed: { round: 2 }, appId: "delta" } });
     });
 
@@ -696,7 +696,7 @@ describe("App lifecycle e2e", () => {
     it("DELETE twice on the same app both return 200", async () => {
       const appRoot = await buildWorkspaceApp(workspaceParent, "zeta", "echo_zeta");
       await installWorkspace(harness, "zeta", appRoot);
-      await waitFor(() => harness.hasAction("echo_zeta"));
+      await waitFor(() => harness.hasAction("zeta:echo_zeta"));
 
       const first = await uninstall(harness, "zeta");
       const second = await uninstall(harness, "zeta");
@@ -713,7 +713,7 @@ describe("App lifecycle e2e", () => {
         firstParty: true,
       });
       expect(result.state).toBe("installed");
-      await waitFor(() => harness.hasAction("echo_fp"));
+      await waitFor(() => harness.hasAction("fp-app:echo_fp"));
 
       const { status, body } = await uninstall(harness, "fp-app", { purge: true });
       expect(status).toBe(400);
@@ -722,7 +722,7 @@ describe("App lifecycle e2e", () => {
       const card = (await listApps(harness)).find((c) => c.id === "fp-app");
       expect(card?.status).toBe("active");
       expect(card?.canUninstall).toBe(false);
-      expect(harness.hasAction("echo_fp")).toBe(true);
+      expect(harness.hasAction("fp-app:echo_fp")).toBe(true);
     });
 
     it("POST /apps with a bundle reusing a first-party app's id returns 400 and the app is unchanged", async () => {
@@ -732,7 +732,7 @@ describe("App lifecycle e2e", () => {
         firstParty: true,
       });
       expect(bootInstalled.state).toBe("installed");
-      await waitFor(() => harness.hasAction("echo_fp_locked"));
+      await waitFor(() => harness.hasAction("fp-locked:echo_fp_locked"));
 
       // A different source tree whose manifest reuses the shipped app's id.
       const impostorRoot = await buildWorkspaceApp(
@@ -749,8 +749,8 @@ describe("App lifecycle e2e", () => {
       const body = (await res.json()) as { error?: string };
       expect(body.error).toMatch(/cannot be replaced/i);
 
-      expect(harness.hasAction("echo_fp_locked")).toBe(true);
-      expect(harness.hasAction("echo_impostor")).toBe(false);
+      expect(harness.hasAction("fp-locked:echo_fp_locked")).toBe(true);
+      expect(harness.hasAction("fp-locked:echo_impostor")).toBe(false);
       const entry = await harness.appManager.readLockfileEntry("fp-locked");
       expect(entry?.installedHash).toBe(bootInstalled.installedHash);
     });
@@ -763,7 +763,7 @@ describe("App lifecycle e2e", () => {
         db: { tablePrefix },
       });
       await installWorkspace(harness, "purge-app", appRoot);
-      await waitFor(() => harness.hasAction("echo_purge"));
+      await waitFor(() => harness.hasAction("purge-app:echo_purge"));
 
       expect(sqliteHasTable(harness, `${tablePrefix}__widgets`)).toBe(true);
 
@@ -786,7 +786,7 @@ describe("App lifecycle e2e", () => {
         db: { tablePrefix },
       });
       await installWorkspace(harness, "keep-app", appRoot);
-      await waitFor(() => harness.hasAction("echo_keep"));
+      await waitFor(() => harness.hasAction("keep-app:echo_keep"));
 
       const dataDir = join(harness.appsRoot, "data", "keep-app");
       await mkdir(dataDir, { recursive: true });
@@ -805,28 +805,28 @@ describe("App lifecycle e2e", () => {
     it("an install survives daemon restart", async () => {
       const appRoot = await buildWorkspaceApp(workspaceParent, "persist", "echo_persist");
       await installWorkspace(harness, "persist", appRoot);
-      await waitFor(() => harness.hasAction("echo_persist"));
+      await waitFor(() => harness.hasAction("persist:echo_persist"));
 
       await harness.restart();
-      await waitFor(() => harness.hasAction("echo_persist"));
+      await waitFor(() => harness.hasAction("persist:echo_persist"));
 
       const cards = await listApps(harness);
       expect(cards.find((c) => c.id === "persist")?.status).toBe("active");
-      const result = await harness.invokeAction("echo_persist", { after: "restart" });
+      const result = await harness.invokeAction("persist:echo_persist", { after: "restart" });
       expect(result).toMatchObject({ status: "ok" });
     });
 
     it("an uninstall survives daemon restart (app stays gone)", async () => {
       const appRoot = await buildWorkspaceApp(workspaceParent, "vanish", "echo_vanish");
       await installWorkspace(harness, "vanish", appRoot);
-      await waitFor(() => harness.hasAction("echo_vanish"));
+      await waitFor(() => harness.hasAction("vanish:echo_vanish"));
       await uninstall(harness, "vanish");
 
       await harness.restart();
 
       const cards = await listApps(harness);
       expect(cards.find((c) => c.id === "vanish")).toBeUndefined();
-      expect(harness.hasAction("echo_vanish")).toBe(false);
+      expect(harness.hasAction("vanish:echo_vanish")).toBe(false);
     });
   });
 
@@ -849,7 +849,7 @@ describe("App lifecycle e2e", () => {
 
       const goodRoot = await buildWorkspaceApp(workspaceParent, "bogus-app", "echo_recovered");
       await installWorkspace(harness, "bogus-app", goodRoot);
-      await waitFor(() => harness.hasAction("echo_recovered"));
+      await waitFor(() => harness.hasAction("bogus-app:echo_recovered"));
       const cardsAfter = await listApps(harness);
       expect(cardsAfter.find((c) => c.id === "bogus-app")?.status).toBe("active");
     });
@@ -857,7 +857,7 @@ describe("App lifecycle e2e", () => {
     it("a rejected re-install leaves the healthy installed app running", async () => {
       const goodRoot = await buildWorkspaceApp(workspaceParent, "sturdy", "echo_sturdy");
       await installWorkspace(harness, "sturdy", goodRoot);
-      await waitFor(() => harness.hasAction("echo_sturdy"));
+      await waitFor(() => harness.hasAction("sturdy:echo_sturdy"));
 
       // An app.yaml whose declared action was never produced — an unbuilt target.
       const unbuiltDir = join(workspaceParent, "sturdy-unbuilt");
@@ -888,7 +888,9 @@ describe("App lifecycle e2e", () => {
       // The prior install is untouched: still active, action still invocable.
       const cards = await listApps(harness);
       expect(cards.find((c) => c.id === "sturdy")?.status).toBe("active");
-      const result = await harness.invokeAction("echo_sturdy", { after: "rejected reinstall" });
+      const result = await harness.invokeAction("sturdy:echo_sturdy", {
+        after: "rejected reinstall",
+      });
       expect(result).toMatchObject({ status: "ok" });
     });
   });
@@ -898,17 +900,17 @@ describe("App lifecycle e2e", () => {
       const aRoot = await buildWorkspaceApp(workspaceParent, "multi-a", "echo_multi_a");
       const bRoot = await buildWorkspaceApp(workspaceParent, "multi-b", "echo_multi_b");
       await installWorkspace(harness, "multi-a", aRoot);
-      await waitFor(() => harness.hasAction("echo_multi_a"));
+      await waitFor(() => harness.hasAction("multi-a:echo_multi_a"));
       await installWorkspace(harness, "multi-b", bRoot);
-      await waitFor(() => harness.hasAction("echo_multi_b"));
+      await waitFor(() => harness.hasAction("multi-b:echo_multi_b"));
 
       await uninstall(harness, "multi-a");
 
       const cards = await listApps(harness);
       expect(cards.find((c) => c.id === "multi-a")).toBeUndefined();
       expect(cards.find((c) => c.id === "multi-b")?.status).toBe("active");
-      expect(harness.hasAction("echo_multi_a")).toBe(false);
-      const result = await harness.invokeAction("echo_multi_b");
+      expect(harness.hasAction("multi-a:echo_multi_a")).toBe(false);
+      const result = await harness.invokeAction("multi-b:echo_multi_b");
       expect(result).toMatchObject({ status: "ok", data: { appId: "multi-b" } });
     });
   });
@@ -921,7 +923,7 @@ describe("App lifecycle e2e", () => {
       const cardsDisabled = await listApps(harness);
       const disabledCard = cardsDisabled.find((c) => c.id === "toggle");
       expect(disabledCard?.status).not.toBe("active");
-      expect(harness.hasAction("echo_toggle")).toBe(false);
+      expect(harness.hasAction("toggle:echo_toggle")).toBe(false);
 
       const patchRes = await harness.fetch("/apps/toggle", {
         method: "PATCH",
@@ -934,8 +936,8 @@ describe("App lifecycle e2e", () => {
       expect(patchBody.spec.source.mode).toBe("bundle");
       expect(patchBody.spec.source.path).toBe(appRoot);
 
-      await waitFor(() => harness.hasAction("echo_toggle"));
-      const result = await harness.invokeAction("echo_toggle", { state: "enabled" });
+      await waitFor(() => harness.hasAction("toggle:echo_toggle"));
+      const result = await harness.invokeAction("toggle:echo_toggle", { state: "enabled" });
       expect(result).toMatchObject({ data: { echoed: { state: "enabled" } } });
     });
 
@@ -1200,7 +1202,7 @@ describe("App lifecycle e2e", () => {
       bundleRegistry.set(bundleKey(good), good.bytes);
       const first = await installAppstore(harness, good);
       expect(first.status).toBe(200);
-      await waitFor(() => harness.hasAction("echo_twofaced_as"));
+      await waitFor(() => harness.hasAction("twofaced-as:echo_twofaced_as"));
 
       // v2's published bundle carries a different manifest id than the listing —
       // the registry listing and the published bundle disagree.
@@ -1217,7 +1219,9 @@ describe("App lifecycle e2e", () => {
       const cards = await listApps(harness);
       expect(cards.find((c) => c.id === "twofaced-as")?.status).toBe("active");
       expect(cards.find((c) => c.id === "other-app")).toBeUndefined();
-      const result = await harness.invokeAction("echo_twofaced_as", { after: "rejected v2" });
+      const result = await harness.invokeAction("twofaced-as:echo_twofaced_as", {
+        after: "rejected v2",
+      });
       expect(result).toMatchObject({ status: "ok" });
     });
 
@@ -1226,8 +1230,8 @@ describe("App lifecycle e2e", () => {
       bundleRegistry.set(bundleKey(bundle), bundle.bytes);
 
       await installAppstore(harness, bundle);
-      await waitFor(() => harness.hasAction("echo_beta_as"));
-      const result = await harness.invokeAction("echo_beta_as", { ping: 7 });
+      await waitFor(() => harness.hasAction("beta-as:echo_beta_as"));
+      const result = await harness.invokeAction("beta-as:echo_beta_as", { ping: 7 });
       expect(result).toMatchObject({
         status: "ok",
         data: { echoed: { ping: 7 }, appId: "beta-as" },
@@ -1238,7 +1242,7 @@ describe("App lifecycle e2e", () => {
       const bundle = await buildAppStoreBundle("gamma-as", "1.0.0", "echo_gamma_as");
       bundleRegistry.set(bundleKey(bundle), bundle.bytes);
       await installAppstore(harness, bundle);
-      await waitFor(() => harness.hasAction("echo_gamma_as"));
+      await waitFor(() => harness.hasAction("gamma-as:echo_gamma_as"));
 
       const { status, body } = await uninstall(harness, "gamma-as");
       expect(status).toBe(200);
@@ -1246,7 +1250,7 @@ describe("App lifecycle e2e", () => {
 
       const cards = await listApps(harness);
       expect(cards.find((c) => c.id === "gamma-as")).toBeUndefined();
-      expect(harness.hasAction("echo_gamma_as")).toBe(false);
+      expect(harness.hasAction("gamma-as:echo_gamma_as")).toBe(false);
     });
 
     it("appstore install → uninstall → install loop converges back to invocable action", async () => {
@@ -1254,13 +1258,13 @@ describe("App lifecycle e2e", () => {
       bundleRegistry.set(bundleKey(bundle), bundle.bytes);
 
       await installAppstore(harness, bundle);
-      await waitFor(() => harness.hasAction("echo_delta_as"));
+      await waitFor(() => harness.hasAction("delta-as:echo_delta_as"));
       await uninstall(harness, "delta-as");
-      expect(harness.hasAction("echo_delta_as")).toBe(false);
+      expect(harness.hasAction("delta-as:echo_delta_as")).toBe(false);
 
       await installAppstore(harness, bundle);
-      await waitFor(() => harness.hasAction("echo_delta_as"));
-      const result = await harness.invokeAction("echo_delta_as", { round: 2 });
+      await waitFor(() => harness.hasAction("delta-as:echo_delta_as"));
+      const result = await harness.invokeAction("delta-as:echo_delta_as", { round: 2 });
       expect(result).toMatchObject({ data: { echoed: { round: 2 }, appId: "delta-as" } });
     });
 
@@ -1290,7 +1294,7 @@ describe("App lifecycle e2e", () => {
       expect(status).toBe(200);
       expect(body.phase).toBe("failed");
       expect(body.error).toMatch(/hash mismatch/i);
-      expect(harness.hasAction("echo_mismatch_as")).toBe(false);
+      expect(harness.hasAction("mismatch-as:echo_mismatch_as")).toBe(false);
 
       const cards = await listApps(harness);
       const card = cards.find((c) => c.id === "mismatch-as");
@@ -1307,7 +1311,7 @@ describe("App lifecycle e2e", () => {
       });
       expect(status).toBe(200);
       expect(body.phase).toBe("installed");
-      await waitFor(() => harness.hasAction("echo_nohash_as"));
+      await waitFor(() => harness.hasAction("nohash-as:echo_nohash_as"));
     });
 
     it("omitting contentHash with no registry answer fails install", async () => {
@@ -1321,7 +1325,7 @@ describe("App lifecycle e2e", () => {
       expect(status).toBe(200);
       expect(body.phase).toBe("failed");
       expect(body.error).toMatch(/did not return a contentHash/i);
-      expect(harness.hasAction("echo_nohash_miss_as")).toBe(false);
+      expect(harness.hasAction("nohash-miss-as:echo_nohash_miss_as")).toBe(false);
     });
 
     it("omitting contentHash but registry hash disagrees with bytes — phase=failed", async () => {
@@ -1335,7 +1339,7 @@ describe("App lifecycle e2e", () => {
       expect(status).toBe(200);
       expect(body.phase).toBe("failed");
       expect(body.error).toMatch(/hash mismatch/i);
-      expect(harness.hasAction("echo_nohash_bad_as")).toBe(false);
+      expect(harness.hasAction("nohash-bad-as:echo_nohash_bad_as")).toBe(false);
     });
 
     it("bundleFetcher throw surfaces as phase=failed", async () => {
@@ -1345,23 +1349,23 @@ describe("App lifecycle e2e", () => {
       expect(status).toBe(200);
       expect(body.phase).toBe("failed");
       expect(body.error).toMatch(/no fixture registered/);
-      expect(harness.hasAction("echo_unfetched_as")).toBe(false);
+      expect(harness.hasAction("unfetched-as:echo_unfetched_as")).toBe(false);
     });
 
     it("an appstore install survives daemon restart", async () => {
       const bundle = await buildAppStoreBundle("persist-as", "1.0.0", "echo_persist_as");
       bundleRegistry.set(bundleKey(bundle), bundle.bytes);
       await installAppstore(harness, bundle);
-      await waitFor(() => harness.hasAction("echo_persist_as"));
+      await waitFor(() => harness.hasAction("persist-as:echo_persist_as"));
 
       // Restart probes by lockfile contentHash; the bundle is already on disk so
       // the fetcher is not invoked.
       await harness.restart();
-      await waitFor(() => harness.hasAction("echo_persist_as"));
+      await waitFor(() => harness.hasAction("persist-as:echo_persist_as"));
 
       const cards = await listApps(harness);
       expect(cards.find((c) => c.id === "persist-as")?.status).toBe("active");
-      const result = await harness.invokeAction("echo_persist_as", { after: "restart" });
+      const result = await harness.invokeAction("persist-as:echo_persist_as", { after: "restart" });
       expect(result).toMatchObject({ status: "ok" });
     });
 
@@ -1373,14 +1377,18 @@ describe("App lifecycle e2e", () => {
       await installWorkspace(harness, "coexist-ws", wsRoot);
       await installAppstore(harness, bundle);
       await waitFor(
-        () => harness.hasAction("echo_coexist_ws") && harness.hasAction("echo_coexist_as"),
+        () =>
+          harness.hasAction("coexist-ws:echo_coexist_ws") &&
+          harness.hasAction("coexist-as:echo_coexist_as"),
       );
 
       await uninstall(harness, "coexist-ws");
-      expect(harness.hasAction("echo_coexist_ws")).toBe(false);
-      expect(harness.hasAction("echo_coexist_as")).toBe(true);
+      expect(harness.hasAction("coexist-ws:echo_coexist_ws")).toBe(false);
+      expect(harness.hasAction("coexist-as:echo_coexist_as")).toBe(true);
 
-      const result = await harness.invokeAction("echo_coexist_as", { from: "after-ws-uninstall" });
+      const result = await harness.invokeAction("coexist-as:echo_coexist_as", {
+        from: "after-ws-uninstall",
+      });
       expect(result).toMatchObject({ data: { appId: "coexist-as" } });
     });
   });
@@ -1409,7 +1417,7 @@ describe("App lifecycle e2e", () => {
 
       const appRoot = await buildWorkspaceApp(workspaceParent, "livecat-app", "livecat_echo");
       await installWorkspace(harness, "livecat-app", appRoot);
-      await waitFor(() => harness.hasAction("livecat_echo"));
+      await waitFor(() => harness.hasAction("livecat-app:livecat_echo"));
 
       const afterActions = parseMcpJson<Array<{ name: string }>>(
         await callMcpTool(server, "actions", "list_actions"),
@@ -1624,8 +1632,8 @@ describe("App lifecycle e2e", () => {
       // The daemon packed into the conventional in-repo artifact dir.
       expect(existsSync(join(repo, ".rome", "artifact", "app.yaml"))).toBe(true);
 
-      await waitFor(() => harness.hasAction("echo_one_step"));
-      const result = await harness.invokeAction("echo_one_step", { via: "one-step" });
+      await waitFor(() => harness.hasAction("one-step:echo_one_step"));
+      const result = await harness.invokeAction("one-step:echo_one_step", { via: "one-step" });
       expect(result).toMatchObject({ status: "ok" });
     });
   });

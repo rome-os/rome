@@ -229,6 +229,11 @@ export function getAssetsDir(): string {
   return join(getProfileDir(), "assets");
 }
 
+/** Release notes already read, one file per release version (instance/system-upgrade/release-notes.ts). */
+export function getReleaseNotesCacheDir(): string {
+  return join(getProfileDir(), "cache", "release-notes");
+}
+
 export function getDefaultSqlitePath(): string {
   return join(getProfileDir(), "rome.db");
 }

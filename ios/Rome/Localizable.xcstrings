@@ -817,6 +817,36 @@
         }
       }
     },
+    "Archive “%@”?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "归档“%@”？"
+          }
+        }
+      }
+    },
+    "Archived" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已归档"
+          }
+        }
+      }
+    },
+    "Archived · %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已归档 · %lld"
+          }
+        }
+      }
+    },
     "Ask the owner of this Rome to turn it on." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1087,6 +1117,16 @@
         }
       }
     },
+    "Cancelling…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在取消…"
+          }
+        }
+      }
+    },
     "Cannot be connected here" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1283,6 +1323,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "收起输入框"
+          }
+        }
+      }
+    },
+    "Deleting…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在删除…"
           }
         }
       }
@@ -2047,6 +2097,26 @@
         }
       }
     },
+    "Failed to cancel the reminder" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消提醒失败"
+          }
+        }
+      }
+    },
+    "Failed to delete the routine" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除定时任务失败"
+          }
+        }
+      }
+    },
     "Failed to load outputs" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2077,12 +2147,52 @@
         }
       }
     },
+    "Failed to mark the task done" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标记完成失败"
+          }
+        }
+      }
+    },
+    "Failed to pause the routine" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂停定时任务失败"
+          }
+        }
+      }
+    },
+    "Failed to resume the routine" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "恢复定时任务失败"
+          }
+        }
+      }
+    },
     "Failed to stop the task" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "停止任务失败"
+          }
+        }
+      }
+    },
+    "Failed to unfollow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消关注失败"
           }
         }
       }
@@ -2163,6 +2273,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "忙闲时间"
+          }
+        }
+      }
+    },
+    "From %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自 %@"
           }
         }
       }
@@ -2415,6 +2535,16 @@
         }
       }
     },
+    "It stops running and is removed. This cannot be undone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它将不再运行并被移除，无法撤销。"
+          }
+        }
+      }
+    },
     "It's 4 bpm higher than last month, mostly on days you slept under 6 hours." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2435,12 +2565,32 @@
         }
       }
     },
+    "Its alerts and digest entries stop coming here. To follow it again, ask Chat." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它的提醒和汇总将不再发到这里。要重新关注，请在 Chat 里说。"
+          }
+        }
+      }
+    },
     "Just now" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "刚刚"
+          }
+        }
+      }
+    },
+    "Keep in Chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "留在 Chat"
           }
         }
       }
@@ -2745,6 +2895,26 @@
         }
       }
     },
+    "Mark as done" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标记完成"
+          }
+        }
+      }
+    },
+    "Marking done…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在标记完成…"
+          }
+        }
+      }
+    },
     "Message" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2811,6 +2981,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更多"
+          }
+        }
+      }
+    },
+    "Move them back" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "挪回这个对话"
           }
         }
       }
@@ -2971,6 +3151,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有可用的 AI 工具"
+          }
+        }
+      }
+    },
+    "No archived chats" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有已归档的对话"
           }
         }
       }
@@ -3635,12 +3825,32 @@
         }
       }
     },
+    "Pause" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂停"
+          }
+        }
+      }
+    },
     "Paused" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "已暂停"
+          }
+        }
+      }
+    },
+    "Pausing…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在暂停…"
           }
         }
       }
@@ -3681,6 +3891,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "图片"
+          }
+        }
+      }
+    },
+    "Pin" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "置顶"
+          }
+        }
+      }
+    },
+    "Pinned" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已置顶"
           }
         }
       }
@@ -4039,6 +4269,26 @@
         }
       }
     },
+    "Resume" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "恢复"
+          }
+        }
+      }
+    },
+    "Resuming…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在恢复…"
+          }
+        }
+      }
+    },
     "Retry" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4189,16 +4439,6 @@
         }
       }
     },
-    "Running on its own" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自动运行"
-          }
-        }
-      }
-    },
     "Running…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4215,6 +4455,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行"
+          }
+        }
+      }
+    },
+    "Scheduled" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "定时"
           }
         }
       }
@@ -4285,6 +4535,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "查看用量"
+          }
+        }
+      }
+    },
+    "Select text" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择文本"
           }
         }
       }
@@ -5209,6 +5469,16 @@
         }
       }
     },
+    "This chat is archived" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话已归档"
+          }
+        }
+      }
+    },
     "This Rome is a development build and cannot be updated." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5285,6 +5555,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个对话会被永久删除。它的关注和未完成的任务会转到 Chat。"
+          }
+        }
+      }
+    },
+    "This chat will be archived. It has:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话会被归档。其中有："
           }
         }
       }
@@ -5659,12 +5939,72 @@
         }
       }
     },
+    "Unarchive" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消归档"
+          }
+        }
+      }
+    },
+    "Unarchive “%@”?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消归档“%@”？"
+          }
+        }
+      }
+    },
     "Understand your sleep" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "了解你的睡眠"
+          }
+        }
+      }
+    },
+    "Unfollow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消关注"
+          }
+        }
+      }
+    },
+    "Unfollow %@?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消关注 %@？"
+          }
+        }
+      }
+    },
+    "Unfollowing…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在取消关注…"
+          }
+        }
+      }
+    },
+    "Unpin" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消置顶"
           }
         }
       }
@@ -6063,6 +6403,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "收到 %@ 时"
+          }
+        }
+      }
+    },
+    "When this chat was archived, these follows moved to Chat:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话归档时，以下关注转到了 Chat："
           }
         }
       }

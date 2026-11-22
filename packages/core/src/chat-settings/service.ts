@@ -26,32 +26,19 @@ import type { Connection } from "../connections/types.js";
 import type { StoredChatRow } from "./repository.js";
 import { ChatSettingsRepository } from "./repository.js";
 import {
-  CONVERSATION_SETTING_FIELDS_BY_KIND,
-  CORE_CONVERSATION_SETTING_FIELDS,
-  defaultConversationSettings,
-} from "./support.js";
+  asChatSettings,
+  chatRulesOf,
+  effectiveChatRules,
+  storedRuleValue,
+  type KindChatRules,
+  UNDECLARED_CHAT_RULES,
+} from "./rules.js";
 import { assertProviderSessionResetPolicy } from "./reset-policy.js";
 
 const log = createLogger("chat-settings");
 
-function fieldValue(settings: ChatSettingsOverrides, field: ChatSettingField) {
-  switch (field) {
-    case "enabled":
-      return settings.enabled;
-    case "activation.mode":
-      return settings.activation?.mode;
-    case "activation.botMessages":
-      return settings.activation?.botMessages;
-    case "activation.whenOthersMentioned":
-      return settings.activation?.whenOthersMentioned;
-    case "replies.placement":
-      return settings.replies?.placement;
-    case "routing.agentName":
-      return settings.routing?.agentName;
-    case "session.reset":
-      return settings.session?.reset;
-  }
-}
+/** The value a stored or requested set of overrides holds for `field`. */
+const fieldValue = storedRuleValue;
 
 function setField(settings: ChatSettingsOverrides, field: ChatSettingField, value: unknown): void {
   switch (field) {
@@ -110,13 +97,25 @@ function clearField(settings: ChatSettingsOverrides, field: ChatSettingField): v
   if (settings.session && Object.keys(settings.session).length === 0) delete settings.session;
 }
 
-function overlay(base: ChatSettings, overrides: ChatSettingsOverrides) {
-  const result = structuredClone(base);
-  for (const field of CONVERSATION_SETTING_FIELDS) {
-    const value = fieldValue(overrides, field);
-    if (value !== undefined) setField(result, field, value);
+/** The values of `value` for the rules in `offers` only. A value stored for
+ *  a rule the chat does not offer stays in storage but never reads back. */
+function offeredOverrides(
+  value: ChatSettingsOverrides,
+  offers: readonly ChatSettingField[],
+): ChatSettingsOverrides {
+  const result: ChatSettingsOverrides = {};
+  for (const field of offers) {
+    const current = fieldValue(value, field);
+    if (current !== undefined) setField(result, field, current);
   }
   return result;
+}
+
+/** Whether the chat holds a value of its own for a rule its kind offers. */
+function hasOverrides(snapshot: ChatSettingsSnapshot): boolean {
+  return snapshot.supportedFields.some(
+    (field) => fieldValue(snapshot.overrides, field) !== undefined,
+  );
 }
 
 function normalizeOverrides(value: ChatSettingsOverrides): ChatSettingsOverrides {
@@ -247,7 +246,9 @@ export class ChatSettingsService implements ChatSettingsControl {
     }
   }
 
-  async list(input: ListChatSettingsInput = {}): Promise<ChatSettingsPage> {
+  /** `changed` keeps only the chats a guardian set a value on, which the
+   *  dashboard lists apart from the ones running on their defaults. */
+  async list(input: ListChatSettingsInput & { changed?: boolean } = {}): Promise<ChatSettingsPage> {
     const limit = Math.max(1, Math.min(input.limit ?? 50, 100));
     const offset = cursorOffset(input.cursor);
     // The public cursor addresses the normalized, cross-provider result set.
@@ -341,6 +342,17 @@ export class ChatSettingsService implements ChatSettingsControl {
       if (input.availability && availability !== input.availability) continue;
       candidates.push({ descriptor, availability, source });
     }
+    if (input.changed) {
+      // A row can hold settings with nothing left in them, after every value
+      // was cleared, so a chat counts as changed by what its snapshot shows.
+      const changed = await Promise.all(
+        candidates.map(
+          async ({ descriptor, source }) =>
+            source === "configured" && hasOverrides(await this.get(descriptor.ref)),
+        ),
+      );
+      candidates.splice(0, candidates.length, ...candidates.filter((_, index) => changed[index]));
+    }
     candidates.sort((a, b) => {
       const left = `${a.descriptor.connectionKind}\0${a.descriptor.containerName ?? ""}\0${a.descriptor.displayName}\0${a.descriptor.ref.connectionId}\0${a.descriptor.ref.chatId}`;
       const right = `${b.descriptor.connectionKind}\0${b.descriptor.containerName ?? ""}\0${b.descriptor.displayName}\0${b.descriptor.ref.connectionId}\0${b.descriptor.ref.chatId}`;
@@ -386,13 +398,14 @@ export class ChatSettingsService implements ChatSettingsControl {
     }
     const stored = this.storedRule(ref, descriptor, row);
     const direct = this.directOverrides(row, stored);
-    const effective = overlay(defaultConversationSettings(), direct);
-    const supportedFields = this.supportedFields(descriptor, row);
+    const rules = this.rulesOf(descriptor, row);
+    const effective = asChatSettings(effectiveChatRules(rules, direct));
+    const supportedFields = rules.offers;
     const snapshot: ChatSettingsSnapshot = {
       conversation: descriptor,
       supportedFields,
       effective,
-      overrides: direct,
+      overrides: offeredOverrides(direct, supportedFields),
       ...(stored ? { updatedAt: stored.updatedAt, updatedBy: stored.updatedBy } : {}),
     };
     log.debug("conversation_settings.opened", {
@@ -416,8 +429,9 @@ export class ChatSettingsService implements ChatSettingsControl {
         this.assertSettingsOwner(descriptor, row);
         const supportedFields = this.supportedFields(descriptor, row);
         const supported = new Set(supportedFields);
-        // `get` returns a fresh, already-normalized overrides object.
-        const next = (await this.get(input.ref)).overrides;
+        // Start from everything stored, so a value for a rule the chat does
+        // not offer survives the write even though `get` hides it.
+        const next = this.directOverrides(row, this.storedRule(input.ref, descriptor, row));
         const changed = new Set<ChatSettingField>();
 
         for (const field of input.clear) {
@@ -735,13 +749,18 @@ export class ChatSettingsService implements ChatSettingsControl {
     descriptor: ChatDescriptor,
     row: StoredChatRow | null,
   ): readonly ChatSettingField[] {
-    if (descriptor.kind === "dm" || row?.kind === "dm") {
-      return CORE_CONVERSATION_SETTING_FIELDS;
-    }
-    return (
-      CONVERSATION_SETTING_FIELDS_BY_KIND.get(descriptor.connectionKind) ??
-      CORE_CONVERSATION_SETTING_FIELDS
-    );
+    return this.rulesOf(descriptor, row).offers;
+  }
+
+  /** The rules the conversation runs under: its kind's, as a direct message
+   *  where it is one. A kind Rome has not registered, or that
+   *  declares none, runs as {@link UNDECLARED_CHAT_RULES}. */
+  private rulesOf(descriptor: ChatDescriptor, row: StoredChatRow | null): KindChatRules {
+    const kind =
+      this.deps.connections.getDescriptor(descriptor.connectionKind)?.chatRules ??
+      UNDECLARED_CHAT_RULES;
+    const direct = descriptor.kind === "dm" || row?.kind === "dm";
+    return chatRulesOf(kind, direct ? "direct" : "group");
   }
 
   private availability(connectionId: string): ChatSettingsListItem["availability"] {

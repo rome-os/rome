@@ -410,6 +410,63 @@ enum MarkdownParser {
         return result
     }
 
+    /// A paragraph's text where each link to a task chat, `[name](#rome-task=ID)`,
+    /// is a chip: the task chat's status mark and its current name on one
+    /// rounded faint fill (`Palette.taskChip`), the link's text only while the
+    /// name is unknown. A task chat the chat does not know reads as plain text
+    /// (docs/domains/chats.md#task-link). The text's own background can neither
+    /// round nor hold an image, so `TaskChipRenderer` draws the fill behind the
+    /// chip's runs; on iOS 17, which has no text renderer, the mark sits just
+    /// before the tinted name.
+    @MainActor
+    static func text(_ source: String, linksAsText: Bool, tasks: TaskLinkStore?, marks: TaskMarkStyle) -> Text {
+        let styled = inline(source, linksAsText: linksAsText)
+        guard !linksAsText, let tasks, source.contains(TaskLink.prefix) else { return Text(styled) }
+        var out: Text?
+        var plain = AttributedString()
+        // The last character drawn: a chip takes a space before it only after text.
+        var previous: Character?
+        func flush() {
+            guard !plain.characters.isEmpty else { return }
+            previous = plain.characters.last
+            out = out.map { $0 + Text(plain) } ?? Text(plain)
+            plain = AttributedString()
+        }
+        for run in styled.runs {
+            guard let url = run.link, let id = TaskLink.chatId(of: url) else {
+                plain.append(styled[run.range])
+                continue
+            }
+            flush()
+            let written = String(styled[run.range].characters).trimmingCharacters(in: .whitespacesAndNewlines)
+            let chip = chip(id: id, written: written, tasks: tasks, marks: marks, spaced: TaskLink.spacesChip(after: previous))
+            previous = "\u{00A0}"
+            out = out.map { $0 + chip } ?? chip
+        }
+        flush()
+        return out ?? Text(styled)
+    }
+
+    @MainActor
+    private static func chip(id: String, written: String, tasks: TaskLinkStore, marks: TaskMarkStyle, spaced: Bool) -> Text {
+        guard let info = tasks.info[id] else {
+            // Not read yet, or none of this chat's: the link's own text.
+            return Text(AttributedString(written.isEmpty ? String(localized: "Task") : written))
+        }
+        var name = AttributedString("\u{00A0}\(info.name.isEmpty ? written : info.name)\u{00A0}")
+        name.foregroundColor = Palette.fg
+        name.link = TaskLink.url(chatId: id)
+        let chip: Text
+        if #available(iOS 18.0, *) {
+            // A no-break space before the mark pads the fill as the one after the name does.
+            chip = (Text(verbatim: "\u{00A0}") + marks.mark(info) + Text(name)).customAttribute(TaskChipRun(id: id))
+        } else {
+            name.backgroundColor = Palette.taskChip
+            chip = marks.mark(info) + Text(name)
+        }
+        return spaced ? Text(verbatim: " ") + chip : chip
+    }
+
     /// The blocks with each image and picture set drawn as its description,
     /// so nothing is loaded.
     static func withoutImages(_ blocks: [MarkdownBlock]) -> [MarkdownBlock] {
@@ -631,15 +688,72 @@ struct MarkdownText: View {
     /// Draws links as their text and images as their description, so the
     /// Markdown opens and loads nothing, as a chat card's must not.
     var textOnly = false
+    /// Select mode (`TextSelection`): the text blocks are drawn as text views
+    /// that select in part, the rest as they are.
+    var selectable = false
+    /// In select mode, where the long press that opened it was, in the
+    /// window: the paragraph under it opens selected.
+    var selectFrom: CGPoint? = nil
+    /// In select mode, where a fold hides the text, down from its top.
+    var foldBottom: CGFloat? = nil
 
     private var blocks: [MarkdownBlock] {
         let parsed = MarkdownParser.parse(source)
         return textOnly ? MarkdownParser.withoutImages(parsed) : parsed
     }
+    /// The blocks select mode lays one text view over, a run at a time; the
+    /// rest, code included, keep their place in it by their drawn height.
+    static func isText(_ block: MarkdownBlock) -> Bool {
+        switch block {
+        case .paragraph, .heading, .list, .quote: true
+        case .code, .rule, .image, .table, .pictures: false
+        }
+    }
+
+    /// Whether select mode has text to select in `block`: words, or code.
+    static func selects(_ block: MarkdownBlock) -> Bool {
+        func words(_ text: String) -> Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        switch block {
+        case .paragraph(let text), .heading(_, let text), .quote(let text), .code(_, let text): return words(text)
+        case .list(_, _, let items): return items.contains { words($0.text) || $0.children.contains(where: selects) }
+        case .rule, .image, .table, .pictures: return false
+        }
+    }
+
+    /// Whether Markdown `source` has text select mode can select: a message
+    /// of only pictures, a table or a rule has none.
+    static func hasSelectableText(_ source: String) -> Bool {
+        MarkdownParser.parse(source).contains(where: selects)
+    }
+
+    /// Where select mode opens in the block at `position`: whether it is the
+    /// message's first or last selectable text, and the fold.
+    private func selectionStart(at position: Int) -> SelectionStart {
+        // The text views select mode lays out: text, and code.
+        let selectable = blocks.map { block -> Bool in
+            if case .code = block { return true }
+            return Self.isText(block)
+        }
+        return SelectionStart(point: selectFrom,
+                              first: !selectable[..<position].contains(true),
+                              last: !selectable[(position + 1)...].contains(true),
+                              foldBottom: foldBottom)
+    }
+
+    private var selectableStyle: SelectableTextStyle {
+        SelectableTextStyle(fontSize: fontSize, lineSpacing: lineSpacing, color: UIColor(color), dynamicTypeSize: dynamicTypeSize, displayScale: displayScale)
+    }
+
+    /// The drawn height of each block select mode does not select, by place.
+    @State private var blockHeights: [Int: CGFloat] = [:]
     @State private var showViewer = false
     @State private var viewerStart = 0
     @Environment(\.instanceOrigin) private var origin
     @Environment(\.chatLinkOpener) private var linkOpener
+    @Environment(\.taskLinks) private var taskLinks
+    @Environment(\.openTaskChat) private var openTaskChat
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.displayScale) private var displayScale
 
     /// The message's images, for paging in the viewer.
     private var gallery: [ViewerImage] {
@@ -666,17 +780,73 @@ struct MarkdownText: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: SelectableText.blockSpacing) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { position, block in
-                view(for: block, at: position)
+                if Self.isText(block) {
+                    view(for: block, at: position)
+                } else {
+                    // A block outside the overlay's runs of text (code, a
+                    // picture): its height, as drawn, holds its place there.
+                    view(for: block, at: position)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { blockHeights[position] = $0 }
+                }
             }
         }
+        // Select mode lays text views over the text, which select it but
+        // draw none of it: the text on screen is the same before, during and
+        // after, so nothing moves as select mode starts or ends.
+        .overlay(alignment: .topLeading) {
+            if selectable {
+                VStack(alignment: .leading, spacing: SelectableText.blockSpacing) {
+                    selectableBlocks
+                }
+            }
+        }
+        // Each text view finds the fold in it from its place in here.
+        .coordinateSpace(.named(SelectableBlockView.space))
         .foregroundStyle(color)
         .tint(Palette.primaryText)
         // Links in the text: the shell's opener, else the system's.
-        .environment(\.openURL, OpenURLAction { url in textOnly ? .discarded : (linkOpener?.run(url) ?? .systemAction) })
+        .environment(\.openURL, OpenURLAction { url in
+            if textOnly { return .discarded }
+            // A chip for a task chat opens it; the Concierge's link to one is no page.
+            if let id = TaskLink.chatId(of: url) {
+                openTaskChat?.run((chatId: id, title: taskLinks?.info[id]?.name ?? ""))
+                return .handled
+            }
+            return linkOpener?.run(url) ?? .systemAction
+        })
+        // The task chats this text names are read for their chips.
+        .task(id: source) {
+            guard let taskLinks else { return }
+            let ids = TaskLink.ids(in: source)
+            if !ids.isEmpty { taskLinks.register(ids) }
+        }
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(images: gallery, start: viewerStart)
+        }
+    }
+
+    /// The blocks in select mode, laid over the text: each run of text one
+    /// text view whose glyphs are clear, and the rest their place. A code
+    /// block's text view is in its own scroll (`view(for:at:)`).
+    @ViewBuilder
+    private var selectableBlocks: some View {
+        let segments = SelectableText.segments(blocks, style: selectableStyle, tasks: textOnly ? nil : taskLinks)
+        let first = segments.firstIndex { if case .block = $0 { false } else { true } }
+        let last = segments.lastIndex { if case .block = $0 { false } else { true } }
+        ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+            switch segment {
+            case .text(let run):
+                // Its quote bars and list markers are SwiftUI's, below.
+                SelectableBlockView(text: SelectableText.invisible(run.text), start: SelectionStart(point: selectFrom, first: index == first, last: index == last, foldBottom: foldBottom))
+                    .padding(.top, SelectableText.topSpace(run.text))
+            case .code(let position, _), .block(let position, _):
+                // Its place only, as tall as the block drawn below, which
+                // keeps its own state (a picture loading or failed): a new
+                // copy of it here could take another height.
+                Color.clear.frame(height: blockHeights[position] ?? 0)
+            }
         }
     }
 
@@ -684,10 +854,7 @@ struct MarkdownText: View {
     private func view(for block: MarkdownBlock, at position: Int) -> some View {
         switch block {
         case .paragraph(let text):
-            Text(MarkdownParser.inline(text, linksAsText: textOnly))
-                .romeFont(fontSize)
-                .lineSpacing(lineSpacing)
-                .fixedSize(horizontal: false, vertical: true)
+            MarkdownParagraph(source: text, linksAsText: textOnly, tasks: taskLinks, fontSize: fontSize, lineSpacing: lineSpacing)
         case .heading(let level, let text):
             Text(MarkdownParser.inline(text, linksAsText: textOnly))
                 .romeFont(level <= 1 ? fontSize + 4 : (level == 2 ? fontSize + 2 : fontSize), .semibold)
@@ -695,7 +862,7 @@ struct MarkdownText: View {
                 .padding(.top, 2)
                 .fixedSize(horizontal: false, vertical: true)
         case .list(let ordered, let start, let items):
-            MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: textOnly)
+            MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: textOnly, tasks: taskLinks)
         case .quote(let text):
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5).fill(Palette.sub.opacity(0.5)).frame(width: 3)
@@ -711,6 +878,14 @@ struct MarkdownText: View {
                     .romeFont(13, design: .monospaced)
                     .lineSpacing(4)
                     .textSelection(.enabled)
+                    // Select mode's text view lies over the code inside its
+                    // scroll, so the code stays where it was scrolled to.
+                    .overlay(alignment: .topLeading) {
+                        if selectable {
+                            SelectableBlockView(text: SelectableText.invisible(SelectableText.code(text, style: selectableStyle)),
+                                                wraps: false, start: selectionStart(at: position))
+                        }
+                    }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 14)
             }
@@ -733,6 +908,57 @@ struct MarkdownText: View {
     }
 }
 
+/// A paragraph of Markdown text with its task link chips. While a chip in it
+/// is active, the paragraph is drawn again for each frame of the running ring;
+/// with none active, off screen or under Reduce Motion, it is drawn once and
+/// the ring stands still.
+struct MarkdownParagraph: View {
+    let source: String
+    let linksAsText: Bool
+    let tasks: TaskLinkStore?
+    let fontSize: CGFloat
+    let lineSpacing: CGFloat
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.offScreen) private var offScreen
+
+    var body: some View {
+        if spins {
+            TimelineView(.animation(minimumInterval: TaskMarkRing.frameInterval, paused: offScreen)) { context in
+                let _ = PerfProbe.count("taskRingTick")
+                paragraph(frame: TaskMarkRing.frame(at: context.date))
+            }
+        } else {
+            paragraph(frame: 0)
+        }
+    }
+
+    @ViewBuilder
+    private func paragraph(frame: Int) -> some View {
+        let marks = TaskMarkStyle.forText(fontSize, dynamicTypeSize, frame: frame)
+        let text = MarkdownParser.text(source, linksAsText: linksAsText, tasks: tasks, marks: marks)
+            .romeFont(fontSize)
+            .lineSpacing(lineSpacing)
+            .fixedSize(horizontal: false, vertical: true)
+        if #available(iOS 18.0, *), hasChips {
+            text.textRenderer(TaskChipRenderer())
+        } else {
+            text
+        }
+    }
+
+    /// Whether this paragraph may draw a chip; the rest keep the plain text drawing.
+    private var hasChips: Bool {
+        !linksAsText && tasks != nil && source.contains(TaskLink.prefix)
+    }
+
+    /// Whether a chip in this paragraph is active and its ring may turn.
+    private var spins: Bool {
+        guard !linksAsText, !reduceMotion, let tasks else { return false }
+        return TaskLink.ids(in: source).contains { tasks.info[$0]?.tone == .running }
+    }
+}
+
 /// A list in the bubble. A nested list sits under its item's text, so each
 /// level steps in by one marker's width. Every level uses the same filled dot.
 struct MarkdownList: View {
@@ -742,6 +968,7 @@ struct MarkdownList: View {
     let fontSize: CGFloat
     let lineSpacing: CGFloat
     var linksAsText = false
+    var tasks: TaskLinkStore?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -752,13 +979,10 @@ struct MarkdownList: View {
                         .foregroundStyle(Palette.sub)
                         .frame(minWidth: 12, alignment: .trailing)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(MarkdownParser.inline(item.text, linksAsText: linksAsText))
-                            .romeFont(fontSize)
-                            .lineSpacing(lineSpacing)
-                            .fixedSize(horizontal: false, vertical: true)
+                        MarkdownParagraph(source: item.text, linksAsText: linksAsText, tasks: tasks, fontSize: fontSize, lineSpacing: lineSpacing)
                         ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
                             if case .list(let ordered, let start, let items) = child {
-                                MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: linksAsText)
+                                MarkdownList(ordered: ordered, start: start, items: items, fontSize: fontSize, lineSpacing: lineSpacing, linksAsText: linksAsText, tasks: tasks)
                             }
                         }
                     }

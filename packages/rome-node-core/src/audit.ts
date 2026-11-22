@@ -32,6 +32,12 @@ interface ContentInfo {
   storedBytes: number;
 }
 
+export interface AuditContentPreview {
+  size: number;
+  preview: Buffer;
+  truncated: boolean;
+}
+
 export interface AuditEvent {
   seq: number;
   at: number;
@@ -657,6 +663,23 @@ COMMIT;`);
       .prepare("SELECT data FROM content WHERE seq = ? AND name = ?")
       .get(seq, name) as { data: Uint8Array } | undefined;
     return row ? Buffer.from(row.data) : null;
+  }
+
+  /**
+   * Prefix of one stored payload read via SQLite substr() so large BLOBs (up to 32 MiB)
+   * never amplify Node heap memory when previewing.
+   */
+  contentPreview(seq: number, name: ContentName, maxBytes: number): AuditContentPreview | null {
+    const limit = Math.max(0, Math.floor(maxBytes));
+    const row = this.reader()
+      .prepare(
+        "SELECT length(data) AS size, substr(data, 1, ?) AS preview FROM content WHERE seq = ? AND name = ?",
+      )
+      .get(limit, seq, name) as { size: number; preview: Uint8Array } | undefined;
+    if (!row) return null;
+    const size = Number(row.size);
+    const preview = Buffer.from(row.preview);
+    return { size, preview, truncated: size > preview.byteLength };
   }
 
   summary(): AuditSummary {

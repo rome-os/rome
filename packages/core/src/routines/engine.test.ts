@@ -228,6 +228,141 @@ describe("RoutineEngine run records", () => {
     expect(contexts[0]).not.toHaveProperty("omitFromRecord");
     expect((await routines.findById(id))?.keepTriggerPayload).toBe(true);
   });
+
+  it("tells a run-now caller the run's id once it has started, before its action finishes", async () => {
+    const routines = new RoutinesRepository(testDb.db);
+    const runs = new RoutineRunsRepository(testDb.db);
+    let finish: () => void = () => {};
+    const actionEngine = {
+      run: () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ status: "success", result: null });
+        }),
+    } as unknown as ActionEngine;
+    const engine = new RoutineEngine(routines, runs, actionEngine, 0, systemClock);
+    const id = await routines.create({
+      name: "slow",
+      trigger: { type: "manual" },
+      actionName: "noop",
+      args: {},
+    });
+
+    const started = new Promise<string>((resolve) => {
+      void engine.runNow(id, {}, resolve);
+    });
+    const runId = await started;
+
+    expect((await runs.findById(runId))?.status).toBe("running");
+    finish();
+  });
+
+  it("starts no action when a stop comes after the run started but before its action did", async () => {
+    let lookedUp: () => void = () => {};
+    // The fire's audience lookup waits until the stop has gone through.
+    const routines = new RoutinesRepository(
+      testDb.db,
+      () => new Promise((resolve) => (lookedUp = () => resolve("private"))),
+    );
+    const runs = new RoutineRunsRepository(testDb.db);
+    const actionEngine = {
+      run: rs.fn(async () => ({ status: "success", result: null })),
+      cancel: async () => false,
+    };
+    const engine = new RoutineEngine(
+      routines,
+      runs,
+      actionEngine as unknown as ActionEngine,
+      0,
+      systemClock,
+    );
+    const id = await routines.create({
+      name: "slow to start",
+      trigger: { type: "manual" },
+      actionName: "noop",
+      args: {},
+      chatId: "guardian-chat",
+    });
+
+    let outcome: Promise<{ runId: string; status: string }> = Promise.resolve({
+      runId: "",
+      status: "",
+    });
+    const runId = await new Promise<string>((resolve) => {
+      outcome = engine.runNow(id, {}, resolve);
+    });
+    expect(await engine.cancelRun(id)).toEqual({ stopped: true, killedLiveProcess: false });
+    lookedUp();
+
+    expect(await outcome).toMatchObject({ runId, status: "cancelled" });
+    expect(actionEngine.run).not.toHaveBeenCalled();
+    expect((await runs.findById(runId))?.status).toBe("cancelled");
+  });
+
+  it("cancels the action when a stop comes while the action engine sets its root up", async () => {
+    const routines = new RoutinesRepository(testDb.db);
+    const runs = new RoutineRunsRepository(testDb.db);
+    let setUp: () => void = () => {};
+    let registered = false;
+    let killRoot: (err: Error) => void = () => {};
+    let actionStarted = false;
+    // Like ActionEngine.run: records the root, registers it, accepts it, then runs it.
+    const actionEngine = {
+      run: async (
+        _name: string,
+        _args: unknown,
+        _context: unknown,
+        _observer: unknown,
+        _events: unknown,
+        onRootAccepted?: () => void,
+      ) => {
+        await new Promise<void>((resolve) => (setUp = resolve));
+        registered = true;
+        const result = new Promise((resolve, reject) => {
+          killRoot = reject;
+          setTimeout(() => {
+            actionStarted = true;
+            resolve({ status: "success", result: null });
+          }, 50);
+        });
+        onRootAccepted?.();
+        return result;
+      },
+      cancel: async () => {
+        if (!registered) return false;
+        killRoot(new Error("Cancelled by user"));
+        return true;
+      },
+    };
+    const engine = new RoutineEngine(
+      routines,
+      runs,
+      actionEngine as unknown as ActionEngine,
+      0,
+      systemClock,
+    );
+    const id = await routines.create({
+      name: "slow to set up",
+      trigger: { type: "manual" },
+      actionName: "noop",
+      args: {},
+    });
+
+    let outcome: Promise<{ runId: string; status: string }> = Promise.resolve({
+      runId: "",
+      status: "",
+    });
+    const runId = await new Promise<string>((resolve) => {
+      outcome = engine.runNow(id, {}, resolve);
+    });
+    // Let the fire reach the action engine, whose setup is still held.
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(await engine.cancelRun(id)).toEqual({ stopped: true, killedLiveProcess: false });
+    setUp();
+
+    expect(await outcome).toMatchObject({ runId, status: "cancelled" });
+    expect(actionStarted).toBe(false);
+    expect((await runs.findById(runId))?.status).toBe("cancelled");
+  });
 });
 
 describe("RoutineEngine worker admission", () => {
@@ -263,6 +398,9 @@ describe("RoutineEngine worker admission", () => {
       "noop",
       expect.anything(),
       expect.objectContaining({ whenWorkersBusy: "queue" }),
+      undefined,
+      undefined,
+      expect.any(Function),
     );
   });
 });
@@ -308,12 +446,18 @@ describe("RoutineEngine fire audience", () => {
       "core:personal_data_query",
       expect.anything(),
       expect.objectContaining({ audience: "private" }),
+      undefined,
+      undefined,
+      expect.any(Function),
     );
     expect(run).toHaveBeenNthCalledWith(
       2,
       "noop",
       expect.anything(),
       expect.objectContaining({ audience: "shared" }),
+      undefined,
+      undefined,
+      expect.any(Function),
     );
   });
 });

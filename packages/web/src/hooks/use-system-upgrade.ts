@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
-import { fetchJson } from "@/lib/fetch-json";
+import { apiErrorMessageFrom } from "@/lib/api-error";
+import { useUpgradeUnderWay } from "@/lib/upgrade-under-way";
 
 /** Mirrors the Rome Cloud upgrade-check contract relayed by GET /api/system/upgrade/check. */
 export interface UpgradeCheck {
@@ -21,7 +22,7 @@ const RESTART_PROBE_TIMEOUT_MS = 5_000;
 export const RESTART_TIMEOUT_MS = 40 * 60_000;
 // Above the server's 15 s Rome Cloud relay budget, so an honest answer still
 // lands; past it the request is treated as lost and they can retry
-// (a duplicate is rejected as `upgrade_in_progress`).
+// (a duplicate is refused as already upgrading; see isAlreadyUpgrading).
 const UPGRADE_REQUEST_TIMEOUT_MS = 20_000;
 
 export interface SystemUpgrade {
@@ -60,7 +61,8 @@ export interface SystemUpgradeOptions {
    * What happens once the backend reports the target version. `reload`, the
    * default, loads the page again. `report` sets `upgradedTo` and leaves the
    * page as it is, so the viewer reloads when it suits them. `report` also
-   * reads a 409 `upgrade_in_progress` as an upgrade already on its way.
+   * reads a refusal because Rome is already upgrading as an upgrade already
+   * on its way.
    */
   finish?: "reload" | "report";
 }
@@ -91,16 +93,17 @@ export function useSystemUpgrade(
   const [retrying, setRetrying] = useState(false);
 
   const accept = (target: string) => setWait({ target });
+  useUpgradeUnderWay(wait !== null && upgradedTo === null && !restartTimedOut);
 
   const mutation = useMutation({
     mutationFn: (target: string) => requestUpgrade(target, t("system.upgradeFailedFallback")),
     onSuccess: (data) => accept(data.target),
     onError: (err, target) => {
-      if (finish === "report" && err.message === "upgrade_in_progress") {
+      if (finish === "report" && isAlreadyUpgrading(err)) {
         accept(target);
         return;
       }
-      if (err.message === "target_not_latest") {
+      if (errorCode(err) === "target_not_latest") {
         setTargetConflict(true);
         void recheck();
         return;
@@ -167,8 +170,8 @@ export function useSystemUpgrade(
       accept(target);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (message === "upgrade_in_progress") accept(target);
-      else if (message === "target_not_latest") {
+      if (isAlreadyUpgrading(err)) accept(target);
+      else if (errorCode(err) === "target_not_latest") {
         // A newer release came out meanwhile: drop this one, and the
         // caller's re-check offers the new one to confirm.
         setWait(null);
@@ -202,13 +205,59 @@ export function useSystemUpgrade(
   };
 }
 
-function requestUpgrade(target: string, fallback: string) {
-  return fetchJson<{ status: string; target: string }>("/api/system/upgrade", {
+/**
+ * A refused upgrade request. `message` is what the viewer reads; `code` is the
+ * body's `error` field, which carries Rome Cloud's code (`target_not_latest`,
+ * `upgrade_in_progress`) even when the body also has a sentence for people.
+ */
+class UpgradeRequestError extends Error {
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null) {
+    super(message);
+    this.name = "UpgradeRequestError";
+    this.code = code;
+  }
+}
+
+function errorCode(err: unknown): string | null {
+  return err instanceof UpgradeRequestError ? err.code : null;
+}
+
+/**
+ * Rome Cloud refused because this Rome is already upgrading, which happens
+ * when the upgrade was started elsewhere: another tab or device, or this page
+ * before a reload. Seen as the code, or as the sentence Rome Cloud answers
+ * with: "Cannot update your Rome while it is upgrading".
+ */
+function isAlreadyUpgrading(err: unknown): boolean {
+  return (
+    err instanceof UpgradeRequestError &&
+    (err.code === "upgrade_in_progress" || /while it is upgrading/i.test(err.message))
+  );
+}
+
+async function requestUpgrade(
+  target: string,
+  fallback: string,
+): Promise<{ status: string; target: string }> {
+  const response = await fetch("/api/system/upgrade", {
     method: "POST",
-    json: { target },
+    credentials: "include",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target }),
     signal: AbortSignal.timeout(UPGRADE_REQUEST_TIMEOUT_MS),
-    fallback,
   });
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const code = (body as { error?: unknown } | null)?.error;
+    throw new UpgradeRequestError(
+      apiErrorMessageFrom(body, fallback),
+      typeof code === "string" ? code : null,
+    );
+  }
+  return body as { status: string; target: string };
 }
 
 /** The version the backend reports, or null when it does not answer. */

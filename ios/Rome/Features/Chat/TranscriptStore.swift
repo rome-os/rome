@@ -32,6 +32,16 @@ final class TranscriptStore {
     /// The least time a retry's spinner shows, so an attempt that fails at
     /// once is still seen.
     @ObservationIgnored var retryHold: Duration = .seconds(1)
+    /// Reads of the newest page that failed in a row, a read made while a
+    /// retry waits not counted. One failure is often a blip, such as the
+    /// network waking after the lock screen, so only the second in a row
+    /// shows its bar: the automatic retry failed too.
+    @ObservationIgnored private var failedLoads = 0
+    /// How long the first try after a failed read waits; each next one waits
+    /// twice as long, at most `autoRetryMost`.
+    @ObservationIgnored var autoRetryFirst: Duration = .seconds(1)
+    static let autoRetryMost: Duration = .seconds(30)
+    @ObservationIgnored private var autoRetry: Task<Void, Never>?
     private(set) var loadingOlder = false
     private(set) var hasOlder = false
     /// The chat is running a turn.
@@ -86,12 +96,12 @@ final class TranscriptStore {
     private(set) var toolCalls: [String: [ToolCall]] = [:]
 
     private var cursor: String?
-    /// The order each message id was first received in.
-    private var seen: [String: Int] = [:]
     private var tokens: [UUID] = []
     private var approvalPolls: [String: Task<Void, Never>] = [:]
     /// What the rows do when acted on; the same object for the store's life.
     let actions = ChatActions()
+    /// The message whose text is drawn selectable, if any.
+    let textSelection = TextSelection()
     /// Where a send is kept until the server takes it.
     var drafts: ChatDrafts?
     /// Where the newest messages are kept across launches: the main Chat and
@@ -100,6 +110,10 @@ final class TranscriptStore {
     /// The rows came from `cache`: the first fetch sets the paging and
     /// replaces what it covers.
     private var fromCache = false
+    /// A full read of the newest page set up the paging (or the chat was
+    /// made just now, with nothing older). A failed first read can show its
+    /// bar, and so count as loaded, before this.
+    @ObservationIgnored private var pagingKnown = false
     /// How many messages a page holds, the newest page included.
     static let pageSize = 40
 
@@ -110,11 +124,13 @@ final class TranscriptStore {
     @ObservationIgnored private var openMark: Int?
     /// The rows hold what the chat held at open: the first fetch since is in.
     @ObservationIgnored private var openFetched = false
-    /// Messages that arrived live during the open: never unread.
-    @ObservationIgnored private var openLive: Set<String> = []
-    /// The agent messages that were unread at open, fixed once both of the
-    /// above are known; older pages add theirs.
-    @ObservationIgnored private var openUnread: Set<String>?
+    /// When the newest message the rows held at open was made, in whole
+    /// seconds; `Int.min` when they held none. Set with `openFetched`: a
+    /// message made after it arrived live, and is never unread.
+    @ObservationIgnored private var openedThrough = Int.min
+    /// What was unread at open, fixed once the read mark and the rows held at
+    /// open are both known.
+    @ObservationIgnored private var openUnread: UnreadAtOpen.Snapshot?
     /// The longest a read waits for the read mark.
     @ObservationIgnored var readMarkWait: Duration = .seconds(2)
     /// `start()` ran and no fetch has worked since.
@@ -168,7 +184,6 @@ final class TranscriptStore {
         if built.isEmpty != rowsEmpty { rowsEmpty = built.isEmpty }
         let infos = RowInfo.build(rows: built, messages: messages, pending: pending, kind: kind)
         if infos != rowInfo { rowInfo = infos }
-        thread?.rebuildRows(chatMessages: messages)
     }
 
     /// The dots are the only part of the rows that how the turn writes
@@ -260,13 +275,14 @@ final class TranscriptStore {
         loaded = true
         readOnce = true
         hasOlder = false
+        pagingKnown = true
     }
 
     /// Shows the rows kept from last time, before anything is fetched. The
     /// first fetch merges into them by id, so nothing moves that is still there.
     func showCached() {
         guard !loaded, messages.isEmpty, let kept = cache?.messages(chat: sessionId) else { return }
-        merge(kept, persist: false)
+        commit(kept, persist: false)
         loaded = true
         hasOlder = false
         fromCache = true
@@ -282,6 +298,10 @@ final class TranscriptStore {
         runningPoll = nil
         resyncWork?.cancel()
         resyncWork = nil
+        autoRetry?.cancel()
+        autoRetry = nil
+        // A blip before it left says nothing about the next visit.
+        failedLoads = 0
         // Off the screen nothing waits, so a return replays no dots. The
         // turn's writing state stays: the server says it once, and a return
         // mid-turn shows the dots it still means; the turn's end clears it.
@@ -311,55 +331,70 @@ final class TranscriptStore {
         await readResends()
         do {
             let page = try await backend.messages(sessionId: sessionId, before: nil, limit: Self.pageSize)
-            // A newest page that shares nothing with what is held leaves a gap
-            // behind it: start over from it. Otherwise keep the pages already
-            // loaded, so a reload never puts the older-page spinner back on top.
+            // Keeps the pages already loaded, so a reload never puts the
+            // older-page spinner back on top; a page that shares nothing with
+            // them starts the history over (`mergeLatest`).
             let known = Set(messages.map(\.id))
             let wasLoaded = loaded
-            let gap = !messages.isEmpty && page.nextCursor != nil && !page.messages.contains { known.contains($0.id) }
-            if gap {
-                messages = []
-                seen = [:]
-            } else if fromCache {
-                pruneCached(against: page)
-            }
-            merge(page.messages)
+            // The server wins over the copy kept on disk: a kept row the page
+            // does not hold was deleted.
+            mergeLatest(page, dropsUnlisted: fromCache)
             // Replies a refetch brings count like live ones: the list marks
             // the back-to-bottom button for a guardian reading further up.
             if wasLoaded, page.messages.contains(where: { !known.contains($0.id) && !$0.isUser && !$0.isTrace }) {
                 arrivals += 1
             }
-            if !loaded || gap || fromCache {
+            if !pagingKnown || fromCache {
                 cursor = page.nextCursor
                 hasOlder = page.nextCursor != nil
                 fromCache = false
+                pagingKnown = true
             }
             loaded = true
             readOnce = true
-            loadError = nil
+            loadWorked()
             needsFetch = false
             if openRead != nil, !openFetched {
                 openFetched = true
+                openedThrough = UnreadAtOpen.newest(in: page.messages)
                 settleUnread()
             }
-            if reopening != nil { await resolveReopening() }
             await refreshRunning()
         } catch let error as APIError {
-            loadError = error
-            loaded = true
+            readFailed(error)
         } catch {}
     }
 
-    /// The server wins: a kept row the page should hold but does not was
-    /// deleted. Kept rows older than the page stay until the older page,
-    /// fetched from the page's cursor, brings them again.
-    private func pruneCached(against page: MessagePage) {
-        let fresh = Set(page.messages.map(\.id))
-        let oldest = page.messages.map(\.date).min()
-        messages.removeAll { message in
-            guard !fresh.contains(message.id) else { return false }
-            guard page.nextCursor != nil, let oldest else { return true }
-            return message.date >= oldest
+    private func loadWorked() {
+        loadError = nil
+        failedLoads = 0
+        autoRetry?.cancel()
+        autoRetry = nil
+    }
+
+    /// A failed read of the newest page shows only when the one before it
+    /// failed too; until then a chat that never loaded keeps its spinner.
+    /// While a screen runs the store, the read is tried again by itself
+    /// after 1, 2, 4… seconds, at most 30, until one works.
+    private func readFailed(_ error: APIError) {
+        // A read that fails while a retry waits is part of the same blip:
+        // coming back in front reads once at once and once more as the
+        // socket confirms, and both meet the same network.
+        if autoRetry == nil { failedLoads += 1 }
+        // A lost session or Chat turned off is no blip: it shows at once, and
+        // the session's own renewal, not a retry, deals with it.
+        let retries = error != .unauthorized && error != .conciergeOff
+        if !retries || failedLoads >= 2 {
+            loadError = error
+            loaded = true
+        }
+        guard retries, !tokens.isEmpty, autoRetry == nil else { return }
+        let wait = min(autoRetryFirst * (1 << min(failedLoads - 1, 5)), Self.autoRetryMost)
+        autoRetry = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled, let self else { return }
+            self.autoRetry = nil
+            self.resync()
         }
     }
 
@@ -367,8 +402,10 @@ final class TranscriptStore {
     @discardableResult
     func refreshLatest() async -> Bool {
         guard let page = try? await backend.messages(sessionId: sessionId, before: nil, limit: 20) else { return false }
-        merge(page.messages)
-        loadError = nil
+        mergeLatest(page)
+        // A chat whose paging no full read set up yet (never loaded, or shown
+        // from the copy on disk) reads in full now: only that sets it up.
+        if pagingKnown { loadWorked() } else { resync() }
         readOnce = true
         return true
     }
@@ -384,15 +421,10 @@ final class TranscriptStore {
         // a page from the old cursor would leave a hole in it.
         guard self.cursor == cursor else { return }
         PerfProbe.count("olderPlaced")
-        merge(page.messages)
+        prepend(page.messages)
         self.cursor = page.nextCursor
         hasOlder = page.nextCursor != nil
-        // An older page was never live: its unread messages count.
-        if var unread = openUnread, let openMark {
-            unread.formUnion(UnreadAtOpen.unread(page.messages.filter { !openLive.contains($0.id) }, mark: openMark))
-            openUnread = unread
-            summarizeUnread()
-        }
+        summarizeUnread()
     }
 
     func markRead() {
@@ -414,6 +446,9 @@ final class TranscriptStore {
     /// its replies count as read only while it shows, and once it shows again.
     var onScreen = false {
         didSet {
+            // The main Chat stays mounted under other pages, so its list
+            // never disappears: going off screen ends select mode instead.
+            if !onScreen { textSelection.end() }
             if onScreen, !oldValue {
                 beginOpen()
                 markRead()
@@ -431,6 +466,7 @@ final class TranscriptStore {
         // A store that runs and fetched since it started is current; else
         // what it holds waits for the next fetch.
         openFetched = loaded && !needsFetch && !tokens.isEmpty
+        openedThrough = openFetched ? UnreadAtOpen.newest(in: messages) : .min
         let backend = backend
         let sessionId = sessionId
         let wait = readMarkWait
@@ -463,7 +499,7 @@ final class TranscriptStore {
         openRead = nil
         openMark = nil
         openFetched = false
-        openLive = []
+        openedThrough = .min
         openUnread = nil
         unread = nil
         unreadPill.reset()
@@ -473,12 +509,12 @@ final class TranscriptStore {
     /// at open are both known.
     private func settleUnread() {
         guard openUnread == nil, openFetched, let openMark else { return }
-        openUnread = UnreadAtOpen.unread(messages.filter { !openLive.contains($0.id) }, mark: openMark)
+        openUnread = UnreadAtOpen.Snapshot(mark: openMark, through: openedThrough)
         summarizeUnread()
     }
 
     private func summarizeUnread() {
-        unread = openUnread.flatMap { UnreadAtOpen.summary(in: messages, unread: $0, hasOlder: hasOlder) }
+        unread = openUnread.flatMap { UnreadAtOpen.summary(in: messages, at: $0, hasOlder: hasOlder) }
         // No line drawn yet, the run going on into an older page: the pill
         // shows as for a line above the screen.
         if let unread, unread.firstId == nil { unreadPill.dividerAbove(true) }
@@ -515,114 +551,69 @@ final class TranscriptStore {
         if onScreen { markRead() }
     }
 
-    /// Keeps the server's order: a turn's rows stay together, turns ordered by
-    /// when they started, rows in a turn by time. Times are whole seconds, so
-    /// rows and turns that tie within a second keep the order they first
-    /// arrived in; the order never changes when the same rows arrive again.
-    private func merge(_ incoming: [ChatMessage], persist: Bool = true) {
+    // The server sends every message list in its final order, and the store never
+    // sorts: a page is held as it came, an older page goes above the held
+    // messages, a live message goes last in the order it arrived, and a message
+    // already held is replaced where it stands. The order is right after a reload.
+
+    /// Holds `next` as the messages, and keeps a copy on disk.
+    private func commit(_ next: [ChatMessage], persist: Bool = true) {
         rowsHeld = true
         defer {
             rowsHeld = false
             rebuildRows()
         }
-        // A copy of a message already held, with the same turn and time,
-        // keeps its place: every key the order goes by is unchanged, so it
-        // replaces the held one where it stands, with no sort. Streaming and
-        // live edits of a message take this path.
-        if !incoming.isEmpty, let placed = placedInPlace(incoming) {
-            if placed != messages { messages = placed }
-            if persist { cache?.save(chat: sessionId, messages: messages) }
-            return
-        }
-        var byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-        for message in incoming {
-            byID[message.id] = completed(message, held: byID[message.id]) { root in
-                byID.values.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
-            }
-            if seen[message.id] == nil {
-                seen[message.id] = seen.count
-            }
-        }
-        messages = Self.ordered(Array(byID.values), seen: seen)
+        if next != messages { messages = next }
         let stored = Set(messages.map(\.id))
         if pending.contains(where: { stored.contains($0.id) }) { pending.removeAll { stored.contains($0.id) } }
         if persist { cache?.save(chat: sessionId, messages: messages) }
     }
 
-    /// `incoming` put in place of the messages it updates, or nil when one
-    /// of them is new or moved to another turn or time and the order must be
-    /// worked out again.
-    private func placedInPlace(_ incoming: [ChatMessage]) -> [ChatMessage]? {
-        var placed = messages
-        for message in incoming {
-            guard let index = placed.firstIndex(where: { $0.id == message.id }),
-                  placed[index].turnId == message.turnId, placed[index].createdAt == message.createdAt
-            else { return nil }
-            placed[index] = completed(message, held: placed[index]) { root in
-                placed.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
-            }
+    /// A live message: replaces the held message with its id where it stands,
+    /// else goes last.
+    private func mergeLive(_ message: ChatMessage) {
+        var next = messages
+        if let index = next.firstIndex(where: { $0.id == message.id }) {
+            next[index] = message
+        } else {
+            next.append(message)
         }
-        return placed
+        commit(next)
     }
 
-    /// An incoming copy with what the chat already knows about it: its
-    /// thread and the thread's title.
-    private func completed(_ incoming: ChatMessage, held: ChatMessage?, threadTitle: (String) -> String?) -> ChatMessage {
-        var message = incoming
-        if message.knowsThreads {
-            instanceKnowsThreads = true
-        } else if let held, held.knowsThreads {
-            // A live insert leaves the thread out: keep the one already known.
-            message.chatThreadId = held.chatThreadId
-            message.chatThreadTitle = held.chatThreadTitle
-            message.knowsThreads = true
-        }
-        // A copy that leaves the title out keeps the one already known, and a
-        // message of a thread takes its title from the thread.
-        if message.chatThreadTitle == nil, let root = message.chatThreadId {
-            if let held, held.chatThreadId == root, let title = held.chatThreadTitle {
-                message.chatThreadTitle = title
+    /// An older page goes above the held messages. A held message it carries
+    /// again, such as the trace of a turn on both pages, takes the page's place.
+    private func prepend(_ older: [ChatMessage]) {
+        let ids = Set(older.map(\.id))
+        commit(older + messages.filter { !ids.contains($0.id) })
+    }
+
+    /// The newest page, or one that reaches down from it: it replaces the held
+    /// messages from its first held message (not a trace) onward, and what
+    /// stands above stays. A held message after it that it does not carry, such
+    /// as a live one the server read too early, stays after it, unless
+    /// `dropsUnlisted`. A page that shares no message with the held ones while
+    /// older messages remain leaves a gap behind it: the history starts over
+    /// from the page, and the paging follows its cursor. Every refresh of the
+    /// newest page goes through here, so they all follow the one rule.
+    private func mergeLatest(_ page: MessagePage, dropsUnlisted: Bool = false) {
+        let ids = Set(page.messages.map(\.id))
+        let heldIDs = Set(messages.map(\.id))
+        guard let anchor = page.messages.first(where: { !$0.isTrace && heldIDs.contains($0.id) }),
+              let at = messages.firstIndex(where: { $0.id == anchor.id })
+        else {
+            if !messages.isEmpty, page.nextCursor != nil {
+                commit(page.messages)
+                cursor = page.nextCursor
+                hasOlder = true
             } else {
-                message.chatThreadTitle = threadTitle(root)
+                commit(page.messages + (dropsUnlisted ? [] : messages.filter { !ids.contains($0.id) }))
             }
+            return
         }
-        return message
-    }
-
-    /// The server's order: turns by when they started, then by when they
-    /// first arrived; in a turn, rows by time, then by arrival. Each
-    /// message's keys are worked out once, not on every comparison.
-    static func ordered(_ all: [ChatMessage], seen: [String: Int]) -> [ChatMessage] {
-        struct Keys {
-            let turn: String
-            let date: Date
-            let arrival: Int
-        }
-        let keys = all.map { Keys(turn: $0.turnId ?? $0.id, date: $0.date, arrival: seen[$0.id] ?? Int.max) }
-        var turnStart: [String: Date] = [:]
-        var turnArrival: [String: Int] = [:]
-        for key in keys {
-            turnStart[key.turn] = min(turnStart[key.turn] ?? key.date, key.date)
-            turnArrival[key.turn] = min(turnArrival[key.turn] ?? Int.max, key.arrival)
-        }
-        struct Sorted {
-            let index: Int
-            let start: Date
-            let turnArrival: Int
-            let turn: String
-            let date: Date
-            let arrival: Int
-        }
-        let sorted = keys.enumerated().map { index, key in
-            Sorted(index: index, start: turnStart[key.turn]!, turnArrival: turnArrival[key.turn]!, turn: key.turn, date: key.date, arrival: key.arrival)
-        }.sorted { a, b in
-            if a.start != b.start { return a.start < b.start }
-            // Ids are random, so comparing them would decide a tie by chance.
-            if a.turn != b.turn { return a.turnArrival < b.turnArrival }
-            if a.date != b.date { return a.date < b.date }
-            return a.arrival < b.arrival
-        }
-        return sorted.map { all[$0.index] }
+        let above = messages[..<at].filter { !ids.contains($0.id) }
+        let below = dropsUnlisted ? [] : messages[at...].filter { !ids.contains($0.id) }
+        commit(above + page.messages + below)
     }
 
     // MARK: Live events
@@ -639,8 +630,7 @@ final class TranscriptStore {
             // Only a message that arrives live may wait behind the dots: never
             // history, a catch-up read on return, or an older page.
             if isNew { hold(message, after: newest) }
-            if isNew, openRead != nil { openLive.insert(message.id) }
-            merge([message])
+            mergeLive(message)
             if isNew, !message.isUser, !message.isTrace { arrivals += 1 }
         case .messageWriting(let id, let turnId, let mode, let isWriting) where id == sessionId:
             writing = (turnId, mode, isWriting)
@@ -678,7 +668,6 @@ final class TranscriptStore {
                 }
             }
         }
-        thread?.settle(card)
     }
 
     /// Changes several messages at once, so the rows are built once for all.
@@ -700,111 +689,81 @@ final class TranscriptStore {
         }
     }
 
-    // MARK: Chat threads
+    // MARK: Replies
 
-    /// The chat thread shown over the chat, if one is open.
-    private(set) var thread: ThreadStore?
-    /// The instance has chat threads: a read showed `chatThreadId`, on any
-    /// message.
-    private(set) var instanceKnowsThreads = false
-    /// A thread a restored draft was written in, being looked up because its
-    /// message is not in the pages held.
-    private(set) var reopening: ThreadTarget?
-
-    /// The message the guardian replies to, quoted in the reply bar above
-    /// the composer. Reply opens only the bar; inside an open thread view
-    /// the view stays open (docs/domains/chats.md#chat-thread).
-    private(set) var quote: ThreadTarget?
-    /// A message shown tinted: the one a thread view opened from, or the
-    /// original a quote led to.
+    /// The message the guardian replies to, quoted in the reply bar above the
+    /// composer (docs/domains/chats.md#chat-thread). The reply goes with the
+    /// next send.
+    private(set) var quote: ReplyTarget?
+    /// A message shown tinted: the original a quote led to.
     private(set) var tinted: String?
     /// Goes up when the transcript should bring `jumpTarget` into view.
     private(set) var jumps = 0
     private(set) var jumpTarget: String?
     @ObservationIgnored private var untint: Task<Void, Never>?
 
-    /// Where the composer sends, and what its draft keeps: the reply, or a
-    /// thread still being looked up.
-    var composerThread: ThreadTarget? { quote ?? reopening }
+    /// What the composer's next send replies to, and what its draft keeps.
+    var composerReply: ReplyTarget? { quote }
 
-    /// The reply bar shows for a reply to a message, and for Reply inside a
-    /// thread view; not for a thread view opened from its label.
-    var showsQuoteBar: Bool { quote != nil && (quote?.bare != true || repliesToThread) }
-
-    /// Reply was pressed inside a thread view: the bar names the task, and
-    /// the send goes to the thread, quoting no message.
-    private(set) var repliesToThread = false
-
-    /// The thread the reply bar names for a reply inside a thread view.
-    var threadReplyTitle: String? {
-        guard repliesToThread, let thread else { return nil }
-        return thread.title ?? threadTitle(of: thread.anchor)
-    }
+    /// Whether the reply bar shows.
+    var showsQuoteBar: Bool { quote != nil }
 
     /// The quoted message, when it is held.
     var quotedMessage: ChatMessage? {
-        if repliesToThread { return nil }
-        return quote.flatMap { message($0.messageId) ?? thread?.messages.first { [id = $0.messageId] in $0.id == id } }
+        quote.flatMap { message($0.messageId) }
     }
 
-    /// The name of the chat thread `message` is in, or nil when it is in none
-    /// or the thread has no name.
-    func threadTitle(of message: ChatMessage) -> String? {
-        Self.threadTitle(of: message, in: messages)
-    }
-
-    static func threadTitle(of message: ChatMessage, in messages: [ChatMessage]) -> String? {
-        if let title = message.chatThreadTitle { return title }
-        return TranscriptBuilder.threadTitles(messages)[message.threadRoot]
-    }
-
-    /// Whether `message` is in a chat thread of more than one message: its
-    /// root is another message, or a held message replies in a thread it roots.
-    func isInThread(_ message: ChatMessage) -> Bool {
-        if let root = message.chatThreadId, root != message.id { return true }
-        return messages.contains { $0.chatThreadId == message.id && $0.id != message.id }
-    }
-
-    /// Reply on a message: the reply bar quotes it. An open thread view
-    /// stays open, and the send goes into its thread.
-    func reply(to messageId: String) {
-        guard kind == .concierge, message(messageId) != nil || thread != nil else { return }
-        if let thread {
-            // Inside a thread view a reply goes to the thread, not to a message.
-            quote = ThreadTarget(messageId: thread.anchor.id, instanceKnowsThreads: true, quote: true, thread: thread.root, bare: true)
-            repliesToThread = true
-        } else {
-            quote = ThreadTarget(messageId: messageId, instanceKnowsThreads: true, quote: true)
-        }
+    /// Reply on a message, from its menu or a swipe on `row`: the reply bar
+    /// quotes it.
+    func reply(to messageId: String, row: String? = nil) {
+        guard kind == .concierge, message(messageId) != nil else { return }
+        quote = ReplyTarget(messageId: messageId)
+        replyRow = row ?? rows.first(where: { $0.messageId == messageId })?.id
         replies += 1
     }
 
-    /// Goes up on each Reply: the composer takes the keyboard.
+    /// Goes up on each Reply: the composer takes the keyboard, and the list
+    /// keeps `replyRow` in view instead of going to the bottom.
     private(set) var replies = 0
+    /// The row the last Reply was picked on.
+    private(set) var replyRow: String?
 
-    /// The reply bar's ✕: the reply goes, and an open thread view with it.
+    /// The reply bar's ✕: the reply goes.
     func cancelQuote() {
-        closeThread()
+        quote = nil
     }
 
-    /// Opens the thread view of the chat thread `messageId` is in: the message
-    /// is tinted, and a send goes into the thread.
-    func openThread(at messageId: String) {
-        guard kind == .concierge, let anchor = messages.first(where: { $0.id == messageId }) else { return }
-        open(anchor: anchor, older: [], replyTo: messageId, bare: true)
+    /// A restored draft was written as a reply: the reply bar comes back.
+    func restoreReply(_ target: ReplyTarget) {
+        guard kind == .concierge else { return }
+        quote = target
     }
 
-    /// The quote in a reply, the guardian's or the Concierge's, was tapped. A
-    /// reply is in a chat thread, so it opens that thread's view, held on the
-    /// reply. Nil when the quote leads nowhere.
-    func quoteAction(reply replyId: String, original: String) -> (() -> Void)? {
+    /// How many older pages a tap on a quote loads before it gives up.
+    static let quotePages = 10
+
+    /// The quote in a reply was tapped: the transcript goes to the original
+    /// and tints it. One not held yet comes in by paging older messages until
+    /// it does, up to `quotePages` pages; then the tap does nothing, quietly.
+    func quoteAction(original: String) -> (() -> Void)? {
         guard kind == .concierge else { return nil }
-        if let host = message(replyId), isInThread(host) {
-            // A reply in the thread view goes to the thread, quoting nothing.
-            return { [weak self] in self?.open(anchor: host, older: [], tint: original, bare: true) }
+        return { [weak self] in
+            guard let self else { return }
+            Task { await self.reveal(quoted: original) }
         }
-        guard message(original) != nil else { return nil }
-        return { [weak self] in self?.jump(to: original) }
+    }
+
+    /// Brings the quoted message into view, paging older history in until it is held.
+    func reveal(quoted messageId: String) async {
+        var pages = 0
+        while message(messageId) == nil, hasOlder, pages < Self.quotePages {
+            let before = messages.count
+            await loadOlder()
+            pages += 1
+            // A page that brings nothing ends the search.
+            if messages.count == before { break }
+        }
+        if message(messageId) != nil { jump(to: messageId) }
     }
 
     /// Brings the message with a task's card into view and tints it. One not
@@ -814,7 +773,7 @@ final class TranscriptStore {
         if message(messageId) == nil,
            let page = try? await backend.messages(sessionId: sessionId, through: messageId, limit: Self.pageSize) {
             // From the newest down past the card, so no gap opens above what is held.
-            merge(page.messages)
+            mergeLatest(page)
             if message(messageId) != nil {
                 cursor = page.nextCursor
                 hasOlder = page.nextCursor != nil
@@ -844,85 +803,6 @@ final class TranscriptStore {
             self?.tinted = nil
         }
     }
-
-    private func open(anchor: ChatMessage, older: [ChatMessage], replyTo: String? = nil, tint target: String? = nil, bare: Bool = false) {
-        thread?.stop()
-        reopening = nil
-        let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, older: older)
-        thread = opened
-        quote = ThreadTarget(messageId: replyTo ?? anchor.id, instanceKnowsThreads: true, quote: true, thread: opened.root, bare: bare ? true : nil)
-        repliesToThread = false
-        tint(target ?? anchor.id)
-        opened.start()
-    }
-
-    /// Takes the open thread off the screen and nothing else: a reply or a
-    /// thread being looked up stays, for share mode to hand back.
-    func hideThread() {
-        thread?.stop()
-        thread = nil
-        untint?.cancel()
-        tinted = nil
-    }
-
-    /// Closes the open thread view and the reply bar: both end with a send.
-    /// The tint stays a moment, so the guardian sees where they were.
-    func closeThread() {
-        repliesToThread = false
-        thread?.stop()
-        thread = nil
-        reopening = nil
-        quote = nil
-        if tinted != nil { tint(tinted, for: .seconds(1.5)) }
-    }
-
-    /// A restored draft was written as a reply: the reply bar comes back,
-    /// and so does the thread view it was written in. A thread view whose
-    /// message is older than the pages held is looked up; only one the
-    /// server no longer has leaves the text to the chat.
-    func reopenThread(_ target: ThreadTarget) {
-        guard kind == .concierge, thread == nil else { return }
-        // A draft from before quotes was written in a thread view. With no
-        // thread under its message there is none to open: it is a plain reply.
-        if target.quote == nil, let held = message(target.messageId), !isInThread(held) {
-            quote = ThreadTarget(messageId: target.messageId, instanceKnowsThreads: true, quote: true)
-            return
-        }
-        guard let root = target.threadMessage else {
-            quote = target
-            return
-        }
-        if let anchor = message(root) {
-            open(anchor: anchor, older: [], replyTo: target.messageId, bare: target.bare == true)
-            return
-        }
-        reopening = target
-        Task { await resolveReopening() }
-    }
-
-    /// Looks up the thread a draft waits on. Unreachable now, it keeps
-    /// waiting, and the next reload asks again.
-    func resolveReopening() async {
-        guard let target = reopening, thread == nil else { return }
-        do {
-            let root = target.threadMessage ?? target.messageId
-            let found = try await backend.thread(sessionId: sessionId, root: root)
-            guard reopening == target, thread == nil else { return }
-            guard let anchor = found.first(where: { $0.id == root }) ?? found.last else {
-                reopening = nil
-                return
-            }
-            open(anchor: anchor, older: found, replyTo: target.messageId, bare: target.bare == true)
-        } catch APIError.notFound {
-            if reopening == target { reopening = nil }
-        } catch {}
-    }
-
-    /// The messages held for this chat that are in `root`'s thread.
-    func messages(inThread root: String) -> [ChatMessage] {
-        messages.filter { !$0.isTrace && ($0.chatThreadId == root || $0.id == root) }
-    }
-
 
     /// The stored messages drawn: a message sent again gives way to its new
     /// copy, both while the copy is on its way and once it is stored.
@@ -1045,23 +925,23 @@ final class TranscriptStore {
     @discardableResult
     /// Sends the guardian's text with any photos (JPEG). Photos alone are a
     /// message too. `fromComposer`: the composer's content, cleared as it goes.
-    func send(_ text: String, images: [ComposerImage] = [], fromComposer: Bool = false, thread: ThreadTarget? = nil) -> Bool {
-        send(text, images: images, files: [], fromComposer: fromComposer, keepsDraft: true, thread: thread) != nil
+    func send(_ text: String, images: [ComposerImage] = [], fromComposer: Bool = false, reply: ReplyTarget? = nil) -> Bool {
+        send(text, images: images, files: [], fromComposer: fromComposer, keepsDraft: true, reply: reply) != nil
     }
 
     /// The send's `inputId`, or nil when there is nothing to send. `files`:
     /// anything other than photos, which only a resend carries. A resend
     /// keeps no draft: its original stays on the instance, and shows again
     /// with its Retry if the copy is lost.
-    private func send(_ text: String, images: [ComposerImage], files: [OutgoingFile], fromComposer: Bool = false, keepsDraft: Bool, thread: ThreadTarget?) -> String? {
+    private func send(_ text: String, images: [ComposerImage], files: [OutgoingFile], fromComposer: Bool = false, keepsDraft: Bool, reply: ReplyTarget?) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !images.isEmpty || !files.isEmpty else { return nil }
         let inputId = UUID().uuidString.lowercased()
-        pending.append(PendingSend(id: inputId, text: trimmed, images: images, files: files, createdAt: .now, state: .sending, thread: thread, keepsDraft: keepsDraft))
+        pending.append(PendingSend(id: inputId, text: trimmed, images: images, files: files, createdAt: .now, state: .sending, reply: reply, keepsDraft: keepsDraft))
         if kind == .concierge {
             markRunning()
         }
-        deliver(inputId: inputId, text: trimmed, images: images, files: files, fromComposer: fromComposer, keepsDraft: keepsDraft, thread: thread)
+        deliver(inputId: inputId, text: trimmed, images: images, files: files, fromComposer: fromComposer, keepsDraft: keepsDraft, reply: reply)
         return inputId
     }
 
@@ -1087,21 +967,10 @@ final class TranscriptStore {
     /// The originals a resend took the place of: hidden only while their
     /// copy is still held or stored, so a copy that failed for good and was
     /// dropped (here, or by a relaunch) brings its original back.
-    var resentOriginals: Set<String> { resentOriginals(alsoHeld: []) }
-
-    /// The same, counting copies held elsewhere too: a thread view's own read
-    /// can hold a copy the chat's pages do not.
-    func resentOriginals(alsoHeld extra: Set<String>) -> Set<String> {
+    var resentOriginals: Set<String> {
         guard !resends.isEmpty else { return [] }
-        let present = Set(pending.map(\.id)).union(messages.map(\.id)).union(extra)
+        let present = Set(pending.map(\.id)).union(messages.map(\.id))
         return Set(resends.filter { present.contains($0.value) }.keys)
-    }
-
-    /// The resend copies still on their way for these originals, for a
-    /// thread view that shows the originals' place.
-    func pendingResends(of originals: Set<String>) -> [PendingSend] {
-        let copies = Set(resends.filter { originals.contains($0.key) }.values)
-        return pending.filter { copies.contains($0.id) }
     }
 
     /// Reads the chat's resends once, before the first rows are drawn.
@@ -1121,24 +990,24 @@ final class TranscriptStore {
 
     /// Tries a message again. One the app still holds is sent again. One the
     /// instance stored as not delivered or unconfirmed goes as a new message,
-    /// to the same thread and reply, with its files, and takes its place.
+    /// to the same reply, with its files, and takes its place.
     func retry(_ id: String) {
         if let index = pending.firstIndex(where: { $0.id == id }) {
             pending[index].state = .sending
-            deliver(inputId: id, text: pending[index].text, images: pending[index].images, files: pending[index].files, keepsDraft: pending[index].keepsDraft, thread: pending[index].thread)
+            deliver(inputId: id, text: pending[index].text, images: pending[index].images, files: pending[index].files, keepsDraft: pending[index].keepsDraft, reply: pending[index].reply)
             return
         }
         // The instance keeps what it stored under its own `inputId` and drops a
         // second send of it as a duplicate, so this goes as a new message.
         guard let messageId = id.split(separator: ":").first.map(String.init), !resending.contains(messageId),
-              let stored = message(messageId) ?? thread?.messages.first(where: { $0.id == messageId }),
+              let stored = message(messageId),
               let raw = stored.parts.compactMap(\.textContent).first
         else { return }
         let (text, uploads) = UploadLines.split(raw)
         guard !text.isEmpty || !uploads.isEmpty else { return }
         let target = Self.resendTarget(of: stored)
         guard !uploads.isEmpty else {
-            if let inputId = send(text, images: [], files: [], keepsDraft: false, thread: target) { recordResend(of: messageId, as: inputId) }
+            if let inputId = send(text, images: [], files: [], keepsDraft: false, reply: target) { recordResend(of: messageId, as: inputId) }
             return
         }
         // The instance takes files only as bytes, so its stored copies are
@@ -1150,41 +1019,13 @@ final class TranscriptStore {
                 say(String(localized: "Couldn't send. Try again"))
                 return
             }
-            if let inputId = send(text, images: images, files: files, keepsDraft: false, thread: target) { recordResend(of: messageId, as: inputId) }
+            if let inputId = send(text, images: images, files: files, keepsDraft: false, reply: target) { recordResend(of: messageId, as: inputId) }
         }
     }
 
-    /// What a send from the open thread view names to the instance. The view
-    /// replies to the thread, and the app picks the message: the thread's
-    /// last with text, which a card has none of. The instance stores the reply
-    /// to that message as given, so the reply is under the message the
-    /// guardian could see. A thread with no such message loaded, or a send
-    /// that is not from the view, goes as it is.
-    func wireTarget(_ target: ThreadTarget?) -> ThreadTarget? {
-        guard let target, target.bare == true, let thread,
-              let tail = thread.messages.last(where: Self.hasQuotableText)
-        else { return target }
-        return ThreadTarget(messageId: tail.id, instanceKnowsThreads: target.instanceKnowsThreads, quote: true, thread: target.thread)
-    }
-
-    /// Whether `message` has words to quote: text, not an upload line or a card.
-    static func hasQuotableText(_ message: ChatMessage) -> Bool {
-        message.parts.contains { part in
-            guard let raw = part.textContent else { return false }
-            return !(message.isUser ? UploadLines.split(raw).text : raw)
-                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-    }
-
-    /// Where a stored message went: its chat thread, and the message it replied to.
-    static func resendTarget(of message: ChatMessage) -> ThreadTarget? {
-        guard let replyTo = message.parts.lazy.compactMap(\.replyQuote).first?.messageId else { return nil }
-        return ThreadTarget(
-            messageId: replyTo,
-            instanceKnowsThreads: true,
-            quote: true,
-            thread: message.chatThreadId == message.id ? nil : message.chatThreadId
-        )
+    /// Where a stored message went: the message it replied to.
+    static func resendTarget(of message: ChatMessage) -> ReplyTarget? {
+        message.parts.lazy.compactMap(\.replyQuote).first.map { ReplyTarget(messageId: $0.messageId) }
     }
 
     /// A stored message's files: pictures as photos, anything else as the
@@ -1210,11 +1051,10 @@ final class TranscriptStore {
         return (images, files)
     }
 
-    private func deliver(inputId: String, text: String, images: [ComposerImage], files: [OutgoingFile] = [], fromComposer: Bool = false, keepsDraft: Bool = true, thread: ThreadTarget? = nil) {
+    private func deliver(inputId: String, text: String, images: [ComposerImage], files: [OutgoingFile] = [], fromComposer: Bool = false, keepsDraft: Bool = true, reply: ReplyTarget? = nil) {
         // Kept as the chat's draft until the server takes it.
-        // Kept with the thread it was for, so a lost send comes back there.
-        if keepsDraft, let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer, thread: thread) }
-        let target = wireTarget(thread)
+        // Kept with the reply it was for, so a lost send comes back there.
+        if keepsDraft, let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer, reply: reply) }
         Task {
             do {
                 let turn = try await backend.send(
@@ -1223,7 +1063,7 @@ final class TranscriptStore {
                     files: OutgoingFile.photos(images) + files,
                     inputId: inputId,
                     priority: kind == .concierge ? .now : .next,
-                    thread: target
+                    reply: reply
                 )
                 if let index = pending.firstIndex(where: { $0.id == inputId }) {
                     pending[index].state = .sent
@@ -1463,22 +1303,32 @@ final class TranscriptStore {
 enum UnreadAtOpen {
     static func second(_ date: Date) -> Int { Int(date.timeIntervalSince1970.rounded(.down)) }
 
-    /// The agent messages of `messages` made after `mark`.
-    static func unread(_ messages: [ChatMessage], mark: Int) -> Set<String> {
-        Set(messages.filter { $0.role == "assistant" && second($0.date) > mark }.map(\.id))
+    /// The read mark at open, and when the newest message the chat held then
+    /// was made: a message made after it arrived live, and is never unread.
+    struct Snapshot: Equatable {
+        let mark: Int
+        let through: Int
     }
 
-    /// The unread messages of `messages` the chat draws: how many, and the
-    /// first in the chat's order; nil when none is drawn. A page holds whole
-    /// turns, so while older pages remain and the oldest loaded turn has an
-    /// unread message, the run may start on an older page: no first until it
-    /// loads, and the count is a lower bound.
-    static func summary(in messages: [ChatMessage], unread: Set<String>, hasOlder: Bool) -> UnreadSummary? {
-        guard !unread.isEmpty, let oldest = messages.first else { return nil }
-        let drawn = messages.filter { unread.contains($0.id) && TranscriptBuilder.isReply($0, parts: $0.parts) }
+    /// When the newest message of `messages` was made, `Int.min` for none.
+    /// A trace is no message: it comes with the page of its turn.
+    static func newest(in messages: [ChatMessage]) -> Int {
+        messages.filter { !$0.isTrace }.map { second($0.date) }.max() ?? .min
+    }
+
+    /// The unread messages of `messages`, which are in time order, the chat
+    /// draws: how many, and the first; nil when none is drawn. While older
+    /// pages remain and the oldest loaded message is unread, the run may
+    /// start on an older page: no first until it loads, and the count is a
+    /// lower bound.
+    static func summary(in messages: [ChatMessage], at open: Snapshot, hasOlder: Bool) -> UnreadSummary? {
+        let drawn = messages.filter {
+            let at = second($0.date)
+            return $0.role == "assistant" && at > open.mark && at <= open.through
+                && TranscriptBuilder.isReply($0, parts: $0.parts)
+        }
         guard let first = drawn.first else { return nil }
-        let oldestTurn = oldest.turnId ?? oldest.id
-        let more = hasOlder && messages.contains { unread.contains($0.id) && ($0.turnId ?? $0.id) == oldestTurn }
+        let more = hasOlder && messages.first { !$0.isTrace }.map { second($0.date) > open.mark } == true
         return UnreadSummary(firstId: more ? nil : first.id, count: drawn.count, more: more)
     }
 }

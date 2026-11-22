@@ -1,7 +1,8 @@
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
-import type { QuotaSwitchPart } from "@rome/api-types/chat";
+import type { ProviderOutagePart, QuotaSwitchPart } from "@rome/api-types/chat";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { userMessageText } from "@/components/chat/chat-view";
+import { replyTarget } from "@/components/chat/reply/reply-drawing";
 import type { ChatRow } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
 import type { LivePreview } from "@/components/chat/MessageList";
@@ -39,7 +40,19 @@ export interface ConciergeEntry {
 export type ConciergeItem =
   /** Centered time line before `at`, an ISO timestamp. */
   | { kind: "separator"; key: string; at: string }
-  | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
+  /**
+   * A centered line: the chat moved to another model, or, with `outage`,
+   * unattended chats wait on a provider that stopped working.
+   */
+  | {
+      kind: "notice";
+      key: string;
+      model: string;
+      /** The model before the switch, when a turn's model changed. */
+      fromModel?: string;
+      quota?: QuotaSwitchPart;
+      outage?: ProviderOutagePart;
+    }
   /** Line above the first message that was unread when the chat opened. */
   | { kind: "unread"; key: string }
   /**
@@ -157,8 +170,10 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
       b.kind === "notice" &&
       a.key === b.key &&
       a.model === b.model &&
+      a.fromModel === b.fromModel &&
       a.quota?.from === b.quota?.from &&
-      a.quota?.to === b.quota?.to
+      a.quota?.to === b.quota?.to &&
+      a.outage === b.outage
     );
   return (
     b.kind === "group" &&
@@ -171,51 +186,13 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
 }
 
 /**
- * What a focus on `thread`, a root, hides, by message id and by item key: every
- * message outside the thread, whichever thread it is in or none, the
- * guardian's and the agent's; the unread divider; and a time separator with
- * nothing of the thread under it. Model notices and the typing bubble stay, and
- * keep their separator. `threadOf` maps each message in a thread to its root.
- */
-export function focusHidden(
-  items: readonly ConciergeItem[],
-  thread: string,
-  threadOf: ReadonlyMap<string, string>,
-): Set<string> {
-  const hidden = new Set<string>();
-  // The separator being read, and whether anything stays under it.
-  let separator: string | null = null;
-  let kept = false;
-  const settle = () => {
-    if (separator && !kept) hidden.add(separator);
-  };
-  for (const item of items) {
-    if (item.kind === "separator") {
-      settle();
-      separator = item.key;
-      kept = false;
-    } else if (item.kind === "unread") {
-      hidden.add(item.key);
-    } else if (item.kind === "notice") {
-      kept = true;
-    } else {
-      if (item.typing) kept = true;
-      for (const { message } of item.entries) {
-        if (threadOf.get(message.id) === thread) kept = true;
-        else hidden.add(message.id);
-      }
-    }
-  }
-  settle();
-  return hidden;
-}
-
-/**
  * Turns the transcript's rows into what the Concierge draws: groups of
  * same-sender messages, time separators, model-switch notices, and the unread
  * divider. Two
  * adjacent messages join a group when the sender is the same and the gap
- * between their `createdAt` is under {@link GROUP_GAP_MS}. A separator comes
+ * between their `createdAt` is under {@link GROUP_GAP_MS}, or when the
+ * Concierge's message replies to the same message as the one before it, which
+ * keeps a run of replies to one message in one group however long the gap. A separator comes
  * before the first message, after a gap of at least {@link SEPARATOR_GAP_MS},
  * and when the local day changes. It always ends the group before it. A message
  * with an unparsable time gets no separator and is grouped by sender alone.
@@ -235,12 +212,20 @@ export function buildConciergeItems(
 ): ConciergeItem[] {
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
-    | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
+    | {
+        kind: "notice";
+        key: string;
+        model: string;
+        fromModel?: string;
+        quota?: QuotaSwitchPart;
+        outage?: ProviderOutagePart;
+      }
     | { kind: "unread" }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
   let group: Extract<Slot, { kind: "group" }> | null = null;
   let previous: ChatMessage | null = null;
+  let previousSender: "guardian" | "agent" | null = null;
 
   const add = (message: ChatMessage, sender: "guardian" | "agent") => {
     const at = Date.parse(message.createdAt);
@@ -262,12 +247,21 @@ export function buildConciergeItems(
       slots.push({ kind: "unread" });
       group = null;
     }
-    if (!group || separate || group.sender !== sender || gap >= GROUP_GAP_MS) {
+    // A run of replies to one message stays whole: the Concierge answers it
+    // in as many messages as it takes, some minutes apart.
+    const target = sender === "agent" ? replyTarget(message) : undefined;
+    const sameReply =
+      target !== undefined &&
+      previous !== null &&
+      previousSender === "agent" &&
+      replyTarget(previous) === target;
+    if (!group || separate || group.sender !== sender || (gap >= GROUP_GAP_MS && !sameReply)) {
       group = { kind: "group", sender, messages: [] };
       slots.push(group);
     }
     group.messages.push(message);
     previous = message;
+    previousSender = sender;
   };
 
   // Where each turn's input came from, when someone else made the Concierge
@@ -296,23 +290,38 @@ export function buildConciergeItems(
     } else if (row.kind === "agent") {
       for (const message of row.messages) {
         // Only a Concierge chat's transcript is grouped here, and any of them may switch.
-        const quota = parseMessageEntries(message).find(
-          (part): part is QuotaSwitchPart => part.type === "quota_switch",
-        );
+        const parts = parseMessageEntries(message);
+        const quota = parts.find((part): part is QuotaSwitchPart => part.type === "quota_switch");
         if (quota) {
           slots.push({ kind: "notice", key: message.id, model: quota.model, quota });
           automaticModel = quota.model;
+          group = null;
+          continue;
+        }
+        // A provider outage for waiting task chats is a notice too, not a bubble.
+        const outage = parts.find(
+          (part): part is ProviderOutagePart => part.type === "provider_outage",
+        );
+        if (outage) {
+          slots.push({ kind: "notice", key: message.id, model: "", outage });
           group = null;
         } else if (isRenderable(message)) add(message, "agent");
       }
     } else if (row.kind === "automated_input") {
       labelSource(row.turnId, row.source);
     } else if (row.kind === "model_switch") {
+      if (row.quota) {
+        // Rome's own note about a move it made, already a row of its own.
+        slots.push({ kind: "notice", key: row.key, model: row.model, quota: row.quota });
+        automaticModel = row.model;
+        group = null;
+        continue;
+      }
       if (row.model === automaticModel) {
         automaticModel = undefined;
         continue;
       }
-      slots.push({ kind: "notice", key: row.key, model: row.model });
+      slots.push({ kind: "notice", key: row.key, model: row.model, fromModel: row.fromModel });
       group = null;
     }
   }

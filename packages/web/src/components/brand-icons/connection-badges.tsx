@@ -5,11 +5,12 @@ import { cn } from "@/lib/utils";
 import { RomeLogo } from "@/components/logo";
 import { GithubIcon } from "@/components/brand-icons/github-icon";
 import { GoogleIcon } from "@/components/brand-icons/google-icon";
+import { MicrosoftIcon } from "@/components/brand-icons/microsoft-icon";
 import { ShopifyIcon } from "@/components/brand-icons/shopify-icon";
 import { SlackIcon } from "@/components/brand-icons/slack-icon";
 
 /**
- * Brand marks + colored badges for the Settings → Channels / Integrations cards.
+ * Brand marks + colored badges for the Settings → Connections cards.
  *
  * Brand glyphs are official single-path logos (Simple Icons), drawn with
  * `fill="currentColor"` so the badge wrapper sets their color. Brand background
@@ -129,6 +130,8 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
   feishu: { Icon: FeishuIcon, badge: "border border-border bg-white" },
   slack: { Icon: SlackIcon, badge: "border border-border bg-white" },
   google: { Icon: GoogleIcon, badge: "border border-border bg-white" },
+  // The four squares read on any surface, so this needs no off-system white.
+  microsoft: { Icon: MicrosoftIcon, badge: "border border-border bg-background" },
   github: { Icon: GithubIcon, badge: "bg-foreground text-background" },
   shopify: { Icon: ShopifyIcon, badge: "bg-foreground text-background" },
   webchat: {
@@ -144,7 +147,10 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
 };
 
 /** Services drawn with another service's mark: a Slack bot is still Slack. */
-const BADGE_OF_SERVICE: Readonly<Record<string, string>> = { slack_bot: "slack" };
+const BADGE_OF_SERVICE: Readonly<Record<string, string>> = {
+  slack_bot: "slack",
+  slack_app: "slack",
+};
 
 /** Whether a service has a brand mark of its own. */
 export function hasConnectionBrand(connection: string): boolean {

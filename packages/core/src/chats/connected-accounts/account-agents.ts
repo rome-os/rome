@@ -1,46 +1,34 @@
 // The agent of each of Rome's connected accounts, as the inbound ports and
-// the channel-message hook read it, by the connection's id.
+// the channel-message hook read it, by the connection's id. The kind of
+// connection decides it: nobody picks an account's agent.
 // Vocabulary: docs/domains/chats.md#connected-account. Invariants:
 // docs/architecture/channels.md#an-accounts-agent.
 
 import type { AgentCatalog } from "../../agent/index.js";
 import type { Account, ChatSettingsSnapshot } from "@rome-os/app-runtime";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
-import type { AccountLink } from "@rome/api-types/account-agents";
 import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
-import {
-  ConnectedAccountNotFound,
-  type ConnectedAccountsRepository,
-} from "../../db/repositories/connected-accounts.js";
 import { createLogger } from "../../logger.js";
-import type { AccountLinkOf } from "./account-links.js";
 import type { InboundListening } from "./connection-ports.js";
 import { isAccount, type RomeAccounts } from "./rome-accounts.js";
 
 const log = createLogger("account-agents");
 
 /** Where an account's agent is read: the kind of each connection Rome holds,
- *  which says whether its account takes an agent, and the connected account
- *  that holds the agent. */
+ *  and the agent that answers on an account of each kind. */
 export interface AccountAgents {
   /** The kind of connection `connectionId`, or null when Rome holds none. */
   kindOf: (connectionId: string) => string | null;
-  linkOf: AccountLinkOf;
-  accounts: Pick<ConnectedAccountsRepository, "agentOf">;
+  /** The agent that answers on an account of `kind`, or null when that kind
+   *  takes no agent. */
+  agentOfKind: (kind: string) => string | null;
 }
 
-/** Whether connection `connectionId`'s account takes an agent, and the agent
- *  stored on its connected account, null for none. A connection Rome does not
- *  hold takes none. */
-function storedAgent(
-  { kindOf, linkOf, accounts }: AccountAgents,
-  connectionId: string,
-): { takesAgent: boolean; agent: string | null } {
+/** The agent of connection `connectionId`'s account, or null when its kind
+ *  takes none or Rome holds no such connection. */
+function kindAgent({ kindOf, agentOfKind }: AccountAgents, connectionId: string): string | null {
   const kind = kindOf(connectionId);
-  return {
-    takesAgent: kind !== null && linkOf(kind) !== null,
-    agent: accounts.agentOf(connectionId),
-  };
+  return kind === null ? null : agentOfKind(kind);
 }
 
 /**
@@ -53,11 +41,9 @@ export function readAccountAgent(
   agents: Pick<AgentCatalog, "find">,
   connectionId: string,
 ): string | null | undefined {
-  const { takesAgent, agent } = storedAgent(sources, connectionId);
-  if (!takesAgent) return undefined;
-  return agent !== null && (isCoreMainAgentId(agent) || agents.find(agent) !== undefined)
-    ? agent
-    : null;
+  const agent = kindAgent(sources, connectionId);
+  if (agent === null) return undefined;
+  return isCoreMainAgentId(agent) || agents.find(agent) !== undefined ? agent : null;
 }
 
 /**
@@ -99,120 +85,43 @@ export function byAccount(
 }
 
 /**
- * Which accounts Rome listens to, by connection id. An account whose kind of
- * connection takes an agent is listened to only while its connected account
- * names an agent, loaded or not; an account of any other kind always is.
- *
- * Call `changed` after each write to an account's agent, naming every
- * connection the write touched, so its inbound port starts or stops listening.
+ * Which accounts Rome listens to, by connection id. Every account is, since
+ * the kind of connection decides each account's agent. The inbound ports
+ * still ask, until they stop reading it.
  */
 export class AccountListening implements InboundListening {
-  private readonly listeners = new Set<(connectionId: string) => void>();
-
-  constructor(private readonly sources: AccountAgents) {}
-
-  listens(connectionId: string): boolean {
-    const { takesAgent, agent } = storedAgent(this.sources, connectionId);
-    if (!takesAgent) return true;
-    return agent !== null;
+  listens(_connectionId: string): boolean {
+    return true;
   }
 
-  onChange(listener: (connectionId: string) => void): void {
-    this.listeners.add(listener);
-  }
-
-  /** Called after the link is saved, so a port that fails to follow it is
-   *  logged rather than failing the link or skipping the other ports. */
-  changed(connectionIds: Iterable<string>): void {
-    for (const connectionId of connectionIds) {
-      for (const listener of this.listeners) {
-        try {
-          listener(connectionId);
-        } catch (error) {
-          log.warn("an inbound port did not follow its account's agent", { connectionId, error });
-        }
-      }
-    }
-  }
+  onChange(_listener: (connectionId: string) => void): void {}
 }
 
 /**
- * The agent of connection `connectionId`'s account, read on each call, so a
- * switched agent is right on the next message. It answers undefined for an
- * account whose kind of connection takes no agent, the stored agent for a
- * linked one, and null for one with no agent or whose agent is not loaded.
- * Each silent state logs once per connection until the account answers again:
- * an account with no agent at info, since a newly added one starts that way,
- * and one whose agent is not loaded as a warning.
+ * The agent of connection `connectionId`'s account. It answers undefined for
+ * an account whose kind of connection takes no agent, the kind's agent for
+ * one that takes one, and null when that agent is not loaded, which logs a
+ * warning once per connection until it answers again.
  */
 export function accountAgentResolver(
   sources: AccountAgents,
   agents: Pick<AgentCatalog, "find">,
 ): (connectionId: string) => string | null | undefined {
-  const silent = new Map<string, string | null>();
+  const silent = new Set<string>();
   return (connectionId) => {
     const answering = readAccountAgent(sources, agents, connectionId);
     if (answering !== null) {
       silent.delete(connectionId);
       return answering;
     }
-    const { agent } = storedAgent(sources, connectionId);
-    if (silent.has(connectionId) && silent.get(connectionId) === agent) return null;
-    silent.set(connectionId, agent);
-    if (agent === null) {
-      log.info("account has no agent; Rome does not listen to it until one is linked", {
-        connectionId,
-      });
-    } else {
-      log.warn("account's agent is not loaded; the account stays silent", {
-        connectionId,
-        agent,
-      });
-    }
+    if (silent.has(connectionId)) return null;
+    silent.add(connectionId);
+    log.warn("account's agent is not loaded; the account stays silent", {
+      connectionId,
+      agent: kindAgent(sources, connectionId),
+    });
     return null;
   };
-}
-
-/** A link asked of a connected account whose kind of connection takes no
- *  agent. */
-export class AccountNotLinkable extends Error {
-  constructor(
-    readonly connectionId: string,
-    readonly connectionKind: string,
-  ) {
-    super(`A ${connectionKind} account cannot be linked to an agent`);
-    this.name = "AccountNotLinkable";
-  }
-}
-
-/** A connected account's agent as it stands after a link. */
-export interface AccountLinked {
-  connectionId: string;
-  agent: string | null;
-  link: AccountLink | null;
-}
-
-/**
- * Link `agent` to the connected account of connection `connectionId`, or
- * unlink it with null, and return its agent as it now stands. Only that
- * account changes. Only an account whose kind of connection takes an agent
- * takes a link, and unlinking is always open. `kindOf` names the kind of a
- * connection Rome holds, or null for none. Throws
- * {@link ConnectedAccountNotFound} when Rome holds no such connection, and
- * {@link AccountNotLinkable} for a kind that takes no agent.
- */
-export function linkAccountAgent(
-  kindOf: (connectionId: string) => string | null,
-  linkOf: AccountLinkOf,
-  accounts: Pick<ConnectedAccountsRepository, "link">,
-  connectionId: string,
-  agent: string | null,
-): AccountLinked {
-  const kind = kindOf(connectionId);
-  if (kind === null) throw new ConnectedAccountNotFound(connectionId);
-  const link = linkOf(kind);
-  if (agent !== null && link === null) throw new AccountNotLinkable(connectionId, kind);
-  return { connectionId, agent: accounts.link(connectionId, agent), link };
 }
 
 /**

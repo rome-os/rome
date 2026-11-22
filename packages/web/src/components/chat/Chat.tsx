@@ -17,7 +17,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -28,24 +27,18 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
-  ChevronLeft,
   Cpu,
   FileOutput,
   FolderOpen,
-  ListChecks,
-  MoreHorizontal,
   PanelRightOpen,
+  Pencil,
+  Pin,
+  PinOff,
   Share2,
   Trash2,
 } from "lucide-react";
 import { z } from "zod";
 import type { MessageWritingEvent } from "@rome/api-types/concierge";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -63,6 +56,7 @@ import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { TaskChatContext } from "@/components/chat/task-chat";
+import { TaskLinksScope } from "@/components/chat/task-link/task-links";
 import {
   prettyAgentName,
   mainAgentDisplayName as resolveMainAgentDisplayName,
@@ -85,7 +79,6 @@ import {
 } from "@/components/chat/ShareMessageButton";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells } from "@/pages/free/use-free-cells";
-import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { useToolTrace } from "@/pages/free/tool-trace";
 import type {
   TraceSegment,
@@ -97,21 +90,18 @@ import { useStableMap } from "@/hooks/use-stable-map";
 import { HOLD_STICK_EVENT, useStickToBottom } from "@/hooks/use-stick-to-bottom";
 import { ChatPendingCardJump, ConciergeCardJump } from "@/components/chat/ChatPendingCardJump";
 import {
-  CHAT_PAGE_TURNS,
-  CONCIERGE_PAGE_TURNS,
-  CONCIERGE_ROOT_PAGE_TURNS,
+  CHAT_PAGE_SIZE,
+  CONCIERGE_PAGE_SIZE,
   useOlderMessages,
 } from "@/components/chat/use-older-messages";
 import { ChatTimelineRail } from "@/components/chat/ChatTimelineRail";
 import {
   ReplyDraftProvider,
   replyFormFields,
-  type ReplyThread,
   useReplyDraftState,
 } from "@/components/chat/reply/reply-draft";
 import { findMessageAnchor } from "@/components/chat/reply/reply-source";
 import { LANDING_MS, playLanding } from "@/components/chat/reply/thread-anchor";
-import { useThreadFocus } from "@/components/chat/reply/use-thread-focus";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useChatTabStatus } from "@/hooks/use-tab-status";
@@ -140,15 +130,6 @@ import {
 import { ConciergeUnreadPill } from "@/components/chat/ConciergeUnreadPill";
 import { summarizeUnread, useUnreadAtOpen } from "@/components/chat/concierge-unread";
 import {
-  ChatThreadsProvider,
-  missingThreadRoots,
-  threadTail,
-  unreadIn,
-  useChatThreadsValue,
-} from "@/components/chat/reply/chat-threads";
-import { ThreadPills, waitingThreads } from "@/components/chat/reply/ThreadPills";
-import { useVisibleStacks } from "@/components/chat/reply/use-visible-stacks";
-import {
   ConciergeEmptyState,
   ConciergeTopicEmptyState,
 } from "@/components/chat/ConciergeEmptyState";
@@ -156,12 +137,18 @@ import { onConciergeJump } from "@/components/concierge/concierge-jump";
 import {
   CONCIERGE_LEADING_SLOT,
   CONCIERGE_TITLEBAR_SLOT,
+  BackToConciergeChat,
   ConciergeHeaderStatus,
   FLOATING_SURFACE,
+} from "@/components/concierge/ConciergeHeaderStatus";
+import {
+  ChatHeaderActions,
   type HeaderMenu,
   type HeaderMenuItem,
-} from "@/components/concierge/ConciergeHeaderStatus";
+} from "@/components/concierge/ChatHeaderActions";
+import { RomeInputDialog } from "@/components/rome-input-dialog";
 import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
+import { useChatTaskList } from "@/components/concierge/TaskList";
 import { useTaskList } from "@/components/concierge/TaskListPane";
 import { useOutputsPane } from "./outputs/OutputsPane";
 import {
@@ -171,8 +158,9 @@ import {
   type OutputLinks,
   outputOfLink,
 } from "./outputs/chat-outputs";
+import { useTopicChatArchive } from "@/components/concierge/TopicChatArchiveDialog";
 import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
-import { useToolTasks } from "@/pages/free/tool-tasks";
+import { useTaskChatInPane, useToolTasks } from "@/pages/free/tool-tasks";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
@@ -186,6 +174,7 @@ import type {
   DoneEventData,
 } from "@/lib/chat-types";
 import { buildOptimisticUserText } from "@/lib/chat-helpers";
+import { isUpgradeUnderWay } from "@/lib/upgrade-under-way";
 import {
   parseSSEEvents,
   STREAM_STALL_TIMEOUT_MS,
@@ -194,28 +183,29 @@ import {
 } from "@/lib/chat-sse";
 import {
   mergeChatMessage,
-  mergeFetchedChatMessages,
   mergeLatestMessagePage,
-  orderChatMessages,
   startsNewHistory,
-} from "@/lib/chat-message-ordering";
+} from "@/lib/chat-message-merge";
 import {
   ChatApiError,
   createSession,
   deleteSession,
   interruptTurn,
+  isUnreachableStatus,
   listChatAgents,
   listSessionMessagePage,
   listSessionTurns,
-  markMessagesRead as apiMarkMessagesRead,
   markSessionRead as apiMarkSessionRead,
   openTurnStream,
+  plainErrorText,
   postSessionTurn,
   postSessionTurnJson,
   type PostTurnResult,
+  pinSession,
+  renameSession,
   updateSessionModel,
 } from "@/lib/chat-api";
-import { useArchiveSession } from "@/lib/session-events";
+import { emitSessionsChanged, useArchiveSession } from "@/lib/session-events";
 import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import {
   snapshotWorkspaceForSend,
@@ -225,16 +215,13 @@ import { applyAgentPlacement } from "@/pages/free/use-free-cells";
 import { randomUUID } from "@/lib/random-uuid";
 import { DEFAULT_LARGE_MODEL_SELECTION, DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 
-// What a click inside the scroller does not count as blank for: the composer
-// floor, the header, and anything clickable or editable (a message is judged apart).
-const THREAD_FOCUS_KEEP =
-  "[data-chat-floor],[data-concierge-header],[data-thread-back],button,a,input,textarea,select,summary,label,[role=button],[role=link],[contenteditable=true]";
-
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
 const TIMELINE_JUMP_OFFSET_PX = 24;
 /** How many older pages a jump to a Concierge message loads before it gives up. */
 const MAX_JUMP_PAGES = 20;
+/** How many older pages a click on a quote loads before it gives up. */
+const QUOTE_JUMP_PAGES = 10;
 
 // Chat Component
 
@@ -296,9 +283,6 @@ const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
   content: z.string(),
   createdAt: z.string(),
   traceSummary: traceSummarySchema.nullable().optional(),
-  chatThreadId: z.string().nullable().optional(),
-  chatThreadTitle: z.string().nullable().optional(),
-  read: z.boolean().optional(),
 });
 
 const sessionNameSchema = z.object({
@@ -516,7 +500,7 @@ export function Chat({
   conciergeName,
 }: ChatProps) {
   const concierge = variant === "concierge";
-  const pageTurns = concierge ? CONCIERGE_PAGE_TURNS : CHAT_PAGE_TURNS;
+  const pageSize = concierge ? CONCIERGE_PAGE_SIZE : CHAT_PAGE_SIZE;
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
   const presentationMode = usePresentationMode();
@@ -583,6 +567,8 @@ export function Chat({
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  // The header's Rename asks for the new name in a dialog.
+  const [renameOpen, setRenameOpen] = useState(false);
   // Reactions live events changed since the messages loaded. A
   // reconnect reloads the messages, which then say how each stands.
   const [liveReactions, setLiveReactions] = useState<LiveReactions>(new Map());
@@ -630,9 +616,12 @@ export function Chat({
     isForkChat,
     pinnedAgentMention: identityAgentMention,
     archivedAt,
+    pinnedAt,
     forkable,
     isTaskChat,
+    taskOf,
     projectPath,
+    isConciergeSession,
   } = useSessionIdentity(mainSessionId);
   // The main chat is never archived or deleted, so its menu offers neither.
   const isMainChat = concierge && mainSessionId === conciergeMainChatId;
@@ -731,48 +720,21 @@ export function Chat({
   const {
     unread: unreadAtOpen,
     noteOpened,
-    noteOlder,
-    noteLive,
     pendingMark,
   } = useUnreadAtOpen({ chatId: sessionId, loadReadMark });
-  const onOlderPage = useCallback(
-    (id: string, page: ChatMessage[]) => {
-      if (id === mainSessionIdRef.current) noteOlder(page);
-    },
-    [noteOlder],
-  );
 
-  // The chat thread in focus, which is view state: nothing keeps it across a
-  // reload. The back control and Esc end it.
-  const threadFocus = useThreadFocus({
-    scroller: scrollerEl,
-    content: contentEl,
-    resetKey: mainSessionId,
-  });
-  const focusRoot = threadFocus.focus?.root;
-  const rootLoaded = useMemo(
-    () =>
-      focusRoot !== undefined &&
-      (messages.get(mainSessionId ?? "") ?? []).some((message) => message.id === focusRoot),
-    [focusRoot, messages, mainSessionId],
-  );
-  // The main session loads its newest turns first and pages older ones in as
-  // the transcript scrolls toward the top. With a thread in focus, the pages
-  // would add no height, so one loads only for each push against the top.
+  // The main session loads its newest messages first and pages older ones in as
+  // the transcript scrolls toward the top.
   const {
     setCursor: setOlderCursor,
     hasOlder,
     sentinelRef: olderSentinelRef,
     loadOlder,
   } = useOlderMessages(mainSessionId || null, {
-    pageTurns,
+    pageSize,
     scroller: scrollerEl,
     pinned: isAtBottom,
     setMessages,
-    onOlderPage,
-    onDemand: threadFocus.shown !== null,
-    // The thread starts at its root, so with the root loaded nothing older can be in it.
-    satisfied: rootLoaded,
   });
 
   // The view derivation lives in the pure `buildChatView`; here we just memoize
@@ -794,29 +756,10 @@ export function Chat({
     [messages, mainSessionId, mainIdentity],
   );
   const { displayMessages, identityBySession, interactionResults } = view;
-  // Only a Concierge chat stacks threads. A share picks whole turns and shows every
-  // message itself, so it stacks nothing.
-  const chatThreads = useChatThreadsValue(
-    displayMessages,
-    threadFocus.shown,
-    concierge && !shareMode,
-  );
   const olderRemains = mainSessionId ? hasOlder(mainSessionId) : false;
-  // The unread divider goes before a message the main line shows: the replies of
-  // a thread are in its stack. A thread in focus hides the main line, so it
-  // has no divider and no pill: the thread's own messages are read one by one.
   const unread = useMemo(
-    () =>
-      unreadAtOpen && !threadFocus.shown
-        ? summarizeUnread(
-            chatThreads.stacked.size > 0
-              ? displayMessages.filter((message) => !chatThreads.stacked.has(message.id))
-              : displayMessages,
-            unreadAtOpen,
-            olderRemains,
-          )
-        : null,
-    [displayMessages, chatThreads.stacked, unreadAtOpen, olderRemains, threadFocus.shown],
+    () => (unreadAtOpen ? summarizeUnread(displayMessages, unreadAtOpen, olderRemains) : null),
+    [displayMessages, unreadAtOpen, olderRemains],
   );
   // The main session's id, empty while a draft has none. Keys the running turn
   // and live stream (send, stop, reattach, live trace, onSessionMessage).
@@ -885,51 +828,24 @@ export function Chat({
     });
   }, []);
 
-  // Hands `then` the element `find` gives once the thread in focus, if any,
-  // is not hiding it: a hidden element brings the whole chat back first.
-  const closeFocusRef = useRef<(instant?: boolean) => Promise<void>>(async () => {});
-  // The thread in focus, every thread's root by message and the opener, read by
-  // the jump to a message, which is built before them.
-  const focusRef = useRef<{ root: string } | null>(null);
-  const rootsRef = useRef<ReadonlyMap<string, string>>(new Map());
-  const displayedRef = useRef<readonly ChatMessage[]>([]);
-  const openThreadRef = useRef<(thread: ReplyThread) => Promise<void>>(async () => {});
-  const whenShown = useCallback(
-    (find: () => HTMLElement | null, then: (el: HTMLElement) => void) => {
-      const el = find();
-      if (!el) return;
-      if (!el.closest("[data-thread-out]")) return then(el);
-      void closeFocusRef.current(true).then(() => {
-        const shown = find();
-        if (shown) then(shown);
-      });
-    },
-    [],
-  );
-
   // Scrolls to a message and tints it. An anchor names one message id, or
   // every id of an agent turn separated by spaces.
   const jumpToMessage = useCallback(
     (messageId: string) => {
       const scroller = scrollerEl;
       if (!scroller) return;
-      whenShown(
-        () => findMessageAnchor(scroller, messageId),
-        (anchor) => {
-          scrollToAnchor(scroller, anchor);
-
-          // Every user bubble is the same tint, so without this you cannot tell
-          // whether the jump landed on the question you picked.
-          landOn(scroller, anchor);
-        },
-      );
+      const anchor = findMessageAnchor(scroller, messageId);
+      if (!anchor) return;
+      scrollToAnchor(scroller, anchor);
+      // Every user bubble is the same tint, so without this you cannot tell
+      // whether the jump landed on the question you picked.
+      landOn(scroller, anchor);
     },
-    [scrollerEl, landOn, scrollToAnchor, whenShown],
+    [scrollerEl, landOn, scrollToAnchor],
   );
 
-  // Respond in the Tasks panel points to a Concierge message that may sit
-  // pages above the loaded ones, so the jump reads history down through it in
-  // one page; the unread divider pages older history in until it renders.
+  // A jump to a message, a quote's original or the unread divider may point
+  // above the loaded pages, so each reads history in until it renders.
   const olderRef = useRef({ hasOlder, loadOlder });
   olderRef.current = { hasOlder, loadOlder };
   const shownCountRef = useRef(0);
@@ -938,27 +854,30 @@ export function Chat({
   }, [displayMessages]);
   const findingMessageRef = useRef(false);
   // Pages older history in until `find` returns an element, then hands it to
-  // `reveal`, or says `missing` when the search runs out. With `through`, the
-  // message it looks for, one read brings the history down to it instead of
-  // a page at a time. Only one search runs at a time. Resolves whether it
-  // revealed it.
+  // `reveal`. When the search runs out, or reaches `maxPages`, it says
+  // `missing` in a toast, or ends without a word when that is null. With
+  // `through`, the message it looks for, one read brings the history down to
+  // it instead of a page at a time. Only one search runs at a time. Resolves
+  // whether it revealed it.
   const revealWhenLoaded = useCallback(
     async (
       find: () => HTMLElement | null,
       reveal: () => void | Promise<void>,
-      missing: string,
-      through?: string,
+      missing: string | null,
+      options: { through?: string; maxPages?: number } = {},
     ): Promise<boolean> => {
+      const { through, maxPages = MAX_JUMP_PAGES } = options;
       if (!mainSessionId || findingMessageRef.current) return false;
       if (find()) {
         await reveal();
         return true;
       }
       findingMessageRef.current = true;
-      const loading = toast.loading(t("concierge.tasks.findingMessage"));
+      const loading =
+        missing === null ? undefined : toast.loading(t("concierge.tasks.findingMessage"));
       try {
         let stalled = 0;
-        for (let page = 0; page < (through ? 1 : MAX_JUMP_PAGES); page++) {
+        for (let page = 0; page < (through ? 1 : maxPages); page++) {
           if (!olderRef.current.hasOlder(mainSessionId)) break;
           const before = shownCountRef.current;
           await olderRef.current.loadOlder(mainSessionId, through ? { through } : undefined);
@@ -975,58 +894,45 @@ export function Chat({
           stalled = shownCountRef.current === before ? stalled + 1 : 0;
           if (stalled >= 2) break;
         }
-        toast.error(missing);
+        if (missing !== null) toast.error(missing);
         return false;
       } finally {
-        toast.dismiss(loading);
+        if (loading !== undefined) toast.dismiss(loading);
         findingMessageRef.current = false;
       }
     },
     [mainSessionId, t],
   );
+  // Respond in the Tasks panel points to a Concierge message that may sit
+  // pages above the loaded ones, so the jump reads history down through it in
+  // one page.
   const showSourceMessage = useCallback(
-    async (messageId: string, focusThread = false) => {
+    (messageId: string) => {
       const scroller = scrollerEl;
-      if (!scroller) return false;
-      // A reply of a thread whose root is loaded is not on the main line: its
-      // root stands for it until the thread is in focus.
-      const hiddenIn = () => {
-        const root = rootsRef.current.get(messageId);
-        return root !== undefined &&
-          root !== messageId &&
-          rootsRef.current.get(root) === root &&
-          focusRef.current?.root !== root
-          ? root
-          : null;
-      };
-      const landed = await revealWhenLoaded(
-        () => {
-          const root = hiddenIn();
-          return (
-            findMessageAnchor(scroller, messageId) ??
-            (root ? findMessageAnchor(scroller, root) : null)
-          );
-        },
-        async () => {
-          const root = hiddenIn();
-          if (root) {
-            if (focusRef.current) await closeFocusRef.current(true);
-            await openThreadRef.current({ thread: root, title: "" });
-          }
-          jumpToMessage(messageId);
-        },
+      if (!scroller) return Promise.resolve(false);
+      return revealWhenLoaded(
+        () => findMessageAnchor(scroller, messageId),
+        () => jumpToMessage(messageId),
         t("concierge.tasks.sourceMissing"),
-        messageId,
+        { through: messageId },
       );
-      if (!landed || !focusThread) return landed;
-      // The chat focuses the message's thread: one on another thread closes first.
-      const root = rootsRef.current.get(messageId);
-      if (!root) return landed;
-      if (focusRef.current && focusRef.current.root !== root) await closeFocusRef.current(true);
-      if (!focusRef.current) openThreadRef.current({ thread: messageId, title: "" });
-      return landed;
     },
     [scrollerEl, revealWhenLoaded, jumpToMessage, t],
+  );
+  // A click on a quote goes to the original: older pages load until it is
+  // there, up to QUOTE_JUMP_PAGES, and a search that finds nothing ends quietly.
+  const showQuotedMessage = useCallback(
+    (messageId: string) => {
+      const scroller = scrollerEl;
+      if (!scroller) return;
+      void revealWhenLoaded(
+        () => findMessageAnchor(scroller, messageId),
+        () => jumpToMessage(messageId),
+        null,
+        { maxPages: QUOTE_JUMP_PAGES },
+      );
+    },
+    [scrollerEl, revealWhenLoaded, jumpToMessage],
   );
   // The unread divider's pill: scrolls to the divider, paging in older
   // messages first when it is still on one.
@@ -1036,110 +942,31 @@ export function Chat({
     const find = () => scroller.querySelector<HTMLElement>("[data-concierge-unread-divider]");
     void revealWhenLoaded(
       find,
-      () => whenShown(find, (divider) => scrollToAnchor(scroller, divider)),
+      () => {
+        const divider = find();
+        if (divider) scrollToAnchor(scroller, divider);
+      },
       t("concierge.newMessagesMissing"),
     );
-  }, [scrollerEl, revealWhenLoaded, scrollToAnchor, whenShown, t]);
+  }, [scrollerEl, revealWhenLoaded, scrollToAnchor, t]);
   useEffect(() => {
     if (!concierge) return;
     return onConciergeJump(showSourceMessage);
   }, [concierge, showSourceMessage]);
 
-  const { focus, open: openFocus, close: closeFocus } = threadFocus;
-  closeFocusRef.current = closeFocus;
-  focusRef.current = focus;
-  rootsRef.current = chatThreads.roots;
-  displayedRef.current = displayMessages;
-  // The owner has seen these messages: they read as seen at once, and the
-  // server is told. The server failing to take it changes nothing here, as with
-  // the chat's own read mark: the next open reads them again.
-  const markRead = useCallback((ids: readonly string[]) => {
-    const session = mainSessionIdRef.current;
-    if (!session || ids.length === 0) return;
-    const seen = new Set(ids);
-    const unseen = (message: ChatMessage) => seen.has(message.id) && message.read === false;
-    setMessages((prev) => {
-      const list = prev.get(session);
-      if (!list?.some(unseen)) return prev;
-      return new Map(prev).set(
-        session,
-        list.map((message) => (unseen(message) ? { ...message, read: true } : message)),
-      );
-    });
-    void apiMarkMessagesRead(session, ids).catch(() => {});
-  }, []);
-  // Opening a thread reads it, and so does a message that arrives in it while
-  // it is open.
-  useEffect(() => {
-    if (focus) markRead(unreadIn(displayMessages, chatThreads.roots, focus.root));
-  }, [focus, displayMessages, chatThreads.roots, markRead]);
-  // A thread whose stack the reader sees has no pill.
-  const waitingRoots = useMemo(() => waitingThreads(chatThreads), [chatThreads]);
-  const visibleStacks = useVisibleStacks(scrollerEl, contentEl, waitingRoots);
-  // A pill of the bottom row takes the reader to its thread's stack and
-  // tints it, without opening the thread, and reads the thread.
-  const showStack = useCallback(
-    (root: string) => {
-      const scroller = scrollerEl;
-      if (!scroller) return;
-      const stack = [...scroller.querySelectorAll<HTMLElement>("[data-thread-stack]")].find(
-        (candidate) => candidate.dataset.threadStack === root,
-      );
-      if (stack) {
-        scrollToAnchor(scroller, findMessageAnchor(scroller, root) ?? stack);
-        landOn(scroller, stack);
-      }
-      markRead(unreadIn(displayedRef.current, rootsRef.current, root));
-    },
-    [scrollerEl, scrollToAnchor, landOn, markRead],
-  );
-  // With a thread in focus, a quote can only go to what is shown.
-  const displayedMessageIds = useMemo(
-    () =>
-      new Set(
-        displayMessages
-          .filter((message) => !focus || chatThreads.roots.get(message.id) === focus.root)
-          .map((message) => message.id),
-      ),
-    [displayMessages, focus, chatThreads.roots],
-  );
-  // A touch device keeps its keyboard down when a thread comes into focus.
-  const coarsePointer = useCoarsePointer();
-  const openThread = useCallback(
-    async (next: ReplyThread) => {
-      // A share picks whole turns, so no thread comes into focus meanwhile.
-      if (shareMode || focus) return;
-      // A message alone in its thread has no thread to focus.
-      const root = chatThreads.roots.get(next.thread);
-      if (!root) return;
-      const title = chatThreads.titles.get(root) ?? next.title;
-      await openFocus({ ...next, title, root });
-      if (!coarsePointer) composerRef.current?.focus();
-    },
-    [shareMode, focus, closeFocus, openFocus, chatThreads, coarsePointer],
-  );
-  openThreadRef.current = openThread;
   const replyDraft = useReplyDraftState({
     chatId: mainSessionId ?? undefined,
     sessionId: mainSessionId ?? null,
-    messageIds: displayedMessageIds,
-    jump: jumpToMessage,
+    jump: showQuotedMessage,
     focusComposer: () => composerRef.current?.focus(),
-    // A Concierge chat keeps chat threads: a quote in a reply focuses the chat
-    // on its thread, and Reply opens the reply bar alone.
-    onOpenThread: concierge ? openThread : undefined,
-    thread: focus,
   });
 
   // Share chat picks every turn in a common chat. A Concierge chat holds its
-  // owner's private history, so there it starts with none picked. A share is
-  // of whole turns, which can hold messages of other threads, so a thread in
-  // focus closes first and the picker shows every message a turn holds.
+  // owner's private history, so there it starts with none picked.
   const enterShareMode = useCallback(() => {
-    void closeFocus(true);
     setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
     setShareMode(true);
-  }, [concierge, mainTurnIds, closeFocus]);
+  }, [concierge, mainTurnIds]);
 
   // Share on a message: the same share mode, with only that message's turn
   // selected. A message outside the chat's own turns selects nothing. Read
@@ -1152,11 +979,10 @@ export function Chat({
         ? (messagesRef.current.get(mainSessionId)?.find((m) => m.id === messageId)?.turnId ??
           (turn?.sessionId === mainSessionId ? turn.turnId : undefined))
         : undefined;
-      void closeFocus(true);
       setSelectedShareTurns(new Set(turnId ? [turnId] : []));
       setShareMode(true);
     },
-    [mainSessionId, closeFocus],
+    [mainSessionId],
   );
 
   const exitShareMode = useCallback(() => {
@@ -1327,6 +1153,9 @@ export function Chat({
     return () => document.removeEventListener("visibilitychange", flush);
   }, [markSessionRead]);
 
+  // A task chat open in the side pane's Chat tab, beside its Concierge chat.
+  const inPane = useTaskChatInPane();
+
   // Delete the current chat from the navbar's "⋯" menu, then refresh the
   // sidebar list and drop back to a fresh chat. `stopWork` ends a topic
   // chat's follows and open tasks instead of moving them to the main chat.
@@ -1341,36 +1170,75 @@ export function Chat({
         // best-effort — the list refresh below reconciles either way
       }
       notifySessionsChanged();
+      // In the side pane only its tab goes: the Concierge chat beside it stays.
+      if (inPane) {
+        inPane.onClose();
+        return;
+      }
       // `forkable` holds for a common or fork chat, the ordinary chats. Leaving
       // one for the main chat's page would switch the chat list to Concierge.
       navigate(forkable ? "/chat" : MAIN_CHAT_PATH);
     },
-    [forkable, mainSessionId, notifySessionsChanged, navigate],
+    [forkable, mainSessionId, notifySessionsChanged, navigate, inPane],
   );
 
   // Archive (read-only soft-hide) or restore the current chat. Archiving does
   // not navigate away — the transcript stays open, read-only. The override flips
   // the composer immediately; the sidebar reconciles via the changed event.
-  const handleArchive = useCallback(async () => {
-    if (!mainSessionId) return;
-    setArchivedOverride(true);
-    try {
-      // Archive mutation PATCHes and broadcasts the sessions-changed event.
-      await setArchived(mainSessionId, true);
-    } catch {
-      setArchivedOverride(false);
-    }
-  }, [mainSessionId, setArchived]);
-
-  const handleUnarchive = useCallback(async () => {
-    if (!mainSessionId) return;
-    setArchivedOverride(false);
-    try {
-      await setArchived(mainSessionId, false);
-    } catch {
+  // `stopWork` ends a topic chat's follows and open tasks instead of moving
+  // them to the main chat; `moveFollowsBack` moves back the follows its
+  // archive moved there.
+  const handleArchive = useCallback(
+    async (stopWork = false) => {
+      if (!mainSessionId) return;
       setArchivedOverride(true);
+      try {
+        // Archive mutation PATCHes and broadcasts the sessions-changed event.
+        await setArchived(mainSessionId, true, stopWork ? { followsAndTasks: "stop" } : {});
+      } catch {
+        setArchivedOverride(false);
+      }
+    },
+    [mainSessionId, setArchived],
+  );
+
+  const handleUnarchive = useCallback(
+    async (moveFollowsBack = false) => {
+      if (!mainSessionId) return;
+      setArchivedOverride(false);
+      try {
+        await setArchived(mainSessionId, false, moveFollowsBack ? { follows: "moveBack" } : {});
+      } catch {
+        setArchivedOverride(true);
+      }
+    },
+    [mainSessionId, setArchived],
+  );
+
+  // An archived topic chat is in no active list, so it opens as an ordinary
+  // chat: the session itself says it is a topic chat.
+  const isTopicChat =
+    !isMainChat && mainSessionId !== conciergeMainChatId && (concierge || isConciergeSession);
+  // Pins or unpins the open topic chat; the chat list and this header read it again.
+  const togglePin = useCallback(async () => {
+    if (!mainSessionId) return;
+    try {
+      await pinSession(mainSessionId, !pinnedAt);
+    } catch {
+      toast.error(t("recentChats.pinFailed", { ns: "common" }));
     }
-  }, [mainSessionId, setArchived]);
+    emitSessionsChanged();
+  }, [mainSessionId, pinnedAt, t]);
+  // A topic chat asks, as the sidebar does, what becomes of its follows and
+  // open tasks when it is archived, and of the follows that moved when it is
+  // unarchived.
+  const topicArchive = useTopicChatArchive({
+    chatId: mainSessionId ?? null,
+    name: sessionName?.trim() || t("recentChats.newChat", { ns: "common" }),
+    topic: isTopicChat,
+    onArchive: (stopWork) => void handleArchive(stopWork),
+    onUnarchive: (moveBack) => void handleUnarchive(moveBack),
+  });
 
   useEffect(() => {
     onSessionMessageRef.current?.({ sessionId: activeSessionId, turnId: activeStreamTurnId });
@@ -1390,7 +1258,7 @@ export function Chat({
         ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
         : undefined;
       try {
-        const fetchPage = () => listSessionMessagePage(id, { limit: pageTurns });
+        const fetchPage = () => listSessionMessagePage(id, { limit: pageSize });
         let page = await fetchPage();
         if (page === null && (await recoverMissingSessionRef.current?.(id)))
           page = await fetchPage();
@@ -1406,34 +1274,17 @@ export function Chat({
           messages: newestMessages,
           hasOlder: page.nextCursor !== null,
         });
-        let olderMessages: ChatMessage[] = [];
-        // A topic chat's thread metadata can arrive before the Concierge list sets its variant.
-        if (!shareMode && !loadedSessionsRef.current.has(id) && page.nextCursor) {
-          const missing = missingThreadRoots(newestMessages);
-          if (missing.length > 0) {
-            try {
-              const older = await listSessionMessagePage(id, {
-                limit: CONCIERGE_ROOT_PAGE_TURNS,
-                before: page.nextCursor,
-              });
-              if (older) {
-                olderMessages = older.messages;
-                page = {
-                  ...page,
-                  messages: mergeFetchedChatMessages(olderMessages, newestMessages),
-                  nextCursor: older.nextCursor,
-                };
-              }
-            } catch {
-              // Root history is optional: a failed read must not block the newest page.
-            }
-          }
-        }
-        const fetchedMessages = orderChatMessages(page.messages);
+        const fetchedMessages = page.messages;
         if (fetchedMessages.some((message) => message.traceArchived))
           traceArchivedSessionsRef.current.add(id);
         else traceArchivedSessionsRef.current.delete(id);
         const dropMessageIds = localBeforeFetch;
+        // A row sent while the page was on the way stays when the history starts over.
+        const keepMessageIds = new Set(
+          [...(localOptimisticMessageIdsRef.current.get(id) ?? [])].filter(
+            (messageId) => !localBeforeFetch?.has(messageId),
+          ),
+        );
         const commitMessages = () =>
           setMessages((prev) => {
             const next = new Map(prev);
@@ -1442,6 +1293,7 @@ export function Chat({
               mergeLatestMessagePage(next.get(id) ?? [], fetchedMessages, {
                 restart,
                 dropMessageIds,
+                keepMessageIds,
               }),
             );
             return next;
@@ -1469,7 +1321,6 @@ export function Chat({
         if (!loadedSessionsRef.current.has(id) && isReadVisibleSession(id)) {
           noteOpened(newestMessages);
         }
-        if (olderMessages.length > 0) onOlderPage(id, olderMessages);
         loadedSessionsRef.current.add(id);
         if (isReadVisibleSession(id)) {
           void markSessionRead(id);
@@ -1479,15 +1330,7 @@ export function Chat({
         // refresh) can retry on the next trigger.
       }
     },
-    [
-      shareMode,
-      isReadVisibleSession,
-      markSessionRead,
-      noteOpened,
-      onOlderPage,
-      pageTurns,
-      setOlderCursor,
-    ],
+    [shareMode, isReadVisibleSession, markSessionRead, noteOpened, pageSize, setOlderCursor],
   );
 
   // A new message reactivates every turn's steps. Fetch server truth once,
@@ -1508,10 +1351,17 @@ export function Chat({
 
   // Subscribe to the main session's events through useLiveEvents.
   const sessionEventIds = useMemo(() => (mainSessionId ? [mainSessionId] : []), [mainSessionId]);
+  // Turns a provider card explains: their end shows no error banner.
+  const cardedTurnsRef = useRef(new Set<string>());
   const handleMessageInsert = useCallback(
     (sid: string, message: ChatMessage) => {
       if (message.sessionId !== sid) return;
-      noteLive(message.id);
+      // A provider failure card says why the turn stopped and what to do, so
+      // the composer's error banner would only repeat it.
+      if (message.content.includes('"provider_failure"')) {
+        if (message.turnId) cardedTurnsRef.current.add(message.turnId);
+        if (sid === mainSessionIdRef.current) setStreamError(null);
+      }
       setMessages((prev) => {
         const next = new Map(prev);
         const existing = next.get(sid) ?? [];
@@ -1522,7 +1372,7 @@ export function Chat({
       void markSessionRead(sid);
       onSessionMessageRef.current?.({ sessionId: sid, turnId: message.turnId ?? null });
     },
-    [markSessionRead, noteLive, refreshArchivedSession],
+    [markSessionRead, refreshArchivedSession],
   );
   const handleSessionName = useCallback(
     (sid: string, event: z.infer<typeof sessionNameSchema>) => {
@@ -1628,6 +1478,7 @@ export function Chat({
                 !payload.success &&
                 payload.error &&
                 !isModelResolutionErrorCode(payload.code) &&
+                !cardedTurnsRef.current.has(turnId) &&
                 sessionId === mainSessionIdRef.current
               ) {
                 setStreamError({
@@ -1650,6 +1501,7 @@ export function Chat({
               if (
                 payload.error &&
                 !isModelResolutionErrorCode(payload.code) &&
+                !cardedTurnsRef.current.has(turnId) &&
                 sessionId === mainSessionIdRef.current
               ) {
                 setStreamError({
@@ -1835,7 +1687,14 @@ export function Chat({
           } else if (sessionId === mainSessionIdRef.current) {
             // The composer banner belongs to the chat's own turn; a background
             // turn retries quietly.
-            shownError = t("stream.errors.reconnectStatus", { status: res.status });
+            // Rome answering nothing behind its proxy is a dropped
+            // connection, and this loop already reconnects. It is named an
+            // upgrade only when this page knows one is under way.
+            shownError = isUnreachableStatus(res.status)
+              ? isUpgradeUnderWay()
+                ? t("stream.errors.updatingReconnecting")
+                : t("stream.errors.reconnecting")
+              : t("stream.errors.reconnectStatus", { status: res.status });
             setStreamError(shownError);
           }
         } catch {
@@ -1975,8 +1834,6 @@ export function Chat({
       // settles. The server keeps it as the message id, so the accepted row
       // replaces this one in place instead of mounting a second bubble.
       immediateInputId?: string,
-      // The thread the message is sent into, so its row is in it at once.
-      chatThreadId?: string,
     ): Promise<void> => {
       setStreamError(null);
       // Sending re-engages stickiness so the user follows their own message and
@@ -1993,8 +1850,10 @@ export function Chat({
         localOptimisticMessageIdsRef.current.set(sendingSessionId, localIds);
         setMessages((prev) => {
           const next = new Map(prev);
-          const existing = (next.get(sendingSessionId) ?? []).filter((m) => m.id !== replacesId);
-          next.set(sendingSessionId, mergeChatMessage(existing, message));
+          next.set(
+            sendingSessionId,
+            mergeChatMessage(next.get(sendingSessionId) ?? [], message, replacesId),
+          );
           return next;
         });
       };
@@ -2022,7 +1881,6 @@ export function Chat({
           content: optimisticUserContent,
           createdAt: sentAt,
           sender: viewerSenderRef.current,
-          ...(chatThreadId ? { chatThreadId } : {}),
         });
       }
 
@@ -2052,7 +1910,9 @@ export function Chat({
           result.message ||
           (result.status === 0
             ? t("stream.errors.sendInvalidResponse")
-            : t("stream.errors.sendStatus", { status: result.status }));
+            : isUnreachableStatus(result.status)
+              ? t(isUpgradeUnderWay() ? "stream.errors.updating" : "stream.errors.unreachable")
+              : t("stream.errors.sendStatus", { status: result.status }));
         setStreamError({
           message,
           ...(result.code ? { code: result.code } : {}),
@@ -2078,7 +1938,6 @@ export function Chat({
         content: createResp.content ?? optimisticUserContent,
         createdAt: sentAt,
         sender: viewerSenderRef.current,
-        ...(chatThreadId ? { chatThreadId } : {}),
       };
       putUserMessage(userMsg, immediateInputId);
 
@@ -2198,13 +2057,7 @@ export function Chat({
             baseOptimisticText.trim() ? ` ${baseOptimisticText}` : ""
           }`
         : baseOptimisticText;
-      // A message sent from a focused composer replies to the last message of
-      // the thread that has text.
-      const replyTo =
-        snapshot.replyTo ??
-        (snapshot.chatThread
-          ? threadTail(displayedRef.current, rootsRef.current, snapshot.chatThread)
-          : null);
+      const { replyTo } = snapshot;
       // The quote shows at once; the accepted row carries the server's snapshot of it.
       const optimisticContent = JSON.stringify([
         ...(replyTo
@@ -2233,14 +2086,11 @@ export function Chat({
           formData.set("reasoningEffort", snapshot.reasoningEffort);
           if (concierge) formData.set("priority", "now");
           // The reply names its message, the one the quote above shows, and the
-          // server stores it as given. A focused thread with no message to
-          // quote sends the thread alone, for the server to resolve.
+          // server stores it as given.
           if (replyTo) {
             for (const [name, value] of Object.entries(replyFormFields(replyTo))) {
               formData.set(name, value);
             }
-          } else if (snapshot.chatThread) {
-            formData.set("chatThread", snapshot.chatThread);
           }
           for (const upload of snapshot.uploads) {
             formData.append("files", upload.file);
@@ -2254,29 +2104,12 @@ export function Chat({
             onUploadProgress: snapshot.uploads.length ? controls.onUploadProgress : undefined,
             signal: controls.signal,
           });
-          // A Reply sent from the main line starts or joins a thread, whose
-          // messages the main line leaves out for its stack: once the server
-          // takes it, the thread opens in focus, so the owner sees what they
-          // sent and the answer. The same path as pressing the stack.
-          if (accepted.ok && concierge && snapshot.replyTo && !focusRef.current) {
-            const { messageId } = snapshot.replyTo;
-            void openThreadRef.current({
-              thread: rootsRef.current.get(messageId) ?? messageId,
-              title: "",
-            });
-          }
           return accepted;
         },
         optimisticContent,
         // A text-only send shows its bubble at once. An upload keeps its text
         // in the composer until the server accepts it, so its bubble waits too.
         snapshot.uploads.length === 0 ? snapshot.inputId : undefined,
-        // The row is in its thread at once: the one in focus, else the replied
-        // message's, which a message alone in its own starts.
-        snapshot.chatThread ??
-          (snapshot.replyTo
-            ? (rootsRef.current.get(snapshot.replyTo.messageId) ?? snapshot.replyTo.messageId)
-            : undefined),
       );
     },
     [
@@ -2394,8 +2227,13 @@ export function Chat({
         // within moments; the grace-period check only fires on a dead one.
         forceReleaseIfStuck(STOP_FORCE_RELEASE_GRACE_MS);
       } else {
-        const message = await res.text().catch(() => "");
-        setStreamError(message || t("stream.errors.stopStatus", { status: res.status }));
+        const message = plainErrorText(await res.text().catch(() => ""));
+        setStreamError(
+          message ||
+            (isUnreachableStatus(res.status)
+              ? t(isUpgradeUnderWay() ? "stream.errors.updating" : "stream.errors.unreachable")
+              : t("stream.errors.stopStatus", { status: res.status })),
+        );
       }
     } catch {
       setStreamError(t("stream.errors.stopFallback"));
@@ -2445,8 +2283,10 @@ export function Chat({
   // A narrow workspace shows the open tool pane in place of the chat.
   const toolTasksHost = useToolTasks();
   const paneCoversChat = toolTrace.paneOpen && Boolean(toolTasksHost?.compact);
-  // Either one stops listening: no one could see it listen.
-  const composerHidden = sharingRef.current || paneCoversChat;
+  // Any of these stops listening: no one could see it listen. A task chat in
+  // the side pane is hidden, not unmounted, while another tab shows, so its
+  // field keeps a size and the voice input cannot tell by itself.
+  const composerHidden = sharingRef.current || paneCoversChat || inPane?.active === false;
   useEffect(() => {
     if (composerHidden) composerRef.current?.stopVoiceInput();
   }, [composerHidden, composerRef]);
@@ -2600,15 +2440,17 @@ export function Chat({
   const workspaceStore = useContext(WorkspaceStoreContext);
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
-  // The agent's logo in the header opens the chat's task list: what runs for it.
+  // The header's Tasks button opens the chat's task list: what runs for it.
   const taskList = useTaskList(concierge ? (mainSessionId ?? null) : null);
+  // A dot on the header's Tasks button says a task chat needs its owner.
+  const { needsYou: tasksNeedYou } = useChatTaskList(concierge ? (mainSessionId ?? null) : null);
   // On a narrow screen the task list's sheet covers the composer.
   useEffect(() => {
     if (taskList.sheetOpen) composerRef.current?.stopVoiceInput();
   }, [taskList.sheetOpen, composerRef]);
   // The files the chat's agent produced, opened from the header's button or
   // from a message's link to one of them. docs/domains/chats.md#outputs
-  // Every chat has them, from the menu on its header's badge.
+  // Every chat has them, from its header's ⋯ menu.
   const outputsChatId = mainSessionId ?? null;
   const outputsPane = useOutputsPane(outputsChatId, { taskChats: concierge });
   useEffect(() => {
@@ -2655,8 +2497,8 @@ export function Chat({
   // The name the header shows for the Concierge, which a share of this chat
   // labels its turns by too.
   const conciergeDisplayName = resolveMainAgentDisplayName(conciergeName);
-  // A blank topic chat, before its first message, shows nothing in the
-  // header: its empty state speaks for it, and it has no tasks yet.
+  // A topic chat before its first message. It has no tasks yet, and its
+  // header's status capsule welcomes the guardian instead of staying hidden.
   const blankTopicChat = conciergeEmpty && !isMainChat;
   // A chat started in a project the guardian chose names it in the menu. The
   // default project is where a chat goes when none was chosen.
@@ -2672,67 +2514,112 @@ export function Chat({
     workspaceEventBus?.emit("projects:opened", { paths: [logical], force: true });
     workspaceStore?.set("followTargetPath", logical);
   };
-  // The badge's menu: what opens in the side pane, and the model that answered
-  // last at its foot. No counts or marks.
-  const menuItems: HeaderMenuItem[] = mainSessionId
-    ? [
-        ...(concierge
-          ? [
-              {
-                key: "tasks",
-                icon: <ListChecks />,
-                label: t("concierge.menu.tasks"),
-                run: taskList.open,
+  // The header's ⋯ menu, in three parts: what opens in the side pane (Outputs,
+  // the chosen project), what is done to the
+  // chat (the main chat is only shared), and the model that answered last.
+  // Its Tasks have a button of their own beside it.
+  const opens: HeaderMenuItem[] = [
+    {
+      key: "outputs",
+      icon: <FileOutput />,
+      label: t("concierge.menu.outputs"),
+      run: () => outputsPane.open(),
+    },
+    ...(chosenProject
+      ? [
+          {
+            key: "project",
+            icon: <FolderOpen />,
+            label: t("chatHeader.project", {
+              name: chosenProject.split("/").filter(Boolean).at(-1) ?? chosenProject,
+            }),
+            run: () => openProject(chosenProject),
+          },
+        ]
+      : []),
+  ];
+  const actions: HeaderMenuItem[] = [
+    // An archived topic chat is renamed once it is unarchived.
+    ...(isMainChat || (isTopicChat && isArchived)
+      ? []
+      : [
+          {
+            key: "rename",
+            icon: <Pencil />,
+            label: t("recentChats.rename", { ns: "common" }),
+            run: () => setRenameOpen(true),
+          },
+        ]),
+    // Only a topic chat is pinned, and an archived one shows no pin.
+    ...(isTopicChat && mainSessionId && !isArchived
+      ? [
+          {
+            key: "pin",
+            icon: pinnedAt ? <PinOff /> : <Pin />,
+            label: pinnedAt
+              ? t("recentChats.unpin", { ns: "common" })
+              : t("recentChats.pin", { ns: "common" }),
+            run: () => void togglePin(),
+          },
+        ]
+      : []),
+    {
+      key: "share",
+      icon: <Share2 />,
+      label: t("share.title", "Share chat"),
+      run: () => enterShareMode(),
+    },
+    ...(isMainChat
+      ? []
+      : [
+          isArchived
+            ? {
+                key: "unarchive",
+                icon: <ArchiveRestore />,
+                label: t("navbar.unarchive"),
+                run: () => void topicArchive.unarchive(),
+              }
+            : {
+                key: "archive",
+                icon: <Archive />,
+                label: t("navbar.archive"),
+                run: () => void topicArchive.archive(),
               },
-            ]
-          : []),
-        {
-          key: "outputs",
-          icon: <FileOutput />,
-          label: t("concierge.menu.outputs"),
-          run: () => outputsPane.open(),
-        },
-        ...(chosenProject
-          ? [
-              {
-                key: "project",
-                icon: <FolderOpen />,
-                label: t("chatHeader.project", {
-                  name: chosenProject.split("/").filter(Boolean).at(-1) ?? chosenProject,
-                }),
-                run: () => openProject(chosenProject),
-              },
-            ]
-          : []),
-      ]
-    : [];
-  const headerMenu: HeaderMenu | undefined =
-    menuItems.length > 0
-      ? {
-          items: menuItems,
-          caption: model ? (
-            <span
-              className="flex min-w-0 items-center gap-2"
-              title={t("chatHeader.lastModel", { model })}
-            >
-              <Cpu aria-hidden />
-              <span className="truncate">{modelDisplayName(model)}</span>
-            </span>
-          ) : undefined,
-        }
-      : undefined;
+          {
+            key: "delete",
+            icon: <Trash2 />,
+            label: t("navbar.delete"),
+            destructive: true,
+            run: () => setDeleteConfirmOpen(true),
+          },
+        ]),
+  ];
+  const headerMenu: HeaderMenu = {
+    sections: [opens, actions],
+    caption: model ? (
+      <span
+        className="flex min-w-0 items-center gap-2"
+        title={t("chatHeader.lastModel", { model })}
+      >
+        <Cpu aria-hidden />
+        <span className="truncate">{modelDisplayName(model)}</span>
+      </span>
+    ) : undefined,
+  };
   const headerBadge = concierge ? (
-    blankTopicChat ? null : (
-      <ConciergeHeaderStatus
-        // Every Concierge chat, main or topic, goes by the Concierge's name
-        // here; a topic chat's own name is in the chat list.
-        name={conciergeDisplayName}
-        activity={conciergeActivity}
-        // A chat with no messages yet draws its own large mascot.
-        badge={!conciergeEmpty}
-        menu={headerMenu}
-      />
-    )
+    // One header for a blank topic chat and the chat its first send makes, so
+    // the badge, the name and the capsule stay put as the first message lands.
+    <ConciergeHeaderStatus
+      // Every Concierge chat, main or topic, goes by the Concierge's name
+      // here; a topic chat's own name is in the chat list.
+      name={conciergeDisplayName}
+      activity={conciergeActivity}
+      // The main chat with no messages yet draws its own large mascot.
+      badge={!conciergeEmpty || blankTopicChat}
+      // Until its first message, a topic chat's capsule asks what's on the
+      // guardian's mind; any activity, and then idle, take over from there.
+      idleText={blankTopicChat ? t("concierge.topicEmpty.welcome") : undefined}
+    />
   ) : (
     <ConciergeHeaderStatus
       // Nothing while the chat's name loads, so "New chat" never flashes first.
@@ -2748,7 +2635,6 @@ export function Chat({
           />
         ) : undefined
       }
-      menu={headerMenu}
       showsActivity={false}
     />
   );
@@ -2756,39 +2642,17 @@ export function Chat({
   const navbarActions = (
     <>
       {mainSessionId && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <IconButton
-              size={floating ? "md" : "sm"}
-              label={t("navbar.more")}
-              icon={<MoreHorizontal />}
-              className={actionBadge}
-            />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => enterShareMode()}>
-              <Share2 className="size-4" />
-              {t("share.title", "Share chat")}
-            </DropdownMenuItem>
-            {isMainChat ? null : isArchived ? (
-              <DropdownMenuItem onSelect={() => void handleUnarchive()}>
-                <ArchiveRestore className="size-4" />
-                {t("navbar.unarchive")}
-              </DropdownMenuItem>
-            ) : (
-              <DropdownMenuItem onSelect={() => void handleArchive()}>
-                <Archive className="size-4" />
-                {t("navbar.archive")}
-              </DropdownMenuItem>
-            )}
-            {isMainChat ? null : (
-              <DropdownMenuItem variant="destructive" onSelect={() => setDeleteConfirmOpen(true)}>
-                <Trash2 className="size-4" />
-                {t("navbar.delete")}
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <ChatHeaderActions
+          floating={floating}
+          // A Concierge chat's tasks; an ordinary chat, or a topic chat before
+          // its first message, has none.
+          tasks={
+            concierge && !blankTopicChat
+              ? { needsYou: tasksNeedYou, open: () => taskList.open() }
+              : undefined
+          }
+          menu={headerMenu}
+        />
       )}
       {!toolTrace.paneOpen && (
         <IconButton
@@ -2814,48 +2678,11 @@ export function Chat({
     </>
   );
 
-  // A click on the blank of a thread in focus goes back to the whole chat. A
-  // message, anything clickable, the composer and a text selection stay.
-  const leaveFocusOnBlankClick = (event: ReactMouseEvent<HTMLElement>) => {
-    const target = event.target as Element | null;
-    // A click in a menu or popover opened from a message bubbles here through
-    // its React parent, though it is not in the scroller.
-    if (!target?.closest || !event.currentTarget.contains(target)) return;
-    // A message's own box spans the column, so only what is inside it is the
-    // message: the box itself, beside its bubble, is blank.
-    const entry = target.closest("[data-thread-entry]");
-    if (entry && entry !== target) return;
-    if (target.closest(THREAD_FOCUS_KEEP)) return;
-    if (window.getSelection()?.toString()) return;
-    void closeFocus();
-  };
-
-  // While a chat thread is in focus, the header's left corner shows the way
-  // back to the whole chat, named for the task.
-  const threadBack = focus ? (
-    <button
-      type="button"
-      data-thread-back
-      aria-label={
-        focus.title ? t("thread.back", { title: focus.title }) : t("chat.back", { ns: "common" })
-      }
-      onClick={() => void closeFocus()}
-      className={cn(
-        "pointer-events-auto col-start-1 row-start-1 flex h-[var(--control-h-md)] max-w-full min-w-0 cursor-pointer items-center gap-1 justify-self-start rounded-full pr-3 pl-2 text-ui text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50",
-        floating ? FLOATING_SURFACE : "hover:bg-muted",
-      )}
-    >
-      <ChevronLeft aria-hidden className="size-4 shrink-0" />
-      <span className="truncate">{focus.title}</span>
-    </button>
-  ) : null;
-
   // A Concierge chat's header floats over its messages: no bar, just the
   // mascot's badge with the name pill under it in the middle, and round
   // buttons either side, centred on the badge. The equal side columns keep the
   // middle centred over the chat. Only its pieces take the pointer, so the
-  // messages under the gaps stay reachable. The thread view floats the same
-  // header with its close button on the right.
+  // messages under the gaps stay reachable.
   const floatingHeader = (trailing: ReactNode) => (
     <div
       data-concierge-header
@@ -2864,17 +2691,18 @@ export function Chat({
       <ChatEdgeBlur edge="top" />
       {/* The phone shell's back and menu buttons move in here, and its bar
           steps aside. Not while the tool pane covers the chat: the shell's
-          bar is then the only way back from the pane. A thread in focus takes
-          their corner, so the outlet stays mounted, which keeps the bar away,
-          and goes unseen. */}
-      {threadBack}
-      {paneCoversChat ? null : (
+          bar is then the only way back from the pane. */}
+      {inPane ? null : taskOf ? (
+        // A task chat names the Concierge chat it reports to, and goes back
+        // there. On the phone it takes the place of the chat list's button.
+        <BackToConciergeChat
+          to={taskOf.main ? MAIN_CHAT_PATH : `/chat/${encodeURIComponent(taskOf.conciergeChatId)}`}
+          name={taskOf.main ? t("taskLink.mainChat") : taskOf.conciergeChatName}
+        />
+      ) : paneCoversChat ? null : (
         <SlotOutlet
           name={CONCIERGE_LEADING_SLOT}
-          className={cn(
-            "pointer-events-auto col-start-1 row-start-1 items-center gap-1 justify-self-start",
-            threadBack ? "hidden" : "flex md:hidden",
-          )}
+          className="pointer-events-auto col-start-1 row-start-1 flex items-center gap-1 justify-self-start md:hidden"
         />
       )}
       {headerBadge}
@@ -2890,7 +2718,6 @@ export function Chat({
     ? (trailing: ReactNode) => (
         <>
           <SlotContent name={navbarSlot}>
-            {threadBack}
             <div className="min-w-0 flex-1" />
             {trailing}
           </SlotContent>
@@ -2963,7 +2790,6 @@ export function Chat({
                 query MUST match ChatTimelineRail's visibility gate. */}
               <div
                 ref={attachScroller}
-                onClick={focus ? leaveFocusOnBlankClick : undefined}
                 className={cn(
                   "scrollbar-hover-shown relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
                   // Concierge has no timeline rail, so no lane for it. Its
@@ -2980,9 +2806,9 @@ export function Chat({
                       onPick={(prompt) => composerRef.current?.insertText(prompt)}
                     />
                   ) : (
-                    // A topic chat: its starters send themselves as its first message.
+                    // A topic chat: a suggestion goes into the composer, unsent.
                     <ConciergeTopicEmptyState
-                      onStart={(prompt) => composerRef.current?.submit(prompt)}
+                      onStart={(prompt) => composerRef.current?.insertText(prompt)}
                     />
                   )
                 ) : mainSessionId ? (
@@ -2990,10 +2816,7 @@ export function Chat({
                     {hasOlder(mainSessionId) ? (
                       <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
                     ) : null}
-                    {/* The blank a thread in focus keeps around the messages, to
-                      hold the clicked one still (use-thread-focus.ts). */}
-                    <div ref={threadFocus.topSpace} aria-hidden className="shrink-0" />
-                    <ChatThreadsProvider value={chatThreads}>
+                    <TaskLinksScope chatId={concierge ? mainSessionId : null}>
                       <TaskChatContext.Provider value={isTaskChat}>
                         <MessageList
                           rows={rows}
@@ -3030,8 +2853,7 @@ export function Chat({
                           unreadFrom={unread?.firstId ?? null}
                         />
                       </TaskChatContext.Provider>
-                    </ChatThreadsProvider>
-                    <div ref={threadFocus.bottomSpace} aria-hidden className="shrink-0" />
+                    </TaskLinksScope>
                   </>
                 ) : (
                   emptyState
@@ -3113,7 +2935,6 @@ export function Chat({
                             currentReplyMessageIds={currentReplyMessageIds}
                             messages={view.displayMessages}
                             liveCards={liveCards}
-                            whenShown={whenShown}
                           />
                         ) : (
                           <ChatPendingCardJump
@@ -3136,13 +2957,6 @@ export function Chat({
                     {/* Share mode hides the composer rather than unmounting it,
                       so a draft is still there when share mode ends. */}
                     <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
-                      {concierge ? (
-                        <ThreadPills
-                          threads={chatThreads}
-                          onPick={showStack}
-                          visible={visibleStacks}
-                        />
-                      ) : null}
                       {isArchived ? (
                         <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
                           <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
@@ -3150,7 +2964,7 @@ export function Chat({
                             type="button"
                             size="sm"
                             variant="outline"
-                            onClick={() => void handleUnarchive()}
+                            onClick={() => void topicArchive.unarchive()}
                           >
                             <ArchiveRestore data-icon="inline-start" className="size-3.5" />
                             {t("archived.unarchive")}
@@ -3256,6 +3070,26 @@ export function Chat({
               })
             }
           />
+          {topicArchive.dialog}
+          {mainSessionId && !isMainChat ? (
+            <RomeInputDialog
+              open={renameOpen}
+              title={t("recentChats.rename", { ns: "common" })}
+              inputLabel={t("recentChats.renameLabel", { ns: "common" })}
+              confirmLabel={t("recentChats.rename", { ns: "common" })}
+              initialValue={sessionName?.trim() ?? ""}
+              onCancel={() => setRenameOpen(false)}
+              onConfirm={(value) => {
+                setRenameOpen(false);
+                const name = value.trim();
+                if (!name || name === sessionName?.trim()) return;
+                // The chat list and this header read the name again.
+                void renameSession(mainSessionId, name)
+                  .catch(() => undefined)
+                  .then(emitSessionsChanged);
+              }}
+            />
+          ) : null}
           {/* A topic chat asks, as the sidebar does, what becomes of its
               follows and open tasks. */}
           {concierge && mainSessionId && !isMainChat ? (

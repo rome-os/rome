@@ -5,7 +5,6 @@ import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import {
   buildConciergeItems,
   type ConciergeItem,
-  focusHidden,
   showsTyping,
   simulatedTypingMs,
 } from "./concierge-groups";
@@ -72,6 +71,7 @@ describe("buildConciergeItems", () => {
       kind: "model_switch" as const,
       key: "generic",
       model: "gpt-6-luna",
+      fromModel: "claude-opus-5-5",
       turnId: "recovered",
       sessionId: "concierge",
     };
@@ -88,6 +88,35 @@ describe("buildConciergeItems", () => {
         ]),
       ),
     ).toEqual(["notice", "sep", "A:recovered", "notice"]);
+  });
+
+  it("draws a provider outage as a notice, not a bubble", () => {
+    const outage = {
+      type: "provider_outage",
+      outageId: "o1",
+      provider: "anthropic",
+      reason: "quota",
+      chatIds: ["t1", "t2"],
+      alternatives: ["openai"],
+    };
+    const message = { ...say("outage", 1_000, "host"), content: JSON.stringify([outage]) };
+    const items = build([agentRow(say("before", 0)), agentRow(message)]);
+    expect(shape(items)).toEqual(["sep", "A:before", "notice"]);
+    expect(items[2]).toMatchObject({ kind: "notice", outage: { outageId: "o1" } });
+  });
+
+  it("keeps the earlier model on a model-switch notice", () => {
+    const items = build([
+      {
+        kind: "model_switch",
+        key: "switch",
+        model: "claude-opus-5-5",
+        fromModel: "gpt-6-luna",
+        turnId: "t2",
+        sessionId: "concierge",
+      },
+    ]);
+    expect(items[0]).toMatchObject({ kind: "notice", fromModel: "gpt-6-luna" });
   });
 
   it("opens with a separator before the first message", () => {
@@ -541,86 +570,5 @@ describe("where a reply came from", () => {
     old.turnId = "t1";
     old.sender = { kind: "automated", sourceType: "agent", name: "Milo", iconUrl: null };
     expect(build([userRow(old)])).toEqual([]);
-  });
-});
-
-describe("focusHidden", () => {
-  // Messages of two threads and of none, in one stream, as the chat holds them.
-  const threadOf = new Map([
-    ["a1", "A"],
-    ["a2", "A"],
-    ["ga", "A"],
-    ["b1", "B"],
-    ["gb", "B"],
-  ]);
-  const hide = (
-    rows: ChatRow[],
-    thread: string,
-    opts: { unreadFrom?: string; typing?: boolean } = {},
-  ) =>
-    focusHidden(
-      buildConciergeItems(rows, { typing: opts.typing ?? false, unreadFrom: opts.unreadFrom }),
-      thread,
-      threadOf,
-    );
-
-  it("hides every message outside the thread: other threads', none's, the guardian's and the agent's", () => {
-    const rows = [
-      userRow(guardian("ga", 0)),
-      agentRow(say("b1", MIN, "t1")),
-      userRow(guardian("g0", 2 * MIN)),
-      agentRow(say("free", 3 * MIN, "t2")),
-      agentRow(say("a1", 4 * MIN, "t3")),
-      userRow(guardian("gb", 5 * MIN)),
-    ];
-    expect([...hide(rows, "A")].sort()).toEqual(["b1", "free", "g0", "gb"]);
-  });
-
-  it("keeps a message in the thread whoever said it", () => {
-    const rows = [
-      userRow(guardian("ga", 0)),
-      agentRow(say("a1", MIN, "t1"), say("a2", 2 * MIN, "t1")),
-    ];
-    expect(hide(rows, "A").size).toBe(0);
-  });
-
-  it("hides a time separator with no message of the thread under it, and keeps the others", () => {
-    const rows = [
-      userRow(guardian("ga", 0)),
-      agentRow(say("b1", 70 * MIN, "t1")),
-      agentRow(say("a2", 140 * MIN, "t2")),
-    ];
-    const items = buildConciergeItems(rows, { typing: false });
-    expect(items.filter((item) => item.kind === "separator")).toHaveLength(3);
-    const hidden = focusHidden(items, "A", threadOf);
-    const separators = items.filter((item) => item.kind === "separator").map((item) => item.key);
-    // The first and the last have a message of the thread under them; the middle one has only b1.
-    expect(separators.map((key) => hidden.has(key))).toEqual([false, true, false]);
-  });
-
-  it("hides the unread divider, and a separator whose only messages are hidden with it", () => {
-    const rows = [userRow(guardian("g0", 0)), agentRow(say("a1", 70 * MIN, "t1"))];
-    const items = buildConciergeItems(rows, { typing: false, unreadFrom: "g0" });
-    const hidden = focusHidden(items, "A", threadOf);
-    expect(hidden.has("unread-divider")).toBe(true);
-    expect(hidden.has("g0")).toBe(true);
-    // The first separator sat over g0 alone.
-    const [first, second] = items.filter((item) => item.kind === "separator");
-    expect(hidden.has(first!.key)).toBe(true);
-    expect(hidden.has(second!.key)).toBe(false);
-  });
-
-  it("keeps the typing bubble, and the separator over it", () => {
-    const rows = [agentRow(say("b1", 0, "t1"))];
-    const items = buildConciergeItems(rows, { typing: true });
-    const hidden = focusHidden(items, "A", threadOf);
-    expect(hidden.has("b1")).toBe(true);
-    expect(hidden.has("time:b1")).toBe(false);
-  });
-
-  it("hides everything in a thread that has no messages", () => {
-    const rows = [userRow(guardian("g0", 0)), agentRow(say("a1", MIN, "t1"))];
-    const hidden = hide(rows, "Z");
-    expect([...hidden].sort()).toEqual(["a1", "g0", "time:g0"]);
   });
 });

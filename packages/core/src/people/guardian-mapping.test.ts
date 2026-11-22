@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/db.js";
-import { PeopleRepository } from "../db/repositories/people.js";
+import { DrizzlePeopleRepository } from "./infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "./model/people-repository.js";
 import {
   applyGuardianMappingWithinTx,
   linkGuardianToAccount,
@@ -13,7 +14,7 @@ describe("guardian channel mapping", () => {
 
   beforeEach(async () => {
     testDb = createTestDb();
-    repo = new PeopleRepository(testDb.db);
+    repo = new DrizzlePeopleRepository(testDb.db);
     await repo.createWithId("guardian", { displayName: "Guardian", bondLevel: "guardian" });
   });
 

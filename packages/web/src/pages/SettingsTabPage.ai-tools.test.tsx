@@ -366,13 +366,13 @@ describe("AI Tools destructive actions", () => {
 
     render(<AiToolsPanel showUsage />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Log Out" }));
+    await user.click(await screen.findByRole("button", { name: "Log out" }));
 
     expect(logoutCalls).toBe(0);
     const dialog = screen.getByRole("dialog", { name: "Log out of Claude?" });
     expect(within(dialog).getByText("Logs out on this server only.")).toBeTruthy();
 
-    await user.click(within(dialog).getByRole("button", { name: "Log Out" }));
+    await user.click(within(dialog).getByRole("button", { name: "Log out" }));
 
     await waitFor(() => expect(logoutCalls).toBe(1));
     expect(within(dialog).getByText("Claude logout was rejected.")).toBeTruthy();
@@ -467,9 +467,9 @@ describe("AI Tools provider presentation", () => {
     expect(screen.getByText("Claude")).toBeTruthy();
     expect(screen.queryByText("Gemini")).toBeNull();
     expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
-    const claudeLogin = screen.getByRole("button", { name: "Log In" });
-    const apiKey = screen.getByRole("button", { name: "API Key" });
-    expect(screen.getByRole("button", { name: "Log Out" })).toBeTruthy();
+    const claudeLogin = screen.getByRole("button", { name: "Log in" });
+    const apiKey = screen.getByRole("button", { name: "API key" });
+    expect(screen.getByRole("button", { name: "Log out" })).toBeTruthy();
     expect(screen.getByText("ChatGPT").closest(".bg-surface")).toBeTruthy();
     expect(claudeLogin.parentElement).toBe(apiKey.parentElement);
     expect(claudeLogin.parentElement?.getAttribute("role")).toBe("group");
@@ -546,7 +546,7 @@ describe("AI Tools provider presentation", () => {
     expect(screen.getByText("MiniMax")).toBeTruthy();
     expect(screen.queryByText("Logging in via")).toBeNull();
     expect(document.querySelector('img[src="/provider-logos/minimax.svg"]')).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Log Out" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Log out" })).toHaveLength(1);
     const changeProvider = screen.getByRole("button", { name: "Change" });
     const removeProvider = screen.getByRole("button", { name: "Remove" });
     expect(
@@ -612,7 +612,7 @@ describe("AI Tools provider presentation", () => {
 
     render(<AiToolsPanel showUsage />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "API Key" }));
+    await user.click(await screen.findByRole("button", { name: "API key" }));
     await user.click(screen.getByRole("combobox"));
     await user.click(screen.getByRole("option", { name: "Custom" }));
 
@@ -633,7 +633,7 @@ describe("AI Tools provider presentation", () => {
       },
     });
 
-    await user.click(screen.getByRole("radio", { name: "Key / Value" }));
+    await user.click(screen.getByRole("radio", { name: "Key / value" }));
     const modelValue = screen.getByRole("textbox", { name: "Environment variable 3 value" });
     expect((modelValue as HTMLInputElement).value).toBe("ep-model");
     await user.clear(modelValue);
@@ -645,7 +645,7 @@ describe("AI Tools provider presentation", () => {
         .value,
     ).toContain('"ANTHROPIC_MODEL": "ep-model-updated"');
 
-    await user.click(screen.getByRole("button", { name: "Save Configuration" }));
+    await user.click(screen.getByRole("button", { name: "Save configuration" }));
     await waitFor(() => expect(savedBody).not.toBeNull());
     expect(savedBody).toEqual({
       provider: "custom",
@@ -704,7 +704,7 @@ describe("AI Tools provider presentation", () => {
     fireEvent.change(json, {
       target: { value: (json as HTMLTextAreaElement).value.replace("ep-one", "ep-two") },
     });
-    await user.click(screen.getByRole("button", { name: "Save Configuration" }));
+    await user.click(screen.getByRole("button", { name: "Save configuration" }));
 
     await waitFor(() => expect(savedBody).not.toBeNull());
     expect(savedBody).toEqual({
@@ -740,9 +740,9 @@ describe("AI Tools provider presentation", () => {
 
     expect(await screen.findByText("API key active")).toBeTruthy();
     expect(screen.getByText("Environment API key")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Log In" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Log in" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
-    expect(screen.getByRole("button", { name: "API Key" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "API key" })).toBeTruthy();
   });
 });
 
@@ -778,26 +778,31 @@ describe("AI Tools Rome credits", () => {
     expect(screen.getByText("of $10.00")).toBeTruthy();
   });
 
-  it("puts credits on standby while ChatGPT is connected", async () => {
+  it("hides credits while ChatGPT is logged in", async () => {
     mockPanel(true, credits);
     render(<AiToolsPanel showRomeCredits />);
 
-    expect(await screen.findByText("Standby")).toBeTruthy();
+    expect(await screen.findByText("ChatGPT")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("Rome credits")).toBeNull();
   });
 
-  it("puts credits on standby while the ChatGPT login is still unknown", async () => {
+  it("hides credits while the ChatGPT login is still unknown", async () => {
     mockPanel(undefined, credits);
     render(<AiToolsPanel showRomeCredits />);
 
-    expect(await screen.findByText("Standby")).toBeTruthy();
+    expect(await screen.findByText("ChatGPT")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("Rome credits")).toBeNull();
   });
 
-  it("marks credits ready rather than in use while Claude handles chats", async () => {
+  it("hides credits while Claude is logged in", async () => {
     mockPanel(false, credits, true);
     render(<AiToolsPanel showRomeCredits />);
 
-    expect(await screen.findByText("Ready")).toBeTruthy();
-    expect(screen.queryByText("In use")).toBeNull();
+    expect(await screen.findByText("ChatGPT")).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("Rome credits")).toBeNull();
   });
 
   it("shows credits the caller already read without reading them again", async () => {
@@ -824,29 +829,11 @@ describe("AI Tools Rome credits", () => {
     expect(screen.getByText("$0.00")).toBeTruthy();
   });
 
-  it("puts used-up credits on standby once ChatGPT is connected", async () => {
-    mockPanel(true, { ...credits, balanceMicros: "-12000", availableMicros: "-12000" });
+  it("marks paused credits", async () => {
+    mockPanel(false, { ...credits, enabled: false });
     render(<AiToolsPanel showRomeCredits />);
 
-    expect(await screen.findByText("Standby")).toBeTruthy();
-    expect(screen.queryByText("Used up")).toBeNull();
-  });
-
-  it("puts paused credits on standby while ChatGPT pays", async () => {
-    mockPanel(true, { ...credits, enabled: false });
-    render(<AiToolsPanel showRomeCredits />);
-
-    expect(await screen.findByText("Standby")).toBeTruthy();
-    expect(screen.queryByText("Paused")).toBeNull();
-  });
-
-  it("keeps used-up credits calm while Claude handles chats", async () => {
-    mockPanel(false, { ...credits, balanceMicros: "0", availableMicros: "0" }, true);
-    render(<AiToolsPanel showRomeCredits />);
-
-    const status = await screen.findByText("Used up");
-    expect(status.className).toContain("text-muted-foreground");
-    expect(screen.getByText("$0.00").className).not.toContain("text-destructive-fg");
+    expect(await screen.findByText("Paused")).toBeTruthy();
   });
 
   it("waits for a status read that succeeds before showing the row", async () => {

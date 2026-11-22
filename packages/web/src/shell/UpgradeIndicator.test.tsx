@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
+import { isUpgradeUnderWay } from "@/lib/upgrade-under-way";
 import { UpgradeIndicator } from "./UpgradeIndicator";
 
 beforeAll(async () => {
@@ -80,6 +81,9 @@ function mockBackend(opts: {
       if (!next) throw new Error("unexpected upgrade request");
       if (next === "timeout") throw new DOMException("signal timed out", "TimeoutError");
       return json(next);
+    }
+    if (url.startsWith("/api/system/release-notes?")) {
+      return json({ status: 404, body: { error: "not_found" } });
     }
     if (url === "/api/build-info") {
       if (opts.buildDelayMs) await new Promise((r) => setTimeout(r, opts.buildDelayMs));
@@ -220,12 +224,15 @@ describe("UpgradeIndicator", () => {
     try {
       await confirm(user);
       expect(await screen.findByRole("status", { name: UPDATING })).toBeTruthy();
+      // The chat names an outage an upgrade only while it is under way.
+      expect(isUpgradeUnderWay()).toBe(true);
 
       backend.state.build = "1.2.0";
       await rs.advanceTimersByTimeAsync(3_000);
 
       const done = await screen.findByRole("button", { name: UPDATED });
       expect(done.textContent).toBe("UpdatedReload");
+      expect(isUpgradeUnderWay()).toBe(false);
       // It stays: no reload and no timer takes it away.
       await rs.advanceTimersByTimeAsync(10 * 60_000);
       expect(screen.getByRole("button", { name: UPDATED })).toBe(done);
@@ -278,15 +285,31 @@ describe("UpgradeIndicator", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
   });
 
-  it("reads an upgrade already in progress as updating", async () => {
-    mockBackend({
-      check: [available("1.1.0", "1.2.0")],
-      upgrade: [{ status: 409, body: { error: "upgrade_in_progress" } }],
-    });
+  it.each([
+    ["the code alone", { status: 409, body: { error: "upgrade_in_progress" } }],
+    [
+      "the code with a sentence",
+      {
+        status: 409,
+        body: {
+          error: "upgrade_in_progress",
+          message: "Cannot update your Rome while it is upgrading",
+        },
+      },
+    ],
+    [
+      "the sentence alone",
+      { status: 400, body: { error: "Cannot update your Rome while it is upgrading" } },
+    ],
+  ])("reads an upgrade already in progress, refused with %s, as updating", async (_shape, refusal) => {
+    // Started elsewhere: another tab or device, or this page before a reload.
+    mockBackend({ check: [available("1.1.0", "1.2.0")], upgrade: [refusal] });
     renderIndicator();
     await confirm(userEvent.setup());
 
     expect(await screen.findByRole("status", { name: UPDATING })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Upgrade and restart" })).toBeNull();
+    expect(screen.queryByText(/Upgrade request failed/)).toBeNull();
   });
 
   it("gives the dialog back when the upgrade request times out", async () => {

@@ -1,7 +1,7 @@
 ---
 name: routine-from-chat
 description: Turn a plain-language "do this automatically" request into a routine — either event-triggered ("text me when I get an email from my landlord") or scheduled ("remind me every Friday at 9am"). For third-party events (Gmail, GitHub, Slack…) it confirms with the guardian and then subscribes to the connector trigger so the event actually fires, even one that has never fired before. Ask for any missing detail, then confirm with a card when available or in plain chat otherwise. Reach for this first whenever the guardian wants something to happen automatically; do not explore the codebase or hand-build a trigger.
-tools: [ask_question, search_event_catalog, connector_login, connector_connect, connector_event_search, connector_event_schema, connector_event_subscribe, propose_routine, search_actions, read_action, execute_action, summon, send_message]
+tools: [ask_question, system:search_event_catalog, connector:connector_login, connector:connector_connect, connector:connector_event_search, connector:connector_event_schema, connector:connector_event_subscribe, propose_routine, search_actions, read_action, execute_action, system:summon, system:send_message]
 ---
 
 # Create a routine from chat
@@ -23,8 +23,8 @@ A routine fires one of three ways. Decide which the request is:
 - **Schedule** — "at a time / on a cadence": "every Friday at 9am", "tomorrow
   at noon", "the 1st of each month", "every morning".
 - **Manual** — "save this so I can run it whenever": a playbook with **no**
-  automatic trigger. the guardian runs it by hand from the Routines page's 
-  "Run now" button.
+  automatic trigger. The guardian runs it from the Routines page's "Run now"
+  button, or asks an agent, which runs it with `system:run_routine`.
 
 If it's ambiguous ("remind me about the standup"), ask one short question to
 disambiguate before going further. In particular, if it's unclear whether they
@@ -48,12 +48,12 @@ subagent. Return any event-source permission still needed with the draft too.
      compute. Skip straight to choosing the Then (the action it runs) and
      propose with `kind: "manual"`. No `eventName`, `tzid`, `rrule`, or `date`.
    - *Event from a third-party app* (Gmail, GitHub, Slack, Stripe, …): go through
-     the connector chain — `connector_event_search` → `connector_event_schema` →
-     *confirm with the guardian* → `connector_event_subscribe`. It finds the
+     the connector chain — `connector:connector_event_search` → `connector:connector_event_schema` →
+     *confirm with the guardian* → `connector:connector_event_subscribe`. It finds the
      trigger, gets a yes before arming it upstream, and hands you the exact
      `eventName` to bind. See "Event routines from a connector".
    - *Event already flowing on the bus* (a Rome app's own event, or a connector
-     event you set up before): call `search_event_catalog` with keywords from the
+     event you set up before): call `system:search_event_catalog` with keywords from the
      request, then use the matching `eventType` as `eventName`. Never invent an
      event name.
    - *Schedule:* work out the cadence, the time of day, and the timezone from
@@ -152,20 +152,20 @@ guardian's timezone, the `system:create_routine` arguments are:
 ## Event routines from a connector (Gmail, GitHub, Slack, …)
 
 Third-party events reach Rome through the **Connector** app (Composio). A
-connector event only appears in `search_event_catalog` *after it has fired at
+connector event only appears in `system:search_event_catalog` *after it has fired at
 least once* — so for anything new you don't search the catalog, you **subscribe**.
 Subscribing both tells you the canonical event name and arms the upstream trigger
 so it starts firing. Three steps — and the third is an action you get the
 guardian's explicit go-ahead for first, because it reaches out and starts
 watching their third-party account:
 
-1. **Find the trigger.** `connector_event_search({ toolkit, regex? })` lists the
+1. **Find the trigger.** `connector:connector_event_search({ toolkit, regex? })` lists the
    triggers a toolkit can emit as `{ slug, name, description }`. Use the toolkit
    the request implies (`gmail`, `github`, `slack`, `stripe`, …) and an optional
    case-insensitive `regex` to narrow (`"new.*message"`); omit it to see them all.
    Pick the slug whose meaning matches the intent — e.g. `GMAIL_NEW_GMAIL_MESSAGE`.
    Never invent a slug.
-2. **Read its schema.** `connector_event_schema({ toolkit, slug })` returns
+2. **Read its schema.** `connector:connector_event_schema({ toolkit, slug })` returns
    `config` (the settings the subscribe needs), `payload` (the shape of the event
    it delivers — use it to pick `filter` field paths exactly, no guessing),
    `eventName` (the string the routine binds to), and `requiresWebhookEndpointSetup`.
@@ -177,7 +177,7 @@ watching their third-party account:
    Tell the guardian, in their terms, exactly what you're about to register ("I'll
    subscribe to GitHub's *new issue* event on `zhangfand/vps` so Rome starts
    watching it") and ask with `ask_question` (a `single` yes/no). **Only on a yes**
-   call `connector_event_subscribe({ toolkit, slug, config })`, which arms the
+   call `connector:connector_event_subscribe({ toolkit, slug, config })`, which arms the
    trigger and returns the `eventName` to bind. Pass `config` matching the schema
    from step 2 — `{}` when it needs none; for any required field you can't infer,
    ask the guardian recognition-style. It's idempotent, so re-subscribing the same
@@ -193,12 +193,12 @@ with its card or the explicit chat confirmation above.
 *and* the toolkit connected. These are two separate gates, handled in order — a
 connector action's error tells you which one you're on:
 
-- **Not signed in** (error points to `connector_login`): call `connector_login`,
-  which renders the account-wide sign-in card. Do **not** call `connector_connect`
+- **Not signed in** (error points to `connector:connector_login`): call `connector:connector_login`,
+  which renders the account-wide sign-in card. Do **not** call `connector:connector_connect`
   here — it refuses to render until sign-in succeeds, so you'd just bounce between
   errors.
-- **Signed in but toolkit not connected** (error points to `connector_connect`):
-  call `connector_connect({ toolkit })` to render the connect card.
+- **Signed in but toolkit not connected** (error points to `connector:connector_connect`):
+  call `connector:connector_connect({ toolkit })` to render the connect card.
 
 After the guardian completes a card, resume the chain. Only when a toolkit
 genuinely can't be connected do you stop and say the event isn't available (a
@@ -216,7 +216,7 @@ matches.
 ## Event routines already on the bus
 
 For a Rome app's own event, or a connector event you've already subscribed to,
-`search_event_catalog({ query, limit? })` returns the best-matching watchable
+`system:search_event_catalog({ query, limit? })` returns the best-matching watchable
 types as `{ eventType, appId }` plus a `total` count. Search with words from the
 request; if `total` exceeds what came back, search again with sharper keywords.
 Use the **exact** `eventType` as `eventName`. (For a brand-new third-party event
@@ -287,14 +287,14 @@ Guardian: "Text me when I get an important email from my landlord."
 
 1. Classify → event, third-party (Gmail). Make sure you're signed in and Gmail is
    connected; if a connector action says otherwise, handle the prereq it names
-   (`connector_login`, then `connector_connect({ toolkit: "gmail" })`) and wait for
+   (`connector:connector_login`, then `connector:connector_connect({ toolkit: "gmail" })`) and wait for
    the guardian to finish.
 2. Discover + read the trigger:
-   - `connector_event_search({ toolkit: "gmail", regex: "new.*message" })` → pick `GMAIL_NEW_GMAIL_MESSAGE`.
-   - `connector_event_schema({ toolkit: "gmail", slug: "GMAIL_NEW_GMAIL_MESSAGE" })` → note the payload's sender field and the `eventName`.
+   - `connector:connector_event_search({ toolkit: "gmail", regex: "new.*message" })` → pick `GMAIL_NEW_GMAIL_MESSAGE`.
+   - `connector:connector_event_schema({ toolkit: "gmail", slug: "GMAIL_NEW_GMAIL_MESSAGE" })` → note the payload's sender field and the `eventName`.
 3. Confirm, then subscribe:
    - `ask_question` (single yes/no): "I'll subscribe to Gmail's *new email* event so Rome can watch your inbox — set that up?"
-   - On **yes** → `connector_event_subscribe({ toolkit: "gmail", slug: "GMAIL_NEW_GMAIL_MESSAGE", config: {} })` → returns `eventName: "provider:event:gmail.gmail_new_gmail_message"`.
+   - On **yes** → `connector:connector_event_subscribe({ toolkit: "gmail", slug: "GMAIL_NEW_GMAIL_MESSAGE", config: {} })` → returns `eventName: "provider:event:gmail.gmail_new_gmail_message"`.
 4. `ask_question` — "Who's your landlord?" (a `single` over the addresses you know, or a `text` question if unsure);
    "What counts as important?" ("Anything from them" / "Only if it mentions rent").
 5. After they pick `dana@example.com` and "anything from them" (filter field taken from the payload schema):

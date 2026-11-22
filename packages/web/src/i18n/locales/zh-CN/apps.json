@@ -89,7 +89,7 @@
     "publishHint": "将 v{{version}} 发布到 Rome 应用商店。",
     "publishHintListed": "将 v{{version}} 发布到 Rome 应用商店。商店最新版本：v{{storeVersion}}。",
     "publishHintUnlisted": "将 v{{version}} 发布到 Rome 应用商店。尚未发布到商店。",
-    "uninstallHint": "移除应用，数据会保留以便日后重装。",
+    "uninstallHint": "移除应用，数据会保留以便日后重装，但它管理的例程会被删除。",
     "uninstallPurgeHint": "此应用的数据会被永久删除，无法恢复。"
   },
   "installed": {
@@ -139,7 +139,7 @@
     },
     "uninstallDialog": {
       "title": "卸载 {{name}}?",
-      "descriptionKeep": "其数据会保留，以便日后重新安装。",
+      "descriptionKeep": "其数据会保留，以便日后重新安装。它管理的例程会被删除。",
       "descriptionPurge": "其数据将被永久删除，无法恢复。",
       "confirmKeep": "卸载",
       "confirmPurge": "卸载并清除数据"

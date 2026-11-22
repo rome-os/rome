@@ -167,7 +167,7 @@ const COLOR_SEMANTICS: Record<string, readonly string[]> = {
   hairline: ["border", "input"], // "The default border and the input edge"
   "hairline-strong": ["border-strong"],
   scrim: ["overlay"], // "A 45% ink over the page, the `overlay` token"
-  "signal-red": ["destructive"],
+  "signal-red": ["destructive", "unread"],
   "red-tint": ["destructive-bg"],
   "red-ink": ["destructive-fg"],
   "red-edge": ["destructive-border"],

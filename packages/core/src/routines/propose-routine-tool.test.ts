@@ -15,7 +15,7 @@ const validInput = {
   thenSummary: "summarize it and notify you",
   eventName: "provider:event:gmail.gmail_new_gmail_message",
   filter: [{ field: "from.email", equals: "dana@example.com" }],
-  actionName: "summon",
+  actionName: "system:summon",
   args: { agentName: "main", prompt: "Summarize the email." },
 };
 
@@ -28,7 +28,7 @@ const validSchedule = {
   tzid: "America/Los_Angeles",
   localTime: "09:00",
   rrule: "FREQ=WEEKLY;BYDAY=FR",
-  actionName: "summon",
+  actionName: "system:summon",
   args: { agentName: "main", prompt: "Remind the guardian to send their weekly update." },
 };
 
@@ -43,7 +43,7 @@ describe("normalizeRoutineDraftForCard", () => {
       filter: [{ field: "from.email", equals: "dana@example.com" }],
     });
     expect(result.draft.name).toBe("Landlord emails");
-    expect(result.draft.actionName).toBe("summon");
+    expect(result.draft.actionName).toBe("system:summon");
     expect(result.draft.filterSummary).toBe("sender is dana@example.com");
   });
 
@@ -94,7 +94,7 @@ describe("normalizeRoutineDraftForCard", () => {
       name: "Morning briefing",
       watchLabel: "Run on demand",
       thenSummary: "pull your day and send you a briefing",
-      actionName: "summon",
+      actionName: "system:summon",
       args: { agentName: "main", prompt: "Build the morning briefing." },
     });
     expect(result.ok).toBe(true);
@@ -141,7 +141,7 @@ describe("normalizeRoutineDraftForCard", () => {
     const result = normalizeRoutineDraftForCard({
       ...validSchedule,
       rrule: undefined,
-      date: "2026-07-01",
+      date: "2099-07-01",
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -151,7 +151,7 @@ describe("normalizeRoutineDraftForCard", () => {
       // A dated one-off pins to a fixed absolute zone at creation.
       tzMode: "fixed",
       localTime: "09:00",
-      date: "2026-07-01",
+      date: "2099-07-01",
     });
   });
 
@@ -170,8 +170,27 @@ describe("normalizeRoutineDraftForCard", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("rejects a MONTHLY rrule without BYMONTHDAY (would silently never fire)", () => {
-    const result = normalizeRoutineDraftForCard({ ...validSchedule, rrule: "FREQ=MONTHLY" });
+  // "Turn it on" creates the routine, so a draft that a new routine's rules
+  // refuse never reaches the card.
+  it.each([
+    ["a MONTHLY rule without a day of the month", { rrule: "FREQ=MONTHLY" }],
+    [
+      "a biweekly rule the scheduler would run weekly",
+      { rrule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO" },
+    ],
+    ["a WEEKLY rule without a day", { rrule: "FREQ=WEEKLY" }],
+    ["a rule that ends after a count", { rrule: "FREQ=DAILY;COUNT=3" }],
+    ["a date no calendar has", { rrule: undefined, date: "2099-02-30" }],
+  ])("refuses %s", (_label, fields) => {
+    const result = normalizeRoutineDraftForCard({ ...validSchedule, ...fields });
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses an event filter field with an empty part", () => {
+    const result = normalizeRoutineDraftForCard({
+      ...validInput,
+      filter: [{ field: "from..email", equals: "a@example.test" }],
+    });
     expect(result.ok).toBe(false);
   });
 
@@ -270,7 +289,7 @@ describe("normalizeRoutineDraftForCard", () => {
       expect(res.isError).toBeUndefined();
       expect(calls).toEqual([
         {
-          name: "create_routine",
+          name: "system:create_routine",
           input: {
             // Derived from the tool call, so the drain computes the card's key
             // itself instead of reading it from this result.
@@ -283,7 +302,7 @@ describe("normalizeRoutineDraftForCard", () => {
               localTime: "09:00",
               rrule: "FREQ=WEEKLY;BYDAY=FR",
             },
-            actionName: "summon",
+            actionName: "system:summon",
             args: validSchedule.args,
           },
         },
@@ -293,16 +312,18 @@ describe("normalizeRoutineDraftForCard", () => {
     });
 
     it("falls back to a draft card when the agent may not call the target", async () => {
-      const { calls, run } = setup({ permissions: { summon: "denied" } });
+      const { calls, run } = setup({ permissions: { "system:summon": "denied" } });
       const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);
       expect(res.isError).toBeUndefined();
       expect(res.content[0].text).toContain(DRAFTED);
-      expect(res.content[0].text).toContain('"summon" is not an action you are permitted to call');
+      expect(res.content[0].text).toContain(
+        '"system:summon" is not an action you are permitted to call',
+      );
     });
 
     it("falls back to a draft card when the agent may not call create_routine", async () => {
-      const { calls, run } = setup({ permissions: { create_routine: "denied" } });
+      const { calls, run } = setup({ permissions: { "system:create_routine": "denied" } });
       const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);
       expect(res.isError).toBeUndefined();
@@ -317,7 +338,7 @@ describe("normalizeRoutineDraftForCard", () => {
     });
 
     it("errors without a card for an unregistered target action", async () => {
-      const { calls, run } = setup({ permissions: { summon: "unknown" } });
+      const { calls, run } = setup({ permissions: { "system:summon": "unknown" } });
       const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);
       expect(res.isError).toBe(true);
@@ -328,7 +349,7 @@ describe("normalizeRoutineDraftForCard", () => {
     // card's "Turn it on" gets must run here too.
     it("creates nothing when the args don't fit the target action's schema", async () => {
       const { calls, run } = setup({
-        argsError: 'args do not satisfy the input schema for action "summon"',
+        argsError: 'args do not satisfy the input schema for action "system:summon"',
       });
       const res = await run({ ...validInput, activate: true });
       expect(calls).toEqual([]);

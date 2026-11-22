@@ -95,7 +95,6 @@ export class MessageRepository {
         replyToMessageId: replyTo,
         rootMessageId: this.rootFor(chatId, replyTo),
         saidAt: message.at,
-        readAt: message.read ? message.at : null,
       })
       .onConflictDoNothing()
       .returning({ id: chatMessages.id, root: chatMessages.rootMessageId })
@@ -304,67 +303,6 @@ export class MessageRepository {
   }
 
   /**
-   * The key of the last message said in the chat thread of the message keyed
-   * `key` in `chat`, which may be any message of the thread: the root itself
-   * when nothing replies to it, or null when Rome holds no such message.
-   * docs/domains/chats.md#chat-thread
-   */
-  lastInChatThread(chat: ChatRef, key: string): string | null {
-    return (
-      this.db.all<{ key: string }>(sql`
-        WITH thread(root) AS (
-          SELECT coalesce(root_message_id, id) FROM chat_messages
-          WHERE chat_id = ${chatIdOf(chat)} AND key = ${key}
-        )
-        SELECT m.key FROM thread JOIN chat_messages m ON m.chat_id = ${chatIdOf(chat)}
-          AND (m.id = thread.root OR m.root_message_id = thread.root)
-        ORDER BY m.said_at DESC, m.id DESC LIMIT 1
-      `)[0]?.key ?? null
-    );
-  }
-
-  /**
-   * Mark the messages of `chat` keyed `keys` read at `at`. A message already
-   * read keeps its time, and a key Rome does not hold is skipped. Answers how
-   * many messages it marked.
-   */
-  markRead(chat: ChatRef, keys: readonly string[], at: Date = new Date()): number {
-    if (keys.length === 0) return 0;
-    return this.db
-      .update(chatMessages)
-      .set({ readAt: at })
-      .where(
-        and(
-          sql`${chatMessages.chatId} = ${chatIdOf(chat)}`,
-          isNull(chatMessages.readAt),
-          sql`${chatMessages.key} IN (SELECT value FROM json_each(${JSON.stringify(keys)}))`,
-        ),
-      )
-      .returning({ id: chatMessages.id })
-      .all().length;
-  }
-
-  /**
-   * Mark the main line of `chat` read at `at`: every message that is not a
-   * reply inside a thread rooted at another message. Answers how many it
-   * marked.
-   */
-  markMainLineRead(chat: ChatRef, at: Date = new Date()): number {
-    return this.db
-      .update(chatMessages)
-      .set({ readAt: at })
-      .where(
-        and(
-          sql`${chatMessages.chatId} = ${chatIdOf(chat)}`,
-          isNull(chatMessages.readAt),
-          sql`(${chatMessages.rootMessageId} IS NULL OR ${chatMessages.rootMessageId} = ${chatMessages.id})`,
-        ),
-      )
-      .returning({ id: chatMessages.id })
-      .all().length;
-  }
-
-  /**
    * React to the message keyed `key` in `chat` with `reaction`, or with null
    * clear its reaction. One message holds one reaction, so a new one replaces
    * it. Answers whether Rome holds the message.
@@ -374,6 +312,21 @@ export class MessageRepository {
       this.db
         .update(chatMessages)
         .set({ reaction })
+        .where(and(sql`${chatMessages.chatId} = ${chatIdOf(chat)}`, eq(chatMessages.key, key)))
+        .returning({ id: chatMessages.id })
+        .all().length > 0
+    );
+  }
+
+  /**
+   * Rewrites the parts of the message keyed `key` in `chat`, as a card that
+   * settles in place does. Answers whether Rome holds the message.
+   */
+  setParts(chat: ChatRef, key: string, parts: string): boolean {
+    return (
+      this.db
+        .update(chatMessages)
+        .set({ parts })
         .where(and(sql`${chatMessages.chatId} = ${chatIdOf(chat)}`, eq(chatMessages.key, key)))
         .returning({ id: chatMessages.id })
         .all().length > 0

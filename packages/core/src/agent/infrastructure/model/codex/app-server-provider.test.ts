@@ -1886,6 +1886,9 @@ describe("CodexAppServerProvider", () => {
       "turn/start",
       expect.objectContaining({ threadId: "thr-1", effort: "xhigh" }),
     );
+    // Each turn names the session's model: a resumed thread keeps its own otherwise.
+    const [, started] = requestMock.mock.calls.find(([method]) => method === "turn/start") ?? [];
+    expect((started as { model?: string } | undefined)?.model).toEqual(expect.any(String));
     await session.close();
   });
 

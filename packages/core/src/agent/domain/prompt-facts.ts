@@ -1,3 +1,5 @@
+import type { ThreadContext } from "@rome-os/app-runtime";
+
 /** A message said where a session stands, as the agent reads it. */
 export interface PromptMessage {
   readonly id: number;
@@ -39,4 +41,16 @@ export interface PromptFacts {
   read(messageIds: readonly number[]): Promise<PromptMessage[]>;
   /** Turn `turnId` of session `sessionId` was shown `messageIds`. */
   seen(messageIds: readonly number[], sessionId: string, turnId: string): void;
+  /**
+   * The latest messages said in `place` before `before`, oldest first, read
+   * from where the chat itself lives rather than from Rome's record, so a
+   * new session sees them whether or not Rome holds a copy. Each names who
+   * said it as {@link PromptMessage} does. Null where none can be read: a
+   * place whose channel hands the agent every message, a platform with no
+   * read, or a read that failed or ran out of time. Absent, nothing is read.
+   * `first`, when given, is the id of the message the session opens on: it,
+   * and what was said after it within `before`'s second, are left out by the
+   * platform's own order, since Rome's record keeps whole seconds.
+   */
+  earlier?(place: ThreadContext, before: Date, first?: number): Promise<UnseenMessage[] | null>;
 }

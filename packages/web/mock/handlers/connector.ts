@@ -64,6 +64,12 @@ const catalog: ComposioCatalogEntry[] = [
   { slug: "hubspot", name: "HubSpot", scope: "Tracks your contacts and deals.", glyph: "hubspot" },
   { slug: "stripe", name: "Stripe", scope: "Looks up payments and customers.", glyph: "stripe" },
   {
+    slug: "freshdesk",
+    name: "Freshdesk",
+    scope: "Reads and answers your support tickets.",
+    glyph: "freshdesk",
+  },
+  {
     slug: "otter_ai_mcp",
     name: "Otter.ai",
     scope: "Searches your meetings and reads their transcripts.",

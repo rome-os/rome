@@ -17,6 +17,29 @@ import {
   type WorkspaceEventBus,
 } from "@/pages/free/workspace-event-bus";
 
+// The sheet's file browser is the Memory page's own; here it shows what it was
+// asked to select, whether it saves by itself, and holds the sheet's close
+// until `canLeave` says it may.
+const browser = { canLeave: true };
+rs.mock("@/components/file-browser-page", () => ({
+  FileBrowserPage: ({
+    externalSelection,
+    autoSave,
+    leaveGuard,
+  }: {
+    externalSelection: { path: string } | null;
+    autoSave?: unknown;
+    leaveGuard?: { current: (() => Promise<boolean>) | null };
+  }) => {
+    if (leaveGuard) leaveGuard.current = async () => browser.canLeave;
+    return (
+      <div data-testid="memory-browser" data-autosave={autoSave ? "on" : "off"}>
+        {externalSelection?.path}
+      </div>
+    );
+  },
+}));
+
 const autoPlaceApp = rs.fn();
 rs.mock("@/pages/free/use-free-cells", () => ({
   autoPlaceApp: (...args: unknown[]) => autoPlaceApp(...args),
@@ -115,6 +138,82 @@ describe("ChatLink and the chat's outputs", () => {
       expect(screen.getByTestId("where").textContent).toBe("/home/rome/elsewhere/notes.md"),
     );
     expect(opened).toEqual([]);
+  });
+
+  it("opens a memory file the agent wrote in the Outputs tab", async () => {
+    const { opened } = withOutputs(<ChatLink href="/memory/voice-terms.md">terms</ChatLink>, [
+      "/memory/voice-terms.md",
+    ]);
+    fireEvent.click(screen.getByText("terms"));
+    await waitFor(() => expect(opened).toEqual(["/memory/voice-terms.md"]));
+    expect(screen.queryByTestId("memory-browser")).toBeNull();
+  });
+
+  it("opens any other memory file in a sheet beside the chat, not the Memory page", async () => {
+    function Where() {
+      return <span data-testid="where">{useLocation().pathname}</span>;
+    }
+    const resolved: string[] = [];
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async (url: string) => {
+        resolved.push(url);
+        return new Response(JSON.stringify({ type: "file" }), { status: 200 });
+      }),
+    );
+    const { opened } = withOutputs(
+      <>
+        <ChatLink href="/memory/topics/%E7%AC%94%E8%AE%B0.md">notes</ChatLink>
+        <Where />
+      </>,
+      [],
+    );
+    const before = screen.getByTestId("where").textContent;
+    fireEvent.click(screen.getByText("notes"));
+    await waitFor(() =>
+      expect(screen.getByTestId("memory-browser").textContent).toBe("memory/topics/笔记.md"),
+    );
+    expect(resolved).toEqual([
+      `/api/memory/resolve?path=${encodeURIComponent("memory/topics/笔记.md")}`,
+    ]);
+    expect(screen.getByTestId("where").textContent).toBe(before);
+    expect(opened).toEqual([]);
+  });
+
+  it("saves sheet edits as the Memory page does, and closes only once they are settled", async () => {
+    rs.stubGlobal(
+      "fetch",
+      rs.fn(async () => new Response(JSON.stringify({ type: "file" }), { status: 200 })),
+    );
+    const outer = rs.fn();
+    withOutputs(
+      // Stands in for the message bubble, whose tap opens its menu.
+      <div onClick={outer}>
+        <ChatLink href="/memory/topics/health.md">health</ChatLink>
+      </div>,
+      [],
+    );
+    fireEvent.click(screen.getByText("health"));
+    outer.mockClear();
+    const sheetBrowser = await screen.findByTestId("memory-browser");
+    expect(sheetBrowser.dataset.autosave).toBe("on");
+    // A tap in the sheet stays out of the message under it.
+    fireEvent.click(sheetBrowser);
+    expect(outer).not.toHaveBeenCalled();
+
+    // Opening the Memory page in a new tab keeps the sheet and its edits.
+    fireEvent.click(screen.getByRole("link", { name: "memoryFile.openPage" }), { metaKey: true });
+    fireEvent.click(screen.getByRole("link", { name: "memoryFile.openPage" }), { ctrlKey: true });
+    expect(screen.getByTestId("memory-browser")).toBeTruthy();
+
+    browser.canLeave = false;
+    fireEvent.click(screen.getByRole("button", { name: "memoryFile.close" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByTestId("memory-browser")).toBeTruthy();
+
+    browser.canLeave = true;
+    fireEvent.click(screen.getByRole("button", { name: "memoryFile.close" }));
+    await waitFor(() => expect(screen.queryByTestId("memory-browser")).toBeNull());
   });
 
   it("opens a shown file's chip in the Outputs tab instead of saving it", async () => {
@@ -392,6 +491,36 @@ describe("ChatLink", () => {
     fireEvent.click(screen.getByRole("link", { name: "Issue Triage" }));
 
     expect(autoPlaceApp).toHaveBeenCalledWith("issue-triage", undefined, undefined, true);
+  });
+
+  it("opens the app tile for a same-origin absolute app URL", () => {
+    stubOrigin("https://staging.romeos.cc");
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+
+    renderInWorkspace(
+      <ChatLink href="https://staging.romeos.cc/apps/connector/setup?connector=gmail">go</ChatLink>,
+      { store, bus },
+    );
+    fireEvent.click(screen.getByText("go"));
+
+    expect(autoPlaceApp).toHaveBeenCalledWith("connector", "setup", { connector: "gmail" }, true);
+  });
+
+  it("leaves an app URL on another instance as an external link", () => {
+    stubOrigin("https://staging.romeos.cc");
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+
+    renderInWorkspace(
+      <ChatLink href="https://other-tenant.romeos.cc/apps/calendar">calendar</ChatLink>,
+      { store, bus },
+    );
+    const link = screen.getByText("calendar").closest("a") as HTMLAnchorElement;
+    fireEvent.click(link);
+
+    expect(autoPlaceApp).not.toHaveBeenCalled();
+    expect(link.getAttribute("target")).toBe("_blank");
   });
 
   it("preserves the in-app sub-route for a deep /apps link", () => {

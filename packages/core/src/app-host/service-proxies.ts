@@ -17,6 +17,13 @@
 
 import { callMain, isTransportUncertain } from "../apps/actions/worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
+import type { CreateRoutineResult, RoutineCreationService } from "../routines/create.js";
+import type {
+  RoutineControlOp,
+  RoutineControlResult,
+  RoutineControlService,
+} from "../routines/control.js";
 import type {
   AgentFeedback,
   FeedbackOutcome,
@@ -97,6 +104,11 @@ const BACKEND_TURN_RPC_TIMEOUT_MS = 2 * 60 * 60 * 1000;
  * RPC timeout above that HTTP budget; 150s provides 30s headroom and overrides
  * callMain's 30s default. */
 const NOTIFY_RPC_TIMEOUT_MS = 150 * 1000;
+/** A channel query may read the platform live, and a platform that allows
+ * few reads a minute holds one for its turn: Rome's Slack app waits up to a
+ * minute, then up to 15s for Slack. 90s covers both, over callMain's 30s
+ * default. */
+const CHANNEL_QUERY_RPC_TIMEOUT_MS = 90 * 1000;
 
 export class AppConnectionsProxy implements AppConnectionBrokerPort, AppConnectionsContextFactory {
   forApp(appId: string) {
@@ -157,6 +169,29 @@ export class RoutineEngineProxy implements RoutineEngine {
   }
 }
 
+/** Worker-side stand-in for core's routine creation: the main process creates
+ * the routine, for the app or agent running this worker's action. */
+export class RoutineCreationProxy implements RoutineCreationService {
+  async create(input: unknown): Promise<CreateRoutineResult> {
+    const context = actionExecutionContext.getStore();
+    return callMain<CreateRoutineResult>("routines.create", {
+      input,
+      caller: {
+        ...(context?.callerAppId ? { callerAppId: context.callerAppId } : {}),
+        ...(context?.agentName ? { agentName: context.agentName } : {}),
+      },
+    });
+  }
+}
+
+/** Worker-side stand-in for core's routine operations: the main process runs
+ * them, for the turn of this worker's action. */
+export class RoutineControlProxy implements RoutineControlService {
+  call(op: RoutineControlOp, input: unknown): Promise<RoutineControlResult> {
+    return callMain<RoutineControlResult>("routines.control", { op, input });
+  }
+}
+
 /**
  * Worker-side action existence and args checker backed by the main process's
  * eager ActionRegistry. The worker registry may contain lazy stubs whose modules
@@ -172,6 +207,11 @@ export class ActionRegistryProxy {
   async isExplicit(actionName: string): Promise<boolean> {
     const result = await callMain<{ explicit: boolean }>("actions.isExplicit", { actionName });
     return result.explicit;
+  }
+
+  async suggest(actionName: string): Promise<string | undefined> {
+    const result = await callMain<{ suggestion: string | null }>("actions.suggest", { actionName });
+    return result.suggestion ?? undefined;
   }
 
   /** Returns an error message when args fail the action's input schema, else null. */
@@ -323,11 +363,16 @@ export class ChannelsServiceProxy implements ChannelsService {
     query: ChannelMessageQuery = {},
   ): Promise<ChannelMessage[]> {
     return fromWire(
-      await callMain<WireChannelMessage[]>("channels.query", {
-        channel,
-        ...query,
-        ...(query.since ? { since: query.since.toISOString() } : {}),
-      }),
+      await callMain<WireChannelMessage[]>(
+        "channels.query",
+        {
+          channel,
+          ...query,
+          ...(query.since ? { since: query.since.toISOString() } : {}),
+          ...(query.until ? { until: query.until.toISOString() } : {}),
+        },
+        { timeoutMs: CHANNEL_QUERY_RPC_TIMEOUT_MS },
+      ),
     );
   }
 }
@@ -352,7 +397,7 @@ export class ChatSettingsControlProxy implements ChatSettingsControl {
 
 /**
  * Worker-side stand-in for the main-process `SystemUpgradeService`. The nightly
- * `system_upgrade` action runs in a worker, but the upgrade countdown hub and
+ * `system:system_upgrade` action runs in a worker, but the upgrade countdown hub and
  * its timers live in the main process — so the probe forwards to main, where
  * the real service checks Rome Cloud and opens the countdown.
  */
@@ -363,7 +408,7 @@ export class SystemUpgradeServiceProxy implements SystemUpgradeChecker {
 }
 
 /** Worker-side stand-in for the main-process backend-turn orchestrator. The
- * `resume_session` action runs in a worker (a routine-fired root action →
+ * `system:resume_session` action runs in a worker (a routine-fired root action →
  * subprocess), but running the turn + delivering its reply needs main-process
  * state (the AgentSession registry, channel adapters, the webchat runtime), so
  * the single `runAndDeliver` forwards there over one RPC. */
@@ -376,7 +421,7 @@ export class BackendTurnRunnerProxy implements BackendTurnRunner {
 }
 
 /** Worker-side stand-in for the main-process `NotifyClient`. The
- * `send_notification` action runs in a worker, but the durable instance token
+ * `system:send_notification` action runs in a worker, but the durable instance token
  * must never leave the main process — so the whole send (token read + the
  * `/api/notify` call) happens in main and only the `SendOutcome` returns here.
  * A worker→main transport failure leaves delivery genuinely uncertain (the
@@ -398,7 +443,7 @@ export class NotifyServiceProxy implements NotifyService {
 
 /** Worker-side stand-in for the live EmailAdapter's inbound entry point. The
  * real adapter (inbound secret, MailProvider, onMessage pipeline) lives in the
- * main process; `email_inbound` runs in a worker, so it forwards the raw deposit
+ * main process; `system:email_inbound` runs in a worker, so it forwards the raw deposit
  * + HMAC to main where the adapter verifies and dispatches it. */
 export class EmailInboundControlProxy implements EmailInboundControl {
   async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {

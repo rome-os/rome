@@ -12,6 +12,9 @@ import {
   type RecapSettings,
 } from "../../../../rome_apps/system/src/settings";
 import type { RomeCreditsResponse, RomeCreditsView } from "@rome/api-types/rome-credits";
+import type { DefaultModelProvider } from "@rome/api-types/chat";
+import { hasUsableRomeCredits } from "@/components/rome-credits-row";
+import type { DefaultProviderState, ProviderOutage } from "@/hooks/use-default-provider";
 import type {
   AIToolStatus,
   AnthropicCompatibleConfiguredSummary,
@@ -95,6 +98,39 @@ const romeCredits: RomeCreditsView = {
   enabled: true,
   models: ["gpt-6.1-sol", "gpt-6-luna", "gpt-5.6-terra"],
 };
+
+// ── Default provider ───────────────────────────────────
+
+let defaultProvider: DefaultModelProvider | null = "anthropic";
+let defaultNote: DefaultProviderState["note"] = undefined;
+
+const defaultProviderState = (): DefaultProviderState => {
+  const anthropic = aiToolStatus.claude?.loggedIn === true;
+  const openai = aiToolStatus.codex?.loggedIn === true;
+  // Rome credits run chats only while no AI account is logged in.
+  const romeCreditsUsable = hasUsableRomeCredits(romeCredits);
+  return {
+    provider: defaultProvider,
+    signedIn: { anthropic, openai, rome_credits: !anthropic && !openai && romeCreditsUsable },
+    ...(defaultNote ? { note: defaultNote } : {}),
+    followingChats: 4,
+    romeCreditsUsable,
+  };
+};
+
+/** The outage the provider cards chat's notice points at. */
+export const MOCK_OUTAGE_ID = "mock-outage-claude-quota";
+
+const outages: ProviderOutage[] = [
+  {
+    id: MOCK_OUTAGE_ID,
+    provider: "anthropic",
+    reason: "quota",
+    until: fromNow(2 * HOUR),
+    chatIds: ["mock-chat-lisbon", "mock-task-question"],
+    since: fromNow(-20 * MINUTE),
+  },
+];
 
 // ── Access control ─────────────────────────────────────
 
@@ -387,8 +423,32 @@ export const settingsHandlers = [
     } satisfies ComputerUseStatus),
   ),
   http.get("/api/ai-tools/status", () =>
-    HttpResponse.json({ ...aiToolStatus, anthropicCompatible: configuredAnthropic }),
+    HttpResponse.json({
+      ...aiToolStatus,
+      anthropicCompatible: configuredAnthropic,
+      defaultProvider: defaultProviderState(),
+    }),
   ),
+  http.get("/api/ai-tools/default", () =>
+    HttpResponse.json({ defaultProvider: defaultProviderState() }),
+  ),
+  http.put("/api/ai-tools/default", async ({ request }) => {
+    const body = (await request.json()) as {
+      provider: DefaultModelProvider;
+      moveExisting?: boolean;
+    };
+    if (!defaultProviderState().signedIn[body.provider]) {
+      return HttpResponse.json({ error: "Not signed in" }, { status: 409 });
+    }
+    defaultProvider = body.provider;
+    defaultNote = undefined;
+    return HttpResponse.json({ defaultProvider: defaultProviderState() });
+  }),
+  http.delete("/api/ai-tools/default/note", () => {
+    defaultNote = undefined;
+    return HttpResponse.json({ defaultProvider: defaultProviderState() });
+  }),
+  http.get("/api/ai-tools/provider-outages", () => HttpResponse.json({ outages })),
   http.get("/api/ai-tools/rome-credits", () =>
     HttpResponse.json({ credits: romeCredits } satisfies RomeCreditsResponse),
   ),

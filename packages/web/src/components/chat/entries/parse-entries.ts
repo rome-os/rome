@@ -32,6 +32,18 @@ const REQUIRED_FIELDS = {
   interaction_result: { toolUseId: "string" },
   error: { error: "string" },
   quota_switch: { from: "string", to: "string", model: "string" },
+  provider_failure: {
+    provider: "string",
+    reason: "string",
+    alternatives: "object",
+    chatId: "string",
+  },
+  provider_outage: {
+    outageId: "string",
+    provider: "string",
+    reason: "string",
+    chatIds: "object",
+  },
   task_chat: { chatId: "string", title: "string" },
   connect_card: { service: "string", label: "string", connect: "object" },
   reply_to: { messageId: "string", author: "string", text: "string" },

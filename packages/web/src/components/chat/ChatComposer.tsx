@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
 import { ChatApiError, createProject as apiCreateProject, saveSetting } from "@/lib/chat-api";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
+import { useSignedInProviders } from "@/hooks/use-default-provider";
 import { usePeople } from "@/hooks/use-people";
 import { useChatLocations } from "@/hooks/use-chat-locations";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
@@ -71,11 +72,13 @@ import {
   clearNewChatDraft,
   currentAuthEpoch,
   loadNewChatDraft,
+  type NewChatDraft,
   saveNewChatDraft,
 } from "@/lib/new-chat-draft-storage";
 import { randomUUID } from "@/lib/random-uuid";
 import { chatSearchShortcutForPlatform } from "@/lib/chat-search-shortcut";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
+import type { DictationStop } from "@/lib/voice-input/dictation";
 
 export interface ChatComposerSnapshot {
   text: string;
@@ -100,8 +103,6 @@ export interface ChatComposerSnapshot {
   // The message this turn replies to, sent as `replyToMessageId` (and
   // `replyQuote` for a selection).
   replyTo?: ReplyTarget;
-  // The root of the chat thread the chat is focused on, sent as `chatThread`.
-  chatThread?: string;
 }
 
 export interface ChatComposerSendControls {
@@ -325,6 +326,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   );
 
   const { data: settings } = useSettings();
+  const signedInProviders = useSignedInProviders();
   const { data: peopleData } = usePeople();
   const invalidateSettings = useInvalidateSettings();
   const people = peopleData ?? [];
@@ -399,6 +401,29 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   const [connectOnCreate, setConnectOnCreate] = useState(false);
   const [pendingConnectPath, setPendingConnectPath] = useState<string | null>(null);
 
+  const newChatDraft = useCallback(
+    (text: string): NewChatDraft => ({
+      version: 1,
+      text,
+      projectPath: draftProjectName,
+      agentMention: draftAgentMention,
+      skill: draftSkill,
+      personaId: selectedPersonId,
+      ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
+    }),
+    [draftProjectName, draftDeviceFolder, draftAgentMention, draftSkill, selectedPersonId],
+  );
+  const { keep: keepChatDraft } = draft;
+  const keepDraft = useCallback(
+    (text: string, stop?: DictationStop) => {
+      keepChatDraft(text, stop);
+      if (persistNewChatDraft && !sessionCreatedRef.current) {
+        saveNewChatDraft(newChatDraft(text), authEpoch);
+      }
+    },
+    [keepChatDraft, persistNewChatDraft, newChatDraft, authEpoch],
+  );
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const voice = useVoiceInput({
     textareaRef,
@@ -406,7 +431,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     setValue: setInputText,
     notice: draft.notice,
     setNotice: draft.setNotice,
-    keepNotice: draft.keepNotice,
+    keepDraft,
     onSend: () => void runSendRef.current(),
   });
   const runSendRef = useRef<() => Promise<void>>(async () => {});
@@ -495,34 +520,16 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     if (initialAgentMention && !agentMentionLocked) setDraftAgentMention(initialAgentMention);
   }, [initialAgentMention, agentMentionLocked]);
 
+  const previewText = voice.preview?.value;
   useEffect(() => {
     if (!persistNewChatDraft || sessionCreatedRef.current) return;
     if (skipNextDraftSaveRef.current) {
       skipNextDraftSaveRef.current = false;
       return;
     }
-    saveNewChatDraft(
-      {
-        version: 1,
-        text: inputText,
-        projectPath: draftProjectName,
-        agentMention: draftAgentMention,
-        skill: draftSkill,
-        personaId: selectedPersonId,
-        ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
-      },
-      authEpoch,
-    );
-  }, [
-    persistNewChatDraft,
-    authEpoch,
-    inputText,
-    draftProjectName,
-    draftDeviceFolder,
-    draftAgentMention,
-    draftSkill,
-    selectedPersonId,
-  ]);
+    // While voice input is on, the draft's text is the field's with the heard words in.
+    saveNewChatDraft(newChatDraft(previewText ?? inputText), authEpoch);
+  }, [persistNewChatDraft, authEpoch, inputText, previewText, newChatDraft]);
 
   useLayoutEffect(() => {
     if (!persistNewChatDraft) return;
@@ -768,11 +775,10 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       failedSendRef.current = { inputId, text, uploads, skill };
       // Before the returns below: the field may be gone, but the chat keeps it.
       if (clearsOptimistically) sendEnded(persistNewChatDraft ? rawText : text, false);
-      if (
-        persistNewChatDraft &&
-        (!textareaRef.current || (clearsOptimistically && textareaRef.current.value))
-      )
-        return;
+      // Words dictated while the send was pending are newer than what failed,
+      // though they are not in the field's value until listening ends.
+      const newer = Boolean(textareaRef.current?.value) || voiceActiveRef.current;
+      if (persistNewChatDraft && (!textareaRef.current || (clearsOptimistically && newer))) return;
       // A failed turn in an adopted session belongs there, not in New chat.
       if (persistNewChatDraft && !sessionCreatedRef.current) {
         saveNewChatDraft(
@@ -789,7 +795,15 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
         );
       }
       if (clearsOptimistically) {
-        setInputText(persistNewChatDraft ? rawText : text);
+        // Text typed while the send was pending survives a failure; only an
+        // empty field takes the failed text back.
+        setInputText((current) =>
+          current === "" && !voiceActiveRef.current
+            ? persistNewChatDraft
+              ? rawText
+              : text
+            : current,
+        );
         setPendingUploads(uploads);
         setDraftSkill(skill);
         if (snapshot.replyTo) replyDraft?.restore(snapshot.replyTo);
@@ -1066,11 +1080,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                       />
                     }
                   />
-                  <VoiceInputSpokenText
-                    textareaRef={textareaRef}
-                    value={inputText}
-                    spoken={voice.spoken}
-                  />
+                  <VoiceInputSpokenText textareaRef={textareaRef} preview={voice.preview} />
                 </div>
               }
             />
@@ -1190,6 +1200,7 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
                     : void updateLargeModelSelection(next)
                 }
                 disabled={uploadInFlight}
+                signedIn={signedInProviders}
               />
             )}
             {textOnly ? null : (
@@ -1214,7 +1225,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
             {voice.available && (voice.active || !uploadInFlight) ? (
               <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
             ) : null}
-            {isStreaming && onStop && (
+            {/* Hidden while voice input is on, so its square is never mistaken for voice input's. */}
+            {isStreaming && onStop && !voice.active && (
               <Button
                 type="button"
                 variant="outline"

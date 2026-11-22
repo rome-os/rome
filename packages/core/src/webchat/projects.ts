@@ -207,7 +207,7 @@ interface WebchatSessionProjectRef {
 
 /**
  * Resolve the absolute working dir for a *system-initiated continuation* — a
- * deferred `resume_session`, an approval resume, a timer — so the Claude Agent
+ * deferred `system:resume_session`, an approval resume, a timer — so the Claude Agent
  * SDK finds the per-cwd transcript (`~/.claude/projects/<enc-cwd>/<id>.jsonl`)
  * in the same project the conversation started in. This mirrors what the inbound
  * webchat route already does (resolve the session's project → its workspace dir);

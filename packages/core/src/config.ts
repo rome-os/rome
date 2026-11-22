@@ -1,7 +1,6 @@
 import "dotenv/config";
 import { z } from "zod";
 import { DEFAULT_SQLITE_PATH } from "./db/index.js";
-import { desktopSlot, WECHAT_DEFAULT_DISPLAY, wechatUserDisplay } from "./desktops/desktops.js";
 
 /**
  * A relay drain URL must be a parseable ws/wss URL pointing at a `/c/{mailboxId}`
@@ -46,15 +45,15 @@ const configSchema = z.object({
   // Read as at least the limit above.
   sessionHandoffHardContextTokens: z.coerce.number().int().min(50_000).default(180_000),
 
-  // Personal WeChat is opt-in and runs as the Rome service user.
-  wechatUserEnabled: z
-    .enum(["true", "false"])
-    .default("false")
-    .transform((value) => value === "true"),
-
   // System upgrade — how long the consent countdown runs before proceeding on
   // silence. Fits inside the reserved 3:00–3:30am nightly window.
   systemUpgradeCountdownMinutes: z.coerce.number().int().positive().default(10),
+  // Where runtime releases keep their release-notes.json, read as
+  // `<url>/v<version>/release-notes.json`. The upgrade dialog shows them.
+  releaseNotesUrl: z
+    .string()
+    .regex(/^https?:\/\//, "must be an http:// or https:// URL")
+    .default("https://github.com/rome-os/rome/releases/download"),
 
   // How long a question card or an approval in a Concierge task chat keeps
   // the task waiting for its owner. After it the task ends for no response
@@ -121,6 +120,15 @@ const configSchema = z.object({
   // Observability
   otelExporterEndpoint: z.string().optional(),
 
+  // Slack's origin for Rome's own Slack app connection (`slack_app`): its Web
+  // API calls go to `<origin>/api/<method>`. A test environment points it at a
+  // stand-in Slack.
+  slackApiBaseUrl: z
+    .string()
+    .url()
+    .default("https://slack.com")
+    .transform((value) => new URL(value).origin),
+
   // Webhook relay drainer. Absent unless explicitly configured. When present, a
   // persistent WS client drains buffered webhooks from the Cloudflare relay and
   // replays them into the target app handler. Core stays app-neutral: this holds
@@ -157,6 +165,9 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   if (env.SYSTEM_UPGRADE_COUNTDOWN_MINUTES) {
     raw.systemUpgradeCountdownMinutes = env.SYSTEM_UPGRADE_COUNTDOWN_MINUTES;
   }
+  if (env.ROME_RELEASE_NOTES_URL) {
+    raw.releaseNotesUrl = env.ROME_RELEASE_NOTES_URL;
+  }
   if (env.CONCIERGE_TASK_WAIT_EXPIRY_MINUTES) {
     raw.conciergeTaskWaitExpiryMinutes = env.CONCIERGE_TASK_WAIT_EXPIRY_MINUTES;
   }
@@ -186,9 +197,6 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   }
   if (env.SESSION_HANDOFF_HARD_CONTEXT_TOKENS) {
     raw.sessionHandoffHardContextTokens = env.SESSION_HANDOFF_HARD_CONTEXT_TOKENS;
-  }
-  if (env.WECHAT_USER_ENABLED !== undefined) {
-    raw.wechatUserEnabled = env.WECHAT_USER_ENABLED;
   }
   if (env.ROME_ACTION_MAX_WORKERS) {
     raw.actionWorkerMaxProcesses = env.ROME_ACTION_MAX_WORKERS;
@@ -236,6 +244,8 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
     raw.otelExporterEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT;
   }
 
+  if (env.SLACK_API_BASE_URL) raw.slackApiBaseUrl = env.SLACK_API_BASE_URL;
+
   // Webhook relay drainer. Build the object only when a RELAY_DRAIN_* var is
   // set, then let the schema enforce that BOTH fields are present — a partial
   // credential fails loud rather than half-configuring. The delivery target is
@@ -258,25 +268,6 @@ export function loadConfig(): Config {
   if (!result.success) {
     const formatted = z.prettifyError(result.error);
     throw new Error(`Invalid configuration:\n${formatted}`);
-  }
-  // WeChat's own desktop has one rule, shared with the runtime and the desktop
-  // proxy; a bad value fails boot here rather than when WeChat first starts.
-  // Without this, the runtime would read a missing row as "no own desktop" and
-  // quietly run the client beside Chrome.
-  try {
-    wechatUserDisplay(process.env);
-  } catch (error) {
-    throw new Error(`Invalid configuration:\n${(error as Error).message}`);
-  }
-  if (process.env.WECHAT_USER_ENABLED === "true" && !desktopSlot("wechat")) {
-    const shared = process.env.DISPLAY || ":99";
-    // wechatUserDisplay has already rejected a WECHAT_USER_DISPLAY equal to
-    // DISPLAY, so a clash here is the default display.
-    throw new Error(
-      !process.env.WECHAT_USER_DISPLAY && shared === WECHAT_DEFAULT_DISPLAY
-        ? `Invalid configuration:\nWeChat's desktop defaults to ${WECHAT_DEFAULT_DISPLAY}, which is the shared desktop. Set WECHAT_USER_DISPLAY to a display other than DISPLAY (${shared}).`
-        : "Invalid configuration:\nWeChat's desktop needs ROME_WECHAT_VNC_PORT and ROME_WECHAT_NOVNC_PORT to be integers from 1 to 65535",
-    );
   }
 
   return result.data;

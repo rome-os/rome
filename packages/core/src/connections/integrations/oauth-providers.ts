@@ -3,25 +3,22 @@
 // Each provider is brokered by Rome Cloud OAuth: the guardian delegates access by
 // clicking Connect, Rome Cloud runs the provider authorization, and the instance
 // redeems a handoff for an OAuthTokenBundle. Grant is route-driven
-// (`romeCloudOAuth` — see schemes.ts), and renew() is "needs-fix" until a
-// Rome Cloud refresh exchange exists.
+// (`romeCloudOAuth` — see schemes.ts). Google, Shopify and Microsoft renew
+// through Cloud.
 //
-// This phase migrates ONLY the connection state into the registry: the grant
-// ledger becomes the system of record for whether a provider is connected, while
-// the legacy consumers (the tmpfs token files written at connect time, the
-// gh/git shell auth, `connector_proxy`'s direct proxy path) are untouched and
-// keep reading the token file. The Act seam (registry-built
-// Actors) is a follow-up — `capabilities` is deliberately empty, which the
-// registry supports (`capabilities` is `Partial<…>`); a capability-less
-// connection still carries full grant state.
+// Google and Microsoft keep mail credentials in Core-only Actors (Gmail,
+// Outlook) so shell tools and apps cannot bypass send approval with a raw token. Other providers keep their
+// token-file consumers. All providers share the registry's grant lifecycle.
 //
 // Grant names follow the grant table: grants are about grants, not
-// token count. GitHub and Google each mint one user credential → one `user`
+// token count. GitHub, Google and Microsoft each mint one user credential → one `user`
 // grant. Slack's single OAuth dance mints TWO tokens (bot + user) that live
 // together in ONE `workspace` grant's material. Shopify mints one offline token
 // for a store, not a person → one `store` grant.
 
 import { z } from "zod";
+import { createGmailActor } from "../gmail/api.js";
+import { createOutlookActor } from "../outlook/api.js";
 import {
   clearGithubShellIntegrationForProvider,
   syncGithubShellIntegrationForProvider,
@@ -35,6 +32,7 @@ import { clearProviderTokenFile, syncProviderTokenFile } from "../oauth/provider
 import { romeCloudOAuth } from "../schemes.js";
 import type { SetupFn } from "../setup/types.js";
 import type {
+  Actor,
   ConnectionDescriptor,
   Credential,
   GrantCustody,
@@ -120,11 +118,25 @@ export const shopifyGrantProfileSchema = z
   .strict();
 export type ShopifyGrantProfile = z.infer<typeof shopifyGrantProfileSchema>;
 
+/** Microsoft's grant profile: OIDC identity from the ID token. Like Google,
+ *  no handle; Microsoft serves no avatar URL. */
+export const microsoftGrantProfileSchema = z
+  .object({
+    /** OIDC `sub`, pairwise to Rome's Microsoft app. */
+    subject: identityField,
+    displayName: identityField,
+    email: identityField,
+    scopes: scopesField,
+  })
+  .strict();
+export type MicrosoftGrantProfile = z.infer<typeof microsoftGrantProfileSchema>;
+
 export const OAUTH_PROVIDER_PROFILE_SCHEMAS = {
   github: githubGrantProfileSchema,
   slack: slackGrantProfileSchema,
   google: googleGrantProfileSchema,
   shopify: shopifyGrantProfileSchema,
+  microsoft: microsoftGrantProfileSchema,
 } as const;
 
 /** Any kind-specific OAuth grant profile, for OAuth-layer code that fans out
@@ -133,7 +145,8 @@ export type OAuthProviderGrantProfile =
   | GithubGrantProfile
   | SlackGrantProfile
   | GoogleGrantProfile
-  | ShopifyGrantProfile;
+  | ShopifyGrantProfile
+  | MicrosoftGrantProfile;
 
 /** Validate a record against `provider`'s own schema. Fail-closed: a value that
  *  doesn't match throws (ZodError) — callers never see a partial profile. */
@@ -150,6 +163,7 @@ export const OAUTH_PROVIDER_GRANTS: Record<OAuthProvider, GrantName> = {
   google: "user",
   slack: "workspace",
   shopify: "store",
+  microsoft: "user",
 };
 
 // Pure display mappings: parsed profile (plain data) in, frozen display
@@ -198,6 +212,15 @@ export function toShopifyDisplay(profile: ShopifyGrantProfile): ProfileDisplay {
   });
 }
 
+export function toMicrosoftDisplay(profile: MicrosoftGrantProfile): ProfileDisplay {
+  return Object.freeze({
+    displayName: profile.displayName,
+    handle: undefined,
+    email: profile.email,
+    avatarUrl: undefined,
+  });
+}
+
 /** Each connection kind revives a stored record by re-running its OWN parse, then
  *  mapping the parsed plain data through its pure display function. A record
  *  that no longer matches the schema throws instead of displaying sparsely. */
@@ -206,6 +229,7 @@ const OAUTH_PROVIDER_REVIVERS: Record<OAuthProvider, (record: ProfileRecord) => 
   slack: (record) => toSlackDisplay(slackGrantProfileSchema.parse(record)),
   google: (record) => toGoogleDisplay(googleGrantProfileSchema.parse(record)),
   shopify: (record) => toShopifyDisplay(shopifyGrantProfileSchema.parse(record)),
+  microsoft: (record) => toMicrosoftDisplay(microsoftGrantProfileSchema.parse(record)),
 };
 
 /**
@@ -229,12 +253,19 @@ function makeOAuthProviderCustody(provider: OAuthProvider): GrantCustody {
   };
 }
 
+/** Providers whose grant only a Core-only mail Actor may use. */
+const MAIL_ACTORS: Partial<Record<OAuthProvider, (credential: Credential) => Actor>> = {
+  google: createGmailActor,
+  microsoft: createOutlookActor,
+};
+
 /** Human-facing provider labels for the setup's success view. */
 const OAUTH_PROVIDER_LABELS: Record<OAuthProvider, string> = {
   github: "GitHub",
   slack: "Slack",
   google: "Google",
   shopify: "Shopify",
+  microsoft: "Microsoft",
 };
 
 /**
@@ -354,10 +385,8 @@ export function makeOAuthProviderSetup(
 }
 
 /**
- * Build a provider's ConnectionDescriptor: one Rome Cloud-OAuth grant, no
- * capabilities, and grant-state-driven custody of its out-of-process artifacts
- * (the tmpfs token file + gh/git shell auth). The descriptor holds the provider's
- * connection/grant state (imported by the oauth redeem route); Actor/Watcher capabilities land in follow-ups.
+ * Build one Rome Cloud-OAuth grant. Google and Microsoft use Core-only mail
+ * Actors; the other providers keep grant-state-driven token-file and shell custody.
  *
  * `setupDeps` attaches the setup (the redirect cutover) to the
  * grant's scheme. Omitted in tests that exercise connection state only;
@@ -379,6 +408,6 @@ export function makeOAuthProviderDescriptor(
     // the installer in its workspace, and for Shopify the store.
     accountIdOf: (record) => (typeof record.subject === "string" && record.subject) || null,
     custody: makeOAuthProviderCustody(provider),
-    capabilities: {},
+    capabilities: MAIL_ACTORS[provider] ? { actor: { build: MAIL_ACTORS[provider] } } : {},
   };
 }

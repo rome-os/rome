@@ -17,6 +17,8 @@ import {
 } from "./db.js";
 import * as schema from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
+import type * as connections from "../connections/message.js";
+import { legacyMessage } from "../connections/test-fixtures.js";
 import { givenGrant } from "../connections/connection.js";
 import type { GrantValue } from "../connections/grant.js";
 import type { Credential } from "../connections/types.js";
@@ -68,6 +70,7 @@ import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.j
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
 import { EventBus } from "../events/event-bus.js";
 import { RelayDrainer } from "../relay/drainer.js";
+import { ReleaseNotes } from "../instance/system-upgrade/release-notes.js";
 import { SystemUpgradeService } from "../instance/system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type {
@@ -79,8 +82,9 @@ import type {
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
-import { PeopleRepository } from "../db/repositories/people.js";
-import { GuardianLinkCodes } from "../people/guardian-link-code.js";
+import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
+import type { PeopleRepository } from "../people/model/people-repository.js";
+import { GuardianLinkCodes } from "../people/link-code/index.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { LinkedInStoreRepository } from "../db/repositories/linkedin-store.js";
 import { WhatsAppStoreRepository } from "../db/repositories/whatsapp-store.js";
@@ -229,7 +233,7 @@ export interface SentMessage {
 export class FakeTransport {
   /** Every message sent and accepted, oldest first. */
   readonly sentMessages: SentMessage[] = [];
-  private readonly listeners = new Set<(message: ChannelMessage) => Promise<void>>();
+  private readonly listeners = new Set<(message: connections.Message) => Promise<void>>();
 
   constructor(readonly channel = "test") {}
 
@@ -241,7 +245,7 @@ export class FakeTransport {
   }
 
   /** What the Connection's talker delivers through. */
-  listen(listener: (message: ChannelMessage) => Promise<void>): () => void {
+  listen(listener: (message: connections.Message) => Promise<void>): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -254,7 +258,9 @@ export class FakeTransport {
    */
   async receive(overrides: Partial<ChannelMessage> = {}): Promise<ChannelMessage> {
     const message = buildMessage({ channel: this.channel, ...overrides });
-    await Promise.all([...this.listeners].map((listener) => listener(message)));
+    // The talker hands over the Connections message apps receive this as.
+    const heard = legacyMessage(message);
+    await Promise.all([...this.listeners].map((listener) => listener(heard)));
     return message;
   }
 }
@@ -286,7 +292,7 @@ export function createTestConnections(
       id,
       connectionKind,
       withTalker: (call: (talker: TestTalker) => unknown) => call(live),
-      hearTalker: (handler: (message: ChannelMessage) => Promise<void>) =>
+      hearTalker: (handler: (message: connections.Message) => Promise<void>) =>
         transport.listen(handler),
       isUnlocked: (capability: string) => capability === "chat",
       status: () => ({ chat: { state: "unlocked" } }),
@@ -525,7 +531,7 @@ export async function buildTestDeps(
   }
 
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
-  const peopleRepo = new PeopleRepository(db);
+  const peopleRepo = new DrizzlePeopleRepository(db);
   const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
   const whatsAppStoreRepo = new WhatsAppStoreRepository(db);
   const whatsAppAccounts = new WhatsAppAccounts(whatsAppStoreRepo);
@@ -836,14 +842,13 @@ export async function buildTestDeps(
     actionRegistry,
     agentLoader,
     agentsByName: () => agentsByLegacyName(agentLoader.list(), artifactIdentity.legacyBindings),
-    accountListening: { changed: () => {} },
     skillCatalog,
     appsRoot: join(appDomainRoot, "apps"),
     agentSessionManager,
     sessionOpeningFor: sessionOpeningFor({ channelSurface: testChannelSurface }),
     conversationTitleGenerator: {
       async generate(firstMessage) {
-        return normalizeConversationTitle(firstMessage) ?? "New Chat";
+        return normalizeConversationTitle(firstMessage) ?? "New chat";
       },
     },
     agentRunner,
@@ -870,7 +875,7 @@ export async function buildTestDeps(
         devices: [],
       }),
     },
-    wechatApp: null,
+    connectionKinds: [],
     computerUse: {
       getStatus: async () => ({
         daemon: { status: "unavailable", version: null },
@@ -896,6 +901,7 @@ export async function buildTestDeps(
     // Inert in tests: checkAndOffer is never invoked here, and the Rome Cloud
     // client self-rejects on the versionless test boot if it ever were.
     systemUpgradeService: new SystemUpgradeService({ countdownMs: 600_000 }),
+    releaseNotes: new ReleaseNotes({ baseUrl: "https://release-notes.invalid", cacheDir: null }),
     isCloudAuthEnabled: async () => false,
     loginUsage: { recordLogin: () => {} },
     transports,

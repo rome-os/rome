@@ -2,17 +2,21 @@
  * Message parts only the host may author. A routine card can create, pause and
  * delete routines, so only the webchat drain writes one (directly to the
  * repository). Every outbound path that stores sender-supplied parts —
- * `send_message`, `channels.send`, a People send — strips them, so a forged card
+ * `system:send_message`, `channels.send`, a People send — strips them, so a forged card
  * can't bind those controls to a routine or schedule an arbitrary action. A
  * connect card makes the dashboard open a link and call an API path it carries,
  * so only the Concierge's own tool may write one. A widget mounts an app's code
  * with the props it carries, so only the webchat drain writes one, for the app
  * that owns the action that showed it. A card the agent waits on is a widget
  * too, and an event on it can answer the agent, so only the drain writes one.
+ * A provider failure card and an outage notice change the default provider
+ * and resend turns, so only the host writes them.
  */
 const HOST_ONLY_PART_TYPES: ReadonlySet<string> = new Set([
   "routine_draft_card",
   "quota_switch",
+  "provider_failure",
+  "provider_outage",
   "connect_card",
   "widget",
   "pending_interaction",

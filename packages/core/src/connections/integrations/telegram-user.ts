@@ -7,7 +7,7 @@
 // below): API credentials + phone number → phone code → optional 2FA password,
 // whose terminal return is the single ledger write of credential material +
 // identity profile. The transport core — connect, NewMessage streaming, the
-// inbound `ChannelMessage`, media download, send — is
+// inbound `Message`, media download, send — is
 // `TelegramUserAdapter` (packages/core/src/connections/kinds/telegram-user/telegram-user.ts), wrapped
 // here so the runtime's grant-epoch lifecycle and fault→grant-state mapping
 // drive it. The transport already speaks the channel's record, so inbound and
@@ -55,6 +55,7 @@ import type {
   Talker,
 } from "../types.js";
 import { directoryCursorOffset, directoryPage } from "./talk-features.js";
+import { SESSION_RESET_ONLY_CHAT_RULES } from "@rome/api-types/chat-rules";
 
 // The `session` grant's profile — the non-secret half of the user-account login
 // (who the account is, its phone, when it connected). Declared next to the
@@ -365,6 +366,9 @@ export function makeTelegramUserDescriptor(deps: TelegramUserDeps = {}): Connect
     accountIdOf: (record) => (typeof record.userId === "string" && record.userId) || null,
     link: "delegate",
     grant: "session",
+    // Today's behaviour, stated: chats wake on every message the platform
+    // delivers, and only the session reset is the guardian's to set.
+    chatRules: SESSION_RESET_ONLY_CHAT_RULES,
     auth: session,
     capabilities: {
       talker: {

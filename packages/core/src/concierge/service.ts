@@ -1,4 +1,4 @@
-import type { SystemInputSource } from "@rome/api-types/trace-segments";
+import type { AgentPlan, SystemInputSource } from "@rome/api-types/trace-segments";
 import { automatedInputLabel } from "./automated-input.js";
 // Concierge: texting-style chats that hand work to task chats. One Concierge
 // talks in a main chat and in any topic chats its owner starts, all sharing one
@@ -14,7 +14,6 @@ import {
   type MessageStatusEvent,
 } from "@rome/api-types/concierge";
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
-import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
 import type { Body, SendResult } from "../chats/send.js";
 import { DASHBOARD_PLATFORM } from "../webchat/dashboard-account.js";
@@ -27,13 +26,14 @@ import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
 import type { AgentTurnFailedBeforeStart } from "../agent/index.js";
 import type { Sessions } from "../agent/index.js";
 import {
-  codexStrongSelection,
+  followingSelection,
+  isModelSelectionId,
   MODEL_SELECTIONS,
+  providerOfDefault,
   selectionOfStrength,
+  type DefaultProviders,
   type ModelStrength,
   sameProviderTarget,
-  soleProviderAtUsageLimit,
-  usageSwitchTarget,
   type ModelAccounts,
   type ModelSelectionId,
   type SessionRepository,
@@ -45,7 +45,7 @@ import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
 import { type ConciergeTasks, stopHolds } from "./tasks.js";
 import type { TaskSchedules } from "./task-schedule.js";
-import { taskChatPlace } from "./task-chat.js";
+import { type TaskChatMessages, taskChatPlace } from "./task-chat.js";
 import type { TaskChecks } from "./task-checks.js";
 import { RESOLVED_BY_STOP, type TurnDown } from "./approval-expiry.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
@@ -54,7 +54,6 @@ import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../w
 import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
 import type { ChatCardSettledEvent, InputsSettledEvent } from "@rome/api-types/chat";
 import { openCards, settledCard, type TaskCardSources } from "./task-cards.js";
-import { defaultReplyTarget } from "./reply-target.js";
 import {
   CONCIERGE_AGENT_ID,
   canOpenChat,
@@ -66,8 +65,6 @@ import {
 import { ALL_OWNERS_SERVED, type ConciergeOwners, type OwnerProfile } from "./owners.js";
 import { guardianNow } from "./alerts.js";
 import { resolveGuardianTimezone } from "../instance/timezone.js";
-
-import { ambiguousQuota, type FailoverReason } from "../agent/index.js";
 
 /** The models a Concierge chat started on before it ran on the strongest. */
 const OLD_DEFAULTS: ReadonlySet<ModelSelectionId> = new Set([
@@ -81,12 +78,8 @@ const log = createLogger("concierge");
 /** What a digest adds about a chat's tasks, and which notes it lists. */
 export interface DigestTaskNotes {
   text: string;
-  /** Tasks whose scheduled run finished with nothing to say. */
-  passive: string[];
   /** Tasks that ended for no response. */
   noResponse: string[];
-  /** Rows a day old with no task chat started and nothing scheduled. */
-  unstarted: string[];
 }
 
 /** How long a stopped task's failed approval turn-down waits to be tried again, doubling up to the most. */
@@ -195,6 +188,8 @@ export interface TaskChats {
   isBusy(chatId: string): boolean;
   /** The tool the chat's running turn is in now, as the trace names it, or null. */
   openTool(chatId: string): string | null;
+  /** The plan of the chat's running turn, as its Plan card shows it, or null for none. */
+  turnPlan(chatId: string): AgentPlan | null;
   /**
    * Calls `listener` with the chat's id whenever it starts or stops running
    * a turn, or its running turn enters or leaves a tool; the latter alone
@@ -241,11 +236,12 @@ export interface ConciergeDeps {
     | "awaitingGuardianSince"
     | "openWaitsOf"
     | "taskCardsOf"
+    | "widgetMessage"
     | "ownerSpokeAt"
     | "archiveSessionIn"
+    | "unarchiveSession"
     | "deleteSessionIn"
     | "deleteSession"
-    | "taskChatPartMessages"
   >;
   /** The todo list. */
   tasks: ConciergeTasks;
@@ -253,10 +249,12 @@ export interface ConciergeDeps {
   checks?: TaskChecks;
   /** Each task's repeating schedule. Absent, no task has one. */
   schedules?: TaskSchedules;
-  approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved">;
-  messages: Pick<MessageRepository, "recent" | "before">;
+  approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved" | "findById">;
+  messages: TaskChatMessages;
   sessionRepository: Pick<SessionRepository, "current">;
   accounts: Pick<ModelAccounts, "read">;
+  /** The default provider. Absent, none is set, and chats keep their models. */
+  defaults?: Pick<DefaultProviders, "current">;
   agentSessionManager: Pick<Sessions, "find">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
@@ -299,11 +297,6 @@ export interface SystemTurnOptions {
 }
 
 /**
- * The task a `defer` wake-up is for, from the `task_id` of the `<defer_note>`
- * line Rome writes ahead of the note (routines/defer.ts). Only the first such
- * line counts: what the note itself says names nothing.
- */
-/**
  * The check a `defer` wake-up is, named as Rome's headline right above its
  * `<defer_note>` line names it ("⏰ Time's up: <name>"), or null for a turn
  * that is no wake-up.
@@ -324,9 +317,15 @@ function checkSourceOf(prompt: string): { inputSource?: SystemInputSource; input
   return { inputSource, inputLabel: automatedInputLabel(inputSource) };
 }
 
+/**
+ * The task a `defer` wake-up is for, from the `chat_id` of the `<defer_note>`
+ * line Rome writes ahead of the note (routines/defer.ts): the task is its task
+ * chat. Only the first such line counts: what the note itself says names
+ * nothing.
+ */
 function deferTaskIds(prompt: string): string[] {
   const header = prompt.match(/^<defer_note [^\n]*$/m)?.[0];
-  const id = header?.match(/\btask_id="([^"]+)"/)?.[1];
+  const id = header?.match(/\bchat_id="([^"]+)"/)?.[1];
   return id ? [id.replaceAll("&quot;", '"').replaceAll("&lt;", "<").replaceAll("&amp;", "&")] : [];
 }
 
@@ -580,6 +579,15 @@ export class ConciergeService {
     return chat ? ownerOf(chat) : null;
   }
 
+  /**
+   * Whether `chatId` is a topic chat of `owner`, archived or not: what its
+   * archive, unarchive or delete asks about.
+   */
+  async isTopicChatOf(chatId: string, owner: ConciergeOwner): Promise<boolean> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    return !!chat && isConciergeChat(chat) && !this.isMainChat(chat) && ownerOf(chat) === owner;
+  }
+
   /** A Concierge chat that is not archived, as a list shows it, or null. */
   async conciergeChat(chatId: string): Promise<ConciergeChatRef | null> {
     const chat = await this.deps.webchatRepo.getSession(chatId);
@@ -642,35 +650,43 @@ export class ConciergeService {
   }
 
   /**
-   * What deleting topic chat `chatId` of `owner` moves to the main chat: the
-   * follows that report to it, and its open tasks, counted as
-   * {@link retireChat} counts them (status is not `ended`).
+   * What archiving or deleting topic chat `chatId` of `owner` moves to the
+   * main chat: the follows that report to it, and its open tasks, counted as
+   * {@link retireChat} counts them (status is not `ended`). While it is
+   * archived, `movedFollows` are the follows its archive moved that still
+   * report to the main chat, which restoring it can move back.
    */
   async followsAndTasksOf(
     chatId: string,
     owner: ConciergeOwner,
   ): Promise<{
     follows: { source: string; label: string; target: string }[];
-    openTasks: { id: string; title: string; sessionId: string | null }[];
+    openTasks: { id: string; title: string }[];
+    movedFollows: { source: string; label: string; target: string }[];
   }> {
     const follows = (await this.attachedFollowing?.followsOfChat(chatId, owner)) ?? [];
+    const movedFollows =
+      (await this.attachedFollowing?.followsMovedFrom(
+        chatId,
+        storedChatId(mainChatIdOf(owner)),
+        owner,
+      )) ?? [];
     const rows = (await this.deps.tasks.repo.listForConciergeChat(chatId, owner, new Date())).map(
       (task) => task.row,
     );
     const status = await this.deps.tasks.statusOf(rows);
     const openTasks = rows
       .filter((row) => status.get(row.id)?.status !== "ended")
-      .map(({ id, title, sessionId }) => ({ id, title, sessionId }));
-    return { follows, openTasks };
+      .map(({ id, title }) => ({ id, title }));
+    return { follows, openTasks, movedFollows };
   }
 
   /**
    * Ends the follows and stops the open tasks of topic chat `chatId`, before
    * {@link retireChat} runs, so it finds nothing to move and posts no notice.
-   * A task with a task chat ends as archiving that chat ends it, once its
-   * running work is interrupted; one with none is stopped and its row
-   * archived. Either way no row lands on the main chat's panel, and no news
-   * of it reaches the main chat, which never knew it. One that fails to end,
+   * A task ends as archiving its task chat ends it, once its running work is
+   * interrupted, so no row lands on the main chat's panel, and no news of it
+   * reaches the main chat, which never knew it. One that fails to end,
    * a turn that cannot be interrupted included, is logged and left open for
    * `retireChat` to move.
    */
@@ -680,7 +696,7 @@ export class ConciergeService {
     const owner = ownerOf(chat);
     const { follows, openTasks } = await this.followsAndTasksOf(chatId, owner);
     const failed = (what: string, error: unknown) =>
-      log.warn(`failed to end a deleted chat's ${what}`, {
+      log.warn(`failed to end a retired chat's ${what}`, {
         chatId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -692,19 +708,11 @@ export class ConciergeService {
     for (const task of openTasks) {
       try {
         // Work that cannot be stopped keeps its task open, to move.
-        if (task.sessionId) {
-          for (const turnId of this.attached?.chats.activeTurns(task.sessionId) ?? []) {
-            await this.attached?.chats.interruptTurn(turnId);
-          }
+        for (const turnId of this.attached?.chats.activeTurns(task.id) ?? []) {
+          await this.attached?.chats.interruptTurn(turnId);
         }
         this.taskEvents?.silence([task.id]);
-        const ended = task.sessionId ? await this.endTaskChat(task.sessionId, "archived") : null;
-        if (!ended) {
-          // Stopped as its owner's Stop does, without telling the Concierge.
-          await this.deps.tasks.repo.stop(task.id, "guardian");
-          await this.cancelChecks(task.id);
-          await this.deps.tasks.repo.archive(task.id);
-        }
+        await this.endTaskChat(task.id, "archived");
       } catch (error) {
         failed("task", error);
       }
@@ -725,7 +733,12 @@ export class ConciergeService {
     if (!chat || !isConciergeChat(chat)) return null;
     const owner = ownerOf(chat);
     const main = await this.ensureChatId(owner);
-    const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
+    const follows =
+      (await this.attachedFollowing?.moveToMainChat(
+        chatId,
+        storedChatId(main),
+        how === "archived",
+      )) ?? 0;
     // Its rows are its owner's main chat's from now on, as rows are read:
     // none is moved.
     const tasks = await this.deps.tasks.repo.leaveChat(chatId, async (rows) => {
@@ -752,6 +765,22 @@ export class ConciergeService {
   }
 
   /**
+   * Topic chat `chatId` is restored. The follows its archive moved to the
+   * main chat, and that still report there, move back to it when its owner
+   * chose so, and stay otherwise. Its task rows read as its own again without
+   * moving, so they need nothing.
+   */
+  async restoreChat(chatId: string, moveFollowsBack: boolean): Promise<void> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (!chat || !isConciergeChat(chat) || this.isMainChat(chat)) return;
+    const owner = ownerOf(chat);
+    const main = storedChatId(mainChatIdOf(owner));
+    const moved =
+      (await this.attachedFollowing?.restoreToChat(chatId, main, owner, moveFollowsBack)) ?? 0;
+    if (moved > 0) log.info("concierge chat restored", { chatId, follows: moved });
+  }
+
+  /**
    * A retired Concierge chat is archived or deleted now, and its tasks are
    * `mainChatId`'s. Finished rows stay on the retired chat, so no row write
    * tells the activity that their task chats now move the main chat.
@@ -773,39 +802,69 @@ export class ConciergeService {
     );
   }
 
-  // The YAML tier prefers Codex whenever it is signed in, so the choice is
-  // stored on the chat: the strongest model of Claude, else of Codex. Opus
+  // The Concierge runs the default provider's strongest model, stored on the
+  // chat as Rome's choice, so it follows the default when that changes. Opus
   // answers a simple turn as fast as Sonnet, since its thinking adapts to the
   // question (docs/concierge-eval.md#baseline). An Anthropic-compatible
   // provider serves its own models through the tier mappings, so it keeps the
-  // tier's choice, as does a chat that neither provider can serve.
+  // tier's choice, as does a Rome with no default yet.
   private pickModel(): ModelSelectionId | null {
+    const provider = this.defaultModelProvider();
+    if (!provider) return null;
     const { anthropic: claude, openai: codex } = this.deps.accounts.read();
-    if (claude?.state === "available" && claude.account.authMethod !== "stored-compatible") {
-      return "claude-opus-5-5";
-    }
-    if (codex?.state === "available") return codexStrongSelection(codex.account);
-    return null;
+    if (provider === "anthropic" && claude?.account.authMethod === "stored-compatible") return null;
+    return selectionOfStrength(provider, "strong", codex?.account);
+  }
+
+  /** The provider the default runs on, or null when none is set. */
+  private defaultModelProvider(): "anthropic" | "openai" | null {
+    const current = this.deps.defaults?.current() ?? null;
+    return current ? providerOfDefault(current) : null;
   }
 
   /**
-   * The model of `strength` for a task chat that Concierge chat `chatId`
-   * starts: on the Concierge chat's own provider, so the task runs on the
-   * account the Concierge does. Null when that chat has no provider of its own.
+   * The model of `strength` for a task chat a Concierge chat starts: on the
+   * default provider, stored as Rome's choice, so the task follows the
+   * default like any chat. Null with no default.
    */
-  async taskModel(chatId: string, strength: ModelStrength): Promise<ModelSelectionId | null> {
-    const stored = (await this.deps.webchatRepo.getSession(chatId))?.largeModelSelection;
-    const own = stored ? MODEL_SELECTIONS[stored as ModelSelectionId]?.providerId : undefined;
-    const picked = own === "anthropic" || own === "openai" ? null : this.pickModel();
-    const provider = picked ? MODEL_SELECTIONS[picked].providerId : own;
-    if (provider !== "anthropic" && provider !== "openai") return null;
+  async taskModel(_chatId: string, strength: ModelStrength): Promise<ModelSelectionId | null> {
+    const provider = this.defaultModelProvider();
+    if (!provider) return null;
     return selectionOfStrength(provider, strength, this.deps.accounts.read().openai?.account);
   }
 
-  /** Checks raw subscription availability before a turn in any Concierge chat. */
-  async switchIfExhausted(chatId: string) {
+  /**
+   * Before a turn in chat `chatId`: a model Rome chose for it follows the
+   * default provider at the same strength, and a Concierge chat on an older
+   * default moves to the strong model. A model its owner picked stays. Returns
+   * the provider the chat moved from and to, or null when it stayed.
+   */
+  async followDefault(
+    chatId: string,
+  ): Promise<{ from: "anthropic" | "openai"; to: "anthropic" | "openai" } | null> {
     await this.adoptStrongDefault(chatId);
-    return this.move(chatId);
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    const stored = chat?.largeModelSelection;
+    if (!chat || chat.largeModelSelectionBy !== "auto" || !isModelSelectionId(stored)) return null;
+    const next = followingSelection(
+      stored,
+      this.deps.defaults?.current() ?? null,
+      this.deps.accounts.read().openai?.account,
+    );
+    if (next === stored) return null;
+    await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, next, "auto");
+    const agentName = chat.agentName ?? CONCIERGE_AGENT_ID;
+    this.deps.agentSessionManager
+      .find({ agentName, channelThreadKey: webchatSessionKey(chatId) })
+      ?.selectModel(next);
+    const from = MODEL_SELECTIONS[stored].providerId;
+    const to = MODEL_SELECTIONS[next].providerId;
+    log.info("chat follows the default provider", { chatId, from: stored, to: next });
+    return from === to ||
+      (from !== "anthropic" && from !== "openai") ||
+      (to !== "anthropic" && to !== "openai")
+      ? null
+      : { from, to };
   }
 
   /**
@@ -832,70 +891,63 @@ export class ConciergeService {
       log.info("concierge chat moved to its strong model", { chatId, from: stored, to: strong });
   }
 
-  async switchForFailure(
-    chatId: string,
-    failure: AgentTurnFailure,
-    reason: FailoverReason,
-    crossOnly = false,
-  ) {
-    return this.move(chatId, failure, reason, crossOnly);
-  }
-
-  private async move(
-    chatId: string,
-    failure?: AgentTurnFailure,
-    reason?: FailoverReason,
-    crossOnly = false,
-  ) {
+  /**
+   * A chat whose model hit a limit of its own moves to another model of the
+   * same provider, with a note. It never moves to another provider, and never
+   * off a model its owner picked: that chat shows a card instead.
+   */
+  async switchForModelLimit(chatId: string, failure: AgentTurnFailure, agentName?: string) {
     const chat = await this.deps.webchatRepo.getSession(chatId);
-    if (!chat || !isConciergeChat(chat)) return null;
-    const key = { agentName: CONCIERGE_AGENT_ID, channelThreadKey: webchatSessionKey(chatId) };
-    const selected = resolveWebchatLargeModelSelection(chat.largeModelSelection);
+    if (!chat) return null;
+    const ownerPicked =
+      chat.largeModelSelectionBy === "owner" ||
+      (chat.largeModelSelection !== null && chat.largeModelSelectionBy === null);
+    if (ownerPicked) return null;
+    const key = {
+      agentName:
+        agentName ?? (isConciergeChat(chat) ? CONCIERGE_AGENT_ID : (chat.agentName ?? "main")),
+      channelThreadKey: webchatSessionKey(chatId),
+    };
+    // On Rome credits every chat runs its model's strength on Codex, whatever
+    // provider its stored model names. A login takes the default off them.
+    const credits = this.deps.defaults?.current() === "rome_credits";
+    const stored = resolveWebchatLargeModelSelection(chat.largeModelSelection);
+    const selected = credits && stored?.providerId !== "openai" ? null : stored;
     const runtime = selected
       ? null
       : await this.deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-    const state = this.deps.accounts.read();
-    // An Auto chat whose first turn failed has no recorded provider yet.
-    const from =
-      selected?.providerId ??
-      runtime?.provider ??
-      failure?.provider ??
-      soleProviderAtUsageLimit(state);
+    const from = credits
+      ? "openai"
+      : (selected?.providerId ?? runtime?.provider ?? failure.provider);
     if (from !== "openai" && from !== "anthropic") return null;
-    if (failure && failure.provider !== from) return null;
-    const source = state[from];
+    if (failure.provider && failure.provider !== from) return null;
+    const read = this.deps.accounts.read();
     // An account billed per use has no subscription to switch from.
-    if (source?.account.usageLimited === false) return null;
-    reason ??=
-      source?.state === "usage_limit_reached"
-        ? "quota"
-        : // Codex runs on Rome credits while the ChatGPT account is out, so that alone is no failure.
-          (from === "anthropic" && source?.state === "unauthorized") || source?.state === "expired"
-          ? "login"
-          : undefined;
-    if (!reason) return null;
-    const fromModel = selected?.model ?? runtime?.model ?? "";
-    const same =
-      !crossOnly &&
-      (reason === "model_limit" || (reason === "quota" && ambiguousQuota(failure?.message ?? "")))
-        ? sameProviderTarget(state, from, fromModel)
-        : null;
-    const cross = usageSwitchTarget(state, from, true);
-    const candidates = reason === "model_limit" ? [same, cross] : [cross, same];
+    if (read[from]?.account.usageLimited === false) return null;
+    // The turn reached the provider, which refused one model only: the account
+    // runs, whatever an older read of it says.
+    const report = read[from];
+    const state = report ? { ...read, [from]: { ...report, state: "available" as const } } : read;
+    // A chat whose turns never ran records no model: it asked for the
+    // provider's strong one, as every chat that follows the default does.
+    const fromModel =
+      selected?.model ??
+      (runtime?.provider === from ? runtime.model : undefined) ??
+      MODEL_SELECTIONS[selectionOfStrength(from, "strong", report?.account)].model;
     // A model each Concierge chat left, so one chat's move never blocks another's.
     const modelKey = (model: string) => `${chatId}\u0000${model.replace(/\[.*\]$/, "")}`;
-    const target = candidates.find(
-      (candidate) =>
-        candidate &&
-        (this.leftModels.get(modelKey(MODEL_SELECTIONS[candidate.selectionId].model)) ?? 0) <=
-          Date.now(),
-    );
-    if (!target) return null;
+    const target = sameProviderTarget(state, from, fromModel);
+    if (
+      !target ||
+      (this.leftModels.get(modelKey(MODEL_SELECTIONS[target.selectionId].model)) ?? 0) > Date.now()
+    )
+      return null;
     await this.deps.webchatRepo.updateSessionLargeModelSelection(
       chatId,
       target.selectionId,
-      "auto",
+      chat.largeModelSelectionBy === "kept" ? "kept" : "auto",
     );
+    // The move keeps a kept chat kept.
     this.deps.agentSessionManager.find(key)?.selectModel(target.selectionId);
     this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);
     await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [
@@ -903,12 +955,12 @@ export class ConciergeService {
         type: "quota_switch",
         from,
         to: target.provider,
-        reason,
+        reason: "model_limit",
         fromModel,
         model: MODEL_SELECTIONS[target.selectionId].model,
       },
     ]);
-    return { from, to: target.provider, selectionId: target.selectionId, reason };
+    return { from, to: target.provider, selectionId: target.selectionId };
   }
 
   /** The runtime session id of a Concierge chat, or null before its first turn. */
@@ -1009,7 +1061,7 @@ export class ConciergeService {
   private async runtimeOf(chatId: string): Promise<string | null> {
     const existing = await this.runtimeSessionId(chatId);
     if (existing || !this.attached) return existing;
-    await this.switchIfExhausted(chatId);
+    await this.followDefault(chatId);
     return this.attached.chats.openSession(chatId);
   }
 
@@ -1122,9 +1174,9 @@ export class ConciergeService {
 
   /**
    * Says a card the Concierge shows, which replies as its messages do: to the
-   * message `named`, else to the turn's default (reply-target.ts). A name that
-   * is no message of the chat is dropped, not refused: the guardian was shown
-   * the card already. A card is a message of its own, so it carries no quote.
+   * message `named`, if it names one. A name that is no message of the chat is
+   * dropped, not refused: the guardian was shown the card already. A card is a
+   * message of its own, so it carries no quote.
    */
   async addCard(
     chatId: string,
@@ -1134,13 +1186,11 @@ export class ConciergeService {
   ): Promise<string> {
     const { webchatRepo } = this.deps;
     const target = named ? await webchatRepo.getReplyTarget(chatId, named) : null;
-    const key = target ? undefined : await defaultReplyTarget(this, chatId, turnId);
-    const replyTo = target ?? (key ? await webchatRepo.getReplyTarget(chatId, key) : null);
     const { id } = await webchatRepo.addBackendMessage(
       chatId,
       turnId,
       [part],
-      replyTo ? { replyTo: replyTo.id } : {},
+      target ? { replyTo: target.id } : {},
     );
     return id;
   }
@@ -1247,9 +1297,10 @@ export class ConciergeService {
 
   /**
    * Archives or deletes dashboard chat `chatId`. A task chat's task stops
-   * with it: its running work is interrupted, and its row is stopped and
-   * archived in the same transaction as the chat (docs/domains/chats.md#task-chat).
-   * Answers the row's id, or null when the chat links no row of its owner.
+   * with it: its running work is interrupted, and its row is stopped in the
+   * same transaction as the chat is archived, or goes with the chat when it is
+   * deleted (docs/domains/chats.md#task-chat). Answers the task's id, or null
+   * when the chat is no task chat of its owner.
    */
   async endTaskChat(chatId: string, end: "archived" | "deleted"): Promise<string | null> {
     const chat = await this.deps.webchatRepo.getSession(chatId);
@@ -1281,7 +1332,7 @@ export class ConciergeService {
       open,
     );
     // A task that ends with its chat has nothing left to check on.
-    if (row) await this.cancelChecks(row.id);
+    if (row) await this.cancelChecksOf(row.id, row.ownerKey);
     if (row && end === "archived" && this.attached) {
       const { chats } = this.attached;
       for (const turnId of chats.activeTurns(chatId)) {
@@ -1339,11 +1390,8 @@ export class ConciergeService {
   /**
    * What a digest of Concierge chat `chatId` adds about its tasks: each task
    * still waiting on a check it scheduled `POSTPONED_CHECKS` times or more,
-   * so the Concierge asks the guardian rather than check again, each
-   * scheduled run that finished with nothing to say, each task that ended
-   * for no response, and each row left a day with no task chat started and
-   * nothing scheduled, so the Concierge asks the guardian about it. Each of
-   * the last two is listed once. `text` is empty when there is nothing to say.
+   * so the Concierge asks the guardian rather than check again, and each
+   * task that ended for no response, listed once. `text` is empty when there is nothing to say.
    * Read only: {@link markTaskNotesListed} settles them once the digest's
    * turn ran to its end, so a failed digest leaves them for the next one.
    */
@@ -1365,13 +1413,6 @@ export class ConciergeService {
           ]
         : [];
     });
-    // A scheduled run that finished with nothing to say goes here, not in a turn of its own.
-    const passive = this.taskEvents?.passiveOf(ids) ?? [];
-    for (const row of rows) {
-      if (passive.includes(row.id)) {
-        lines.push(`<ran_on_schedule task="${attr(row.id)}" title="${attr(row.title)}"/>`);
-      }
-    }
     // Each task that ended for no response is listed once, so it can be resumed.
     const noResponse = await this.deps.tasks.repo.noResponseUnlisted(ids);
     for (const row of rows) {
@@ -1379,38 +1420,15 @@ export class ConciergeService {
         lines.push(`<ended_no_response task="${attr(row.id)}" title="${attr(row.title)}"/>`);
       }
     }
-    // A row the Concierge wrote and never started stays later: after a day
-    // with nothing scheduled, the guardian is asked about it, once.
-    const dayAgo = Date.now() - this.deps.tasks.waitExpiry;
-    const unstarted = later
-      .filter(
-        (row) =>
-          !row.linkedAt &&
-          !row.sessionId &&
-          !row.lastOutcome &&
-          !row.unstartedListedAt &&
-          status.get(row.id)?.laterAt === null &&
-          row.updatedAt.getTime() <= dayAgo,
-      )
-      .map((row) => row.id);
-    for (const row of rows) {
-      if (unstarted.includes(row.id)) {
-        lines.push(`<not_started task="${attr(row.id)}" title="${attr(row.title)}"/>`);
-      }
-    }
     return {
       text: lines.length > 0 ? `<task_review>\n${lines.join("\n")}\n</task_review>` : "",
-      passive,
       noResponse,
-      unstarted,
     };
   }
 
   /** Settles the notes a digest listed, once its turn ran to its end. */
   async markTaskNotesListed(notes: DigestTaskNotes): Promise<void> {
-    this.taskEvents?.settlePassive(notes.passive);
     await this.deps.tasks.repo.markNoResponseListed(notes.noResponse);
-    await this.deps.tasks.repo.markUnstartedListed(notes.unstarted);
   }
 
   /**
@@ -1419,10 +1437,33 @@ export class ConciergeService {
    * told to the Concierge quietly. Answers how many turns it stopped.
    */
   async stopTask(taskId: string, by: "concierge" | "guardian"): Promise<number> {
-    await this.deps.tasks.repo.stop(taskId, by);
+    await this.deps.tasks.repo.stop(taskId);
+    return this.endTaskWork(taskId, by === "guardian" ? "stopped_by_owner" : null);
+  }
+
+  /**
+   * Its owner marked task `taskId` done from the task list: it ends done, and
+   * otherwise as a Stop ends it. Its running work stops, its checks are
+   * cancelled, and the Concierge hears of it quietly. Answers whether it was
+   * marked; one already ended is not.
+   */
+  async markTaskDone(taskId: string): Promise<boolean> {
+    if (!(await this.deps.tasks.repo.markDone(taskId))) return false;
+    await this.endTaskWork(taskId, "done_by_owner");
+    return true;
+  }
+
+  /**
+   * The rest of ending task `taskId`: its checks are cancelled, the Concierge
+   * hears `told` quietly when there is one, its chat's turns stop, and what
+   * they asked for is turned down. Answers how many turns it stopped.
+   */
+  private async endTaskWork(
+    taskId: string,
+    told: "stopped_by_owner" | "done_by_owner" | null,
+  ): Promise<number> {
     await this.cancelChecks(taskId);
-    if (by === "guardian")
-      this.taskEvents?.mark({ taskId, kind: "stopped_by_owner", urgent: false });
+    if (told) this.taskEvents?.mark({ taskId, kind: told, urgent: false });
     const chatId = (await this.deps.tasks.repo.get(taskId))?.sessionId;
     if (!chatId) return 0;
     const turns = this.attached?.chats.activeTurns(chatId) ?? [];
@@ -1594,7 +1635,12 @@ export class ConciergeService {
   async cancelChecks(taskId: string): Promise<void> {
     const row = await this.deps.tasks.repo.get(taskId);
     if (!row) return;
-    await this.deps.checks?.cancelFor(taskId, ownerOf(row)).catch((error: unknown) =>
+    await this.cancelChecksOf(taskId, ownerOf(row));
+  }
+
+  /** {@link cancelChecks} for a task whose owner is known, so a task chat just deleted still cancels. */
+  async cancelChecksOf(taskId: string, owner: string): Promise<void> {
+    await this.deps.checks?.cancelFor(taskId, owner).catch((error: unknown) =>
       log.warn("failed to cancel a task's checks", {
         taskId,
         error: error instanceof Error ? error.message : String(error),
@@ -1607,9 +1653,6 @@ export class ConciergeService {
       }),
     );
   }
-
-  /** Task chats whose scheduled run in flight reports only when it matters. */
-  private readonly quietRuns = new Set<string>();
 
   /**
    * A scheduled run of task `taskId` fired at `firedAt`: its brief goes
@@ -1636,7 +1679,6 @@ export class ConciergeService {
       return "no_chat";
     }
     const chatId = row.sessionId;
-    if (schedule.report === "when_it_matters") this.quietRuns.add(chatId);
     // No one is asking from a device in a scheduled run, and a device id saved
     // by an earlier handoff ends at the next sign-in: the run's live reads
     // take a working device instead. A later handoff from a device sets it again.
@@ -1647,18 +1689,9 @@ export class ConciergeService {
       CONCIERGE_ACCOUNT,
     );
     if (!sent.ok) {
-      this.quietRuns.delete(chatId);
       throw new Error("error" in sent ? sent.error : "The task chat cannot take the scheduled run");
     }
     return "sent";
-  }
-
-  /**
-   * Whether the turn that just ended in task chat `chatId` was a scheduled
-   * run that reports only when it matters. Read once per run.
-   */
-  takeQuietRun(chatId: string): boolean {
-    return this.quietRuns.delete(chatId);
   }
 
   /**
@@ -1705,15 +1738,9 @@ export class ConciergeService {
     }
   }
 
-  /** Unarchived task chat `chatId` brings back the row archiving it archived; the task stays stopped. */
+  /** Unarchived task chat `chatId` is listed again, and stays stopped when it was. */
   async restoreTaskChat(chatId: string): Promise<void> {
-    const chat = await this.deps.webchatRepo.getSession(chatId);
-    if (chat) await this.deps.tasks.repo.restoreWithChat(chatId, ownerOf(chat));
-  }
-
-  /** A task chat was deleted. Its row stays, unlinked; the Concierge hears of it quietly. */
-  chatDeleted(taskId: string): void {
-    this.taskEvents?.mark({ taskId, kind: "chat_deleted", urgent: false });
+    await this.deps.tasks.repo.reannounce(chatId);
   }
 
   /** Where a turn that failed before it started is told, once {@link startConciergeEvents} runs. */

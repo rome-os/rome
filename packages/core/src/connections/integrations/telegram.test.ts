@@ -9,6 +9,7 @@
 //      end-to-end over the real ConnectionRegistry.
 
 import { afterEach, describe, expect, it } from "@rstest/core";
+import { channelMessageOf } from "../../chats/connected-accounts/channel-message.js";
 import { sendThrough } from "../../chats/connected-accounts/connection-ports.js";
 import type { ChatId, ChannelMessage } from "@rome-os/app-runtime";
 import { Bot, GrammyError, type Transformer } from "grammy";
@@ -231,7 +232,7 @@ describe("telegram descriptor shape", () => {
     const received: string[] = [];
     expect(conn.isUnlocked("chat")).toBe(true);
     conn.hearTalker(async (msg) => {
-      received.push(`${msg.chatId}:${msg.text}`);
+      received.push(`${msg.where.chatId}:${msg.content.text}`);
       return;
     });
     await factory.untilPolling();
@@ -254,7 +255,7 @@ describe("telegram descriptor shape", () => {
 });
 
 describe("telegram inbound delivery", () => {
-  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+  it("delivers the transport's message as apps receive it, field for field", async () => {
     const factory = new FaultBotFactory(/* skipInit */ true);
     const desc = makeTelegramDescriptor({ createBot: factory.createBot });
     const talker = desc.capabilities.talker!.build(validCred(), {
@@ -264,7 +265,7 @@ describe("telegram inbound delivery", () => {
     });
     const delivered: unknown[] = [];
     talker.start(
-      (msg) => delivered.push(msg),
+      (msg) => void delivered.push(channelMessageOf(msg, "telegram")),
       () => {},
     );
     await factory.untilPolling();

@@ -6,7 +6,6 @@
     "activity": "动态",
     "people": "联系人",
     "assistants": "助手",
-    "envoys": "外派智能体",
     "memory": "记忆",
     "projects": "项目",
     "sessions": "会话",
@@ -49,8 +48,6 @@
     "conciergeUnreadBadge_one": "{{label}} 条未读消息",
     "conciergeUnreadBadge_other": "{{label}} 条未读消息",
     "newTopic": "新话题",
-    "sectionTasks": "任务",
-    "tasksRunning": "任务，{{count}} 个运行中",
     "modeSwitch": "对话列表模式",
     "modeChat": "对话",
     "modeConcierge": "Agent",
@@ -71,6 +68,14 @@
     "topicChatDeleteMoveHint": "提醒和任务更新会发到主对话。",
     "topicChatDeleteStop": "停止它们",
     "topicChatDeleteStopHint": "关注会结束，任务会停止。",
+    "topicChatArchiveTitle": "归档“{{name}}”？",
+    "topicChatArchiveWithWork": "这个对话会被归档。其中有：",
+    "topicChatUnarchiveTitle": "取消归档“{{name}}”？",
+    "topicChatUnarchiveMoved": "这个对话归档时，以下关注转到了主对话：",
+    "topicChatUnarchiveMoveBack": "挪回这个对话",
+    "topicChatUnarchiveMoveBackHint": "提醒会重新发到这个对话。",
+    "topicChatUnarchiveKeep": "留在主对话",
+    "topicChatUnarchiveKeepHint": "提醒继续发到主对话。",
     "topicChatRetireFailed": "没能修改这个话题对话。",
     "rowStatus": {
       "waiting": "等你处理",
@@ -83,6 +88,9 @@
     "archive": "归档对话",
     "unarchive": "取消归档",
     "rename": "重命名",
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "pinFailed": "没能修改置顶。",
     "renameLabel": "对话名称",
     "chatActions": "对话操作",
     "newChatInProject": "在该项目中开启新对话",
@@ -246,44 +254,7 @@
   },
   "desktop": {
     "iframeTitle": "Rome 桌面",
-    "namedIframeTitle": "Rome 桌面“{{name}}”",
-    "notFound": "没有名为“{{name}}”的桌面。",
     "reconnecting": "正在重新连接…"
-  },
-  "wechatApp": {
-    "loading": "正在检查微信…",
-    "loadFailed": "无法检查微信状态",
-    "installFailed": "无法安装微信",
-    "startFailed": "无法启动微信",
-    "retry": "重试",
-    "unavailable": {
-      "title": "微信未启用",
-      "description": "这个实例关闭了 WECHAT_USER_ENABLED。要开启微信，把它设为 true 并重启 Rome。"
-    },
-    "absent": {
-      "title": "微信未安装",
-      "description": "Rome 会下载一次微信桌面客户端，然后在这里打开它。下载需要几分钟。",
-      "action": "安装微信",
-      "failed": "安装没有完成：{{error}}"
-    },
-    "installing": {
-      "title": "正在安装微信",
-      "description": "Rome 正在下载微信客户端，完成后会在这里打开。离开这个页面不会中断下载。"
-    },
-    "stopped": {
-      "title": "微信未运行",
-      "description": "微信客户端已安装在这个实例上。",
-      "action": "启动微信",
-      "failed": "微信没有启动：{{error}}"
-    },
-    "starting": {
-      "title": "正在启动微信"
-    },
-    "sharedDesktop": {
-      "title": "微信正在共享桌面上运行",
-      "description": "微信在共享桌面上运行时，这个桌面是空的。",
-      "action": "打开共享桌面"
-    }
   },
   "chat": {
     "add": "打开一个应用",
@@ -303,6 +274,7 @@
     "openToolNewTab": "在新标签页中打开{{name}}",
     "closeTool": "关闭{{name}}",
     "tasksTab": "任务",
+    "taskChatTab": "对话",
     "allTools": "所有已打开应用",
     "allToolsHidden_one": "所有已打开应用，另有 {{count}} 个",
     "allToolsHidden_other": "所有已打开应用，另有 {{count}} 个",

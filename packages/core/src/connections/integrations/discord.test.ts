@@ -13,6 +13,7 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
+import type * as connections from "../message.js";
 import type { ConnectionApiRequest, ConnectionApiResult } from "../../apps/platform-requests.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { StreamFault, Talker } from "../types.js";
@@ -32,7 +33,7 @@ const fakeState: {
   lastConfig?: FakeConfig;
   startError: unknown;
   typedThread?: string;
-  inbound?: (msg: ChannelMessage) => Promise<void>;
+  inbound?: (msg: connections.Message) => Promise<void>;
   sent: Array<{ chatId: ChatId; message: unknown }>;
   apiRequests: ConnectionApiRequest[];
   apiResult: ConnectionApiResult;
@@ -59,7 +60,7 @@ rs.mock("../kinds/discord/discord.js", () => ({
     constructor(readonly config: FakeConfig) {
       fakeState.lastConfig = config;
     }
-    onInbound(handler: (msg: ChannelMessage) => Promise<void>): void {
+    onInbound(handler: (msg: connections.Message) => Promise<void>): void {
       fakeState.inbound = handler;
     }
     async directConversationFor(userId: string): Promise<string> {
@@ -381,16 +382,16 @@ describe("discord descriptor shape", () => {
 });
 
 describe("discord inbound delivery", () => {
-  it("delivers the transport's ChannelMessage as it is, field for field", async () => {
+  it("delivers the transport's message as it is, field for field", async () => {
     const desc = makeDiscordDescriptor(deps);
     const talker = desc.capabilities.talker!.build(validCred(), {
       connectionId: "discord-test",
       persist: async () => {},
       registerIngress: () => () => {},
     });
-    const delivered: ChannelMessage[] = [];
+    const delivered: connections.Message[] = [];
     talker.start(
-      (msg) => delivered.push(msg),
+      (msg) => void delivered.push(msg),
       () => {},
     );
 
@@ -398,41 +399,16 @@ describe("discord inbound delivery", () => {
     // every optional field Discord sets is present.
     const raw = { id: "msg-7", channelId: "thread-1" };
     const timestamp = new Date("2026-05-10T00:00:00Z");
-    const emitted: ChannelMessage = {
-      channel: "discord",
-      direction: "inbound",
-      messageId: "msg-7",
-      chatId: "thread-1" as ChatId,
-      parentChatId: "channel-1" as ChatId,
-      senderId: "user-1",
-      senderDisplayName: "Alice Smith",
-      senderUsername: "alice",
-      text: "see this",
-      attachments: [
-        {
-          type: "image",
-          url: "https://cdn.discordapp.com/attachments/1/2/photo.png",
-          fileName: "photo.png",
-        },
-      ],
-      timestamp,
-      replyTo: { messageId: "msg-5" },
-      addressing: "mention",
-      thread: { kind: "topic", name: "launch" },
-      raw,
-    };
-    await fakeState.inbound?.(emitted);
-
-    expect(delivered).toStrictEqual([
-      {
-        channel: "discord",
-        direction: "inbound",
-        messageId: "msg-7",
-        chatId: "thread-1",
-        parentChatId: "channel-1",
-        senderId: "user-1",
-        senderDisplayName: "Alice Smith",
-        senderUsername: "alice",
+    const emitted: connections.Message = {
+      id: "msg-7",
+      where: {
+        chatId: "thread-1" as ChatId,
+        kind: "group",
+        name: "launch",
+        thread: { parentChatId: "channel-1" as ChatId, startedBy: "bot-1" },
+      },
+      sender: { accountId: "user-1", name: "Alice Smith", handle: "alice" },
+      content: {
         text: "see this",
         attachments: [
           {
@@ -441,13 +417,16 @@ describe("discord inbound delivery", () => {
             fileName: "photo.png",
           },
         ],
-        timestamp,
-        replyTo: { messageId: "msg-5" },
-        addressing: "mention",
-        thread: { kind: "topic", name: "launch" },
-        raw,
       },
-    ]);
+      receivedBy: "bot-1",
+      mentions: ["bot-1"],
+      replyTo: { messageId: "msg-5" },
+      saidAt: timestamp,
+      raw,
+    };
+    await fakeState.inbound?.(emitted);
+
+    expect(delivered).toStrictEqual([emitted]);
     expect(delivered[0].raw).toBe(raw);
     await talker.stop();
   });

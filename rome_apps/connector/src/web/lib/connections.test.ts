@@ -65,6 +65,14 @@ describe("catalog", () => {
     });
   });
 
+  it("includes Freshdesk, an API-key toolkit, in the first-class connection catalog", () => {
+    expect(CATALOG.map((entry) => entry.slug)).toEqual(expect.arrayContaining(["freshdesk"]));
+    expect(CATALOG_BY_SLUG.get("freshdesk")).toMatchObject({
+      name: "Freshdesk",
+      glyph: "freshdesk",
+    });
+  });
+
   it("omits providers without Composio-managed auth from the catalog", () => {
     expect(CATALOG_BY_SLUG.has("twitter")).toBe(false);
   });

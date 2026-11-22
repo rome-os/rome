@@ -121,7 +121,7 @@ export interface RomeAppSuggestedChannelBinding {
 /**
  * An event type family the app delivers on the bus. Core uses it so a wait on
  * one of these events (`defer` with `event`) also subscribes at the provider,
- * and so `search_event_catalog` lists the types before they are first emitted.
+ * and so `system:search_event_catalog` lists the types before they are first emitted.
  */
 export interface RomeAppEventSource {
   /** Event-name glob with one `*`, e.g. `provider:event:github.*`. */

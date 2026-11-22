@@ -10,7 +10,8 @@
 //
 // All factories produce plain objects — no singletons, safe to call per test.
 
-import type { ChannelMessage, Attachment, ChatId, MessageReceipt } from "@rome-os/app-runtime";
+import type { Attachment, ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
+import type * as connections from "./message.js";
 import { CredentialRejected, Disconnected } from "./errors.js";
 import type {
   Actor,
@@ -56,7 +57,7 @@ export function makeRecordingSleep(): RecordingSleep {
 
 export interface FakeTalkerState {
   /** The `deliver` callback passed to start(). Null until start() is called. */
-  deliver: ((msg: ChannelMessage) => void) | null;
+  deliver: ((msg: connections.Message) => void) | null;
   /** The `fault` callback passed to start(). Null until start() is called. */
   fault: ((err: CredentialRejected | Disconnected) => void) | null;
   /** Every start() call is recorded here with the credential at the time. */
@@ -69,7 +70,7 @@ export interface FakeTalkerState {
    *  callback before returning — models a Talker flushing buffered inbound on
    *  start. Used to prove onUnlocked fires before start() so a handler registered
    *  synchronously in the callback catches the first delivery. */
-  flushOnStart: ChannelMessage[] | null;
+  flushOnStart: connections.Message[] | null;
   /** Number of stop() drains awaited to completion. */
   stopResolved: number;
 }
@@ -86,6 +87,8 @@ export interface FakeTalkerOptions {
    *  bumps state.stopResolved when it resolves — models grammy's async drain so
    *  awaitable-shutdown tests can prove stopAll() waits for it. */
   asyncStop?: boolean;
+  /** Declares Talker.awaitsAcceptance, so `deliver` returns the acceptance. */
+  awaitsAcceptance?: boolean;
 }
 
 export function makeFakeTalker(cred: Credential, opts?: FakeTalkerOptions): FakeTalker {
@@ -102,6 +105,7 @@ export function makeFakeTalker(cred: Credential, opts?: FakeTalkerOptions): Fake
 
   const talker: FakeTalker = {
     state,
+    ...(opts?.awaitsAcceptance ? { awaitsAcceptance: true } : {}),
     start(deliver, fault) {
       state.deliver = deliver;
       state.fault = fault;
@@ -332,22 +336,85 @@ export function makeFakeRenewableScheme(opts?: {
   return scheme;
 }
 
-// Helpers for building ChannelMessage / WatchEvent in tests
+// Helpers for building a Connections message / WatchEvent in tests
 
-export function makeInboundMessage(overrides?: Partial<ChannelMessage>): ChannelMessage {
+export function makeInboundMessage(overrides?: Partial<connections.Message>): connections.Message {
   const attachments: Attachment[] = [];
   return {
-    channel: "test",
-    direction: "inbound",
-    messageId: "msg-1",
-    chatId: "thread-1" as ChatId,
-    senderId: "sender-1",
-    senderDisplayName: "Sender",
-    thread: { kind: "dm" },
-    text: "hello",
-    attachments,
-    timestamp: new Date(0),
+    id: "msg-1",
+    where: { chatId: "thread-1" as ChatId, kind: "direct" },
+    sender: { accountId: "sender-1", name: "Sender" },
+    content: { text: "hello", attachments },
+    receivedBy: TEST_ROME_ACCOUNT,
+    saidAt: new Date(0),
     ...overrides,
+  };
+}
+
+/** The account a test's Connections messages are received by. */
+export const TEST_ROME_ACCOUNT = "rome-1";
+
+/**
+ * A Connections message from the fields a test once wrote as a
+ * `ChannelMessage`, with the facts that make apps receive those same fields
+ * again: its `addressing`, `fromBot` and `mentionsOthers` become the mention,
+ * reply, thread and bot facts they are worked out from. A message with no
+ * thread, or a `dm` one, is direct.
+ */
+export function legacyMessage(
+  fields: Omit<ChannelMessage, "channel" | "direction" | "attachments"> & {
+    attachments?: Attachment[];
+  },
+): connections.Message {
+  const thread = fields.thread;
+  const me = TEST_ROME_ACCOUNT;
+  const parentChatId =
+    fields.parentChatId ?? (fields.addressing === "bot_thread" ? fields.chatId : undefined);
+  const mentions =
+    fields.addressing === undefined
+      ? undefined
+      : [
+          ...(fields.addressing === "mention" ? [me] : []),
+          ...(fields.mentionsOthers ? ["someone-else"] : []),
+        ];
+  return {
+    id: fields.messageId,
+    where: {
+      chatId: fields.chatId,
+      kind: !thread || thread.kind === "dm" ? "direct" : "group",
+      ...(thread?.name !== undefined ? { name: thread.name } : {}),
+      ...(parentChatId
+        ? {
+            thread: {
+              parentChatId,
+              ...(fields.addressing === "bot_thread" ? { startedBy: me } : {}),
+            },
+          }
+        : {}),
+    },
+    sender: {
+      accountId: fields.senderId,
+      ...(fields.senderDisplayName !== undefined ? { name: fields.senderDisplayName } : {}),
+      ...(fields.senderUsername !== undefined ? { handle: fields.senderUsername } : {}),
+      ...(fields.fromBot ? { isBot: true } : {}),
+    },
+    content: { text: fields.text, attachments: fields.attachments ?? [] },
+    receivedBy: me,
+    ...(mentions ? { mentions } : {}),
+    ...(fields.replyTo
+      ? {
+          replyTo: {
+            messageId: fields.replyTo.messageId,
+            ...(fields.addressing === "reply" ? { senderAccountId: me } : {}),
+            ...(fields.replyTo.content !== undefined ? { text: fields.replyTo.content } : {}),
+            ...(fields.replyTo.senderName !== undefined
+              ? { senderName: fields.replyTo.senderName }
+              : {}),
+          },
+        }
+      : {}),
+    saidAt: fields.timestamp,
+    ...(fields.raw !== undefined ? { raw: fields.raw } : {}),
   };
 }
 

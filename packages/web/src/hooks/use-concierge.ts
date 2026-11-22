@@ -190,6 +190,21 @@ export function useRefreshTopicChats(): () => void {
 }
 
 /**
+ * The follows and open tasks archiving or deleting topic chat `chatId` would
+ * move or stop and, while it is archived, the follows its archive moved that
+ * unarchiving it can move back. Throws when the server cannot answer.
+ */
+export function fetchConciergeChatWork(
+  chatId: string,
+  signal?: AbortSignal,
+): Promise<ConciergeChatWorkResponse> {
+  return fetchJson<ConciergeChatWorkResponse>(
+    `/api/concierge/chats/${encodeURIComponent(chatId)}/follows-and-tasks`,
+    { signal, fallback: "" },
+  );
+}
+
+/**
  * The follows and open tasks deleting topic chat `chatId` would move or stop.
  * Read afresh each time `enabled` turns on; it errors when the server cannot
  * answer, and the caller then keeps the default, which moves them.
@@ -197,11 +212,7 @@ export function useRefreshTopicChats(): () => void {
 export function useConciergeChatWork(chatId: string, enabled: boolean) {
   return useQuery({
     queryKey: ["concierge-chat-work", chatId],
-    queryFn: ({ signal }) =>
-      fetchJson<ConciergeChatWorkResponse>(
-        `/api/concierge/chats/${encodeURIComponent(chatId)}/follows-and-tasks`,
-        { signal, fallback: "" },
-      ),
+    queryFn: ({ signal }) => fetchConciergeChatWork(chatId, signal),
     enabled,
     staleTime: 0,
     gcTime: 0,

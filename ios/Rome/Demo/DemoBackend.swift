@@ -14,6 +14,10 @@ final class LocalEventBus: LiveEventSource {
     }
 
     func unsubscribe(_ token: UUID) { handlers[token] = nil }
+
+    /// Whether anyone still listens to `topic`.
+    func isListening(to topic: String) -> Bool { handlers.values.contains { $0.topic == topic } }
+
     func pause() {}
     func resume() {}
 
@@ -47,8 +51,14 @@ final class DemoBackend: RomeBackend {
     private var chats: [String: ChatSession] = [:]
     private var tasks: [ConciergeTask] = []
     private var topicChats: [ConciergeChat] = []
+    /// Archived topic chats, latest archived first; their messages stay.
+    private var archivedTopics: [ConciergeChat] = []
+    /// The follows each archived chat's archive moved to the main chat.
+    private var movedFollows: [String: [ConciergeChatWork.Follow]] = [:]
     /// Each topic chat's last activity, for the chat list; the drawer sorts by it.
     private var topicActivity: [String: Date] = [:]
+    /// When each pinned topic chat was pinned. None is pinned at first.
+    private var topicPins: [String: Date] = [:]
     /// Files sent with messages, by their asset path.
     private var assets: [String: Data] = [:]
     private var approvals: [String: ApprovalRecord] = [:]
@@ -76,6 +86,7 @@ final class DemoBackend: RomeBackend {
             messages[conciergeChatID] = []
             tasks = []
             topicChats = []
+            archivedTopics = []
         }
         if variant == .longChat {
             lengthenMainChat()
@@ -218,13 +229,44 @@ final class DemoBackend: RomeBackend {
         bus.emit(LiveTopic.chat(id), .sessionName(sessionId: id, name: name))
     }
 
+    func pinChat(_ id: String, pinned: Bool) async throws {
+        try await pause(0.2)
+        topicPins[id] = pinned ? .now : nil
+    }
+
     func archiveChat(_ id: String) async throws {
         try await pause(0.2)
+        if let chat = topicChats.first(where: { $0.id == id }) { archivedTopics.insert(chat, at: 0) }
         topicChats.removeAll { $0.id == id }
     }
 
+    func archivedTopicChats() async throws -> [ChatSession] {
+        try await pause(0.2)
+        return archivedTopics.map { chat in
+            ChatSession(id: chat.id, name: chat.name, agentName: ChatSession.conciergeAgent, archivedAt: RomeDate.string(.now), activityAt: topicActivity[chat.id].map(RomeDate.string), pinnedAt: nil)
+        }
+    }
+
+    func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws {
+        try await pause(0.2)
+        guard let chat = archivedTopics.first(where: { $0.id == id }) else { throw APIError.notFound }
+        archivedTopics.removeAll { $0.id == id }
+        movedFollows[id] = nil
+        topicChats.append(chat)
+    }
+
+    /// An archived chat's follows its archive moved. Any other chat answers
+    /// as an older instance does, so its archive and delete ask as before.
+    func chatWork(chatId: String) async throws -> ConciergeChatWork {
+        try await pause(0.2)
+        guard archivedTopics.contains(where: { $0.id == chatId }) else { throw APIError.notFound }
+        return ConciergeChatWork(movedFollows: movedFollows[chatId] ?? [])
+    }
+
     func deleteChat(_ id: String) async throws {
-        try await archiveChat(id)
+        try await pause(0.2)
+        topicChats.removeAll { $0.id == id }
+        archivedTopics.removeAll { $0.id == id }
     }
 
     /// Chats whose messages cannot be read, for the load-error bar's snapshots.
@@ -239,7 +281,7 @@ final class DemoBackend: RomeBackend {
         let end = before.flatMap { cursor in all.firstIndex { $0.id == cursor } } ?? all.count
         let start = max(0, end - limit)
         let turned = Self.withTurns(all)
-        return MessagePage(messages: Array(turned[start..<end]).map(Self.withThreads), nextCursor: start > 0 ? all[start].id : nil)
+        return MessagePage(messages: Array(turned[start..<end]), nextCursor: start > 0 ? all[start].id : nil)
     }
 
     /// Turns the way the server keeps them: each message the guardian writes
@@ -273,26 +315,11 @@ final class DemoBackend: RomeBackend {
         for key in shares.keys { shares[key]?.removeAll { $0.id == id } }
     }
 
-    /// The demo is an instance with chat threads: every message says its thread.
-    private static func withThreads(_ message: ChatMessage) -> ChatMessage {
-        var message = message
-        message.knowsThreads = true
-        return message
-    }
-
-
-    func thread(sessionId: String, root: String) async throws -> [ChatMessage] {
-        try await pause(0.25)
-        let all = messages[sessionId] ?? []
-        guard all.contains(where: { $0.id == root }) else { throw APIError.notFound }
-        return all.filter { !$0.isTrace && ($0.chatThreadId == root || $0.id == root) }.map(Self.withThreads)
-    }
-
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
-        try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority, thread: nil)
+        try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority, reply: nil)
     }
 
-    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread target: ThreadTarget?) async throws -> CreatedTurn {
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, reply target: ReplyTarget?) async throws -> CreatedTurn {
         try await pause(0.35)
         if text.contains("失败") || text.lowercased().contains("fail") { throw APIError.network }
         // Stored the way the server stores it: a line per file after the text.
@@ -302,11 +329,10 @@ final class DemoBackend: RomeBackend {
             return "- File \(index + 1): [\(file.name)](</\(path)>)"
         }
         let stored = ([text] + (lines.isEmpty ? [] : [lines.joined(separator: "\n")])).filter { !$0.isEmpty }.joined(separator: "\n\n")
-        // A send replies to the message it names, and so does the answer: both
-        // are in that message's chat thread and show its quote.
+        // A send replies to the message it names and shows its quote; so does
+        // the answer, which sits right under it.
         let original = target.flatMap { target in (messages[sessionId] ?? []).first { $0.id == target.messageId } }
-        let thread = original.map { $0.chatThreadId ?? $0.id }
-        let sent = threaded(quoting(user(inputId, stored, at: .now, session: sessionId), original), thread)
+        let sent = quoting(user(inputId, stored, at: .now, session: sessionId), original)
         insert(sessionId, sent)
         let turnId = "turn-\(nextID())"
         setRunning(sessionId, turnId)
@@ -315,9 +341,9 @@ final class DemoBackend: RomeBackend {
         Task {
             try? await pause(concierge ? 1.8 : 3.5)
             if concierge {
-                insert(sessionId, threaded(quoting(agent("好，我记下了。", at: .now, session: sessionId), sent), thread))
+                insert(sessionId, quoting(agent("好，我记下了。", at: .now, session: sessionId), sent))
                 try? await pause(0.7)
-                insert(sessionId, threaded(agent("需要开任务的话，我会把它放进任务里，做完告诉你。", at: .now, session: sessionId), thread))
+                insert(sessionId, quoting(agent("需要开任务的话，我会把它放进任务里，做完告诉你。", at: .now, session: sessionId), sent))
                 // An untitled topic chat is named from its first message.
                 if let topic, topicChats[topic].name.isEmpty {
                     let name = String(text.prefix(16))
@@ -382,7 +408,7 @@ final class DemoBackend: RomeBackend {
 
     func sessions() async throws -> [ChatSession] {
         Array(chats.values) + topicChats.map { chat in
-            ChatSession(id: chat.id, name: chat.name, activityAt: topicActivity[chat.id].map(RomeDate.string))
+            ChatSession(id: chat.id, name: chat.name, activityAt: topicActivity[chat.id].map(RomeDate.string), pinnedAt: topicPins[chat.id].map(RomeDate.string))
         }
     }
 
@@ -397,8 +423,43 @@ final class DemoBackend: RomeBackend {
         }
     }
 
-    /// The demo's task list: its tasks in the groups their status gives
-    /// them, with a schedule, a lone check, a follow and a routine.
+    /// The task chats the demo's task links name, by id.
+    private var taskLinkInfo: [String: TaskLinkInfo] = [:]
+
+    func taskLinks(chatId: String, ids: [String]) async throws -> TaskLinksResponse {
+        try await pause(0.1)
+        return TaskLinksResponse(tasks: ids.compactMap { taskLinkInfo[$0] })
+    }
+
+    /// The main chat's rows that are no task chat: a reminder, a follow and
+    /// routines (a daily one, a paused weekly one, a one-off), made on the
+    /// first read so their times count from then. The row actions change them.
+    private var listExtras: [TaskListItem]?
+
+    private func extras(nowMs: Double) -> [TaskListItem] {
+        if let listExtras { return listExtras }
+        let hour = 3_600_000.0
+        let made = nowMs - 6 * 24 * hour
+        let oneOffDate: String = {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.string(from: Date(timeIntervalSince1970: (nowMs + 2 * 24 * hour) / 1000))
+        }()
+        let items: [TaskListItem] = [
+            .check(.init(check: .init(id: "check-flight", name: "看看机票有没有降价", at: nowMs + 3 * hour, waitingFor: nil, createdAt: made))),
+            .routine(.init(id: "r-passport", name: "提醒续签护照", trigger: .init(type: "schedule", localTime: "10:00", rrule: nil, date: oneOffDate), enabled: true, nextRunAt: nowMs + 2 * 24 * hour, lastRun: nil, createdAt: made)),
+            .routine(.init(id: "r-summary", name: "每日总结", trigger: .init(type: "schedule", localTime: "21:00", rrule: "FREQ=DAILY"), enabled: true, nextRunAt: nowMs + 5 * hour, lastRun: nil, createdAt: made)),
+            .follow(.init(source: "github", label: "GitHub", target: "rome-os/rome", state: "active", digestTimes: ["09:00", "18:00"], nextAt: nowMs + 7 * hour, createdAt: made)),
+            .routine(.init(id: "r-weekly", name: "周报提醒", trigger: .init(type: "schedule", localTime: "17:00", rrule: "FREQ=WEEKLY;BYDAY=FR"), enabled: false, nextRunAt: nil, lastRun: .init(status: "error", firedAt: made), createdAt: made)),
+        ]
+        listExtras = items
+        return items
+    }
+
+    /// The demo's task list in the one panel's groups: its tasks in the
+    /// groups their status gives them, a scheduled task between runs in
+    /// Scheduled, with a lone reminder, a follow and routines.
     func taskList(chatId: String) async throws -> TaskListResponse {
         try await pause(0.2)
         let nowMs = Date.now.timeIntervalSince1970 * 1000
@@ -422,21 +483,70 @@ final class DemoBackend: RomeBackend {
             )
             let key: TaskListGroup.Key = switch status {
             case "needs_you": .needsYou
-            case "later": .later
+            case "later": item.schedule == nil ? .later : .scheduled
             case "ended": .ended
             default: .active
             }
             groups[key, default: []].append(.task(item))
         }
-        if chat == nil {
-            groups[.later, default: []].append(.check(.init(check: .init(id: "check-flight", name: "看看机票有没有降价", at: nowMs + 3 * 3_600_000, waitingFor: nil))))
-            groups[.onItsOwn, default: []] += [
-                .follow(.init(source: "github", label: "GitHub", target: "rome-os/rome", state: "active", digestTimes: ["09:00", "18:00"])),
-                .routine(.init(id: "r-summary", name: "每日总结", trigger: .init(type: "schedule", localTime: "21:00", rrule: "FREQ=DAILY"), enabled: true, nextRunAt: nowMs + 5 * 3_600_000, lastRun: nil)),
-            ]
+        // The empty demo has none, so its tab shows "No tasks yet".
+        if chat == nil, variant != .empty {
+            for item in extras(nowMs: nowMs) {
+                let key: TaskListGroup.Key
+                switch item {
+                case .routine(let routine): key = routine.trigger.date != nil && routine.trigger.rrule == nil ? .later : .scheduled
+                case .follow: key = .scheduled
+                default: key = .later
+                }
+                groups[key, default: []].append(item)
+            }
         }
-        let order: [TaskListGroup.Key] = [.needsYou, .active, .later, .onItsOwn, .ended]
+        let order: [TaskListGroup.Key] = [.needsYou, .active, .later, .scheduled, .ended]
         return TaskListResponse(chatId: chatId, groups: order.compactMap { key in groups[key].map { TaskListGroup(key: key, items: $0) } })
+    }
+
+    /// Changes a row that is no task chat, then reads the list again; one
+    /// the list does not hold is not found.
+    private func changeExtra(_ id: String, chatId: String, _ change: (inout [TaskListItem], Int) -> Void) async throws {
+        try await pause(0.4)
+        guard var items = listExtras, let index = items.firstIndex(where: { $0.id == id }) else { throw APIError.notFound }
+        change(&items, index)
+        listExtras = items
+        bus.emit(LiveTopic.chatTasks(chatId), .taskListChanged(chatId: chatId))
+    }
+
+    func cancelListedCheck(chatId: String, checkId: String) async throws {
+        try await changeExtra("check:\(checkId)", chatId: chatId) { items, index in items.remove(at: index) }
+    }
+
+    func unfollowListed(chatId: String, source: String, target: String) async throws {
+        try await changeExtra("follow:\(source):\(target)", chatId: chatId) { items, index in items.remove(at: index) }
+    }
+
+    func setListedRoutineEnabled(chatId: String, routineId: String, enabled: Bool) async throws {
+        let nowMs = Date.now.timeIntervalSince1970 * 1000
+        try await changeExtra("routine:\(routineId)", chatId: chatId) { items, index in
+            guard case .routine(var routine) = items[index] else { return }
+            routine.enabled = enabled
+            routine.nextRunAt = enabled ? nowMs + 24 * 3_600_000 : nil
+            items[index] = .routine(routine)
+        }
+    }
+
+    func deleteListedRoutine(chatId: String, routineId: String) async throws {
+        try await changeExtra("routine:\(routineId)", chatId: chatId) { items, index in items.remove(at: index) }
+    }
+
+    /// Marks a demo task done: it ends as done, and its list reads again.
+    func markListedTaskDone(chatId: String, taskId: String) async throws {
+        try await pause(0.4)
+        guard let index = tasks.firstIndex(where: { $0.id == taskId }) else { throw APIError.notFound }
+        tasks[index].status = "ended"
+        tasks[index].endReason = "done"
+        tasks[index].state = .done
+        tasks[index].completedAt = Date.now.timeIntervalSince1970 * 1000
+        tasks[index].updatedAt = tasks[index].completedAt!
+        bus.emit(LiveTopic.chatTasks(chatId), .taskListChanged(chatId: chatId))
     }
 
     /// Stops a demo task: it ends as stopped, and its list reads again.
@@ -555,7 +665,9 @@ final class DemoBackend: RomeBackend {
             for message in list where !message.isTrace {
                 let text = message.parts.compactMap(\.textContent).joined(separator: " ")
                 guard text.localizedCaseInsensitiveContains(query) else { continue }
-                let session = chats[sessionId] ?? ChatSession(id: sessionId, name: "Chat")
+                let session = chats[sessionId]
+                    ?? archivedTopics.first { $0.id == sessionId }.map { ChatSession(id: $0.id, name: $0.name, agentName: ChatSession.conciergeAgent, archivedAt: RomeDate.string(.now)) }
+                    ?? ChatSession(id: sessionId, name: "Chat")
                 hits.append(SearchHit(session: session, message: .init(id: message.id, role: message.role, snippet: text, createdAt: message.createdAt)))
             }
         }
@@ -835,7 +947,7 @@ final class DemoBackend: RomeBackend {
     }
 
     private func insert(_ sessionId: String, _ message: ChatMessage) {
-        let message = Self.withThreads(Self.withTurns((messages[sessionId] ?? []) + [message]).last ?? message)
+        let message = Self.withTurns((messages[sessionId] ?? []) + [message]).last ?? message
         messages[sessionId, default: []].append(message)
         bus.emit(LiveTopic.chat(sessionId), .messageInsert(message))
     }
@@ -866,17 +978,6 @@ final class DemoBackend: RomeBackend {
         return message
     }
 
-    /// The message, placed in the chat thread that starts at `root`, or in its
-    /// own when it has none, as the server sends it. The title is the task's
-    /// that started in the thread, when one did.
-    private func threaded(_ message: ChatMessage, _ root: String?, _ title: String? = nil) -> ChatMessage {
-        var message = message
-        message.chatThreadId = root ?? message.id
-        message.chatThreadTitle = root.flatMap { title ?? threadTitles[$0] }
-        message.knowsThreads = true
-        return message
-    }
-
     /// The message with the quote of `original` as its first part, as the
     /// server stores a reply; the message itself when there is nothing to quote.
     private func quoting(_ message: ChatMessage, _ original: ChatMessage?) -> ChatMessage {
@@ -890,9 +991,6 @@ final class DemoBackend: RomeBackend {
         message.content = json([quote] + stored)
         return message
     }
-
-    /// The title of the task each demo chat thread is, by its root.
-    private var threadTitles: [String: String] = [:]
 
     /// The guardian's reply to a message, with its quote, as the server stores it.
     private func reply(_ id: String, _ text: String, to original: String, quoting: String, at date: Date, session: String) -> ChatMessage {
@@ -1018,11 +1116,39 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-lists", name: "搬家清单", main: false, unread: 0),
             ConciergeChat(id: "topic-cards", name: "周末安排", main: false, unread: 0),
             ConciergeChat(id: "topic-itinerary", name: "东京一日", main: false, unread: 0),
+            ConciergeChat(id: "topic-task-links", name: "任务进度", main: false, unread: 0),
         ]
         // Latest first in the drawer: the trip, then the errors, and so on.
         // The cafés come eighth, past the first five, for the drawer over it.
-        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800]
+        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
+
+        // Archived topic chats, out of the drawer's list: the Archived row's
+        // sheet lists them, and each opens read only. The car's archive moved
+        // a follow to the main chat, so its Restore asks about it.
+        archivedTopics = [
+            ConciergeChat(id: "topic-archived-car", name: "二手车比价", main: false),
+            ConciergeChat(id: "topic-archived-holiday", name: "国庆出行", main: false),
+            ConciergeChat(id: "topic-archived-tax", name: "个税年度汇算", main: false),
+        ]
+        for (id, days) in ["topic-archived-car": 6, "topic-archived-holiday": 40, "topic-archived-tax": 120] {
+            topicActivity[id] = Date.now.addingTimeInterval(Double(-days * 86400))
+        }
+        movedFollows["topic-archived-car"] = [.init(source: "gmail", label: "Gmail", target: "dealer@example.com")]
+        messages["topic-archived-car"] = [
+            user("car-1", "帮我比较一下这三辆二手车：2019 款卡罗拉、2020 款思域和 2018 款马自达 3。", at: at(20, 10, daysAgo: 6), session: "topic-archived-car"),
+            agent("三辆车里，2020 款思域里程最少、车况记录最完整，但价格高出约 1.2 万。卡罗拉保值率最好，保养也最便宜。马自达 3 开起来最好，但有一次小事故记录。\n\n如果你主要在市区通勤，我推荐卡罗拉。", at: at(20, 11, daysAgo: 6), session: "topic-archived-car"),
+            user("car-2", "就卡罗拉吧，帮我盯着车商的邮件。", at: at(20, 15, daysAgo: 6), session: "topic-archived-car"),
+            agent("好的，我会关注车商发来的邮件，有报价或试驾时间就告诉你。", at: at(20, 15, daysAgo: 6), session: "topic-archived-car"),
+        ]
+        messages["topic-archived-holiday"] = [
+            user("holiday-1", "国庆去哪儿人少一点？", at: at(9, 0, daysAgo: 40), session: "topic-archived-holiday"),
+            agent("可以考虑错峰去皖南的小村子，比如查济或屏山，人比宏村少很多。", at: at(9, 1, daysAgo: 40), session: "topic-archived-holiday"),
+        ]
+        messages["topic-archived-tax"] = [
+            user("tax-1", "个税汇算要准备什么？", at: at(19, 30, daysAgo: 120), session: "topic-archived-tax"),
+            agent("准备好全年的收入明细和专项附加扣除的材料，在个税 App 里核对后提交就行。", at: at(19, 31, daysAgo: 120), session: "topic-archived-tax"),
+        ]
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
             let updated = nowMs - minutesAgo * 60_000
@@ -1060,35 +1186,25 @@ final class DemoBackend: RomeBackend {
             for row in 0..<3 { for column in 0..<5 { context.fill(CGRect(x: 200 + column * 85, y: 220 + row * 95, width: 50, height: 60)) } }
         }.jpegData(compressionQuality: 0.8)
         // A long chat, to scroll far from the bottom.
-        // The last eight chapters are one long chat thread, taller than the
-        // screen: its root, chapter 17's question, carries the replies line.
-        threadTitles = [
-            "b16": "读书笔记：第 17–24 章", "k1": "比较京都三家酒店",
-            "c-site": "官网首页双语文案", "c-price": "价格追踪：发提醒邮件", "c-research": "竞品定价调研", "c-login": "修复登录页样式",
-        ]
         messages["topic-books"] = (0..<24).flatMap { index -> [ChatMessage] in
             let time = at(8, 0, daysAgo: 1).addingTimeInterval(Double(index) * 600)
-            let root: String? = index >= 16 ? "b16" : nil
             return [
-                threaded(user("b\(index)", "第 \(index + 1) 章讲了什么？", at: time, session: "topic-books"), root),
+                user("b\(index)", "第 \(index + 1) 章讲了什么？", at: time, session: "topic-books"),
                 // The last answer opens with bold that closes after `。`.
-                threaded(agent(index == 23
+                agent(index == 23
                     ? "**第 24 章的重点：先把大问题拆小。**每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。"
-                    : "第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"), root),
+                    : "第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"),
             ]
         }
-        // One task's chat thread among messages in none: the plan's task
-        // came back into the thread of the message that started it, so its
-        // Concierge messages carry its label. The weather's question and
-        // answer are in no thread. The last word is a reply to the hotel
-        // message, in the thread, with its quote.
+        // The weather's question and answer sit between the trip's messages.
+        // The last word is the guardian's reply to the hotel message, with its quote.
         messages["topic-trip"] = [
-            threaded(user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"), "k1"),
-            threaded(agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"), "k1"),
-            threaded(user("k4", "顺便看下四月京都的天气。", at: at(8, 58), session: "topic-trip"), nil),
-            threaded(agent("四月白天 15–20 度，早晚凉，带件外套。月初樱花还在。", at: at(8, 59), session: "topic-trip"), nil),
-            threaded(agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip", id: "k5"), "k1"),
-            threaded(reply("k6", "就按它排。", to: "k5", quoting: "酒店比较好了：河原町那家离车站最近，价格中等。", at: at(9, 24), session: "topic-trip"), "k1"),
+            user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"),
+            agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"),
+            user("k4", "顺便看下四月京都的天气。", at: at(8, 58), session: "topic-trip"),
+            agent("四月白天 15–20 度，早晚凉，带件外套。月初樱花还在。", at: at(8, 59), session: "topic-trip"),
+            agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip", id: "k5"),
+            reply("k6", "就按它排。", to: "k5", quoting: "酒店比较好了：河原町那家离车站最近，价格中等。", at: at(9, 24), session: "topic-trip"),
         ]
         // A photo the guardian sent, stored the way the server stores it, and a long reply.
         let kitchen = "projects/demo/home/kitchen.jpg"
@@ -1162,24 +1278,31 @@ final class DemoBackend: RomeBackend {
         digestRun.traceSummary?.automatedInput = TraceSummary.InputSource(type: "digest", name: nil)
         var digestAnswer = agent("今天的摘要：三封邮件，一个日程。", at: at(10, 20).addingTimeInterval(5))
         digestAnswer.turnId = "turn-digest"
-        // Each task's messages are in its chat thread, labelled with the
-        // task: a task card when it starts, its question or approval on its
-        // own when it asks. The login task's cards are settled and fold; the
-        // research question expired; the price approval waits.
+        let loginAsk = user("c-login", "登录页的按钮间距不对，深色模式下也看不清，修一下。", at: at(9, 58, daysAgo: 3))
+        let siteAsk = user("c-site", "帮我把官网首页的文案改成中英双语", at: at(9, 12))
+        let researchAsk = agent("竞品调研想确认一下范围，你看下。", at: at(9, 15), id: "c-research")
+        let researchReply = reply("c-research-reply", "只看国内的就行。", to: "c-research", quoting: "竞品调研想确认一下范围，你看下。", at: at(9, 18), session: conciergeChatID)
+        // Each task: a task card when it starts, its question or approval on
+        // its own when it asks. The login task's cards are settled and fold;
+        // the research question expired; the price approval waits. The
+        // Concierge's replies to one message sit together, and a reply to an
+        // earlier message shows its quote.
         messages[conciergeChatID] = [
-            threaded(user("c-login", "登录页的按钮间距不对，深色模式下也看不清，修一下。", at: at(9, 58, daysAgo: 3)), "c-login"),
-            threaded(taskPart("chat-login", "修复登录页样式", show: "task", at: at(9, 59, daysAgo: 3)), "c-login"),
-            threaded(taskPart("chat-login", "修复登录页样式", show: "ask", card: questionCard("q-login", "深色模式下按钮用珊瑚色，还是用中性色？", options: ["珊瑚色", "中性色"], answered: "珊瑚色", since: at(10, 10, daysAgo: 3)), at: at(10, 11, daysAgo: 3)), "c-login"),
-            threaded(taskPart("chat-login", "修复登录页样式", show: "ask", card: approvalCard("ap-login", "发布预览环境", outcome: "approved", since: at(10, 30, daysAgo: 3)), at: at(10, 31, daysAgo: 3)), "c-login"),
-            threaded(agent("改好了：按钮间距统一成 14 pt，深色模式下的文字换成了浅色。", at: at(10, 41, daysAgo: 3)), "c-login"),
-            threaded(user("c-site", "帮我把官网首页的文案改成中英双语", at: at(9, 12)), "c-site"),
-            threaded(agent("好，我开一个任务去改。", at: at(9, 12).addingTimeInterval(20)), "c-site"),
-            threaded(agent("改完告诉你。", at: at(9, 12).addingTimeInterval(21)), "c-site"),
-            threaded(taskPart("chat-site", "官网首页双语文案", show: "task", at: at(9, 12).addingTimeInterval(22)), "c-site"),
-            threaded(agent("竞品调研想确认一下范围，你看下。", at: at(9, 15), id: "c-research"), "c-research"),
-            threaded(taskPart("chat-research", "竞品定价调研", show: "ask", card: questionCard("q-1", "调研范围只看国内产品，还是包括海外？", options: ["只看国内", "包括海外"], expired: true, since: at(9, 15)), at: at(9, 15).addingTimeInterval(1)), "c-research"),
-            threaded(agent("降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。", at: at(9, 40), id: "c-price"), "c-price"),
-            threaded(taskPart("chat-price", "价格追踪：发提醒邮件", show: "ask", card: approvalCard("ap-1", "发送邮件", since: at(9, 39).addingTimeInterval(5)), at: at(9, 40).addingTimeInterval(1)), "c-price"),
+            loginAsk,
+            taskPart("chat-login", "修复登录页样式", show: "task", at: at(9, 59, daysAgo: 3)),
+            taskPart("chat-login", "修复登录页样式", show: "ask", card: questionCard("q-login", "深色模式下按钮用珊瑚色，还是用中性色？", options: ["珊瑚色", "中性色"], answered: "珊瑚色", since: at(10, 10, daysAgo: 3)), at: at(10, 11, daysAgo: 3)),
+            taskPart("chat-login", "修复登录页样式", show: "ask", card: approvalCard("ap-login", "发布预览环境", outcome: "approved", since: at(10, 30, daysAgo: 3)), at: at(10, 31, daysAgo: 3)),
+            quoting(agent("改好了：按钮间距统一成 14 pt，深色模式下的文字换成了浅色。", at: at(10, 41, daysAgo: 3)), loginAsk),
+            siteAsk,
+            quoting(agent("好，我开一个任务去改。", at: at(9, 12).addingTimeInterval(20)), siteAsk),
+            quoting(agent("改完告诉你。", at: at(9, 12).addingTimeInterval(21)), siteAsk),
+            taskPart("chat-site", "官网首页双语文案", show: "task", at: at(9, 12).addingTimeInterval(22)),
+            researchAsk,
+            taskPart("chat-research", "竞品定价调研", show: "ask", card: questionCard("q-1", "调研范围只看国内产品，还是包括海外？", options: ["只看国内", "包括海外"], expired: true, since: at(9, 15)), at: at(9, 15).addingTimeInterval(1)),
+            researchReply,
+            quoting(agent("好，只看国内的。", at: at(9, 18).addingTimeInterval(20)), researchReply),
+            agent("降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。", at: at(9, 40), id: "c-price"),
+            taskPart("chat-price", "价格追踪：发提醒邮件", show: "ask", card: approvalCard("ap-1", "发送邮件", since: at(9, 39).addingTimeInterval(5)), at: at(9, 40).addingTimeInterval(1)),
             // The Concierge asks and waits for an approval in the main chat too.
             renewed,
             user("c3", "海口明天怎么样？", at: at(9, 52), session: conciergeChatID),
@@ -1284,6 +1407,24 @@ final class DemoBackend: RomeBackend {
         ]
         // Cards the Concierge composed itself: Rome's own, every value
         // written out, with no `bind`.
+        // Task links in each status, the way the Concierge refers to its tasks.
+        taskLinkInfo = Dictionary(uniqueKeysWithValues: [
+            TaskLinkInfo(id: "chat-site", name: "官网首页双语文案", status: "active"),
+            TaskLinkInfo(id: "chat-price", name: "价格追踪：发提醒邮件", status: "needs_you"),
+            TaskLinkInfo(id: "chat-login", name: "修复登录页样式", status: "ended", endReason: "done"),
+            TaskLinkInfo(id: "chat-export", name: "导出季度报表", status: "ended", endReason: "failed"),
+            TaskLinkInfo(id: "chat-quotes", name: "抓取供应商报价", status: "ended", endReason: "stopped"),
+            TaskLinkInfo(id: "chat-research", name: "竞品定价调研", status: "ended", endReason: "no_response"),
+            TaskLinkInfo(id: "chat-weekly", name: "每周一整理周报", status: "later"),
+            TaskLinkInfo(id: "chat-blur", name: "iOS 退出 task chat 后头部模糊变实心", status: "active"),
+            TaskLinkInfo(id: "chat-reload", name: "iOS 长气泡展开和折叠时图片重新加载，先在 Mac mini 上复现", status: "needs_you"),
+        ].map { ($0.id, $0) })
+        messages["topic-task-links"] = [
+            user("tl1", "我的任务都怎么样了？", at: at(9, 30), session: "topic-task-links"),
+            agent("[官网首页双语文案](#rome-task=chat-site) 还在逐段翻译，好了告诉你。其余的：\n\n- [价格追踪：发提醒邮件](#rome-task=chat-price) 等你批准\n- [修复登录页样式](#rome-task=chat-login) 改好了\n- [导出季度报表](#rome-task=chat-export) 没导出来，表格权限不够\n- [抓取供应商报价](#rome-task=chat-quotes) 你停掉了\n- [竞品定价调研](#rome-task=chat-research) 没等到你的回答\n- [每周一整理周报](#rome-task=chat-weekly) 下周一开始", at: at(9, 31), session: "topic-task-links"),
+            // Chips on a wrapped paragraph's first line, and one that wraps itself.
+            agent("在查了：[iOS 退出 task chat 后头部模糊变实心](#rome-task=chat-blur)。会在 Mac mini 上复现、找根因，先给你看修法，不直接改。\n\n另一件：[iOS 长气泡展开和折叠时图片重新加载，先在 Mac mini 上复现](#rome-task=chat-reload) 等你确认。", at: at(9, 32), session: "topic-task-links"),
+        ]
         messages["topic-itinerary"] = [
             user("it1", "周六在东京怎么安排？", at: at(9, 0), session: "topic-itinerary"),
             parts([Self.agentItinerary], at: at(9, 1), session: "topic-itinerary"),

@@ -11,30 +11,11 @@ import {
 } from "lucide-react";
 import { FileBrowserPage } from "@/components/file-browser-page";
 import { SyncStatusPanel } from "@/components/sync/SyncStatusPanel";
+import { getMemoryAutoSavePolicy } from "@/lib/memory-autosave";
 
 /** Reserved sync key for the memory dir — mirrors `MEMORY_SYNC_KEY` in the
  * backend sync routes. Memory rides the same sync stack as projects. */
 const MEMORY_SYNC_KEY = "@memory";
-
-const LARGE_TEXT_FILE_BYTES = 1024 * 1024;
-const STANDARD_AUTOSAVE_DELAY_MS = 2000;
-const LARGE_FILE_AUTOSAVE_DELAY_MS = 5000;
-
-function getMemoryAutoSavePolicy(file: {
-  editable: boolean;
-  kind: string;
-  path: string;
-  size: number;
-}) {
-  if (!file.editable || file.kind !== "text") return null;
-  if (!/\.(md|mdx|txt)$/i.test(file.path)) return null;
-
-  return {
-    commit: false,
-    delayMs:
-      file.size > LARGE_TEXT_FILE_BYTES ? LARGE_FILE_AUTOSAVE_DELAY_MS : STANDARD_AUTOSAVE_DELAY_MS,
-  };
-}
 
 function MemoryCategory({ icon, label }: { icon: ReactNode; label: string }) {
   return (

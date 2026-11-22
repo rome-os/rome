@@ -1,4 +1,4 @@
-export const OAUTH_PROVIDERS = ["google", "github", "slack", "shopify"] as const;
+export const OAUTH_PROVIDERS = ["google", "github", "slack", "shopify", "microsoft"] as const;
 
 export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
 
@@ -12,7 +12,7 @@ export const OAUTH_PROVIDER_DESCRIPTORS: Record<OAuthProvider, OAuthProviderDesc
   google: {
     id: "google",
     label: "Google",
-    description: "Workspace APIs, Drive, Gmail, Calendar, and Google identity.",
+    description: "Read Gmail and send messages you approve.",
   },
   github: {
     id: "github",
@@ -28,6 +28,11 @@ export const OAUTH_PROVIDER_DESCRIPTORS: Record<OAuthProvider, OAuthProviderDesc
     id: "shopify",
     label: "Shopify",
     description: "Products, inventory, and orders in your Shopify store.",
+  },
+  microsoft: {
+    id: "microsoft",
+    label: "Microsoft",
+    description: "Read Outlook mail and send messages you approve.",
   },
 };
 
@@ -76,7 +81,11 @@ export function normalizeShopifyShopDomain(value: string | null | undefined): st
 /** Providers whose expiring grants Rome Cloud can refresh. Any other provider's
  *  expiring grant answers "needs-fix" without a round trip, and degrades at
  *  expiry until the guardian reconnects. */
-export const ROME_CLOUD_REFRESHABLE_PROVIDERS: ReadonlySet<OAuthProvider> = new Set(["shopify"]);
+export const ROME_CLOUD_REFRESHABLE_PROVIDERS: ReadonlySet<OAuthProvider> = new Set([
+  "google",
+  "shopify",
+  "microsoft",
+]);
 
 export function isOAuthProvider(value: string): value is OAuthProvider {
   return OAUTH_PROVIDERS.includes(value as OAuthProvider);
@@ -90,8 +99,17 @@ export function showGoogleOAuth(): boolean {
   return envFlagEnabled(process.env.SHOW_GOOGLE_OAUTH);
 }
 
+/** Opt-in until a real Microsoft consent, read and send have been verified. */
+export function showMicrosoftOAuth(): boolean {
+  return envFlagEnabled(process.env.SHOW_MICROSOFT_OAUTH);
+}
+
 export function getEnabledOAuthProviders(): OAuthProvider[] {
-  return OAUTH_PROVIDERS.filter((provider) => provider !== "google" || showGoogleOAuth());
+  return OAUTH_PROVIDERS.filter(
+    (provider) =>
+      (provider !== "google" || showGoogleOAuth()) &&
+      (provider !== "microsoft" || showMicrosoftOAuth()),
+  );
 }
 
 export function isEnabledOAuthProvider(value: string): value is OAuthProvider {

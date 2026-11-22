@@ -12,7 +12,9 @@ export type { DeleteRoutineOutput } from "./types.js";
 const log = createAppLogger("delete-routine");
 
 export const deleteRoutineInputSchema = z.object({
-  routineId: z.string().describe("The id of the routine to delete (obtain it from search_routine)"),
+  routineId: z
+    .string()
+    .describe("The id of the routine to delete (obtain it from system:search_routine)"),
 });
 
 export type DeleteRoutineInput = z.infer<typeof deleteRoutineInputSchema>;
@@ -54,7 +56,7 @@ export async function deleteRoutine(
         status: "error",
         error:
           `No routine found with id "${input.routineId}". ` +
-          "Use search_routine to find the right id.",
+          "Use system:search_routine to find the right id.",
       };
     case "managed":
       return {
@@ -69,7 +71,8 @@ export async function deleteRoutine(
         error:
           `Routine "${input.routineId}" has ${result.activeRuns} active run(s) ` +
           "(running or awaiting approval) and was not deleted. Wait for them to " +
-          "finish, or cancel them, then try again.",
+          "finish, or stop a running one with system:stop_routine, then try again. " +
+          "A run awaiting approval ends only when the guardian approves or rejects it.",
       };
     case "deleted":
       // Only tear down the live trigger once the row is actually gone, so a
@@ -99,7 +102,7 @@ export function createAction(
   // The deps bag is untyped at the wiring seam; a missing engine must fail the
   // action load at boot, not leave deleted routines firing until next restart.
   if (!deps.routineEngine) {
-    throw new Error("delete_routine requires a routineEngine dep");
+    throw new Error("system:delete_routine requires a routineEngine dep");
   }
   return createDeleteRoutineAction(config, deps);
 }

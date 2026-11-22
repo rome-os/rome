@@ -2,7 +2,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useLayoutEffect, useState } from "react";
+import { useState } from "react";
 import { MemoryRouter, useLocation, useNavigationType } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { romeNewsConfig } from "@/config/quick-entries";
@@ -12,9 +12,7 @@ import i18n from "@/i18n";
 import { ChatComponent, type ChatComponentProps, GREETING_ONLY_HOME_KEY } from "./ChatComponent";
 import * as chatModule from "./Chat" with { rstest: "importActual" };
 import type { ChatProps } from "./Chat";
-import type { ChatMessagePage } from "@/lib/chat-api";
 import type { MessageListProps } from "./MessageList";
-import { useChatThreads } from "./reply/chat-threads";
 import { ToolTraceContext, type ToolTraceHost } from "@/pages/free/tool-trace";
 
 rs.mock("@/components/logo", () => ({
@@ -79,22 +77,8 @@ rs.mock("@/components/chat/entries", () => ({
   renderSingleEntry: () => null,
 }));
 
-const transcriptFrames = rs.hoisted(
-  () =>
-    [] as Array<{
-      ids: string[];
-      stacked: string[];
-      variant: MessageListProps["variant"];
-    }>,
-);
-
 function TranscriptProbe({ rows, variant }: MessageListProps) {
-  const threads = useChatThreads();
   const ids = rows.flatMap((row) => (row.kind === "user" ? [row.message.id] : []));
-  useLayoutEffect(() => {
-    if (ids.length > 0)
-      transcriptFrames.push({ ids, stacked: [...(threads?.stacked ?? [])], variant });
-  });
   return <div data-testid="message-list" data-variant={variant} data-message-ids={ids.join(",")} />;
 }
 
@@ -126,7 +110,6 @@ beforeAll(async () => {
 afterEach(async () => {
   cleanup();
   chatStub.enabled = false;
-  transcriptFrames.length = 0;
   romeNewsConfig.enabled = false;
   localStorage.clear();
   sessionStorage.clear();
@@ -207,8 +190,6 @@ function renderChatComponent(
     settings?: Record<string, unknown>;
     // Answers `/api/concierge/session` once it resolves; a chat's messages 404 until then.
     conciergeCreated?: Promise<void>;
-    conciergeChatsGate?: Promise<void>;
-    messagePage?: (url: string) => ChatMessagePage | Promise<ChatMessagePage>;
   },
   initialEntry: string | { pathname: string; state: Record<string, unknown> } = "/chat",
 ) {
@@ -228,7 +209,6 @@ function renderChatComponent(
       return Response.json({ guardianName: "Ada", agentName: "Atlas", ...homeData?.settings });
     }
     if (url === "/api/concierge/chats") {
-      await homeData?.conciergeChatsGate;
       return Response.json({
         chats: [
           { id: "concierge", name: "Concierge", main: true, unread: 0 },
@@ -258,7 +238,7 @@ function renderChatComponent(
         return Response.json({ error: "Session not found" }, { status: 404 });
       }
       return url.includes("limit=")
-        ? Response.json((await homeData?.messagePage?.(url)) ?? { messages: [], nextCursor: null })
+        ? Response.json({ messages: [], nextCursor: null })
         : Response.json([]);
     }
     if (/\/api\/chat\/sessions\/[^/]+\/turns$/.test(url)) {
@@ -332,60 +312,6 @@ describe("ChatComponent draft file drops", () => {
   });
 });
 
-describe("ChatComponent topic chat reload", () => {
-  it("loads thread roots before the delayed Concierge list identifies the topic chat", async () => {
-    let releaseChats!: () => void;
-    let resolveOlder!: (page: ChatMessagePage) => void;
-    const conciergeChatsGate = new Promise<void>((resolve) => {
-      releaseChats = resolve;
-    });
-    const older = new Promise<ChatMessagePage>((resolve) => {
-      resolveOlder = resolve;
-    });
-    const root = {
-      id: "root",
-      sessionId: "topic-1",
-      turnId: null,
-      role: "user" as const,
-      content: JSON.stringify([{ type: "text", content: "Plan a trip" }]),
-      createdAt: "2026-11-09T09:00:00.000Z",
-      chatThreadId: "root",
-    };
-    const reply = { ...root, id: "reply", createdAt: "2026-11-09T10:00:00.000Z" };
-    const messagePage = rs.fn((url: string) =>
-      new URL(url, "http://localhost").searchParams.has("before")
-        ? older
-        : { messages: [reply], nextCursor: "newest" },
-    );
-    renderChatComponent(
-      { sessionId: "topic-1" },
-      { sessions: [], projects: [], conciergeChatsGate, messagePage },
-      "/chat/topic-1",
-    );
-    await waitFor(() => expect(messagePage).toHaveBeenCalledTimes(2));
-    expect(messagePage.mock.calls[0]?.[0]).toContain("limit=10");
-    expect(messagePage.mock.calls[1]?.[0]).toContain("before=newest");
-    expect(transcriptFrames).toEqual([]);
-
-    await act(async () => resolveOlder({ messages: [root], nextCursor: "older" }));
-    await waitFor(() =>
-      expect(screen.getByTestId("message-list").dataset.messageIds).toBe("root,reply"),
-    );
-    expect(screen.getByTestId("message-list").dataset.variant).toBe("default");
-    expect(transcriptFrames[0]?.ids).toEqual(["root", "reply"]);
-
-    await act(async () => releaseChats());
-    await waitFor(() =>
-      expect(screen.getByTestId("message-list").dataset.variant).toBe("concierge"),
-    );
-    const conciergeFrames = transcriptFrames.filter((frame) => frame.variant === "concierge");
-    expect(conciergeFrames.length).toBeGreaterThan(0);
-    expect(conciergeFrames.every((frame) => frame.stacked.includes("reply"))).toBe(true);
-    expect(transcriptFrames.every((frame) => frame.ids.includes("root"))).toBe(true);
-    expect(messagePage).toHaveBeenCalledTimes(2);
-  });
-});
-
 describe("ChatComponent Concierge chats", () => {
   beforeEach(() => {
     chatStub.enabled = true;
@@ -453,7 +379,11 @@ describe("ChatComponent topic chat draft", () => {
       return original(input, init);
     }) as typeof fetch);
     // The topic chat's own empty state, not the home greeting or the main chat's.
-    expect(await screen.findByRole("region", { name: "Start an ongoing topic" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Suggestions" })).toBeTruthy();
+    // The header's status capsule says the welcome until the first message.
+    expect(screen.getByText("What's on your mind?")).toBeTruthy();
+    const badge = document.querySelector("[data-concierge-header-badge]");
+    expect(badge).not.toBeNull();
     expect(
       screen.queryByRole("region", { name: "Just tell me what you want to get done" }),
     ).toBeNull();
@@ -462,6 +392,9 @@ describe("ChatComponent topic chat draft", () => {
     expect(posted).toEqual([]);
     await userEvent.setup().keyboard("Plan my week{Enter}");
     await waitFor(() => expect(onSessionCreated).toHaveBeenCalledWith("topic-9"));
+    // The same header carries on into the chat the send made: its badge is
+    // the very one the blank chat drew, not a fresh copy.
+    expect(document.querySelector("[data-concierge-header-badge]")).toBe(badge);
     // An untitled topic chat, which its first message names.
     expect(posted).toEqual([{ url: "/api/concierge/chats", body: {} }]);
     const turnPost = fetchSpy.mock.calls.find(
@@ -587,7 +520,7 @@ describe("ChatComponent Concierge", () => {
     expect(
       await screen.findByRole("region", { name: "Just tell me what you want to get done" }),
     ).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Start an ongoing topic" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Suggestions" })).toBeNull();
   });
 });
 

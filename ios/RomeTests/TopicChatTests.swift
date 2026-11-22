@@ -90,12 +90,11 @@ import Testing
 
     /// As on the web, a named chat's composer says which chat a message goes to.
     @Test func theComposerNamesTheChatOnceItHasOne() {
-        #expect(TopicChatsStore.composerPlaceholder(nil, replying: false) == "Message")
+        #expect(TopicChatsStore.composerPlaceholder(nil) == "Message")
         let unnamed = ConciergeChat(id: "topic-1", name: "  ", main: false, unread: 0)
-        #expect(TopicChatsStore.composerPlaceholder(unnamed, replying: false) == "Message")
+        #expect(TopicChatsStore.composerPlaceholder(unnamed) == "Message")
         let named = ConciergeChat(id: "topic-1", name: " Kyoto trip ", main: false, unread: 0)
-        #expect(TopicChatsStore.composerPlaceholder(named, replying: false) == "Message in Kyoto trip")
-        #expect(TopicChatsStore.composerPlaceholder(named, replying: true) == "Reply")
+        #expect(TopicChatsStore.composerPlaceholder(named) == "Message in Kyoto trip")
     }
 
     /// A chat read beside the pinned drawer (iPad) loses its badge at once.
@@ -156,6 +155,23 @@ import Testing
         #expect(await workspace.deleteTopic("topic-1"))
         #expect(await workspace.deleteTopic("topic-2", stoppingWork: true))
         #expect(backend.calls == ["delete topic-1", "delete topic-2 stopping work"])
+        #expect(workspace.topics.chats.isEmpty)
+    }
+
+    /// As on the web: an archive moves the chat's follows and open tasks
+    /// unless the guardian chose to stop them.
+    @Test func archiveStopsTheChatsWorkOnlyWhenAsked() async {
+        let backend = FakeBackend()
+        backend.topicChats = [
+            ConciergeChat(id: "topic-1", name: "Trip", main: false, unread: 0),
+            ConciergeChat(id: "topic-2", name: "Home", main: false, unread: 0),
+        ]
+        let workspace = workspace(backend)
+        workspace.topics.start()
+        await settle()
+        #expect(await workspace.archiveTopic("topic-1"))
+        #expect(await workspace.archiveTopic("topic-2", stoppingWork: true))
+        #expect(backend.calls == ["archive topic-1", "archive topic-2 stopping work"])
         #expect(workspace.topics.chats.isEmpty)
     }
 
@@ -255,6 +271,69 @@ import Testing
         #expect(TopicChatsStore.shownCount(12, limit: page, openIndex: nil) == 12)
     }
 
+    /// As on the web: the pinned chats first, the latest pinned on top, then
+    /// the rest by activity, whatever their activity.
+    @Test func theDrawerListsPinnedChatsFirstLatestPinOnTop() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b", "c", "d"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T08:00:00.000Z", pinnedAt: "2026-11-16T08:00:00.000Z"),
+            ChatSession(id: "c", name: "c", activityAt: "2026-11-15T09:00:00.000Z"),
+            ChatSession(id: "d", name: "d", activityAt: "2026-11-15T07:00:00.000Z", pinnedAt: "2026-11-16T09:00:00.000Z"),
+        ]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        #expect(store.chats.map(\.id) == ["d", "b", "a", "c"])
+        #expect(store.isPinned("d") && store.isPinned("b") && !store.isPinned("a"))
+        // A turn in an unpinned chat moves it up among the unpinned only.
+        backend.sessionRows[2].activityAt = "2026-11-17T09:00:00.000Z"
+        store.refresh()
+        await settle()
+        #expect(store.chats.map(\.id) == ["d", "b", "c", "a"])
+    }
+
+    @Test func pinningMovesTheChatToTheTopAndUnpinningBack() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b", "c"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T09:00:00.000Z"),
+            ChatSession(id: "c", name: "c", activityAt: "2026-11-15T08:00:00.000Z"),
+        ]
+        let workspace = workspace(backend)
+        workspace.topics.start()
+        await settle()
+        #expect(await workspace.pinTopic("c", pinned: true))
+        // At once, before the refetch.
+        #expect(workspace.topics.chats.map(\.id) == ["c", "a", "b"])
+        await settle()
+        #expect(workspace.topics.chats.map(\.id) == ["c", "a", "b"])
+        #expect(await workspace.pinTopic("b", pinned: true))
+        #expect(workspace.topics.chats.map(\.id) == ["b", "c", "a"])
+        #expect(await workspace.pinTopic("c", pinned: false))
+        await settle()
+        #expect(workspace.topics.chats.map(\.id) == ["b", "a", "c"])
+        #expect(backend.calls == ["pin c", "pin b", "unpin c"])
+    }
+
+    @Test func aPinTheServerRefusesChangesNothing() async {
+        let backend = FakeBackend()
+        backend.topicChats = ["a", "b"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
+        backend.sessionRows = [
+            ChatSession(id: "a", name: "a", activityAt: "2026-11-15T10:00:00.000Z"),
+            ChatSession(id: "b", name: "b", activityAt: "2026-11-15T09:00:00.000Z"),
+        ]
+        backend.pinFails = true
+        let workspace = workspace(backend)
+        workspace.topics.start()
+        await settle()
+        #expect(await !workspace.pinTopic("b", pinned: true))
+        #expect(workspace.topics.chats.map(\.id) == ["a", "b"])
+        #expect(!workspace.topics.isPinned("b"))
+    }
+
     @Test func theOrderWithoutTimesIsNewestStartedFirst() {
         let chats = ["a", "b", "c"].map { ConciergeChat(id: $0, name: $0, main: false, unread: 0) }
         #expect(TopicChatsStore.ordered(chats, lastActive: [:]).map(\.id) == ["c", "b", "a"])
@@ -313,6 +392,27 @@ import Testing
         let prompt = TopicDeletePrompt(id: "topic-1", name: "Trip", work: nil)
         #expect(!prompt.asksAboutWork)
         #expect(prompt.message == "This chat is deleted permanently. Its follows and open tasks move to Chat.")
+    }
+
+    /// The archive alert lists what the delete alert lists, after its own lead.
+    @Test func theArchiveAlertListsTheWorkAndAsks() {
+        let work = ConciergeChatWork(
+            follows: [.init(source: "github", label: "GitHub", target: "rome-os/rome")],
+            openTasks: (1...6).map { .init(id: "t\($0)", title: "Task \($0)") }
+        )
+        let prompt = TopicArchivePrompt(id: "topic-1", name: "Trip", work: work)
+        #expect(prompt.title == "Archive “Trip”?")
+        #expect(prompt.message == """
+        This chat will be archived. It has:
+        • Following GitHub · rome-os/rome
+        • Open task: Task 1
+        • Open task: Task 2
+        • Open task: Task 3
+        • Open task: Task 4
+        and 2 more
+
+        What happens to them?
+        """)
     }
 
     @Test func parsesTheServersList() throws {

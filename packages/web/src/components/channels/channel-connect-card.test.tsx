@@ -343,37 +343,6 @@ describe("ChannelConnectCard — config variations", () => {
 // ── Registered custom components ─────────────────────────────────────────────
 
 describe("ChannelConnectCard — custom components", () => {
-  it("links connected Discord to the generic conversation settings page", () => {
-    const fetchMock = stubFetch();
-    renderCard(
-      <ChannelConnectCard
-        config={CHANNEL_CONFIGS.discord}
-        slot={connected("bot", "@rome_helper")}
-        role="primary"
-        onRefresh={() => {}}
-      />,
-    );
-    expect(screen.getByRole("link", { name: "Configure chats" }).getAttribute("href")).toBe(
-      "/settings/channels?connectionId=conn-1",
-    );
-    expect(fetchMock).not.toHaveBeenCalledWith("/api/channels/discord/channels");
-  });
-
-  it("links connected WeChat to the generic conversation settings page", () => {
-    stubFetch();
-    renderCard(
-      <ChannelConnectCard
-        config={CHANNEL_CONFIGS.wechat}
-        slot={connected("account", "@wechat-user")}
-        role="primary"
-        onRefresh={() => {}}
-      />,
-    );
-    expect(screen.getByRole("link", { name: "Configure chats" }).getAttribute("href")).toBe(
-      "/settings/channels?connectionId=conn-1",
-    );
-  });
-
   it("renders the Feishu QR image from the presenting payload's data-url link", async () => {
     stubFetch((url) =>
       url === "/api/setups/feishu-cid"

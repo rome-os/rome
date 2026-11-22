@@ -1,3 +1,4 @@
+import { RenewalUnavailable } from "./errors.js";
 // Fault-handling contract suite. The subtlest semantics:
 // degrade relocking only dependents (scenario 5), renew-once-then-degrade
 // (scenario 6), re-authorize clearing the renewed flag (scenario 7), epoch
@@ -12,7 +13,8 @@
 import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/db.js";
 import type { DrizzleTx, SqliteExec } from "../db/index.js";
-import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
+import type { ChatId } from "@rome-os/app-runtime";
+import type * as connections from "./message.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import type { GrantValue } from "./grant.js";
 import type { ConnectionsRepository, StoredConnection } from "./repository.js";
@@ -25,6 +27,7 @@ import type {
   Credential,
   GrantName,
 } from "./types.js";
+import { RecordingStopped } from "./types.js";
 import {
   CredentialRejected,
   Disconnected,
@@ -61,6 +64,45 @@ function makeFailingLedger(shouldFail: (grant: GrantValue) => boolean): Connecti
 }
 
 describe("registry faults", () => {
+  it("keeps an unavailable fault renewal retryable, including after an expired-token read", async () => {
+    const ledger = makeLedger();
+    const registry = new ConnectionRegistry({ repository: ledger });
+    const fx = makeRenewableAct();
+    let unavailable = true;
+    let calls = 0;
+    fx.descriptor.auth.renew = async () => {
+      calls++;
+      if (unavailable) throw new RenewalUnavailable("Cloud is offline");
+      return { material: { token: "renewed" }, expiresAt: new Date(Date.now() + 3600_000) };
+    };
+    registry.register(fx.descriptor);
+    const conn = await registry.connect("fake-github");
+    await registry.giveGrant(conn.connectionKind, conn.id, "user", {
+      material: { token: "expired" },
+      expiresAt: new Date(0),
+    });
+    await registry.renewExpiring(60_000);
+    expect(conn.auth.grants().user).toBe("authorized");
+    for (let attempt = 0; attempt < 2; attempt++) {
+      fx.actorFactory.instances.at(-1)!.state.nextInvokeError = new CredentialRejected();
+      await expect(conn.act!.invoke({ operation: "read" })).rejects.toBeInstanceOf(
+        CredentialRejected,
+      );
+      await flush();
+      expect(conn.auth.grants().user).toBe("authorized");
+      expect(conn.act).not.toBeNull();
+    }
+    expect(calls).toBe(3);
+    unavailable = false;
+    await registry.renewExpiring(60_000);
+    expect(conn.auth.grants().user).toBe("authorized");
+    expect(calls).toBe(4);
+    expect((await ledger.grantOf(conn.id))?.credential?.material).toEqual({
+      kind: "inline",
+      record: { token: "renewed" },
+    });
+  });
+
   // Scenario 5 — a degraded grant relocks every capability
   describe("scenario 5: a degraded grant relocks every capability", () => {
     it("a rejection on act degrades the one grant and relocks talk and watch with it", async () => {
@@ -355,7 +397,7 @@ describe("registry faults", () => {
       await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
 
       expect(conn.isUnlocked("chat")).toBe(true);
-      const heard: ChannelMessage[] = [];
+      const heard: connections.Message[] = [];
       expect(conn.hearTalker(async (msg) => void heard.push(msg))).not.toBeNull();
       await conn.withTalker((talker) =>
         talker.send("thread-1" as ChatId, { text: "before revoke" }),
@@ -380,7 +422,7 @@ describe("registry faults", () => {
         talker.send("thread-1" as ChatId, { text: "after reimport" }),
       );
       expect(newTalker.state.sends.map((s) => s.msg)).toEqual([{ text: "after reimport" }]);
-      newTalker.state.deliver?.(makeInboundMessage({ messageId: "after-reimport" }));
+      newTalker.state.deliver?.(makeInboundMessage({ id: "after-reimport" }));
       await flush();
       expect(heard).toEqual([]);
     });
@@ -644,23 +686,52 @@ describe("registry faults", () => {
       // Deliver a message through the rebuilt instance → resets disconnectStreak.
       const inst1 = fx.talkerFactory.instances.at(-1);
       if (!inst1) throw new Error("inst1 not built");
-      inst1.state.deliver?.({
-        channel: "test",
-        direction: "inbound",
-        messageId: "m",
-        chatId: "thread-1" as ChatId,
-        senderId: "s",
-        senderDisplayName: "S",
-        thread: { kind: "dm" },
-        text: "hi",
-        attachments: [],
-        timestamp: new Date(0),
-      });
+      inst1.state.deliver?.(makeInboundMessage({ id: "m" }));
 
       // Next fault should start again from base, not base*2.
       inst1.state.fault?.(new Disconnected());
       await flush();
       expect(sleep.durations).toEqual([100, 100]);
+    });
+
+    it("a refused delivery to a Talker that waits for acceptance keeps the backoff growing; an accepted one resets it", async () => {
+      const ledger = makeLedger();
+      const sleep = makeRecordingSleep();
+      const registry = new ConnectionRegistry({
+        repository: ledger,
+        sleep: sleep.fn,
+        backoff: { baseMs: 100, maxMs: 10_000 },
+      });
+      const fx = makePasteTalk({ awaitsAcceptance: true });
+      registry.register(fx.descriptor);
+      const conn = await registry.connect("fake-telegram");
+      await registry.giveGrant(conn.connectionKind, conn.id, "bot", fx.validCredential());
+      let refusing = true;
+      conn.hearTalker(async () => {
+        if (refusing) throw new RecordingStopped();
+      });
+
+      // Each rebuild delivers the held message again, and it is refused again.
+      for (let i = 0; i < 3; i++) {
+        const instance = fx.talkerFactory.instances.at(-1);
+        if (!instance) throw new Error("instance not built");
+        await expect(instance.state.deliver?.(makeInboundMessage({ id: "m" }))).rejects.toThrow(
+          RecordingStopped,
+        );
+        instance.state.fault?.(new Disconnected());
+        await flush();
+      }
+      expect(sleep.durations).toEqual([100, 200, 400]);
+
+      // Recording is back: the delivery is accepted, and the next fault
+      // starts the backoff over.
+      refusing = false;
+      const instance = fx.talkerFactory.instances.at(-1);
+      if (!instance) throw new Error("instance not built");
+      await instance.state.deliver?.(makeInboundMessage({ id: "m" }));
+      instance.state.fault?.(new Disconnected());
+      await flush();
+      expect(sleep.durations).toEqual([100, 200, 400, 100]);
     });
 
     // Regression: write-through custody must survive a bare backoff rebuild.
@@ -722,8 +793,8 @@ describe("registry faults", () => {
       // produces (build() runs synchronously inside the grant, before
       // start(), so the knob is set in time).
       const flushed = makeInboundMessage({
-        messageId: "buffered-1",
-        text: "buffered on start",
+        id: "buffered-1",
+        content: { text: "buffered on start", attachments: [] },
       });
       const originalBuild = fx.talkerFactory.build.bind(fx.talkerFactory);
       fx.talkerFactory.build = (cred) => {
@@ -737,7 +808,7 @@ describe("registry faults", () => {
       // Register the unlock handler BEFORE the epoch is built. When chat unlocks,
       // the handler synchronously registers an onMessage listener — which must be
       // wired before start() runs, or the buffered flush is lost.
-      const received: ChannelMessage[] = [];
+      const received: connections.Message[] = [];
       registry.onUnlocked("chat", (c) => {
         c.hearTalker(async (msg) => {
           received.push(msg);
@@ -751,8 +822,8 @@ describe("registry faults", () => {
 
       // Before the fix (start before onUnlocked) the buffered message dropped
       // into empty handler arrays; after the fix it is delivered.
-      expect(received.map((m) => m.messageId)).toContain("buffered-1");
-      expect(received.map((m) => m.text)).toContain("buffered on start");
+      expect(received.map((m) => m.id)).toContain("buffered-1");
+      expect(received.map((m) => m.content.text)).toContain("buffered on start");
     });
   });
 });

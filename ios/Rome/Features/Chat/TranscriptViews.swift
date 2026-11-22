@@ -29,7 +29,7 @@ extension EnvironmentValues {
 /// The guardian's bubble: coral, right-aligned, fully round. Photos sent with
 /// it sit above the text.
 /// The long-press menu of a message bubble: its time on top, then Reply
-/// where a thread can open, Copy and Share.
+/// where a message can be replied to, Copy, Select text and Share.
 struct BubbleMenu {
     /// When the message was written; nil leaves the title out.
     var date: Date? = nil
@@ -37,8 +37,6 @@ struct BubbleMenu {
     var onReply: (() -> Void)? = nil
     /// Opens share mode on the message's turn; nil shares the text.
     var onShare: (() -> Void)? = nil
-    /// Inside a thread view: a tap on the bubble stays on it.
-    var inThread = false
     /// A message that did not go through: its reason and what to do come first.
     var problem: SendProblem? = nil
 }
@@ -47,6 +45,8 @@ struct BubbleMenu {
 private struct BubbleMenuItems: View {
     let text: String
     let menu: BubbleMenu
+    /// Puts the message in select mode; nil where its text cannot be selected.
+    let onSelect: (() -> Void)?
     @Environment(\.today) private var today
 
     var body: some View {
@@ -61,6 +61,9 @@ private struct BubbleMenuItems: View {
                 Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
             }
             CopyButton(text: text)
+            if let onSelect {
+                Button(action: onSelect) { Label("Select text", systemImage: "selection.pin.in.out") }
+            }
             if let onShare = menu.onShare {
                 Button(action: onShare) { Label("Share", systemImage: "square.and.arrow.up") }
             } else {
@@ -74,15 +77,42 @@ private struct BubbleMenuItems: View {
 }
 
 private extension View {
-    /// The bubble lifts under the finger with the system's menu. Inside a
-    /// thread view it keeps its own tap, so one on the message never closes it.
-    @ViewBuilder
-    func bubbleMenu(text: String, menu: BubbleMenu) -> some View {
-        if menu.inThread {
-            self.onTapGesture {}.contextMenu { BubbleMenuItems(text: text, menu: menu) }
-        } else {
-            self.contextMenu { BubbleMenuItems(text: text, menu: menu) }
-        }
+    /// The bubble lifts under the finger with the system's menu. Reply is
+    /// also a swipe to the right (`SwipeToReply`), and an action of its own
+    /// for VoiceOver.
+    /// `selects` says whether the text has anything Select text can select.
+    func bubbleMenu(text: String, menu: BubbleMenu, selects: Bool) -> some View {
+        modifier(BubbleMenuModifier(text: text, menu: menu, selects: selects))
+    }
+}
+
+/// The bubble's menu, with Select text where the transcript has a select
+/// mode. In select mode it has no menu: a long press there selects text.
+private struct BubbleMenuModifier: ViewModifier {
+    let text: String
+    let menu: BubbleMenu
+    /// The text has something to select: not only pictures or a table.
+    let selects: Bool
+    @Environment(\.textSelection) private var selection
+    @Environment(\.transcriptRowID) private var rowID
+
+    func body(content: Content) -> some View {
+        let selecting = selection?.isSelecting(row: rowID, text: text) ?? false
+        let onSelect: (() -> Void)? = {
+            guard let selection, let rowID, selects else { return nil }
+            return { [text] in selection.begin(row: rowID, text: text) }
+        }()
+        content
+            .contextMenu {
+                if !selecting { BubbleMenuItems(text: text, menu: menu, onSelect: onSelect) }
+            }
+            // A message that streams on, or is edited, leaves select mode.
+            .onChange(of: text) { selection?.messageChanged(row: rowID, text: text) }
+            .accessibilityActions {
+                if menu.problem == nil, let onReply = menu.onReply {
+                    Button("Reply", action: onReply)
+                }
+            }
     }
 }
 
@@ -96,16 +126,18 @@ struct UserBubble: View {
     var menu = BubbleMenu()
     /// The badge on the message: Rome's status, else the Concierge's reaction.
     var mark: MessageMark? = nil
-    /// What the message replies to, quoted at the top of the bubble.
+    /// What the message replies to, quoted at the top of the bubble, when it
+    /// does not sit right under it.
     var quote: MessagePart.ReplyQuote? = nil
-    /// The mark that stands for the quote where the reply sits right under what it answers.
-    var rail: ReplyRail.Kind? = nil
-    /// The quote's tap: the thread view, or the original; nil leaves it plain.
+    /// The quote's tap: it goes to the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
     @Environment(\.rowTinted) private var tinted
+    @Environment(\.textSelection) private var selection
+    @Environment(\.transcriptRowID) private var rowID
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// The message has a bubble under its photos: text, or a quote drawn in it.
-    private var hasBubble: Bool { !Self.badgeOnPhotos(text: text, quoteInBubble: quote != nil && rail == nil) }
+    private var hasBubble: Bool { !Self.badgeOnPhotos(text: text, quoteInBubble: quote != nil) }
 
     /// Where the mark sits: on the text bubble when there is one, and on the
     /// photos' corner only for photos sent alone.
@@ -137,25 +169,30 @@ struct UserBubble: View {
                             .markBadge(hasBubble ? nil : mark)
                     }
                     if hasBubble {
-                        VStack(alignment: .leading, spacing: 4) {
-                            if let quote, rail == nil {
-                                QuotedReply(quote: quote, tone: .sent, onTap: onQuote)
-                            }
+                        Group {
                             if !text.isEmpty {
                                 Text(text)
                                     .romeFont(16)
                                     .lineSpacing(5)
                                     .foregroundStyle(.white)
+                                    // Select mode lays a text view over it that
+                                    // selects it but draws none of it, so the
+                                    // text never moves as select mode starts or ends.
+                                    .overlay(alignment: .topLeading) {
+                                        if selection?.isSelecting(row: rowID, text: text) == true {
+                                            SelectableTextView(
+                                                text: SelectableText.invisible(SelectableText.plain(text, style: SelectableTextStyle(color: .white, dynamicTypeSize: dynamicTypeSize))),
+                                                start: SelectionStart(point: selection?.target?.point, first: true), tint: .white)
+                                        }
+                                    }
                             }
                         }
+                            .quotedAbove(quote, tone: .sent, hasContent: !text.isEmpty, onTap: onQuote)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                            .overlay(alignment: .topTrailing) {
-                                if let rail, let quote { ReplyRail(kind: rail, isUser: true, label: quote.text, onTap: onQuote) }
-                            }
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                            .bubbleMenu(text: text, menu: bubbleMenu)
+                            .bubbleMenu(text: text, menu: bubbleMenu, selects: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .markBadge(mark)
                     }
                 }
@@ -247,6 +284,14 @@ private struct UserImageTile: View {
     @State private var loaded: CGImage?
     @State private var failed = false
 
+    init(image: UserImage) {
+        self.image = image
+        // Already in memory, it shows in the first frame, with no spinner.
+        if case .stored(let upload) = image {
+            _loaded = State(initialValue: StoredImageCache.shared.image(StoredImageCache.shared.key(upload.assetPath)))
+        }
+    }
+
     var body: some View {
         switch image {
         case .local(let photo):
@@ -276,20 +321,14 @@ private struct UserImageTile: View {
     }
 
     private func load(_ upload: UploadLines.Upload) async {
-        let key = StoredImageCache.shared.key(upload.assetPath)
-        if let cached = StoredImageCache.shared.image(key) {
-            loaded = cached
-            return
-        }
         do {
-            let data = try await ImageFetch.data(upload.source, assetLoader: assetLoader, apiLoader: apiLoader, width: Self.assetWidth)
-            // Decoded small and off the main actor: an upload from the web may be huge.
-            let thumbnail = await Task.detached(priority: .userInitiated) {
-                ImageCompressor.thumbnail(from: data, maxPixel: ComposerImage.thumbnailPixels)
-            }.value
-            guard let thumbnail else { throw APIError.network }
-            StoredImageCache.shared.store(thumbnail, for: key)
-            loaded = thumbnail
+            loaded = try await StoredImageCache.shared.load(
+                upload.assetPath, maxPixel: ComposerImage.thumbnailPixels, onDisk: upload.source.isStoredAsset
+            ) {
+                try await ImageFetch.data(
+                    upload.source, assetLoader: assetLoader, apiLoader: apiLoader, width: Self.assetWidth
+                )
+            }
         } catch is CancellationError {
             // Scrolled away mid-load: the next appear loads it.
         } catch {
@@ -311,47 +350,6 @@ private struct UserImageTile: View {
     }
 }
 
-/// Stored photos already loaded, so scrolling back does not fetch them again.
-/// It holds at most 64 MB of decoded pixels. The app uses `shared`; a test
-/// makes its own, so it never sees another test's pictures or resets.
-@MainActor
-final class StoredImageCache {
-    static let shared = StoredImageCache()
-
-    private final class Box {
-        let image: CGImage
-        init(_ image: CGImage) { self.image = image }
-    }
-
-    private let cache: NSCache<NSString, Box> = {
-        let cache = NSCache<NSString, Box>()
-        cache.totalCostLimit = 64 * 1024 * 1024
-        return cache
-    }()
-
-    /// The open workspace's: keys carry it, so a picture loaded for one
-    /// instance or account never shows in another.
-    private var scope = UUID()
-
-    /// The key for a path in the open workspace. Taken before a load starts,
-    /// so a load that ends after a switch lands under the old scope.
-    func key(_ path: String) -> String { "\(scope.uuidString)|\(path)" }
-
-    /// A workspace opened or closed, or a sign-out: nothing cached carries over.
-    func reset() {
-        scope = UUID()
-        cache.removeAllObjects()
-    }
-
-    func image(_ path: String) -> CGImage? {
-        cache.object(forKey: path as NSString)?.image
-    }
-
-    func store(_ image: CGImage, for path: String) {
-        cache.setObject(Box(image), forKey: path as NSString, cost: image.bytesPerRow * image.height)
-    }
-}
-
 /// The agent's bubble. In a run of bubbles the first keeps a small bottom-left
 /// corner and the last a small top-left corner, as on the design's Chat board.
 /// Every reply sits in a bubble, a long one too: past about fifteen lines it
@@ -362,11 +360,10 @@ struct AgentBubble: View {
     let position: BubblePosition
     var onOpenChat: (String, String) -> Void = { _, _ in }
     var menu = BubbleMenu()
-    /// What the message replies to, quoted at the top of the bubble.
+    /// What the message replies to, quoted at the top of the bubble, when it
+    /// does not sit right under it.
     var quote: MessagePart.ReplyQuote? = nil
-    /// The mark that stands for the quote where the reply sits right under what it answers.
-    var rail: ReplyRail.Kind? = nil
-    /// The quote's tap: the thread view, or the original; nil leaves it plain.
+    /// The quote's tap: it goes to the original; nil leaves it plain.
     var onQuote: (() -> Void)? = nil
     #if DEBUG
     /// Snapshot runs only: long bubbles open unfolded.
@@ -381,6 +378,7 @@ struct AgentBubble: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.rowTopHold) private var rowTopHold
     @Environment(\.transcriptRowID) private var rowID
+    @Environment(\.textSelection) private var selection
 
     /// How many lines a bubble shows before it folds.
     nonisolated static let foldedLines = 15
@@ -408,6 +406,16 @@ struct AgentBubble: View {
         )
     }
 
+    private var selecting: Bool { selection?.isSelecting(row: rowID, text: text) == true }
+    /// How far a selection handle's knob reaches past the text.
+    private static let handleRoom: CGFloat = 24
+
+    /// Where the fold hides the text, down from its top: above the fade over
+    /// the last folded lines, where the text is still in sight.
+    private var foldBottom: CGFloat { Self.foldHeight(for: dynamicTypeSize) - Self.fadeHeight }
+    /// The fade over a folded reply's last lines (`expandButton`).
+    static let fadeHeight: CGFloat = 40
+
     private var folds: Bool { Self.folds(height: fullHeight, size: dynamicTypeSize) }
     /// Held to the folded height until it is measured, so a long reply is
     /// folded from its first frame. Unfolded first, it shrank by hundreds of
@@ -415,21 +423,24 @@ struct AgentBubble: View {
     private var capped: Bool { Self.capped(measured: fullHeight, expanded: expanded, size: dynamicTypeSize) }
 
     /// Whether the text is held to the folded height: until it is measured
-    /// (`measured` is 0), and while a long one is folded.
+    /// (`measured` is 0), and while a long one is folded. Select mode leaves
+    /// the fold as it is: its first selection is the paragraph pressed, which
+    /// is in sight, and text inside the fold is selected once it is unfolded.
     nonisolated static func capped(measured: CGFloat, expanded: Bool, size: DynamicTypeSize) -> Bool {
         !expanded && (measured == 0 || folds(height: measured, size: size))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let quote, rail == nil {
-                QuotedReply(quote: quote, tone: .received, onTap: onQuote)
-            }
-            MarkdownText(source: text)
+            MarkdownText(source: text, selectable: selecting, selectFrom: selection?.target?.point,
+                         foldBottom: selecting && capped ? foldBottom : nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
                 .frame(maxHeight: capped ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
-                .clipped()
+                // In select mode the clip leaves room for the selection's
+                // handles above and beside the text; folded, it still hides
+                // the text under the fold.
+                .clipShape(FoldClip(handleRoom: selecting ? Self.handleRoom : 0, folded: capped))
                 .overlay(alignment: .bottom) {
                     // Folded, the chevron sits on the fade over the last
                     // lines, so the bubble does not grow for it.
@@ -438,14 +449,12 @@ struct AgentBubble: View {
             // Open, it sits right under the last line.
             if folds && expanded { expandButton.padding(.top, -6) }
         }
+        .quotedAbove(quote, tone: .received, onTap: onQuote)
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Palette.bubble, in: shape)
-        .overlay(alignment: .topLeading) {
-            if let rail, let quote { ReplyRail(kind: rail, isUser: false, label: quote.text, onTap: onQuote) }
-        }
         .contentShape(.contextMenuPreview, shape)
-        .bubbleMenu(text: text, menu: menu)
+        .bubbleMenu(text: text, menu: menu, selects: MarkdownText.hasSelectableText(text))
         .bubbleWidth()
     }
 
@@ -457,7 +466,7 @@ struct AgentBubble: View {
             Image(systemName: expanded ? "chevron.up" : "chevron.down")
                 .romeFont(13, .semibold)
                 .foregroundStyle(Palette.sub.opacity(0.6))
-                .frame(maxWidth: .infinity, minHeight: expanded ? 16 : 40, alignment: .bottom)
+                .frame(maxWidth: .infinity, minHeight: expanded ? 16 : Self.fadeHeight, alignment: .bottom)
                 .background {
                     if !expanded {
                         LinearGradient(colors: [Palette.bubble.opacity(0), Palette.bubble], startPoint: .top, endPoint: .bottom)
@@ -488,6 +497,8 @@ struct ConciergeBubble: View {
     let name: String
     let text: String
     var menu = BubbleMenu()
+    @Environment(\.textSelection) private var selection
+    @Environment(\.transcriptRowID) private var rowID
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -497,13 +508,13 @@ struct ConciergeBubble: View {
                     .romeFont(12)
                     .foregroundStyle(Palette.sub)
                     .lineLimit(1)
-                MarkdownText(source: text)
+                MarkdownText(source: text, selectable: selection?.isSelecting(row: rowID, text: text) == true, selectFrom: selection?.target?.point)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(Palette.bubble, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                     .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                    .bubbleMenu(text: text, menu: menu)
+                    .bubbleMenu(text: text, menu: menu, selects: MarkdownText.hasSelectableText(text))
             }
             Mascot()
                 .frame(height: 16)
@@ -588,8 +599,9 @@ struct TimeSeparator: View {
     }
 }
 
-/// The spacing above a row, which carries the design's rhythm: 3 pt inside a
-/// run, 18 pt when the sender changes, room around time separators.
+/// The spacing above a row, which carries the design's rhythm: 2 pt inside a
+/// run of replies to one message, 8 pt between other bubbles, 18 pt when the
+/// sender changes, room around time separators.
 enum TranscriptSpacing {
     static func top(_ row: TranscriptRow, after previous: TranscriptRow?) -> CGFloat {
         guard let previous else { return 8 }
@@ -608,7 +620,8 @@ enum TranscriptSpacing {
         if row.isGuardian != previous.isGuardian { return 18 }
         if row.isGuardian { return 6 }
         switch (row, previous) {
-        case (.agentText, .agentText): return 3
+        case (.agentText(_, _, _, _, let position), .agentText(_, _, _, _, let above)):
+            return position.joinsAbove && above.joinsBelow ? 2 : 8
         case (.taskCard, .agentText), (.agentText, .taskCard), (.taskCard, .taskCard): return 6
         case (.taskAsk, .agentText), (.agentText, .taskAsk): return 6
         default: return 12
@@ -991,5 +1004,19 @@ struct CameraPicker: UIViewControllerRepresentable {
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             parent.dismiss()
         }
+    }
+}
+
+/// The clip of a reply's text: `handleRoom` past its top and sides for a
+/// selection's handles, and past its bottom too unless the reply is folded,
+/// whose text below the fold stays hidden.
+struct FoldClip: Shape {
+    let handleRoom: CGFloat
+    let folded: Bool
+
+    func path(in rect: CGRect) -> Path {
+        Path(CGRect(x: rect.minX - handleRoom, y: rect.minY - handleRoom,
+                    width: rect.width + handleRoom * 2,
+                    height: rect.height + handleRoom + (folded ? 0 : handleRoom)))
     }
 }

@@ -125,7 +125,12 @@ function approvalOutcome(approval: AskedApproval): TaskApprovalOutcome | undefin
   return { kind: "rejected" };
 }
 
-/** The approval as a card draws it. */
+/** What an approval asks, in one line: its preview's title, else its description. */
+export function approvalLine(payload: unknown, description: string): string {
+  const title = (payload as { preview?: { title?: unknown } } | null)?.preview?.title;
+  return typeof title === "string" && title.trim() ? title : description;
+}
+
 /** `card` with `closed` filled in from its task `row`: a card with no outcome whose task ended is closed. */
 function closedBy<C extends Extract<TaskCard, { kind: "question" | "approval" }>>(
   card: C,

@@ -19,6 +19,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { Kbd } from "@/components/ui/kbd";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useChatListModeForShell, useLastOrdinaryChatId } from "@/hooks/use-chat-list-mode";
@@ -153,10 +154,7 @@ function renderBuiltinIcon(entry: BuiltinNavEntry): React.ReactNode {
       data-motion={entry.sidebarIconMotion}
       aria-hidden
     >
-      <Icon
-        className={`h-4 w-4 shrink-0 ${entry.id === "projects" ? "stroke-[1.5]" : ""}`}
-        aria-hidden
-      />
+      <Icon className="h-4 w-4 shrink-0" aria-hidden />
     </span>
   );
 }
@@ -502,9 +500,9 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
                 {labelled ? (
                   <>
                     <RailLabel>{t("sidebar.search")}</RailLabel>
-                    <kbd className="shrink-0 border-l border-border pl-3 font-sans text-aux text-muted-foreground max-md:hidden">
-                      {chatSearchShortcutForPlatform()}
-                    </kbd>
+                    <span className="flex shrink-0 border-l border-border pl-3 max-md:hidden">
+                      <Kbd variant="ghost">{chatSearchShortcutForPlatform()}</Kbd>
+                    </span>
                   </>
                 ) : null}
               </button>

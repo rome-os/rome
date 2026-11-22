@@ -1,3 +1,4 @@
+import type { ChatSettingField, ChatSettings } from "@rome/api-types/chat-settings";
 /**
  * Client types + fetchers for the registry-native connection surface
  * (`GET /api/connections`). The types mirror the backend's
@@ -7,17 +8,7 @@
  * `connection-cards.ts`, not here.
  */
 
-import type {
-  AccountValue,
-  ConnectedAccountEntry,
-  ConnectionAccountFields,
-  LinkAccountAgentRequest,
-  LinkAccountAgentResult,
-  LinkConnectedAccountRequest,
-  LinkConnectedAccountResult,
-  ListConnectedAccountsResult,
-} from "@rome/api-types/connected-accounts";
-import { getApiErrorMessage } from "@/lib/api-error";
+import type { ConnectionAccountFields } from "@rome/api-types/connected-accounts";
 import { fetchJson } from "@/lib/fetch-json";
 
 /** Runtime health can change without a grant ceremony (for example, a long-poll
@@ -82,6 +73,12 @@ export interface ApiConnection extends ConnectionAccountFields {
    *  setup (if any). Lets a reopened dashboard re-attach instead of starting
    *  a fresh one. Empty when no setup is in progress. */
   setups: Record<string, string>;
+  /** The chat rules the connection's kind offers on its group chats. Empty
+   *  for a kind that offers none. Absent from a core that predates it. */
+  chatRules?: ChatSettingField[];
+  /** The values the kind's group chats run on where nobody set one. Null
+   *  for a kind with no chats, and absent from a core that predates it. */
+  chatRuleDefaults?: ChatSettings | null;
 }
 
 export async function fetchConnections(): Promise<ApiConnection[]> {
@@ -92,7 +89,9 @@ export async function fetchConnections(): Promise<ApiConnection[]> {
 }
 
 /** Structured, non-throwing result from a teardown call. */
-export type TeardownResult = { ok: true } | { ok: false; error: string };
+/** A disconnect that ended the connection may carry a warning: the service
+ *  may still hold Rome's access, because taking it back there failed. */
+export type TeardownResult = { ok: true; warning?: string } | { ok: false; error: string };
 
 /** Revoke the grant — the registry-native disconnect. The transport relocks
  *  and custody artifacts clear off the transition. The connection ends with
@@ -109,49 +108,8 @@ export async function revokeConnectionGrant(
     const payload = (await response.json().catch(() => null)) as { error?: string } | null;
     return { ok: false, error: payload?.error || "Failed to disconnect." };
   }
-  return { ok: true };
-}
-
-/** Link an agent to a connected account, named by its connection's id, or
- *  pass null to unlink it, so Rome stops listening to the account. `fallback`
- *  is the error message when the server gives none. */
-export async function linkAccountAgent(
-  connectionId: string,
-  agent: string | null,
-  fallback: string,
-): Promise<LinkAccountAgentResult> {
-  const body: LinkAccountAgentRequest = { agent };
-  return fetchJson<LinkAccountAgentResult>(
-    `/api/accounts/${encodeURIComponent(connectionId)}/agent`,
-    { method: "PUT", json: body, fallback },
-  );
-}
-
-/** Every connected account with its agent, disconnected ones included, from
- *  `GET /api/connected-accounts`. A core that predates the listing answers
- *  404, and then no account reads as disconnected. */
-export async function fetchConnectedAccounts(): Promise<ConnectedAccountEntry[]> {
-  const response = await fetch("/api/connected-accounts", {
-    credentials: "include",
-    cache: "no-store",
-  });
-  if (response.status === 404) return [];
-  if (!response.ok) {
-    throw new Error(await getApiErrorMessage(response, "Failed to load connected accounts."));
-  }
-  return ((await response.json()) as ListConnectedAccountsResult).accounts;
-}
-
-/** Unlink the agent of a connected account named by its account, which works
- *  for a disconnected one too. `fallback` is the error message when the
- *  server gives none. */
-export async function unlinkConnectedAccount(
-  account: AccountValue,
-  fallback: string,
-): Promise<LinkConnectedAccountResult> {
-  const body: LinkConnectedAccountRequest = { agent: null };
-  return fetchJson<LinkConnectedAccountResult>(
-    `/api/connected-accounts/${encodeURIComponent(account.platform)}/${encodeURIComponent(account.id)}/agent`,
-    { method: "PUT", json: body, fallback },
-  );
+  const payload = (await response.json().catch(() => null)) as { warning?: unknown } | null;
+  return typeof payload?.warning === "string"
+    ? { ok: true, warning: payload.warning }
+    : { ok: true };
 }

@@ -2,8 +2,10 @@ import { appDocumentAccessHandlers } from "./app-document-access";
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
 import { questionCardRender } from "../fixtures/question-card";
 import type { Question } from "@rome/api-types/question-card";
+import type { ProviderFailurePart } from "@rome/api-types/chat";
 import type {
   ChatId,
+  ChatSettingField,
   ChatSettings,
   ChatSettingsListItem,
   PartialChatSettings,
@@ -63,11 +65,8 @@ import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
-import type { ConnectedAccountEntry } from "@rome/api-types/connected-accounts";
-import { connections } from "./connections-store";
+import { CHAT_RULE_DEFAULTS, chatRuleDefaultsOf, connections } from "./connections-store";
 
-/** Connected accounts left by a disconnect in this session, each with its
- *  agent. Core keeps them, so Envoys lists them as disconnected. */
 /** The questions of the mock `ask_question` card: one per layout the card takes. */
 const WAITLIST_QUESTIONS: Question[] = [
   {
@@ -96,16 +95,15 @@ const WAITLIST_QUESTIONS: Question[] = [
   },
 ];
 
-const disconnectedAccounts: ConnectedAccountEntry[] = [];
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
 import { assistantHandlers } from "./assistants";
 import { taskListHandlers } from "./task-list";
-import { chatOutputHandlers } from "./chat-outputs";
+import { chatOutputHandlers, outputProjectFolder } from "./chat-outputs";
 import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
-import { pickerDevices, settingsHandlers } from "./settings";
+import { MOCK_OUTAGE_ID, pickerDevices, settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
 import { shareHandlers } from "./shares";
 import { curatedChats } from "../fixtures/chats";
@@ -359,19 +357,11 @@ const turn = (
   return rows;
 };
 
-// The Concierge's afternoon, as the server sends it: a reply chain per topic.
-// Every message in a thread of more than one carries the root's key, and a
-// reply, the guardian's or the Concierge's, carries the quote of the message it
-// replies to. The three task threads interleave with each other and with the
-// Concierge's own messages, so there is a lot to fold away. The plumber thread
-// is a plain back-and-forth with nothing between its messages. The turns above
-// are one message and its answer in no thread.
-const TABLE_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-1`, title: "Book a table for Friday" };
-const FLIGHT_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-3`, title: "Compare flights to Berlin" };
-const NAS_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-8`, title: "Fix the NAS backup" };
-// No task started in the plumber thread, so it has no title: a client names it
-// from its root's text.
-const PLUMBER_THREAD = { id: `${CONCIERGE_CHAT_ID}-pm-17` };
+// The Concierge's afternoon, as the server sends it: replies that answer
+// several topics in turn, interleaved. A reply, the guardian's or the
+// Concierge's, carries the quote of the message it replies to, and the chat
+// draws it by what sits above it: plain, in a run of replies to one message, or
+// with the quote in its bubble. The plumber exchange is a plain back-and-forth.
 const NAS_CLEANUP_SCRIPT = `Yes. Give the backup disk a limit, and delete the oldest snapshot when it goes over:
 
 \`\`\`bash
@@ -413,7 +403,6 @@ const afternoon = (
   at: string,
   from: "guardian" | "agent",
   content: string,
-  thread?: { id: string; title?: string },
 ): ChatMessage => {
   afternoonSaid.set(n, { from, content });
   const quoted = AFTERNOON_REPLIES[n];
@@ -437,8 +426,6 @@ const afternoon = (
     content: JSON.stringify([...quote, text(content)]),
     createdAt: `2026-08-07T${at}:00.000Z`,
     ...(from === "guardian" ? { sender: guardianSender } : {}),
-    ...(thread ? { chatThreadId: thread.id } : {}),
-    ...(thread?.title ? { chatThreadTitle: thread.title } : {}),
   };
 };
 
@@ -453,18 +440,6 @@ const afternoon = (
 // unreachable in mock mode. Worked queries: "roadmap" is content-only for both
 // chats that mention it, and "brief" matches one title *and* its transcript,
 // which is the session that keeps its title rank and gains a snippet.
-/**
- * The thread a message that replies to `target` is in: the target's, or, when
- * the target is alone, the one it now starts, as the server records it.
- */
-const joinThread = (target: ChatMessage) => {
-  target.chatThreadId ??= target.id;
-  return {
-    chatThreadId: target.chatThreadId,
-    ...(target.chatThreadTitle ? { chatThreadTitle: target.chatThreadTitle } : {}),
-  };
-};
-
 const transcripts: Record<string, ChatMessage[]> = {
   // The later turns cover the message shapes the Concierge sends: a short
   // answer, and long ones with a table, many links, a digest and a forward.
@@ -538,37 +513,27 @@ const transcripts: Record<string, ChatMessage[]> = {
       "13:10",
       "guardian",
       "Can you book a table for 4 on Friday evening, somewhere close to the office?",
-      TABLE_THREAD,
     ),
-    afternoon(2, "13:11", "agent", "I found three tables for Friday at 7.", TABLE_THREAD),
+    afternoon(2, "13:11", "agent", "I found three tables for Friday at 7."),
     afternoon(
       3,
       "13:12",
       "guardian",
       "Also check flights to Berlin next Tuesday, back on Thursday.",
-      FLIGHT_THREAD,
     ),
-    afternoon(
-      4,
-      "13:12",
-      "agent",
-      "On it. I'll compare fares and tell you what I find.",
-      FLIGHT_THREAD,
-    ),
+    afternoon(4, "13:12", "agent", "On it. I'll compare fares and tell you what I find."),
     afternoon(
       5,
       "13:20",
       "agent",
       "All three take a booking for 4. Osteria 23 has a quiet back room, and it is the closest at 9 minutes on foot. Shall I take that one?",
-      TABLE_THREAD,
     ),
-    afternoon(6, "13:22", "guardian", "Does the back room have a minimum spend?", TABLE_THREAD),
+    afternoon(6, "13:22", "guardian", "Does the back room have a minimum spend?"),
     afternoon(
       7,
       "13:30",
       "agent",
       "Round trip, Tuesday 11/17 to Thursday 11/19, economy:\n\n1. **Lufthansa LH1135** · 08:40 out, 18:30 back · €210\n2. **Eurowings EW9021** · 07:15 out, 20:50 back · €148, no bag\n3. **Ryanair FR1832** · 06:10 out, 21:40 back · €96, no bag",
-      FLIGHT_THREAD,
     ),
     // A routine made the Concierge speak: its reply carries the routine's name.
     {
@@ -593,55 +558,39 @@ const transcripts: Record<string, ChatMessage[]> = {
       content: JSON.stringify([text("Today: two meetings, and the plumber at 4.")]),
       createdAt: "2026-08-07T13:32:01.000Z",
     },
-    afternoon(
-      8,
-      "13:40",
-      "agent",
-      "Last night's NAS backup failed. I'm looking into why.",
-      NAS_THREAD,
-    ),
+    afternoon(8, "13:40", "agent", "Last night's NAS backup failed. I'm looking into why."),
     afternoon(
       9,
       "13:41",
       "agent",
       "Yes, there is a €200 minimum for the back room, which fits a table of 4.",
-      TABLE_THREAD,
     ),
-    afternoon(
-      10,
-      "13:50",
-      "guardian",
-      "Anything that gets me back on Thursday afternoon?",
-      FLIGHT_THREAD,
-    ),
+    afternoon(10, "13:50", "guardian", "Anything that gets me back on Thursday afternoon?"),
     afternoon(
       11,
       "13:51",
       "agent",
       "Lufthansa has a 14:30 back on Thursday. With the Tuesday morning flight it is €190 round trip.",
-      FLIGHT_THREAD,
     ),
     afternoon(
       12,
       "14:00",
       "agent",
       "The backup disk is full: Time Machine kept 14 months of snapshots and never cleared the old ones. I deleted the ones before 2025, which freed 820 GB, and last night's backup has run again.",
-      NAS_THREAD,
     ),
-    afternoon(13, "14:02", "guardian", "Can it clean up by itself from now on?", NAS_THREAD),
-    afternoon(14, "14:03", "agent", NAS_CLEANUP_SCRIPT, NAS_THREAD),
-    afternoon(15, "14:15", "guardian", "Book the back room.", TABLE_THREAD),
+    afternoon(13, "14:02", "guardian", "Can it clean up by itself from now on?"),
+    afternoon(14, "14:03", "agent", NAS_CLEANUP_SCRIPT),
+    afternoon(15, "14:15", "guardian", "Book the back room."),
     afternoon(
       16,
       "14:16",
       "agent",
       "Booked: Friday 19:00, Osteria 23 back room, 4 people, under your name. A confirmation text is on its way to your phone.",
-      TABLE_THREAD,
     ),
-    afternoon(17, "14:20", "guardian", "What time is the plumber coming?", PLUMBER_THREAD),
-    afternoon(18, "14:20", "agent", "At 4 pm. He will call from the car park.", PLUMBER_THREAD),
-    afternoon(19, "14:22", "guardian", "Thanks. Does he need a key?", PLUMBER_THREAD),
-    afternoon(20, "14:22", "agent", "No, Ray is home all afternoon.", PLUMBER_THREAD),
+    afternoon(17, "14:20", "guardian", "What time is the plumber coming?"),
+    afternoon(18, "14:20", "agent", "At 4 pm. He will call from the car park."),
+    afternoon(19, "14:22", "guardian", "Thanks. Does he need a key?"),
+    afternoon(20, "14:22", "agent", "No, Ray is home all afternoon."),
     // The owner's latest message, which the Concierge is still working on: it
     // carries the working status, which Rome derives.
     {
@@ -650,13 +599,28 @@ const transcripts: Record<string, ChatMessage[]> = {
     },
   ],
   // The task chat the conclusion above came from: the full answer, then its conclusion.
-  "mock-chat-lisbon": turn(
-    "mock-chat-lisbon",
-    1,
-    "2026-08-07T09:20:00.000Z",
-    "Compare round-trip fares to Lisbon for 1–7 March and tell me what to book.",
-    [text(TASK_CHAT_ANSWER_WITH_CONCLUSION)],
-  ),
+  "mock-chat-lisbon": [
+    ...turn(
+      "mock-chat-lisbon",
+      1,
+      "2026-08-07T09:20:00.000Z",
+      "Compare round-trip fares to Lisbon for 1–7 March and tell me what to book.",
+      [text(TASK_CHAT_ANSWER_WITH_CONCLUSION)],
+    ),
+    // A follow-up that could not run: Claude, the default, hit its usage limit.
+    ...turn("mock-chat-lisbon", 2, "2026-08-07T14:25:00.000Z", "Book option A.", [
+      {
+        type: "provider_failure",
+        provider: "anthropic",
+        reason: "quota",
+        card: "wait",
+        until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+        followsDefault: true,
+        alternatives: [],
+        chatId: "mock-chat-lisbon",
+      },
+    ]),
+  ],
   "mock-task-question": turn(
     "mock-task-question",
     1,
@@ -678,6 +642,28 @@ const transcripts: Record<string, ChatMessage[]> = {
         ]),
       },
     ],
+  ),
+  // The main chat's other task chats, so each opens from its task list row.
+  "mock-task-chat-table": turn(
+    "mock-task-chat-table",
+    1,
+    "2026-08-05T08:50:00.000Z",
+    "Book a table for four on Friday evening.",
+    [text("Osteria 23 has a back room for four at 19:00. It needs your approval to hold it.")],
+  ),
+  "mock-task-chat-pr-review": turn(
+    "mock-task-chat-pr-review",
+    1,
+    "2026-08-05T09:05:00.000Z",
+    "Review the open pull requests.",
+    [text("Three are open. I am reading the second one now.")],
+  ),
+  "mock-task-chat-visa": turn(
+    "mock-task-chat-visa",
+    1,
+    "2026-08-05T09:10:00.000Z",
+    "Check the visa appointment.",
+    [text("No earlier slot yet. I will look again in 20 minutes.")],
   ),
   ...Object.fromEntries(
     curatedChats.map((chat) => [
@@ -1090,6 +1076,179 @@ transcripts["mock-topic-news"] = turn(
   [text("Done. Every Monday at 7:30 I will send the week's top stories.")],
 );
 
+// Each state of the provider failure card, and the main chat's grouped
+// notice, in a topic chat of their own: the main chat's transcript is the one
+// the layout checks measure, so these stay out of it.
+const PROVIDER_CARDS_CHAT_ID = "mock-topic-provider-cards";
+const providerCard = (part: Omit<ProviderFailurePart, "type" | "chatId">): TranscriptPart => ({
+  type: "provider_failure",
+  chatId: PROVIDER_CARDS_CHAT_ID,
+  ...part,
+});
+transcripts[PROVIDER_CARDS_CHAT_ID] = [
+  ...turn(PROVIDER_CARDS_CHAT_ID, 1, "2026-08-08T09:00:00.000Z", "Plan the Kyoto budget.", [
+    providerCard({
+      provider: "openai",
+      reason: "quota",
+      card: "wait",
+      until: new Date(Date.now() + 90 * 60 * 1000).toISOString(),
+      continues: true,
+      followsDefault: true,
+      alternatives: ["anthropic"],
+    }),
+  ]),
+  // A weekly limit the usage-limit continuation will not take: no promise.
+  ...turn(PROVIDER_CARDS_CHAT_ID, 8, "2026-08-08T09:01:00.000Z", "Plan the Osaka leg.", [
+    providerCard({
+      provider: "openai",
+      reason: "quota",
+      card: "wait",
+      until: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+      followsDefault: true,
+      alternatives: [],
+    }),
+  ]),
+  // A temporary failure its silent retry did not get past: [Retry].
+  ...turn(PROVIDER_CARDS_CHAT_ID, 9, "2026-08-08T09:03:00.000Z", "Check the hotel reviews.", [
+    providerCard({
+      provider: "anthropic",
+      reason: "temporary",
+      card: "wait",
+      followsDefault: true,
+      alternatives: [],
+    }),
+  ]),
+  // Rome credits used up, no account logged in: [Log in].
+  ...turn(PROVIDER_CARDS_CHAT_ID, 10, "2026-08-08T09:04:00.000Z", "Book the ryokan.", [
+    providerCard({
+      provider: "rome_credits",
+      reason: "credits_used_up",
+      card: "account",
+      followsDefault: true,
+      alternatives: [],
+    }),
+  ]),
+  // Its reset passed before the sweep ran: the card offers [Continue].
+  ...turn(PROVIDER_CARDS_CHAT_ID, 7, "2026-08-08T09:02:00.000Z", "Summarise the board meeting.", [
+    providerCard({
+      provider: "anthropic",
+      reason: "quota",
+      card: "wait",
+      until: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+      followsDefault: true,
+      alternatives: [],
+    }),
+  ]),
+  ...turn(PROVIDER_CARDS_CHAT_ID, 2, "2026-08-08T09:05:00.000Z", "Book the 9:40 train.", [
+    providerCard({
+      provider: "openai",
+      reason: "login",
+      card: "account",
+      followsDefault: true,
+      alternatives: ["anthropic"],
+      detail: "401 Unauthorized: the refresh token was revoked.",
+    }),
+  ]),
+  ...turn(PROVIDER_CARDS_CHAT_ID, 3, "2026-08-08T09:10:00.000Z", "Summarise the inbox.", [
+    providerCard({
+      provider: "anthropic",
+      reason: "removed",
+      card: "account",
+      followsDefault: true,
+      alternatives: [],
+      credits: true,
+    }),
+  ]),
+  ...turn(PROVIDER_CARDS_CHAT_ID, 4, "2026-08-08T09:15:00.000Z", "Draft the release notes.", [
+    providerCard({
+      provider: "openai",
+      reason: "model_unavailable",
+      card: "model",
+      model: "gpt-6-astra",
+      replacement: { selection: "gpt-6-1-sol", model: "gpt-6.1-sol" },
+      followsDefault: false,
+      alternatives: ["anthropic"],
+    }),
+  ]),
+  ...turn(PROVIDER_CARDS_CHAT_ID, 5, "2026-08-08T09:20:00.000Z", "Check the flight prices.", [
+    providerCard({
+      provider: "anthropic",
+      reason: "quota",
+      card: "wait",
+      followsDefault: true,
+      alternatives: ["openai"],
+      resolved: {
+        at: "2026-08-08T09:22:00.000Z",
+        by: "switched",
+        provider: "openai",
+        continued: true,
+      },
+    }),
+  ]),
+  ...turn(PROVIDER_CARDS_CHAT_ID, 6, "2026-08-08T09:30:00.000Z", "Any updates on the tasks?", [
+    {
+      type: "provider_outage",
+      outageId: MOCK_OUTAGE_ID,
+      provider: "anthropic",
+      reason: "quota",
+      card: "wait",
+      until: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      chatIds: ["mock-chat-lisbon", "mock-task-question"],
+    },
+  ]),
+];
+
+/** A failure card's button: the card settles in place, as the server rewrites it. */
+const settleProviderCard = (messageId: string, change: Record<string, unknown> | null) => {
+  for (const messages of Object.values(transcripts)) {
+    const index = messages.findIndex((message) => message.id === messageId);
+    if (index < 0) continue;
+    const message = messages[index]!;
+    const parts = JSON.parse(message.content) as TranscriptPart[];
+    const card = parts.find(
+      (part): part is ProviderFailurePart => part.type === "provider_failure",
+    );
+    if (!card || card.resolved) return false;
+    card.resolved = !change
+      ? { at: new Date().toISOString(), by: "recovered", continued: true }
+      : {
+          at: new Date().toISOString(),
+          by: "switched",
+          ...(change.kind === "model"
+            ? { model: card.replacement?.model }
+            : { provider: change.provider as ProviderFailurePart["provider"] }),
+          continued: true,
+        };
+    messages[index] = { ...message, content: JSON.stringify(parts) };
+    return true;
+  }
+  return false;
+};
+
+// A content card beside a question card: the content card reads as wide as a
+// text bubble, the question card keeps its narrow width.
+const CARD_WIDTHS_CHAT_ID = "mock-topic-card-widths";
+transcripts[CARD_WIDTHS_CHAT_ID] = [
+  ...turn(CARD_WIDTHS_CHAT_ID, 1, "2026-08-08T10:00:00.000Z", "How did I do this week?", [
+    { ...AGENT_CARD_HEALTH, toolUseId: "mock-card-widths-health" } as TranscriptPart,
+  ]),
+  ...turn(CARD_WIDTHS_CHAT_ID, 2, "2026-08-08T10:05:00.000Z", "Plan a walk for tonight.", [
+    {
+      type: "pending_interaction",
+      toolUseId: "mock-card-widths-question",
+      appId: "core",
+      render: questionCardRender([
+        {
+          id: "time",
+          question: "When should the walk start?",
+          type: "single",
+          options: ["18:30", "19:30"],
+        },
+      ]),
+    } as TranscriptPart,
+  ]),
+];
+
 /** Session metadata is derived from the transcript so `messageCount` and the
  *  activity timestamps can't drift away from the messages they describe. */
 const session = (
@@ -1121,6 +1280,8 @@ const chatSessions: ChatSession[] = [
   // Topic chats, which the Concierge section lists under the main chat.
   session("mock-topic-travel", "Travel planning", "default", CONCIERGE_AGENT_ID),
   session("mock-topic-news", "Weekly news digest", "default", CONCIERGE_AGENT_ID),
+  session(PROVIDER_CARDS_CHAT_ID, "Provider failure cards", "default", CONCIERGE_AGENT_ID),
+  session(CARD_WIDTHS_CHAT_ID, "Card widths", "default", CONCIERGE_AGENT_ID),
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
   {
@@ -1149,6 +1310,12 @@ const chatSessions: ChatSession[] = [
     awaitingGuardian: true,
     triggerKind: "concierge",
   },
+  { ...session("mock-task-chat-table", "Book a table for Friday"), triggerKind: "concierge" },
+  {
+    ...session("mock-task-chat-pr-review", "Review the open pull requests"),
+    triggerKind: "concierge",
+  },
+  { ...session("mock-task-chat-visa", "Check the visa appointment"), triggerKind: "concierge" },
   // A chat that works in a folder on another computer groups under that folder.
   {
     ...session("mock-chat-device-folder", "Fix the flaky e2e test"),
@@ -1364,6 +1531,7 @@ const mockBody = (path: string) =>
   `# ${path.split("/").pop()}\n\nMock file content for the dashboard mock mode.\n`;
 
 const projectsTree: MockFsNode[] = [
+  outputProjectFolder,
   dir("projects/demo-app", [
     dir("projects/demo-app/src", [
       file("projects/demo-app/src/index.ts", mockBody("projects/demo-app/src/index.ts")),
@@ -1401,13 +1569,50 @@ const composioStatus: { composio: ComposioCliStatus } = {
   },
 };
 
-const conversationDefaults: ChatSettings = {
-  enabled: true,
-  activation: { mode: "mention", botMessages: "ignore", whenOthersMentioned: "ignore" },
-  replies: { placement: "thread" },
-  routing: { agentName: null },
-  session: { reset: { mode: "idle", idleMinutes: 10_080 } },
-};
+const conversationDefaults: ChatSettings = CHAT_RULE_DEFAULTS;
+
+const DISCORD_FIELDS: ChatSettingField[] = [
+  "enabled",
+  "activation.mode",
+  "activation.botMessages",
+  "activation.whenOthersMentioned",
+  "replies.placement",
+  "routing.agentName",
+  "session.reset",
+];
+
+/** A channel on the mock Discord bot, with any values a guardian set on it. */
+function discordChannel(
+  chatId: string,
+  displayName: string,
+  containerName: string,
+  overrides: PartialChatSettings = {},
+): ChatSettingsListItem {
+  const configured = Object.keys(overrides).length > 0;
+  return {
+    availability: "online",
+    source: configured ? "configured" : "live",
+    snapshot: {
+      conversation: {
+        ref: { connectionId: "discord-1", chatId: chatId as ChatId },
+        connectionKind: "discord",
+        service: "discord",
+        kind: "channel",
+        displayName,
+        containerName,
+      },
+      supportedFields: DISCORD_FIELDS,
+      effective: mergeSettings(structuredClone(conversationDefaults), overrides),
+      overrides: structuredClone(overrides),
+      ...(configured
+        ? {
+            updatedAt: "2026-11-18T09:30:00.000Z",
+            updatedBy: { kind: "guardian" as const, displayName: "Mock Guardian" },
+          }
+        : {}),
+    },
+  };
+}
 
 const conversationSettings: { items: ChatSettingsListItem[] } = {
   items: [
@@ -1438,6 +1643,18 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
         updatedBy: { kind: "guardian", displayName: "Mock Guardian" },
       },
     },
+    discordChannel("general", "general", "Rome", { activation: { mode: "all" } }),
+    discordChannel("launch", "launch-planning", "Rome", { routing: { agentName: "pm-assistant" } }),
+    discordChannel("random", "random", "Rome", { enabled: false }),
+    discordChannel("announcements", "announcements", "Rome"),
+    discordChannel("design", "design", "Rome"),
+    discordChannel("standup", "standup", "Rome"),
+    discordChannel("support", "customer-support", "Rome Community", {
+      replies: { placement: "inline" },
+    }),
+    discordChannel("welcome", "welcome", "Rome Community"),
+    discordChannel("feedback", "feedback", "Rome Community"),
+    discordChannel("showcase", "showcase", "Rome Community"),
     {
       availability: "offline",
       source: "known",
@@ -1450,7 +1667,8 @@ const conversationSettings: { items: ChatSettingsListItem[] } = {
           displayName: "Ray",
           containerName: undefined,
         },
-        supportedFields: ["enabled", "session.reset"],
+        // A direct message offers only the session reset.
+        supportedFields: ["session.reset"],
         effective: {
           ...conversationDefaults,
           session: { reset: { mode: "daily", atHour: 4 } },
@@ -1588,23 +1806,38 @@ export const handlers = [
       ? HttpResponse.json(found)
       : HttpResponse.json({ error: "Unknown session" }, { status: 404 });
   }),
+  http.post("/api/ai-tools/provider-failures/:messageId/switch", async ({ params, request }) => {
+    const change = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!change)
+      return HttpResponse.json({ error: "A provider or a model is required" }, { status: 400 });
+    return settleProviderCard(String(params.messageId), change)
+      ? HttpResponse.json({ ok: true })
+      : HttpResponse.json({ error: "No open card in that message" }, { status: 409 });
+  }),
+  http.post("/api/ai-tools/provider-failures/:messageId/continue", ({ params }) =>
+    settleProviderCard(String(params.messageId), null)
+      ? HttpResponse.json({ ok: true })
+      : HttpResponse.json({ error: "No open card in that message" }, { status: 409 }),
+  ),
   http.get("/api/chat/sessions/:sessionId/messages", ({ params, request }) => {
     const messages = transcripts[String(params.sessionId)];
     if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
     const query = new URL(request.url).searchParams;
     const limit = Number(query.get("limit"));
     if (!limit) return HttpResponse.json(messages);
-    // Pages by turn like the server; the cursor is the index of the page's first turn.
-    const turns = new Map<string, typeof messages>();
-    for (const message of messages) {
-      const key = message.turnId ?? message.id;
-      turns.set(key, [...(turns.get(key) ?? []), message]);
-    }
-    const groups = [...turns.values()];
-    const end = query.has("before") ? Number(query.get("before")) : groups.length;
+    // Pages by message like the server: the cursor is the index of the page's first
+    // message, and the traces of the page's turns ride along.
+    const said = messages.filter((message) => message.role !== "trace");
+    const end = query.has("before") ? Number(query.get("before")) : said.length;
     const start = Math.max(0, end - limit);
+    const page = said.slice(start, end);
+    const turns = new Set(page.flatMap((message) => (message.turnId ? [message.turnId] : [])));
+    const traces = messages.filter(
+      (message) => message.role === "trace" && message.turnId && turns.has(message.turnId),
+    );
+    const shown = new Set([...page, ...traces]);
     return HttpResponse.json({
-      messages: groups.slice(start, end).flat(),
+      messages: messages.filter((message) => shown.has(message)),
       nextCursor: start > 0 ? String(start) : null,
     });
   }),
@@ -1612,18 +1845,14 @@ export const handlers = [
   // model behind it, so a session always reads as idle.
   http.get("/api/chat/sessions/:sessionId/turns", () => HttpResponse.json([] as TurnInfo[])),
   // A sent message is only recorded: no turn starts, so nothing answers it. It
-  // replies to the message the owner picked, else, with a thread in focus, to
-  // that thread's last message, else to nothing, and joins the thread of the
-  // message it replies to, as the server records it.
+  // replies to the message the owner picked, else to nothing.
   http.post("/api/chat/sessions/:sessionId/turns", async ({ params, request }) => {
     const sessionId = String(params.sessionId);
     const messages = transcripts[sessionId];
     if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
     const form = await request.formData();
     const picked = form.get("replyToMessageId");
-    const thread = form.get("chatThread");
-    const focused = thread ? messages.filter((message) => message.chatThreadId === thread) : [];
-    const repliesTo = picked ? messages.find((message) => message.id === picked) : focused.at(-1);
+    const repliesTo = picked ? messages.find((message) => message.id === picked) : undefined;
     const sentAt = new Date().toISOString();
     // A reply shows the quote of what it replies to.
     const original = repliesTo ? JSON.parse(repliesTo.content) : [];
@@ -1649,7 +1878,6 @@ export const handlers = [
       content,
       createdAt: sentAt,
       sender: guardianSender,
-      ...(repliesTo ? joinThread(repliesTo) : {}),
     });
     return HttpResponse.json({
       turnId: null,
@@ -1670,20 +1898,6 @@ export const handlers = [
       lastSeenActivityAt: found.lastSeenActivityAt,
       unread: found.unread,
     });
-  }),
-  // The messages the owner has seen, as the server marks them read.
-  http.post("/api/chat/sessions/:sessionId/messages/read", async ({ params, request }) => {
-    const messages = transcripts[String(params.sessionId)];
-    if (!messages) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
-    const { ids } = (await request.json()) as { ids: string[] };
-    let marked = 0;
-    for (const message of messages) {
-      if (ids.includes(message.id) && message.read === false) {
-        message.read = true;
-        marked += 1;
-      }
-    }
-    return HttpResponse.json({ marked });
   }),
   // Pin or unpin a chat from its row menu. Kept in memory, so the chat moves
   // into the Pinned section and stays there until the page reloads.
@@ -1831,68 +2045,24 @@ export const handlers = [
     HttpResponse.json({ agents: mockAgentNames.map((name) => ({ name })) }),
   ),
   http.get("/api/connections", () => HttpResponse.json(connections)),
-  // Every connected account, the ones a connection reaches and the ones left
-  // disconnected with their agent, as core lists them.
-  http.get("/api/connected-accounts", () =>
+  // The iPhone app's battery-and-network capability, as a phone reports it,
+  // so a device connect card's page has something to describe.
+  http.get("/api/device-connections", () =>
     HttpResponse.json({
-      accounts: [
-        ...connections.connections.flatMap((connection) =>
-          connection.id !== null && connection.account && connection.agent !== undefined
-            ? [
-                {
-                  account: connection.account,
-                  name: Object.values(connection.display)[0]?.displayName ?? null,
-                  agent: connection.agent,
-                  connection: connection.id,
-                },
-              ]
-            : [],
-        ),
-        ...disconnectedAccounts,
+      connections: [
+        {
+          capability: "device",
+          title: "Device",
+          summary: "Your Rome reads this phone's battery and network.",
+          labels: {
+            "zh-CN": { title: "设备", summary: "让你的 Rome 读取这部手机的电量和网络。" },
+          },
+          device: { name: "iPhone" },
+          state: "off",
+        },
       ],
     }),
   ),
-  // A disconnected account can be unlinked by its account. Linking it waits
-  // until it is connected again, which mock mode cannot do.
-  http.put("/api/connected-accounts/:platform/:accountId/agent", async ({ params, request }) => {
-    const body = (await request.json()) as { agent: string | null };
-    const entry = disconnectedAccounts.find(
-      (candidate) =>
-        candidate.account.platform === String(params.platform) &&
-        candidate.account.id === String(params.accountId),
-    );
-    if (!entry) return HttpResponse.json({ error: "Unknown account." }, { status: 404 });
-    if (body.agent !== null) {
-      return HttpResponse.json(
-        { error: "This account is not connected. Connect it again to link an agent." },
-        { status: 409 },
-      );
-    }
-    entry.agent = null;
-    return HttpResponse.json({ account: entry });
-  }),
-  // Link an agent to a connected account, named by its connection's id. Only
-  // this account changes: an agent may be linked to any number of accounts,
-  // several on one platform included.
-  http.put("/api/accounts/:id/agent", async ({ params, request }) => {
-    const id = String(params.id);
-    const body = (await request.json()) as { agent: string | null };
-    // Core stores main by its canonical id and accepts the short name.
-    const agent = body.agent === "main" ? MAIN_AGENT_ID : body.agent;
-    const target = connections.connections.find((candidate) => candidate.id === id);
-    if (!target) return HttpResponse.json({ error: "Unknown account." }, { status: 404 });
-    if (agent !== null && !mockAgentNames.includes(agent)) {
-      return HttpResponse.json({ error: `Agent ${agent} is not loaded.` }, { status: 400 });
-    }
-    if (agent !== null && !target.link) {
-      return HttpResponse.json(
-        { error: `${target.connectionKind} accounts do not take an agent.` },
-        { status: 400 },
-      );
-    }
-    target.agent = agent;
-    return HttpResponse.json({ account: { id, agent, link: target.link ?? null } });
-  }),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
   // above without this would make every one of those buttons fail locally.
   // Teardown is real here, the way the route runs it: the grant relocks and
@@ -1911,9 +2081,6 @@ export const handlers = [
     if (!(grant in connection.grants)) {
       return HttpResponse.json({ error: "Unknown grant." }, { status: 404 });
     }
-    // The name the connection showed, which its connected account keeps.
-    const shown = connection.display[grant];
-    const name = shown?.displayName || shown?.handle || null;
     connection.grants[grant] = "unauthorized";
     connection.state = null;
     connection.display[grant] = null;
@@ -1931,18 +2098,9 @@ export const handlers = [
       };
     }
     // Core ends the connection of a service that names its accounts, which
-    // the services that take an agent are. The connected account stays with
-    // its agent, listed as disconnected.
+    // the services that take an agent are.
     const unconnectedAccount = Boolean(connection.link);
     if (!unconnectedAccount) return HttpResponse.json({ ok: true, connection });
-    if (connection.account && connection.agent) {
-      disconnectedAccounts.push({
-        account: connection.account,
-        name,
-        agent: connection.agent,
-        connection: null,
-      });
-    }
     const others = connections.connections.filter(
       (candidate) =>
         candidate !== connection && candidate.connectionKind === connection.connectionKind,
@@ -1959,7 +2117,38 @@ export const handlers = [
     return HttpResponse.json({ ok: true, connection: null });
   }),
   http.get("/api/integrations/composio/status", () => HttpResponse.json(composioStatus)),
-  http.get("/api/chat-settings", () => HttpResponse.json(conversationSettings)),
+  http.get("/api/chat-settings", ({ request }) => {
+    const search = new URL(request.url).searchParams;
+    const connectionId = search.get("connectionId");
+    const query = search.get("query")?.trim().toLocaleLowerCase();
+    const changed = search.get("changed") === "true";
+    return HttpResponse.json({
+      items: conversationSettings.items.filter((item) => {
+        const chat = item.snapshot.conversation;
+        if (connectionId && chat.ref.connectionId !== connectionId) return false;
+        if (changed && Object.keys(item.snapshot.overrides).length === 0) return false;
+        if (!query) return true;
+        return [chat.connectionKind, chat.containerName, chat.displayName]
+          .filter(Boolean)
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query);
+      }),
+    });
+  }),
+  http.post("/api/chat-settings/reset", async ({ request }) => {
+    const body = (await request.json()) as { ref: { connectionId: string; chatId: string } };
+    const found = conversationSettings.items.find(
+      (candidate) =>
+        candidate.snapshot.conversation.ref.connectionId === body.ref.connectionId &&
+        candidate.snapshot.conversation.ref.chatId === body.ref.chatId,
+    );
+    if (!found) return HttpResponse.json({ error: "Unknown conversation" }, { status: 404 });
+    found.source = "live";
+    found.snapshot.overrides = {};
+    found.snapshot.effective = chatRuleDefaultsOf(found.snapshot.conversation.connectionKind);
+    return HttpResponse.json(found.snapshot);
+  }),
   // Auto-save writes through on every edit, so mock mode needs a real write
   // path or the dashboard would toast an error on each change.
   http.patch("/api/chat-settings", async ({ request }) => {
@@ -1987,6 +2176,7 @@ export const handlers = [
       delete found.snapshot.overrides.routing;
       found.snapshot.effective.routing.agentName = null;
     }
+    found.source = "configured";
     found.snapshot.updatedAt = new Date().toISOString();
     found.snapshot.updatedBy = { kind: "guardian", displayName: identity.displayName ?? undefined };
     return HttpResponse.json(found.snapshot);

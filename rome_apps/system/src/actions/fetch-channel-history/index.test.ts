@@ -356,13 +356,13 @@ describe("fetch_channel_history", () => {
       const result = await action.execute({ channel: "webchat", limit: 5 });
       expect(result).toEqual({
         status: "error",
-        error: "Paging with limit or cursor needs a threadId.",
+        error: "Paging with limit, cursor, olderThan or newerThan needs a threadId.",
       });
       expect(query).not.toHaveBeenCalled();
     });
 
-    it("resumes after a cursor, and ends with no cursor on a short page", async () => {
-      const { query, action } = pagedDeps([at("m1", 1, "c1")]);
+    it("resumes after a cursor, and ends with no cursor on an empty page", async () => {
+      const { query, action } = pagedDeps([]);
       const result = await action.execute({
         channel: "webchat",
         threadId: "chat-1",
@@ -377,6 +377,175 @@ describe("fetch_channel_history", () => {
         limit: 2,
       });
       expect((result as { data: { nextCursor: string | null } }).data.nextCursor).toBeNull();
+    });
+
+    it("pages on past a short page that a platform read live cut at 15 messages", async () => {
+      // Slack keeps 40 messages, and answers at most 15 at a time.
+      const all = Array.from({ length: 40 }, (_, i) => at(`m${40 - i}`, 40 - i, `c${40 - i}`));
+      const query = rs.fn<ChannelsService["query"]>(async (_target, read) => {
+        const from = read?.after ? all.findIndex((m) => m.cursor === read.after) + 1 : 0;
+        return all.slice(from, from + Math.min(read?.limit ?? 100, 15));
+      });
+      const action = createAction(actionConfig, {
+        channelsService: {
+          list: async () => [{ name: "slack", sendable: true }],
+          send: async (_channel: string, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      });
+
+      const read: string[] = [];
+      let cursor: string | undefined;
+      for (let call = 0; call < 10; call++) {
+        const result = await action.execute({
+          channel: "slack",
+          threadId: "C1",
+          limit: 100,
+          ...(cursor ? { cursor } : {}),
+          includeMessages: true,
+        });
+        const data = (result as { data: { nextCursor: string | null; messages: { id: string }[] } })
+          .data;
+        read.push(...data.messages.map((m) => m.id));
+        if (!data.nextCursor) break;
+        cursor = data.nextCursor;
+      }
+
+      expect(read).toHaveLength(40);
+      expect(new Set(read).size).toBe(40);
+      // Three pages of 15, 15 and 10, then one empty read that ends paging.
+      expect(query).toHaveBeenCalledTimes(4);
+    });
+
+    it("names where to read on after a plain read of one chat, which Slack may cut short", async () => {
+      const query = rs.fn<ChannelsService["query"]>(async () =>
+        Array.from({ length: 15 }, (_, i) => at(`m${40 - i}`, 40 - i, `c${40 - i}`)),
+      );
+      const action = createAction(actionConfig, {
+        channelsService: {
+          list: async () => [{ name: "slack", sendable: true }],
+          send: async (_channel: string, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      });
+
+      const one = await action.execute({ channel: "slack", threadId: "D1" });
+      expect((one as { data: Record<string, unknown> }).data.nextCursor).toBe("c26");
+
+      const every = await action.execute({ channel: "slack" });
+      expect((every as { data: Record<string, unknown> }).data).not.toHaveProperty("nextCursor");
+    });
+  });
+
+  describe("an account read by message id", () => {
+    function discordDeps(page: ChannelMessage[]) {
+      const query = rs.fn<ChannelsService["query"]>().mockResolvedValue(page);
+      const account = { platform: "discord", id: "bot-1" };
+      const deps = {
+        channelsService: {
+          list: async () => [{ name: "discord", account, platform: "discord", sendable: true }],
+          send: async (_channel: string, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      };
+      return { query, account, action: createAction(actionConfig, deps) };
+    }
+    const said = (id: string, minute: number, extra: Partial<ChannelMessage> = {}) =>
+      makeMessage({
+        messageId: id,
+        text: id,
+        timestamp: new Date(Date.UTC(2026, 10, 19, 8, minute)),
+        ...extra,
+      });
+
+    it("names each message and the thread it opened", async () => {
+      const { action } = discordDeps([
+        said("m2", 2, { openedThread: "t1" as ChatId }),
+        said("m1", 1),
+      ]);
+
+      const result = await action.execute({ platform: "discord", threadId: "general" });
+
+      const content = (result as { data: { content: string } }).data.content;
+      expect(content).toContain("**Alice** (message m1): m1");
+      expect(content).toContain("**Alice** (message m2, opened thread t1): m2");
+    });
+
+    it("reads on from the newest message of a full page read forward", async () => {
+      const { query, account, action } = discordDeps([said("m3", 3), said("m2", 2)]);
+
+      const result = await action.execute({
+        platform: "discord",
+        threadId: "general",
+        newerThan: "m1",
+        limit: 2,
+      });
+
+      expect(query).toHaveBeenCalledWith(account, {
+        chatId: "general",
+        since: new Date(0),
+        newerThan: "m1",
+        limit: 2,
+      });
+      const data = (result as { data: Record<string, unknown> }).data;
+      expect(data.nextNewerThan).toBe("m3");
+      expect(data).not.toHaveProperty("nextCursor");
+    });
+  });
+
+  describe("an account read by message id", () => {
+    function discordDeps(page: ChannelMessage[]) {
+      const query = rs.fn<ChannelsService["query"]>().mockResolvedValue(page);
+      const account = { platform: "discord", id: "bot-1" };
+      const deps = {
+        channelsService: {
+          list: async () => [{ name: "discord", account, platform: "discord", sendable: true }],
+          send: async (_channel: string, chatId: ChatId) => ({ chatId }),
+          query,
+        } as ChannelsService,
+      };
+      return { query, account, action: createAction(actionConfig, deps) };
+    }
+    const said = (id: string, minute: number, extra: Partial<ChannelMessage> = {}) =>
+      makeMessage({
+        messageId: id,
+        text: id,
+        timestamp: new Date(Date.UTC(2026, 10, 19, 8, minute)),
+        ...extra,
+      });
+
+    it("names each message and the thread it opened", async () => {
+      const { action } = discordDeps([
+        said("m2", 2, { openedThread: "t1" as ChatId }),
+        said("m1", 1),
+      ]);
+
+      const result = await action.execute({ platform: "discord", threadId: "general" });
+
+      const content = (result as { data: { content: string } }).data.content;
+      expect(content).toContain("**Alice** (message m1): m1");
+      expect(content).toContain("**Alice** (message m2, opened thread t1): m2");
+    });
+
+    it("reads on from the newest message of a full page read forward", async () => {
+      const { query, account, action } = discordDeps([said("m3", 3), said("m2", 2)]);
+
+      const result = await action.execute({
+        platform: "discord",
+        threadId: "general",
+        newerThan: "m1",
+        limit: 2,
+      });
+
+      expect(query).toHaveBeenCalledWith(account, {
+        chatId: "general",
+        since: new Date(0),
+        newerThan: "m1",
+        limit: 2,
+      });
+      const data = (result as { data: Record<string, unknown> }).data;
+      expect(data.nextNewerThan).toBe("m3");
+      expect(data).not.toHaveProperty("nextCursor");
     });
   });
 });

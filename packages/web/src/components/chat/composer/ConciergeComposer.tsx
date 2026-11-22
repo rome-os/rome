@@ -38,6 +38,7 @@ import type {
 import { ProjectSelector } from "@/components/project-selector";
 import { useChatLocations } from "@/hooks/use-chat-locations";
 import { useSettings } from "@/hooks/use-settings";
+import { useSignedInProviders } from "@/hooks/use-default-provider";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import {
   COMMON_LARGE_MODEL_IDS,
@@ -45,6 +46,7 @@ import {
   DEFAULT_PROJECT_NAME,
   DEFAULT_REASONING_EFFORT,
   LARGE_MODEL_OPTIONS,
+  runnableLargeModelOptions,
 } from "@/lib/chat-constants";
 import { isReasoningEffort } from "@/lib/chat-helpers";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
@@ -176,7 +178,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       setValue: setInputText,
       notice: draft.notice,
       setNotice: draft.setNotice,
-      keepNotice: draft.keepNotice,
+      keepDraft: draft.keep,
       onSend: () => void runSendRef.current(),
     });
     const runSendRef = useRef<() => Promise<void>>(async () => {});
@@ -202,7 +204,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         replyTo?: ReplyTarget,
         pickedFolder: FolderSelection | null = null,
         skillName?: string,
-        chatThread?: string,
       ): ChatComposerSnapshot => ({
         text: appendFolderLine(text, pickedFolder),
         uploads,
@@ -212,7 +213,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         inputId,
         replyTo,
         skillName,
-        ...(chatThread ? { chatThread } : {}),
       }),
       [reasoningEffort],
     );
@@ -239,7 +239,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       voice.dismissNotice();
       const clearsOptimistically = uploads.length === 0;
       const replyTo = replyDraft?.target ?? undefined;
-      const chatThread = replyDraft?.thread ?? undefined;
       // The draft's change count once this send cleared it: a failed send
       // puts its reply back only if the guardian changed nothing since.
       let clearedAt: number | undefined;
@@ -251,9 +250,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         clearedAt = replyDraft?.clear();
       }
       try {
-        await invokeOnSend(
-          snapshotOf(text, uploads, inputId, replyTo, pickedFolder, skill?.name, chatThread),
-        );
+        await invokeOnSend(snapshotOf(text, uploads, inputId, replyTo, pickedFolder, skill?.name));
         failedSendRef.current = null;
         if (!clearsOptimistically) {
           replyDraft?.clear();
@@ -266,7 +263,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       } catch {
         failedSendRef.current = { inputId, text, uploads, folder: pickedFolder, skill };
         if (clearsOptimistically) {
-          setInputText(text);
+          // Text typed or dictated while the send was pending is newer than
+          // what failed. Dictated words are not in the field until listening ends.
+          setInputText((current) => (current === "" && !voiceActiveRef.current ? text : current));
           sendEnded(text, false);
           setPendingUploads(uploads);
           setFolder(pickedFolder);
@@ -344,10 +343,13 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     const [showAllModels, setShowAllModels] = useState(false);
     // Like the model picker in other chats: the common models and the chat's
     // own pick first, every model after "show all".
+    // Only models a signed-in provider can run, plus the chat's own pick.
+    const signedInProviders = useSignedInProviders();
+    const modelOptions = (value: string) => runnableLargeModelOptions(signedInProviders, value);
     const modelRows = (value: string) =>
       showAllModels
-        ? LARGE_MODEL_OPTIONS
-        : LARGE_MODEL_OPTIONS.filter(
+        ? modelOptions(value)
+        : modelOptions(value).filter(
             (option) => COMMON_LARGE_MODEL_IDS.includes(option.id) || option.id === value,
           );
     const modelLabel = (id: string) =>
@@ -491,7 +493,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                         >
                           {modelRows(modelSelection.value).map((option) => (
                             <DropdownMenuRadioItem key={option.id} value={option.id}>
-                              {t(option.labelKey)}
+                              {option.id === DEFAULT_LARGE_MODEL_SELECTION
+                                ? t("modelSelector.options.autoFollowsDefault")
+                                : t(option.labelKey)}
                             </DropdownMenuRadioItem>
                           ))}
                         </DropdownMenuRadioGroup>
@@ -506,7 +510,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                           >
                             <MoreHorizontal aria-hidden />
                             {t("modelSelector.showAll", {
-                              count: LARGE_MODEL_OPTIONS.length,
+                              count: modelOptions(modelSelection.value).length,
                             })}
                           </DropdownMenuItem>
                         )}
@@ -561,11 +565,14 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             {/* At least as tall as the buttons beside it, with one line of text
                 centered, so the text sits on their center line until it wraps.
                 `--row-h` follows the buttons: `icon-sm`, raised to the touch
-                floor where `touch-target` applies it. */}
+                floor where `touch-target` applies it. On its own row while
+                voice input is on, the text starts where the + below draws:
+                the + is centered in a `--row-h` wide button and its strokes
+                begin about 4px left of that center. */}
             <div
               className={cn(
                 "relative flex min-w-0 flex-1 items-center [--row-h:var(--control-h-sm)] [@media(hover:none)]:[--row-h:max(var(--control-h-sm),var(--rome-size-44,2.75rem))]",
-                voice.active && "order-first basis-full",
+                voice.active && "order-first basis-full pl-[calc(var(--row-h)/2-0.25rem)]",
               )}
               style={{ minHeight: "var(--row-h)" }}
             >
@@ -617,9 +624,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                     placeholder={
                       pendingUploads.length > 0
                         ? t("composer.placeholderWithUploads")
-                        : replyDraft?.thread && replyDraft.threadTitle
-                          ? t("thread.replyPlaceholder", { title: replyDraft.threadTitle })
-                          : (namedPlaceholder ?? t("concierge.placeholder"))
+                        : (namedPlaceholder ?? t("concierge.placeholder"))
                     }
                     rows={1}
                     className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:truncate placeholder:text-subtle-foreground focus:outline-none"
@@ -632,11 +637,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                   />
                 }
               />
-              <VoiceInputSpokenText
-                textareaRef={textareaRef}
-                value={inputText}
-                spoken={voice.spoken}
-              />
+              <VoiceInputSpokenText textareaRef={textareaRef} preview={voice.preview} />
             </div>
             {voice.state === "listening" ? (
               <VoiceInputWaveform level={voice.level} className="flex-1 self-center" />
@@ -646,7 +647,8 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             {voice.available && (voice.active || !uploadInFlight) ? (
               <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
             ) : null}
-            {isStreaming && onStop && (
+            {/* Hidden while voice input is on, so its square is never mistaken for voice input's. */}
+            {isStreaming && onStop && !voice.active && (
               <Button
                 type="button"
                 variant="outline"

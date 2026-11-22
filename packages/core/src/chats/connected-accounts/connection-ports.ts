@@ -19,13 +19,20 @@ import type {
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
-import type { Connection, TalkFeatureName, Talker } from "../../connections/types.js";
+import type {
+  Connection,
+  TalkFeatureName,
+  TalkHistoryRead,
+  Talker,
+} from "../../connections/types.js";
 import type { ConnectionRegistry } from "../../connections/registry.js";
 import type { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { createLogger } from "../../logger.js";
 import { type Admission, OrderedAdmission, type OrderedAdmissionOptions } from "./admission.js";
+import { channelMessageOf } from "./channel-message.js";
 import { AccountNotConnected, type AccountChats, type ChannelSend } from "./connected-account.js";
 import { ChatBuffers } from "../../participation/conversation-buffer.js";
+import { type Messages, queryLimit } from "../history/messages.js";
 
 const log = createLogger("channel-ports");
 
@@ -53,6 +60,15 @@ export interface ConnectionPortsDeps {
    *  else does, so what the sender called themselves reaches the account
    *  profile cache (account-profiles.ts). Must not throw. */
   heard?: (message: ChannelMessage) => void;
+  /** Settles once the consumer that accepts inbound messages, Chats, has
+   *  accepted message `messageId` said in `chatId` on `channel` through
+   *  Connection `connectionId` (Talker.start). Called before the message is
+   *  handed to any subscriber. Absent, a message counts as accepted once it
+   *  is handed over. */
+  accepted?: (
+    channel: string,
+    ref: { connectionId: string; chatId: string; messageId: string },
+  ) => Promise<void>;
 }
 
 /**
@@ -91,6 +107,9 @@ export interface ConnectionPorts {
   send: ChannelSend | null;
   inbound: ChannelInbound | null;
   directory: AccountChats;
+  /** The chat history the platform keeps, read live, where the Talk reads
+   *  it (`reads`). Null otherwise. */
+  messages: Messages | null;
 }
 
 /**
@@ -116,6 +135,7 @@ export function connectionPorts(
     send: talker.sends === false ? null : connectionSend(backing),
     inbound: talker.receives === false ? null : connectionInbound(backing),
     directory: connectionDirectory(backing),
+    messages: talker.reads === true ? connectionMessages(backing) : null,
   };
 }
 
@@ -167,6 +187,50 @@ function connectionDirectory(backing: Backing): AccountChats {
       return listed.flat();
     },
   };
+}
+
+/**
+ * A chat's history read live from the platform through the Connection that
+ * backs the channel now, one chat at a time. A cursor from an earlier page
+ * (`after`) names the message the page ended on, so it reads as `olderThan`
+ * that message. With no bound, it reads back as far as `limit` reaches.
+ */
+function connectionMessages(backing: Backing): Messages {
+  const { channel } = backing;
+  return {
+    live: true,
+    byAccount: null,
+    async query({ chatId, since, until, after, olderThan, newerThan, limit }) {
+      if (!chatId) {
+        throw new Error(`Channel "${channel}" reads one chat at a time: name its chatId`);
+      }
+      const connection = connectionFor(backing);
+      if (!connection) throw new AccountNotConnected(channel);
+      if (!offers(connection, "history")) {
+        throw new Error(`Channel "${channel}" reads no messages while its connection is locked`);
+      }
+      const cursorId = after ? messageIdOf(after.ref) : undefined;
+      const read: TalkHistoryRead = {
+        // A live read keeps the platform's own precision, so `since` is not rounded.
+        ...(since ? { since } : {}),
+        ...(until ? { until } : {}),
+        ...((cursorId ?? olderThan) ? { olderThan: cursorId ?? olderThan } : {}),
+        ...(newerThan ? { newerThan } : {}),
+        limit: queryLimit(limit),
+      };
+      const messages = await callTalker(connection, (talker) => talker.history?.read(chatId, read));
+      // A later channel of the kind names itself, not the kind's first one.
+      return messages.map((message) => ({ ...message, channel }));
+    },
+  };
+}
+
+/** The platform id of the message a cursor's ref names, which is
+ *  `<chatId>:<messageId>` (`channelMessageOrder`). The chat part is not
+ *  checked: a live read's message ids are unique across chats, so one from
+ *  another chat is still a bound in time. */
+function messageIdOf(ref: string): string {
+  return ref.slice(ref.lastIndexOf(":") + 1);
 }
 
 /** The Connection that backs the channel now. A channel is one presence, so
@@ -261,8 +325,9 @@ function connectionInbound(backing: Backing): ChannelInbound {
   // in the order they are pushed here, which admission keeps as arrival
   // order (R4). A conversation is keyed by the Connection it arrived on as
   // well, so two Connections' conversations sharing an id never share a queue.
-  // Nothing upstream waits on delivery, so dispatch returns once every event
-  // is buffered. A subscription's waiting events are dropped when it ends
+  // Dispatch returns once every event is buffered and Chats has accepted the
+  // message (Talker.start), so a Talker can await its delivery before it
+  // tells its platform. A subscription's waiting events are dropped when it ends
   // (R3); a handler already running keeps running, and its subscriber owns
   // stopping it.
   const dispatchFrom =
@@ -281,9 +346,17 @@ function connectionInbound(backing: Backing): ChannelInbound {
         message: named,
         ref: { connectionId, chatId: message.chatId },
       };
+      // Waited on from before any subscriber can hear it, so its recording
+      // cannot come first.
+      const accepted = deps.accepted?.(channel, {
+        connectionId,
+        chatId: message.chatId,
+        messageId: message.messageId,
+      });
       // A Connection id is a UUID, so the first colon ends it.
       const conversation = `${connectionId}:${message.chatId}`;
       for (const buffers of subscriptions) buffers.push(conversation, event);
+      await accepted;
     };
 
   const listens = (connection: Connection): boolean =>
@@ -306,7 +379,7 @@ function connectionInbound(backing: Backing): ChannelInbound {
     if (!listens(connection)) return;
     const dispatch = dispatchFrom(connection.id);
     const detach = connection.hearTalker((message) =>
-      admission.deliver(connection, message, dispatch),
+      admission.deliver(connection, channelMessageOf(message, channel), dispatch),
     );
     if (detach) attached.set(connection.id, detach);
   };

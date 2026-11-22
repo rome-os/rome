@@ -1,11 +1,12 @@
 import type { ConciergeChatDto } from "@rome/api-types/concierge";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, Ellipsis, Hash, Pencil, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Ellipsis, Hash, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { z } from "zod";
+import { useTopicChatArchive } from "@/components/concierge/TopicChatArchiveDialog";
 import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
 import {
   DropdownMenu,
@@ -14,7 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
-import { archiveSession, deleteSession, renameSession } from "@/lib/chat-api";
+import { archiveSession, deleteSession, pinSession, renameSession } from "@/lib/chat-api";
 import { findScrollableYAncestor } from "@/lib/scroll-container";
 import { useRenameInPlace } from "@/hooks/use-rename-in-place";
 import { Badge } from "@/components/ui/badge";
@@ -41,13 +42,17 @@ export const TOPIC_CHATS_PAGE = 30;
 /** A topic chat as the sidebar lists it. */
 export interface TopicChatRow extends ConciergeChatDto {
   archived: boolean;
+  /** When its owner pinned it; null when it is not pinned. An archived chat is never shown pinned. */
+  pinnedAt: string | null;
 }
 
 /**
- * The topic chats the Concierge section lists under a status filter, latest
- * first. Active ones come from the Concierge's own list, which carries their
- * unread counts. Archived ones are only in the chat list. A topic chat the
- * chat list has not caught up with yet counts as the newest.
+ * The topic chats the Concierge section lists under a status filter: the
+ * pinned ones first, the latest pinned on top, then the rest, latest first.
+ * Active ones come from the Concierge's own list, which carries their unread
+ * counts; their pins and times come from the chat list. Archived ones are
+ * only in the chat list and are never shown pinned. A topic chat the chat
+ * list has not caught up with yet counts as the newest.
  */
 export function topicChatRows(
   statusFilter: "all" | "active" | "archived",
@@ -55,17 +60,20 @@ export function topicChatRows(
   topicSessions: readonly ChatSession[],
 ): TopicChatRow[] {
   const listed = new Map(topicSessions.map((session) => [session.id, session]));
-  const rows: Array<TopicChatRow & { at: number }> = [];
+  const rows: Array<TopicChatRow & { at: number; pin: number }> = [];
   if (statusFilter !== "archived") {
     // The Concierge lists them oldest first. Walking it backwards leaves the
     // newest first among those the chat list has no time for, as the sort
     // below keeps ties in place.
     for (const chat of [...activeTopics].reverse()) {
       const session = listed.get(chat.id);
+      const pinnedAt = session?.pinnedAt ?? null;
       rows.push({
         ...chat,
         archived: false,
+        pinnedAt,
         at: session ? sessionActivityTime(session) : Number.POSITIVE_INFINITY,
+        pin: pinnedAt ? new Date(pinnedAt).getTime() : Number.NEGATIVE_INFINITY,
       });
     }
   }
@@ -78,11 +86,35 @@ export function topicChatRows(
         main: false,
         unread: 0,
         archived: true,
+        pinnedAt: null,
         at: sessionActivityTime(session),
+        pin: Number.NEGATIVE_INFINITY,
       });
     }
   }
-  return rows.sort((a, b) => b.at - a.at).map(({ at: _at, ...row }) => row);
+  return rows
+    .sort((a, b) => (a.pin !== b.pin ? b.pin - a.pin : b.at - a.at))
+    .map(({ at: _at, pin: _pin, ...row }) => row);
+}
+
+/**
+ * A row's unread count, on the bottom right corner of its icon, so the icon
+ * still shows. One red in every theme, ringed in the row's fill. Up to 99+;
+ * the pill widens to the left, so it never reaches the name.
+ */
+function UnreadCorner({ count, label }: { count: number; label: string }) {
+  const { t } = useTranslation("common");
+  return (
+    <Badge
+      shape="pill"
+      className="absolute -right-1.5 -bottom-1 h-2.75 min-w-2.75 justify-center border-0 bg-unread px-[var(--row-count-px)] font-semibold tabular-nums ring-2 ring-background group-hover:ring-surface-hover dark:group-hover:ring-surface"
+      data-concierge-unread
+      role="img"
+      aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
+    >
+      {label}
+    </Badge>
+  );
 }
 
 /**
@@ -118,21 +150,9 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
             : undefined
         }
       >
-        <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
-          {count > 0 ? (
-            <Badge
-              variant="brand"
-              shape="pill"
-              className="h-4 min-w-4 shrink-0 justify-center bg-primary/15 px-[var(--row-count-px)] font-normal tabular-nums dark:border-primary/50"
-              data-concierge-unread
-              role="img"
-              aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-            >
-              {label}
-            </Badge>
-          ) : (
-            <RomeLogo className="size-4 shrink-0" aria-hidden />
-          )}
+        <span className="rome-sidebar-icon relative flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
+          <RomeLogo className="size-4 shrink-0" aria-hidden />
+          {count > 0 ? <UnreadCorner count={count} label={label} /> : null}
         </span>
         <span className="flex-1 truncate">{t("recentChats.mainChat")}</span>
       </Link>
@@ -144,7 +164,8 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
  * The sidebar's Concierge section: the main chat's entry, then the topic
  * chats, latest first, {@link TOPIC_CHATS_PAGE} at a time: scrolling near the
  * end of the list shows the next page. Each topic chat has its unread badge
- * and a menu to rename, archive or unarchive, and delete it. The status filter applies here too:
+ * and a menu to rename, pin or unpin, archive or unarchive, and delete it; an archived one has only
+ * Unarchive and Delete. The status filter applies here too:
  * the main chat is never archived, so the archived filter hides it.
  */
 export function ConciergeChats({
@@ -228,6 +249,16 @@ function ConciergeTopicEntry({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const count = active ? 0 : chat.unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
+  const pinned = chat.pinnedAt !== null;
+  const togglePin = async () => {
+    try {
+      await pinSession(chat.id, !pinned);
+    } catch {
+      toast.error(t("recentChats.pinFailed"));
+    }
+    onChanged();
+    emitSessionsChanged();
+  };
   const rename = useRenameInPlace({
     onCommit: async (id, name) => {
       await renameSession(id, name).catch(() => undefined);
@@ -235,11 +266,14 @@ function ConciergeTopicEntry({
       emitSessionsChanged();
     },
   });
-  const retire = async (how: "archive" | "unarchive" | "delete", stopWork = false) => {
+  // `choice` stops the follows and open tasks of a delete or an archive, and
+  // moves an unarchived chat's follows back.
+  const retire = async (how: "archive" | "unarchive" | "delete", choice = false) => {
     try {
-      if (how === "delete")
-        await deleteSession(chat.id, stopWork ? { followsAndTasks: "stop" } : {});
-      else await archiveSession(chat.id, how === "archive");
+      if (how === "delete") await deleteSession(chat.id, choice ? { followsAndTasks: "stop" } : {});
+      else if (how === "archive")
+        await archiveSession(chat.id, true, choice ? { followsAndTasks: "stop" } : {});
+      else await archiveSession(chat.id, false, choice ? { follows: "moveBack" } : {});
     } catch {
       toast.error(t("recentChats.topicChatRetireFailed"));
     }
@@ -248,6 +282,13 @@ function ConciergeTopicEntry({
     // An unarchived chat stays open where it is.
     if (how !== "unarchive") onGone();
   };
+  const archiving = useTopicChatArchive({
+    chatId: chat.id,
+    name,
+    topic: true,
+    onArchive: (stopWork) => void retire("archive", stopWork),
+    onUnarchive: (moveBack) => void retire("unarchive", moveBack),
+  });
   if (rename.editingId === chat.id) {
     return (
       <input
@@ -270,21 +311,13 @@ function ConciergeTopicEntry({
           count > 0 ? t("recentChats.topicChatUnread", { name, count, label }) : undefined
         }
       >
-        <span className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
-          {count > 0 ? (
-            <Badge
-              variant="brand"
-              shape="pill"
-              className="h-4 min-w-4 shrink-0 justify-center bg-primary/15 px-[var(--row-count-px)] font-normal tabular-nums dark:border-primary/50"
-              data-concierge-unread
-              role="img"
-              aria-label={t("recentChats.conciergeUnreadBadge", { count, label })}
-            >
-              {label}
-            </Badge>
+        <span className="rome-sidebar-icon relative flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground">
+          {pinned ? (
+            <Pin aria-hidden className="size-4 shrink-0" data-topic-pinned />
           ) : (
             <Hash aria-hidden className="size-4 shrink-0" />
           )}
+          {count > 0 ? <UnreadCorner count={count} label={label} /> : null}
         </span>
         {/* The menu button floats over the row's end, so the name keeps clear
             of it. */}
@@ -309,17 +342,30 @@ function ConciergeTopicEntry({
           className="min-w-[180px]"
           {...rename.menuContentProps}
         >
-          <DropdownMenuItem onSelect={() => rename.start(chat.id, chat.name)}>
-            <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            {t("recentChats.rename")}
-          </DropdownMenuItem>
+          {/* An archived topic chat is renamed once it is unarchived. */}
+          {chat.archived ? null : (
+            <DropdownMenuItem onSelect={() => rename.start(chat.id, chat.name)}>
+              <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              {t("recentChats.rename")}
+            </DropdownMenuItem>
+          )}
+          {chat.archived ? null : (
+            <DropdownMenuItem onSelect={() => void togglePin()}>
+              {pinned ? (
+                <PinOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              ) : (
+                <Pin className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              )}
+              {pinned ? t("recentChats.unpin") : t("recentChats.pin")}
+            </DropdownMenuItem>
+          )}
           {chat.archived ? (
-            <DropdownMenuItem onSelect={() => void retire("unarchive")}>
+            <DropdownMenuItem onSelect={() => void archiving.unarchive()}>
               <ArchiveRestore className="h-3.5 w-3.5 shrink-0" aria-hidden />
               {t("recentChats.unarchive")}
             </DropdownMenuItem>
           ) : (
-            <DropdownMenuItem onSelect={() => void retire("archive")}>
+            <DropdownMenuItem onSelect={() => void archiving.archive()}>
               <Archive className="h-3.5 w-3.5 shrink-0" aria-hidden />
               {t("recentChats.archive")}
             </DropdownMenuItem>
@@ -341,6 +387,7 @@ function ConciergeTopicEntry({
           void retire("delete", stopWork);
         }}
       />
+      {archiving.dialog}
     </div>
   );
 }

@@ -210,7 +210,7 @@ describe("connector API catalog", () => {
         .map((item) => item.slug)
         .sort(),
     ).toEqual(["github", "shopify", "slack"]);
-    expect(items.filter((item) => !item.romeManaged)).toHaveLength(19);
+    expect(items.filter((item) => !item.romeManaged)).toHaveLength(20);
   });
 
   it.each([
@@ -389,7 +389,7 @@ describe("connector API GitHub webhook outbox", () => {
 
     expect(response.status).toBe(200);
     await rs.waitFor(() => expect(runAction).toHaveBeenCalledOnce());
-    expect(runAction).toHaveBeenCalledWith("publish_event", {
+    expect(runAction).toHaveBeenCalledWith("system:publish_event", {
       name: "provider:event:github.issue_comment",
       source: "connector",
       payload: { action: "created", issue: { number: 7 } },

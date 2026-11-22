@@ -17,13 +17,14 @@ export interface SessionSettings {
 }
 
 /**
- * Whether a cold resume restores the model the chat saved: only when this open
- * selects no model itself, and the session is pinned to none or its agent lets
- * the saved selection outrank the pin.
+ * Whether a cold resume restores the model the chat saved: when this open
+ * selects no model itself. The pin no longer holds a session on another
+ * provider, so the chat's exact selection outranks it on every agent, and an
+ * agent that lets it (`savedSelectionOutranksPin`) changes nothing more.
  */
 export function restoresSavedSelection(
-  agent: Pick<AgentDefinition, "savedSelectionOutranksPin">,
+  _agent: Pick<AgentDefinition, "savedSelectionOutranksPin">,
   resume: { pinned: boolean; selected: boolean },
 ): boolean {
-  return !resume.selected && (!resume.pinned || agent.savedSelectionOutranksPin === true);
+  return !resume.selected;
 }

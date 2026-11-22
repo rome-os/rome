@@ -15,7 +15,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, rs } from "@rstes
 import { ChannelType } from "discord.js";
 import type { ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 import { FakeTelegramApi } from "./kit/fake-telegram.js";
-import type { PeopleRepository } from "../db/repositories/people.js";
+import type { PeopleRepository } from "../people/model/people-repository.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../webchat/repository.js";
 import type { MailProvider, SendMailInput } from "../connections/kinds/email/rome-cloud-mail.js";
@@ -23,7 +23,6 @@ import type { LarkChannel } from "@larksuiteoapi/node-sdk";
 import { DiscordAdapter } from "../connections/kinds/discord/discord.js";
 import { EmailAdapter } from "../connections/kinds/email/email.js";
 import { FeishuAdapter } from "../connections/kinds/feishu/feishu.js";
-import { SlackAdapter, type SlackWebApi } from "../connections/kinds/slack/slack.js";
 import { TelegramAdapter } from "../connections/kinds/telegram/telegram.js";
 import { TelegramUserAdapter } from "../connections/kinds/telegram-user/telegram-user.js";
 import { WebChatAdapter } from "../webchat/adapter.js";
@@ -115,30 +114,6 @@ function telegramUser(): Harness {
     send: (message) => adapter.send(CHAT, message),
     calls: () => sent.length,
     texts: () => sent.flatMap((params) => (params.file ? [] : [params.message ?? ""])),
-  };
-}
-
-function slack(): Harness {
-  const posted: string[] = [];
-  const api = {
-    postMessage: async (_token: string, input: { markdown: string }) => {
-      posted.push(input.markdown);
-      return { ts: `1700000000.00010${posted.length}` };
-    },
-  } as unknown as SlackWebApi;
-  const adapter = new SlackAdapter({
-    botToken: "xoxb-1",
-    appToken: "xapp-1",
-    channel: "slack_bot",
-    api,
-    createSocket: () => {
-      throw new Error("not started");
-    },
-  });
-  return {
-    send: (message) => adapter.send("C1" as ChatId, message),
-    calls: () => posted.length,
-    texts: () => posted,
   };
 }
 
@@ -297,13 +272,6 @@ const SUBJECTS: readonly Subject[] = [
     attachments: "files",
     urls: true,
     unanswerable: NUMERIC_UNANSWERABLE,
-  },
-  {
-    channel: "slack",
-    make: slack,
-    shows: [],
-    attachments: "none",
-    unanswerable: ["", "abc", "1700000000", "C1:1700000000.000100"],
   },
   {
     channel: "feishu",
