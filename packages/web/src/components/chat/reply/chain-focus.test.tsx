@@ -11,7 +11,7 @@ import type { BlockActions, LivePreview } from "@/components/chat/MessageList";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
-import { getThreadPage } from "@/lib/chat-api";
+import { ChatApiError, getThreadPage } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ChainFocusLayer } from "./ChainFocusLayer";
 import { ReplyBar } from "./ReplyBar";
@@ -120,12 +120,15 @@ interface Seen {
   chain?: ReturnType<typeof useChainFocus>;
   draft?: ReturnType<typeof useReplyDraftState>;
   fallback: ReturnType<typeof rs.fn>;
+  changeSession?: (sessionId: string) => void;
 }
 
 /** The chat's wiring of the chain focus: the transcript under a layer, and the composer's reply bar. */
-function Harness({ seen }: { seen: Seen }) {
+function Harness({ seen, loaded }: { seen: Seen; loaded: ChatMessage[] }) {
+  const [sessionId, setSessionId] = useState("concierge");
+  seen.changeSession = setSessionId;
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
-  const focus = useChainFocus({ sessionId: "concierge", scroller, fallback: seen.fallback });
+  const focus = useChainFocus({ sessionId, scroller, messages: loaded, fallback: seen.fallback });
   seen.chain = focus;
   const draft = useReplyDraftState({
     chatId: "concierge",
@@ -135,7 +138,7 @@ function Harness({ seen }: { seen: Seen }) {
     focusComposer: () => {},
   });
   seen.draft = draft;
-  const rows = buildRows(main, new Map(), idle.identity, {
+  const rows = buildRows(loaded, new Map(), idle.identity, {
     runningTurnId: null,
     isStreaming: false,
   });
@@ -156,6 +159,7 @@ function Harness({ seen }: { seen: Seen }) {
             identity={idle.identity}
             actions={actions}
             onMore={focus.more}
+            onRetry={focus.retry}
             onClose={focus.close}
           />
         ) : null}
@@ -168,7 +172,7 @@ function Harness({ seen }: { seen: Seen }) {
   );
 }
 
-function renderChat() {
+function renderChat(loaded: ChatMessage[] = main) {
   const seen: Seen = { fallback: rs.fn() };
   render(
     <QueryClientProvider
@@ -176,7 +180,7 @@ function renderChat() {
     >
       <MemoryRouter>
         <ThemeProvider>
-          <Harness seen={seen} />
+          <Harness seen={seen} loaded={loaded} />
         </ThemeProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -250,12 +254,300 @@ describe("opening a chain from a quote", () => {
     expect(layer()).toBeNull();
   });
 
-  it("goes to the original when the read fails", async () => {
+  it("keeps the memory chain with a retry when the read fails", async () => {
     thread.mockRejectedValue(new Error("offline"));
     const seen = renderChat();
     await pressQuote("a2");
-    expect(seen.fallback).toHaveBeenCalledWith("g1");
+    expect(seen.fallback).not.toHaveBeenCalled();
+    expect(layer()).not.toBeNull();
+    expect(seen.chain!.focus!.initial).toBe("error");
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+
+describe("memory-first opening", () => {
+  it("shows loaded same-root rows and their traces before the initial response, without duplicate paging", async () => {
+    const read = deferred<ReturnType<typeof page>>();
+    thread.mockReturnValueOnce(read.promise);
+    const trace = {
+      ...a1,
+      id: "trace-a1",
+      role: "trace",
+      chatThreadId: undefined,
+      content: "[]",
+    } as ChatMessage;
+    const seen = renderChat([...main, trace]);
+    await pressQuote("a2");
+    expect(seen.chain!.focus!.messages.map((m) => m.id)).toEqual([
+      ...chain.map((m) => m.id),
+      trace.id,
+    ]);
+    expect(seen.chain!.focus!.initial).toBe("loading");
+    expect(seen.chain!.focus!.hasNewer).toBe(true);
+    expect(seen.chain!.focus!.fetchedThrough).toBeUndefined();
+    act(() => fireEvent.scroll(scrollerOf()));
+    await act(async () => {
+      await seen.chain!.more("before");
+      await seen.chain!.more("after");
+    });
+    expect(thread).toHaveBeenCalledTimes(1);
+    await act(async () => read.resolve(page(chain)));
+    expect(seen.chain!.focus!.initial).toBeUndefined();
+  });
+
+  it("backfills by id, updates server rows and keeps local rows beyond the returned window, without another transition", async () => {
+    const read = deferred<ReturnType<typeof page>>();
+    thread.mockReturnValueOnce(read.promise);
+    const start = rs.fn((update: () => void) => {
+      update();
+      return { finished: Promise.resolve() };
+    });
+    Object.defineProperty(Element.prototype, "startViewTransition", {
+      configurable: true,
+      value: start,
+    });
+    const seen = renderChat();
+    await pressQuote("a2");
+    expect(start).toHaveBeenCalledTimes(1);
+    const earlier = say("e1", "user", "Earlier", -1, { root: "g1" });
+    await act(async () =>
+      read.resolve(page([earlier, g1, { ...a1, content: "updated by server" }, a2])),
+    );
+    expect(seen.chain!.focus!.messages.map((m) => m.id)).toEqual(["e1", "g1", "a1", "a2", "g2"]);
+    expect(seen.chain!.focus!.messages.find((m) => m.id === "a1")!.content).toBe(
+      "updated by server",
+    );
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the message now being read pinned when backfill and row updates change content above it", async () => {
+    rs.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function () {
+      return Number.parseFloat(this.style.height) || 0;
+    });
+    rs.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(600);
+    rs.spyOn(Element.prototype, "scrollHeight", "get").mockReturnValue(5000);
+    const read = deferred<ReturnType<typeof page>>();
+    thread.mockReturnValueOnce(read.promise);
+    const seen = renderChat();
+    rs.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function () {
+      const el = this.closest<HTMLElement>("[data-chain-layer] > div");
+      const rows = seen.chain!.focus?.messages ?? [];
+      const blank = el?.querySelector<HTMLElement>("[data-chain-top]")?.offsetHeight ?? 0;
+      const heightOf = (m: ChatMessage) => (m.content === "expanded" ? 200 : 100);
+      const id = this.getAttribute("data-timeline-anchor")?.split(" ")[0];
+      const at = rows.findIndex((m) => m.id === id);
+      let top =
+        el && at >= 0
+          ? blank + rows.slice(0, at).reduce((n, m) => n + heightOf(m), 0) - el.scrollTop
+          : 0;
+      let height = at >= 0 ? heightOf(rows[at]) : 600;
+      if (this.hasAttribute("data-chain-content")) {
+        top = blank - (el?.scrollTop ?? 0);
+        height = rows.reduce((n, m) => n + heightOf(m), 0);
+      }
+      return {
+        top,
+        bottom: top + height,
+        height,
+        y: top,
+        x: 0,
+        left: 0,
+        right: 600,
+        width: 600,
+        toJSON: () => ({}),
+      } as DOMRect;
+    });
+    await pressQuote("a2");
+    scrollerOf().scrollTop = 300;
+    const reading = () =>
+      layer()!.querySelector('[data-timeline-anchor="g2"]')!.getBoundingClientRect().top;
+    expect(reading()).toBe(0);
+    await act(async () =>
+      read.resolve(
+        page([
+          say("e1", "user", "Earlier", -1, { root: "g1" }),
+          g1,
+          { ...a1, content: "expanded" },
+          a2,
+        ]),
+      ),
+    );
+    expect(reading()).toBe(0);
+    expect(scrollerOf().scrollTop).toBe(500);
+  });
+
+  it("returns bottom blank when a loaded row shrinks, so a short layer keeps room for its pinned position", async () => {
+    let height = 500;
+    rs.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function () {
+      return this.hasAttribute("data-chain-content")
+        ? height
+        : Number.parseFloat(this.style.height) || 0;
+    });
+    thread.mockResolvedValue(page(chain));
+    const seen = renderChat();
+    await pressQuote("a2");
+    const bottom = layer()!.querySelector<HTMLElement>("[data-chain-bottom]")!;
+    bottom.style.height = "100px";
+    height = 400;
+    act(() => seen.chain!.onLive({ ...a1, content: "shorter" }));
+    expect(bottom.style.height).toBe("200px");
+  });
+
+  it("keeps memory on ordinary failure and retries without another entry animation or duplicate request", async () => {
+    thread.mockRejectedValueOnce(new Error("offline"));
+    const seen = renderChat();
+    await pressQuote("a2");
+    await waitFor(() => expect(seen.chain!.focus!.initial).toBe("error"));
+    expect(bubbleIds(layer()!)).toEqual(chain.map((m) => m.id));
+    const read = deferred<ReturnType<typeof page>>();
+    thread.mockReturnValueOnce(read.promise);
+    act(() => {
+      seen.chain!.retry();
+      seen.chain!.retry();
+    });
+    expect(thread).toHaveBeenCalledTimes(2);
+    expect(seen.chain!.focus!.initial).toBe("loading");
+    await act(async () => read.resolve(page(chain)));
+    expect(seen.chain!.focus!.initial).toBeUndefined();
+    expect(seen.fallback).not.toHaveBeenCalled();
+  });
+
+  it("lets a retry's newer server snapshot supersede live edits received before that retry began", async () => {
+    const first = deferred<ReturnType<typeof page>>(),
+      second = deferred<ReturnType<typeof page>>();
+    thread.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const seen = renderChat();
+    await pressQuote("a2");
+    act(() => seen.chain!.onLive({ ...a1, content: "live before retry" }));
+    await act(async () => first.reject(new Error("offline")));
+    act(() => seen.chain!.retry());
+    await act(async () =>
+      second.resolve(page([g1, { ...a1, content: "newer retry snapshot" }, a2, g2])),
+    );
+    expect(seen.chain!.focus!.messages.find((m) => m.id === "a1")!.content).toBe(
+      "newer retry snapshot",
+    );
+  });
+
+  it("buffers live arrivals before the native entry callback mounts the local layer", async () => {
+    const read = deferred<ReturnType<typeof page>>(),
+      motion = deferred<void>();
+    thread.mockReturnValueOnce(read.promise);
+    let update!: () => void;
+    Object.defineProperty(Element.prototype, "startViewTransition", {
+      configurable: true,
+      value: (fn: () => void) => {
+        update = fn;
+        return { finished: motion.promise };
+      },
+    });
+    const seen = renderChat();
+    act(() => {
+      void seen.chain!.open("g1", "a2");
+    });
     expect(layer()).toBeNull();
+    act(() =>
+      seen.chain!.onLive(say("a3", "assistant", "arrived before mount", 8, { root: "g1" })),
+    );
+    act(() => update());
+    await act(async () => {
+      motion.resolve();
+      read.resolve(page(chain));
+    });
+    expect(seen.chain!.focus!.messages.at(-1)!.id).toBe("a3");
+  });
+
+  it("closes while the request is held and ignores its result after a new focus of the same anchor", async () => {
+    const first = deferred<ReturnType<typeof page> | null>(),
+      second = deferred<ReturnType<typeof page>>();
+    thread.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const seen = renderChat();
+    await pressQuote("a2");
+    await act(async () => seen.chain!.close());
+    expect(layer()).toBeNull();
+    await pressQuote("a2");
+    await act(async () => first.resolve(null));
+    expect(seen.chain!.focus!.initial).toBe("loading");
+    expect(seen.fallback).not.toHaveBeenCalled();
+    await act(async () => second.resolve(page(chain)));
+    expect(seen.chain!.focus!.initial).toBeUndefined();
+  });
+
+  it("does not show an old session's memory or accept its late response after the session changes", async () => {
+    const read = deferred<ReturnType<typeof page>>();
+    thread.mockReturnValueOnce(read.promise);
+    const seen = renderChat();
+    await pressQuote("a2");
+    act(() => seen.changeSession!("different"));
+    expect(layer()).toBeNull();
+    await act(async () => read.resolve(page(chain)));
+    expect(layer()).toBeNull();
+    expect(seen.fallback).not.toHaveBeenCalled();
+  });
+
+  for (const status of [401, 403])
+    it(`clears cached focus and takes the existing fallback on HTTP${status}`, async () => {
+      const read = deferred<ReturnType<typeof page>>();
+      thread.mockReturnValueOnce(read.promise);
+      const seen = renderChat();
+      await pressQuote("a2");
+      expect(layer()).not.toBeNull();
+      await act(async () => read.reject(new ChatApiError("denied", status, {})));
+      expect(layer()).toBeNull();
+      expect(seen.fallback).toHaveBeenCalledWith("g1");
+    });
+
+  it("shows a loading layer for an empty memory window, then fills it without fabricating a message", async () => {
+    const read = deferred<ReturnType<typeof page>>();
+    thread.mockReturnValueOnce(read.promise);
+    const seen = renderChat([]);
+    await act(async () => seen.chain!.open("g1", "a2"));
+    expect(seen.chain!.focus!.messages).toEqual([]);
+    expect(layer()).not.toBeNull();
+    await act(async () => read.resolve(page(chain)));
+    expect(bubbleIds(layer()!)).toEqual(chain.map((m) => m.id));
+  });
+
+  it("keeps live updates newer than the initial snapshot and releases buffered arrivals only at a confirmed newest end", async () => {
+    const read = deferred<ReturnType<typeof page>>();
+    thread.mockReturnValueOnce(read.promise);
+    const seen = renderChat();
+    await pressQuote("a2");
+    const edited = { ...a1, content: "newer live update" },
+      arrival = say("a3", "assistant", "Live", 8, { root: "g1" });
+    act(() => {
+      seen.chain!.onLive(edited);
+      seen.chain!.onLive(arrival);
+      seen.chain!.onLive(arrival);
+    });
+    expect(seen.chain!.focus!.messages.map((m) => m.id)).not.toContain("a3");
+    await act(async () => read.resolve(page(chain)));
+    expect(seen.chain!.focus!.messages.map((m) => m.id)).toEqual([...chain.map((m) => m.id), "a3"]);
+    expect(seen.chain!.focus!.messages.find((m) => m.id === "a1")!.content).toBe(
+      "newer live update",
+    );
+  });
+
+  it("does not append a buffered live row across a gap, and retains it through paging to the newest end", async () => {
+    stubTall();
+    const read = deferred<ReturnType<typeof page>>();
+    thread.mockReturnValueOnce(read.promise).mockResolvedValueOnce(page([]));
+    const seen = renderChat();
+    await pressQuote("a2");
+    act(() => seen.chain!.onLive(say("a3", "assistant", "Live", 8, { root: "g1" })));
+    await act(async () => read.resolve(page(chain, { hasNewer: true })));
+    expect(seen.chain!.focus!.messages.map((m) => m.id)).not.toContain("a3");
+    await act(async () => seen.chain!.more("after"));
+    expect(seen.chain!.focus!.messages.at(-1)!.id).toBe("a3");
   });
 });
 

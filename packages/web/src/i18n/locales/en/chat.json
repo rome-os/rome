@@ -219,7 +219,10 @@
     "action": "Reply",
     "dismiss": "Cancel reply",
     "jump": "Go to the original message",
-    "closeChain": "Close reply chain"
+    "closeChain": "Close reply chain",
+    "loadingChain": "Loading reply chain",
+    "loadFailed": "Could not load the reply chain",
+    "retry": "Retry"
   },
   "senderGuardian": "Guardian",
   "inputState": {

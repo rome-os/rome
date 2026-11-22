@@ -983,6 +983,7 @@ export function Chat({
   const chain = useChainFocus({
     sessionId: mainSessionId ?? null,
     scroller: scrollerEl,
+    messages: displayMessages,
     fallback: showQuotedMessage,
   });
   chainFocusedRef.current = chain.focus !== null;
@@ -3005,6 +3006,7 @@ export function Chat({
                     identity={mainIdentity}
                     actions={blockActions}
                     onMore={chain.more}
+                    onRetry={chain.retry}
                     onClose={chain.close}
                   />
                 ) : null}

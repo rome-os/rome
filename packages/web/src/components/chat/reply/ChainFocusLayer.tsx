@@ -7,6 +7,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
+import { Spinner } from "@rome-os/ui/spinner";
+import { Button } from "@/components/ui/button";
 import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
 import type { BlockActions } from "@/components/chat/MessageList";
 import { type AgentIdentity, buildRows } from "@/components/chat/chat-view";
@@ -41,6 +44,7 @@ export function ChainFocusLayer({
   identity,
   actions,
   onMore,
+  onRetry,
   onClose,
 }: {
   focus: ChainFocus;
@@ -51,8 +55,10 @@ export function ChainFocusLayer({
   identity: AgentIdentity;
   actions: BlockActions;
   onMore: (side: "before" | "after") => void;
+  onRetry: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("chat");
   const draft = useReplyDraft();
   // A quote here is plain: its original is in the chain, right above.
   const plain = useMemo(() => (draft ? { ...draft, jump: undefined } : null), [draft]);
@@ -85,33 +91,43 @@ export function ChainFocusLayer({
 
   // A message that arrives takes up the blank kept below the messages.
   const content = useRef<HTMLDivElement>(null);
+  const contentHeight = useRef(0);
+  const consumeBlank = useCallback(() => {
+    const el = content.current;
+    if (!el) return;
+    const bottom = layerRef.current?.querySelector<HTMLElement>("[data-chain-bottom]");
+    const height = el.offsetHeight;
+    if (bottom && height !== contentHeight.current) {
+      const blank = bottom.offsetHeight - (height - contentHeight.current);
+      bottom.style.height = blank > 0.5 ? `${blank}px` : "";
+    }
+    contentHeight.current = height;
+  }, [layerRef]);
+  // Set the resize baseline in the commit, before an anchored backfill places
+  // the list. Its later observer delivery must not consume the blank twice.
+  useLayoutEffect(consumeBlank, [consumeBlank, focus.messages, floorHeight]);
   useEffect(() => {
     const el = content.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    let height = el.offsetHeight;
-    const observer = new ResizeObserver(() => {
-      const bottom = layerRef.current?.querySelector<HTMLElement>("[data-chain-bottom]");
-      if (bottom && el.offsetHeight > height) {
-        const blank = bottom.offsetHeight - (el.offsetHeight - height);
-        bottom.style.height = blank > 0.5 ? `${blank}px` : "";
-      }
-      height = el.offsetHeight;
-    });
+    const observer = new ResizeObserver(consumeBlank);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [layerRef]);
+  }, [consumeBlank]);
 
   // Reads the next page when the view comes within reach of an end.
   const check = useCallback(() => {
     const el = layerRef.current;
-    if (!el) return;
+    if (!el || focus.initial) return;
     const below = el.querySelector<HTMLElement>("[data-chain-bottom]")?.offsetHeight ?? 0;
     if (focus.hasOlder && el.scrollTop < LOAD_AHEAD_PX) onMore("before");
     if (focus.hasNewer && el.scrollHeight - below - el.scrollTop - el.clientHeight < LOAD_AHEAD_PX)
       onMore("after");
-  }, [focus.hasOlder, focus.hasNewer, layerRef, onMore]);
+  }, [focus.initial, focus.hasOlder, focus.hasNewer, layerRef, onMore]);
   // After each page, in case the view is still at an end.
-  useLayoutEffect(check, [check, focus.messages]);
+  useLayoutEffect(() => {
+    const frame = requestAnimationFrame(check);
+    return () => cancelAnimationFrame(frame);
+  }, [check, focus.messages]);
 
   return (
     <div data-chain-layer className="absolute inset-0 z-5">
@@ -133,6 +149,29 @@ export function ChainFocusLayer({
         </div>
         <div data-chain-bottom aria-hidden className="shrink-0" />
       </div>
+      {focus.initial ? (
+        <div
+          data-chain-load={focus.initial}
+          className="absolute inset-x-0 flex justify-center"
+          style={{ bottom: floorHeight + 16 }}
+        >
+          <div
+            role="status"
+            className="flex items-center gap-2 rounded-md bg-chat-canvas px-3 py-1 text-aux text-muted-foreground"
+          >
+            {focus.initial === "loading" ? (
+              <Spinner size="sm" label={t("reply.loadingChain")} />
+            ) : (
+              <>
+                <span>{t("reply.loadFailed")}</span>
+                <Button variant="ghost" size="sm" onClick={onRetry}>
+                  {t("reply.retry")}
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

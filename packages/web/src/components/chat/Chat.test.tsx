@@ -3941,7 +3941,11 @@ describe("Chat Concierge jump to a message", () => {
         messages: [message(1), message(2)],
         nextCursor: null,
       });
-      renderChat(<Chat sessionId="concierge" variant="concierge" />);
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
       await waitFor(() => expect(rows()).toBe(2));
 
       fireEvent.click(quoteAnchor());
