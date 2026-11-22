@@ -1979,9 +1979,12 @@ export interface ChannelsService {
    *
    * With `includeThreads` a page lists threads too, each naming its chat as
    * `parent`. With `includeArchivedThreads` it also lists the threads the
-   * platform has archived. On Discord those are read from Discord when the
-   * first page is asked for, so that page can take a while, and the pages
-   * after it list the same threads.
+   * platform has archived. Only Discord lists threads today; another platform
+   * lists its chats alone. Discord reads its archived threads when the first
+   * page is asked for, so that page can take a while, and the pages after it
+   * list the same threads. Their cursor expires once four newer such listings
+   * of the account have started, or when its connection reconnects: the next
+   * page then rejects, and the listing starts again from its first page.
    */
   chats?(account: Account | string, query?: ChannelChatsQuery): Promise<ChannelChatsPage>;
 }
