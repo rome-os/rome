@@ -68,6 +68,43 @@ private struct TopicRetireModifier: ViewModifier {
     }
 }
 
+/// Rename asked for a topic chat, from its header's "…" or from its row in
+/// the drawer.
+struct TopicRenameRequest: Equatable {
+    let chatId: String
+    /// The chat's name as the guardian sees it, the field's first text.
+    let name: String
+}
+
+extension View {
+    /// Asks for a topic chat's new name once `request` is set, in one alert
+    /// with the current name filled in, and renames it on Rename.
+    func topicRename(_ request: Binding<TopicRenameRequest?>, workspace: Workspace) -> some View {
+        modifier(TopicRenameModifier(request: request, workspace: workspace))
+    }
+}
+
+private struct TopicRenameModifier: ViewModifier {
+    @Binding var request: TopicRenameRequest?
+    let workspace: Workspace
+    @State private var name = ""
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: request) { _, asked in
+                if let asked { name = asked.name }
+            }
+            .alert("Rename chat", isPresented: Binding(get: { request != nil }, set: { if !$0 { request = nil } }), presenting: request) { asked in
+                TextField("Name", text: $name)
+                Button("Cancel", role: .cancel) {}
+                Button("Rename") {
+                    let name = name
+                    Task { await workspace.renameTopic(asked.chatId, to: name) }
+                }
+            }
+    }
+}
+
 /// Unarchive asked for an archived topic chat, from its row in the Archived
 /// sheet or its banner.
 struct TopicRestoreRequest: Equatable {

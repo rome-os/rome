@@ -14,6 +14,15 @@ import {
 } from "./frame.js";
 import type { InboundEnvelope, OutboundEnvelope } from "./protocol.js";
 import { parseTransferMessage, TRANSFER_VERSION, TransferHost } from "./transfer.js";
+import { sanitizeComputerUseArgs, type ComputerUseHost } from "./computer-use.js";
+
+const windowBindingAuthority = { allowPreemption: true, leaseIfAvailable: true } as const;
+
+function isDeviceActionRequest(
+  value: unknown,
+): value is { type: "request"; action: string; args?: unknown } {
+  return isRecord(value) && value.type === "request" && typeof value.action === "string";
+}
 
 interface ExecInput {
   command: string;
@@ -153,25 +162,34 @@ export function createExecutor(
   send: (message: OutboundEnvelope) => boolean,
   secrets: string[] = [],
   sendFrame: (frame: Frame) => boolean = () => false,
+  nativeHost?: ComputerUseHost,
 ) {
+  const computerUse = nativeHost;
   const children = new Set<ChildProcess>();
   const transfers = new TransferHost({ keepBytes: AUDIT_PUSH_BYTES });
   let generation = 0;
-  const info = async (): Promise<ActionResponse> => ({
-    type: "response",
-    ok: true,
-    result: {
-      name,
-      platform: platform() === "darwin" ? "macos" : platform() === "win32" ? "windows" : platform(),
-      // Lists caller-facing actions only. transfer.open is an internal frame protocol for
-      // rome-node cp, so it is omitted on purpose. Callers detect it through transferVersion.
-      actions: ["system.info", "exec", "fs.list"],
-      frameVersion: 1,
-      transferVersion: TRANSFER_VERSION,
-      // Unavailable means every other action is refused until the owner fixes the log.
-      audit: await audit.status(),
-    },
-  });
+  const info = async (): Promise<ActionResponse> => {
+    const native = await computerUse?.describe();
+    const actions = Array.isArray(native?.actions) ? native.actions : [];
+    const readiness = await audit.status();
+    return {
+      type: "response",
+      ok: true,
+      result: {
+        name,
+        platform:
+          platform() === "darwin" ? "macos" : platform() === "win32" ? "windows" : platform(),
+        // Lists caller-facing actions only. transfer.open is an internal frame protocol for
+        // rome-node cp, so it is omitted on purpose. Callers detect it through transferVersion.
+        actions: ["system.info", "exec", "fs.list", ...actions],
+        ...(native ? { capabilities: [native] } : {}),
+        frameVersion: 1,
+        transferVersion: TRANSFER_VERSION,
+        // Unavailable means every other action is refused until the owner fixes the log.
+        audit: readiness,
+      },
+    };
+  };
   // A request the log could not record never runs, so its outcome is known: nothing happened.
   const refused = () =>
     actionError(
@@ -184,7 +202,7 @@ export function createExecutor(
     actionError("connection_replaced", "The connection was replaced before the request ran.");
   const startRecord = (action: string, args: unknown, extra: Record<string, unknown>) => ({
     ...extra,
-    args,
+    args: action.startsWith("computer.") ? sanitizeComputerUseArgs(action, args) : args,
     ...(action === "exec" ? { envKeys: Object.keys(childEnvironment()).sort() } : {}),
   });
   function endRecord(
@@ -347,14 +365,15 @@ export function createExecutor(
     /** Handles request frames and replies with a response frame to the sender. Ignores other types. */
     receiveFrame: (frame: Frame) => track(() => receiveFrame(frame)),
     /** Resolves once every request that has started is recorded as ended. */
-    idle: () =>
-      running ? new Promise<void>((resolve) => drained.push(resolve)) : Promise.resolve(),
+    idle: async () => {
+      if (running) await new Promise<void>((resolve) => drained.push(resolve));
+      await computerUse?.idle();
+    },
     disconnect,
   };
   async function receive(message: InboundEnvelope) {
     const request = message.payload;
-    if (!isRecord(request) || request.type !== "request" || typeof request.action !== "string")
-      return;
+    if (!isDeviceActionRequest(request)) return;
     const current = generation;
     const action = request.action;
     const handler = Object.hasOwn(handlers, action) ? handlers[action] : undefined;
@@ -381,11 +400,27 @@ export function createExecutor(
         ? refused()
         : current !== generation
           ? replaced()
-          : handler
-            ? await handler(request.args, notes).catch(() =>
-                actionError("exec_failed", "The action failed."),
-              )
-            : actionError("unsupported_action", "The computer does not support this action.");
+          : computerUse && action.startsWith("computer.")
+            ? await computerUse
+                .run(
+                  action,
+                  request.args,
+                  message.from,
+                  ...(action === "computer.bind" || action === "computer.preempt"
+                    ? [windowBindingAuthority]
+                    : []),
+                )
+                .catch(() =>
+                  actionError(
+                    "unknown_outcome",
+                    "The computer-use response was lost. Do not replay input.",
+                  ),
+                )
+            : handler
+              ? await handler(request.args, notes).catch(() =>
+                  actionError("exec_failed", "The action failed."),
+                )
+              : actionError("unsupported_action", "The computer does not support this action.");
     const reply = { id: message.id, to: message.from, payload };
     // A process from an earlier connection must never reply on its replacement.
     const interrupted = current !== generation;
@@ -409,8 +444,7 @@ export function createExecutor(
       transfers.receive(frame.id, frame.peer, transfer, frame.body);
       return;
     }
-    if (!isRecord(request) || request.type !== "request" || typeof request.action !== "string")
-      return;
+    if (!isDeviceActionRequest(request)) return;
     const current = generation;
     const action = request.action;
     const respond = (response: ActionResponse) =>
@@ -434,7 +468,7 @@ export function createExecutor(
               transport: "binary",
               generation: current,
             }),
-            { stdin: frame.body },
+            action.startsWith("computer.") ? {} : { stdin: frame.body },
             secrets,
           );
     if (seq === null) {
@@ -479,15 +513,37 @@ export function createExecutor(
     }
     const handler = Object.hasOwn(frameHandlers, action) ? frameHandlers[action] : undefined;
     const notes: Notes = { fields: {}, content: {} };
-    const result = handler
-      ? await handler(request.args, frame.body, notes).catch(() => ({
-          response: actionError("exec_failed", "The action failed."),
-          body: empty,
-        }))
-      : {
-          response: actionError("unsupported_action", "The computer does not support this action."),
-          body: empty,
-        };
+    const result =
+      computerUse && action.startsWith("computer.")
+        ? await computerUse
+            .runBinary(
+              action,
+              request.args,
+              frame.body,
+              frame.peer,
+              ...(action === "computer.bind" || action === "computer.preempt"
+                ? [windowBindingAuthority]
+                : []),
+            )
+            .catch(() => ({
+              response: actionError(
+                "unknown_outcome",
+                "The computer-use response was lost. Do not replay input.",
+              ),
+              body: empty,
+            }))
+        : handler
+          ? await handler(request.args, frame.body, notes).catch(() => ({
+              response: actionError("exec_failed", "The action failed."),
+              body: empty,
+            }))
+          : {
+              response: actionError(
+                "unsupported_action",
+                "The computer does not support this action.",
+              ),
+              body: empty,
+            };
     // A process from an earlier connection must never reply on its replacement.
     const interrupted = current !== generation;
     let response = result.response;
@@ -517,6 +573,7 @@ export function createExecutor(
   }
   function disconnect() {
     generation++;
+    computerUse?.disconnect();
     transfers.abortAll();
     for (const child of children) {
       child.kill("SIGTERM");

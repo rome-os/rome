@@ -211,7 +211,17 @@
         "bot": {
           "title": "Slack 里的 Rome",
           "bullets": {
-            "reply": "在你的 Slack 工作区里以你的 Concierge 身份回复私信"
+            "reply": "在你的 Slack 工作区里回复你的私信和提及",
+            "tasks": "在那里帮你做事，做完把结果发回原处"
+          }
+        }
+      },
+      "discord_app": {
+        "bot": {
+          "title": "Discord 里的 Rome",
+          "bullets": {
+            "reply": "回复你的私信，以及你在服务器里的 @提及",
+            "tasks": "在那里帮你做事，做完把结果发回原处"
           }
         }
       },
@@ -539,6 +549,24 @@
       "codeShownEarlier": "首次连接时已显示验证码。请断开后重新连接以生成新验证码。",
       "botTokenLabel": "机器人 Token",
       "botTokenPlaceholder": "来自 @BotFather 的机器人 Token"
+    },
+    "discordApp": {
+      "link": "链接 Discord",
+      "blurb": "在 Discord 里找 Rome",
+      "add": "添加到服务器",
+      "remove": "移除",
+      "removing": "正在移除…",
+      "retry": "重试",
+      "loadFailed": "无法加载你的服务器。",
+      "addFailed": "无法打开 Discord，请重试。",
+      "removeFailed": "无法移除 {{name}}，请重试。",
+      "howTo": "私信 Rome，或在频道里 @Rome。",
+      "blurbDetail": "私信它，或把它加到你的服务器。",
+      "servers": "服务器",
+      "empty": "加到服务器后，就能在频道里 @Rome。",
+      "manage": "更多",
+      "disconnect": "断开 Discord",
+      "linkedAs": "以 {{name}} 的身份链接"
     },
     "telegramUser": {
       "fallbackName": "Telegram 用户",
@@ -1030,7 +1058,7 @@
       "stopped": "空闲",
       "connecting": "正在连接",
       "retrying": "正在重连",
-      "revoked": "授权已撤销",
+      "revoked": "已从账号移除",
       "superseded": "连接已被替换",
       "not_configured": "未配置",
       "unavailable": "不可用",

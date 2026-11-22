@@ -41,6 +41,8 @@ function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
   return {
     postMessage: rs.fn(async () => ({ ts: "2.0" })),
     openDirectMessage: rs.fn(async () => "D_NEW"),
+    addReaction: rs.fn(async () => {}),
+    removeReaction: rs.fn(async () => {}),
     userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou" })),
     conversationHistory: rs.fn(async () => ({ messages: [], hasMore: false })),
     conversationReplies: rs.fn(async () => ({ messages: [] })),
@@ -188,6 +190,22 @@ describe("Slack app direct messages (R4)", () => {
         addressing: "direct",
       });
     }
+  });
+
+  it("reacts with Slack's name for the emoji, to the message's own timestamp", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, api } = adapter(mailbox);
+    await a.start();
+    await a.react("C_TEAM" as never, "1700000000.000100:1700000000.000200", "👍");
+    expect(api.addReaction).toHaveBeenCalledWith(
+      TEAM,
+      { channel: "C_TEAM", timestamp: "1700000000.000200", name: "+1" },
+      expect.anything(),
+    );
+    await expect(a.react("D_GUARDIAN" as never, "1.0", "🦄")).rejects.toThrow("no emoji name");
+    await expect(a.react("D_GUARDIAN" as never, "not-a-ts", "👍")).rejects.toThrow(
+      "not a Slack message id",
+    );
   });
 
   it("replies in the same direct message through Slack's Web API", async () => {

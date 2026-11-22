@@ -108,6 +108,8 @@ describe("a Slack app backlog, end to end", () => {
         api: {
           postMessage: async () => ({ ts: "9.0" }),
           openDirectMessage: async () => "D_NEW",
+          addReaction: async () => {},
+          removeReaction: async () => {},
           userName: async () => ({ displayName: "Member" }),
           conversationHistory: async () => ({ messages: [], hasMore: false }),
           conversationReplies: async () => ({ messages: [] }),

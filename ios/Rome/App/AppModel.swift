@@ -376,9 +376,10 @@ final class Workspace {
     @discardableResult
     func archiveTopic(_ chatId: String, stoppingWork: Bool = false) async -> Bool {
         let chat = topics.chat(chatId)
+        let lastActive = topics.lastActive[chatId]
         guard (try? await backend.archiveChat(chatId, stoppingWork: stoppingWork)) != nil else { return false }
         dropTopic(chatId)
-        archivedTopics.add(chat ?? ConciergeChat(id: chatId, name: "", main: false))
+        archivedTopics.add(chat ?? ConciergeChat(id: chatId, name: "", main: false), lastActive: lastActive)
         return true
     }
 

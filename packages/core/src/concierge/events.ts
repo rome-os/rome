@@ -282,6 +282,8 @@ export function startConciergeEvents(
 ): () => void {
   /** Per chat, the reminder turn that runs, and its end once it fires. */
   const remindersRunning = new Map<string, { finished?: EndedAgentTurn }>();
+  /** Per chat on a connection, as channel:thread, the reminder turn that runs, and its id once it ends. */
+  const connectionReminders = new Map<string, { finished?: string }>();
   const recoveriesRunning = new Map<string, { finished?: EndedAgentTurn }>();
   const { tasks, webchatRepo, approvals } = service.deps;
 
@@ -372,12 +374,20 @@ export function startConciergeEvents(
   };
 
   // Reacts ✅ to the messages of `keys` still without a sign, so their owner
-  // always sees a response (docs/domains/chats.md#reaction).
-  const reactToSilent = async (chatId: string, keys: readonly string[]) => {
+  // always sees a response (docs/domains/chats.md#reaction). In a chat on a
+  // connection the reaction goes to the platform, as the account's.
+  const reactToSilent = async (
+    chatId: string,
+    keys: readonly string[],
+    onConnection?: { channel: string; threadId: string },
+  ) => {
     for (const key of await tasks.repo.silentAmong(chatId, keys)) {
-      if (await webchatRepo.setMessageReaction(chatId, key, "✅")) {
-        await service.messageStatus.reactedTo(chatId, key);
-      }
+      const reacted = onConnection
+        ? await (service.deps.reactInChat?.(onConnection, key, "✅") ?? Promise.reject()).then(
+            () => true,
+          )
+        : await webchatRepo.setMessageReaction(chatId, key, "✅");
+      if (reacted) await service.messageStatus.reactedTo(chatId, key);
     }
   };
 
@@ -850,11 +860,72 @@ export function startConciergeEvents(
   };
   service.attachFailedBeforeStart(onFailedBeforeStart);
 
+  // A Concierge turn in a chat on a connection ends as one on the dashboard
+  // does: on `done`. A turn whose last text is anything else may have meant
+  // it for the chat, which never saw it: one reminder turn asks it to `say`
+  // it, as on the dashboard.
+  const onConnectionTurn = async (event: EndedAgentTurn) => {
+    // What the turn said is out: its repeats need no keeping.
+    service.forgetTurn(event.turn.turnId);
+    const thread = event.turn.threadContext;
+    if (!thread?.threadId) return;
+    // Read before any await: the reminder's own end fires while it still runs.
+    const place = `${thread.channel}:${thread.threadId}`;
+    const reminder = connectionReminders.get(place);
+    if (reminder) reminder.finished = event.turn.turnId;
+    const chatId = (await webchatRepo.chatOfSession(event.turn.sessionId))?.id;
+    const chat = chatId ? await service.connectionChat(chatId) : null;
+    if (!chatId || !chat) return;
+    // The messages the turn took settle as on the dashboard: done, failed or
+    // stopped, which their status on the platform follows.
+    const silent = await settleTurnMarks(chatId, event.turn.turnId, event.status, event.handedOn);
+    // A reminder runs with no sender, so its words would pass the send gate
+    // as the guardian's: only a turn the guardian started, or one no person
+    // started, such as a task's report, gets one.
+    const othersTurn =
+      thread.senderBondLevel !== undefined && thread.senderBondLevel !== "guardian";
+    if (
+      !othersTurn &&
+      shouldNudge({
+        status: event.status,
+        text: event.output.text,
+        reminderRunning: reminder !== undefined,
+      })
+    ) {
+      const running: { finished?: string } = {};
+      connectionReminders.set(place, running);
+      try {
+        await service.runSystemTurn(chatId, NUDGE_PROMPT);
+      } finally {
+        connectionReminders.delete(place);
+      }
+      // The reminder delivers the missed answer: then the turn said something.
+      if (running.finished && (await turnSaid(chatId, running.finished).catch(() => true))) return;
+    }
+    if (silent.length > 0) {
+      await reactToSilent(chatId, silent, chat).catch((error: unknown) =>
+        log.warn("failed to react to a message a turn left unanswered", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  };
+
   const unsubscribers = [
     turns.listen({
       couldNotStart: onFailedBeforeStart,
       ended: (event) => {
         const thread = event.turn.threadContext;
+        if (
+          !event.turn.parent &&
+          thread?.channel !== undefined &&
+          thread.channel !== "webchat" &&
+          isConciergeAgent(event.turn.agentName)
+        ) {
+          void guard(`concierge connection turn (${event.turn.turnId})`, onConnectionTurn(event));
+          return;
+        }
         // A subagent's turn belongs to its parent's turn, which reports on its own.
         if (event.turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
         const chatId = thread.threadId;

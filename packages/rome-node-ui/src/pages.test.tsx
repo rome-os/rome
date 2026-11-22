@@ -151,7 +151,6 @@ afterEach(() => {
 const devices: NodeDevice[] = [
   { id: "dev-1", name: "Workstation", platform: "linux", status: "connected" },
   { id: "dev-2", name: "Laptop", platform: "darwin", status: "not_connected" },
-  { id: "dev-3", name: "Old phone", platform: "ios", status: "revoked" },
 ];
 
 function navigation(): NodeNavigation & { navigate: ReturnType<typeof rs.fn> } {
@@ -176,10 +175,6 @@ describe("NodeDevices", () => {
     expect(within(cards[1]!).getByRole("img", { name: "0 commands in 24 h" })).toBeTruthy();
     await userEvent.click(screen.getByText("Workstation"));
     expect(nav.navigate).toHaveBeenCalledWith("/devices/dev-1");
-    // The revoked device waits behind a toggle.
-    expect(screen.queryByText("Old phone")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: /Revoked/ }));
-    expect(screen.getByText("Old phone")).toBeTruthy();
   });
 
   it("says on a device's card when its audit log is unavailable", async () => {
@@ -665,17 +660,15 @@ describe("device menu", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  it("offers a revoked device only removal and explains a pending revocation", async () => {
+  it("keeps the remove dialog open and shows the error when the removal fails", async () => {
     const actions = manage();
-    actions.remove.mockResolvedValue("revocation_pending");
-    page(devices[2]!, actions);
+    actions.remove.mockResolvedValue("device_not_found");
+    page(devices[1]!, actions);
     await open();
-    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
     await userEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
-    const dialog = await screen.findByRole("dialog", { name: "Remove Old phone?" });
-    expect(within(dialog).getByText(/already revoked/)).toBeTruthy();
+    const dialog = await screen.findByRole("dialog", { name: "Remove Laptop?" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
-    expect(await within(dialog).findByText(/It stays under Revoked/)).toBeTruthy();
+    expect(await within(dialog).findByText(/has no such device in your account/)).toBeTruthy();
   });
 
   it("puts a menu on each card, over its link", async () => {

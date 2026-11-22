@@ -6,7 +6,7 @@ export interface DeviceStatus {
   id: string;
   name: string;
   platform: string | null;
-  status: "connected" | "not_connected" | "unknown" | "revoked";
+  status: "connected" | "not_connected" | "unknown";
   /** The device's audit log, from system.info. Absent for hosts that predate it. */
   audit?: { state: "ok" | "unavailable"; code?: string; message?: string };
 }
@@ -72,7 +72,7 @@ export class DeviceStatusReader {
         id: item.id,
         name: typeof item.device_name === "string" ? item.device_name : item.id,
         platform: typeof item.platform === "string" ? item.platform : null,
-        status: item.revoked_at ? "revoked" : "unknown",
+        status: "unknown",
       };
     });
     // Bound both parallel requests and each refresh's work, including large account histories.
@@ -82,7 +82,6 @@ export class DeviceStatusReader {
       Array.from({ length: Math.min(4, devices.length) }, async () => {
         while (next < devices.length && Date.now() < deadline) {
           const device = devices[next++];
-          if (device.status === "revoked") continue;
           const response = await this.connector.run(device.id, "system.info", {}, 3000);
           device.status = response.ok
             ? "connected"
@@ -102,7 +101,7 @@ export class DeviceStatusReader {
     );
     const connection = this.connector.getStatus();
     if (connection !== "online") {
-      for (const device of devices) if (device.status !== "revoked") device.status = "unknown";
+      for (const device of devices) device.status = "unknown";
     }
     return { connection, checkedAt: new Date().toISOString(), devices };
   }

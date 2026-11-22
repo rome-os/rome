@@ -1125,13 +1125,22 @@ final class DemoBackend: RomeBackend {
 
         // Archived topic chats, out of the drawer's list: the Archived row's
         // sheet lists them, and each opens read only. The car's archive moved
-        // a follow to the main chat, so its Restore asks about it.
+        // a follow to the main chat, so its Restore asks about it. Their last
+        // activity spans weeks, months and a year, for the sheet's groups.
         archivedTopics = [
+            ConciergeChat(id: "topic-archived-gift", name: "生日礼物清单", main: false),
             ConciergeChat(id: "topic-archived-car", name: "二手车比价", main: false),
+            ConciergeChat(id: "topic-archived-gym", name: "健身房年卡", main: false),
+            ConciergeChat(id: "topic-archived-photos", name: "整理旧照片", main: false),
             ConciergeChat(id: "topic-archived-holiday", name: "国庆出行", main: false),
             ConciergeChat(id: "topic-archived-tax", name: "个税年度汇算", main: false),
+            ConciergeChat(id: "topic-archived-lease", name: "租房合同", main: false),
         ]
-        for (id, days) in ["topic-archived-car": 6, "topic-archived-holiday": 40, "topic-archived-tax": 120] {
+        let archivedDays = [
+            "topic-archived-gift": 1, "topic-archived-car": 6, "topic-archived-gym": 12, "topic-archived-photos": 26,
+            "topic-archived-holiday": 40, "topic-archived-tax": 120, "topic-archived-lease": 400,
+        ]
+        for (id, days) in archivedDays {
             topicActivity[id] = Date.now.addingTimeInterval(Double(-days * 86400))
         }
         movedFollows["topic-archived-car"] = [.init(source: "gmail", label: "Gmail", target: "dealer@example.com")]

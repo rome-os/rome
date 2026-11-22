@@ -405,6 +405,23 @@ describe("channels.chats", () => {
     expect(chats).toHaveBeenCalledWith("slack_app", { query: "news", limit: 5 });
   });
 
+  it("passes on a request for threads and archived threads", async () => {
+    const chats = rs.fn(async () => ({ chats: [] }));
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(), send: rs.fn(), query: rs.fn(), chats } as never,
+    });
+
+    await calls["channels.chats"](
+      { channel: "discord", includeThreads: true, includeArchivedThreads: true },
+      turnIn("private"),
+    );
+
+    expect(chats).toHaveBeenCalledWith("discord", {
+      includeThreads: true,
+      includeArchivedThreads: true,
+    });
+  });
+
   it("refuses on a host whose service lists no chats", async () => {
     const calls = makeCalls();
     await expect(calls["channels.chats"]({ channel: "slack_app" }, {})).rejects.toThrow(

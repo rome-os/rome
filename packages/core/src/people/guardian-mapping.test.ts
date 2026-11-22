@@ -48,6 +48,19 @@ describe("guardian channel mapping", () => {
     expect(await accounts("whatsapp")).toEqual(["15551234567@s.whatsapp.net"]);
   });
 
+  it("adds an account beside the guardian's only one on the channel, with addOnly", async () => {
+    await linkGuardianToAccount(repo, "discord", "discord-a");
+    expect(await linkGuardianToAccount(repo, "discord", "discord-b", { addOnly: true })).toBe(true);
+    // Either account writing again moves neither.
+    expect(await linkGuardianToAccount(repo, "discord", "discord-a", { addOnly: true })).toBe(
+      false,
+    );
+    expect(await linkGuardianToAccount(repo, "discord", "discord-b", { addOnly: true })).toBe(
+      false,
+    );
+    expect(await accounts("discord")).toEqual(["discord-a", "discord-b"]);
+  });
+
   it("leaves an account on another channel alone when it re-canonicalizes", async () => {
     await repo.linkStated({ platform: "whatsapp", id: "15551234567:8@s.whatsapp.net" }, "guardian");
     await repo.linkStated({ platform: "telegram", id: "tg-guardian" }, "guardian");

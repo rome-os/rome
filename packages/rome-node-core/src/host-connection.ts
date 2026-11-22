@@ -171,7 +171,7 @@ export async function runHostConnection(
             finish(
               new Error(
                 status === "revoked"
-                  ? "Authorization revoked. Explicit authorization is required."
+                  ? "This device was removed from your account. Connect it again to add it back."
                   : "Another connection replaced this device. This process has stopped.",
               ),
             ),

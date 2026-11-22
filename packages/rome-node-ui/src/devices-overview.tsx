@@ -1,6 +1,5 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import { Badge } from "@rome-os/ui/badge";
-import { Button } from "@rome-os/ui/button";
 import { Card } from "@rome-os/ui/card";
 import { cn } from "@rome-os/ui/cn";
 import {
@@ -10,7 +9,6 @@ import {
   SectionHeading,
   SectionTitle,
 } from "@rome-os/ui/page";
-import { ChevronRight } from "lucide-react";
 import { DeviceMenu } from "./device-manage.js";
 import { platformOf } from "./format.js";
 import { messagesFor, plural, type NodeUiMessages } from "./messages.js";
@@ -266,7 +264,6 @@ export function NodeDevices({
   // seconds to open on a slow network.
   const ready = !loading;
   const byPeer = useMemo(() => (stats ? statsByPeer(stats) : new Map()), [stats]);
-  const [showRevoked, setShowRevoked] = useState(false);
 
   // Only the account's devices show, so a removed device leaves even with recent activity.
   // This computer shows before Rome Cloud lists it, under the name the app knows.
@@ -282,17 +279,13 @@ export function NodeDevices({
     device.id.toLowerCase() === self ? thisDevice : undefined;
   const connected = (device: NodeDevice) =>
     selfOf(device) ? thisDevice!.state === "connected" : device.status === "connected";
-  const revoked = listed.filter((device) => device.status === "revoked");
-  const current = useFirstOrder(
-    listed.filter((device) => device.status !== "revoked"),
-    ready,
-    (list) =>
-      [...list].sort(
-        (a, b) =>
-          Number(!selfOf(a)) - Number(!selfOf(b)) ||
-          Number(!connected(a)) - Number(!connected(b)) ||
-          a.name.localeCompare(b.name, locale),
-      ),
+  const current = useFirstOrder(listed, ready, (list) =>
+    [...list].sort(
+      (a, b) =>
+        Number(!selfOf(a)) - Number(!selfOf(b)) ||
+        Number(!connected(a)) - Number(!connected(b)) ||
+        a.name.localeCompare(b.name, locale),
+    ),
   );
 
   return (
@@ -335,38 +328,6 @@ export function NodeDevices({
             </li>
           ))}
         </ul>
-      )}
-      {ready && revoked.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            align="start"
-            className="self-start text-muted-foreground"
-            aria-expanded={showRevoked}
-            onClick={() => setShowRevoked((value) => !value)}
-          >
-            <ChevronRight
-              data-icon="inline-start"
-              className={cn("transition-transform", showRevoked && "rotate-90")}
-              aria-hidden
-            />
-            {m.revokedDevices}
-          </Button>
-          {showRevoked && (
-            <div className="grid gap-2 @xl:grid-cols-2 @6xl:grid-cols-3">
-              {revoked.map((device) => (
-                <NodeDeviceCard
-                  key={device.id}
-                  device={device}
-                  navigation={navigation}
-                  manage={manage}
-                  locale={locale}
-                />
-              ))}
-            </div>
-          )}
-        </section>
       )}
     </Section>
   );

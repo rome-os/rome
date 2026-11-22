@@ -82,6 +82,8 @@ function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
     conversationHistory: async () => ({ messages: [], hasMore: false }),
     conversationReplies: async () => ({ messages: [] }),
     memberChannels: async () => ({ channels: [] }),
+    addReaction: async () => {},
+    removeReaction: async () => {},
     ...overrides,
   };
 }

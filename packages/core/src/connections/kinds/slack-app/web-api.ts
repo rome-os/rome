@@ -23,6 +23,20 @@ export interface SlackAppWebApi {
     signal?: AbortSignal,
   ): Promise<{ ts: string }>;
   openDirectMessage(teamId: string, userId: string, signal?: AbortSignal): Promise<string>;
+  /** Reacts to the message at `timestamp` with the emoji named `name`. A
+   *  reaction already there counts as added. */
+  addReaction(
+    teamId: string,
+    input: { channel: string; timestamp: string; name: string },
+    signal?: AbortSignal,
+  ): Promise<void>;
+  /** Takes the bot's reaction named `name` off the message at `timestamp`.
+   *  One that is not there counts as taken off. */
+  removeReaction(
+    teamId: string,
+    input: { channel: string; timestamp: string; name: string },
+    signal?: AbortSignal,
+  ): Promise<void>;
   userName(teamId: string, userId: string, signal?: AbortSignal): Promise<SlackUserName>;
   /** One page of a conversation's history, newest first: at most `limit`
    *  messages before `latest` (exclusive), or the newest. */
@@ -216,6 +230,22 @@ export function createSlackAppWebApi(
       const ts = stringField(result.ts);
       if (!ts) throw new SlackApiError("missing_message_id");
       return { ts };
+    },
+    async addReaction(teamId, input, signal) {
+      try {
+        await call(teamId, "reactions.add", input, signal);
+      } catch (error) {
+        if (error instanceof SlackApiError && error.code === "already_reacted") return;
+        throw error;
+      }
+    },
+    async removeReaction(teamId, input, signal) {
+      try {
+        await call(teamId, "reactions.remove", input, signal);
+      } catch (error) {
+        if (error instanceof SlackApiError && error.code === "no_reaction") return;
+        throw error;
+      }
     },
     async openDirectMessage(teamId, userId, signal) {
       const result = await call(teamId, "conversations.open", { users: userId }, signal);

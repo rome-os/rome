@@ -143,7 +143,7 @@ import {
 } from "../../concierge/automated-input.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../agent/index.js";
-import { MessageWriting, messageWritingModeOf } from "./message-writing.js";
+import { MessageWriting, messageWritingModeOf } from "../../core/message-writing.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { EMPTY_WORKSPACE_CONTEXT } from "../../core/sticky-headers.js";
 import type {

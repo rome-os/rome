@@ -10,6 +10,9 @@ import Observation
 final class ArchivedTopicsStore {
     private let backend: RomeBackend
     private(set) var chats: [ConciergeChat] = []
+    /// Each chat's last activity, from the list (`activityAt`). A chat
+    /// missing here has none known.
+    private(set) var lastActive: [String: Date] = [:]
     private(set) var loaded = false
     private var refreshWork: Task<Void, Never>?
     private var refreshAgain = false
@@ -48,6 +51,8 @@ final class ArchivedTopicsStore {
                     gone = Self.pending(gone, askedAt: asked)
                     let listed = Self.ordered(sessions).filter { gone[$0.id] == nil }
                     if listed != chats { chats = listed }
+                    let times = Self.activity(sessions)
+                    if times != lastActive { lastActive = times }
                     loaded = true
                 }
             } while refreshAgain
@@ -63,11 +68,13 @@ final class ArchivedTopicsStore {
         chats.contains { $0.id == id }
     }
 
-    /// A chat archived here: listed first now, ahead of the refetch.
-    func add(_ chat: ConciergeChat) {
+    /// A chat archived here: listed first now, ahead of the refetch, with
+    /// the last activity the drawer knew for it.
+    func add(_ chat: ConciergeChat, lastActive at: Date? = nil) {
         gone[chat.id] = nil
         guard !contains(chat.id) else { return }
         chats.insert(chat, at: 0)
+        if let at { lastActive[chat.id] = at }
         refresh()
     }
 
@@ -107,4 +114,78 @@ final class ArchivedTopicsStore {
         let order = sessions.indices.sorted { a, b in times[a] != times[b] ? times[a] > times[b] : a < b }
         return order.map { ConciergeChat(id: sessions[$0].id, name: sessions[$0].name, main: false) }
     }
+
+    /// Each listed chat's last activity, where the list gives one.
+    nonisolated static func activity(_ sessions: [ChatSession]) -> [String: Date] {
+        var times: [String: Date] = [:]
+        for session in sessions {
+            if let at = session.activityAt.flatMap(RomeDate.parse) { times[session.id] = at }
+        }
+        return times
+    }
+
+    /// The sheet's groups, in the list's order: this week, earlier this
+    /// month, then one per month, newest first. Chats with no activity
+    /// known come last, in a group of their own.
+    nonisolated static func groups(_ chats: [ConciergeChat], lastActive: [String: Date], now: Date = .now, calendar: Calendar = .current) -> [ArchivedTopicGroup] {
+        var groups: [ArchivedTopicGroup] = []
+        for chat in chats {
+            let period = ArchivedTopicGroup.Period(lastActive[chat.id], now: now, calendar: calendar)
+            if let index = groups.firstIndex(where: { $0.period == period }) {
+                groups[index].chats.append(chat)
+            } else {
+                groups.append(ArchivedTopicGroup(period: period, chats: [chat]))
+            }
+        }
+        return groups.sorted { $0.period < $1.period }
+    }
+}
+
+/// One group of the Archived sheet: the chats last active in one period.
+struct ArchivedTopicGroup: Identifiable, Equatable, Sendable {
+    enum Period: Hashable, Comparable, Sendable {
+        case thisWeek
+        case earlierThisMonth
+        /// A month before this one, as its first day.
+        case month(Date)
+        case undated
+
+        /// Where a chat last active at `date` goes. A time ahead of `now`, a
+        /// clock off on either side, counts as this week.
+        init(_ date: Date?, now: Date, calendar: Calendar) {
+            guard let date else {
+                self = .undated
+                return
+            }
+            if date >= now || calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) {
+                self = .thisWeek
+            } else if calendar.isDate(date, equalTo: now, toGranularity: .month) {
+                self = .earlierThisMonth
+            } else {
+                self = .month(calendar.dateInterval(of: .month, for: date)?.start ?? date)
+            }
+        }
+
+        /// Newest first.
+        static func < (a: Period, b: Period) -> Bool {
+            switch (a, b) {
+            case (.month(let x), .month(let y)): return x > y
+            default: return a.rank < b.rank
+            }
+        }
+
+        private var rank: Int {
+            switch self {
+            case .thisWeek: 0
+            case .earlierThisMonth: 1
+            case .month: 2
+            case .undated: 3
+            }
+        }
+    }
+
+    let period: Period
+    var chats: [ConciergeChat]
+
+    var id: Period { period }
 }

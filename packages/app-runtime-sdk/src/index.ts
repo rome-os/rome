@@ -582,6 +582,9 @@ export interface LifecycleThreadContext {
   threadType?: "private" | "group";
   projectName?: string;
   projectPath?: string;
+  /** The bond level of the person whose message started the turn, as the
+   *  inbox passed it; absent for a turn no person started. */
+  senderBondLevel?: string;
 }
 
 export interface AgentTurnRef {
@@ -1779,6 +1782,9 @@ export interface ChatDescriptor {
   displayName: string;
   parent?: ChatRef;
   containerName?: string;
+  /** True for a thread the platform has archived: it is still read by its
+   *  id, and a message said in it may bring it back. Absent otherwise. */
+  archived?: boolean;
 }
 
 /**
@@ -1910,6 +1916,11 @@ export interface ChannelChatsQuery {
   limit?: number;
   /** Where the page before ended, as its `nextCursor` said. */
   cursor?: string;
+  /** Also list the threads inside each chat. Defaults to false. */
+  includeThreads?: boolean;
+  /** Also list the threads the platform has archived, where it lets the
+   *  account see them. Implies `includeThreads`. Defaults to false. */
+  includeArchivedThreads?: boolean;
 }
 
 /** One page of the chats an account is in. */
@@ -1919,6 +1930,11 @@ export interface ChannelChatsPage {
     /** The chat's name as the platform shows it, such as `#news`. */
     name: string;
     kind: ChatDescriptor["kind"];
+    /** For a thread, the chat it is in. */
+    parent?: ChatId;
+    /** True for a thread the platform has archived: it is still read by its
+     *  id, and a message said in it may bring it back. Absent otherwise. */
+    archived?: boolean;
   }>;
   /** Present while more chats follow this page. */
   nextCursor?: string;
@@ -1963,6 +1979,15 @@ export interface ChannelsService {
    * platform's reason, rather than answer an empty page. Rejects for an
    * account whose connection lists no chats. Absent on a host that predates
    * it.
+   *
+   * With `includeThreads` a page lists threads too, each naming its chat as
+   * `parent`. With `includeArchivedThreads` it also lists the threads the
+   * platform has archived. Only Discord lists threads today. Another platform
+   * lists its chats alone. Discord reads its archived threads when the first
+   * page is asked for, so that page can take a while, and the pages after it
+   * list the same threads. Their cursor expires once four newer such listings
+   * of the account have started, or when its connection reconnects: the next
+   * page then rejects, and the listing starts again from its first page.
    */
   chats?(account: Account | string, query?: ChannelChatsQuery): Promise<ChannelChatsPage>;
 }

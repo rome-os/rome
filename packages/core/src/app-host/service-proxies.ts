@@ -379,10 +379,16 @@ export class ChannelsServiceProxy implements ChannelsService {
   }
 
   chats(channel: Account | string, query: ChannelChatsQuery = {}): Promise<ChannelChatsPage> {
+    // The first page of a listing with archived threads reads a platform's
+    // archive chat by chat, which can take longer than a query does.
     return callMain<ChannelChatsPage>(
       "channels.chats",
       { channel, ...query },
-      { timeoutMs: CHANNEL_QUERY_RPC_TIMEOUT_MS },
+      {
+        timeoutMs: query.includeArchivedThreads
+          ? APP_INSTALL_RPC_TIMEOUT_MS
+          : CHANNEL_QUERY_RPC_TIMEOUT_MS,
+      },
     );
   }
 }

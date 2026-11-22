@@ -51,7 +51,6 @@ it("sends a JSON body with its content type", async () => {
 it.each([
   [404, "device_not_found", "device_not_found"],
   [400, "invalid_device_name", "invalid_device_name"],
-  [503, "revocation_pending", "revocation_pending"],
   [404, "something_else", "cloud_unavailable"],
   [500, undefined, "cloud_unavailable"],
 ])("maps a %i %s answer to %s", async (status, error, code) => {

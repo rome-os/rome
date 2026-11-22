@@ -78,7 +78,7 @@ private struct BubbleMenuItems: View {
 
 private extension View {
     /// The bubble lifts under the finger with the system's menu. Reply is
-    /// also a swipe to the right (`SwipeToReply`), and an action of its own
+    /// also an action of its own
     /// for VoiceOver.
     /// `selects` says whether the text has anything Select text can select.
     func bubbleMenu(text: String, menu: BubbleMenu, selects: Bool) -> some View {

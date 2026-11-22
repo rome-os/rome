@@ -104,6 +104,8 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
           conversationHistory: slack.conversationHistory,
           conversationReplies: async () => ({ messages: [] }),
           memberChannels: async () => ({ channels: [] }),
+          addReaction: async () => {},
+          removeReaction: async () => {},
         },
         readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
       });
@@ -188,6 +190,8 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
         conversationHistory: slack.conversationHistory,
         conversationReplies: async () => ({ messages: [] }),
         memberChannels: async () => ({ channels: [] }),
+        addReaction: async () => {},
+        removeReaction: async () => {},
       },
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
@@ -238,6 +242,8 @@ describe("a mention inside a Slack thread (R14)", () => {
         conversationHistory: async () => ({ messages: [], hasMore: false }),
         conversationReplies,
         memberChannels: async () => ({ channels: [] }),
+        addReaction: async () => {},
+        removeReaction: async () => {},
       },
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
@@ -311,6 +317,8 @@ describe("a mention inside a Slack thread (R14)", () => {
         conversationHistory: async () => ({ messages: [], hasMore: false }),
         conversationReplies: conversationReplies as never,
         memberChannels: async () => ({ channels: [] }),
+        addReaction: async () => {},
+        removeReaction: async () => {},
       },
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
@@ -379,6 +387,8 @@ describe("a mention inside a Slack thread (R14)", () => {
         conversationHistory: async () => ({ messages: [], hasMore: false }),
         conversationReplies: conversationReplies as never,
         memberChannels: async () => ({ channels: [] }),
+        addReaction: async () => {},
+        removeReaction: async () => {},
       },
       // Slack's pacing, scaled down: one thread read per 300 ms.
       repliesGate: new SlackReadGate({ intervalMs: 300, maxWaitMs: 300 }),
@@ -431,6 +441,8 @@ describe("a mention inside a Slack thread (R14)", () => {
         conversationHistory: async () => ({ messages: [], hasMore: false }),
         conversationReplies: async () => ({ messages: [] }),
         memberChannels: async () => ({ channels: [] }),
+        addReaction: async () => {},
+        removeReaction: async () => {},
       },
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });

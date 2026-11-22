@@ -28,7 +28,7 @@ final class TopicChatsStore {
     /// Each chat's last activity, from the chat list (`GET /chat/sessions`).
     /// Only the server's time moves a chat, so a replayed status never does.
     /// A chat missing here counts as newest.
-    private var lastActive: [String: Date] = [:]
+    private(set) var lastActive: [String: Date] = [:]
     /// When each pinned chat was pinned, from the same chat list. A chat
     /// missing here is not pinned.
     private(set) var pinnedAt: [String: Date] = [:]
