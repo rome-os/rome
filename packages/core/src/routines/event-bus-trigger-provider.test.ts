@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import type { Cron } from "croner";
 import {
   EventBusTriggerProvider,
   matchesSource,
@@ -40,6 +41,18 @@ function fakeRepo() {
   };
 }
 
+// Reach into the provider's private registrations to fire a wait's deadline
+// timer with `Cron.trigger()`, croner's public "fire the callback now" API, as
+// the schedule provider's tests do. Waiting out the wall clock was flaky: croner
+// counts in whole seconds, so a deadline can fire up to a second late.
+function deadlineTimerFor(provider: EventBusTriggerProvider, routineId: string): Cron {
+  const registrations = (provider as unknown as { registrations: Map<string, { deadline?: Cron }> })
+    .registrations;
+  const timer = registrations.get(routineId)?.deadline;
+  if (!timer) throw new Error(`no deadline timer for routine ${routineId}`);
+  return timer;
+}
+
 /** Let the provider's fire-and-forget chain (disable, then fire) settle. */
 async function flush(): Promise<void> {
   for (let i = 0; i < 5; i++) await Promise.resolve();
@@ -60,10 +73,15 @@ describe("EventBusTriggerProvider", () => {
     const fired: Record<string, unknown>[] = [];
     const routine = buildRoutine({
       trigger: { type: "event-bus", eventName: "ci.done", once: true },
-      args: { deadline: new Date(Date.now() + 60).toISOString(), waitingFor: "the CI run" },
+      args: {
+        deadline: new Date(Date.now() + 60 * 60_000).toISOString(),
+        waitingFor: "the CI run",
+      },
     });
     await provider.activate(routine, async (payload) => void fired.push(payload));
-    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    await flush();
+    expect(fired).toEqual([]);
+    await deadlineTimerFor(provider, routine.id).trigger();
     await flush();
     expect(fired).toEqual([
       expect.objectContaining({ deadlinePassed: true, waitingFor: "the CI run" }),
