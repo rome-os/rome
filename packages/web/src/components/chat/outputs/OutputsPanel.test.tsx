@@ -253,18 +253,61 @@ describe("OutputsPanel", () => {
     expect(screen.queryByRole("link", { name: "Download" })).toBeNull();
   });
 
-  it("previews Markdown rendered, with no HTML running, and goes back to the list", async () => {
+  it("previews ordinary Markdown with links and images, sanitizes HTML, and goes back to the list", async () => {
     const user = userEvent.setup();
     outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
-    files[outputs[0].contentUrl!] = "# Plan\n\n<img src=x onerror=alert(1)>\n\n- one";
+    files[outputs[0].contentUrl!] =
+      "# Plan\n\n[Reference](https://example.com/reference)\n\n![Chart](https://example.com/chart.png)\n\n<img src=x onerror=alert(1)>\n\n- one";
     renderPanel({ selectedId: "notes" });
     const markdown = await screen.findByTestId("output-markdown");
     await waitFor(() =>
       expect(within(markdown).getByRole("heading", { name: "Plan" })).toBeTruthy(),
     );
-    expect(markdown.querySelector("img")).toBeNull();
+    expect(within(markdown).getByRole("link", { name: "Reference" }).getAttribute("href")).toBe(
+      "https://example.com/reference",
+    );
+    expect(within(markdown).getByRole("img", { name: "Chart" }).getAttribute("src")).toBe(
+      "https://example.com/chart.png",
+    );
+    expect(markdown.querySelector("[onerror]")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
     expect(screen.getByRole("list", { name: "Today" })).toBeTruthy();
+  });
+
+  it("renders a Mermaid flowchart in a Markdown output preview", async () => {
+    const measureText = rs.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    rs.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(private readonly callback: IntersectionObserverCallback) {}
+        observe(target: Element) {
+          this.callback(
+            [{ isIntersecting: true, target } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver,
+          );
+        }
+        unobserve() {}
+        disconnect() {}
+        takeRecords() {
+          return [];
+        }
+      },
+    );
+    try {
+      outputs = [output("report", { name: "report.md", mimeType: "text/markdown" })];
+      files[outputs[0].contentUrl!] =
+        "# Architecture\n\n```mermaid\nflowchart TD\n    W[Web React / Vite] --> RPC[认证 WebSocket RPC + HTTP]\n```";
+      renderPanel({ selectedId: "report" });
+
+      const markdown = await screen.findByTestId("output-markdown");
+      await waitFor(() => expect(markdown.querySelector("svg.pele-flowchart")).not.toBeNull());
+      expect(markdown.querySelector("svg.pele-flowchart")?.textContent).toContain(
+        "Web React / Vite",
+      );
+      expect(markdown.querySelector('[data-streamdown="code-block"]')).toBeNull();
+    } finally {
+      measureText.mockRestore();
+    }
   });
 
   it("opens a row's preview: text as text, a picture inline, anything else as a download", async () => {
