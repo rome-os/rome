@@ -30,6 +30,20 @@ final class FakeBackend: RomeBackend {
     /// newest), as the server hands them out; a page missing fails.
     var servedPages: [String?: MessagePage] = [:]
 
+    var threadPages: [String: ThreadPage] = [:]
+    var threadReads: [(anchor: String, before: String?, after: String?, limit: Int)] = []
+    var threadError: APIError?
+    var duringThreadFetch: (() async -> Void)?
+
+    func threadPage(sessionId: String, anchor: String, before: String?, after: String?, limit: Int) async throws -> ThreadPage {
+        threadReads.append((anchor, before, after, limit))
+        if let threadError { throw threadError }
+        let page = threadPages[before.map { "before:\($0)" } ?? after.map { "after:\($0)" } ?? "open"]
+        if let duringThreadFetch { await duringThreadFetch() }
+        guard let page else { throw APIError.notFound }
+        return page
+    }
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         pageLimits.append(limit)
         if let messagesError { throw messagesError }

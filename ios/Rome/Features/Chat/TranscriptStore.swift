@@ -16,7 +16,10 @@ final class TranscriptStore {
 
     // The properties with a `didSet` are what `rows` is built from: each
     // change builds the rows again, once, so a read is a plain property read.
-    private(set) var messages: [ChatMessage] = [] { didSet { rebuildRows() } }
+    private(set) var messages: [ChatMessage] = [] { didSet {
+        rebuildRows()
+        threadFocus?.updateHeld(messages)
+    } }
     private(set) var pending: [PendingSend] = [] { didSet { rebuildRows() } }
     private(set) var loaded = false
     /// A read of the chat worked at least once (or it was made just now), so
@@ -289,6 +292,7 @@ final class TranscriptStore {
     }
 
     func stop() {
+        closeThread()
         for token in tokens { backend.events.unsubscribe(token) }
         tokens = []
         for poll in approvalPolls.values { poll.cancel() }
@@ -428,6 +432,7 @@ final class TranscriptStore {
     }
 
     func markRead() {
+        guard threadFocus == nil else { return }
         // A read before the open's read mark is known would erase it.
         let waiting = openRead
         Task {
@@ -548,7 +553,7 @@ final class TranscriptStore {
 
     /// New replies came in, or the list appeared: read, if the chat shows.
     func arrived() {
-        if onScreen { markRead() }
+        if onScreen && threadFocus == nil { markRead() }
     }
 
     // The server sends every message list in its final order, and the store never
@@ -572,6 +577,7 @@ final class TranscriptStore {
     /// A live message: replaces the held message with its id where it stands,
     /// else goes last.
     private func mergeLive(_ message: ChatMessage) {
+        threadFocus?.receive(message)
         var next = messages
         if let index = next.firstIndex(where: { $0.id == message.id }) {
             next[index] = message
@@ -597,6 +603,7 @@ final class TranscriptStore {
     /// from the page, and the paging follows its cursor. Every refresh of the
     /// newest page goes through here, so they all follow the one rule.
     private func mergeLatest(_ page: MessagePage, dropsUnlisted: Bool = false) {
+        threadFocus?.catchUp(page.messages)
         let ids = Set(page.messages.map(\.id))
         let heldIDs = Set(messages.map(\.id))
         guard let anchor = page.messages.first(where: { !$0.isTrace && heldIDs.contains($0.id) }),
@@ -619,6 +626,7 @@ final class TranscriptStore {
     // MARK: Live events
 
     private func handle(_ event: LiveEvent) {
+        threadFocus?.handle(event, sessionId: sessionId)
         switch event {
         case .messageInsert(var message) where message.sessionId == sessionId:
             let held = messages.first { $0.id == message.id }
@@ -689,6 +697,41 @@ final class TranscriptStore {
         }
     }
 
+    var threadFocus: ThreadFocus?
+    @ObservationIgnored let focusPosition = TranscriptFocusPosition()
+    @ObservationIgnored private var openingThread = false
+    @ObservationIgnored private var threadEpoch = 0
+
+    func openThread(from messageId: String, row: String, original: String) async {
+        guard threadFocus == nil, !openingThread else { return }
+        openingThread = true
+        let epoch = threadEpoch
+        defer { openingThread = false }
+        do {
+            let page = try await backend.threadPage(sessionId: sessionId, anchor: messageId, before: nil, after: nil, limit: 10)
+            guard !Task.isCancelled, epoch == threadEpoch else { return }
+            let y = focusPosition.frame(row)?.minY
+            let gap = rows.firstIndex(where: { $0.id == row }).map { index in
+                TranscriptSpacing.top(rows[index], after: index > 0 ? rows[index - 1] : nil)
+            } ?? 0
+            threadFocus = ThreadFocus(sessionId: sessionId, anchor: messageId, row: row, bubbleY: y.map { $0 + gap }, page: page, backend: backend)
+        } catch APIError.notFound {
+            guard epoch == threadEpoch else { return }
+            await reveal(quoted: original)
+        } catch {
+            // A failed read leaves the mounted chat and its position alone.
+        }
+    }
+
+    func closeThread() {
+        threadEpoch += 1
+        threadFocus = nil
+    }
+
+    func holdThreadMessages(_ next: [ChatMessage]) {
+        commit(next, persist: false)
+    }
+
     // MARK: Replies
 
     /// The message the guardian replies to, quoted in the reply bar above the
@@ -703,14 +746,14 @@ final class TranscriptStore {
     @ObservationIgnored private var untint: Task<Void, Never>?
 
     /// What the composer's next send replies to, and what its draft keeps.
-    var composerReply: ReplyTarget? { quote }
+    var composerReply: ReplyTarget? { threadFocus?.reply.map { ReplyTarget(messageId: $0.id) } ?? quote }
 
     /// Whether the reply bar shows.
-    var showsQuoteBar: Bool { quote != nil }
+    var showsQuoteBar: Bool { composerReply != nil }
 
     /// The quoted message, when it is held.
     var quotedMessage: ChatMessage? {
-        quote.flatMap { message($0.messageId) }
+        threadFocus?.reply ?? quote.flatMap { message($0.messageId) }
     }
 
     /// Reply on a message, from the menu of its `row`: the reply bar
@@ -733,6 +776,10 @@ final class TranscriptStore {
         quote = nil
     }
 
+    func dismissQuote() {
+        if threadFocus != nil { closeThread() } else { cancelQuote() }
+    }
+
     /// A restored draft was written as a reply: the reply bar comes back.
     func restoreReply(_ target: ReplyTarget) {
         guard kind == .concierge else { return }
@@ -742,14 +789,19 @@ final class TranscriptStore {
     /// How many older pages a tap on a quote loads before it gives up.
     static let quotePages = 10
 
-    /// The quote in a reply was tapped: the transcript goes to the original
-    /// and tints it. One not held yet comes in by paging older messages until
-    /// it does, up to `quotePages` pages; then the tap does nothing, quietly.
-    func quoteAction(original: String) -> (() -> Void)? {
+    /// A quote with a containing row opens that message's chain. Without a
+    /// row, it reveals the original, as on an instance without the endpoint.
+    func quoteAction(original: String, from: String? = nil, row: String? = nil) -> (() -> Void)? {
         guard kind == .concierge else { return nil }
         return { [weak self] in
             guard let self else { return }
-            Task { await self.reveal(quoted: original) }
+            Task {
+                if let from, let row {
+                    await self.openThread(from: from, row: row, original: original)
+                } else {
+                    await self.reveal(quoted: original)
+                }
+            }
         }
     }
 

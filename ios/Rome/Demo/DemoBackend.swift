@@ -272,6 +272,27 @@ final class DemoBackend: RomeBackend {
     /// Chats whose messages cannot be read, for the load-error bar's snapshots.
     var unreadableChats: Set<String> = []
 
+    func threadPage(sessionId: String, anchor: String, before: String?, after: String?, limit: Int) async throws -> ThreadPage {
+        let all = Self.withThreadRoots(Self.withTurns(messages[sessionId] ?? []))
+        guard let pressed = all.first(where: { $0.id == anchor && !$0.isTrace }) else { throw APIError.notFound }
+        let chain = all.filter { !$0.isTrace && $0.chatThreadId == pressed.chatThreadId }
+        guard let at = chain.firstIndex(where: { $0.id == (before ?? after ?? anchor) }) else { throw APIError.notFound }
+        let start = after != nil ? at + 1 : max(0, at - limit)
+        let end = before != nil ? at : min(chain.count, at + limit + 1)
+        return ThreadPage(messages: Array(chain[start..<end]), hasOlder: after != nil || start > 0, hasNewer: before != nil || end < chain.count)
+    }
+
+    private static func withThreadRoots(_ messages: [ChatMessage]) -> [ChatMessage] {
+        var roots: [String: String] = [:]
+        return messages.map { message in
+            var message = message
+            let original = message.parts.lazy.compactMap(\.replyQuote).first?.messageId
+            message.chatThreadId = original.flatMap { roots[$0] } ?? message.id
+            roots[message.id] = message.chatThreadId
+            return message
+        }
+    }
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         try await pause(0.3)
         if unreadableChats.contains(sessionId) { throw APIError.server(status: 503, message: nil) }
@@ -280,7 +301,7 @@ final class DemoBackend: RomeBackend {
         let all = messages[sessionId] ?? []
         let end = before.flatMap { cursor in all.firstIndex { $0.id == cursor } } ?? all.count
         let start = max(0, end - limit)
-        let turned = Self.withTurns(all)
+        let turned = Self.withThreadRoots(Self.withTurns(all))
         return MessagePage(messages: Array(turned[start..<end]), nextCursor: start > 0 ? all[start].id : nil)
     }
 
@@ -947,7 +968,7 @@ final class DemoBackend: RomeBackend {
     }
 
     private func insert(_ sessionId: String, _ message: ChatMessage) {
-        let message = Self.withTurns((messages[sessionId] ?? []) + [message]).last ?? message
+        let message = Self.withThreadRoots(Self.withTurns((messages[sessionId] ?? []) + [message])).last ?? message
         messages[sessionId, default: []].append(message)
         bus.emit(LiveTopic.chat(sessionId), .messageInsert(message))
     }

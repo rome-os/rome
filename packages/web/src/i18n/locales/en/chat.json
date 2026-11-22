@@ -218,7 +218,8 @@
   "reply": {
     "action": "Reply",
     "dismiss": "Cancel reply",
-    "jump": "Go to the original message"
+    "jump": "Go to the original message",
+    "closeChain": "Close reply chain"
   },
   "senderGuardian": "Guardian",
   "inputState": {

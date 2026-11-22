@@ -1114,6 +1114,13 @@ html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
   border-radius: var(--rome-radius-16);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
 }
+/* A reply chain opens and closes in one view transition (use-chain-focus.ts):
+   the chain's bubbles named in both pictures glide, the rest fades. */
+:root[data-chain-transition]::view-transition-group(*),
+:root[data-chain-transition]::view-transition-old(*),
+:root[data-chain-transition]::view-transition-new(*) {
+  animation-duration: 250ms;
+}
 /* A run of the Concierge's replies to one message sits close: 2px between the
    bubbles instead of the group's 8px (a quarter of the gap), and the corners
    where they meet are 4px (ConciergeGroup, reply-drawing.ts). */

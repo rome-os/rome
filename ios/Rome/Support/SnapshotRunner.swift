@@ -168,6 +168,19 @@ enum SnapshotRunner {
             await capture("04c-chat-replies", style: styleName, in: directory, wait: 1.5) {
                 model.workspace?.concierge.jump(to: "c-site")
             }
+            await capture("04h-chat-reply-chain", style: styleName, in: directory, wait: 3) {
+                guard let chat = model.workspace?.concierge,
+                      let row = chat.rows.last(where: { chat.info(for: $0).quote != nil }),
+                      let from = row.ownMessageId,
+                      let quote = chat.info(for: row).quote else { return }
+                chat.cancelQuote()
+                chat.jump(to: from)
+                Task {
+                    try? await Task.sleep(for: .milliseconds(800))
+                    await chat.openThread(from: from, row: row.id, original: quote.messageId)
+                }
+            }
+            model.workspace?.concierge.closeThread()
             // The settled login task: its question and approval folded, and the Concierge's answer quoting what the guardian asked.
             await capture("04d-chat-settled-cards", style: styleName, in: directory, wait: 2) {
                 model.workspace?.concierge.jump(to: "c-login")

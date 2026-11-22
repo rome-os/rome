@@ -26,6 +26,7 @@ import {
   ToolTasksContext,
   type ToolTasksHost,
 } from "@/pages/free/tool-tasks";
+import { ThemeProvider } from "@/hooks/use-theme";
 import { Chat } from "./Chat";
 import enChat from "@/i18n/locales/en/chat.json";
 import zhChat from "@/i18n/locales/zh-CN/chat.json";
@@ -43,6 +44,7 @@ import {
   createSession,
   deleteSession,
   interruptTurn,
+  getThreadPage,
   listSessionMessagePage,
   listSessionMessages,
   listSessionTurns,
@@ -210,11 +212,11 @@ function ReplyJump() {
   const reply = useReplyDraft();
   return (
     <>
-      <button type="button" data-testid="reply-jump" onClick={() => reply?.jump("a2")}>
+      <button type="button" data-testid="reply-jump" onClick={() => reply?.jump?.("a2", "m-2")}>
         jump
       </button>
       {/* A click on the quote of a message, which names m-1. */}
-      <button type="button" data-testid="quote-jump" onClick={() => reply?.jump("m-1")}>
+      <button type="button" data-testid="quote-jump" onClick={() => reply?.jump?.("m-1", "m-2")}>
         quote
       </button>
       {/* An older message the timeline has not loaded. */}
@@ -501,6 +503,8 @@ rs.mock("@/lib/chat-api", () => {
     pinSession: rs.fn().mockResolvedValue(undefined),
     interruptTurn: rs.fn(),
     listSessionMessages,
+    // A server with no reply chains to open, unless a test says otherwise.
+    getThreadPage: rs.fn().mockResolvedValue(null),
     // The newest page reads like the whole list unless a test says otherwise.
     listSessionMessagePage: rs.fn(async (id: string) => {
       const all = await listSessionMessages(id);
@@ -3639,6 +3643,32 @@ describe("Chat Concierge jump to a message", () => {
   });
 
   describe("a click on a quote", () => {
+    it("opens the reply's chain in place when the server has it, and a click on blank space closes it", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3)],
+        nextCursor: null,
+      });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      await waitFor(() => expect(rows()).toBe(3));
+
+      fireEvent.click(screen.getByTestId("quote-jump"));
+
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+      expect(getThreadPage).toHaveBeenCalledWith("concierge", "m-2", { limit: 10 });
+      expect(scrollTo).not.toHaveBeenCalled();
+      fireEvent.click(document.querySelector("[data-chain-layer] > div")!);
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
+    });
+
     // A message of the guardian's that replies to m-1.
     const reply = (n: number) => ({
       ...message(n),
@@ -3649,7 +3679,7 @@ describe("Chat Concierge jump to a message", () => {
     });
     const quoteAnchor = () => screen.getByTestId("quote-jump");
 
-    it("scrolls to the original and tints it when it is loaded, with no toast", async () => {
+    it("goes to the original and tints it when it is loaded, with no toast, where the server has no chain to open", async () => {
       rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
         messages: [message(1), message(2)],
         nextCursor: null,
@@ -3659,7 +3689,7 @@ describe("Chat Concierge jump to a message", () => {
 
       fireEvent.click(quoteAnchor());
 
-      expect(scrollTo).toHaveBeenCalledOnce();
+      await waitFor(() => expect(scrollTo).toHaveBeenCalledOnce());
       expect(toast.loading).not.toHaveBeenCalled();
     });
 

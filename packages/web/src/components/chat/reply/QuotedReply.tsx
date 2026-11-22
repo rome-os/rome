@@ -15,9 +15,10 @@ const FOCUS_RING =
  * automation names it first. The quote fills the width of the bubble's
  * content and adds nothing to it (`contain: inline-size`): a long original is
  * cut, and never widens the bubble, whose minimum width a quote sets
- * (ChatBubble). Pressing it goes to the original, where the chat can.
+ * (ChatBubble). Pressing it opens the reply's chain or goes to the original,
+ * where the chat can. `from` is the message that carries the quote.
  */
-export function QuotedReply({ part }: { part: ReplyToPart }) {
+export function QuotedReply({ part, from }: { part: ReplyToPart; from: string }) {
   const { t } = useTranslation("chat");
   const draft = useReplyDraft();
   const className =
@@ -36,7 +37,7 @@ export function QuotedReply({ part }: { part: ReplyToPart }) {
       </span>
     </>
   );
-  if (!draft) {
+  if (!draft?.jump) {
     return (
       <div data-reply-quote={part.messageId} className={className}>
         {quoted}
@@ -50,7 +51,7 @@ export function QuotedReply({ part }: { part: ReplyToPart }) {
       aria-label={t("reply.jump")}
       title={part.text}
       className={cn(className, "cursor-pointer hover:text-foreground", FOCUS_RING)}
-      onClick={() => draft.jump(part.messageId)}
+      onClick={() => draft.jump?.(part.messageId, from)}
     >
       {quoted}
     </button>

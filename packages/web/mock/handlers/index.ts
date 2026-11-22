@@ -397,6 +397,10 @@ const AFTERNOON_REPLIES: Record<number, number> = {
   19: 18,
   20: 19,
 };
+const afternoonRoot = (n: number): number => {
+  const quoted = AFTERNOON_REPLIES[n];
+  return quoted === undefined ? n : afternoonRoot(quoted);
+};
 const afternoonSaid = new Map<number, { from: "guardian" | "agent"; content: string }>();
 const afternoon = (
   n: number,
@@ -425,6 +429,7 @@ const afternoon = (
     role: from === "guardian" ? "user" : "assistant",
     content: JSON.stringify([...quote, text(content)]),
     createdAt: `2026-08-07T${at}:00.000Z`,
+    chatThreadId: `${CONCIERGE_CHAT_ID}-pm-${afternoonRoot(n)}`,
     ...(from === "guardian" ? { sender: guardianSender } : {}),
   };
 };
@@ -1841,6 +1846,30 @@ export const handlers = [
       nextCursor: start > 0 ? String(start) : null,
     });
   }),
+  // A window of the reply chain the message is in, like the server's: the
+  // messages of the chat with the same root, oldest first, the message's id as
+  // the cursor for `before` and `after`.
+  http.get("/api/chat/sessions/:sessionId/messages/:messageId/thread", ({ params, request }) => {
+    const said = (transcripts[String(params.sessionId)] ?? []).filter(
+      (message) => message.role !== "trace",
+    );
+    const anchor = said.find((message) => message.id === params.messageId);
+    if (!anchor) return HttpResponse.json({ error: "message_not_found" }, { status: 404 });
+    const root = anchor.chatThreadId ?? anchor.id;
+    const chain = said.filter((message) => (message.chatThreadId ?? message.id) === root);
+    const query = new URL(request.url).searchParams;
+    const limit = Number(query.get("limit") ?? 20);
+    const before = query.get("before");
+    const after = query.get("after");
+    const at = chain.findIndex((message) => message.id === (before ?? after ?? anchor.id));
+    const from = after ? at + 1 : Math.max(0, at - limit);
+    const to = before ? at : at + 1 + limit;
+    return HttpResponse.json({
+      messages: chain.slice(from, to),
+      hasOlder: from > 0,
+      hasNewer: to < chain.length,
+    });
+  }),
   // No turn is ever in flight: the transcripts are static and mock mode has no
   // model behind it, so a session always reads as idle.
   http.get("/api/chat/sessions/:sessionId/turns", () => HttpResponse.json([] as TurnInfo[])),
@@ -1878,6 +1907,9 @@ export const handlers = [
       content,
       createdAt: sentAt,
       sender: guardianSender,
+      chatThreadId: repliesTo
+        ? (repliesTo.chatThreadId ?? repliesTo.id)
+        : String(form.get("inputId")),
     });
     return HttpResponse.json({
       turnId: null,

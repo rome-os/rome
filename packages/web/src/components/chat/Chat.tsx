@@ -100,6 +100,8 @@ import {
   replyFormFields,
   useReplyDraftState,
 } from "@/components/chat/reply/reply-draft";
+import { ChainFocusLayer } from "@/components/chat/reply/ChainFocusLayer";
+import { useChainFocus } from "@/components/chat/reply/use-chain-focus";
 import { findMessageAnchor } from "@/components/chat/reply/reply-source";
 import { LANDING_MS, playLanding } from "@/components/chat/reply/thread-anchor";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
@@ -674,6 +676,8 @@ export function Chat({
   // streaming entry is only removed when this set drains.
   const inflightTurnsRef = useRef<Map<string, Set<string>>>(new Map());
 
+  const chainFocusedRef = useRef(false);
+
   // Auto stick-to-bottom against the message scroller — a bounded
   // `overflow-y-auto` node, NOT the document. The chat shell is now
   // viewport-fixed, so message reflow (mermaid, late media) stays contained and
@@ -689,7 +693,7 @@ export function Chat({
     scrollRef: stickScrollRef,
     isAtBottom,
     scrollToBottom,
-  } = useStickToBottom({ initialStuck: Boolean(sessionId) });
+  } = useStickToBottom({ initialStuck: Boolean(sessionId), paused: chainFocusedRef });
 
   const [floorEl, setFloorEl] = useState<HTMLDivElement | null>(null);
 
@@ -919,8 +923,9 @@ export function Chat({
     },
     [scrollerEl, revealWhenLoaded, jumpToMessage, t],
   );
-  // A click on a quote goes to the original: older pages load until it is
-  // there, up to QUOTE_JUMP_PAGES, and a search that finds nothing ends quietly.
+  // A click on a quote of a chat that has no reply chains to open goes to the
+  // original: older pages load until it is there, up to QUOTE_JUMP_PAGES, and a
+  // search that finds nothing ends quietly.
   const showQuotedMessage = useCallback(
     (messageId: string) => {
       const scroller = scrollerEl;
@@ -954,10 +959,19 @@ export function Chat({
     return onConciergeJump(showSourceMessage);
   }, [concierge, showSourceMessage]);
 
+  // A Concierge chat opens the reply chain of a quote in place, and goes to
+  // the original where the server has none.
+  const chain = useChainFocus({
+    sessionId: mainSessionId ?? null,
+    scroller: scrollerEl,
+    fallback: showQuotedMessage,
+  });
+  chainFocusedRef.current = chain.focus !== null;
   const replyDraft = useReplyDraftState({
     chatId: mainSessionId ?? undefined,
     sessionId: mainSessionId ?? null,
-    jump: showQuotedMessage,
+    jump: concierge ? chain.open : showQuotedMessage,
+    onDismiss: chain.close,
     focusComposer: () => composerRef.current?.focus(),
   });
 
@@ -1118,6 +1132,7 @@ export function Chat({
   const hiddenReadsRef = useRef(new Set<string>());
   const markSessionRead = useCallback(
     async (id: string) => {
+      if (chainFocusedRef.current && id === mainSessionIdRef.current) return;
       // Marking the chat read first would erase the read mark the divider needs.
       const waiting = pendingMark();
       if (waiting) {
@@ -1269,6 +1284,7 @@ export function Chat({
           onSessionNotFoundRef.current?.(id);
           return;
         }
+        if (id === mainSessionIdRef.current) chain.onPage(page.messages);
         const newestMessages = page.messages;
         const restart = startsNewHistory(messagesRef.current.get(id) ?? [], {
           messages: newestMessages,
@@ -1330,7 +1346,15 @@ export function Chat({
         // refresh) can retry on the next trigger.
       }
     },
-    [shareMode, isReadVisibleSession, markSessionRead, noteOpened, pageSize, setOlderCursor],
+    [
+      shareMode,
+      isReadVisibleSession,
+      markSessionRead,
+      noteOpened,
+      pageSize,
+      setOlderCursor,
+      chain.onPage,
+    ],
   );
 
   // A new message reactivates every turn's steps. Fetch server truth once,
@@ -1368,11 +1392,12 @@ export function Chat({
         next.set(sid, mergeChatMessage(existing, message));
         return next;
       });
+      if (sid === mainSessionIdRef.current) chain.onLive(message);
       refreshArchivedSession(sid);
       void markSessionRead(sid);
       onSessionMessageRef.current?.({ sessionId: sid, turnId: message.turnId ?? null });
     },
-    [markSessionRead, refreshArchivedSession],
+    [markSessionRead, refreshArchivedSession, chain.onLive],
   );
   const handleSessionName = useCallback(
     (sid: string, event: z.infer<typeof sessionNameSchema>) => {
@@ -2812,7 +2837,11 @@ export function Chat({
                     />
                   )
                 ) : mainSessionId ? (
-                  <>
+                  // The chat under a reply chain in focus stays as it is, out of sight.
+                  <div
+                    className="contents"
+                    style={chain.focus ? { visibility: "hidden" } : undefined}
+                  >
                     {hasOlder(mainSessionId) ? (
                       <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
                     ) : null}
@@ -2854,7 +2883,7 @@ export function Chat({
                         />
                       </TaskChatContext.Provider>
                     </TaskLinksScope>
-                  </>
+                  </div>
                 ) : (
                   emptyState
                 )}
@@ -2919,13 +2948,15 @@ export function Chat({
                       // rail, has no width gate: it is reachable on a phone, where
                       // the 36px step is under the 44px floor.
                       "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
-                      !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
+                      !mainSessionId || isAtBottom || chain.focus
+                        ? "invisible opacity-0"
+                        : "visible opacity-100",
                     )}
                   />
                   <div className="pointer-events-auto relative mx-auto max-w-5xl">
                     {/* Sits on the composer's top-right corner, clear of the
                       centered jump to latest. */}
-                    {mainSessionId && (
+                    {mainSessionId && !chain.focus && (
                       <div className="pointer-events-none absolute right-0 bottom-full mb-2">
                         {concierge ? (
                           <ConciergeCardJump
@@ -3029,7 +3060,19 @@ export function Chat({
                   <div aria-hidden data-draft-center-spacer className="hidden flex-auto md:block" />
                 ) : null}
               </div>
-              {concierge && unread && mainSessionId ? (
+              {chain.focus ? (
+                <ChainFocusLayer
+                  focus={chain.focus}
+                  layerRef={chain.layer}
+                  floor={floorEl}
+                  identityBySession={identityBySession}
+                  identity={mainIdentity}
+                  actions={blockActions}
+                  onMore={chain.more}
+                  onClose={chain.close}
+                />
+              ) : null}
+              {concierge && unread && mainSessionId && !chain.focus ? (
                 // Under the floating header, on the transcript's top-right corner.
                 <div className="pointer-events-none absolute top-[calc(var(--rome-concierge-header-offset)+0.5rem)] right-3 z-10 md:right-6">
                   <ConciergeUnreadPill

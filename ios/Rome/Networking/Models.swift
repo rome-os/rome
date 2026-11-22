@@ -56,6 +56,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     /// Rome's status on a guardian message of its Chat: `working` or `failed`.
     /// It shows over the reaction. Nil when it has none, and from older instances.
     var status: String? = nil
+    var chatThreadId: String? = nil
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -71,7 +72,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, sender, inputState, reaction, status
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, sender, inputState, reaction, status, chatThreadId
     }
 }
 
@@ -106,6 +107,7 @@ extension ChatMessage {
         inputState = (try? container.decodeIfPresent(String.self, forKey: .inputState)) ?? nil
         reaction = (try? container.decodeIfPresent(String.self, forKey: .reaction)) ?? nil
         status = (try? container.decodeIfPresent(String.self, forKey: .status)) ?? nil
+        chatThreadId = try container.decodeIfPresent(String.self, forKey: .chatThreadId)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -121,6 +123,7 @@ extension ChatMessage {
         try container.encodeIfPresent(inputState, forKey: .inputState)
         try container.encodeIfPresent(reaction, forKey: .reaction)
         try container.encodeIfPresent(status, forKey: .status)
+        try container.encodeIfPresent(chatThreadId, forKey: .chatThreadId)
     }
 }
 
@@ -218,6 +221,13 @@ struct UpgradeStarted: Codable, Hashable, Sendable {
 struct BuildInfo: Codable, Hashable, Sendable {
     var version: String?
     var sha: String?
+}
+
+/// A window of one chain, in server order. The anchor stays the same while paging.
+struct ThreadPage: Codable, Sendable {
+    var messages: [ChatMessage]
+    var hasOlder: Bool
+    var hasNewer: Bool
 }
 
 /// `GET /chat/sessions/:id/messages?limit=&before=`.

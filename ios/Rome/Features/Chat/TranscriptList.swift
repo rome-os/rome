@@ -18,6 +18,8 @@ struct TranscriptList<Row: View>: View {
     var footer: AnyView? = nil
     /// Goes up when the newest rows must come into view (a tapped push).
     var latestRequest = 0
+    var thread: ThreadFocus? = nil
+    var onBlankTap: (() -> Void)? = nil
     @ViewBuilder let row: (TranscriptRow, TranscriptRow?) -> Row
 
     @State private var scroll = TranscriptScroll()
@@ -35,14 +37,23 @@ struct TranscriptList<Row: View>: View {
         GeometryReader { proxy in
             ChatCollection(
                 rows: rows,
-                hasOlder: store.hasOlder,
+                hasOlder: thread?.hasOlder ?? store.hasOlder,
                 footer: footer,
                 insets: proxy.safeAreaInsets,
                 alignTop: alignTop,
                 scroll: scroll,
                 selection: store.textSelection,
+                position: thread == nil ? store.focusPosition : nil,
+                thread: thread,
+                suspended: store.threadFocus != nil,
+                onBlankTap: onBlankTap,
                 row: row,
                 onNearTop: {
+                    if store.threadFocus != nil { return }
+                    if let thread {
+                        Task { await thread.load(.before) }
+                        return
+                    }
                     Task {
                         // A page of only hidden messages adds no row and no
                         // scroll, so nothing would ask for the next one.
@@ -66,7 +77,7 @@ struct TranscriptList<Row: View>: View {
         .onDisappear { store.textSelection.end() }
         .onChange(of: store.share.isSelecting) { if store.share.isSelecting { store.textSelection.end() } }
         .onChange(of: rows.last?.id) {
-            if let until = catchUpUntil, Date.now < until { scroll.toBottom() }
+            if store.threadFocus == nil, let until = catchUpUntil, Date.now < until { scroll.toBottom() }
         }
         // The swipe home, or Notification Center pulled down, starts on the
         // list and reads as a drag away from the bottom. Where the list stood
@@ -86,7 +97,7 @@ struct TranscriptList<Row: View>: View {
             scroll.reveal(row.id, atTop: row == .unreadDivider)
         }
         .onChange(of: store.pending.count) { old, new in
-            if new > old { scroll.toBottom() }
+            if store.threadFocus == nil, new > old { scroll.toBottom() }
         }
         .onChange(of: store.arrivals) {
             if !scroll.following { scroll.unseen += 1 }
@@ -100,19 +111,19 @@ struct TranscriptList<Row: View>: View {
         .onChange(of: composerFocused) { _, focused in
             // Brought up by a Reply, the composer leaves the list where it is.
             if focused, let repliedAt, Date.now.timeIntervalSince(repliedAt) < 1 { return }
-            if focused {
+            if focused, store.threadFocus == nil {
                 Task {
                     try? await Task.sleep(for: .milliseconds(300))
-                    scroll.toBottom()
+                    if store.threadFocus == nil { scroll.toBottom() }
                 }
             }
         }
         .overlay(alignment: .bottom) {
-            if BackToBottom.visible(far: scroll.far, unseen: scroll.unseen, following: scroll.following) {
+            if store.threadFocus == nil, BackToBottom.visible(far: scroll.far, unseen: scroll.unseen, following: scroll.following) {
                 // Outside the list's content, so a tap mid-glide reaches it.
                 Button {
                     transcriptScrollLog.notice("back-to-bottom tapped")
-                    scroll.toBottom()
+                    if store.threadFocus == nil { scroll.toBottom() }
                 } label: {
                     BackToBottomGlyph(dot: scroll.unseen > 0)
                 }
@@ -128,6 +139,7 @@ struct TranscriptList<Row: View>: View {
     }
 
     private func catchUp() {
+        guard store.threadFocus == nil else { return }
         catchUpUntil = .now + 5
         scroll.toBottom()
     }
@@ -311,6 +323,10 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
     let alignTop: Bool
     let scroll: TranscriptScroll
     let selection: TextSelection
+    let position: TranscriptFocusPosition?
+    let thread: ThreadFocus?
+    let suspended: Bool
+    let onBlankTap: (() -> Void)?
     let row: (TranscriptRow, TranscriptRow?) -> Row
     let onNearTop: () -> Void
     let onDividerAbove: (Bool) -> Void
@@ -336,12 +352,23 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
         coordinator.onDividerAbove = onDividerAbove
         coordinator.scroll = scroll
         coordinator.selection = selection
+        coordinator.suspended = suspended
+        view.accessibilityElementsHidden = suspended
+        view.isUserInteractionEnabled = !suspended
+        coordinator.onBlankTap = onBlankTap
+        coordinator.focusHitAreas = context.environment.threadFocusHitAreas
+        coordinator.onNearBottom = thread.map { thread in { Task { await thread.load(.after) } } }
+        position?.frame = { [weak coordinator] id in coordinator?.windowFrame(id) }
         scroll.target = coordinator
         PerfProbe.count("listUpdate")
         coordinator.cells.environment = context.environment
         coordinator.cells.footer = footer
         coordinator.set(insets: insets)
         coordinator.apply(rows: rows, hasOlder: hasOlder, footer: footer != nil)
+        if let thread {
+            coordinator.positionThread(thread, rows: rows)
+            DispatchQueue.main.async { [weak coordinator] in coordinator?.positionThread(thread, rows: rows) }
+        }
     }
 }
 
@@ -350,6 +377,13 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
 private final class TranscriptCoordinator<RowView: View>: NSObject, UICollectionViewDelegate, UIGestureRecognizerDelegate, ChatLayoutDelegate, TranscriptScrollTarget {
     var row: (TranscriptRow, TranscriptRow?) -> RowView
     var onNearTop: () -> Void = {}
+    var onNearBottom: (() -> Void)?
+    var onBlankTap: (() -> Void)?
+    var focusHitAreas: ThreadFocusHitAreas?
+    var suspended = false
+    private var positionedThread = false
+    private var positioningThread = false
+    private var askedNewer: ContinuousClock.Instant?
     var onDividerAbove: (Bool) -> Void = { _ in }
     weak var scroll: TranscriptScroll?
     /// The transcript's select mode, which a scroll or a tap outside the message ends.
@@ -511,7 +545,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         let first = items.isEmpty
         let held = items
         // Read before the update: rows going in move the bottom away.
-        let onBottom = (scroll?.following ?? true) && (scroll?.atBottom ?? true)
+        let onBottom = !suspended && (scroll?.following ?? true) && (scroll?.atBottom ?? true)
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
         snapshot.appendSections([0])
         snapshot.appendItems(next)
@@ -678,6 +712,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     func set(insets: EdgeInsets) {
         // A little air between the newest row and the composer.
         let next = UIEdgeInsets(top: insets.top, left: 0, bottom: insets.bottom + 14, right: 0)
+        guard !suspended else { return }
         guard next != screenInsets, let view else { return }
         screenInsets = next
         // Keep what the guardian sees above the bar that moved: the newest
@@ -707,12 +742,19 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     private func readScroll() {
-        guard let view, let scroll else { return }
+        guard let view, let scroll, !suspended, !positioningThread else { return }
         let height = view.bounds.height - screenInsets.top - screenInsets.bottom
         let distance = BackToBottom.distance(contentHeight: view.contentSize.height, offset: view.contentOffset.y, viewHeight: view.bounds.height, bottomInset: view.contentInset.bottom)
         scroll.set(atBottom: distance < 7, far: BackToBottom.shows(scroll.far, distance: distance, height: height))
         let fromTop = view.contentOffset.y + view.contentInset.top
         if items.first == ItemID.older, height > 0, !scrollingToTop, fromTop < height * 4 { askOlder() }
+        if distance < height, let onNearBottom {
+            let now = ContinuousClock.now
+            if askedNewer == nil || now - askedNewer! > .seconds(1) {
+                askedNewer = now
+                onNearBottom()
+            }
+        }
         readDivider(in: view)
     }
 
@@ -854,6 +896,53 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         return min(max(target, low), high)
     }
 
+    func windowFrame(_ id: String) -> CGRect? {
+        guard let view, let index = items.firstIndex(of: id),
+              let attributes = layout.layoutAttributesForItem(at: IndexPath(item: index, section: 0)) else { return nil }
+        return view.convert(attributes.frame, to: nil)
+    }
+
+    func positionThread(_ thread: ThreadFocus, rows: [TranscriptRow]) {
+        guard !positionedThread, let view, view.bounds.height > 0,
+              let index = rows.firstIndex(where: { $0.id == thread.row }),
+              let item = items.firstIndex(of: thread.row) else { return }
+        positionedThread = true
+        positioningThread = true
+        view.alpha = 0
+        scroll?.set(following: false)
+        let gap = TranscriptSpacing.top(rows[index], after: index > 0 ? rows[index - 1] : nil)
+        let y = thread.bubbleY.map { view.convert(CGPoint(x: 0, y: $0), from: nil).y - gap } ?? screenInsets.top
+        // Insets allow an anchor near either end of a short chain to keep
+        // its window position without moving the mounted main list.
+        view.contentInset.top = max(screenInsets.top, view.bounds.height)
+        view.contentInset.bottom = max(screenInsets.bottom, view.bounds.height)
+        view.layoutIfNeeded()
+        layout.restoreContentOffset(with: ChatLayoutPositionSnapshot(indexPath: IndexPath(item: item, section: 0), edge: .top, offset: y - view.contentInset.top))
+        view.layoutIfNeeded()
+        // The restore measures self-sizing rows. Correct any residual drift
+        // before the first visible frame, after those measurements.
+        if let frame = layout.layoutAttributesForItem(at: IndexPath(item: item, section: 0))?.frame {
+            let offset = frame.minY - y
+            view.contentInset.top = max(screenInsets.top, -offset)
+            view.contentInset.bottom = max(screenInsets.bottom, offset + view.bounds.height - view.contentSize.height)
+            view.contentOffset.y = offset
+        }
+        view.layoutIfNeeded()
+        view.alpha = 1
+        if !UIAccessibility.isReduceMotionEnabled {
+            let cells = view.visibleCells.filter { view.indexPath(for: $0)?.item != item }
+            for cell in cells {
+                cell.alpha = 0
+                cell.transform = CGAffineTransform(translationX: 0, y: cell.frame.midY < view.contentOffset.y + y ? 12 : -12)
+            }
+            UIViewPropertyAnimator(duration: 0.25, curve: .easeOut) {
+                for cell in cells { cell.alpha = 1; cell.transform = .identity }
+            }.startAnimation()
+        }
+        positioningThread = false
+        readScroll()
+    }
+
     // MARK: Heights
 
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
@@ -865,11 +954,22 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
 
     /// A tap on the transcript outside the message in select mode ends it.
     @objc private func tappedOutsideSelection() {
+        if selection?.isActive != true { onBlankTap?() }
         selection?.end()
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard selection?.isActive == true else { return false }
+        if selection?.isActive != true {
+            guard onBlankTap != nil, let view else { return false }
+            if focusHitAreas?.contains(touch.location(in: view.window)) == true { return false }
+            if let path = view.indexPathForItem(at: touch.location(in: view)), let id = items[safe: path.item], let row = boxes[id]?.row {
+                switch row {
+                case .userText, .agentText, .separator: return true
+                default: return false
+                }
+            }
+            return true
+        }
         // A tap in the text itself moves the selection, and its handles and
         // links are the text view's.
         var view = touch.view

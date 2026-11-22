@@ -67,7 +67,7 @@ struct ChatScreen: View {
                     // Inside the composer's inset, so the last message rests above it too.
                     UpdatedNotice(agentName: workspace.agentName, visible: visible)
                     if store.showsQuoteBar {
-                        QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
+                        QuoteBar(message: store.quotedMessage) { store.dismissQuote() }
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                     if ConciergeStarters.visible(loaded: store.readOnce, empty: store.rowsEmpty) {
@@ -158,7 +158,8 @@ struct ChatScreen: View {
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
                 .onTapGesture { composerFocused = false }
-                .overlay(alignment: .top) { UnreadPillButton(store: store) }
+                .overlay(alignment: .top) { if store.threadFocus == nil { UnreadPillButton(store: store) } }
+                .threadFocus(store: store, tasks: workspace.taskChats, composerFocused: composerFocused)
                 .onAppear { store.arrived() }
                 .onChange(of: store.arrivals) { store.arrived() }
             }
@@ -198,7 +199,7 @@ private struct ChatHeaderBar: View {
 
     var body: some View {
         // The main Chat is only shared: no Rename, Archive or Delete.
-        ChatHeader(name: workspace.agentDisplayName, activity: workspace.mainChatActivity, announces: model.visibleChat == conciergeChatID, onMenu: onMenu, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID), tasks: workspace.taskList(forChat: conciergeChatID))
+        ChatHeader(name: workspace.agentDisplayName, activity: workspace.mainChatActivity, announces: model.visibleChat == conciergeChatID, onMenu: onMenu, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID), tasks: workspace.taskList(forChat: conciergeChatID), onCloseThread: store.threadFocus == nil ? nil : { store.closeThread() })
             .shareModeHeader(store.share)
     }
 }
@@ -289,9 +290,10 @@ struct ConciergeRow: View, Equatable {
     /// The row's message is the tinted one: its bubble or card draws the
     /// tint behind its own shape, never behind the whole row.
     var tinted = false
+    var quotesInteractive = true
 
     nonisolated static func == (lhs: ConciergeRow, rhs: ConciergeRow) -> Bool {
-        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.tinted == rhs.tinted
+        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.tinted == rhs.tinted && lhs.quotesInteractive == rhs.quotesInteractive
     }
 
     @Environment(\.openTaskChat) private var openTaskChat
@@ -300,10 +302,11 @@ struct ConciergeRow: View, Equatable {
         openTaskChat?.run((chatId: chatId, title: title))
     }
 
-    /// The tap of the quote a reply carries: it goes to the original.
+    /// A quote opens this message's chain. Quotes inside the chain stay plain.
     private func quoteAction() -> (() -> Void)? {
         let actions = store.actions
-        return info.quote.map { quote in { actions.quote(original: quote.messageId) } }
+        guard quotesInteractive, let from = row.ownMessageId else { return nil }
+        return info.quote.map { quote in { [rowID = row.id] in actions.quote(original: quote.messageId, from: from, row: rowID) } }
     }
 
     /// The message's time, and Reply where the message takes one
@@ -396,6 +399,7 @@ struct ChatHeader: View {
     /// The chat's task list, for the dot on Tasks while a task needs the
     /// guardian; nil for a blank topic chat, which has none yet.
     var tasks: TaskListStore? = nil
+    var onCloseThread: (() -> Void)? = nil
     /// A topic chat's options in the "…" menu; the main Chat has none.
     var onRename: (() -> Void)? = nil
     /// Whether the topic chat is pinned, for Pin or Unpin.
@@ -418,7 +422,15 @@ struct ChatHeader: View {
             // As wide as the capsule on the right, so the identity stays in the middle.
             .frame(width: ChatHeaderButtons.width, alignment: .leading)
             ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces, zoomSource: zoomSource, onTap: { onAgent(nil) }) }
+            if let onCloseThread {
+                GlassCircleButton(accessibilityLabel: "Close reply chain", action: onCloseThread) {
+                    Image(systemName: "xmark").romeFont(15, .semibold)
+                }
+                .accessibilityIdentifier("close-reply-chain")
+                .frame(width: ChatHeaderButtons.width, alignment: .trailing)
+            } else {
             ChatHeaderButtons(title: menuTitle ?? "", tasks: tasks, onAgent: onAgent, onRename: onRename, pinned: pinned, onPin: onPin, onArchive: onArchive, onUnarchive: onUnarchive, onDelete: onDelete)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)

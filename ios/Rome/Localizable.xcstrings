@@ -1297,6 +1297,16 @@
         }
       }
     },
+    "Close reply chain" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭回复串"
+          }
+        }
+      }
+    },
     "Closed: the task ended" : {
       "localizations" : {
         "zh-Hans" : {

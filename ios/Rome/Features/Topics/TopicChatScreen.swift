@@ -107,7 +107,7 @@ struct TopicChatScreen: View {
                 // Inside the composer's inset, so the last message rests above it too.
                 UpdatedNotice(agentName: workspace.agentName, visible: chatId.map { visibleChat == $0 } ?? inFront)
                 if !archived, let store, store.showsQuoteBar {
-                    QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
+                    QuoteBar(message: store.quotedMessage) { store.dismissQuote() }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 if startFailed && store == nil {
@@ -150,6 +150,7 @@ struct TopicChatScreen: View {
     /// Read only while it is the chat on screen: never under an instance
     /// page's sheet, the Agent page or the drawer.
     private func markRead(_ store: TranscriptStore) {
+        guard store.threadFocus == nil else { return }
         guard visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId) else { return }
         // Before the read: the open reads where the unread messages start.
         store.beginOpen()
@@ -166,7 +167,8 @@ struct TopicChatScreen: View {
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
             .onTapGesture { composerFocused = false }
-            .overlay(alignment: .top) { UnreadPillButton(store: store) }
+            .overlay(alignment: .top) { if store.threadFocus == nil { UnreadPillButton(store: store) } }
+            .threadFocus(store: store, tasks: workspace.taskChats, composerFocused: composerFocused)
             .onAppear { markRead(store) }
             .onChange(of: store.arrivals) { markRead(store) }
             // Back from under a sheet: what arrived meanwhile is read now.
@@ -318,6 +320,10 @@ private struct TopicChatHeader: View {
             onAgent: onAgent,
             zoomSource: AgentZoom.source(chatId ?? draftKey),
             tasks: chatId.flatMap { workspace.taskList(forChat: $0) },
+            onCloseThread: chatId.flatMap { id -> (() -> Void)? in
+                let store = workspace.topicStore(id)
+                return store.threadFocus == nil ? nil : { store.closeThread() }
+            },
             // A blank chat has nothing to rename, pin, archive or delete yet.
             onRename: menu.has(.rename) ? { onRename(title) } : nil,
             pinned: menu.has(.pin) && (chatId.map(workspace.topics.isPinned) ?? false),
