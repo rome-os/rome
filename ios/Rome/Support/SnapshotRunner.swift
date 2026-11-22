@@ -276,6 +276,11 @@ enum SnapshotRunner {
                 workspace.archivedTopics.refresh()
                 try? await Task.sleep(for: .seconds(0.6))
                 await capture("05h-drawer-archived", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .drawer(true) }
+                // The demo's own archived chats only, so the sheet shows its
+                // groups rather than ten chats of today.
+                for id in moved { await workspace.restoreTopic(id) }
+                workspace.archivedTopics.refresh()
+                try? await Task.sleep(for: .seconds(0.6))
                 await capture("05i-archived-sheet", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .archivedSheet(true) }
                 model.debugCommand = .archivedSheet(false)
                 try? await Task.sleep(for: .seconds(0.3))
@@ -283,7 +288,6 @@ enum SnapshotRunner {
                 try? await Task.sleep(for: .seconds(0.4))
                 await capture("24b-topic-archived", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-archived-car")) }
                 model.debugCommand = .section(.chat)
-                for id in moved { await workspace.restoreTopic(id) }
                 try? await Task.sleep(for: .seconds(0.6))
             }
             await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.tasks) }

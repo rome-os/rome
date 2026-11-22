@@ -158,6 +158,20 @@ struct PressScaleStyle: ButtonStyle {
     }
 }
 
+/// What covers the screen behind a half-height sheet: a blur, then a dim, so
+/// no text reads around the sheet. It takes no touches; the sheet's own
+/// dismissal still gets a tap above it.
+struct SheetScrim: View {
+    var body: some View {
+        Rectangle()
+            .fill(.thinMaterial)
+            .overlay(Palette.sheetScrim)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
 /// A row press: the background darkens instead of the content scaling.
 struct RowPressStyle: ButtonStyle {
     var pressed: Color = Palette.pressed

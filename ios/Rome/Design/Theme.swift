@@ -34,6 +34,8 @@ enum Palette {
     static let glass = dynamic(rgba: (0xFFFFFF, 0.78), (0x1E1A17, 0.8))
     static let grabber = dynamic(rgba: (0x1A130F, 0.18), (0xFFFFFF, 0.22))
     static let scrim = dynamic(rgba: (0x1A130F, 0.25), (0x000000, 0.55))
+    /// The dim over the blur behind a half-height sheet (`SheetScrim`).
+    static let sheetScrim = dynamic(rgba: (0x1A130F, 0.18), (0x000000, 0.35))
     /// The page pushed aside by the open drawer: a step above the page,
     /// below the agent bubble in dark.
     static let drawerPage = dynamic(0xE4DED4, 0x151210)

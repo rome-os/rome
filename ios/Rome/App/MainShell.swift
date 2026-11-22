@@ -169,6 +169,15 @@ struct MainShell: View {
                 .frame(width: geometry.size.width - column, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
             }
         }
+        // The Archived sheet stops at half height and floats on iOS 26, and
+        // the system dims nothing behind a sheet there: the drawer and the
+        // chat would read clearly around it.
+        .overlay {
+            ZStack {
+                if showArchived { SheetScrim().transition(.opacity) }
+            }
+            .animation(.easeOut(duration: 0.25), value: showArchived)
+        }
         .fullScreenCover(item: $agentPage, onDismiss: {
             // Settings is a sheet of this view, so it waits for the cover to be gone.
             guard openUsageAfterCover else { return }
@@ -241,7 +250,7 @@ struct MainShell: View {
             if archivedPreview {
                 // A sheet at medium height, over the open drawer.
                 ZStack(alignment: .bottom) {
-                    Color.black.opacity(0.4).ignoresSafeArea()
+                    SheetScrim()
                     archivedSheet
                         .frame(height: 420)
                         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
