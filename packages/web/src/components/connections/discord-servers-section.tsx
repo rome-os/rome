@@ -41,8 +41,7 @@ async function readError(response: Response): Promise<string | null> {
   return typeof payload?.error === "string" ? payload.error : null;
 }
 
-/** Discord's page that adds Rome's bot to a server and links the guardian's
- *  Discord account. Rejects with the server's words when it gives none. */
+/** Discord's page that adds Rome's bot to a server and connects this server to Rome. Rejects with the server's words when it gives none. */
 async function discordInstallLink(): Promise<string> {
   const response = await fetch(`${BASE}/install-link`, { method: "POST" });
   if (!response.ok) throw new Error((await readError(response)) ?? "");
@@ -135,7 +134,7 @@ function RowMenu({
 
 /**
  * The connected view of Rome's Discord bot: the servers it was added to, one
- * tile each with Remove in its menu, the Discord account Rome listens to, and
+ * tile each with Remove in its menu, the people who chose this Rome for DMs, and
  * Disconnect at the bottom. Adding happens on Discord's own page, in a new
  * tab; the list reads again when the guardian comes back to this one.
  */
@@ -236,7 +235,7 @@ export function DiscordServersSection({
       onSelect={() => void remove(server)}
     />
   );
-  // Whom Rome listens to, then how to reach it.
+  // DM destinations do not grant reply permission.
   const hint = [
     accountName && t("channels.discordApp.linkedAs", { name: accountName }),
     t("channels.discordApp.howTo"),
