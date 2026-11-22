@@ -123,7 +123,7 @@ Observations expire after 15 seconds, and unknown outcomes must never be replaye
 Images travel as raw bytes. Audit records omit image and input contents.
 Real AppKit checks and isolated input checks do not qualify complete tasks,
 multiple applications, both hosts or distribution permissions. See the
-[full action contract](../../docs/rome-node.md#native-computer-use-on-macos).
+[full action contract](../rome-node-core/README.md#shared-macos-computer-use).
 
 Copy a file to or from a device:
 

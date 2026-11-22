@@ -14,9 +14,17 @@ function filesUnder(dir: string): string[] {
 }
 
 describe("the Mac app without a VM", () => {
-  it("bundles no Lima payload and skips no signature for one", () => {
+  it("bundles no Lima payload and only skips re-signing the pre-signed computer-use helper", () => {
     const config = readFileSync(join(packageDir, "electron-builder.yml"), "utf8");
-    expect(config).not.toMatch(/lima|signIgnore|beforePack|afterPack/i);
+    expect(config).not.toMatch(/lima|beforePack|afterPack/i);
+    expect(config.match(/signIgnore/gi)).toHaveLength(1);
+    const signIgnoreBlock = config.match(/^  signIgnore:\n((?:    - .*\n)+)/m);
+    expect(
+      signIgnoreBlock?.[1]
+        .trim()
+        .split("\n")
+        .map((line) => line.trim()),
+    ).toEqual(["- '/Contents/Resources/native/Rome Computer Use\\.app(?:/|$)'"]);
   });
 
   it("has no build script for a VM image", () => {

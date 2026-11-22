@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "@rstest/core";
 import { COMPUTER_USE_ACTIONS } from "@rome-os/node-core/computer-use";
 import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { hostname, platform, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -134,7 +134,7 @@ describe("connect authorization modes", () => {
   it("authorizes with a device code, runs system.info, reuses credentials, and stops on revocation", async () => {
     const f = await fixture();
     const args = ["connect", "--device-code", "--name", "Remote Linux", "--cloud", f.cloudUrl];
-    const first = f.run(args);
+    const first = f.run(args, { ROME_COMPUTER_USE_APP: join(f.root, "absent-helper.app") });
     await until(() => first.output().includes("Connection: online"));
     expect(first.output()).toContain(`${f.cloudUrl}/device\n`);
     expect(first.output()).toContain("User code: ABCD-1234");
@@ -175,14 +175,7 @@ describe("connect authorization modes", () => {
         ok: true,
         result: {
           name: "Remote Linux",
-          actions: [
-            "system.info",
-            "exec",
-            "fs.list",
-            ...(process.platform === "darwin" && process.arch === "arm64"
-              ? COMPUTER_USE_ACTIONS
-              : []),
-          ],
+          actions: ["system.info", "exec", "fs.list"],
         },
       },
     });
@@ -348,4 +341,42 @@ describe("connect authorization modes", () => {
     f.socket()!.close(4001);
     expect(await child.exited).toBe(1);
   }, 10000);
+
+  it.skipIf(!(process.platform === "darwin" && process.arch === "arm64"))(
+    "advertises computer-use actions on Apple Silicon when the helper app exists",
+    async () => {
+      const f = await fixture();
+      const helperApp = join(f.root, "Rome Computer Use.app");
+      await mkdir(helperApp);
+      const child = f.run(
+        ["connect", "--device-code", "--name", "Apple Silicon Mac", "--cloud", f.cloudUrl],
+        { ROME_COMPUTER_USE_APP: helperApp },
+      );
+      await until(() => child.output().includes("Connection: online"));
+      const reply = new Promise<unknown>((resolve) =>
+        f.socket()!.once("message", (data) => resolve(JSON.parse(data.toString()))),
+      );
+      f.socket()!.send(
+        JSON.stringify({
+          id: "info",
+          from: "caller",
+          payload: { type: "request", action: "system.info", args: {} },
+        }),
+      );
+      expect(await reply).toMatchObject({
+        id: "info",
+        to: "caller",
+        payload: {
+          ok: true,
+          result: {
+            name: "Apple Silicon Mac",
+            actions: ["system.info", "exec", "fs.list", ...COMPUTER_USE_ACTIONS],
+          },
+        },
+      });
+      f.socket()!.close(4001);
+      expect(await child.exited).toBe(1);
+    },
+    10000,
+  );
 });

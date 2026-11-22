@@ -342,6 +342,10 @@ async function main(): Promise<void> {
         "Remote execution (Computer Use) is disabled in web-config.json; connecting in limited mode (computer_use_off).\n",
       );
     }
+    const computerUse =
+      executionEnabled && process.platform === "darwin" && process.arch === "arm64"
+        ? (await import("@rome-os/node-core/computer-use")).createComputerUseHost()
+        : undefined;
     // On a terminal, the status screen replaces the Connection lines once sign-in is over.
     const screen = process.stdout.isTTY ? await loadConnectUi() : undefined;
     let ui: ConnectUi | undefined;
@@ -374,7 +378,9 @@ async function main(): Promise<void> {
             process.stderr.write(
               !executionEnabled
                 ? "Remote execution is disabled in web-config.json; this device will connect in limited mode and refuse remote actions.\n"
-                : "While connect is running, Rome instances in your account can execute programs and read or change files as your OS user.\n",
+                : computerUse
+                  ? "While connect is running, Rome instances in your account can execute programs, read or change files, and control background windows (when macOS permissions are granted) as your OS user.\n"
+                  : "While connect is running, Rome instances in your account can execute programs and read or change files as your OS user.\n",
             );
           else if (event.type === "retrying")
             process.stderr.write("Rome Cloud is unavailable; keeping credentials and retrying.\n");
@@ -391,7 +397,7 @@ async function main(): Promise<void> {
         },
       };
       return executionEnabled
-        ? connectHost({ ...hostOptions, audit })
+        ? connectHost({ ...hostOptions, audit, ...(computerUse ? { computerUse } : {}) })
         : connectLimitedHost(hostOptions);
     }).finally(() => {
       ui?.stop();

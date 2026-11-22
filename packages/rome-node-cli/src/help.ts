@@ -39,9 +39,9 @@ These commands run locally on an Apple Silicon Mac. They need no Cloud credentia
 and do not start the caller daemon.
 
   status       Start or contact the signed helper and report its permissions.
-  permissions  Open the helper's permission panel. Grant Accessibility, Screen
-               Recording and required Input Monitoring access. Opening the panel does
-               not grant either permission.
+  permissions  Open the helper's permission panel. Grant Accessibility and Screen
+               Recording access. Input Monitoring is not required. Opening the panel
+               does not grant either permission.
 
 The package contains the native helper. No compiler or runtime download is needed.
 ROME_COMPUTER_USE_APP can name a development build of Rome Computer Use.app.
@@ -264,20 +264,23 @@ Examples below use POSIX caller-shell quoting:
 Native computer use on an Apple Silicon Mac:
   computer.status   Read helper permissions and supported input actions.
   computer.windows  List supported windows and opaque windowRef values.
-  computer.bind     Start desktop control with {}; no window selection is required.
+  computer.bind     Bind a listed {windowRef} for background window control.
   computer.observe  Read {sessionId}; returns observationId, stateVersion, elements.
   computer.act      Use a fresh observation and a unique actionId to dispatch input.
   computer.verify   Independently verify {sessionId, actionId}.
   computer.cancel   Stop {sessionId}; a stopped session cannot resume.
 
-Desktop actions are move, click, drag, scroll, key, type, press and setValue.
-Coordinates are pixels in the latest desktop screenshot. type inserts Unicode text
-without using the clipboard; it does not emulate IME composition. An optional windowRef
-selects background TextEdit AX setValue with the existing 180 UTF-16 limit.
+Background window actions are move, click, drag, scroll, key, type, press, setValue,
+selectText and performAction. Omitting windowRef returns window_selection_required.
+A non-key window in the foreground app can bind in window_semantics mode (ref-only AX
+click, press, setValue and selectText). Coordinates are pixels in the latest window
+image; click and scroll can also target an element ref without coordinates. type
+inserts Unicode text without using the clipboard and does not emulate IME composition.
 Capability lists describe implemented routes, not acceptance for every application.
 
-  rome-node device run <device-id> computer.bind
-  rome-node device run <device-id> computer.observe --args '{"sessionId":"<session-id>"}'
+  rome-node device run <device-id> computer.windows
+  rome-node device run <device-id> computer.bind --args '{"windowRef":"<listed-window-ref>"}'
+  rome-node device run <device-id> computer.observe --args '{"sessionId":"<session-id>","full":true}'
   rome-node device run <device-id> computer.act --args '{"sessionId":"<session-id>","actionId":"unique-action-id","observationId":"<observation-id>","stateVersion":1,"action":{"type":"click","x":100,"y":200}}'
   rome-node device run <device-id> computer.verify --args '{"sessionId":"<session-id>","actionId":"unique-action-id"}'
   rome-node device run <device-id> computer.observe --args '{"sessionId":"<session-id>","screenshot":true}' --output window.png
@@ -286,7 +289,7 @@ Capability lists describe implemented routes, not acceptance for every applicati
 Use the returned stateVersion and viewport, not the example's placeholder values.
 Observations expire after 15 seconds. A dispatched action is not a verified effect.
 An act may include expect:{identifier,title,role,value,contains} as an AX postcondition.
-Generic input without a checkable postcondition remains unverified.
+Generic input without a checkable postcondition remains unverifiable.
 An unknown outcome must never be replayed, including after refreshing the observation.
 Window images require --output and travel as raw bytes. JSON metadata carries
 their byteLength and sha256. Screenshots and input text do not enter the host audit.

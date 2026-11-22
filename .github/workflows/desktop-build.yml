@@ -232,6 +232,8 @@ jobs:
             helper_team="$(printf '%s\n' "$helper_signature" | sed -n 's/^TeamIdentifier=//p')"
             app_team="$(codesign --display --verbose=4 "$app" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
             test -n "$helper_team" && test "$helper_team" = "$app_team"
+            helper_entitlements="$(codesign --display --entitlements - --xml "$helper" 2>/dev/null)"
+            test -z "$helper_entitlements"
             codesign --verify --deep --strict --verbose=2 "$app"
             spctl --assess --type execute --verbose "$app"
             xcrun stapler validate "$app"

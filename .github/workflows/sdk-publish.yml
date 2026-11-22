@@ -46,7 +46,9 @@ jobs:
     name: Resolve publish targets
     runs-on: ubuntu-latest
     outputs:
-      paths: ${{ steps.compute.outputs.paths }}
+      publish_node_core: ${{ steps.compute.outputs.publish_node_core }}
+      other_paths: ${{ steps.compute.outputs.other_paths }}
+      has_other_paths: ${{ steps.compute.outputs.has_other_paths }}
     steps:
       - id: compute
         env:
@@ -55,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${CALLER_PATHS:-}" ]; then
-            echo "paths=$CALLER_PATHS" >> "$GITHUB_OUTPUT"
+            resolved="$CALLER_PATHS"
           elif [ "${PACKAGE:-}" = "all" ]; then
             # Every package in release-please-config.json, each with a
             # configured npm Trusted Publisher. Keep the two lists in step: a
@@ -63,26 +65,79 @@ jobs:
             # dispatch, and one missing from here is reachable only by name.
             # Automatic releases ignore this and take exact paths from
             # release-please.
-            echo 'paths=["packages/app-runtime-sdk","packages/app-web-sdk","packages/ui","packages/lib","packages/web-content","packages/rome-node-cli","packages/rome-node-core"]' >> "$GITHUB_OUTPUT"
+            resolved='["packages/app-runtime-sdk","packages/app-web-sdk","packages/ui","packages/lib","packages/web-content","packages/rome-node-cli","packages/rome-node-core"]'
           elif [ -n "${PACKAGE:-}" ]; then
-            echo "paths=[\"$PACKAGE\"]" >> "$GITHUB_OUTPUT"
+            resolved="$(jq -cn --arg pkg "$PACKAGE" '[$pkg]')"
           else
             echo "No npm publish targets provided" >&2
             exit 1
           fi
+          publish_node_core="$(jq -rn --argjson paths "$resolved" '$paths | any(. == "packages/rome-node-core")')"
+          other_paths="$(jq -cn --argjson paths "$resolved" '$paths | map(select(. != "packages/rome-node-core"))')"
+          has_other_paths="$(jq -rn --argjson paths "$other_paths" '($paths | length) > 0')"
+          echo "publish_node_core=${publish_node_core}" >> "$GITHUB_OUTPUT"
+          echo "other_paths=${other_paths}" >> "$GITHUB_OUTPUT"
+          echo "has_other_paths=${has_other_paths}" >> "$GITHUB_OUTPUT"
+
+  # Publish @rome-os/node-core first so dependent packages (especially @rome-os/node)
+  # never publish against a version whose macOS helper build/notarization failed.
+  publish-node-core:
+    name: Publish packages/rome-node-core
+    needs: prepare
+    if: ${{ needs.prepare.outputs.publish_node_core == 'true' }}
+    runs-on: macos-15
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm --dir packages/rome-node-core run build
+
+      - name: Build signed and notarized computer-use helper
+        uses: ./.github/actions/build-computer-use
+        with:
+          sign: "true"
+          notarize: "true"
+          certificate: ${{ secrets.CSC_LINK }}
+          certificate-password: ${{ secrets.CSC_KEY_PASSWORD }}
+          api-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          api-issuer: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          api-key: ${{ secrets.APP_STORE_CONNECT_P8_CONTENT }}
+
+      - name: Publish to npm
+        working-directory: packages/rome-node-core
+        run: pnpm publish --access public --no-git-checks${{ inputs.dry_run && ' --dry-run' || '' }}
 
   publish:
     name: Publish ${{ matrix.path }}
-    needs: prepare
-    runs-on: ${{ matrix.path == 'packages/rome-node-core' && 'macos-15' || 'ubuntu-latest' }}
-    timeout-minutes: 35
+    needs: [prepare, publish-node-core]
+    if: ${{ !cancelled() && needs.prepare.outputs.has_other_paths == 'true' && (needs.publish-node-core.result == 'success' || needs.publish-node-core.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
     strategy:
       fail-fast: false
       matrix:
-        path: ${{ fromJSON(needs.prepare.outputs.paths) }}
+        path: ${{ fromJSON(needs.prepare.outputs.other_paths) }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -102,18 +157,6 @@ jobs:
 
       - name: Build
         run: pnpm --dir "${{ matrix.path }}" run build
-
-      - name: Build signed and notarized computer-use helper
-        if: matrix.path == 'packages/rome-node-core'
-        uses: ./.github/actions/build-computer-use
-        with:
-          sign: "true"
-          notarize: "true"
-          certificate: ${{ secrets.CSC_LINK }}
-          certificate-password: ${{ secrets.CSC_KEY_PASSWORD }}
-          api-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
-          api-issuer: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-          api-key: ${{ secrets.APP_STORE_CONNECT_P8_CONTENT }}
 
       # pnpm 11 publishes natively, rewrites workspace protocol dependencies
       # in the packed manifest, and supports npm OIDC Trusted Publisher auth.

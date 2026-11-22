@@ -49,6 +49,10 @@ mac:
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # Keep the pre-signed helper's entitlement-free signature intact instead of
+  # re-signing it with Electron's inherited entitlements.
+  signIgnore:
+    - '/Contents/Resources/native/Rome Computer Use\.app(?:/|$)'
   category: public.app-category.productivity
   extendInfo:
     # Programs Rome runs on this Mac as a device count as the app's own
