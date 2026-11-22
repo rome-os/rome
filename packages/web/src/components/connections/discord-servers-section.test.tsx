@@ -51,13 +51,17 @@ async function openMenuOf(name: string) {
 }
 
 describe("the servers Rome's Discord bot was added to", () => {
-  it("lists each server and the guardian's account", async () => {
+  it("lists servers and the people who enabled direct messages", async () => {
     answering({
       "GET /api/connections/discord-app/servers": () => Response.json(LISTED),
     });
     section();
     expect(await screen.findByText("Ray's Lab")).toBeTruthy();
-    expect(screen.getByText("Linked as Ray · DM Rome, or @Rome in a channel.")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Direct messages enabled for Ray · @Rome in a channel. Run /rome there to enable direct messages.",
+      ),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add to server" })).toBeTruthy();
   });
 

@@ -2363,13 +2363,6 @@ async function main() {
         const relay = await settingsRepo.get<Partial<RelayDrainSetting>>(RELAY_SETTING_KEY);
         return typeof relay?.depositUrl === "string" && relay.depositUrl ? relay.depositUrl : null;
       },
-      // People decides who an account is; each one the Worker forwards the
-      // guardian bound while signed in to this Rome's Rome Cloud account.
-      linkGuardian: async (userId) => {
-        // One more of the guardian's accounts: never re-points another, such
-        // as a second bound account or the guardian's own bot's link.
-        await linkGuardianToAccount(peopleRepo, "discord", userId, { addOnly: true });
-      },
       nameOf: async (userId) =>
         (await peopleRepo.byAccount({ platform: "discord", id: userId }))?.displayName,
     }),

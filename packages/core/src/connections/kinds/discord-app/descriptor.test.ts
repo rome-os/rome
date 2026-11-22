@@ -4,7 +4,7 @@ import { createDiscordAppDescriptor, makeDiscordAppSetup } from "./descriptor.js
 import type { DiscordAppCloud } from "./worker.js";
 import { DiscordAppRefused } from "./worker.js";
 
-const people = { linkGuardian: async () => {}, nameOf: async () => undefined };
+const people = { nameOf: async () => undefined };
 
 function cloud(over: Partial<DiscordAppCloud> = {}): DiscordAppCloud {
   return {

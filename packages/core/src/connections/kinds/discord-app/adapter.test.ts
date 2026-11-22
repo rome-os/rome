@@ -15,7 +15,7 @@ function deposit(over: Partial<DiscordAppDeposit> = {}): DiscordAppDeposit {
     channelId: "444444444444444444",
     serverName: "",
     channelName: "Direct message",
-    author: { id: GUARDIAN, username: "ray", globalName: "Ray" },
+    sender: { id: GUARDIAN, username: "ray", globalName: "Ray" },
     content: "hello",
     ts: "2026-11-20T10:00:00.000Z",
     ...over,
@@ -27,7 +27,7 @@ function frame(body: unknown, key = KEY) {
   return { bytes, signature: createHmac("sha256", key).update(bytes).digest("hex") };
 }
 
-function adapter(sent: unknown[] = [], linked: string[] = []) {
+function adapter(sent: unknown[] = []) {
   const cloud = {
     send: async (input: unknown) => {
       sent.push(input);
@@ -39,9 +39,6 @@ function adapter(sent: unknown[] = [], linked: string[] = []) {
     botUsername: "Rome",
     depositKey: KEY,
     cloud,
-    linkGuardian: async (userId) => {
-      linked.push(userId);
-    },
   });
 }
 
@@ -91,17 +88,26 @@ describe("Rome's Discord bot, as a frame from its Worker reaches it", () => {
     expect(thread.where.thread).toEqual({ parentChatId: "777777777777777777" });
   });
 
-  it("hands the message to Rome after putting its author under the guardian, and acknowledges it", async () => {
-    const linked: string[] = [];
-    const bot = adapter([], linked);
+  it("hands the original sender to Rome without changing People, and acknowledges it", async () => {
+    const bot = adapter();
     const delivered: Message[] = [];
     bot.start((message) => {
       delivered.push(message);
     });
     const { bytes, signature } = frame(deposit());
     expect(await bot.ingest(bytes, signature)).toEqual({ status: 200 });
-    expect(linked).toEqual([GUARDIAN]);
+    expect(delivered[0]?.sender.accountId).toBe(GUARDIAN);
     expect(delivered.map((message) => message.id)).toEqual(["333333333333333333"]);
+  });
+
+  it("accepts a legacy worker's author without promoting it to guardian", async () => {
+    const bot = adapter();
+    const delivered: Message[] = [];
+    bot.start((message) => delivered.push(message));
+    const { sender, ...rest } = deposit();
+    const legacy = frame({ ...rest, author: sender });
+    expect(await bot.ingest(legacy.bytes, legacy.signature)).toEqual({ status: 200 });
+    expect(delivered[0]?.sender.accountId).toBe(GUARDIAN);
   });
 
   it("acknowledges every signed frame, also when Rome cannot take its message, and refuses an invalid one", async () => {
@@ -113,20 +119,6 @@ describe("Rome's Discord bot, as a frame from its Worker reaches it", () => {
       throw new Error("recording stopped");
     });
     expect(await bot.ingest(bytes, signature)).toEqual({ status: 200 });
-    const failingLink = new DiscordAppAdapter({
-      botId: BOT,
-      botUsername: "Rome",
-      depositKey: KEY,
-      cloud: {} as DiscordAppCloud,
-      linkGuardian: async () => {
-        throw new Error("database is locked");
-      },
-    });
-    const delivered: Message[] = [];
-    failingLink.start((message) => delivered.push(message));
-    expect(await failingLink.ingest(bytes, signature)).toEqual({ status: 200 });
-    // The message still reaches Rome when its author could not be linked.
-    expect(delivered).toHaveLength(1);
     // A frame the Worker did not sign, or that is no message, is refused.
     expect(await bot.ingest(bytes, "0".repeat(64))).toEqual({ status: 401 });
     const junk = frame({ hello: "world" });
@@ -154,7 +146,6 @@ describe("Rome's Discord bot, as a frame from its Worker reaches it", () => {
       botUsername: "Rome",
       depositKey: KEY,
       cloud: { send } as unknown as DiscordAppCloud,
-      linkGuardian: async () => {},
     });
     await expect(
       bot.send(
@@ -185,7 +176,6 @@ describe("Rome's Discord bot, as a frame from its Worker reaches it", () => {
           calls.push(["unreact", input]);
         },
       } as unknown as DiscordAppCloud,
-      linkGuardian: async () => {},
     });
     await bot.showTyping("444444444444444444" as ChatId);
     await bot.react("444444444444444444" as ChatId, "333333333333333333", "👍");

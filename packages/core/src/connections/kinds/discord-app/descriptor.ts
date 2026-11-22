@@ -1,16 +1,5 @@
 // Rome's own Discord bot connection. Channel contract:
 // docs/architecture/channels.md.
-//
-// The guardian turns it on with one click: Rome asks the Discord gateway
-// Worker to deposit this instance's messages into its relay mailbox. Adding the
-// bot to a server is Discord's own page, linked from the connection's card;
-// the Worker then binds the server and the guardian's Discord account to this
-// instance. The connection's account is the bot, which is the same account in
-// every server, so one connection holds every server it was added to. Like
-// Rome's Slack app, it answers as the guardian's Concierge.
-//
-// This kind is separate from `discord` (a bot the guardian makes), which keeps
-// working.
 
 import { z } from "zod";
 import { createLogger } from "../../../logger.js";
@@ -84,10 +73,6 @@ export interface DiscordAppDescriptorDeps {
   /** The public address of this instance's relay mailbox, or null while Rome
    *  Cloud has not given one. Read on each connect. */
   depositUrl: () => Promise<string | null>;
-  /** Puts a Discord account under the guardian, unless People already places
-   *  it. The Worker forwards only the accounts the guardian bound while signed
-   *  in to this Rome's Rome Cloud account. */
-  linkGuardian: (userId: string) => Promise<void>;
   /** A Discord account's name as People knows it, for the card. */
   nameOf: (userId: string) => Promise<string | undefined>;
 }
@@ -183,7 +168,6 @@ export function createDiscordAppDescriptor(deps: DiscordAppDescriptorDeps): Conn
               botUsername,
               depositKey,
               cloud: deps.cloud,
-              linkGuardian: deps.linkGuardian,
             });
           }
 
