@@ -1294,7 +1294,13 @@ final class TranscriptStore {
         failureErrors[messageId] = nil
         do {
             if let change = action.switchBody {
-                try await backend.switchProviderFailure(messageId: messageId, change: change)
+                // An option that no longer worked wrote a fresh card in its
+                // place: the chat is read again and shows it, with no error.
+                if try await backend.switchProviderFailure(messageId: messageId, change: change) {
+                    failurePending.remove(messageId)
+                    resync()
+                    return
+                }
             } else {
                 try await backend.continueProviderFailure(messageId: messageId)
             }
@@ -1304,11 +1310,31 @@ final class TranscriptStore {
             return
         }
         resync()
+        // A switch pins this chat, or lets it follow a new default.
+        if action.switchBody != nil { await readChatSession() }
         let limit = Self.failurePendingLimit
         Task { [weak self] in
             try? await Task.sleep(for: limit)
             self?.failurePending.remove(messageId)
         }
+    }
+
+    /// The chat as the server shows it, for whether it follows the default.
+    private(set) var chatSession: ChatSession?
+    /// "Back to default" is on its way.
+    private(set) var followingDefault = false
+
+    /// Reads whether the chat follows the default. A failed read keeps what shows.
+    func readChatSession() async {
+        if let read = try? await backend.chatSession(sessionId) { chatSession = read }
+    }
+
+    /// "Back to default": the chat follows the default from its next turn.
+    func followDefault() async {
+        guard !followingDefault else { return }
+        followingDefault = true
+        defer { followingDefault = false }
+        if let read = try? await backend.followDefault(sessionId: sessionId) { chatSession = read }
     }
 
     /// Cards whose answer is on its way, by tool-use id: each is sent once.

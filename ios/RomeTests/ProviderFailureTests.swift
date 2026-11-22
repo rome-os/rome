@@ -37,8 +37,9 @@ import Testing
         let part = failure(["provider": "openai", "reason": "quota", "card": "wait", "until": RomeDate.string(now.addingTimeInterval(3600)), "alternatives": ["anthropic", "rome_credits"]])
         #expect(part.kind == .wait)
         #expect(part.alternatives == [.anthropic, .romeCredits])
-        // Credits are no account to switch to on a wait card.
-        #expect(ProviderFailureAction.of(part, now: now) == [.switchTo(.anthropic)])
+        // Credits are no account to switch to on a wait card; before its reset
+        // Retry comes last, as on the web.
+        #expect(ProviderFailureAction.of(part, now: now) == [.switchTo(.anthropic), .retry])
         // Once the reset passed, Continue comes first.
         #expect(ProviderFailureAction.of(part, now: now.addingTimeInterval(7200)) == [.continueTurn, .switchTo(.anthropic)])
         #expect(ProviderFailureAction.switchTo(.anthropic).title == "Switch to Claude")
@@ -60,13 +61,14 @@ import Testing
         let part = failure(["provider": "openai", "reason": "login", "card": "account", "alternatives": ["anthropic"], "detail": "401 Unauthorized"])
         #expect(part.kind == .account)
         #expect(part.detail == "401 Unauthorized")
-        #expect(ProviderFailureAction.of(part) == [.logIn, .switchTo(.anthropic)])
+        // Retry is on every card: last where something else does the job.
+        #expect(ProviderFailureAction.of(part) == [.logIn, .switchTo(.anthropic), .retry])
         #expect(ProviderFailureCopy.status(part) == "Needs you")
         #expect(ProviderFailureCopy.reason(part) == "ChatGPT needs you to log in again")
         // No account left and a balance: Rome credits.
         let credits = failure(["provider": "openai", "reason": "removed", "credits": true])
         #expect(credits.kind == .account)
-        #expect(ProviderFailureAction.of(credits) == [.logIn, .useCredits])
+        #expect(ProviderFailureAction.of(credits) == [.logIn, .useCredits, .retry])
         #expect(ProviderFailureAction.useCredits.switchBody == .object(["kind": .string("provider"), "provider": .string("rome_credits"), "makeDefault": .bool(true)]))
         #expect(ProviderFailureAction.useCredits.confirms)
     }
@@ -75,7 +77,7 @@ import Testing
         let part = failure(["provider": "openai", "reason": "model_unavailable", "model": "gpt-6-sol", "replacement": ["selection": "gpt-6-luna", "model": "gpt-6-luna"], "alternatives": ["anthropic"]])
         #expect(part.kind == .model)
         let actions = ProviderFailureAction.of(part)
-        #expect(actions == [.switchModel(.init(selection: "gpt-6-luna", model: "gpt-6-luna"))])
+        #expect(actions == [.switchModel(.init(selection: "gpt-6-luna", model: "gpt-6-luna")), .retry])
         #expect(actions.first?.title == "Switch to GPT-6 Luna")
         #expect(actions.first?.confirms == false)
         #expect(actions.first?.switchBody == .object(["kind": .string("model"), "selection": .string("gpt-6-luna")]))
@@ -223,6 +225,80 @@ import Testing
         #expect(backend.failureCalls.isEmpty)
         store.press(.logIn, part: part, messageId: "m1")
         #expect(store.failurePrompt == .logIn(.chatgpt))
+    }
+
+    @Test func retryOnAnAccountCardRunsTheTurnWhereItRan() async throws {
+        let backend = FakeBackend()
+        let store = TranscriptStore(sessionId: "s", kind: .concierge, backend: backend)
+        let part = ProviderFailurePart(provider: .openai, reason: "login", alternatives: [.anthropic], chatId: "s", card: .account)
+        #expect(ProviderFailureAction.of(part).last == .retry)
+        store.press(.retry, part: part, messageId: "m1")
+        try await until { backend.failureCalls.count == 1 }
+        // The web's Retry: the continue route, with no switch.
+        #expect(backend.failureCalls.first?.change == nil)
+    }
+
+    @Test func aSwitchCanAlsoMakeTheAccountTheDefault() {
+        #expect(ProviderFailureAction.switchAndMakeDefault(.anthropic).switchBody == .object(["kind": .string("provider"), "provider": .string("anthropic"), "makeDefault": .bool(true), "moveExisting": .bool(true)]))
+        #expect(ProviderFailureAction.switchAndMakeDefault(.anthropic).title == "Switch and make default")
+    }
+
+    @Test func aStaleOptionRedrawsWithNoError() async {
+        let backend = FakeBackend()
+        backend.switchRefreshes = true
+        let store = TranscriptStore(sessionId: "s", kind: .concierge, backend: backend)
+        await store.send(.switchTo(.anthropic), messageId: "m1")
+        // The server wrote a fresh card: nothing waits, nothing failed.
+        #expect(!store.failurePending.contains("m1"))
+        #expect(store.failureErrors["m1"] == nil)
+        #expect(backend.sessionReads == 0)
+    }
+
+    @Test func aSwitchReadsWhetherTheChatIsPinnedNow() async {
+        let backend = FakeBackend()
+        backend.chatSessionRead = ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "kept", providerId: "anthropic"))
+        let store = TranscriptStore(sessionId: "s", kind: .concierge, backend: backend)
+        await store.send(.switchTo(.anthropic), messageId: "m1")
+        #expect(PinnedHint.text(store.chatSession) == "On Claude")
+    }
+
+    @Test func aOneTurnSwapSaysItWasForThisReply() {
+        let swap = parts([["type": "quota_switch", "from": "anthropic", "to": "anthropic", "reason": "model_limit", "fromModel": "claude-opus-5-5", "model": "claude-sonnet-5-5", "oneTurn": true]])
+        #expect(swap == [.notice("Used Sonnet 5.5 for this reply")])
+        // Older notes moved for good, and say so.
+        let older = parts([["type": "quota_switch", "from": "anthropic", "to": "anthropic", "reason": "model_limit", "fromModel": "claude-opus-5-5", "model": "claude-sonnet-5-5"]])
+        #expect(older == [.notice("Opus 5.5 limit reached, switched to Sonnet 5.5")])
+    }
+
+    // MARK: Pinned chats
+
+    @Test func aPinnedChatSaysWhereItRunsAndWhoPinnedIt() {
+        #expect(PinnedHint.text(ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "kept", providerId: "openai", model: "gpt-6-luna"))) == "On ChatGPT")
+        #expect(PinnedHint.text(ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "owner", providerId: "anthropic", selection: "claude-haiku", model: "claude-haiku-5-5"))) == "You picked Haiku 5.5")
+        // An owner pick the server names no model for reads its provider.
+        #expect(PinnedHint.text(ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "owner", providerId: "anthropic"))) == "You picked Claude")
+        // A chat that follows the default, or a server that does not say: none.
+        #expect(PinnedHint.text(ChatSession(id: "s", name: "", followsDefault: true)) == nil)
+        #expect(PinnedHint.text(ChatSession(id: "s", name: "")) == nil)
+        #expect(PinnedHint.text(nil) == nil)
+    }
+
+    @Test func thePinnedFieldsDecodeFromTheWire() throws {
+        let json = #"{"id":"s","name":"n","followsDefault":false,"pinnedModel":{"by":"owner","providerId":"anthropic","selection":"claude-haiku","model":null}}"#
+        let session = try JSONDecoder().decode(ChatSession.self, from: Data(json.utf8))
+        #expect(session.followsDefault == false)
+        #expect(session.pinnedModel == .init(by: "owner", providerId: "anthropic", selection: "claude-haiku", model: nil))
+    }
+
+    @Test func backToDefaultHidesTheHint() async {
+        let backend = FakeBackend()
+        backend.chatSessionRead = ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "kept", providerId: "openai"))
+        let store = TranscriptStore(sessionId: "s", kind: .concierge, backend: backend)
+        await store.readChatSession()
+        #expect(PinnedHint.text(store.chatSession) == "On ChatGPT")
+        await store.followDefault()
+        #expect(backend.followDefaultCalls == ["s"])
+        #expect(PinnedHint.text(store.chatSession) == nil)
     }
 
     /// Waits up to ten seconds for `condition`: a loaded CI runner is slow.

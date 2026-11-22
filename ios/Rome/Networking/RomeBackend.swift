@@ -118,7 +118,16 @@ protocol RomeBackend: AnyObject, Sendable {
     /// Cancels a ChatGPT login still in progress.
     func cancelChatGPTDeviceLogin() async
     /// Logs Rome out of the account, on this instance only.
-    func logOut(_ account: AIAccount) async throws
+    /// `moveExisting`: whether the chats that follow the default move with it,
+    /// when the logout moves it.
+    func logOut(_ account: AIAccount, moveExisting: Bool) async throws
+    /// Makes `provider` the default; `moveExisting` false leaves the chats
+    /// that follow it where they run, pinned there.
+    func setDefaultProvider(_ provider: DefaultModelProvider, moveExisting: Bool) async throws
+    /// One chat as the server shows it, with whether it follows the default.
+    func chatSession(_ id: String) async throws -> ChatSession
+    /// "Back to default": a pinned chat follows the default again.
+    func followDefault(sessionId: String) async throws -> ChatSession
     /// The account's Rome credits; nil when the instance has none.
     func romeCredits() async throws -> RomeCreditsResponse.Credits?
     /// `showAiToolUsage` in `GET /settings`: on unless the guardian turned it off.
@@ -131,7 +140,8 @@ protocol RomeBackend: AnyObject, Sendable {
     func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws
     /// A provider failure card's switch (`change` as the web sends it): the
     /// chat moves and the stopped turn runs again.
-    func switchProviderFailure(messageId: String, change: JSONValue) async throws
+    /// True when the option no longer worked and the server wrote a fresh card.
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws -> Bool
     /// A provider failure card's Retry or Continue: the stopped turn runs again where it ran.
     func continueProviderFailure(messageId: String) async throws
     func setConciergeEnabled(_ enabled: Bool) async throws
@@ -412,8 +422,20 @@ final class LiveBackend: RomeBackend {
         _ = try? await client.post("/ai-tools/codex/device-login/cancel")
     }
 
-    func logOut(_ account: AIAccount) async throws {
-        _ = try await client.post("/ai-tools/\(account.routeSegment)/logout")
+    func logOut(_ account: AIAccount, moveExisting: Bool) async throws {
+        _ = try await client.post("/ai-tools/\(account.routeSegment)/logout", json: .object(["moveExisting": .bool(moveExisting)]))
+    }
+
+    func setDefaultProvider(_ provider: DefaultModelProvider, moveExisting: Bool) async throws {
+        try await client.put("/ai-tools/default", json: .object(["provider": .string(provider.wire), "moveExisting": .bool(moveExisting)]))
+    }
+
+    func chatSession(_ id: String) async throws -> ChatSession {
+        try await client.get("/chat/sessions/\(escape(id))")
+    }
+
+    func followDefault(sessionId: String) async throws -> ChatSession {
+        try await client.post("/chat/sessions/\(escape(sessionId))/model/follow-default", as: ChatSession.self)
     }
 
     func romeCredits() async throws -> RomeCreditsResponse.Credits? {
@@ -440,8 +462,9 @@ final class LiveBackend: RomeBackend {
         _ = try await client.post("/chat/sessions/\(escape(sessionId))/turns", json: body)
     }
 
-    func switchProviderFailure(messageId: String, change: JSONValue) async throws {
-        _ = try await client.post("/ai-tools/provider-failures/\(escape(messageId))/switch", json: change)
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws -> Bool {
+        let answer: JSONValue = try await client.post("/ai-tools/provider-failures/\(escape(messageId))/switch", json: change, as: JSONValue.self)
+        return answer["refreshed"]?.bool ?? false
     }
 
     func continueProviderFailure(messageId: String) async throws {
@@ -664,12 +687,15 @@ extension RomeBackend {
     func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus { try await aiTools() }
     func startChatGPTDeviceLogin() async throws -> DeviceLoginCode { throw APIError.notFound }
     func cancelChatGPTDeviceLogin() async {}
-    func logOut(_ account: AIAccount) async throws { throw APIError.notFound }
+    func logOut(_ account: AIAccount, moveExisting: Bool) async throws { throw APIError.notFound }
+    func setDefaultProvider(_ provider: DefaultModelProvider, moveExisting: Bool) async throws { throw APIError.notFound }
+    func chatSession(_ id: String) async throws -> ChatSession { throw APIError.notFound }
+    func followDefault(sessionId: String) async throws -> ChatSession { throw APIError.notFound }
     func romeCredits() async throws -> RomeCreditsResponse.Credits? { nil }
     func showsAIToolUsage() async -> Bool { true }
     func claudeLoginSocket() -> LoginSocket? { nil }
     func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws { throw APIError.notFound }
-    func switchProviderFailure(messageId: String, change: JSONValue) async throws { throw APIError.notFound }
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws -> Bool { throw APIError.notFound }
     func continueProviderFailure(messageId: String) async throws { throw APIError.notFound }
     func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink { throw APIError.notFound }
     func chatShares(sessionId: String) async throws -> [ChatShareLink] { [] }

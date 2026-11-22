@@ -99,7 +99,7 @@ struct ProviderFailureCardView: View {
             let primary = index == 0
             Button {
                 if action == .logIn, part.provider.account == nil {
-                    // Rome credits used up: any account logs in, on the AI model page.
+                    // Rome credits used up: any account logs in, on the AI Tools page.
                     model.openAIModel()
                 } else {
                     store.press(action, part: part, messageId: messageId)
@@ -190,9 +190,13 @@ private struct ProviderFailurePrompts: ViewModifier {
                 isPresented: Binding(get: { confirming != nil }, set: { if !$0 { store.failurePrompt = nil } }),
                 presenting: confirming
             ) { prompt in
-                Button("Switch") {
-                    store.failurePrompt = nil
-                    Task { await store.send(prompt.action, messageId: prompt.messageId) }
+                // A move to an account asks whether it becomes the default too;
+                // Rome credits always do.
+                if case .switchTo(let provider) = prompt.action {
+                    Button("Switch this chat") { confirm(prompt.action, prompt.messageId) }
+                    Button("Switch and make default") { confirm(.switchAndMakeDefault(provider), prompt.messageId) }
+                } else {
+                    Button("Switch") { confirm(prompt.action, prompt.messageId) }
                 }
                 Button("Cancel", role: .cancel) { store.failurePrompt = nil }
             } message: { prompt in
@@ -203,6 +207,11 @@ private struct ProviderFailurePrompts: ViewModifier {
                     workspace.aiModel.update(read)
                 }
             }
+    }
+
+    private func confirm(_ action: ProviderFailureAction, _ messageId: String) {
+        store.failurePrompt = nil
+        Task { await store.send(action, messageId: messageId) }
     }
 
     private var confirming: (messageId: String, action: ProviderFailureAction)? {

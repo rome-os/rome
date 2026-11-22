@@ -705,8 +705,17 @@ final class DemoBackend: RomeBackend {
     }
 
     /// The state the demo's AI model shows, for Settings in each state.
-    enum AIModelPreview { case ready, paused, needsLogin, notSetUp, credits }
+    /// `creditsUsable`: no account logged in, no default, and credits left.
+    enum AIModelPreview { case ready, paused, needsLogin, notSetUp, credits, creditsUsable }
     static var aiModelPreview: AIModelPreview = .ready
+    /// The default the demo was set to, while that provider can run.
+    private var chosenDefault: DefaultModelProvider?
+    /// Chats that do not follow the default, by id: one kept on ChatGPT by a
+    /// card's switch, one its owner picked a model for.
+    private var pinned: [String: ChatSession.PinnedModel] = [
+        "topic-provider": .init(by: "kept", providerId: "openai", selection: nil, model: "gpt-6-luna"),
+        "topic-ai": .init(by: "owner", providerId: "anthropic", selection: "claude-haiku", model: "claude-haiku-5-5"),
+    ]
     /// Accounts the demo logged out of, and when a device login started.
     private var loggedOut: Set<AIAccount> = []
     /// Accounts the demo logged in to, whatever the preview says.
@@ -730,7 +739,7 @@ final class DemoBackend: RomeBackend {
             codex.loggedIn = false
             codex.needsReauth = true
             codex.usage = nil
-        case .notSetUp, .credits:
+        case .notSetUp, .credits, .creditsUsable:
             claude = .init(loggedIn: false, quotaExhausted: false)
             codex = .init(loggedIn: false, quotaExhausted: false)
             provider = Self.aiModelPreview == .credits ? .romeCredits : nil
@@ -750,13 +759,37 @@ final class DemoBackend: RomeBackend {
             if codex.loggedIn == true { provider = .openai } else if claude.loggedIn == true { provider = .anthropic }
         }
         if provider == .openai, codex.loggedIn == false, claude.loggedIn == true, Self.aiModelPreview == .ready { provider = .anthropic }
+        let creditsUsable = [.credits, .creditsUsable].contains(Self.aiModelPreview) && codex.loggedIn != true && claude.loggedIn != true
+        switch chosenDefault {
+        case .anthropic? where claude.loggedIn == true: provider = .anthropic
+        case .openai? where codex.loggedIn == true: provider = .openai
+        case .romeCredits? where creditsUsable: provider = .romeCredits
+        default: break
+        }
         let code = deviceLoginStarted.map { _ in AIToolsStatus.DeviceLogin(running: true, userCode: "K7QF-2M9D", verificationUrl: "https://auth.openai.com/codex/device") }
         return AIToolsStatus(
             claude: claude,
             codex: codex,
             codexDeviceLogin: code,
-            defaultProvider: .init(provider: provider, signedIn: .init(anthropic: claude.loggedIn, openai: codex.loggedIn), romeCreditsUsable: Self.aiModelPreview == .credits)
+            defaultProvider: .init(provider: provider, signedIn: .init(anthropic: claude.loggedIn, openai: codex.loggedIn, romeCredits: creditsUsable), romeCreditsUsable: creditsUsable, followingChats: 3)
         )
+    }
+
+    func setDefaultProvider(_ provider: DefaultModelProvider, moveExisting: Bool) async throws {
+        try await pause(0.5)
+        chosenDefault = provider
+        // A checked move lets every kept chat follow again.
+        if moveExisting { pinned = pinned.filter { $0.value.by == "owner" } }
+    }
+
+    func chatSession(_ id: String) async throws -> ChatSession {
+        ChatSession(id: id, name: "", followsDefault: pinned[id] == nil, pinnedModel: pinned[id])
+    }
+
+    func followDefault(sessionId: String) async throws -> ChatSession {
+        try await pause(0.4)
+        pinned[sessionId] = nil
+        return try await chatSession(sessionId)
     }
 
     func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus { try await aiTools() }
@@ -769,7 +802,7 @@ final class DemoBackend: RomeBackend {
 
     func cancelChatGPTDeviceLogin() async { deviceLoginStarted = nil }
 
-    func logOut(_ account: AIAccount) async throws {
+    func logOut(_ account: AIAccount, moveExisting: Bool) async throws {
         try await pause(0.5)
         loggedIn.remove(account)
         loggedOut.insert(account)
@@ -790,9 +823,16 @@ final class DemoBackend: RomeBackend {
 
     func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws {}
 
-    func switchProviderFailure(messageId: String, change: JSONValue) async throws {
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws -> Bool {
         let to = change["provider"]?.string.map(DefaultModelProvider.init(wire:))
+        // This chat only: it stays on that account, pinned there.
+        if let to, to != .romeCredits, change["makeDefault"]?.bool != true,
+           let chatId = messages.first(where: { $0.value.contains { $0.id == messageId } })?.key {
+            pinned[chatId] = .init(by: "kept", providerId: to.wire, selection: nil, model: nil)
+        }
+        if change["makeDefault"]?.bool == true, let to { chosenDefault = to }
         settleFailure(messageId, resolved: .object(["at": .string(RomeDate.string(.now)), "by": .string("switched"), "provider": to.map { .string($0.wire) } ?? .null, "model": change["selection"] ?? .null, "continued": .bool(true)]))
+        return false
     }
 
     func continueProviderFailure(messageId: String) async throws {
@@ -1618,6 +1658,8 @@ final class DemoBackend: RomeBackend {
             user("pf4", "那换一个问题：明天几点开会？", at: at(10, 15), session: provider),
             parts([failure(["provider": .string("openai"), "reason": .string("quota"), "card": .string("wait"), "until": .string(RomeDate.string(pauseEnd)), "alternatives": .array([.string("anthropic")])])], at: at(10, 16), session: provider),
             parts([failure(["provider": .string("openai"), "reason": .string("quota"), "card": .string("wait"), "resolved": .object(["at": .string(RomeDate.string(.now)), "by": .string("switched"), "provider": .string("anthropic"), "continued": .bool(true)])])], at: at(10, 17), session: provider),
+            // A model at its limit, swapped for this reply only.
+            parts([.object(["type": .string("quota_switch"), "from": .string("anthropic"), "to": .string("anthropic"), "reason": .string("model_limit"), "fromModel": .string("claude-opus-5-5"), "model": .string("claude-sonnet-5-5"), "oneTurn": .bool(true)])], at: at(10, 17), session: provider),
             parts([.object(["type": .string("provider_outage"), "outageId": .string("out-1"), "provider": .string("openai"), "reason": .string("quota"), "until": .string(RomeDate.string(pauseEnd)), "chatIds": .array([.string("chat-site"), .string("chat-price")])])], at: at(10, 18), session: provider),
         ]
         messages["topic-task-links"] = [

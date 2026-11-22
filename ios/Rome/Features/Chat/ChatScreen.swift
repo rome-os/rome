@@ -49,6 +49,8 @@ struct ChatScreen: View {
         // The task links in its messages draw the task chats' live status.
         .environment(\.taskLinks, workspace.taskLinks(forChat: store.sessionId))
         .providerFailurePrompts(store, workspace: workspace)
+        // Whether the chat follows the default, read each time it opens.
+        .task(id: "\(store.sessionId)|\(visible)") { if visible { await store.readChatSession() } }
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
         .background { ChatLeaveWatch(store: store) }
@@ -74,6 +76,7 @@ struct ChatScreen: View {
                     if ConciergeStarters.visible(loaded: store.readOnce, empty: store.rowsEmpty) {
                         ConciergeStarters { store.send($0.text) }
                     }
+                    PinnedHintLine(store: store)
                     Composer(text: $draft, placeholder: String(localized: "Message"), focused: $composerFocused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: workspace.concierge.sessionId, voiceField: .chat, onScreen: visible && !store.share.isSelecting) {
                         // A photo still being made small would land in the next message.
                         guard !attachments.isPreparing else { return }

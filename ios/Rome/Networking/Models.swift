@@ -23,6 +23,21 @@ struct ChatSession: Codable, Identifiable, Hashable, Sendable {
     var largeModelSelection: String?
     /// When its owner pinned it; a topic chat only. Nil when not pinned.
     var pinnedAt: String?
+    /// Whether it follows the default provider; absent from an older server.
+    var followsDefault: Bool?
+    /// The model it is pinned to while it does not follow the default.
+    var pinnedModel: PinnedModel?
+
+    /// What a chat that does not follow the default is pinned to, and who
+    /// pinned it (docs/domains/agents.md#pinned-chat).
+    struct PinnedModel: Codable, Hashable, Sendable {
+        /// `owner` (a pick in the model menu) or `kept` (a card's switch, or a
+        /// change of the default that left the chat where it was).
+        var by: String
+        var providerId: String
+        var selection: String?
+        var model: String?
+    }
 
     /// The agent that answers a Concierge chat, a topic chat's included.
     static let conciergeAgent = "core:concierge"
@@ -686,6 +701,12 @@ struct AIToolsStatus: Codable, Sendable {
         struct SignedIn: Codable, Sendable, Equatable {
             var anthropic: Bool?
             var openai: Bool?
+            var romeCredits: Bool?
+
+            enum CodingKeys: String, CodingKey {
+                case anthropic, openai
+                case romeCredits = "rome_credits"
+            }
         }
 
         /// `anthropic`, `openai` or `rome_credits`; nil while none is set.
@@ -693,6 +714,8 @@ struct AIToolsStatus: Codable, Sendable {
         var signedIn: SignedIn?
         /// Whether Rome credits could run chats once no AI account is logged in.
         var romeCreditsUsable: Bool?
+        /// How many chats follow the default, so a change of it would move them.
+        var followingChats: Int?
     }
 
     var claude: Provider?

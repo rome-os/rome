@@ -356,6 +356,34 @@ enum SnapshotRunner {
                     }
                 }
             }
+            // No account, credits left: Rome credits offer to be the default.
+            await capture("11n-ai-model-credits-usable", style: styleName, in: directory, wait: 1.5) {
+                DemoBackend.aiModelPreview = .creditsUsable
+                model.debugCommand = .settings(nil)
+                Task {
+                    try? await Task.sleep(for: .seconds(0.4))
+                    model.debugCommand = .settings([.aiModel(login: nil)])
+                }
+            }
+            // The default's dialogs over the page: Set as default, a logout
+            // that moves the default, and one that moves nothing.
+            DemoBackend.aiModelPreview = .ready
+            let dialogs: [(String, (AIModelStore) -> AIDefaultDialog)] = [
+                ("11o-ai-dialog-set-default", { $0.setDefaultDialog(.anthropic) }),
+                ("11p-ai-dialog-logout-default", { $0.logOutDialog(.chatgpt) }),
+                ("11q-ai-dialog-logout-other", { $0.logOutDialog(.claude) }),
+            ]
+            for (name, make) in dialogs {
+                await capture(name, style: styleName, in: directory, wait: 2) {
+                    AIModelScreen.debugDialog = make
+                    model.debugCommand = .settings(nil)
+                    Task {
+                        try? await Task.sleep(for: .seconds(0.4))
+                        model.debugCommand = .settings([.aiModel(login: nil)])
+                    }
+                }
+            }
+            AIModelScreen.debugDialog = nil
             DemoBackend.aiModelPreview = .ready
             model.debugCommand = .settings(nil)
             try? await Task.sleep(for: .seconds(0.6))

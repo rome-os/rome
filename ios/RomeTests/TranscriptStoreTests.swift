@@ -349,10 +349,31 @@ final class FakeBackend: RomeBackend {
     var failureCalls: [(messageId: String, change: JSONValue?)] = []
     /// Set, a failure card's button fails with it.
     var failureError: APIError?
-    func switchProviderFailure(messageId: String, change: JSONValue) async throws {
+    /// Set, a switch answers that the option went stale and a fresh card was written.
+    var switchRefreshes = false
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws -> Bool {
         if let failureError { throw failureError }
         failureCalls.append((messageId, change))
+        return switchRefreshes
     }
+    /// What the chat reads answer, and the Back to default calls made.
+    var chatSessionRead: ChatSession?
+    var sessionReads = 0
+    var followDefaultCalls: [String] = []
+    func chatSession(_ id: String) async throws -> ChatSession {
+        sessionReads += 1
+        guard let chatSessionRead else { throw APIError.notFound }
+        return chatSessionRead
+    }
+    func followDefault(sessionId: String) async throws -> ChatSession {
+        followDefaultCalls.append(sessionId)
+        return ChatSession(id: sessionId, name: "", followsDefault: true)
+    }
+    /// The logouts and default changes sent, with their moveExisting.
+    var logOutCalls: [(account: AIAccount, moveExisting: Bool)] = []
+    var defaultCalls: [(provider: DefaultModelProvider, moveExisting: Bool)] = []
+    func logOut(_ account: AIAccount, moveExisting: Bool) async throws { logOutCalls.append((account, moveExisting)) }
+    func setDefaultProvider(_ provider: DefaultModelProvider, moveExisting: Bool) async throws { defaultCalls.append((provider, moveExisting)) }
     func continueProviderFailure(messageId: String) async throws {
         if let failureError { throw failureError }
         failureCalls.append((messageId, nil))

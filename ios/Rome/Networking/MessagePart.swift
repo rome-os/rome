@@ -409,6 +409,9 @@ extension MessagePart {
         let fromProvider = value["from"]?.string, toProvider = value["to"]?.string
         let reason = value["reason"]?.string
         let toModel = ModelNames.display(model)
+        // A model-limit swap that lasted this turn only: the next one tries
+        // the chat's own model again.
+        if value["oneTurn"]?.bool == true { return String(localized: "Used \(toModel) for this reply") }
         // Within one provider, or with no provider named, the model limit is what ran out.
         if fromProvider != nil, fromProvider == toProvider || reason == "model_limit" {
             let fromModel = ModelNames.display(value["fromModel"]?.string ?? "")

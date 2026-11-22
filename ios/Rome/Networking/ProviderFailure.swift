@@ -161,6 +161,9 @@ enum ProviderFailureAction: Hashable, Sendable {
     case logIn
     /// Moves this chat to another logged-in account.
     case switchTo(DefaultModelProvider)
+    /// The confirm's other way: moves this chat and makes that account the
+    /// default, moving the other chats that follow it too.
+    case switchAndMakeDefault(DefaultModelProvider)
     /// Every chat runs on Rome credits.
     case useCredits
     /// Another model of the same provider.
@@ -170,8 +173,10 @@ enum ProviderFailureAction: Hashable, Sendable {
     var switchBody: JSONValue? {
         switch self {
         case .switchTo(let provider):
-            // This chat only: making it the default comes with the default dialogs.
+            // This chat only: it becomes pinned there.
             return .object(["kind": .string("provider"), "provider": .string(provider.wire), "makeDefault": .bool(false)])
+        case .switchAndMakeDefault(let provider):
+            return .object(["kind": .string("provider"), "provider": .string(provider.wire), "makeDefault": .bool(true), "moveExisting": .bool(true)])
         case .useCredits:
             return .object(["kind": .string("provider"), "provider": .string(DefaultModelProvider.romeCredits.wire), "makeDefault": .bool(true)])
         case .switchModel(let replacement):
@@ -195,29 +200,29 @@ enum ProviderFailureAction: Hashable, Sendable {
         case .continueTurn: return String(localized: "Continue")
         case .logIn: return String(localized: "Log in")
         case .switchTo(let provider): return String(localized: "Switch to \(provider.name)")
+        case .switchAndMakeDefault: return String(localized: "Switch and make default")
         case .useCredits: return String(localized: "Use Rome credits")
         case .switchModel(let replacement): return String(localized: "Switch to \(ModelNames.display(replacement.model))")
         }
     }
 
+    /// Every card runs its turn again on a click: a quota reads Continue once
+    /// its reset has passed (or with no reset known), anything else Retry. It
+    /// leads only on a wait it may get past; elsewhere it comes last.
     static func of(_ part: ProviderFailurePart, now: Date = .now) -> [ProviderFailureAction] {
         let kind = part.kind
-        var actions: [ProviderFailureAction] = []
-        if kind == .wait {
-            if part.reason != "quota" {
-                actions.append(.retry)
-            } else if let until = RomeDate.parse(part.until), until > now {
-                // Waits for its reset.
-            } else {
-                actions.append(.continueTurn)
-            }
-        }
+        let quota = part.reason == "quota"
+        let resetPassed = part.until == nil || RomeDate.parse(part.until).map { $0 <= now } == true
+        let again: ProviderFailureAction = quota && resetPassed ? .continueTurn : .retry
+        let againLeads = kind == .wait && (again == .continueTurn || !quota)
+        var actions: [ProviderFailureAction] = againLeads ? [again] : []
         if kind == .account { actions.append(.logIn) }
         if kind != .model {
             actions += part.alternatives.filter { $0 != .romeCredits }.map(ProviderFailureAction.switchTo)
             if kind == .account, part.credits { actions.append(.useCredits) }
         }
         if kind == .model, let replacement = part.replacement { actions.append(.switchModel(replacement)) }
+        if !againLeads { actions.append(again) }
         return actions
     }
 }

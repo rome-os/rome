@@ -21,6 +21,16 @@
         }
       }
     },
+    "%@ becomes the default." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 会成为默认。"
+          }
+        }
+      }
+    },
     "%@ cannot run on this account" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7481,6 +7491,16 @@
         }
       }
     },
+    "Back to default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "改回默认"
+          }
+        }
+      }
+    },
     "by day" : {
       "localizations" : {
         "zh-Hans" : {
@@ -7521,12 +7541,42 @@
         }
       }
     },
+    "Chats on %@ will ask you to log in again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %@ 上的聊天会请你重新登录。"
+          }
+        }
+      }
+    },
+    "Chats pause until you log in again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聊天会暂停，直到你重新登录。"
+          }
+        }
+      }
+    },
     "conversation got long" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "对话较长"
+          }
+        }
+      }
+    },
+    "Could not change the default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能更改默认"
           }
         }
       }
@@ -7699,6 +7749,156 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "每天早上 9 点，我会把睡眠、步数和静息心率发给你，有异常会特别提醒。"
+          }
+        }
+      }
+    },
+    "Its login has expired: log in to %@ again after you log out." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它的登录已过期：退出登录后请重新登录 %@。"
+          }
+        }
+      }
+    },
+    "Log out and switch all chats" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退出登录，所有聊天都切换"
+          }
+        }
+      }
+    },
+    "Log out, keep chats here" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退出登录，聊天留在原处"
+          }
+        }
+      }
+    },
+    "Make %@ the default?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将 %@ 设为默认？"
+          }
+        }
+      }
+    },
+    "Make default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设为默认"
+          }
+        }
+      }
+    },
+    "New chats use %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新聊天使用 %@。"
+          }
+        }
+      }
+    },
+    "On %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %@ 上"
+          }
+        }
+      }
+    },
+    "Only new chats" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只用于新聊天"
+          }
+        }
+      }
+    },
+    "Rome credits become the default." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 额度会成为默认。"
+          }
+        }
+      }
+    },
+    "Set as default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设为默认"
+          }
+        }
+      }
+    },
+    "Switch all chats" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有聊天都切换"
+          }
+        }
+      }
+    },
+    "Switch and make default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换并设为默认"
+          }
+        }
+      }
+    },
+    "Switch this chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只切换这个聊天"
+          }
+        }
+      }
+    },
+    "Used %@ for this reply" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这次回复用了 %@"
+          }
+        }
+      }
+    },
+    "You picked %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你选了 %@"
           }
         }
       }

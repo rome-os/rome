@@ -98,6 +98,8 @@ struct TopicChatScreen: View {
         .pageBackground()
         .environment(\.taskLinks, chatId.flatMap { workspace.taskLinks(forChat: $0) })
         .providerFailurePrompts(store, workspace: workspace)
+        // Whether the chat follows the default, read each time it opens.
+        .task(id: store?.sessionId) { await store?.readChatSession() }
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onReply: { store?.restoreReply($0) }, prefill: Binding(
             get: { workspace.composerPrefills[chatId ?? draftKey] },
             set: { workspace.composerPrefills[chatId ?? draftKey] = $0 }
@@ -119,6 +121,9 @@ struct TopicChatScreen: View {
                 }
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
+                }
+                if !archived, let store {
+                    PinnedHintLine(store: store)
                 }
                 if !archived {
                     TopicComposer(workspace: workspace, chatId: chatId, draft: $draft, focused: $composerFocused, attachments: attachments, sharing: store?.share.isSelecting ?? false) { send() }
