@@ -1030,7 +1030,7 @@
       "stopped": "Idle",
       "connecting": "Connecting",
       "retrying": "Reconnecting",
-      "revoked": "Access revoked",
+      "revoked": "Removed from your account",
       "superseded": "Connection replaced",
       "not_configured": "Not configured",
       "unavailable": "Unavailable",

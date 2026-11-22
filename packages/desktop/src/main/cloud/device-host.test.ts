@@ -148,7 +148,9 @@ describe("DeviceHost", () => {
     await settle();
     limited.emit({ type: "connection", status: "revoked" });
     limited.emit({ type: "connection", status: "stopped" });
-    limited.end(new Error("Authorization revoked. Explicit authorization is required."));
+    limited.end(
+      new Error("This device was removed from your account. Connect it again to add it back."),
+    );
     await settle();
     expect(options.onRevoked).toHaveBeenCalledTimes(1);
     expect(subject.status()).toEqual({ state: "off" });
@@ -227,7 +229,9 @@ describe("DeviceHost", () => {
     gateway.emit({ type: "connection", status: "revoked" });
     // The host then stops the connection, which reports "stopped" before it ends.
     gateway.emit({ type: "connection", status: "stopped" });
-    gateway.end(new Error("Authorization revoked. Explicit authorization is required."));
+    gateway.end(
+      new Error("This device was removed from your account. Connect it again to add it back."),
+    );
     await settle();
     expect(options.onRevoked).toHaveBeenCalledTimes(1);
     expect(subject.status()).toEqual({ state: "off" });

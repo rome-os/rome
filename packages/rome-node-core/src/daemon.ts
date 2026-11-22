@@ -430,7 +430,7 @@ export async function serveDaemon(config: NodeConfig, signal: AbortSignal): Prom
               if (!(cause instanceof CloudError)) throw cause;
               result = actionError(cause.code, cause.message);
             } finally {
-              // A revocation can land even when the request fails.
+              // A removal can land even when the request fails.
               deviceStatus.invalidate();
             }
             break;

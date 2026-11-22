@@ -19,11 +19,7 @@ import { withTracingSuppressed } from "../telemetry.js";
 
 export type DeviceManageResult = { ok: true } | { ok: false; code: DeviceManageErrorCode };
 
-const manageErrors = new Set<string>([
-  "device_not_found",
-  "invalid_device_name",
-  "revocation_pending",
-]);
+const manageErrors = new Set<string>(["device_not_found", "invalid_device_name"]);
 
 export type DeviceFilesResult =
   | { ok: true; folder: DeviceFilesResponse }
@@ -99,7 +95,7 @@ export function createNodeDevicesService(
       }
     },
     /**
-     * Authorized, unrevoked devices from Cloud's list. Unlike getStatus it sends
+     * Authorized devices from Cloud's list. Unlike getStatus it sends
      * no probe to any device. Null when the caller cannot reach the list.
      */
     async listDevices(): Promise<DeviceList | null> {
@@ -107,13 +103,11 @@ export function createNodeDevicesService(
         client ??= createClient();
         const list = await client.listDevices();
         return {
-          devices: list.items
-            .filter((item) => !item.revoked_at)
-            .map((item) => ({
-              id: item.id,
-              name: typeof item.device_name === "string" ? item.device_name : item.id,
-              platform: typeof item.platform === "string" ? item.platform : null,
-            })),
+          devices: list.items.map((item) => ({
+            id: item.id,
+            name: typeof item.device_name === "string" ? item.device_name : item.id,
+            platform: typeof item.platform === "string" ? item.platform : null,
+          })),
         };
       } catch (error) {
         if (error instanceof DaemonVersionError) {
@@ -169,7 +163,7 @@ export function createNodeDevicesService(
     renameDevice(deviceId: string, name: string): Promise<DeviceManageResult> {
       return manage((c) => c.renameDevice(deviceId, name));
     },
-    /** Revokes a device and deletes it from the account through Cloud. */
+    /** Removes a device from the account through Cloud. */
     removeDevice(deviceId: string): Promise<DeviceManageResult> {
       return manage((c) => c.removeDevice(deviceId));
     },

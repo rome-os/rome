@@ -1030,7 +1030,7 @@
       "stopped": "空闲",
       "connecting": "正在连接",
       "retrying": "正在重连",
-      "revoked": "授权已撤销",
+      "revoked": "已从账号移除",
       "superseded": "连接已被替换",
       "not_configured": "未配置",
       "unavailable": "不可用",

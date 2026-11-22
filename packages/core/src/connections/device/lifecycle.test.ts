@@ -70,9 +70,9 @@ describe("the device lifecycle", () => {
     expect(turnedOff).toEqual([]);
   });
 
-  it("keeps a pending removal's rows, so the retry that succeeds turns the origin off", async () => {
+  it("keeps a failed removal's rows, so the retry that succeeds turns the origin off", async () => {
     report("dev-1", "origin-1");
-    removal = { ok: false, code: "revocation_pending" };
+    removal = { ok: false, code: "unavailable" };
     await service().removeDevice("dev-1");
     expect(ids()).toEqual(["dev-1"]);
     removal = { ok: true };

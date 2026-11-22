@@ -4085,6 +4085,16 @@
         }
       }
     },
+    "Removed from your account" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已从账号移除"
+          }
+        }
+      }
+    },
     "Rename" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4315,16 +4325,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重试"
-          }
-        }
-      }
-    },
-    "Revoked" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已撤销"
           }
         }
       }

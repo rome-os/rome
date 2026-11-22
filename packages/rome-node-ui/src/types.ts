@@ -1,4 +1,4 @@
-export type NodeDeviceStatus = "connected" | "not_connected" | "unknown" | "revoked";
+export type NodeDeviceStatus = "connected" | "not_connected" | "unknown";
 
 /** A device linked to the account, as the host reads it from Rome Cloud. */
 export interface NodeDevice {
@@ -52,11 +52,7 @@ export interface NodeThisDevice {
 }
 
 /** Why the host could not rename or remove a device. */
-export type NodeDeviceManageError =
-  | "device_not_found"
-  | "invalid_device_name"
-  | "revocation_pending"
-  | "unavailable";
+export type NodeDeviceManageError = "device_not_found" | "invalid_device_name" | "unavailable";
 
 /**
  * Account-level changes to a device. The host sends them to Rome Cloud, resolves with null on
@@ -64,9 +60,6 @@ export type NodeDeviceManageError =
  */
 export interface NodeDeviceManage {
   rename(deviceId: string, name: string): Promise<NodeDeviceManageError | null>;
-  /**
-   * Revokes the device and deletes it from the account. `revocation_pending` means it is revoked
-   * but stays listed as revoked until Rome Cloud confirms; removing it again then deletes it.
-   */
+  /** Removes the device from the account. */
   remove(deviceId: string): Promise<NodeDeviceManageError | null>;
 }

@@ -201,6 +201,7 @@ extension DeviceStatus {
         #expect(NodeStatusLine.words(.online) == "Online")
         #expect(NodeStatusLine.words(.off) == "Offline")
         #expect(NodeStatusLine.words(.stopped(.superseded)) == "Replaced")
+        #expect(NodeStatusLine.words(.stopped(.revoked)) == "Removed from your account")
     }
 }
 

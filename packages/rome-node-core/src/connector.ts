@@ -123,11 +123,7 @@ export class DeviceConnector {
     await cloudRequest(cloudUrl, `/api/account/devices/${deviceId}`, token, "PATCH", { name });
   }
 
-  /**
-   * Revokes a device of the account and deletes its record. Throws CloudError
-   * `revocation_pending` when the device is revoked but the Gateway has not
-   * confirmed it yet, so the record stays listed as revoked.
-   */
+  /** Removes a device from the account. */
   async remove(deviceId: string): Promise<void> {
     if (this.stopped) throw new Error("connector_stopped");
     if (!isUuid(deviceId)) throw new CloudError("device_not_found");
