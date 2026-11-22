@@ -135,7 +135,7 @@ enum NodeStatusLine {
         case .online: return String(localized: "Online")
         case .connecting: return String(localized: "Connecting…")
         case .stopped(.superseded): return String(localized: "Replaced")
-        case .stopped(.revoked): return String(localized: "Revoked")
+        case .stopped(.revoked): return String(localized: "Removed from your account")
         case .off: return String(localized: "Offline")
         }
     }

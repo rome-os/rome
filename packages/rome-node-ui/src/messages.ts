@@ -10,7 +10,6 @@ export interface NodeUiMessages {
   gateway: Record<Extract<NodeConnectionStatus, "retrying" | "revoked" | "superseded">, string>;
   title: string;
   status: Record<NodeDeviceStatus, string>;
-  revokedDevices: string;
   statsUnavailable: string;
   card: {
     /** The name of a device's curve. */
@@ -53,12 +52,8 @@ export interface NodeUiMessages {
     /** The remove dialog's first line, then one point per consequence. */
     removeLead: string;
     removeActive: string[];
-    removeRevoked: string[];
     removeOnCloud: string;
-    errors: Record<
-      "device_not_found" | "invalid_device_name" | "revocation_pending" | "unavailable",
-      string
-    >;
+    errors: Record<"device_not_found" | "invalid_device_name" | "unavailable", string>;
   };
   detail: {
     commandsInDay: Plural;
@@ -111,7 +106,7 @@ const en: NodeUiMessages = {
   },
   gateway: {
     retrying: "Reconnecting to Gateway",
-    revoked: "Gateway access revoked",
+    revoked: "Removed from your account",
     superseded: "Gateway connection replaced",
   },
   title: "Devices",
@@ -119,9 +114,7 @@ const en: NodeUiMessages = {
     connected: "Connected",
     not_connected: "Not connected",
     unknown: "Unknown",
-    revoked: "Access revoked",
   },
-  revokedDevices: "Revoked",
   statsUnavailable: "Restart the device service to show command counts.",
   card: {
     chart: { one: "{count} command in 24 h", other: "{count} commands in 24 h" },
@@ -164,13 +157,10 @@ const en: NodeUiMessages = {
       "Your agent can't use {name} anymore.",
       "To add it back, reconnect it. It returns as a new device.",
     ],
-    removeRevoked: ["{name} is already revoked, so only its record is deleted."],
     removeOnCloud: "Remove on Rome Cloud",
     errors: {
       device_not_found: "Rome Cloud has no such device in your account.",
       invalid_device_name: "Use 1 to 80 characters without control characters.",
-      revocation_pending:
-        "The device is revoked, but Rome Cloud has not confirmed it yet. It stays under Revoked; remove it again in a moment.",
       unavailable: "Rome Cloud could not be reached. Try again.",
     },
   },
@@ -234,7 +224,7 @@ const zhCN: NodeUiMessages = {
   },
   gateway: {
     retrying: "正在重连 Gateway",
-    revoked: "Gateway 授权已撤销",
+    revoked: "已从账号移除",
     superseded: "Gateway 连接已被替换",
   },
   title: "设备",
@@ -242,9 +232,7 @@ const zhCN: NodeUiMessages = {
     connected: "已连接",
     not_connected: "未连接",
     unknown: "未知",
-    revoked: "授权已撤销",
   },
-  revokedDevices: "已撤销",
   statsUnavailable: "重启设备服务后即可显示命令统计。",
   card: {
     chart: { one: "24 小时 {count} 条命令", other: "24 小时 {count} 条命令" },
@@ -286,13 +274,10 @@ const zhCN: NodeUiMessages = {
       "你的 Agent 将不能再使用 {name}。",
       "要加回来，需要重新连接，它会作为一台新设备出现。",
     ],
-    removeRevoked: ["{name} 的授权已撤销，这里只删除它的记录。"],
     removeOnCloud: "在 Rome Cloud 上移除",
     errors: {
       device_not_found: "你的账号中没有这台设备。",
       invalid_device_name: "请使用 1 到 80 个字符，不含控制字符。",
-      revocation_pending:
-        "设备已撤销授权，但 Rome Cloud 还没确认，暂时留在“已撤销”中。请稍后再移除一次。",
       unavailable: "无法连接 Rome Cloud，请重试。",
     },
   },

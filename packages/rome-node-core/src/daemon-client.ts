@@ -381,7 +381,7 @@ export function createNodeClient(config: NodeConfig, options: NodeClientOptions 
             typeof device.id === "string" &&
             typeof device.name === "string" &&
             (device.platform === null || typeof device.platform === "string") &&
-            ["connected", "not_connected", "unknown", "revoked"].includes(String(device.status)),
+            ["connected", "not_connected", "unknown"].includes(String(device.status)),
         )
       )
         throw new Error("Invalid devices status response.");
@@ -410,10 +410,7 @@ export function createNodeClient(config: NodeConfig, options: NodeClientOptions 
     },
     /** Renames a device of the account. Cloud trims the name and accepts 1 to 80 characters. */
     renameDevice: (deviceId: string, name: string) => manage("devices.rename", { deviceId, name }),
-    /**
-     * Revokes a device of the account and deletes it from the list. The code
-     * `revocation_pending` means the device is revoked but still listed; remove it again later.
-     */
+    /** Removes a device from the account. Cloud ends its token and its connection. */
     removeDevice: (deviceId: string) => manage("devices.remove", { deviceId }),
     run,
     /**

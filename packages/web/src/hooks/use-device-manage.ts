@@ -6,7 +6,6 @@ import { fetchJson } from "@/lib/fetch-json";
 const manageErrors = new Set<string>([
   "device_not_found",
   "invalid_device_name",
-  "revocation_pending",
 ] satisfies NodeDeviceManageError[]);
 
 /** Sends one device change to the backend. Resolves with the error code, or null on success. */
@@ -45,8 +44,6 @@ export function useDeviceManage(onRemoved?: (deviceId: string) => void): NodeDev
         after(await manageRequest(path(deviceId), { method: "PATCH", json: { name } })),
       async remove(deviceId) {
         const error = await manageRequest(path(deviceId), { method: "DELETE" });
-        // A pending revocation still revoked the device, so the list changed either way.
-        if (error === "revocation_pending") void refresh();
         if (error) return error;
         void refresh();
         onRemoved?.(deviceId);
