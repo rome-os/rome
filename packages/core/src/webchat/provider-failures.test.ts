@@ -71,12 +71,14 @@ function harness(
   const swaps: string[] = [];
   const kept: Array<{ chatId: string; provider: string }> = [];
   const followed: string[] = [];
+  const released: string[] = [];
   const chose: Array<{ provider: string; moveExisting?: boolean }> = [];
   const selected: Array<{ chatId: string; selection: string | null }> = [];
   const accountListeners = new Set<
     (provider: ProviderId, change: "authorization" | "refreshed") => void
   >();
   let defaultProvider: DefaultProvider = options.defaultProvider ?? "anthropic";
+  let chooseFails: Error | undefined;
   const signedIn = options.signedIn ?? { anthropic: true, openai: true, rome_credits: false };
   const deps: ProviderFailuresDeps = {
     accounts: {
@@ -90,6 +92,11 @@ function harness(
       current: () => defaultProvider,
       signedIn: () => signedIn,
       choose: async (provider, choice) => {
+        if (chooseFails) {
+          const error = chooseFails;
+          chooseFails = undefined;
+          throw error;
+        }
         chose.push({ provider, ...(choice ? { moveExisting: choice.moveExisting } : {}) });
         defaultProvider = provider;
       },
@@ -102,6 +109,9 @@ function harness(
       follow: async (chatId) => {
         followed.push(chatId);
         return null;
+      },
+      release: async (chatId) => {
+        released.push(chatId);
       },
     },
     webchatRepo: {
@@ -230,6 +240,7 @@ function harness(
     swaps,
     kept,
     followed,
+    released,
     chose,
     selected,
     accountChanged,
@@ -238,6 +249,9 @@ function harness(
     notice,
     fail,
     defaultProvider: () => defaultProvider,
+    failNextChoose: (error: Error) => {
+      chooseFails = error;
+    },
   };
 }
 
@@ -933,6 +947,44 @@ describe("a card's options stay as written, and Retry is on every card", () => {
     const [card] = await h.failures.cards();
     await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "rome_credits" });
     expect(h.followed).toEqual(["chat"]);
+  });
+
+  it("Use Rome credits on a held owner-picked chat keeps the owner's pick", async () => {
+    const chats: Record<string, Row> = {
+      chat: { largeModelSelection: "claude-haiku", largeModelSelectionBy: "owner" },
+    };
+    const h = harness(
+      chats,
+      { anthropic: reportOf("unauthorized"), openai: reportOf("unauthorized") },
+      { defaultProvider: "rome_credits", signedIn: noAccount, credits: true, held: ["chat"] },
+    );
+    await h.fail("chat", notLoggedIn);
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "rome_credits" });
+    expect(h.released).toEqual(["chat"]);
+    expect(h.followed).toEqual([]);
+    expect(chats.chat).toMatchObject({
+      largeModelSelection: "claude-haiku",
+      largeModelSelectionBy: "owner",
+    });
+  });
+
+  it("an error other than a logged-out provider stays an error, not a fresh card", async () => {
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+    );
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    h.failNextChoose(new Error("disk full"));
+    await expect(
+      h.failures.switchCard(card!.messageId, {
+        kind: "provider",
+        provider: "openai",
+        makeDefault: true,
+      }),
+    ).rejects.toThrow("disk full");
+    expect(h.shownCards("chat")).toHaveLength(1);
   });
 });
 

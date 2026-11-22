@@ -136,13 +136,53 @@ describe("the default provider as Rome keeps it", () => {
       openai: reportOf("available"),
     };
     const { defaults, changes } = keeper(reports, { stored: { provider: "openai" } });
-    defaults.expectLogout("openai", { moveExisting: false });
+    const done = defaults.expectLogout("openai", { moveExisting: false });
     reports.openai = reportOf("unauthorized");
     await defaults.reconcile();
+    await done();
     expect(changes.at(-1)).toMatchObject({ from: "openai", to: "anthropic", moveExisting: false });
     // The choice is spent: the next logout that names none moves them.
     reports.openai = reportOf("available");
     await defaults.choose("openai");
+    reports.openai = reportOf("unauthorized");
+    await defaults.reconcile();
+    expect(changes.at(-1)).toMatchObject({ to: "anthropic", moveExisting: true });
+  });
+
+  it("a failure never changes the default: logging in elsewhere leaves an expired default", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("expired"),
+      openai: reportOf("unauthorized"),
+    };
+    const { defaults } = keeper(reports, { stored: { provider: "anthropic" } });
+    reports.openai = reportOf("available");
+    await defaults.reconcile();
+    expect(defaults.current()).toBe("anthropic");
+  });
+
+  it("keeps the logout dialog's choice when a reconcile runs before the logout", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("available"),
+    };
+    const { defaults, changes } = keeper(reports, { stored: { provider: "openai" } });
+    const done = defaults.expectLogout("openai", { moveExisting: false });
+    // Another account read lands first, while ChatGPT is still logged in.
+    await defaults.reconcile();
+    reports.openai = reportOf("unauthorized");
+    await defaults.reconcile();
+    await done();
+    expect(changes.at(-1)).toMatchObject({ from: "openai", to: "anthropic", moveExisting: false });
+  });
+
+  it("forgets the logout dialog's choice once the logout has ended", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("available"),
+    };
+    const { defaults, changes } = keeper(reports, { stored: { provider: "openai" } });
+    // The logout failed: ChatGPT stays logged in.
+    await defaults.expectLogout("openai", { moveExisting: false })();
     reports.openai = reportOf("unauthorized");
     await defaults.reconcile();
     expect(changes.at(-1)).toMatchObject({ to: "anthropic", moveExisting: true });

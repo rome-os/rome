@@ -3276,6 +3276,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // goes with the chat in the delete's own transaction.
     if (deps.concierge) await deps.concierge.endTaskChat(sessionId, "deleted");
     else await deps.webchatRepo.deleteSession(sessionId);
+    // A held conversation goes with its chat.
+    await deps.chatProviders?.release(sessionId);
     // Told after the delete, as an archive is, so the activity reads the
     // chat's finished rows as the main chat's.
     if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo, true);
@@ -3415,6 +3417,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       selection?.id ?? null,
       "owner",
     );
+    // Auto follows the default: a conversation held on a provider is let go.
+    if (!selection) await deps.chatProviders?.release(sessionId);
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);

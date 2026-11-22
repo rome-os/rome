@@ -8215,6 +8215,32 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    it("an overload swap lasts one turn: a restart after it resumes the session's own model", async () => {
+      const state = { openai: reportOf("unauthorized"), anthropic: reportOf("available") };
+      const opens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [claudeProvider(opens)],
+        accounts: fakeAccounts(() => state),
+      });
+      const first = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      const key = { agentName: "test-main", channelThreadKey: "webchat:one-turn-restart" };
+      const session = await first.open(key);
+      await collectMessages((await startAfter(session, { prompt: "first" })).events());
+      const own = (await sessionRepository.session(session.sessionId))!.model;
+      session.selectModelForOneTurn?.("claude-sonnet");
+      await collectMessages((await startAfter(session, { prompt: "swapped" })).events());
+      // The row still names the session's own model, not the one the swap lent it.
+      expect((await sessionRepository.session(session.sessionId))!.model).toBe(own);
+      await first.shutdown();
+      const again = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      const resumed = await again.open(key);
+      const after = (
+        await collectMessages((await startAfter(resumed, { prompt: "after" })).events())
+      ).find((message) => message.type === "result");
+      expect(after).toMatchObject({ content: own });
+      await again.shutdown();
+    });
+
     it("an unchecked move keeps every existing chat: a held session runs where it was held", async () => {
       const state = { openai: reportOf("available"), anthropic: reportOf("available") };
       const opens: ModelSessionParams[] = [];

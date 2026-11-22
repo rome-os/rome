@@ -30,8 +30,19 @@ import type { WebChatRepository } from "./repository.js";
 /** The conversations held on a provider, by their root session key. */
 export const HELD_SESSIONS_SETTING_KEY = "heldSessions";
 
-/** A one-off run's key, `<agent>:<uuid>`, which no later turn reuses. */
-const ADHOC_KEY = /^[^:]+:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * A one-off run's key, `<agent>:<uuid v4>` as `adhocSessionKey` writes it,
+ * which no later turn reuses. A web chat's key is never one: its id is a
+ * uuid v7.
+ */
+const ADHOC_KEY =
+  /^(?!webchat:)[^:]+:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * How recent a conversation's last turn must be for a change of the default
+ * to hold it: older ones are not reopened often enough to be worth keeping.
+ */
+export const HELD_SESSION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** What a chat runs on when it does not follow the default, as the chat APIs show it. */
 export interface PinnedModel {
@@ -89,10 +100,12 @@ export interface ChatProvidersDeps {
   /** The default now, so a chat that goes back to it runs its strength there. */
   currentDefault?: () => DefaultProvider | null;
   /**
-   * The keys of the live sessions whose last turn ran on `provider`: every
-   * conversation, a fork's, a channel's and a subagent's included.
+   * The keys of the live sessions active since `since` whose last turn ran on
+   * `provider`, or on any provider when it is absent: every conversation, a
+   * fork's, a channel's and a subagent's included.
    */
-  ranOn?: (provider: AccountedProviderId) => Promise<string[]>;
+  ranOn?: (provider: AccountedProviderId | undefined, since: Date) => Promise<string[]>;
+  now?: () => Date;
   /** Tells a chat's live session, if one is open, the model its next turn runs. */
   selectModel: (
     chatId: string,
@@ -131,6 +144,12 @@ export interface ChatProviders {
    * followed the default.
    */
   follow(chatId: string): Promise<ModelSelectionId | null>;
+  /**
+   * Lets the chat's conversation go where its own model or the default puts
+   * it, leaving its stored model as it is: an owner's pick stays theirs.
+   * For a chat that is deleted, or whose owner chose Auto or Rome credits.
+   */
+  release(chatId: string): Promise<void>;
   /**
    * How many chats a change of the default that moves existing chats would
    * move: those that follow it, the kept ones it lets follow it again, and
@@ -186,11 +205,36 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
       if (provider === "anthropic" || provider === "openai") held.set(key, provider);
     }
   })();
-  const saveHeld = async (next: Map<string, AccountedProviderId>) => {
-    await deps.settings?.set(HELD_SESSIONS_SETTING_KEY, Object.fromEntries(next));
-    held = next;
+  // Every change to the held map, one at a time, each from the map as the
+  // one before it left it, so two at once never drop each other's change.
+  let queue: Promise<unknown> = loaded;
+  const changeHeld = <T>(
+    change: (current: Map<string, AccountedProviderId>) => Promise<T> | T,
+  ): Promise<T> => {
+    const run = async () => {
+      const next = new Map(held);
+      const result = await change(next);
+      if (next.size !== held.size || [...next].some(([key, value]) => held.get(key) !== value)) {
+        await deps.settings?.set(HELD_SESSIONS_SETTING_KEY, Object.fromEntries(next));
+        held = next;
+      }
+      return result;
+    };
+    const next = queue.then(run, run);
+    queue = next.catch(() => undefined);
+    return next;
   };
   const rootOf = (key: string) => walkToRoot(key).stored;
+  const since = () => new Date((deps.now?.() ?? new Date()).getTime() - HELD_SESSION_WINDOW_MS);
+  /** The conversations, by root, whose sessions ran on `provider` since `from`. */
+  const conversationsOn = async (provider: AccountedProviderId | undefined, from = since()) => {
+    const roots = new Set<string>();
+    for (const key of (await deps.ranOn?.(provider, from)) ?? []) {
+      const root = rootOf(key);
+      if (!ADHOC_KEY.test(root)) roots.add(root);
+    }
+    return roots;
+  };
 
   const keepOn = async (
     chatId: string,
@@ -211,7 +255,7 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
       await loaded;
       if (change.moveExisting) {
         const released = await deps.webchatRepo.releaseKeptChats();
-        if (held.size > 0) await saveHeld(new Map());
+        await changeHeld((map) => map.clear());
         if (released.length > 0) {
           log.info("kept chats follow the default again", { released: released.length });
         }
@@ -225,29 +269,28 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
         const row = await deps.webchatRepo.getSession(chat.id);
         await keepOn(chat.id, row?.agentName ?? null, chat.largeModelSelection, provider);
       }
-      // Every other conversation that ran there stays too: a fork, a
+      // Every other conversation that ran there lately stays too: a fork, a
       // channel's chat, and the subagents under them and under the chats.
-      const next = new Map(held);
-      for (const chat of chats) next.set(webchatSessionKey(chat.id), provider);
-      const ran = (await deps.ranOn?.(provider)) ?? [];
-      for (const key of ran) {
-        const root = rootOf(key);
-        if (ADHOC_KEY.test(root) || next.has(root)) continue;
-        next.set(root, provider);
-      }
-      await saveHeld(next);
-      log.info("chats kept on the old default", {
-        provider,
-        chats: chats.length,
-        conversations: next.size - held.size,
+      const ran = await conversationsOn(provider);
+      // Every conversation with a session left, however old.
+      const live = await conversationsOn(undefined, new Date(0));
+      const added = await changeHeld((map) => {
+        // A held conversation other than a web chat goes once it has no session left.
+        for (const key of [...map.keys()]) {
+          if (!key.startsWith("webchat:") && !live.has(key)) map.delete(key);
+        }
+        const before = map.size;
+        for (const chat of chats) map.set(webchatSessionKey(chat.id), provider);
+        for (const root of ran) if (!map.has(root)) map.set(root, provider);
+        return map.size - before;
       });
+      log.info("chats kept on the old default", { provider, chats: chats.length, added });
     },
     async keep(chatId, provider) {
       const chat = await deps.webchatRepo.getSession(chatId);
       if (!chat) return null;
       if (chat.largeModelSelectionBy === "owner") return null;
       if (chat.largeModelSelection && chat.largeModelSelectionBy === null) return null;
-      await loaded;
       const selection = await keepOn(
         chatId,
         chat.agentName ?? null,
@@ -255,20 +298,18 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
         provider,
       );
       // Its subagents and forks stay with it.
-      await saveHeld(new Map(held).set(webchatSessionKey(chatId), provider));
+      await changeHeld((map) => map.set(webchatSessionKey(chatId), provider));
       return selection;
     },
     async follow(chatId) {
-      await loaded;
       const chat = await deps.webchatRepo.getSession(chatId);
       if (!chat) return null;
       const key = webchatSessionKey(chatId);
-      const heldOn = held.get(key);
-      if (heldOn) {
-        const next = new Map(held);
-        next.delete(key);
-        await saveHeld(next);
-      }
+      const heldOn = await changeHeld((map) => {
+        const was = map.get(key);
+        map.delete(key);
+        return was;
+      });
       if (!pinnedModelOf(chat, heldOn)) return null;
       const stored = chat.largeModelSelection;
       if (!isModelSelectionId(stored)) {
@@ -286,15 +327,26 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
       deps.selectModel(chatId, chat.agentName ?? null, next);
       return next;
     },
+    async release(chatId) {
+      await changeHeld((map) => map.delete(webchatSessionKey(chatId)));
+    },
     async followingCount() {
       await loaded;
       const [following, kept] = await Promise.all([
         deps.webchatRepo.followingChats(),
         deps.webchatRepo.keptChatCount(),
       ]);
-      // Held conversations that are not a web chat, such as a channel's chat.
-      const others = [...held.keys()].filter((key) => !key.startsWith("webchat:")).length;
-      return following.length + kept + others;
+      // The conversations that are not a web chat counted above, such as a
+      // channel's chat: those held, and those that ran on the default lately.
+      const current = deps.currentDefault?.();
+      const onDefault =
+        current && current !== "rome_credits"
+          ? await conversationsOn(providerOfDefault(current))
+          : new Set<string>();
+      const others = new Set(
+        [...held.keys(), ...onDefault].filter((key) => !key.startsWith("webchat:")),
+      );
+      return following.length + kept + others.size;
     },
   };
 }

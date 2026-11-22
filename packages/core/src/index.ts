@@ -1096,6 +1096,7 @@ async function main() {
   // Wired once the chats' sessions exist, before Rome serves a request.
   let chatProviders: ChatProviders = {
     ready: async () => {},
+    release: async () => {},
     beforeDefaultChange: async () => {},
     heldProvider: () => undefined,
     keep: async () => null,
@@ -1502,7 +1503,7 @@ async function main() {
     accounts: modelAccounts,
     settings: settingsRepo,
     currentDefault: () => defaultProviders.current(),
-    ranOn: (provider) => sessionRepository.continuityKeysOn(provider),
+    ranOn: (provider, since) => sessionRepository.continuityKeysOn(provider, since),
     selectModel: (chatId, agentName, selection) =>
       agentSessionManager
         .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })

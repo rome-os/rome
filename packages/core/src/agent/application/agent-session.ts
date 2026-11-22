@@ -3479,10 +3479,16 @@ class AgentSessionImpl implements AgentSession {
     contextTokens?: number,
   ): Promise<void> {
     try {
+      // A swapped turn records the session's own model, so a cold resume
+      // runs that one again and not the one the swap lent it.
+      const own =
+        this.runsOneTurnSelection && this.sessionPin?.providerId === session.providerId
+          ? this.sessionPin.model
+          : session.model;
       this.session.recordTurn({
         provider: session.providerId,
         modelThreadId: session.modelThreadId,
-        model: session.model,
+        model: own,
         reasoningEffort,
         checkpoint: position ? { turnId, checkpointId: position.checkpointId } : undefined,
         ...(contextTokens !== undefined ? { contextTokens } : {}),
@@ -3491,9 +3497,7 @@ class AgentSessionImpl implements AgentSession {
       // The pin becomes readable only once recorded: later turns of this live
       // session now resolve exactly this model, matching what a cold resume
       // of the row would do. A swapped turn's model is not the session's.
-      if (!this.runsOneTurnSelection) {
-        this.sessionPin = { providerId: session.providerId, model: session.model };
-      }
+      this.sessionPin = { providerId: session.providerId, model: own };
     } catch (err) {
       this.log.warn("failed to persist session turn", {
         sessionId: this.sessionId,

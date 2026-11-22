@@ -140,7 +140,7 @@ export interface ProviderFailuresDeps {
   /** `refresh`, when given, reads a provider's account again, as for a reset time a card lacks. */
   accounts: Pick<ModelAccounts, "read" | "onChanged"> & Partial<Pick<ModelAccounts, "refresh">>;
   defaults: Pick<DefaultProviders, "current" | "signedIn" | "choose">;
-  chats: Pick<ChatProviders, "keep" | "follow">;
+  chats: Pick<ChatProviders, "keep" | "follow" | "release">;
   webchatRepo: Pick<
     WebChatRepository,
     "getSession" | "addBackendMessage" | "updateMessageContent" | "updateSessionLargeModelSelection"
@@ -777,15 +777,23 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
     const choose = async (provider: DefaultProvider, moveExisting: boolean) => {
       try {
         await deps.defaults.choose(provider, { moveExisting });
-      } catch {
-        throw new StaleOption();
+      } catch (error) {
+        // The provider logged out since the card was written; anything else is an error.
+        if (error instanceof Error && /not signed in/.test(error.message)) throw new StaleOption();
+        throw error;
       }
     };
     if (change.provider === "rome_credits") {
       if (!creditsOffered()) throw new StaleOption();
       await choose("rome_credits", true);
-      // A chat held on a logged-out provider follows them too.
-      if (deps.held?.(chatId)) await deps.chats.follow(chatId);
+      // Rome credits are the instance's, so every chat runs on them without a
+      // checkbox: the card offers them only when no account can run. A chat
+      // held on a logged-out provider is let go too. A kept one follows the
+      // default again; an owner's pick stays theirs, at its strength there.
+      if (deps.held?.(chatId)) {
+        if (ownerPicked(chat)) await deps.chats.release(chatId);
+        else await deps.chats.follow(chatId);
+      }
       return;
     }
     if (!alternatives(card.runsOn).includes(change.provider)) throw new StaleOption();

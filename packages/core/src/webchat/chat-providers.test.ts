@@ -12,6 +12,12 @@ async function setup(
     ran?: Record<string, string[]>;
     settings?: Map<string, unknown>;
     currentDefault?: "anthropic" | "openai" | "rome_credits";
+    /** Keys of other sessions that still exist, on any provider. */
+    alive?: string[];
+    /** Records the `since` each listing asked for. */
+    asked?: Date[];
+    /** Delays each settings write, so two changes overlap. */
+    slowWrites?: boolean;
   } = {},
 ) {
   const testDb = createTestDb();
@@ -54,11 +60,20 @@ async function setup(
     settings: {
       get: async (key: string) => (settings.get(key) ?? null) as never,
       set: async (key: string, value: unknown) => {
+        if (options.slowWrites) await new Promise((resolve) => setTimeout(resolve, 5));
         settings.set(key, structuredClone(value));
       },
     },
     currentDefault: () => options.currentDefault ?? "openai",
-    ranOn: async (provider) => options.ran?.[provider] ?? [],
+    ranOn: async (provider, since) => {
+      options.asked?.push(since);
+      return provider
+        ? (options.ran?.[provider] ?? [])
+        : Object.values(options.ran ?? {})
+            .flat()
+            .concat(options.alive ?? []);
+    },
+    now: () => new Date("2026-11-22T12:00:00.000Z"),
   });
   await providers.ready();
   const row = async (id: string) => {
@@ -208,6 +223,66 @@ describe("an unchecked move keeps every existing chat", () => {
     moveExisting: false,
   } as const;
 
+  it("holds a fork whose id is a real uuid v7, and its subagents, but no one-off run", async () => {
+    const fork = "webchat:019a8f2e-7c41-7d3a-9b1e-4f2c6a8d0e11";
+    const { providers } = await setup({
+      ran: {
+        anthropic: [fork, `${fork}:subagent:abc`, "main:0b7e7a5e-3c1f-4c8e-9a51-2f4f6f3d9f10"],
+      },
+    });
+    await providers.beforeDefaultChange(unchecked);
+    expect(providers.heldProvider(fork)).toBe("anthropic");
+    expect(providers.heldProvider(`${fork}:subagent:abc`)).toBe("anthropic");
+    expect(providers.heldProvider("main:0b7e7a5e-3c1f-4c8e-9a51-2f4f6f3d9f10")).toBeUndefined();
+  });
+
+  it("holds only conversations active in the last 30 days", async () => {
+    const asked: Date[] = [];
+    const { providers } = await setup({ ran: { anthropic: ["telegram:42"] }, asked });
+    await providers.beforeDefaultChange(unchecked);
+    expect(asked[0]?.toISOString()).toBe("2026-10-23T12:00:00.000Z");
+  });
+
+  it("lets a held channel chat go once it has no session left", async () => {
+    const ran = { anthropic: ["telegram:42"] } as Record<string, string[]>;
+    const { providers } = await setup({ ran });
+    await providers.beforeDefaultChange(unchecked);
+    ran.anthropic = [];
+    await providers.beforeDefaultChange({ ...unchecked, from: "openai", to: "anthropic" });
+    expect(providers.heldProvider("telegram:42")).toBeUndefined();
+  });
+
+  it("lets a deleted chat's conversation go, and Auto in the model menu too", async () => {
+    const { providers } = await setup({ ran: { anthropic: ["webchat:fork-1"] } });
+    await providers.beforeDefaultChange(unchecked);
+    await providers.release("fork-1");
+    expect(providers.heldProvider("webchat:fork-1")).toBeUndefined();
+  });
+
+  it("drops no change when two changes of the held map overlap", async () => {
+    const { providers, settings } = await setup({ slowWrites: true });
+    await Promise.all([
+      providers.keep("fast", "anthropic"),
+      providers.keep("plain", "openai"),
+      providers.release("picked"),
+    ]);
+    expect(providers.heldProvider("webchat:fast")).toBe("anthropic");
+    expect(providers.heldProvider("webchat:plain")).toBe("openai");
+    expect(settings.get("heldSessions")).toEqual({
+      "webchat:fast": "anthropic",
+      "webchat:plain": "openai",
+    });
+  });
+
+  it("counts a channel chat that follows the default among the chats a move would move", async () => {
+    const { providers } = await setup({
+      currentDefault: "openai",
+      ran: { openai: ["telegram:7"] },
+    });
+    // Two web chats that follow, and the channel's chat not held yet.
+    expect(await providers.followingCount()).toBe(3);
+  });
+
   it("holds a fork, a channel's chat and the subagents under any chat on the old provider", async () => {
     const { providers } = await setup({
       ran: {
@@ -244,7 +319,10 @@ describe("an unchecked move keeps every existing chat", () => {
   });
 
   it("counts a held channel chat among the chats a checked move would move", async () => {
-    const { providers } = await setup({ ran: { anthropic: ["telegram:42"] } });
+    const { providers } = await setup({
+      ran: { anthropic: ["telegram:42"] },
+      currentDefault: "openai",
+    });
     await providers.beforeDefaultChange(unchecked);
     // Two web chats kept, and the channel's chat.
     expect(await providers.followingCount()).toBe(3);

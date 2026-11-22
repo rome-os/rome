@@ -333,20 +333,30 @@ export function aiToolsRoutes(
 
   // The logout dialog's "Move existing chats too", for a logout that moves the
   // default. A client that sends none moved them, as before.
-  const expectLogout = async (
+  // The choice holds until the logout and its account read have ended.
+  const loggingOut = async <T>(
     c: { req: { json(): Promise<unknown> } },
     provider: "anthropic" | "openai",
-  ) => {
+    logout: () => Promise<T>,
+  ): Promise<T> => {
     const body = (await c.req.json().catch(() => null)) as { moveExisting?: unknown } | null;
-    deps.defaultProviders?.expectLogout(provider, { moveExisting: body?.moveExisting !== false });
+    const done = deps.defaultProviders?.expectLogout(provider, {
+      moveExisting: body?.moveExisting !== false,
+    });
+    try {
+      return await logout();
+    } finally {
+      await done?.();
+    }
   };
 
-  app.delete("/ai-tools/anthropic-compatible-credentials", async (c) => {
-    await expectLogout(c, "anthropic");
-    await deps.claudeAccount.removeCredential();
-    await deps.modelAccounts.refresh("anthropic");
-    return c.json({ ok: true });
-  });
+  app.delete("/ai-tools/anthropic-compatible-credentials", async (c) =>
+    loggingOut(c, "anthropic", async () => {
+      await deps.claudeAccount.removeCredential();
+      await deps.modelAccounts.refresh("anthropic");
+      return c.json({ ok: true });
+    }),
+  );
 
   // Start ChatGPT OAuth on the shared app-server and open the returned URL in
   // the noVNC-visible server browser. Completion arrives as the process-global
@@ -390,33 +400,35 @@ export function aiToolsRoutes(
   });
 
   // Re-read the account on success so the agent gate reflects it immediately.
-  app.post("/ai-tools/claude/logout", async (c) => {
-    await expectLogout(c, "anthropic");
-    try {
-      await deps.claudeAccount.revoke();
-    } catch (err) {
-      const error = getErrorMessage(err);
-      log.warn("claude logout failed", { error });
-      return c.json({ error }, 500);
-    }
-    await deps.modelAccounts.refresh("anthropic");
-    return c.json({ ok: true });
-  });
+  app.post("/ai-tools/claude/logout", async (c) =>
+    loggingOut(c, "anthropic", async () => {
+      try {
+        await deps.claudeAccount.revoke();
+      } catch (err) {
+        const error = getErrorMessage(err);
+        log.warn("claude logout failed", { error });
+        return c.json({ error }, 500);
+      }
+      await deps.modelAccounts.refresh("anthropic");
+      return c.json({ ok: true });
+    }),
+  );
 
   // Log out of Codex via the app-server `account/logout` RPC (no PTY terminal).
   // Re-probe login state on success so the agent gate reflects it immediately.
-  app.post("/ai-tools/codex/logout", async (c) => {
-    await expectLogout(c, "openai");
-    try {
-      await deps.codexAccountService.revoke();
-      await deps.modelAccounts.refresh("openai");
-      return c.json({ ok: true });
-    } catch (err) {
-      const error = getErrorMessage(err);
-      log.warn("codex logout failed", { error });
-      return c.json({ error }, 500);
-    }
-  });
+  app.post("/ai-tools/codex/logout", async (c) =>
+    loggingOut(c, "openai", async () => {
+      try {
+        await deps.codexAccountService.revoke();
+        await deps.modelAccounts.refresh("openai");
+        return c.json({ ok: true });
+      } catch (err) {
+        const error = getErrorMessage(err);
+        log.warn("codex logout failed", { error });
+        return c.json({ error }, 500);
+      }
+    }),
+  );
 
   return app;
 }

@@ -51,9 +51,14 @@ export interface DefaultProviders {
   dismissNote(): Promise<void>;
   /**
    * Before the guardian logs out of `provider`: whether the chats that follow
-   * the default move with it, if the logout moves it. Absent, they move.
+   * the default move with it, if the logout moves it. Absent, they move. The
+   * choice holds until the returned call, once the logout has ended, so a
+   * reconcile that runs first does not spend it.
    */
-  expectLogout(provider: AccountedProviderId, options: { moveExisting: boolean }): void;
+  expectLogout(
+    provider: AccountedProviderId,
+    options: { moveExisting: boolean },
+  ): () => Promise<void>;
   /** Checks the default against the providers signed in now. */
   reconcile(): Promise<void>;
   onChanged(listener: (change: DefaultProviderChange) => void): () => void;
@@ -91,7 +96,7 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
   let state: DefaultProviderState = { provider: null };
   const listeners = new Set<(change: DefaultProviderChange) => void>();
   // What the guardian chose in the logout dialog, until the logout moves the default.
-  const logouts = new Map<AccountedProviderId, boolean>();
+  const logouts = new Map<AccountedProviderId, { moveExisting: boolean }>();
   // One write at a time, in order, so a reconcile never undoes a choice.
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
@@ -149,16 +154,10 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
         now_,
         seeded && now_[seeded] ? seeded : legacyDefault(reports, now_),
       );
-      // A choice for a provider still logged in, or one that is not the default, moves nothing.
-      for (const logout of logouts.keys()) {
-        if (now_[logout] || state.provider === null || providerOfDefault(state.provider) !== logout)
-          logouts.delete(logout);
-      }
       if (!provider || provider === state.provider) return;
       const from = state.provider;
       const removed = moved && from ? providerOfDefault(from) : null;
-      const moveExisting = (removed && logouts.get(removed)) ?? true;
-      if (removed) logouts.delete(removed);
+      const moveExisting = (removed && logouts.get(removed)?.moveExisting) ?? true;
       await store(
         {
           provider,
@@ -201,7 +200,13 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
         if (state.note && state.provider) await store({ provider: state.provider });
       }),
     expectLogout(provider, choice) {
-      logouts.set(provider, choice.moveExisting);
+      const token = { moveExisting: choice.moveExisting };
+      logouts.set(provider, token);
+      // Queued behind the reconcile the logout's account read starts.
+      return () =>
+        serial(async () => {
+          if (logouts.get(provider) === token) logouts.delete(provider);
+        });
     },
     reconcile,
     onChanged(listener) {

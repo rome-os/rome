@@ -249,7 +249,7 @@ export interface ApiDeps {
    * How many chats follow the default, for the default-change dialog; which
    * conversations are held on a provider; and a chat's "Back to default".
    */
-  chatProviders?: Pick<ChatProviders, "followingCount" | "heldProvider" | "follow">;
+  chatProviders?: Pick<ChatProviders, "followingCount" | "heldProvider" | "follow" | "release">;
   /** Rome credits can be spent now: linked, enabled and with a balance. */
   romeCreditsUsable?: () => boolean;
   /** Codex's loopback route to Rome credits, built by the composition root. */
