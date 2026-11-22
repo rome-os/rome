@@ -459,6 +459,28 @@ describe("an unchecked move keeps every existing chat: a held session", () => {
     ).toMatchObject({ ok: false, failure: { provider: "anthropic" } });
   });
 
+  it("keeps a held chat with a provider-restricted agent on its own account under a credits default", () => {
+    const ask = modelResolutionRequest(
+      "gpt-6-1-sol",
+      undefined,
+      { tier: "large", providerId: "openai" },
+      true,
+      "openai",
+    );
+    expect(ask).toMatchObject({ kind: "exact", providerId: "openai", ownAccount: true });
+    expect(ask).not.toHaveProperty("credits");
+    expect(
+      resolveModel(
+        ask,
+        facts({
+          reports: reports(unauthorized, unauthorized),
+          logins: { openai: credits() },
+          defaultProvider: "rome_credits",
+        }),
+      ),
+    ).toMatchObject({ ok: false, failure: { provider: "openai", availability: "unauthorized" } });
+  });
+
   it("leaves an agent restricted to a provider where its agent put it", () => {
     expect(
       modelResolutionRequest(
@@ -468,6 +490,6 @@ describe("an unchecked move keeps every existing chat: a held session", () => {
         false,
         "anthropic",
       ),
-    ).toEqual({ kind: "tier", tier: "large", providerId: "openai" });
+    ).toEqual({ kind: "tier", tier: "large", providerId: "openai", ownAccount: true });
   });
 });

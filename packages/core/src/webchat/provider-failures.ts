@@ -140,7 +140,7 @@ export interface ProviderFailuresDeps {
   /** `refresh`, when given, reads a provider's account again, as for a reset time a card lacks. */
   accounts: Pick<ModelAccounts, "read" | "onChanged"> & Partial<Pick<ModelAccounts, "refresh">>;
   defaults: Pick<DefaultProviders, "current" | "signedIn" | "choose">;
-  chats: Pick<ChatProviders, "keep" | "follow" | "picked">;
+  chats: Pick<ChatProviders, "keep" | "follow" | "pick">;
   webchatRepo: Pick<
     WebChatRepository,
     "getSession" | "addBackendMessage" | "updateMessageContent" | "updateSessionLargeModelSelection"
@@ -803,12 +803,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         MODEL_SELECTIONS[stored].providerId === provider
           ? stored
           : selectionOfStrength(provider, strengthOfSelection(stored, account), account);
-      if (selection !== stored) {
-        await deps.webchatRepo.updateSessionLargeModelSelection(chatId, selection, "owner");
-        deps.selectModel?.(chatId, agentName, selection);
-      }
-      // A held conversation moves its hold with the pick, so its subagents follow.
-      await deps.chats.picked(chatId, provider);
+      // Still the owner's, in one transition with its hold, so its subagents follow.
+      if (selection !== stored) await deps.chats.pick(chatId, selection);
       return;
     }
     if (change.makeDefault) await deps.chats.follow(chatId);
