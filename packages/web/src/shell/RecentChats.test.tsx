@@ -2034,27 +2034,11 @@ describe("RecentChats", () => {
       expect(screen.queryByRole("region", { name: "Projects" })).toBeNull();
 
       await user.click(screen.getByRole("button", { name: "Actions for Old topic" }));
+      // An archived topic chat is renamed once it is unarchived.
       expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-        "Rename",
         "Unarchive chat",
         "Delete",
       ]);
-    });
-
-    it("shows a renamed archived topic chat under its new name", async () => {
-      localStorage.setItem("rome-recent-chats-status-filter", "archived");
-      const user = userEvent.setup();
-      renderRecentChats();
-      await within(conciergeSection()).findByRole("link", { name: "Old topic" });
-      await user.click(screen.getByRole("button", { name: "Actions for Old topic" }));
-      await user.click(screen.getByRole("menuitem", { name: "Rename" }));
-      const input = await screen.findByRole("textbox", { name: "Chat name" });
-      await user.clear(input);
-      await user.type(input, "Renamed topic{Enter}");
-      expect(
-        await within(conciergeSection()).findByRole("link", { name: "Renamed topic" }),
-      ).toBeTruthy();
-      expect(screen.queryByText("Old topic")).toBeNull();
     });
 
     it("shows the main chat and every topic chat under all", async () => {

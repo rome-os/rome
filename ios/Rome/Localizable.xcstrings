@@ -827,6 +827,26 @@
         }
       }
     },
+    "Archived" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已归档"
+          }
+        }
+      }
+    },
+    "Archived · %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已归档 · %lld"
+          }
+        }
+      }
+    },
     "Ask the owner of this Rome to turn it on." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2565,6 +2585,16 @@
         }
       }
     },
+    "Keep in Chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "留在 Chat"
+          }
+        }
+      }
+    },
     "Language" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2955,6 +2985,16 @@
         }
       }
     },
+    "Move them back" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "挪回这个对话"
+          }
+        }
+      }
+    },
     "Move to Chat" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3111,6 +3151,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有可用的 AI 工具"
+          }
+        }
+      }
+    },
+    "No archived chats" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有已归档的对话"
           }
         }
       }
@@ -5419,6 +5469,16 @@
         }
       }
     },
+    "This chat is archived" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话已归档"
+          }
+        }
+      }
+    },
     "This Rome is a development build and cannot be updated." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5879,6 +5939,26 @@
         }
       }
     },
+    "Unarchive" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消归档"
+          }
+        }
+      }
+    },
+    "Unarchive “%@”?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消归档“%@”？"
+          }
+        }
+      }
+    },
     "Understand your sleep" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6323,6 +6403,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "收到 %@ 时"
+          }
+        }
+      }
+    },
+    "When this chat was archived, these follows moved to Chat:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话归档时，以下关注转到了 Chat："
           }
         }
       }

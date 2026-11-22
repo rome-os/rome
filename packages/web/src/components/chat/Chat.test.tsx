@@ -3929,6 +3929,20 @@ describe("Chat header archive of a Concierge topic chat", () => {
     );
   });
 
+  it("offers no Rename or Pin in an archived topic chat's menu", async () => {
+    identity("2026-11-01T00:00:00.000Z");
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    // An archived topic chat is renamed and pinned once it is unarchived.
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.menu.outputs",
+      "share.title",
+      "navbar.unarchive",
+      "navbar.delete",
+    ]);
+  });
+
   it("asks before unarchiving an archived topic chat that opens as an ordinary chat", async () => {
     // An archived topic chat is in no active list, so the chat page opens it
     // without the Concierge variant; the session itself says what it is.
