@@ -104,6 +104,99 @@ struct MainShell: View {
     private var usesSidebar: Bool { Self.usesSidebar(sizeClass) && !ProcessInfo.processInfo.isMacCatalystApp }
 
     var body: some View {
+        // Split in two: as one chain, the type checker gives up on CI.
+        presented
+        .onChange(of: path) { Keyboard.dismiss() }
+        .onChange(of: agentPage) { _, shown in
+            Keyboard.dismiss()
+            // Opened or closed, it starts on its own page again.
+            agentPath = []
+            agentLinkPage = nil
+            agentApp = nil
+        }
+        // The banner that offers a sign-in must not be covered, and a web
+        // view on the expired session shows nothing useful.
+        .onChange(of: model.sessionExpired) { _, expired in
+            guard expired else { return }
+            agentPage = nil
+            openApp = nil
+            page = nil
+        }
+        .onChange(of: showSettings) { _, shown in if shown { Keyboard.dismiss() } }
+        .onChange(of: page) { _, shown in if shown != nil { Keyboard.dismiss() } }
+        .onChange(of: openApp) { _, shown in if shown != nil { Keyboard.dismiss() } }
+        // A tap on the widget: its app, Apps or Chat in front, nothing over it.
+        // Taken on appear too: a link routed while this shell was being
+        // built (a sign-in, a switch) waits for it.
+        .onChange(of: model.widgetRequest, initial: true) {
+            guard let link = model.takeWidgetLink(for: workspace.instanceID) else { return }
+            Task { await follow(link) }
+        }
+        // A tapped "sign in again" notice: Settings at Apple Health's Sync history.
+        // Taken on appear too: a tap that launched the app came before this shell.
+        .onChange(of: model.settingsRequest, initial: true) {
+            guard let routes = model.takeSettingsRequest() else { return }
+            agentPage = nil
+            page = nil
+            openApp = nil
+            settingsPage = nil
+            closeDrawer()
+            settingsPath = routes
+            showSettings = true
+        }
+        // A tapped push for this instance: its chat in front, nothing over it.
+        .onChange(of: model.chatRequest) { _, request in
+            agentPage = nil
+            showSettings = false
+            page = nil
+            openApp = nil
+            settingsPage = nil
+            closeDrawer()
+            show(request.topicId.map(MainSection.topic) ?? .chat)
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.sessionExpired)
+        // A window that turns wide pins the drawer; the one it pushed aside is closed.
+        .onChange(of: usesSidebar) { drawerOpen = false }
+        #if DEBUG
+        .onAppear { PerfProbe.start(model: model) }
+        .onChange(of: model.debugCommand) { _, command in
+            switch command {
+            case .drawer(let open):
+                // Pinned, the drawer stays on screen in every capture.
+                if !usesSidebar { open ? openDrawer() : closeDrawer() }
+            case .agent(let tab):
+                if let tab { agentTab = tab }
+                agentPage = tab == nil ? nil : AgentRoute(tasksChatId: conciergeChatID, chatKey: conciergeChatID)
+            case .agentBlank(let tab):
+                agentTab = tab
+                agentPage = AgentRoute(tasksChatId: "", chatKey: "snapshot-blank")
+            case .agentRoute(let routes):
+                agentPath = routes
+            case .route(let routes):
+                show(.chat)
+                path = routes
+            case .section(let picked): show(picked)
+            case .settings(let routes):
+                settingsPath = routes ?? []
+                if SnapshotRunner.directory != nil { settingsPreview = routes != nil } else { showSettings = routes != nil }
+            case .page(let url):
+                if SnapshotRunner.directory != nil { pagePreview = url } else { page = url }
+            case .app(let app):
+                if SnapshotRunner.directory != nil { appPreview = app } else { openApp = app }
+            case .photoViewer(let open):
+                photoViewerPreview = open
+            case .connectSheet(let id):
+                connectPreview = id
+            case .archivedSheet(let open):
+                archivedPreview = open
+            case .composerPhotos, .appIdeas, nil: break
+            }
+        }
+        #endif
+    }
+
+    /// The shell with its sheets and covers; `body` adds the reactions to state.
+    private var presented: some View {
         GeometryReader { geometry in
             let _ = PerfProbe.count("shellBody")
             let width = min(318, geometry.size.width * 0.81)
@@ -292,93 +385,6 @@ struct MainShell: View {
         }
         // Whatever covers or replaces the chat takes the keyboard with it;
         // the composer keeps its text.
-        .onChange(of: path) { Keyboard.dismiss() }
-        .onChange(of: agentPage) { _, shown in
-            Keyboard.dismiss()
-            // Opened or closed, it starts on its own page again.
-            agentPath = []
-            agentLinkPage = nil
-            agentApp = nil
-        }
-        // The banner that offers a sign-in must not be covered, and a web
-        // view on the expired session shows nothing useful.
-        .onChange(of: model.sessionExpired) { _, expired in
-            guard expired else { return }
-            agentPage = nil
-            openApp = nil
-            page = nil
-        }
-        .onChange(of: showSettings) { _, shown in if shown { Keyboard.dismiss() } }
-        .onChange(of: page) { _, shown in if shown != nil { Keyboard.dismiss() } }
-        .onChange(of: openApp) { _, shown in if shown != nil { Keyboard.dismiss() } }
-        // A tap on the widget: its app, Apps or Chat in front, nothing over it.
-        // Taken on appear too: a link routed while this shell was being
-        // built (a sign-in, a switch) waits for it.
-        .onChange(of: model.widgetRequest, initial: true) {
-            guard let link = model.takeWidgetLink(for: workspace.instanceID) else { return }
-            Task { await follow(link) }
-        }
-        // A tapped "sign in again" notice: Settings at Apple Health's Sync history.
-        // Taken on appear too: a tap that launched the app came before this shell.
-        .onChange(of: model.settingsRequest, initial: true) {
-            guard let routes = model.takeSettingsRequest() else { return }
-            agentPage = nil
-            page = nil
-            openApp = nil
-            settingsPage = nil
-            closeDrawer()
-            settingsPath = routes
-            showSettings = true
-        }
-        // A tapped push for this instance: its chat in front, nothing over it.
-        .onChange(of: model.chatRequest) { _, request in
-            agentPage = nil
-            showSettings = false
-            page = nil
-            openApp = nil
-            settingsPage = nil
-            closeDrawer()
-            show(request.topicId.map(MainSection.topic) ?? .chat)
-        }
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.sessionExpired)
-        // A window that turns wide pins the drawer; the one it pushed aside is closed.
-        .onChange(of: usesSidebar) { drawerOpen = false }
-        #if DEBUG
-        .onAppear { PerfProbe.start(model: model) }
-        .onChange(of: model.debugCommand) { _, command in
-            switch command {
-            case .drawer(let open):
-                // Pinned, the drawer stays on screen in every capture.
-                if !usesSidebar { open ? openDrawer() : closeDrawer() }
-            case .agent(let tab):
-                if let tab { agentTab = tab }
-                agentPage = tab == nil ? nil : AgentRoute(tasksChatId: conciergeChatID, chatKey: conciergeChatID)
-            case .agentBlank(let tab):
-                agentTab = tab
-                agentPage = AgentRoute(tasksChatId: "", chatKey: "snapshot-blank")
-            case .agentRoute(let routes):
-                agentPath = routes
-            case .route(let routes):
-                show(.chat)
-                path = routes
-            case .section(let picked): show(picked)
-            case .settings(let routes):
-                settingsPath = routes ?? []
-                if SnapshotRunner.directory != nil { settingsPreview = routes != nil } else { showSettings = routes != nil }
-            case .page(let url):
-                if SnapshotRunner.directory != nil { pagePreview = url } else { page = url }
-            case .app(let app):
-                if SnapshotRunner.directory != nil { appPreview = app } else { openApp = app }
-            case .photoViewer(let open):
-                photoViewerPreview = open
-            case .connectSheet(let id):
-                connectPreview = id
-            case .archivedSheet(let open):
-                archivedPreview = open
-            case .composerPhotos, .appIdeas, nil: break
-            }
-        }
-        #endif
     }
 
     /// A tap on the widget: its app, Apps or Chat in front, nothing over it.
