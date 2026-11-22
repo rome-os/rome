@@ -46,9 +46,9 @@ jobs:
     name: Resolve publish targets
     runs-on: ubuntu-latest
     outputs:
-      publish_node_core: ${{ steps.compute.outputs.publish_node_core }}
-      other_paths: ${{ steps.compute.outputs.other_paths }}
-      has_other_paths: ${{ steps.compute.outputs.has_other_paths }}
+      publish_node_core: ${{ steps.split.outputs.publish_node_core }}
+      other_paths: ${{ steps.split.outputs.other_paths }}
+      has_other_paths: ${{ steps.split.outputs.has_other_paths }}
     steps:
       - id: compute
         env:
@@ -57,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${CALLER_PATHS:-}" ]; then
-            resolved="$CALLER_PATHS"
+            echo "paths=$CALLER_PATHS" >> "$GITHUB_OUTPUT"
           elif [ "${PACKAGE:-}" = "all" ]; then
             # Every package in release-please-config.json, each with a
             # configured npm Trusted Publisher. Keep the two lists in step: a
@@ -65,15 +65,21 @@ jobs:
             # dispatch, and one missing from here is reachable only by name.
             # Automatic releases ignore this and take exact paths from
             # release-please.
-            resolved='["packages/app-runtime-sdk","packages/app-web-sdk","packages/ui","packages/lib","packages/web-content","packages/rome-node-cli","packages/rome-node-core"]'
+            echo 'paths=["packages/app-runtime-sdk","packages/app-web-sdk","packages/ui","packages/lib","packages/web-content","packages/rome-node-cli","packages/rome-node-core"]' >> "$GITHUB_OUTPUT"
           elif [ -n "${PACKAGE:-}" ]; then
-            resolved="$(jq -cn --arg pkg "$PACKAGE" '[$pkg]')"
+            echo "paths=$(jq -cn --arg pkg "$PACKAGE" '[$pkg]')" >> "$GITHUB_OUTPUT"
           else
             echo "No npm publish targets provided" >&2
             exit 1
           fi
-          publish_node_core="$(jq -rn --argjson paths "$resolved" '$paths | any(. == "packages/rome-node-core")')"
-          other_paths="$(jq -cn --argjson paths "$resolved" '$paths | map(select(. != "packages/rome-node-core"))')"
+
+      - id: split
+        env:
+          RESOLVED_PATHS: ${{ steps.compute.outputs.paths }}
+        run: |
+          set -euo pipefail
+          publish_node_core="$(jq -rn --argjson paths "$RESOLVED_PATHS" '$paths | any(. == "packages/rome-node-core")')"
+          other_paths="$(jq -cn --argjson paths "$RESOLVED_PATHS" '$paths | map(select(. != "packages/rome-node-core"))')"
           has_other_paths="$(jq -rn --argjson paths "$other_paths" '($paths | length) > 0')"
           echo "publish_node_core=${publish_node_core}" >> "$GITHUB_OUTPUT"
           echo "other_paths=${other_paths}" >> "$GITHUB_OUTPUT"
