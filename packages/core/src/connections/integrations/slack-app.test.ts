@@ -256,21 +256,26 @@ describe("the Slack app talker", () => {
     expect(k.ingress()).toBeNull();
   });
 
-  it("has the instance's mailbox drained while it runs", async () => {
+  it("has the instance's mailbox drained while it runs, claimed once its ingress takes frames", async () => {
     let claims = 0;
+    const k = kit();
+    const ingressAtClaim: boolean[] = [];
     const talker = descriptor({
       claimMailbox: () => {
         claims++;
+        // The claim resumes a frame the drain held, which must find the ingress.
+        ingressAtClaim.push(k.ingress() !== null);
         return () => {
           claims--;
         };
       },
-    }).capabilities.talker?.build({ material: MATERIAL, expiresAt: "never" }, kit().kit);
+    }).capabilities.talker?.build({ material: MATERIAL, expiresAt: "never" }, k.kit);
     talker?.start(
       () => {},
       () => {},
     );
     expect(claims).toBe(1);
+    expect(ingressAtClaim).toEqual([true]);
     await talker?.stop();
     expect(claims).toBe(0);
   });
