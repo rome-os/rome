@@ -172,12 +172,7 @@ struct MainShell: View {
         // The Archived sheet stops at half height and floats on iOS 26, and
         // the system dims nothing behind a sheet there: the drawer and the
         // chat would read clearly around it.
-        .overlay {
-            ZStack {
-                if showArchived { SheetScrim().transition(.opacity) }
-            }
-            .animation(.easeOut(duration: 0.25), value: showArchived)
-        }
+        .overlay { archivedScrim }
         .fullScreenCover(item: $agentPage, onDismiss: {
             // Settings is a sheet of this view, so it waits for the cover to be gone.
             guard openUsageAfterCover else { return }
@@ -581,6 +576,15 @@ struct MainShell: View {
     /// if it is the open one, else nowhere (nil).
     static func section(after current: MainSection, retired: String) -> MainSection? {
         current == .topic(retired) ? .chat : nil
+    }
+
+    /// The scrim behind the Archived sheet while it is up. Kept out of `body`,
+    /// whose modifier chain is already near the type checker's limit.
+    private var archivedScrim: some View {
+        ZStack {
+            if showArchived { SheetScrim().transition(.opacity) }
+        }
+        .animation(.easeOut(duration: 0.25), value: showArchived)
     }
 
     /// The Archived sheet: a tapped row closes it, and its chat opens after.
