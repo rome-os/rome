@@ -25,12 +25,12 @@ struct TopicChatScreen: View {
     @State private var startFailed = false
     @State private var startFailure: SendFailure = .unknown
     @State private var startingImages: [ComposerImage] = []
-    @State private var renaming = false
+    /// Rename from the header, while its alert is up.
+    @State private var renaming: TopicRenameRequest?
     /// Archive or Delete from the header, while it is read and asked.
     @State private var retiring: TopicRetireRequest?
     /// Unarchive from the archived chat's banner, while it is read and asked.
     @State private var restoring: TopicRestoreRequest?
-    @State private var newName = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
 
@@ -67,8 +67,8 @@ struct TopicChatScreen: View {
                 },
                 onAgent: { onAgent(chatId, $0) },
                 onRename: { title in
-                    newName = title
-                    renaming = true
+                    guard let chatId else { return }
+                    renaming = TopicRenameRequest(chatId: chatId, name: title)
                 },
                 onPin: { pinned in
                     guard let chatId else { return }
@@ -92,15 +92,7 @@ struct TopicChatScreen: View {
         }
         // Reply brings the keyboard up.
         .onChange(of: store?.replies) { composerFocused = true }
-        .alert("Rename chat", isPresented: $renaming) {
-            TextField("Name", text: $newName)
-            Button("Cancel", role: .cancel) {}
-            Button("Rename") {
-                guard let chatId else { return }
-                let name = newName
-                Task { await workspace.renameTopic(chatId, to: name) }
-            }
-        }
+        .topicRename($renaming, workspace: workspace)
         .topicRetire($retiring, workspace: workspace) { _ in onArchived() }
         .topicRestore($restoring, workspace: workspace)
         .pageBackground()

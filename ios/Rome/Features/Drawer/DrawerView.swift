@@ -16,6 +16,8 @@ struct DrawerView: View {
     @State private var topicLimit = TopicChatsStore.pageSize
     /// Archive or Delete from a row, while it is read and asked.
     @State private var retiring: TopicRetireRequest?
+    /// Rename from a row's menu, while its alert is up.
+    @State private var renaming: TopicRenameRequest?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var folded: Bool { workspace.topics.folded }
@@ -120,7 +122,7 @@ struct DrawerView: View {
             .padding(.leading, 12)
             .padding(.top, 6)
 
-            // A List, for each row's swipe actions; it draws as the plain
+            // A List, for each row's swipe to Pin; it draws as the plain
             // stack of rows it was: no separators, insets or backgrounds of
             // its own, and the same 2 pt between rows.
             let chats = workspace.topics.chats
@@ -152,17 +154,12 @@ struct DrawerView: View {
                         }
                         .tint(Palette.primary)
                     }
-                    // Left: Archive, which a full swipe takes, then Delete,
-                    // which only a tap takes and which always asks. Not the
-                    // destructive role, which drops the row before the
-                    // guardian has answered.
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button { retire(.archive, chat) } label: { Label("Archive", systemImage: "archivebox") }
-                            .tint(Palette.sub)
-                        Button { retire(.delete, chat) } label: { Label("Delete", systemImage: "trash") }
-                            .tint(Palette.destructive)
-                    }
+                    // No swipe to the left: Archive and Delete, too easy to
+                    // set off by accident there, are in the menu.
                     .contextMenu {
+                        Button {
+                            renaming = TopicRenameRequest(chatId: chat.id, name: TopicChatsStore.title(chat))
+                        } label: { Label("Rename", systemImage: "pencil") }
                         TopicPinButton(pinned: pinned) { pin(chat.id, !pinned) }
                         Button { retire(.archive, chat) } label: { Label("Archive", systemImage: "archivebox") }
                         Button(role: .destructive) { retire(.delete, chat) } label: { Label("Delete", systemImage: "trash") }
@@ -193,6 +190,7 @@ struct DrawerView: View {
             .scrollBounceBehavior(.basedOnSize)
             .frame(maxHeight: .infinity)
             .topicRetire($retiring, workspace: workspace, onRetired: onTopicGone)
+            .topicRename($renaming, workspace: workspace)
 
             // The open Rome behind its latest release, or updating in the
             // background, for a guardian and a visitor alike.
