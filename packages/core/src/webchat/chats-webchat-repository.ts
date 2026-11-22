@@ -35,6 +35,8 @@ import {
   type InterruptedTurn,
   type MessagePageCursor,
   type MessagePageOptions,
+  type ThreadPageOptions,
+  type ThreadPageResult,
   type StoredWebchatHistoryMessage,
   type StoredWebchatMessage,
   pageStartingWithAMessage,
@@ -862,6 +864,83 @@ export class ChatsWebChatRepository extends WebChatRepository {
           ? ({ at: oldest.at, seq: oldest.seq } satisfies MessagePageCursor)
           : null,
     };
+  }
+
+  /** The chain `messageId` is in, around it or before or after a message of the chain.
+   *  The chain is the lines with its root, in the order the main paging says
+   *  them, so a cursor is a position and a same-second message is never lost. */
+  override async getThreadPage(
+    sessionId: string,
+    messageId: string,
+    { limit, before, after }: ThreadPageOptions,
+  ): Promise<ThreadPageResult> {
+    const [anchor] = this.chainMessages(sessionId, sql`m.key = ${messageId}`, "ASC", 1);
+    if (!anchor) return { error: "message_not_found" };
+    let cursor = anchor;
+    const cursorKey = before ?? after;
+    if (cursorKey !== undefined) {
+      const [found] = this.chainMessages(sessionId, sql`m.key = ${cursorKey}`, "ASC", 1);
+      if (!found) return { error: "message_not_found" };
+      if (found.root !== anchor.root) return { error: "not_in_thread" };
+      cursor = found;
+    }
+    const inChain = sql`(m.root_message_id = ${anchor.root} OR m.id = ${anchor.root})`;
+    // One more than asked for tells whether there is more on that side.
+    const side = (older: boolean) =>
+      this.chainMessages(
+        sessionId,
+        older
+          ? sql`${inChain} AND (m.said_at, m.id) < (${cursor.at}, ${cursor.id})`
+          : sql`${inChain} AND (m.said_at, m.id) > (${cursor.at}, ${cursor.id})`,
+        older ? "DESC" : "ASC",
+        limit + 1,
+      );
+    const older = after === undefined ? side(true) : [];
+    const newer = before === undefined ? side(false) : [];
+    const messages = [
+      ...older.slice(0, limit).reverse(),
+      ...(cursorKey === undefined ? [anchor] : []),
+      ...newer.slice(0, limit),
+    ];
+    const hasOlder = after !== undefined || older.length > limit;
+    const hasNewer = before !== undefined || newer.length > limit;
+    if (messages.length === 0) return { rows: [], hasOlder, hasNewer };
+    const keys = JSON.stringify(messages.map((message) => message.key));
+    const turns = JSON.stringify([
+      ...new Set(messages.flatMap((message) => (message.turn_id ? [message.turn_id] : []))),
+    ]);
+    // As the main paging does: the messages, and their turns' traces wherever they stand.
+    const rows = pageStartingWithAMessage(
+      this.selectLines(
+        [sessionId],
+        sql`WHERE (role != 'trace' AND id IN (SELECT value FROM json_each(${keys})))
+        OR (role = 'trace' AND turn_id IN (SELECT value FROM json_each(${turns})))`,
+      ),
+    );
+    return { rows, hasOlder, hasNewer };
+  }
+
+  /** The session's own chat messages that `where` (over `m`) picks, `limit` of
+   *  them in `order`. A session sees the place from when it started there, as
+   *  {@link sessionLines} says, and one in no chat sees none. */
+  private chainMessages(sessionId: string, where: SQL, order: "ASC" | "DESC", limit: number) {
+    return this.db.all<{
+      key: string;
+      id: number;
+      at: number;
+      root: number;
+      turn_id: string | null;
+    }>(sql`
+      SELECT m.key, m.id, m.said_at AS at, COALESCE(m.root_message_id, m.id) AS root, l.turn_id
+      FROM rome_sessions s
+      JOIN ${CHAT_MESSAGES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+        AND m.said_at >= s.created_at
+      LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
+        AND l.role IN ('prompt', 'answer')
+      WHERE s.id = ${sessionId} AND ${where}
+      ORDER BY m.said_at ${sql.raw(order)}, m.id ${sql.raw(order)}
+      LIMIT ${limit}
+    `);
   }
 
   protected override async messagesThrough(

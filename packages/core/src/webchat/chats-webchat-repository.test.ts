@@ -848,6 +848,167 @@ describe("ChatsWebChatRepository", () => {
     }
   });
 
+  describe("a page of a chat thread", () => {
+    const START = 1_800_000_000;
+    const at = (seconds: number) => rs.setSystemTime(new Date((START + seconds) * 1000));
+    // A message of the owner that replies to `replyTo`, said `seconds` into the chat.
+    const say = async (seconds: number, key: string, replyTo?: string) => {
+      at(seconds);
+      await repo.recordUserInput(key, "chat-1", text(key), undefined, undefined, replyTo);
+    };
+    const page = async (
+      messageId: string,
+      options: { limit: number; before?: string; after?: string },
+    ) => {
+      const result = await repo.getThreadPage("chat-1", messageId, options);
+      if ("error" in result) throw new Error(result.error);
+      return {
+        ids: result.rows.map((line) => line.id),
+        hasOlder: result.hasOlder,
+        hasNewer: result.hasNewer,
+      };
+    };
+
+    beforeEach(async () => {
+      rs.useFakeTimers({ toFake: ["Date"] });
+      at(-10);
+      await repo.createSession("chat-1", "Plans");
+      // m1 is the root of the chain, and x1 and x2 are in none.
+      await say(0, "m1");
+      await say(1, "x1");
+      await say(2, "m2", "m1");
+      await say(3, "m3", "m2");
+      await say(4, "x2");
+      await say(5, "m4", "m1");
+      await say(6, "m5", "m4");
+      await say(7, "m6", "m5");
+    });
+    afterEach(() => {
+      rs.useRealTimers();
+    });
+
+    it("reads the chain around a message, up to the limit on each side", async () => {
+      expect(await page("m4", { limit: 2 })).toEqual({
+        ids: ["m2", "m3", "m4", "m5", "m6"],
+        hasOlder: true,
+        hasNewer: false,
+      });
+      // The chain's end exactly at the limit is no more.
+      expect(await page("m4", { limit: 3 })).toMatchObject({ hasOlder: false, hasNewer: false });
+      // The root, and a message in the chain of one.
+      expect(await page("m1", { limit: 1 })).toEqual({
+        ids: ["m1", "m2"],
+        hasOlder: false,
+        hasNewer: true,
+      });
+      expect(await page("x1", { limit: 5 })).toEqual({
+        ids: ["x1"],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      // Any message of the chain names the chain.
+      expect((await page("m6", { limit: 10 })).ids).toEqual(["m1", "m2", "m3", "m4", "m5", "m6"]);
+    });
+
+    it("reads the chain before a message, and after one, from the chain alone", async () => {
+      expect(await page("m6", { limit: 2, before: "m4" })).toEqual({
+        ids: ["m2", "m3"],
+        hasOlder: true,
+        hasNewer: true,
+      });
+      expect(await page("m6", { limit: 5, before: "m2" })).toEqual({
+        ids: ["m1"],
+        hasOlder: false,
+        hasNewer: true,
+      });
+      expect(await page("m6", { limit: 5, before: "m1" })).toEqual({
+        ids: [],
+        hasOlder: false,
+        hasNewer: true,
+      });
+      expect(await page("m1", { limit: 2, after: "m2" })).toEqual({
+        ids: ["m3", "m4"],
+        hasOlder: true,
+        hasNewer: true,
+      });
+      expect(await page("m1", { limit: 2, after: "m5" })).toEqual({
+        ids: ["m6"],
+        hasOlder: true,
+        hasNewer: false,
+      });
+      expect((await page("m1", { limit: 2, after: "m6" })).ids).toEqual([]);
+    });
+
+    it("steps through messages said in the same second, each once, in the order recorded", async () => {
+      at(100);
+      const said: [string, string?][] = [["s1"], ["s2", "s1"], ["s3", "s1"], ["s4", "s2"]];
+      for (const [key, replyTo] of said) {
+        await repo.recordUserInput(key, "chat-1", text(key), undefined, undefined, replyTo);
+      }
+      expect((await page("s3", { limit: 1 })).ids).toEqual(["s2", "s3", "s4"]);
+      const forward: string[] = [];
+      let id = (await page("s1", { limit: 1, after: "s1" })).ids[0];
+      while (id) {
+        forward.push(id);
+        id = (await page("s1", { limit: 1, after: id })).ids[0];
+      }
+      expect(forward).toEqual(["s2", "s3", "s4"]);
+      expect(await page("s1", { limit: 1, before: "s4" })).toMatchObject({
+        ids: ["s3"],
+        hasOlder: true,
+      });
+    });
+
+    it("finds no message that is not the chat's, a trace, or one the session did not see, and refuses a cursor of another chain", async () => {
+      const miss = (id: string, options: { before?: string; after?: string } = {}) =>
+        repo.getThreadPage("chat-1", id, { limit: 5, ...options });
+      expect(await miss("gone")).toEqual({ error: "message_not_found" });
+      expect(await miss("m1", { before: "gone" })).toEqual({ error: "message_not_found" });
+      expect(await miss("m4", { after: "x2" })).toEqual({ error: "not_in_thread" });
+      expect(await miss("m4", { before: "x1" })).toEqual({ error: "not_in_thread" });
+      await repo.addMessage("trace-1", "chat-1", "trace", "[]", "turn-1");
+      expect(await miss("trace-1")).toEqual({ error: "message_not_found" });
+      // A session in no chat has no chains.
+      await repo.ensureRomeSession({ id: "fork-1", type: "fork", name: "Fork", agentName: null });
+      await repo.addMessage("f1", "fork-1", "user", text("Hi"), "turn-9");
+      expect(await repo.getThreadPage("fork-1", "f1", { limit: 5 })).toEqual({
+        error: "message_not_found",
+      });
+      // A message said before the session started there is not the session's.
+      testDb.db
+        .update(chatMessages)
+        .set({ saidAt: new Date(1000) })
+        .where(eq(chatMessages.key, "m1"))
+        .run();
+      expect(await miss("m1")).toEqual({ error: "message_not_found" });
+      expect(await page("m2", { limit: 5 })).toMatchObject({
+        ids: ["m2", "m3", "m4", "m5", "m6"],
+        hasOlder: false,
+      });
+    });
+
+    it("brings the traces of the turns of the page's messages, placed as the main paging places them", async () => {
+      const answer = async (seconds: number, turn: string) => {
+        at(seconds);
+        return (
+          await repo.addBackendMessage("chat-1", turn, [{ type: "text", content: turn }], {
+            replyTo: "m1",
+          })
+        ).id;
+      };
+      at(20);
+      await repo.addMessage("trace-1", "chat-1", "trace", "[]", "turn-1");
+      const a1 = await answer(21, "turn-1");
+      at(22);
+      await repo.addMessage("trace-2", "chat-1", "trace", "[]", "turn-2");
+      const a2 = await answer(23, "turn-2");
+      // A trace of a turn of a message that is not on the page does not come.
+      expect((await page("m1", { limit: 1, after: "m6" })).ids).toEqual([a1, "trace-1"]);
+      // Traces older than the oldest message stand right after it.
+      expect((await page(a2, { limit: 1 })).ids).toEqual([a1, "trace-1", "trace-2", a2]);
+    });
+  });
+
   describe("chat threads", () => {
     beforeEach(async () => {
       await repo.createSession("chat-1", "Plans");

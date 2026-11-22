@@ -330,6 +330,30 @@ export interface MessagePageOptions {
   through?: string;
 }
 
+/** Which part of a reply chain a thread page holds, around or beside a message. */
+export interface ThreadPageOptions {
+  /** Messages per side of the anchor, or on the one side asked for. */
+  limit: number;
+  /** Return only chain messages strictly older than this message id. */
+  before?: string;
+  /** Return only chain messages strictly newer than this message id. */
+  after?: string;
+}
+
+/**
+ * A page of one reply chain, oldest first, with the trace rows of its
+ * messages' turns placed as in {@link MessagePageOptions}'s pages. `hasOlder`
+ * and `hasNewer` count within the chain. Or why there is none: the message
+ * is none of the session's, or a cursor is in another chain.
+ */
+export type ThreadPageResult =
+  | {
+      rows: Awaited<ReturnType<WebChatRepository["getMessages"]>>;
+      hasOlder: boolean;
+      hasNewer: boolean;
+    }
+  | { error: "message_not_found" | "not_in_thread" };
+
 /**
  * `rows` of a page, which stand in the order they were said, with a trace that
  * is older than every message on the page moved to stand right after the
@@ -2598,6 +2622,15 @@ export class WebChatRepository {
           ? ({ at: oldest.at, seq: oldest.seq } satisfies MessagePageCursor)
           : null,
     };
+  }
+
+  /** The chain of message `messageId` as a page. A session in no chat has no chains. */
+  async getThreadPage(
+    _sessionId: string,
+    _messageId: string,
+    _options: ThreadPageOptions,
+  ): Promise<ThreadPageResult> {
+    return { error: "message_not_found" };
   }
 
   /**

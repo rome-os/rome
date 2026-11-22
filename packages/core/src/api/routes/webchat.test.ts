@@ -8085,6 +8085,101 @@ describe("Webchat API", () => {
       await events.cancel();
     });
 
+    describe("reading a reply chain around a message", () => {
+      const text = (content: string) => JSON.stringify([{ type: "text", content }]);
+      type ThreadBody = {
+        messages: { id: string; chatThreadId?: string | null }[];
+        hasOlder: boolean;
+        hasNewer: boolean;
+      };
+      let answers: string[];
+
+      beforeEach(async () => {
+        deps.concierge = { onCardSettled: () => () => {}, deps: { tasks: {} } } as never;
+        await deps.webchatRepo.createSession(
+          "topic",
+          "Topic",
+          undefined,
+          undefined,
+          null,
+          undefined,
+          "core:concierge",
+        );
+        const reply = async (content: string) =>
+          (
+            await deps.webchatRepo.addBackendMessage(
+              "topic",
+              "turn-1",
+              [{ type: "text", content }],
+              {
+                replyTo: "g1",
+              },
+            )
+          ).id;
+        await deps.webchatRepo.addMessage("g1", "topic", "user", text("Weather?"), "turn-1");
+        await deps.webchatRepo.addMessage("g2", "topic", "user", text("Elsewhere"), "turn-2");
+        answers = [await reply("One"), await reply("Two"), await reply("Three")];
+      });
+
+      const read = (
+        path: string,
+        actor?: { kind: "visitor"; accountId: string; email: string },
+      ) => {
+        const app = createWebchatRuntime(deps).routes;
+        const request = () => app.request(`/chat/sessions/topic/messages/${path}`);
+        return actor ? runWithSessionActor(actor, request) : request();
+      };
+
+      it("answers the chain around, before and after a message, and the chain alone", async () => {
+        const around = await read(`${answers[1]}/thread?limit=1`);
+        expect(around.status).toBe(200);
+        const body = (await around.json()) as ThreadBody;
+        expect(body.messages.map((m) => m.id)).toEqual([answers[0], answers[1], answers[2]]);
+        expect(body.messages.every((m) => m.chatThreadId === "g1")).toBe(true);
+        expect(body).toMatchObject({ hasOlder: true, hasNewer: false });
+
+        const before = (await (
+          await read(`g1/thread?limit=1&before=${answers[1]}`)
+        ).json()) as ThreadBody;
+        expect(before.messages.map((m) => m.id)).toEqual([answers[0]]);
+        expect(before).toMatchObject({ hasOlder: true, hasNewer: true });
+
+        const after = (await (
+          await read(`g1/thread?limit=5&after=${answers[0]}`)
+        ).json()) as ThreadBody;
+        expect(after.messages.map((m) => m.id)).toEqual([answers[1], answers[2]]);
+        expect(after).toMatchObject({ hasOlder: true, hasNewer: false });
+
+        // The default limit is 20 on each side, and a message alone is its own chain.
+        const alone = (await (await read("g2/thread")).json()) as ThreadBody;
+        expect(alone).toMatchObject({ messages: [{ id: "g2" }], hasOlder: false, hasNewer: false });
+      });
+
+      it("refuses what it cannot read", async () => {
+        const refused = async (path: string, status: number, code?: string) => {
+          const res = await read(path);
+          expect(res.status).toBe(status);
+          if (code) expect(await res.json()).toMatchObject({ code });
+        };
+        await refused("missing/thread", 404, "message_not_found");
+        await refused(`g1/thread?before=missing`, 404, "message_not_found");
+        await refused(`g1/thread?after=g2`, 400, "not_in_thread");
+        await refused(`g1/thread?before=${answers[0]}&after=${answers[1]}`, 400);
+        for (const limit of ["0", "101", "x"]) await refused(`g1/thread?limit=${limit}`, 400);
+        // A chat that does not exist.
+        const app = createWebchatRuntime(deps).routes;
+        expect((await app.request("/chat/sessions/none/messages/g1/thread")).status).toBe(404);
+      });
+
+      it("is the chat's own: a chat that someone may not open has no chain for them", async () => {
+        const visitor = { kind: "visitor" as const, accountId: "a", email: "a@example.com" };
+        expect((await read("g1/thread")).status).toBe(200);
+        const refused = await read("g1/thread", visitor);
+        expect(refused.status).toBe(404);
+        expect(await refused.json()).toEqual({ error: "Session not found" });
+      });
+    });
+
     describe("a task chat's row", () => {
       let repo: ConciergeTasksRepository;
       let upserts: Array<{ id: string; archivedAt: number | null }>;
