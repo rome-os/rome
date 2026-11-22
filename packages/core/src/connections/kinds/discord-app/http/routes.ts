@@ -28,7 +28,15 @@ export function discordAppRoutes(deps: DiscordAppRoutesDeps): Hono {
 
   app.get(`${base}/servers`, async (c) => {
     try {
-      const { servers, users } = await deps.cloud.bindings();
+      const [{ servers, users }, live] = await Promise.all([
+        deps.cloud.bindings(),
+        // Names and icons as Discord shows them now; without them the list
+        // still shows, with the names the Worker stored.
+        deps.cloud
+          .servers()
+          .catch(() => []),
+      ]);
+      const looks = new Map(live.map((server) => [server.id, server]));
       // A Discord account's name as People knows it; the Worker keeps only ids.
       const named = await Promise.all(
         users.map(async (user) => {
@@ -36,7 +44,17 @@ export function discordAppRoutes(deps: DiscordAppRoutesDeps): Hono {
           return { ...user, ...(name ? { name } : {}) };
         }),
       );
-      return c.json({ servers, users: named });
+      return c.json({
+        servers: servers.map((server) => {
+          const look = looks.get(server.serverId);
+          return {
+            ...server,
+            serverName: look?.name || server.serverName,
+            serverIcon: look?.icon ?? null,
+          };
+        }),
+        users: named,
+      });
     } catch (error) {
       const { body, status } = refusal(error);
       return c.json(body, status);

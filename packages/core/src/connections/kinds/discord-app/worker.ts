@@ -62,6 +62,9 @@ export interface DiscordAppCloud {
    *  leaves servers no other instance uses. Idempotent. */
   disconnect(signal?: AbortSignal): Promise<void>;
   bindings(signal?: AbortSignal): Promise<DiscordAppBindings>;
+  /** The servers the bot is in for this instance, as Discord shows them now:
+   *  the Worker's proxy lists only this instance's. */
+  servers(signal?: AbortSignal): Promise<Array<{ id: string; name: string; icon: string | null }>>;
   removeServer(serverId: string): Promise<{ removed: boolean; left: boolean }>;
   send(input: { channelId: string; content: string; replyTo?: string }): Promise<{ id: string }>;
   /** Shows the bot typing in a channel, for about ten seconds or until it posts. */
@@ -72,6 +75,14 @@ export interface DiscordAppCloud {
   unreact(input: { channelId: string; messageId: string; emoji: string }): Promise<void>;
   /** Discord's page where the guardian adds the bot to a server. */
   installUrl(): Promise<string>;
+}
+
+/** A server's icon on Discord's CDN, from its icon hash; null for none or for
+ *  anything that is not a hash, so nothing else ends up in the URL. */
+function serverIcon(serverId: string, hash: unknown): string | null {
+  return typeof hash === "string" && /^(a_)?[0-9a-f]{32}$/.test(hash)
+    ? `https://cdn.discordapp.com/icons/${serverId}/${hash}.png?size=96`
+    : null;
 }
 
 /** What each refusal means for the guardian. */
@@ -157,6 +168,20 @@ export function romeCloudDiscordApp(fetchImpl: typeof fetch = globalThis.fetch):
     },
     async disconnect(signal) {
       await worker("/v1/connect", "DELETE", undefined, signal);
+    },
+    async servers(signal) {
+      const data = await worker("/v1/discord/users/@me/guilds", "GET", undefined, signal);
+      return (Array.isArray(data) ? data : []).flatMap((row: Record<string, unknown>) =>
+        isString(row?.id) && SNOWFLAKE.test(row.id)
+          ? [
+              {
+                id: row.id,
+                name: typeof row.name === "string" ? row.name : "",
+                icon: serverIcon(row.id, row.icon),
+              },
+            ]
+          : [],
+      );
     },
     async bindings(signal) {
       const data = (await worker("/v1/bindings", "GET", undefined, signal)) as {

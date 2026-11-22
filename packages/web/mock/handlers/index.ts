@@ -1703,6 +1703,11 @@ const upgradeStatus = (): Omit<UpgradeStatus, "receivedAt"> => ({
   serverNow: Date.now(),
 });
 
+/** A server icon for the mock, drawn inline so the mock needs no network. */
+const MOCK_SERVER_ICON = `data:image/svg+xml;utf8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2f6f5e"/><stop offset="1" stop-color="#7cc4a4"/></linearGradient></defs><rect width="96" height="96" fill="url(#g)"/><path d="M18 70 L40 40 L54 58 L64 46 L80 70 Z" fill="#f4efe4"/><circle cx="68" cy="28" r="8" fill="#f4efe4"/></svg>',
+)}`;
+
 export const handlers = [
   ...appDocumentAccessHandlers,
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
@@ -2066,7 +2071,20 @@ export const handlers = [
   // Rome's own Discord bot: the servers and accounts bound to this Rome.
   http.get("/api/connections/discord-app/servers", () =>
     HttpResponse.json({
-      servers: [{ serverId: "200000000000000001", serverName: "Ray's Lab", createdAt: Date.now() }],
+      servers: [
+        {
+          serverId: "200000000000000001",
+          serverName: "Ray's Lab",
+          serverIcon: MOCK_SERVER_ICON,
+          createdAt: Date.now(),
+        },
+        {
+          serverId: "200000000000000002",
+          serverName: "Weekend Hikes",
+          serverIcon: null,
+          createdAt: Date.now(),
+        },
+      ],
       users: [{ userId: "300000000000000001", name: "Mock Guardian", createdAt: Date.now() }],
     }),
   ),

@@ -11,6 +11,9 @@ function app(over: Partial<DiscordAppCloud> = {}) {
       servers: [{ serverId: "5", serverName: "Lab", createdAt: 1 }],
       users: [{ userId: "7", createdAt: 2 }],
     }),
+    servers: async () => [
+      { id: "5", name: "Lab renamed", icon: "https://cdn.discordapp.com/icons/5/h.png?size=96" },
+    ],
     installUrl: async () => "https://discord.com/oauth2/authorize",
     removeServer: async () => ({ removed: true, left: false }),
     ...over,
@@ -22,12 +25,30 @@ function app(over: Partial<DiscordAppCloud> = {}) {
 }
 
 describe("the dashboard's routes for Rome's Discord bot", () => {
-  it("lists the servers and the guardian's accounts by their People names", async () => {
+  it("lists the servers as Discord shows them and the guardian's accounts by their People names", async () => {
     const response = await app().request("/connections/discord-app/servers");
     expect(await response.json()).toEqual({
-      servers: [{ serverId: "5", serverName: "Lab", createdAt: 1 }],
+      servers: [
+        {
+          serverId: "5",
+          serverName: "Lab renamed",
+          serverIcon: "https://cdn.discordapp.com/icons/5/h.png?size=96",
+          createdAt: 1,
+        },
+      ],
       users: [{ userId: "7", createdAt: 2, name: "Ray" }],
     });
+  });
+
+  it("still lists the servers, with stored names and no icons, when Discord can't say", async () => {
+    const response = await app({
+      servers: async () => {
+        throw new DiscordAppRefused("http_503", "Discord is unavailable right now.", 503);
+      },
+    }).request("/connections/discord-app/servers");
+    expect(((await response.json()) as { servers: unknown[] }).servers).toEqual([
+      { serverId: "5", serverName: "Lab", serverIcon: null, createdAt: 1 },
+    ]);
   });
 
   it("hands out the link that adds the bot, and removes a server", async () => {
