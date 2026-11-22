@@ -396,7 +396,7 @@ describe("resolveModel on the default provider", () => {
   });
 
   it("finds none usable with no default and nothing signed in", () => {
-    const given = facts({ reports: reports(unauthorized, unauthorized), defaultProvider: null });
+    const given = facts({ reports: reports(unauthorized, unauthorized) });
     expect(resolveModel(large, given)).toMatchObject({
       ok: false,
       failure: { kind: "none_usable" },

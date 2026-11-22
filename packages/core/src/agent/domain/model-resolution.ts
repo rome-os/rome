@@ -76,10 +76,10 @@ export interface ModelResolutionFacts {
   /** Read only for a tier ask. */
   tierModels?: TierModels;
   /**
-   * The provider a tier that follows the default runs on. Null when none is
-   * set. Undefined keeps the order Rome used before the default existed.
+   * The provider a tier that follows the default runs on. Undefined, before
+   * a default is set, keeps the order Rome used before the default existed.
    */
-  defaultProvider?: DefaultProvider | null;
+  defaultProvider?: DefaultProvider;
 }
 
 /** Why no provider can serve the ask, as facts. The resolver words them. */
@@ -245,8 +245,8 @@ export function resolveModel(
 
   const following =
     request.override ??
-    (facts.defaultProvider ? providerOfDefault(facts.defaultProvider) : facts.defaultProvider);
-  if (following !== undefined) return onDefault(following);
+    (facts.defaultProvider ? providerOfDefault(facts.defaultProvider) : undefined);
+  if (following) return onDefault(following);
 
   // Before the default existed: the pin decides, else the first usable
   // provider in a fixed order.
@@ -276,8 +276,8 @@ export function resolveModel(
 
   // The default provider runs the ask, or nothing does: no other provider
   // stands in. Within it the session keeps the model it last ran.
-  function onDefault(provider: AccountedProviderId | null): ModelResolutionOutcome {
-    if (provider === null || !runs(provider)) return runs("mock") ? onTier("mock") : noneUsable();
+  function onDefault(provider: AccountedProviderId): ModelResolutionOutcome {
+    if (!runs(provider)) return runs("mock") ? onTier("mock") : noneUsable();
     const failure = unusable(provider, reports, login);
     if (failure) {
       return {
