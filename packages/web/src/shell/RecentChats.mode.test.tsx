@@ -36,6 +36,11 @@ beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 
+beforeEach(() => {
+  // Keep the dated fixtures inside the week shown by the topic list.
+  rs.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-07T12:00:00Z"));
+});
+
 afterEach(() => {
   cleanup();
   localStorage.clear();

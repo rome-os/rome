@@ -28,6 +28,8 @@ enum DebugCommand: Equatable {
     case app(InstalledApp?)
     /// A card's connect sheet for a capability, in a stand-in frame; nil closes it.
     case connectSheet(String?)
+    /// The drawer's Archived sheet, in a stand-in frame, or closed.
+    case archivedSheet(Bool)
 }
 
 /// Health sync's demo: a few syncs of today and yesterday.
@@ -184,6 +186,27 @@ enum SnapshotRunner {
                 chat.reply(to: said.id)
             }
             model.workspace?.concierge.cancelQuote()
+            // Select text on the newest Agent reply, then on the guardian's own
+            // message: its text selectable in place, all of it selected.
+            await capture("04f-chat-select-text", style: styleName, in: directory, wait: 1.5) {
+                guard let chat = model.workspace?.concierge,
+                      case .agentText(let id, let text, _, _, _)? = chat.rows.last(where: { if case .agentText = $0 { true } else { false } })
+                else { return }
+                chat.textSelection.begin(row: id, text: text)
+            }
+            await capture("04g-chat-select-own-text", style: styleName, in: directory, wait: 3) {
+                guard let chat = model.workspace?.concierge,
+                      case .userText(let id, let text, _, _)? = chat.rows.last(where: { if case .userText(_, let text, _, _) = $0 { !text.isEmpty } else { false } })
+                else { return }
+                // A row's id is its message's, then its part's place.
+                chat.jump(to: String(id[..<(id.lastIndex(of: ":") ?? id.endIndex)]))
+                Task {
+                    // After the jump's tint has faded.
+                    try? await Task.sleep(for: .seconds(2.2))
+                    chat.textSelection.begin(row: id, text: text)
+                }
+            }
+            model.workspace?.concierge.textSelection.end()
             // The header's status line in each state, then back to the name alone.
             let states: [(String, ConciergeActivity)] = [
                 ("working", .working), ("tool", .tool(.searchingWeb)), ("tasks", .tasks(title: "整理本周会议纪要", more: 1)),
@@ -224,6 +247,25 @@ enum SnapshotRunner {
                 model.debugCommand = .section(.chat)
                 try? await Task.sleep(for: .seconds(0.4))
             }
+            if only.isEmpty || !only.isDisjoint(with: ["05f-drawer-older-collapsed", "05g-drawer-older-expanded", "05h-drawer-older-open"]) {
+                model.openDemo(.olderTopics)
+                try? await Task.sleep(for: .seconds(2))
+                model.workspace?.topics.setFolded(false)
+                await capture("05f-drawer-older-collapsed", style: styleName, in: directory) {
+                    model.workspace?.topics.setOlderExpanded(false)
+                    model.debugCommand = .drawer(true)
+                }
+                await capture("05g-drawer-older-expanded", style: styleName, in: directory) {
+                    model.workspace?.topics.setOlderExpanded(true)
+                }
+                model.workspace?.topics.setOlderExpanded(false)
+                model.debugCommand = .section(.topic("topic-meals"))
+                try? await Task.sleep(for: .seconds(1))
+                await capture("05h-drawer-older-open", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
+                model.debugCommand = .drawer(false)
+                model.openDemo()
+                try? await Task.sleep(for: .seconds(1))
+            }
             // Two topic chats pinned: atop the list, the latest pinned first, each with a pin.
             if only.isEmpty || only.contains("05f-drawer-pinned"), let workspace = model.workspace {
                 await workspace.pinTopic("topic-books", pinned: true)
@@ -242,6 +284,30 @@ enum SnapshotRunner {
                 model.debugCommand = .drawer(false)
                 model.openDemo()
                 try? await Task.sleep(for: .seconds(2))
+            }
+            // Archived topic chats: the drawer's row under a short list, its
+            // sheet, and an archived chat, read only with its Restore banner.
+            let archivedShots = ["05h-drawer-archived", "05i-archived-sheet", "24b-topic-archived"]
+            if only.isEmpty || !only.isDisjoint(with: archivedShots), let workspace = model.workspace {
+                // Ten more archived, so the row shows under the five left.
+                let moved = workspace.topics.chats.suffix(10).map(\.id)
+                for id in moved { await workspace.archiveTopic(id) }
+                workspace.archivedTopics.refresh()
+                try? await Task.sleep(for: .seconds(0.6))
+                await capture("05h-drawer-archived", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .drawer(true) }
+                // The demo's own archived chats only, so the sheet shows its
+                // groups rather than ten chats of today.
+                for id in moved { await workspace.restoreTopic(id) }
+                workspace.archivedTopics.refresh()
+                try? await Task.sleep(for: .seconds(0.6))
+                await capture("05i-archived-sheet", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .archivedSheet(true) }
+                model.debugCommand = .archivedSheet(false)
+                try? await Task.sleep(for: .seconds(0.3))
+                model.debugCommand = .drawer(false)
+                try? await Task.sleep(for: .seconds(0.4))
+                await capture("24b-topic-archived", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-archived-car")) }
+                model.debugCommand = .section(.chat)
+                try? await Task.sleep(for: .seconds(0.6))
             }
             await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.tasks) }
             await capture("06b-agent-task-chat", style: styleName, in: directory, wait: 2) {

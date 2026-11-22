@@ -367,3 +367,65 @@ describe("channels.query from a turn that is not the guardian's", () => {
     expect(query).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("channels.chats", () => {
+  const turnIn = (audience: "private" | "shared") => ({
+    callerActionContext: {
+      audience,
+      channelContext: {
+        channel: "slack_app",
+        threadId: "C1",
+        threadType: "group" as const,
+        senderBondLevel: audience === "private" ? "guardian" : "other",
+      },
+    },
+  });
+
+  it("lists an account's chats from a private turn, and nothing from one others read", async () => {
+    const chats = rs.fn(async () => ({ chats: [] }));
+    const calls = makeCalls({
+      channelsService: {
+        list: rs.fn(async () => []),
+        send: rs.fn(),
+        query: rs.fn(),
+        chats,
+      } as never,
+    });
+
+    await calls["channels.chats"](
+      { channel: "slack_app", query: "news", limit: 5 },
+      turnIn("private"),
+    );
+    // A listing names no chat, so even a turn in one of them lists nothing.
+    await expect(
+      calls["channels.chats"]({ channel: "slack_app" }, turnIn("shared")),
+    ).rejects.toThrow("A turn others read lists no chats");
+
+    expect(chats).toHaveBeenCalledTimes(1);
+    expect(chats).toHaveBeenCalledWith("slack_app", { query: "news", limit: 5 });
+  });
+
+  it("passes on a request for threads and archived threads", async () => {
+    const chats = rs.fn(async () => ({ chats: [] }));
+    const calls = makeCalls({
+      channelsService: { list: rs.fn(), send: rs.fn(), query: rs.fn(), chats } as never,
+    });
+
+    await calls["channels.chats"](
+      { channel: "discord", includeThreads: true, includeArchivedThreads: true },
+      turnIn("private"),
+    );
+
+    expect(chats).toHaveBeenCalledWith("discord", {
+      includeThreads: true,
+      includeArchivedThreads: true,
+    });
+  });
+
+  it("refuses on a host whose service lists no chats", async () => {
+    const calls = makeCalls();
+    await expect(calls["channels.chats"]({ channel: "slack_app" }, {})).rejects.toThrow(
+      "This Rome lists no chats",
+    );
+  });
+});

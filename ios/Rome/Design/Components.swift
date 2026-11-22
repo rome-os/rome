@@ -158,6 +158,20 @@ struct PressScaleStyle: ButtonStyle {
     }
 }
 
+/// What covers the screen behind a half-height sheet: a blur, then a dim, so
+/// no text reads around the sheet. It takes no touches; the sheet's own
+/// dismissal still gets a tap above it.
+struct SheetScrim: View {
+    var body: some View {
+        Rectangle()
+            .fill(.thinMaterial)
+            .overlay(Palette.sheetScrim)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
 /// A row press: the background darkens instead of the content scaling.
 struct RowPressStyle: ButtonStyle {
     var pressed: Color = Palette.pressed
@@ -332,7 +346,8 @@ struct AlertGlyph: View {
 
 /// The capsule banner under the header: offline, session expired, first-open hint.
 struct TopBanner: View {
-    enum Kind { case warning, error, info }
+    /// `archived`: an archived chat, read only until it is restored.
+    enum Kind { case warning, error, info, archived }
 
     let kind: Kind
     let text: String
@@ -350,6 +365,8 @@ struct TopBanner: View {
                 AlertGlyph(size: 15)
             case .info:
                 Image(systemName: "arrow.left.arrow.right").romeFont(13, .semibold)
+            case .archived:
+                Image(systemName: "archivebox").romeFont(13, .semibold)
             }
             Text(text).romeFont(14, .medium)
             if let actionTitle, let action {
@@ -364,7 +381,7 @@ struct TopBanner: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 10)
                 .frame(height: 28)
-                .background(Palette.destructive, in: Capsule())
+                .background(kind == .archived ? Palette.primary : Palette.destructive, in: Capsule())
                 .buttonStyle(PressScaleStyle())
                 .disabled(busy)
                 .accessibilityValue(busy ? Text("Loading") : Text(verbatim: ""))
@@ -383,7 +400,7 @@ struct TopBanner: View {
         switch kind {
         case .warning: return Palette.warningText
         case .error: return Palette.destructive
-        case .info: return Palette.fg
+        case .info, .archived: return Palette.fg
         }
     }
 
@@ -391,7 +408,7 @@ struct TopBanner: View {
         switch kind {
         case .warning: return Palette.warnSoft
         case .error: return Palette.dangerSoft
-        case .info: return Palette.elevated.opacity(0.9)
+        case .info, .archived: return Palette.elevated.opacity(0.9)
         }
     }
 }

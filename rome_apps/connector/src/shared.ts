@@ -8,6 +8,7 @@ import {
 } from "./api/composio-client.js";
 import { readSessionApiKey } from "./api/composio-login.js";
 import { pinnedProjectFor } from "./api/composio-project.js";
+import { SLACK_APP_CONNECT_HINT } from "./api/slack-app-proxy.js";
 import { buildTopic } from "./api/topic.js";
 
 /**
@@ -224,10 +225,11 @@ export function unsupportedToolkitHint(toolkit: string): string {
 }
 
 /** Guidance shown when the agent tries to connect a Rome-managed toolkit, or
- *  acts on one that isn't connected yet. Rome connects these itself, through
- *  its own `connect_account` tool. */
+ *  acts on one that isn't connected yet. Rome connects these itself: Slack
+ *  through Rome's Slack app, the rest through its own `connect_account` tool. */
 export function romeManagedConnectHint(toolkit: string): string {
   const kind = toolkit.toLowerCase();
+  if (kind === "slack") return SLACK_APP_CONNECT_HINT;
   return `${toolkit} is connected by Rome itself, not by this app. Call the connect_account tool with ${JSON.stringify({ kind })} to show the connect card, then retry once it is connected. Where no card shows, ask the guardian to connect ${toolkit} in Settings → Connections.`;
 }
 

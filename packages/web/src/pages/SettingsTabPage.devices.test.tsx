@@ -48,15 +48,12 @@ it("lists devices independently of the settings request", async () => {
     devices: [
       { id: "one", name: "MacBook", platform: "macos", status: "connected" },
       { id: "two", name: "Desktop", platform: "linux", status: "not_connected" },
-      { id: "three", name: "Old computer", platform: "windows", status: "revoked" },
     ],
   }));
   expect(await screen.findByText("Linux · Not connected")).toBeTruthy();
   expect(screen.getByRole("link", { name: /Desktop/ }).getAttribute("href")).toBe(
     "/settings/devices/two",
   );
-  // A revoked device waits behind its toggle.
-  expect(screen.queryByText("Old computer")).toBeNull();
 });
 
 it("shows a device that could not be checked as unknown", async () => {
@@ -415,19 +412,19 @@ describe("managing a device from its page", () => {
     expect(requests).toEqual([{ method: "DELETE", url: "/api/devices/one", body: undefined }]);
   });
 
-  it("keeps the dialog open while the revocation is unconfirmed", async () => {
+  it("keeps the dialog open and shows the error when the removal fails", async () => {
     renderDevice(
-      { status: "revoked" },
+      { status: "connected" },
       () =>
-        new Response(JSON.stringify({ error: "revocation_pending" }), {
-          status: 409,
+        new Response(JSON.stringify({ error: "device_not_found" }), {
+          status: 404,
           headers: { "Content-Type": "application/json" },
         }),
     );
     await menu("Remove");
     const dialog = await screen.findByRole("dialog", { name: "Remove MacBook?" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
-    expect(await within(dialog).findByText(/has not confirmed it yet/)).toBeTruthy();
+    expect(await within(dialog).findByText(/has no such device in your account/)).toBeTruthy();
     expect(screen.queryByText("Devices list")).toBeNull();
   });
 });

@@ -7,7 +7,10 @@ import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 import { BUILTIN_ACCOUNT_LINKS } from "../../test/db.js";
 import { feishu, type FeishuDescriptorDeps } from "../kinds/feishu/index.js";
 import { linkedin, type LinkedInDescriptorDeps } from "../kinds/linkedin/index.js";
-import type { ConnectionRegistry } from "../registry.js";
+import { discordApp, type DiscordAppDescriptorDeps } from "../kinds/discord-app/index.js";
+import { ConnectionRegistry } from "../registry.js";
+import type { ConnectionsRepository, StoredConnection } from "../repository.js";
+import type { Logger } from "../../logger.js";
 import type { ConnectionDescriptor, RuntimeKit } from "../types.js";
 import { type BuiltinConnectionDeps, registerBuiltinConnections } from "./index.js";
 import type {
@@ -48,6 +51,7 @@ function registerEveryKind(registry: ConnectionRegistry): void {
   const mounted = [
     feishu({ listAgents: () => [] } as unknown as FeishuDescriptorDeps),
     linkedin({} as unknown as LinkedInDescriptorDeps),
+    discordApp({} as unknown as DiscordAppDescriptorDeps),
   ];
   for (const kind of mounted) {
     if (kind.descriptor) registry.register(kind.descriptor);
@@ -98,6 +102,35 @@ describe("registerBuiltinConnections", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  // Stored Slack bot (`slack_bot`) connections stay in the store after the
+  // kind is removed.
+  it("boots past a stored Slack bot, skipping it, and still offers Rome's Slack app", async () => {
+    const stored = {
+      id: "conn-slack-bot",
+      connectionKind: "slack_bot",
+      label: "Slack bot",
+      createdAt: new Date("2026-10-01T00:00:00Z"),
+      grant: { state: "unauthorized" },
+    } as unknown as StoredConnection;
+    const warn = rs.fn();
+    const logger = { warn, info() {}, error() {}, debug() {} } as unknown as Logger;
+    const registry = new ConnectionRegistry({
+      repository: { all: async () => [stored] } as unknown as ConnectionsRepository,
+      logger,
+    });
+    registerEveryKind(registry);
+
+    await registry.load();
+
+    expect(warn).toHaveBeenCalledWith("Skipping connection for unregistered connectionKind", {
+      connectionId: "conn-slack-bot",
+      connectionKind: "slack_bot",
+    });
+    expect(registry.all()).toEqual([]);
+    expect(registry.registeredKinds()).toContain("slack_app");
+    expect(registry.registeredKinds()).not.toContain("slack_bot");
+  });
+
   // A bot takes an agent as its own account and the guardian's signed-in
   // account as a delegate; Dream and the test fixtures keep their own lists of
   // these kinds, so all three must agree.
@@ -119,8 +152,8 @@ describe("registerBuiltinConnections", () => {
       feishu: "own_account",
       telegram: "own_account",
       discord: "own_account",
-      slack_bot: "own_account",
       slack_app: "own_account",
+      discord_app: "own_account",
       telegram_user: "delegate",
     });
     // Only a kind with a Talk can be a connected account.
@@ -140,7 +173,7 @@ describe("registerBuiltinConnections", () => {
     ).toEqual([...GUARDIAN_OWN_KINDS].sort());
   });
 
-  it("starts a new account with the Concierge only for Rome's Slack app", () => {
+  it("starts a new account with the Concierge only for Rome's Slack and Discord apps", () => {
     const registered: ConnectionDescriptor[] = [];
     registerEveryKind({
       register: (descriptor: ConnectionDescriptor) => registered.push(descriptor),
@@ -150,7 +183,7 @@ describe("registerBuiltinConnections", () => {
       registered
         .filter((descriptor) => descriptor.startsWithConcierge === true)
         .map((descriptor) => descriptor.connectionKind),
-    ).toEqual(["slack_app"]);
+    ).toEqual(["slack_app", "discord_app"]);
   });
 
   // A grant names the account it reaches, and every kind with a platform has
@@ -209,7 +242,7 @@ const BEFORE_OFFERED = new Map<string, readonly ChatSettingField[]>([
 ]);
 const BEFORE_CORE: readonly ChatSettingField[] = ["session.reset"];
 /** Kinds added after kinds declared their rules, which have no before. */
-const DECLARED_FROM_THE_START = new Set(["slack_app"]);
+const DECLARED_FROM_THE_START = new Set(["slack_app", "discord_app"]);
 
 function beforeOffered(kind: string, place: "direct" | "group"): readonly ChatSettingField[] {
   return place === "direct" ? BEFORE_CORE : (BEFORE_OFFERED.get(kind) ?? BEFORE_CORE);
@@ -288,11 +321,13 @@ describe("chat rules", () => {
     expect(undeclared).toEqual([]);
   });
 
-  it("offers no chat rules for the official Slack app, so its chats run at the defaults", () => {
-    const rules = everyKind().get("slack_app")?.chatRules;
-    expect(rules).toEqual({ offers: [] });
-    for (const place of ["direct", "group"] as const) {
-      expect(chatRulesOf(rules!, place).offers).toEqual([]);
+  it("offers no chat rules for the official Slack and Discord apps, so their chats run at the defaults", () => {
+    for (const kind of ["slack_app", "discord_app"]) {
+      const rules = everyKind().get(kind)?.chatRules;
+      expect(rules).toEqual({ offers: [] });
+      for (const place of ["direct", "group"] as const) {
+        expect(chatRulesOf(rules!, place).offers).toEqual([]);
+      }
     }
   });
 

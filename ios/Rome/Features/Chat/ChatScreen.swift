@@ -403,6 +403,8 @@ struct ChatHeader: View {
     /// Pin (true) or unpin (false) a topic chat.
     var onPin: ((Bool) -> Void)? = nil
     var onArchive: (() -> Void)? = nil
+    /// An archived topic chat's Unarchive, in place of Archive.
+    var onUnarchive: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
     var body: some View {
@@ -416,7 +418,7 @@ struct ChatHeader: View {
             // As wide as the capsule on the right, so the identity stays in the middle.
             .frame(width: ChatHeaderButtons.width, alignment: .leading)
             ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces, zoomSource: zoomSource, onTap: { onAgent(nil) }) }
-            ChatHeaderButtons(title: menuTitle ?? "", tasks: tasks, onAgent: onAgent, onRename: onRename, pinned: pinned, onPin: onPin, onArchive: onArchive, onDelete: onDelete)
+            ChatHeaderButtons(title: menuTitle ?? "", tasks: tasks, onAgent: onAgent, onRename: onRename, pinned: pinned, onPin: onPin, onArchive: onArchive, onUnarchive: onUnarchive, onDelete: onDelete)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -657,7 +659,8 @@ enum MenuTitle {
 /// the guardian; a chat with no task list yet (a blank topic chat) has "…"
 /// alone, as the web does. "…" holds what else the Agent page shows (Outputs),
 /// then what is done to the chat: a topic chat's Rename and Pin
-/// or Unpin, then Share and Shared links, then Archive and Delete. The main Chat is only
+/// or Unpin, then Share and Shared links, then Archive and Delete. An archived
+/// topic chat has Share, Shared links, Unarchive and Delete. The main Chat is only
 /// shared. Each button keeps a 44 pt target; the targets overlap so the
 /// icons sit as close as iOS's own paired toolbar buttons.
 struct ChatHeaderButtons: View {
@@ -671,8 +674,13 @@ struct ChatHeaderButtons: View {
     var pinned = false
     var onPin: ((Bool) -> Void)? = nil
     var onArchive: (() -> Void)? = nil
+    var onUnarchive: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     @Environment(\.chatShare) private var share
+
+    /// A topic chat, archived or not: it lists its shared links. The main
+    /// Chat's are in Settings.
+    private var topic: Bool { onRename != nil || onUnarchive != nil }
 
     var body: some View {
         let needsYou = tasks?.needsYou ?? false
@@ -710,10 +718,13 @@ struct ChatHeaderButtons: View {
                         // Share mode with nothing picked yet, as the web's Share chat.
                         Button { share.begin(turn: nil) } label: { Label("Share", systemImage: "square.and.arrow.up") }
                     }
-                    ChatShareMenuItems(share: onRename == nil ? nil : share)
+                    ChatShareMenuItems(share: topic ? share : nil)
                     if let onArchive {
                         // Not red: an archived chat can come back.
                         Button(action: onArchive) { Label("Archive", systemImage: "archivebox") }
+                    }
+                    if let onUnarchive {
+                        Button(action: onUnarchive) { Label("Unarchive", systemImage: "tray.and.arrow.up") }
                     }
                     if let onDelete {
                         Button(role: .destructive, action: onDelete) { Label("Delete", systemImage: "trash") }

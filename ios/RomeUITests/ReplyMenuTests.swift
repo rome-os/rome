@@ -1,10 +1,10 @@
 import XCTest
 
-/// Swipe to Reply in the Chat, on the demo's long chat: a swipe to the right
-/// on the Agent's message or the guardian's own opens the reply bar, and the
-/// replied message stays in view above the keyboard instead of the list going
-/// to the bottom. Reply in the long-press menu does the same.
-final class SwipeReplyTests: XCTestCase {
+/// Reply in the Chat, on the demo's long chat: Reply in the long-press menu
+/// opens the reply bar, and the replied message stays in view above the
+/// keyboard instead of the list going to the bottom. A swipe on a message
+/// replies to nothing.
+final class ReplyMenuTests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
     }
@@ -59,33 +59,16 @@ final class SwipeReplyTests: XCTestCase {
         XCTAssertLessThan(frame.maxY, keyboard.minY, "the replied message went under the keyboard")
     }
 
+    /// A swipe either way, on the Agent's message or the guardian's own,
+    /// does not reply: Reply is in the menu only.
     @MainActor
-    func testASwipeOnTheAgentsMessageReplies() {
+    func testASwipeDoesNotReply() {
         let app = launch()
-        let message = bubble(app, "个回答")
-        let label = message.label
-        swipe(message, by: 140)
-        XCTAssertTrue(app.buttons["Cancel reply"].waitForExistence(timeout: 5), "no reply bar")
-        assertInView(app, message, label: label)
-    }
-
-    @MainActor
-    func testASwipeOnTheGuardiansOwnMessageReplies() {
-        let app = launch()
-        let message = bubble(app, "个问题")
-        let label = message.label
-        swipe(message, by: 140)
-        XCTAssertTrue(app.buttons["Cancel reply"].waitForExistence(timeout: 5), "no reply bar")
-        assertInView(app, message, label: label)
-    }
-
-    /// A short swipe, or one to the left, does not reply.
-    @MainActor
-    func testAShortOrLeftSwipeDoesNotReply() {
-        let app = launch()
-        let message = bubble(app, "个回答")
-        swipe(message, by: 30)
-        swipe(message, by: -140)
+        let answer = bubble(app, "个回答")
+        swipe(answer, by: 140)
+        swipe(answer, by: -140)
+        let question = bubble(app, "个问题")
+        swipe(question, by: 140)
         XCTAssertFalse(app.buttons["Cancel reply"].waitForExistence(timeout: 2))
     }
 

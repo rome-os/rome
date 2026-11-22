@@ -91,7 +91,7 @@ describe("slotCardCopy", () => {
       ["email", slot("bot"), false],
       ["github", slot("user"), false],
       ["google", slot("user"), false],
-      ["slack", slot("user"), false],
+      ["shopify", slot("user"), false],
       ["composio", slot("user"), false],
     ];
     for (const [service, s, known] of cases) {

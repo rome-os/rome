@@ -9,6 +9,7 @@ import { LatestTaskChatsContext } from "@/components/chat/entries/render";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatEntry } from "@/lib/chat-types";
 import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
+import { ProviderOutageNotice } from "@/components/chat/ProviderOutageNotice";
 import type { ChatRow } from "@/components/chat/chat-view";
 import { buildConciergeItems, showsTyping } from "@/components/chat/concierge-groups";
 import { useGroupDrawings } from "@/components/chat/reply/reply-drawing";
@@ -108,11 +109,14 @@ export function ConciergeTranscript({
             if (item.kind === "separator")
               return <ConciergeTimeSeparator key={item.key} at={item.at} />;
             if (item.kind === "unread") return <ConciergeUnreadDivider key={item.key} />;
+            if (item.kind === "notice" && item.outage)
+              return <ProviderOutageNotice key={item.key} part={item.outage} className="mb-0" />;
             if (item.kind === "notice")
               return (
                 <ModelSwitchNotice
                   key={item.key}
                   model={item.model}
+                  fromModel={item.fromModel}
                   quota={item.quota}
                   className="mb-0"
                 />

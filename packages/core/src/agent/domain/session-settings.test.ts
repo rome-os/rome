@@ -6,8 +6,8 @@ describe("restoresSavedSelection", () => {
     expect(restoresSavedSelection({}, { pinned: false, selected: false })).toBe(true);
   });
 
-  it("keeps a session's pinned model unless its agent lets the saved model outrank it", () => {
-    expect(restoresSavedSelection({}, { pinned: true, selected: false })).toBe(false);
+  it("restores the saved model over the session's pin, on every agent", () => {
+    expect(restoresSavedSelection({}, { pinned: true, selected: false })).toBe(true);
     expect(
       restoresSavedSelection(
         { savedSelectionOutranksPin: true },

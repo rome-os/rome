@@ -1,10 +1,11 @@
-// The live sign that the agent is writing a message, the chat's typing dots
-// (docs/domains/chats.md#reaction). A provider that streams a tool
-// call's input says exactly when a message tool's call starts; for any other
-// the clients show the dots briefly before each message lands.
+// The live sign that the agent is writing a message: the dashboard's typing
+// dots (docs/domains/chats.md#reaction) and a connected chat's typing
+// indicator. A provider that streams a tool call's input says exactly when a
+// message tool's call starts; for any other the clients show the dots briefly
+// before each message lands.
 
 import type { MessageWritingMode } from "@rome/api-types/concierge";
-import { bareTool } from "../../lib/tool-name.js";
+import { bareTool } from "../lib/tool-name.js";
 
 /** The tools whose call is itself a message the chat shows. */
 const MESSAGE_TOOLS = new Set(["say"]);

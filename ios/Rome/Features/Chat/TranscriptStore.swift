@@ -100,6 +100,8 @@ final class TranscriptStore {
     private var approvalPolls: [String: Task<Void, Never>] = [:]
     /// What the rows do when acted on; the same object for the store's life.
     let actions = ChatActions()
+    /// The message whose text is drawn selectable, if any.
+    let textSelection = TextSelection()
     /// Where a send is kept until the server takes it.
     var drafts: ChatDrafts?
     /// Where the newest messages are kept across launches: the main Chat and
@@ -444,6 +446,9 @@ final class TranscriptStore {
     /// its replies count as read only while it shows, and once it shows again.
     var onScreen = false {
         didSet {
+            // The main Chat stays mounted under other pages, so its list
+            // never disappears: going off screen ends select mode instead.
+            if !onScreen { textSelection.end() }
             if onScreen, !oldValue {
                 beginOpen()
                 markRead()
@@ -708,7 +713,7 @@ final class TranscriptStore {
         quote.flatMap { message($0.messageId) }
     }
 
-    /// Reply on a message, from its menu or a swipe on `row`: the reply bar
+    /// Reply on a message, from the menu of its `row`: the reply bar
     /// quotes it.
     func reply(to messageId: String, row: String? = nil) {
         guard kind == .concierge, message(messageId) != nil else { return }

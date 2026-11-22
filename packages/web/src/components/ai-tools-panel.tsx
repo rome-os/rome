@@ -2,8 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import { Measure, Section } from "@rome-os/ui/page";
 import { Fragment, Suspense, useCallback, useEffect, useId, useState } from "react";
 import { lazy } from "@/lib/lazy-with-reload";
+import type { TFunction } from "i18next";
 import { Trans, useTranslation } from "react-i18next";
-import { ChevronDown, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
 
 import {
@@ -18,6 +19,13 @@ import {
   type AiToolBrandIconName,
 } from "@/components/brand-icons/ai-tool-icons";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import {
+  LabeledCheckbox,
+  MakeDefaultProviderButton,
+  useProviderName,
+} from "@/components/default-provider";
+import { Badge } from "@/components/ui/badge";
+import { IconButton } from "@/components/ui/icon-button";
 import { readRomeCredits, RomeCreditsRow } from "@/components/rome-credits-row";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
@@ -47,6 +55,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useSettings, useInvalidateSettings } from "@/hooks/use-settings";
+import {
+  type DefaultModelProvider,
+  type DefaultProviderState,
+  useDefaultProvider,
+  useDismissDefaultProviderNote,
+  useInvalidateDefaultProvider,
+} from "@/hooks/use-default-provider";
 import { fetchJson } from "@/lib/fetch-json";
 import { Textarea } from "@/components/ui/textarea";
 import { getApiErrorMessage } from "@/lib/api-error";
@@ -372,6 +387,54 @@ const LOGOUT_PROVIDER_CONFIG = {
 
 type LogoutProvider = keyof typeof LOGOUT_PROVIDER_CONFIG;
 
+/**
+ * What logging out of `provider` does to the chats. A logout of the default
+ * hands it to the other logged-in account, an expired one included, and with
+ * none left to Rome credits when they can run. Either way the dialog asks
+ * "Move existing chats too" while chats would move. Unchecked, they stay on
+ * the logged-out provider and wait for a login. With neither, the chats pause.
+ * docs/domains/agents.md#default-provider
+ */
+export function logoutOutcome(
+  provider: LogoutProvider,
+  state: DefaultProviderState | null | undefined,
+  providerName: (provider: DefaultModelProvider) => string,
+  t: TFunction<"settings">,
+  choice: { moveExisting?: boolean; otherExpired?: boolean } = {},
+): { text: string; asksToMove: boolean } | null {
+  if (!state) return null;
+  const leaving: DefaultModelProvider = provider === "claude" ? "anthropic" : "openai";
+  const other: DefaultModelProvider = provider === "claude" ? "openai" : "anthropic";
+  const moves = state.provider === leaving;
+  if (state.signedIn[other] && !moves) return null;
+  const asksToMove = moves && (state.followingChats ?? 0) > 0;
+  const stay = asksToMove && choice.moveExisting === false;
+  if (moves && state.signedIn[other]) {
+    const name = providerName(other);
+    const text = stay
+      ? t("aiTools.logoutOutcome.otherBecomesDefaultStay", {
+          provider: name,
+          leaving: providerName(leaving),
+        })
+      : t("aiTools.logoutOutcome.otherBecomesDefault", { provider: name });
+    return {
+      text: choice.otherExpired
+        ? `${text} ${t("aiTools.logoutOutcome.otherExpired", { provider: name })}`
+        : text,
+      asksToMove,
+    };
+  }
+  if (moves && state.romeCreditsUsable) {
+    return {
+      text: stay
+        ? t("aiTools.logoutOutcome.creditsBecomeDefaultStay", { leaving: providerName(leaving) })
+        : t("aiTools.logoutOutcome.creditsBecomeDefault"),
+      asksToMove,
+    };
+  }
+  return { text: t("aiTools.logoutOutcome.pause"), asksToMove: false };
+}
+
 interface AiToolsPanelProps {
   hiddenProviders?: readonly AiToolProviderId[];
   showUsage?: boolean;
@@ -584,6 +647,60 @@ function AnthropicCompatibleProviderLogo({ providerId }: { providerId: string })
   );
 }
 
+/**
+ * The default-provider control on a signed-in provider's row: a badge on the
+ * default, "Set as default" on the others. With one provider signed in it is
+ * simply the default, so only the badge shows.
+ */
+export function DefaultProviderControl({
+  provider,
+  state,
+}: {
+  provider: DefaultModelProvider;
+  state: DefaultProviderState | null | undefined;
+}) {
+  const { t } = useTranslation("settings");
+  if (!state?.signedIn[provider]) return null;
+  if (state.provider === provider) {
+    return <Badge variant="info">{t("aiTools.defaultProvider.badge")}</Badge>;
+  }
+  // Rome credits run only while no AI account is logged in, so the choice is
+  // between the two accounts.
+  if (provider === "rome_credits") return null;
+  if (!state.signedIn.anthropic || !state.signedIn.openai) return null;
+  return <MakeDefaultProviderButton provider={provider} className={AI_TOOL_ACTION_BUTTON_CLASS} />;
+}
+
+/** "{to} is now the default, because {from} was removed." until the guardian dismisses it. */
+function DefaultProviderNote({ state }: { state: DefaultProviderState | null | undefined }) {
+  const { t } = useTranslation("settings");
+  const providerName = useProviderName();
+  const dismiss = useDismissDefaultProviderNote();
+  const note = state?.note;
+  if (!note) return null;
+  return (
+    <div
+      role="note"
+      className="flex items-center gap-2 rounded-8 border border-border bg-surface px-4 py-2"
+    >
+      <p className="min-w-0 flex-1 text-ui text-foreground">
+        {t("aiTools.defaultProvider.removedNote", {
+          to: providerName(note.to),
+          from: providerName(note.from),
+        })}
+      </p>
+      <IconButton
+        size="sm"
+        label={t("aiTools.defaultProvider.dismissNote")}
+        icon={<X aria-hidden />}
+        disabled={dismiss.isPending}
+        onClick={() => dismiss.mutate()}
+        className="text-muted-foreground hover:text-foreground"
+      />
+    </div>
+  );
+}
+
 export function shouldShowAiToolUsage(
   showAiToolUsage: boolean,
   status: AIToolStatus | undefined,
@@ -601,6 +718,7 @@ export function AiToolsPanel({
   onConnectedChange,
 }: AiToolsPanelProps) {
   const { t } = useTranslation("settings");
+  const providerName = useProviderName();
   const uid = useId();
   const [terminalPreset, setTerminalPreset] = useState<string | null>(null);
   const [chatgptModalOpen, setChatgptModalOpen] = useState(false);
@@ -610,6 +728,11 @@ export function AiToolsPanel({
   const [logoutPending, setLogoutPending] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [removeAnthropicProviderOpen, setRemoveAnthropicProviderOpen] = useState(false);
+  // The logout dialog's "Move existing chats too", checked each time a dialog opens.
+  const [logoutMovesExisting, setLogoutMovesExisting] = useState(true);
+  useEffect(() => {
+    if (logoutProvider || removeAnthropicProviderOpen) setLogoutMovesExisting(true);
+  }, [logoutProvider, removeAnthropicProviderOpen]);
   const [toolStatus, setToolStatus] = useState<AIToolStatusMap>({});
   const [anthropicProviders, setAnthropicProviders] = useState<
     AnthropicCompatibleProviderSummary[]
@@ -632,6 +755,8 @@ export function AiToolsPanel({
   const [refreshPending, setRefreshPending] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [fetchedRomeCredits, setRomeCredits] = useState<RomeCreditsView | null>(null);
+  const { data: defaultProvider } = useDefaultProvider();
+  const invalidateDefaultProvider = useInvalidateDefaultProvider();
   const fetchesRomeCredits = showRomeCredits && providedRomeCredits === undefined;
   const romeCredits = providedRomeCredits === undefined ? fetchedRomeCredits : providedRomeCredits;
 
@@ -670,6 +795,8 @@ export function AiToolsPanel({
         ...(data.codex ? { codex: data.codex } : {}),
       });
       setStatusLoaded(true);
+      // A sign-in or sign-out changes which providers can be the default.
+      void invalidateDefaultProvider();
       setConfiguredAnthropicProvider((current) => {
         const next = data.anthropicCompatible ?? null;
         if (
@@ -688,7 +815,7 @@ export function AiToolsPanel({
     } finally {
       setLoadingStatus(false);
     }
-  }, []);
+  }, [invalidateDefaultProvider]);
 
   useEffect(() => {
     fetchStatus().catch(() => {
@@ -831,7 +958,11 @@ export function AiToolsPanel({
     setLogoutPending(true);
     setLogoutError(null);
     try {
-      const res = await fetch(`/api/ai-tools/${provider}/logout`, { method: "POST" });
+      const res = await fetch(`/api/ai-tools/${provider}/logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ moveExisting: logoutMovesExisting }),
+      });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         setLogoutError(data.error || fallbackError);
@@ -909,6 +1040,8 @@ export function AiToolsPanel({
     try {
       const res = await fetch("/api/ai-tools/anthropic-compatible-credentials", {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ moveExisting: logoutMovesExisting }),
       });
       if (!res.ok) {
         throw new Error(
@@ -933,10 +1066,40 @@ export function AiToolsPanel({
     (provider) => provider.id === selectedAnthropicProvider,
   );
   const visibleProviders = AI_TOOL_PROVIDERS.filter(
-    (provider) => !hiddenProviders.includes(provider.statusKey),
+    (provider) => provider.available && !hiddenProviders.includes(provider.statusKey),
   );
   const anyConnected = hasConnectedAiProvider(toolStatus, hiddenProviders);
   const logoutConfig = logoutProvider ? LOGOUT_PROVIDER_CONFIG[logoutProvider] : null;
+  // Rome credits show only while no AI account is logged in. Rome counts an
+  // unknown login as logged in, so only an explicit false on both counts.
+  const noAccountLoggedIn =
+    toolStatus.claude?.loggedIn === false &&
+    toolStatus.codex?.loggedIn === false &&
+    defaultProvider?.signedIn.anthropic !== true &&
+    defaultProvider?.signedIn.openai !== true;
+  // Whether the other account's login expired: it still takes the default.
+  const otherExpired = (leaving: LogoutProvider) =>
+    (leaving === "claude" ? toolStatus.codex : toolStatus.claude)?.needsReauth === true;
+  const outcomeOf = (leaving: LogoutProvider) =>
+    logoutOutcome(leaving, defaultProvider, providerName, t, {
+      moveExisting: logoutMovesExisting,
+      otherExpired: otherExpired(leaving),
+    });
+  const logoutOutcomeNow = logoutProvider ? outcomeOf(logoutProvider) : null;
+  const removeOutcome = outcomeOf("claude");
+  const logoutDescription = logoutConfig
+    ? [t(logoutConfig.descriptionKey), logoutOutcomeNow?.text].filter(Boolean).join(" ")
+    : "";
+  const moveCheckbox = (outcome: ReturnType<typeof logoutOutcome>, disabled: boolean) =>
+    outcome?.asksToMove ? (
+      <LabeledCheckbox
+        checked={logoutMovesExisting}
+        disabled={disabled}
+        onCheckedChange={setLogoutMovesExisting}
+      >
+        {t("aiTools.defaultProvider.moveExisting")}
+      </LabeledCheckbox>
+    ) : null;
 
   useEffect(() => {
     if (!loadingStatus) onConnectedChange?.(anyConnected);
@@ -948,14 +1111,14 @@ export function AiToolsPanel({
   return (
     <PanelMeasure>
       <PanelSection>
+        {showHeader && <DefaultProviderNote state={defaultProvider} />}
         <div className="divide-y divide-border overflow-hidden rounded-8 border border-border bg-surface">
-          {showRomeCredits && romeCredits && statusLoaded && (
+          {showRomeCredits && romeCredits && statusLoaded && noAccountLoggedIn && (
             <RomeCreditsRow
               credits={romeCredits}
-              // Rome counts an unknown ChatGPT login as connected, so only
-              // an explicit false puts Codex on credits.
-              chatgptConnected={toolStatus.codex?.loggedIn !== false}
-              claudeConnected={toolStatus.claude?.loggedIn === true}
+              defaultControl={
+                <DefaultProviderControl provider="rome_credits" state={defaultProvider} />
+              }
             />
           )}
           {visibleProviders.map((provider) => {
@@ -1018,11 +1181,6 @@ export function AiToolsPanel({
                                 : t("aiTools.status.notConnected")}
                           </span>
                         )}
-                        {!provider.available && (
-                          <span className="text-aux text-muted-foreground">
-                            {t("aiTools.status.comingSoon")}
-                          </span>
-                        )}
                       </div>
                       {usesApiKey ? (
                         usesManagedApiKey && configuredAnthropicProvider ? (
@@ -1078,6 +1236,13 @@ export function AiToolsPanel({
                   </div>
                   {provider.available && (
                     <div className="ml-auto flex shrink-0 items-center gap-2">
+                      {(provider.statusKey === "claude" || provider.statusKey === "codex") &&
+                        isLoggedIn && (
+                          <DefaultProviderControl
+                            provider={provider.statusKey === "claude" ? "anthropic" : "openai"}
+                            state={defaultProvider}
+                          />
+                        )}
                       {provider.id === "claude-login" &&
                       usesManagedApiKey &&
                       configuredAnthropicProvider ? (
@@ -1516,13 +1681,15 @@ export function AiToolsPanel({
             open
             icon={logoutConfig.icon}
             title={t(logoutConfig.titleKey)}
-            description={logoutError ?? t(logoutConfig.descriptionKey)}
+            description={logoutError ?? logoutDescription}
             confirmLabel={t("aiTools.logOut")}
             destructive
             confirmDisabled={logoutPending}
             onConfirm={() => void handleLogout()}
             onCancel={() => setLogoutProvider(null)}
-          />
+          >
+            {moveCheckbox(logoutOutcomeNow, logoutPending)}
+          </RomeConfirmDialog>
         )}
 
         {configuredAnthropicProvider && (
@@ -1531,15 +1698,23 @@ export function AiToolsPanel({
             title={t("aiTools.otherProviders.removeConfirm.title", {
               providerName: configuredAnthropicProvider.providerName,
             })}
-            description={t("aiTools.otherProviders.removeConfirm.description", {
-              providerName: configuredAnthropicProvider.providerName,
-            })}
+            description={[
+              t("aiTools.otherProviders.removeConfirm.description", {
+                providerName: configuredAnthropicProvider.providerName,
+              }),
+              // Removing the key logs Claude out, as Log out does.
+              removeOutcome?.text,
+            ]
+              .filter(Boolean)
+              .join(" ")}
             confirmLabel={t("common.remove")}
             destructive
             confirmDisabled={savingAnthropicProvider}
             onConfirm={() => void clearAnthropicProviderCredentials()}
             onCancel={() => setRemoveAnthropicProviderOpen(false)}
-          />
+          >
+            {moveCheckbox(removeOutcome, savingAnthropicProvider)}
+          </RomeConfirmDialog>
         )}
       </PanelSection>
     </PanelMeasure>

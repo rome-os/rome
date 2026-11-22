@@ -66,6 +66,10 @@ struct MainShell: View {
     /// A blank topic chat that started its chat keeps its view under the new id.
     @State private var startedTopics: [String: UUID] = [:]
     @State private var showSettings = false
+    /// The Archived sheet, from the drawer's row under the topic chats.
+    @State private var showArchived = false
+    /// The archived chat tapped in that sheet: it opens once the sheet is gone.
+    @State private var openArchived: String?
     /// Goes up with each widget link followed: a later one wins.
     @State private var linkSerial = 0
     /// A short notice after a widget link, such as an app that is gone.
@@ -87,6 +91,7 @@ struct MainShell: View {
     @State private var pagePreview: URL?
     @State private var appPreview: InstalledApp?
     @State private var connectPreview: String?
+    @State private var archivedPreview = false
     #endif
 
     /// The drawer pinned beside the page rather than pushed aside.
@@ -99,163 +104,8 @@ struct MainShell: View {
     private var usesSidebar: Bool { Self.usesSidebar(sizeClass) && !ProcessInfo.processInfo.isMacCatalystApp }
 
     var body: some View {
-        GeometryReader { geometry in
-            let _ = PerfProbe.count("shellBody")
-            let width = min(318, geometry.size.width * 0.81)
-            // Pinned, the drawer takes this much of the width beside the page;
-            // pushed aside (compact), none, and the slide moves the page instead.
-            let column: CGFloat = usesSidebar && sidebarShown ? width : 0
-
-            DrawerSlide(
-                width: width,
-                column: column,
-                pinned: usesSidebar,
-                pinnedShown: sidebarShown,
-                edge: !usesSidebar && !drawerOpen && path.isEmpty,
-                open: $drawerOpen
-            ) {
-                DrawerView(
-                    workspace: workspace,
-                    section: section,
-                    onSection: { picked in
-                        show(picked)
-                        closeDrawer()
-                    },
-                    onNewTopic: {
-                        show(.newTopic(UUID()))
-                        closeDrawer()
-                    },
-                    // The sheet rises over the open drawer, and the drawer is still
-                    // there when it closes: one motion each way, never two at once.
-                    onSettings: {
-                        settingsPath = []
-                        showSettings = true
-                    },
-                    // The open chat archived or deleted from its row: the main
-                    // Chat shows, as from the chat's own header; the drawer stays.
-                    onTopicGone: { id in
-                        if section == .topic(id) { show(.chat) }
-                    }
-                )
-                .frame(width: width, height: geometry.size.height)
-            } page: {
-                NavigationStack(path: $path) {
-                    root
-                    .navigationDestination(for: Route.self) { route in
-                        destination(route)
-                    }
-                }
-                .environment(\.chatLinkOpener, actions.linkOpener)
-                .environment(\.openUsage, actions.openUsage)
-                .environment(\.connectDevice, model.deviceConnectAction)
-                .environment(\.openTaskChat, actions.openTaskChat)
-                .environment(\.agentZoom, agentZoom)
-                .environment(\.visibleChat, visibleChat)
-                .instancePageSheet(workspace: workspace, url: $page)
-                .appSheet(workspace: workspace, app: $openApp)
-                .environment(\.isVisitor, workspace.isVisitor)
-                .environment(\.shareAgentName, AgentName.display(workspace.agentName))
-                // Over the page, so beside a pinned drawer they sit above the chat.
-                // The page reaches under the status bar; they start below it.
-                .overlay(alignment: .top) { banners.padding(.top, geometry.safeAreaInsets.top) }
-                .frame(width: geometry.size.width - column, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
-            }
-        }
-        .fullScreenCover(item: $agentPage, onDismiss: {
-            // Settings is a sheet of this view, so it waits for the cover to be gone.
-            guard openUsageAfterCover else { return }
-            openUsageAfterCover = false
-            settingsPath = []
-            showSettings = true
-        }) { route in
-            // Its own stack: a task opens inside the page, and back returns
-            // to the Tasks as they were.
-            NavigationStack(path: $agentPath) {
-                AgentPage(workspace: workspace, route: route, tab: $agentTab, onOpenTask: { chat in
-                    agentPath.append(.taskChat(chatId: chat.id, title: chat.name))
-                }, onClose: { agentPage = nil })
-                .toolbar(.hidden, for: .navigationBar)
-                .navigationDestination(for: Route.self) { route in
-                    destination(route)
-                }
-            }
-            .environment(model)
-            .environment(\.chatLinkOpener, actions.linkOpener)
-            // Settings is a sheet of this view: the cover closes first.
-            .environment(\.openUsage, actions.openUsageFromCover)
-            .environment(\.connectDevice, model.deviceConnectAction)
-            .environment(\.visibleChat, visibleChat)
-            .environment(\.isVisitor, workspace.isVisitor)
-            .environment(\.shareAgentName, AgentName.display(workspace.agentName))
-            .instancePageSheet(workspace: workspace, url: $agentLinkPage)
-            .appSheet(workspace: workspace, app: $agentApp)
-            .presentationBackground(Palette.bg)
-            .agentZoomTransition(route.zoomSource, in: agentZoom)
-        }
-        .sheet(isPresented: $showSettings) {
-            settingsSheet
-        }
-        // A connect card's device connection: its authorization, then the card checks.
-        .sheet(item: Binding(get: { model.connections.request }, set: { if $0 == nil { model.connections.request?.finish(false) } })) { request in
-            ConnectDeviceSheet(request: request)
-                .presentationBackground(Palette.sheet)
-                .presentationCornerRadius(22)
-        }
-        #if DEBUG
-        .overlay {
-            if photoViewerPreview {
-                // Snapshot runs only: the viewer in place of its full-screen cover.
-                PhotoViewer(images: [.markdown(ImageSource(src: "/projects/demo/trip/hotel.jpg"), alt: "河原町酒店外观", src: "/projects/demo/trip/hotel.jpg", position: 0)], start: 0)
-            }
-            // Snapshot runs only, for the same reason: the sheets in a stand-in frame.
-            if let pagePreview {
-                SheetStandIn { InstancePageScreen(workspace: workspace, url: pagePreview) }
-            }
-            if let appPreview {
-                SheetStandIn { AppWebScreen(workspace: workspace, app: appPreview) }
-            }
-            if settingsPreview {
-                SheetStandIn { settingsSheet }
-            }
-            if let connectPreview {
-                ZStack(alignment: .bottom) {
-                    Color.black.opacity(0.4).ignoresSafeArea()
-                    ConnectDeviceSheet(request: DeviceConnectRequest(capability: connectPreview) { _ in }, standIn: true)
-                        .background(Palette.sheet)
-                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
-                }
-                .ignoresSafeArea(edges: .bottom)
-            }
-        }
-        #endif
-        // Which chat is in front, for pushes: none under a sheet or the drawer.
-        .onChange(of: visibleChat, initial: true) { _, chat in model.show(chat, by: screenID) }
-        .onChange(of: workspace.mainChatServerID) { model.rewatch() }
-        .onAppear {
-            installShellActions()
-            workspace.register(actions)
-        }
-        // What toggling the navigation does depends on the width.
-        .onChange(of: usesSidebar) { installShellActions() }
-        .onDisappear {
-            model.hide(by: screenID)
-            // The actions hold this view's state, which they must not
-            // outlive. The Agent page's cover takes the shell off screen too
-            // and uses them meanwhile; the workspace empties them when it
-            // stops, cover or not.
-            guard agentPage == nil else { return }
-            actions.reset()
-            workspace.unregister(actions)
-        }
-        .sensoryFeedback(.impact(weight: .light), trigger: drawerOpen)
-        .onChange(of: drawerOpen) { _, open in
-            if open {
-                Keyboard.dismiss()
-                workspace.topics.refresh()
-            }
-        }
-        // Whatever covers or replaces the chat takes the keyboard with it;
-        // the composer keeps its text.
+        // Split in two: as one chain, the type checker gives up on CI.
+        presented
         .onChange(of: path) { Keyboard.dismiss() }
         .onChange(of: agentPage) { _, shown in
             Keyboard.dismiss()
@@ -337,10 +187,204 @@ struct MainShell: View {
                 photoViewerPreview = open
             case .connectSheet(let id):
                 connectPreview = id
+            case .archivedSheet(let open):
+                archivedPreview = open
             case .composerPhotos, .appIdeas, nil: break
             }
         }
         #endif
+    }
+
+    /// The shell with its sheets and covers; `body` adds the reactions to state.
+    private var presented: some View {
+        GeometryReader { geometry in
+            let _ = PerfProbe.count("shellBody")
+            let width = min(318, geometry.size.width * 0.81)
+            // Pinned, the drawer takes this much of the width beside the page;
+            // pushed aside (compact), none, and the slide moves the page instead.
+            let column: CGFloat = usesSidebar && sidebarShown ? width : 0
+
+            DrawerSlide(
+                width: width,
+                column: column,
+                pinned: usesSidebar,
+                pinnedShown: sidebarShown,
+                edge: !usesSidebar && !drawerOpen && path.isEmpty,
+                open: $drawerOpen
+            ) {
+                DrawerView(
+                    workspace: workspace,
+                    section: section,
+                    onSection: { picked in
+                        show(picked)
+                        closeDrawer()
+                    },
+                    onNewTopic: {
+                        show(.newTopic(UUID()))
+                        closeDrawer()
+                    },
+                    // The sheet rises over the open drawer, and the drawer is still
+                    // there when it closes: one motion each way, never two at once.
+                    onSettings: {
+                        settingsPath = []
+                        showSettings = true
+                    },
+                    // The open chat archived or deleted from its row: the main
+                    // Chat shows, as from the chat's own header; the drawer stays.
+                    onTopicGone: leave,
+                    // Over the open drawer, as Settings is.
+                    onArchived: {
+                        openArchived = nil
+                        showArchived = true
+                    }
+                )
+                .frame(width: width, height: geometry.size.height)
+            } page: {
+                NavigationStack(path: $path) {
+                    root
+                    .navigationDestination(for: Route.self) { route in
+                        destination(route)
+                    }
+                }
+                .environment(\.chatLinkOpener, actions.linkOpener)
+                .environment(\.openUsage, actions.openUsage)
+                .environment(\.connectDevice, model.deviceConnectAction)
+                .environment(\.openTaskChat, actions.openTaskChat)
+                .environment(\.agentZoom, agentZoom)
+                .environment(\.visibleChat, visibleChat)
+                .instancePageSheet(workspace: workspace, url: $page)
+                .appSheet(workspace: workspace, app: $openApp)
+                .environment(\.isVisitor, workspace.isVisitor)
+                .environment(\.shareAgentName, AgentName.display(workspace.agentName))
+                // Over the page, so beside a pinned drawer they sit above the chat.
+                // The page reaches under the status bar; they start below it.
+                .overlay(alignment: .top) { banners.padding(.top, geometry.safeAreaInsets.top) }
+                .frame(width: geometry.size.width - column, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
+            }
+        }
+        // The Archived sheet stops at half height and floats on iOS 26, and
+        // the system dims nothing behind a sheet there: the drawer and the
+        // chat would read clearly around it.
+        .overlay { archivedScrim }
+        .fullScreenCover(item: $agentPage, onDismiss: {
+            // Settings is a sheet of this view, so it waits for the cover to be gone.
+            guard openUsageAfterCover else { return }
+            openUsageAfterCover = false
+            settingsPath = []
+            showSettings = true
+        }) { route in
+            // Its own stack: a task opens inside the page, and back returns
+            // to the Tasks as they were.
+            NavigationStack(path: $agentPath) {
+                AgentPage(workspace: workspace, route: route, tab: $agentTab, onOpenTask: { chat in
+                    agentPath.append(.taskChat(chatId: chat.id, title: chat.name))
+                }, onClose: { agentPage = nil })
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(for: Route.self) { route in
+                    destination(route)
+                }
+            }
+            .environment(model)
+            .environment(\.chatLinkOpener, actions.linkOpener)
+            // Settings is a sheet of this view: the cover closes first.
+            .environment(\.openUsage, actions.openUsageFromCover)
+            .environment(\.connectDevice, model.deviceConnectAction)
+            .environment(\.visibleChat, visibleChat)
+            .environment(\.isVisitor, workspace.isVisitor)
+            .environment(\.shareAgentName, AgentName.display(workspace.agentName))
+            .instancePageSheet(workspace: workspace, url: $agentLinkPage)
+            .appSheet(workspace: workspace, app: $agentApp)
+            .presentationBackground(Palette.bg)
+            .agentZoomTransition(route.zoomSource, in: agentZoom)
+        }
+        .sheet(isPresented: $showSettings) {
+            settingsSheet
+        }
+        .sheet(isPresented: $showArchived, onDismiss: {
+            // The chat opens once the sheet is gone, and the drawer goes with it.
+            guard let id = openArchived else { return }
+            openArchived = nil
+            show(.topic(id))
+            closeDrawer()
+        }) {
+            archivedSheet
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Palette.sheet)
+                .presentationCornerRadius(22)
+        }
+        // A connect card's device connection: its authorization, then the card checks.
+        .sheet(item: Binding(get: { model.connections.request }, set: { if $0 == nil { model.connections.request?.finish(false) } })) { request in
+            ConnectDeviceSheet(request: request)
+                .presentationBackground(Palette.sheet)
+                .presentationCornerRadius(22)
+        }
+        #if DEBUG
+        .overlay {
+            if photoViewerPreview {
+                // Snapshot runs only: the viewer in place of its full-screen cover.
+                PhotoViewer(images: [.markdown(ImageSource(src: "/projects/demo/trip/hotel.jpg"), alt: "河原町酒店外观", src: "/projects/demo/trip/hotel.jpg", position: 0)], start: 0)
+            }
+            // Snapshot runs only, for the same reason: the sheets in a stand-in frame.
+            if let pagePreview {
+                SheetStandIn { InstancePageScreen(workspace: workspace, url: pagePreview) }
+            }
+            if let appPreview {
+                SheetStandIn { AppWebScreen(workspace: workspace, app: appPreview) }
+            }
+            if settingsPreview {
+                SheetStandIn { settingsSheet }
+            }
+            if archivedPreview {
+                // A sheet at medium height, over the open drawer.
+                ZStack(alignment: .bottom) {
+                    SheetScrim()
+                    archivedSheet
+                        .frame(height: 420)
+                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
+                }
+                .ignoresSafeArea(edges: .bottom)
+            }
+            if let connectPreview {
+                ZStack(alignment: .bottom) {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    ConnectDeviceSheet(request: DeviceConnectRequest(capability: connectPreview) { _ in }, standIn: true)
+                        .background(Palette.sheet)
+                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
+                }
+                .ignoresSafeArea(edges: .bottom)
+            }
+        }
+        #endif
+        // Which chat is in front, for pushes: none under a sheet or the drawer.
+        .onChange(of: visibleChat, initial: true) { _, chat in model.show(chat, by: screenID) }
+        .onChange(of: workspace.mainChatServerID) { model.rewatch() }
+        .onAppear {
+            installShellActions()
+            workspace.register(actions)
+        }
+        // What toggling the navigation does depends on the width.
+        .onChange(of: usesSidebar) { installShellActions() }
+        .onDisappear {
+            model.hide(by: screenID)
+            // The actions hold this view's state, which they must not
+            // outlive. The Agent page's cover takes the shell off screen too
+            // and uses them meanwhile; the workspace empties them when it
+            // stops, cover or not.
+            guard agentPage == nil else { return }
+            actions.reset()
+            workspace.unregister(actions)
+        }
+        .sensoryFeedback(.impact(weight: .light), trigger: drawerOpen)
+        .onChange(of: drawerOpen) { _, open in
+            if open {
+                Keyboard.dismiss()
+                workspace.topics.refresh()
+                workspace.archivedTopics.refresh()
+            }
+        }
+        // Whatever covers or replaces the chat takes the keyboard with it;
+        // the composer keeps its text.
     }
 
     /// A tap on the widget: its app, Apps or Chat in front, nothing over it.
@@ -518,22 +562,49 @@ struct MainShell: View {
                 .environment(\.offScreen, covered)
             case .search:
                 SearchScreen(workspace: workspace, onMenu: { toggleNavigation() }) { hit in
-                    if workspace.isMainChat(hit.session.id) {
-                        show(.chat)
-                    } else if workspace.topics.chat(hit.session.id) != nil {
-                        show(.topic(hit.session.id))
-                    } else {
-                        path.append(.taskChat(chatId: hit.session.id, title: hit.session.name))
+                    switch workspace.openSearchHit(hit.session) {
+                    case .main: show(.chat)
+                    case .topic(let id): show(.topic(id))
+                    case .taskChat(let id, let title): path.append(.taskChat(chatId: id, title: title))
                     }
                 }
             }
         }
     }
 
+    /// A topic chat archived or deleted from the drawer or the Archived
+    /// sheet: if it is open, the main Chat shows, as from the chat's own header.
+    private func leave(_ chatId: String) {
+        if let next = Self.section(after: section, retired: chatId) { show(next) }
+    }
+
+    /// Where the shell goes when topic chat `retired` leaves: the main Chat
+    /// if it is the open one, else nowhere (nil).
+    static func section(after current: MainSection, retired: String) -> MainSection? {
+        current == .topic(retired) ? .chat : nil
+    }
+
+    /// The scrim behind the Archived sheet while it is up. Kept out of `body`,
+    /// whose modifier chain is already near the type checker's limit.
+    private var archivedScrim: some View {
+        ZStack {
+            if showArchived { SheetScrim().transition(.opacity) }
+        }
+        .animation(.easeOut(duration: 0.25), value: showArchived)
+    }
+
+    /// The Archived sheet: a tapped row closes it, and its chat opens after.
+    private var archivedSheet: some View {
+        ArchivedTopicsSheet(workspace: workspace, onOpen: { id in
+            openArchived = id
+            showArchived = false
+        }, onDeleted: leave)
+    }
+
     /// A pushed page, the Agent page's cover or a large sheet (an app, a
     /// dashboard page, Settings) hides the stack's root. A sheet leaves the
     /// root on screen, so its animations would keep running under it.
-    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil || page != nil || showSettings }
+    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil || page != nil || showSettings || showArchived }
 
     private func topicScreen(chatId: String?, key: UUID? = nil, draftKey: String) -> some View {
         TopicChatScreen(
@@ -626,7 +697,9 @@ struct MainShell: View {
         if agentPage != nil {
             return Self.visibleChat(agentPath: agentPath, covered: agentLinkPage != nil || agentApp != nil || workspace.sharingCoversChat)
         }
-        return Self.visibleChat(section: section, path: path, covered: drawerOpen || showSettings || page != nil || openApp != nil || workspace.sharingCoversChat)
+        // The Archived sheet covers it too: beside a pinned drawer (iPad)
+        // the drawer is not open while the sheet shows.
+        return Self.visibleChat(section: section, path: path, covered: drawerOpen || showSettings || showArchived || page != nil || openApp != nil || workspace.sharingCoversChat)
     }
 
     /// The chat on screen while the Agent page is up: a task chat pushed
@@ -661,7 +734,10 @@ struct MainShell: View {
         guard usesSidebar else { return openDrawer() }
         Keyboard.dismiss()
         withAnimation(Self.drawerSpring) { sidebarShown.toggle() }
-        if sidebarShown { workspace.topics.refresh() }
+        if sidebarShown {
+            workspace.topics.refresh()
+            workspace.archivedTopics.refresh()
+        }
     }
 
     private func closeDrawer() {

@@ -111,7 +111,7 @@ Whether the guardian's own account is authorized, expired or absent, and whether
 
 ## Model provider availability
 
-Whether a turn can use a model provider now, read from the [login](#model-provider-login) in effect: available, expired, usage limit reached, or unauthorized only when the provider has no login at all. On Rome credits, Codex is available, whatever the guardian's account says.
+Whether a turn can use a model provider now, read from the [login](#model-provider-login) in effect: available, expired, usage limit reached, or unauthorized only when the provider has no login at all. While Rome credits are the default, Codex is available for every turn, whatever the guardian's account says. Otherwise a turn reads the guardian's own account, so it shows the account card.
 
 - The resolver is its one reader. A reader that asks about the guardian's own account reads the [account status](#model-provider-account-status) instead.
 - In code it is `providerAvailability` in [`packages/core/src/agent/domain/provider-availability.ts`](../../packages/core/src/agent/domain/provider-availability.ts), a pure function over the account's report and the login.
@@ -122,16 +122,79 @@ How Rome is let in to a model provider. A login has one of three kinds, named by
 
 - The provider reports what the login allows, the models and whether it is usage limited. Who is billed follows from the login. A model session reports the kind of login each turn ran on, unset when Rome cannot tell.
 - Getting a login and using one are two acts. The guardian authorizes a ChatGPT login. Rome's setup picks which login Codex runs on.
-- For Codex, Rome credits are used only while the ChatGPT account is unauthorized or expired, the instance is linked to Rome Cloud, and the credits can be spent. A usage limit alone, or an account not read yet, keeps the subscription login. This is one choice for the whole instance, and it can change while Rome runs ([Rome Cloud](../concepts/rome-cloud.md#rome-credits)).
+- For Codex, the Rome credits login is in effect only while the guardian is logged in to no AI account: no ChatGPT login and no Claude login. A login that expired or was revoked still counts as logged in, so a lost login or a usage limit never brings them in. The instance must be linked to Rome Cloud, and the credits must be spendable. It is one choice for the whole instance ([Rome Cloud](../concepts/rome-cloud.md#rome-credits)).
+- A turn spends Rome credits only while they are the [default](#default-provider), and then every chat spends them: credits are the instance's choice, never one chat's. A chat that follows ChatGPT after its login went shows the account card, with "Use Rome credits".
 - For Claude, Rome's setup picks nothing. A stored credential wins over an environment credential, which wins over the Claude CLI's login, so the guardian chooses by what they store. Where Rome found a credential is a detail of the login, not a kind.
 - In code the logins and their ports are in [`packages/core/src/agent/domain/model-login.ts`](../../packages/core/src/agent/domain/model-login.ts). `CodexLogins` logs Rome in to and out of Codex and runs Codex on the login it is told to use. `ClaudeLogins` keeps the credential Rome stores for Claude and logs the CLI out, since the guardian signs in to Claude outside Rome. `claudeLogin` holds Claude's order. `ModelProviderLogins` is the revoke both adapters share. Rome's setup choice is [`packages/core/src/rome-cloud/codex-login.ts`](../../packages/core/src/rome-cloud/codex-login.ts), outside the agent context.
 
+## Default provider
+
+The provider every chat that follows the default runs on: Claude, Codex on the guardian's ChatGPT login, or Rome credits. Three rules decide it, and the cases below follow from them.
+
+1. **One default.** Each chat either follows it or is [pinned to a model](#pinned-chat). A pinned chat always says so, and one tap brings it back to the default.
+2. **The default changes in three cases only:** the guardian sets it, a login when no usable account existed, and a logout of the default. Every change that moves chats asks with one "Move existing chats too" checkbox, checked.
+3. **A failure changes nothing by itself.** A usage limit, an expired login or a model overload never moves the default or a chat's model. It writes a [card](#provider-failure), and the guardian clicks Retry or Switch. An overload swap lasts one turn.
+
+The cases:
+
+- **The guardian sets it** in AI Tools, after a confirm dialog: "Ongoing chats switch to {provider} on their next reply." While another chat would move, the dialog has "Move existing chats too". Unchecked, every existing chat stays where it runs: web chats, forks, a channel's chats and the subagents under any of them. They become [pinned](#pinned-chat) to the old provider.
+- **A login while Rome credits are the default**, or with no default, makes that account the default, and every chat moves to it without a question. This is the exception to rule 2. Rome credits run only while no AI account is logged in, so once one is, no chat can stay on them: there is nothing to ask. A second login leaves the default as it is, and AI Tools offers "Set as default". That holds when the default's login has expired too: an expired login still counts as logged in, so logging in to the other account does not move the default. Expiry never moves it.
+- **A logout of the default with another account logged in** makes that account the default. An expired login still counts as logged in, so the default goes to it, and the dialog warns that its login expired and asks to log in again. The dialog names the new default and asks "Move existing chats too".
+- **A logout of the last account** makes Rome credits the default, when they can be spent: enabled, with a balance left. This happens only in the logout itself. A later top-up never changes the default: the chats keep showing their card, and its "Use Rome credits" is the way to move them. The dialog says so and asks "Move existing chats too". Unchecked, the existing chats stay on the logged-out provider and show the account card until a login. With none to spend, the default stays and the chats pause until a login, as the dialog says. A default that already is Rome credits stays when their balance runs out.
+- A chat moves on demand, at its next real run (a message, a task chat's or a routine's run), with the note "Switched to {provider}". A running turn is never interrupted. Nothing resumes a stopped turn because the default changed.
+- Rome credits can be the default only while no AI account is logged in, and AI Tools shows them only then.
+- An upgrade starts from the provider the Concierge main chat runs on, else the one the order Rome used before would pick, so the chat the guardian uses most does not move. Until the accounts are read and a default is set, turns resolve in that old order.
+- In code it is `DefaultProvider` in [`packages/core/src/agent/domain/default-provider.ts`](../../packages/core/src/agent/domain/default-provider.ts), kept by `DefaultProviders` in [`packages/core/src/agent/application/default-providers.ts`](../../packages/core/src/agent/application/default-providers.ts). [Provider switching follows three rules](../adrs/provider-switching-three-rules.md) records why.
+
+## Pinned chat
+
+A chat that does not follow the default: its owner picked its model, or it was kept on another provider, by a card's switch or by a change of the default that left existing chats where they were. A chat whose model Rome chose (a Concierge chat's, a task chat's strength) is not pinned. Being pinned to a model has nothing to do with pinning a topic chat in the chat list, nor with the session's [model pin](../concepts/sessions.md#model-pin).
+
+- A pinned chat always shows a hint with one tap "Back to default": "On ChatGPT · Back to default" for a kept chat, "You picked Claude Haiku · Back to default" for an owner's pick. Back to default makes it follow the default again from its next turn, at the strength it runs now.
+- A kept chat stays on the model it last ran, or on its strength on the other provider. One that never ran a model takes its agent's tier. A fork, a channel's chat and the subagents under any chat stay with the conversation they belong to.
+- A kept chat runs on the guardian's own account, never on Rome credits. While credits are the default it shows its account's card instead. A model its owner picked runs on Rome credits at its strength while they are the default, unless the chat stayed on its provider when the default changed.
+- An unchecked change holds every conversation active in the last 30 days on the old default, whatever provider its last turn ran on, since that is where it would run next. Older ones follow the new default when they run again.
+- A change of the default that moves existing chats lets every kept chat follow again. A held conversation that is not a web chat, such as a channel's chat, is let go in three ways only: a checked move, choosing the current default again with "Move existing chats too", or once it has no session left. Choosing the default again is how such a conversation gets back after an unchecked logout left the only account, which is the default already. A web chat is also let go when it is deleted or its owner picks Auto in the model menu. When its owner picks a model on another provider, its hold moves there, so its subagents stay with it. A model its owner picked never moves with the default.
+- A model limit may move a kept chat's turn to another model of its provider, for that turn only, as for any chat.
+- The chat APIs say, beside the chat's model, whether it follows the default and, when it does not, what it is pinned to and who pinned it. Older app builds ignore the new fields.
+- In code the chat's selection is stored as made by its owner or `kept`, and the other held conversations by their session, in [`packages/core/src/webchat/chat-providers.ts`](../../packages/core/src/webchat/chat-providers.ts).
+
+## Provider failure
+
+What happens when the provider a turn needs cannot run. Rome recovers by itself only when no context is lost, no money is spent and nobody's pick is overridden, the same in every chat:
+
+- A temporary error (a rate limit, an overload, the network, a 5xx) gets one silent retry after about 30 seconds.
+- One model at its own limit or at capacity runs the turn again on another model of the same provider, for a chat that follows the default, with a note naming both models. The swap lasts that one turn: the next turn tries the chat's own model again, and swaps again if it is still overloaded. The other model lives only in that turn: it is never stored as the chat's model, nor as the model its session last ran, so the next turn and a restart resolve what they would have without the swap.
+- Nothing else recovers by itself, and nothing moves a chat to another provider, to Rome credits, to ChatGPT credits or to an API key.
+
+Anything else shows one of three **cards**, by what the guardian has to do:
+
+1. **Wait**: the subscription's quota is used up, a temporary error outlasted its retry, or a model the owner picked is at capacity. It offers "Switch to {other account}". A quota card promises that Rome continues ("Rome continues after 14:20") only where the [usage-limit continuation](../concepts/sessions.md#continuation) will run the stopped turn, as the continuation itself decides. Elsewhere, such as a weekly limit or a visitor's chat, it reads "Paused until 14:20", and its "Retry" reads "Continue" once that time has passed.
+2. **Account**: the login expired or is missing, Rome credits are used up, or a spending limit is reached. It offers "Log in", and "Switch to {other account}" or, with no account logged in and a balance left, "Use Rome credits". Used-up credits leave no account logged in, so "Log in" is their way on.
+3. **Model**: the model the owner picked is not in the plan, or the provider stopped offering it. It offers "Switch to {model}" on the same provider.
+
+Every card, an account card included, also offers "Retry", which runs the stopped turn where it ran.
+
+A card's switch asks in a dialog. It moves this chat only (it becomes [pinned](#pinned-chat) to that provider), unless the guardian ticks "Also make default". That changes the default as AI Tools does, with the same "Move existing chats too", checked, shown while another chat would move. Checked, every existing chat moves at its next run, kept ones included. Unchecked, the other chats stay where they run. "Use Rome credits" makes them the default, for every chat, and names the balance. It asks no "Move existing chats too": the card offers it only when no account can run, so no chat has anywhere else to stay. An owner's pick stays theirs, at its strength on the credits.
+
+A card's options stay as it wrote them. Clicking one that does not work now, such as a switch to an account whose login has expired, writes a fresh card with the options that work now, and runs nothing.
+
+A card's button runs the stopped turn at once, in this chat only. Nothing else resumes a stopped turn except the usage-limit continuation and the guardian's next message: a login, a top-up or a change of the default resumes nothing. A newer message in the chat answers instead, and one click, or two, runs the turn once. While the continuation runs the chat, a click runs nothing. The Concierge retries and moves its own chats, and writes their card when it cannot get past the failure: one recovery owns each failed turn. Nothing about it is stored, so a restart before the turn starts leaves the card open, to click again. A card settles to one line when a turn of its chat runs ("Switched to X, continued" or "Recovered, continued"), or says "Switched to X" when its turn did not run. The provider's own error stays behind "Details".
+
+An unattended chat (a task chat, a scheduled run, a routine) gets its card too, and the owner's Concierge main chat gets one **notice** per incident, with links to the stopped tasks and, for the guardian's own, one push. The notice only informs: the guardian opens a task and acts on its card. Once every task's card has settled, the notice reads as one line too.
+
+- The server decides the card and its actions, and a client draws them. In code the cards and notices are [`packages/core/src/webchat/provider-failures.ts`](../../packages/core/src/webchat/provider-failures.ts), and the reasons `providerFailureReason` in [`packages/core/src/agent/domain/failover-reason.ts`](../../packages/core/src/agent/domain/failover-reason.ts).
+
+## Exact selection
+
+A concrete model a developer picked for a chat in the model selector. The chat runs on exactly that model and does not follow the default. Every other chat **follows the default**. The selector lists only the signed-in providers' models, and Auto means following the default. UI copy outside the selector names providers, never models.
+
 ## Model resolution
 
-Which provider and model a turn uses. The ask is the most specific of the chat's [selection](#model-selection), the session's pin, the agent's own model and the agent's tier, and the resolution is the answer. A selection, a pin and an agent's own model are exact asks, and an exact ask resolves to exactly that model or fails, never to a substitute.
+Which provider and model a turn uses. An [exact selection](#exact-selection) or an agent's own model resolves to exactly that model or fails, never to a substitute. Every other ask follows the [default provider](#default-provider): its tier or strength on that provider, on the session's pinned model while the pin is on that provider.
 
 - A provider is **usable** when its [availability](#model-provider-availability) is available, or Rome has not read it yet. Resolution checks that first, and then whether the [login](#model-provider-login) in effect allows the model. So a failure is either an unavailable provider or a model the login does not allow.
-- A tier resolves on the first usable provider in order (Codex subscription capacity, Claude, Codex on allowed ChatGPT credits, Codex on Rome credits, then the mock) to that provider's model for the tier. When the login there does not allow that model, the ask fails rather than moving on to the next provider. ChatGPT credits keep the account's model restrictions. Exact requests and tiers restricted to Codex can use allowed ChatGPT credits even when Claude has capacity.
+- A tier that follows the default fails when the default provider cannot run. No other provider stands in.
 - A tier restricted to one provider asks about the guardian's own account, so Rome credits do not count for it.
 - **Tier models** are the guardian's choice of model for each tier and provider. A provider with none chosen uses Rome's default for the tier. The stored setting keeps its older name, `tierModelMappings`.
 - In code the ask is `ModelResolutionRequest` and the rule is `resolveModel` in [`packages/core/src/agent/domain/model-resolution.ts`](../../packages/core/src/agent/domain/model-resolution.ts), a pure function over the facts the resolver reads. `ModelResolver` in [`packages/core/src/agent/application/model-resolver.ts`](../../packages/core/src/agent/application/model-resolver.ts) reads them and words a failure for the wire.
@@ -140,14 +203,13 @@ Which provider and model a turn uses. The ask is the most specific of the chat's
 
 How strong a model a chat runs on, per provider: **fast** is the provider's quick model (Sonnet on Claude, Luna on Codex), **strong** its best (Opus on Claude, Sol on Codex). On Codex each falls back to Terra when the account may not use it.
 
-- A Concierge chat starts on the strong model of the owner's Claude login, else of Codex. An automatic move to the other provider lands on that provider's strong model, so the chat keeps its strength.
-- The Concierge picks fast or strong for each task chat it starts, on its own chat's provider, and stores it as the task chat's [selection](#model-selection) together with the task's reasoning effort. A task started with neither runs as any chat does, by its agent's tier at the dashboard's effort.
-- A task chat's strength is an exact selection, so it fails closed: when its provider runs out or logs out, the task's turns stop with a usage-limit error, and only a Concierge chat moves to the other provider. The loss against tier routing is narrow, since any chat's session already fails closed on its [model pin](../concepts/sessions.md#model-pin) after its first turn. It shows where a session opens: a task's brief, and a renewed session, run on the other provider when tier-routed but not with a strength. Moving task chats too would take more than the Concierge's move: their cold resumes would have to take the chat's selection over the session's pin, which today only the Concierge agent does (`savedSelectionOutranksPin`), and a failed turn would need a recovery of its own.
-- In code it is `ModelStrength` in [`packages/core/src/agent/domain/model-strength.ts`](../../packages/core/src/agent/domain/model-strength.ts).
+- A Concierge chat runs the strong model of the default provider.
+- The Concierge picks fast or strong for each task chat it starts and stores it as the task chat's [selection](#model-selection), made by Rome, together with the task's reasoning effort. A selection Rome made follows the default provider at the same strength. A task started with neither runs as any chat does, by its agent's tier at the dashboard's effort.
+- In code it is `ModelStrength` and `followingSelection` in [`packages/core/src/agent/domain/model-strength.ts`](../../packages/core/src/agent/domain/model-strength.ts).
 
 ## Model selection
 
 A model a guardian picks by name for a chat, such as `claude-sonnet` or `gpt-6-luna`, and the provider that serves it. It is one of a fixed list the agent context owns. Leaving the choice to Rome ("auto" in the dashboard) is not a selection but the absence of one, so the resolver picks by [tier](../concepts/agents.md#model-selection) instead.
 
-- A chat's selection records who made it: its **owner**, from the model menu or a first message that named a model, or Rome (**auto**), as for a Concierge chat's default, a task chat's [strength](#model-strength) or a quota failover. A change of Rome's default moves only selections Rome made, never the owner's.
+- A chat's selection records who made it: its **owner**, from the model menu or a first message that named a model, which is an [exact selection](#exact-selection), or Rome (**auto**), as for a Concierge chat's model or a task chat's [strength](#model-strength). A selection Rome made follows the [default provider](#default-provider), unless the chat is kept on another provider. A kept selection and the owner's are [pinned](#pinned-chat): neither moves with the default.
 - In code it is `ModelSelection` in [`packages/core/src/agent/domain/model-selection.ts`](../../packages/core/src/agent/domain/model-selection.ts). The webchat settings that store a guardian's pick read it from there.

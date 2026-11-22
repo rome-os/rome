@@ -250,7 +250,6 @@ describe("device list for the folder picker", () => {
         items: [
           { id: "mac", device_name: "macbook", platform: "macos", token: "secret" },
           { id: "pc", platform: 3 },
-          { id: "gone", device_name: "Old", platform: "linux", revoked_at: "2026-10-01T00:00:00Z" },
         ],
       }),
     }));
@@ -346,7 +345,6 @@ describe("device rename and remove", () => {
   it.each([
     ["device_not_found", 404, "device_not_found"],
     ["invalid_device_name", 400, "invalid_device_name"],
-    ["revocation_pending", 409, "revocation_pending"],
     ["cloud_unavailable", 503, "unavailable"],
     ["invalid_device_session", 503, "unavailable"],
   ] as const)("maps the Cloud error %s", async (code, status, error) => {

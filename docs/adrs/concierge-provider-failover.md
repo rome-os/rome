@@ -1,6 +1,6 @@
 # Concierge recovers from provider failures without asking
 
-- **Status**: Accepted
+- **Status**: Superseded by [Default provider over automatic failover](default-provider-over-automatic-failover.md)
 - **Date**: 2026-11-05
 
 ## Context

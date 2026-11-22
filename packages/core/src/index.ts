@@ -3,7 +3,13 @@ import { STICKY_HEADERS } from "./core/sticky-headers.js";
 import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
 import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
-import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
+import {
+  startUsageLimitContinuation,
+  usageLimitContinuationTakes,
+} from "./webchat/usage-limit-continuation.js";
+import { webchatSessionKey } from "./core/agent-session-key.js";
+import { createChatProviders, type ChatProviders } from "./webchat/chat-providers.js";
+import { createProviderFailures } from "./webchat/provider-failures.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
 import { SessionRecords } from "./sessions/session-records.js";
@@ -82,10 +88,11 @@ import {
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
 import type { Channel, ChannelsService, ChatId, ChatStopHandler } from "@rome-os/app-runtime";
+import { isSendRefused } from "@rome-os/app-runtime";
 import { conciergeChatGuard } from "./concierge/automated-input.js";
 import { resolveAutomatedSender } from "./api/routes/chat-senders.js";
 import { actionExecutionContext } from "./apps/actions/context.js";
-import { isConciergeChat } from "./webchat/privacy.js";
+import { CONCIERGE_AGENT_ID, isConciergeChat } from "./webchat/privacy.js";
 
 const log = createLogger("startup");
 
@@ -145,6 +152,7 @@ import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
 import { backfillQuestionCards } from "./webchat/question-card-backfill.js";
 import { domainOf, domainOfGrant } from "./connections/platform.js";
+import { runningSendersOn } from "./connections/send.js";
 import {
   AccountListening,
   accountAgentResolver,
@@ -197,6 +205,8 @@ import { ActionWorkerCoordinator } from "./apps/actions/action-subprocess.js";
 import { endInterruptedRuns } from "./apps/actions/restart-recovery.js";
 import { WorkerRpcServer } from "./apps/actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./apps/actions/worker-rpc-client.js";
+import { connectionTyping, observeTurnWith } from "./core/connection-typing.js";
+import { ConnectionStatusMarks } from "./concierge/connection-status.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import type { ChatResetPolicy } from "./core/chat-reset-policy.js";
 import {
@@ -207,6 +217,14 @@ import {
   createModelAccounts,
   createModelResolver,
   createTierModelsSetting,
+  createDefaultProviders,
+  createDefaultProviderSetting,
+  followingSelection,
+  isModelSelectionId,
+  runsOnRomeCredits,
+  MODEL_SELECTIONS,
+  type DefaultProvider,
+  type ModelResolutionErrorPayload,
   DrizzleSessionRepository,
   codexLoginKind,
   SharedCodexAccountService,
@@ -251,7 +269,8 @@ import { openChannelChat } from "./connections/open-chat.js";
 import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
 import { privateChildren, privateOwnerOf } from "./webchat/privacy.js";
-import { ownerOfChat } from "./webchat/owner.js";
+import { ownerOf, ownerOfChat } from "./webchat/owner.js";
+import { actorOfOwner } from "./access/owner-actor.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
 import { TaskChecks } from "./concierge/task-checks.js";
@@ -262,6 +281,7 @@ import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
 import { agentOfKindIn, conciergePlaceSetup } from "./concierge/on-connection.js";
+import { envoyPrompt, readEnvoyVerdict, sayOnConnection } from "./concierge/connection-say.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -382,6 +402,12 @@ import type { KindMount } from "./connections/kind-mount.js";
 import { guardianOnly } from "./access/guardian-only.js";
 import { feishu } from "./connections/kinds/feishu/index.js";
 import { linkedin } from "./connections/kinds/linkedin/index.js";
+import {
+  deliverDiscordFrame,
+  discordApp,
+  isDiscordFrame,
+  romeCloudDiscordApp,
+} from "./connections/kinds/discord-app/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
@@ -1069,10 +1095,49 @@ async function main() {
     startRefresh: false,
     log: createLogger("model-accounts"),
   });
-  const stopCodexLoginChoice = startCodexLoginChoice({
+  // Codex runs on Rome credits only while no AI account is logged in, and
+  // then the credits are a provider the default can be.
+  const codexLoginChoice = startCodexLoginChoice({
     accounts: modelAccounts,
     logins: codexAccountService,
     log: createLogger("codex-login"),
+  });
+  const stopCodexLoginChoice = () => codexLoginChoice.stop();
+  // Wired once the chats' sessions exist, before Rome serves a request.
+  let chatProviders: ChatProviders = {
+    ready: async () => {},
+    release: async () => {},
+    pick: async () => {},
+    beforeDefaultChange: async () => {},
+    heldProvider: () => undefined,
+    keep: async () => null,
+    follow: async () => null,
+    followingCount: async () => 0,
+  };
+  const defaultProviders = createDefaultProviders({
+    setting: createDefaultProviderSetting(settingsRepo),
+    accounts: modelAccounts,
+    providers: ["anthropic", "openai"],
+    creditsEnabled: () => codexLoginChoice.creditsEnabled(),
+    // The last logout hands the default to credits only when they can be spent.
+    creditsUsable: () => codexLoginChoice.creditsUsable(),
+    // An upgrade keeps the Concierge where it runs: the provider of the model
+    // Rome chose for the guardian's main chat, when it has one.
+    seed: async () => {
+      const chatId = await concierge.findChatId();
+      const chat = chatId ? await webchatRepo.getSession(chatId) : null;
+      const stored = chat?.largeModelSelection;
+      if (chat?.largeModelSelectionBy !== "auto" || !isModelSelectionId(stored)) return null;
+      const provider = MODEL_SELECTIONS[stored].providerId;
+      return provider === "anthropic" || provider === "openai" ? provider : null;
+    },
+    // A change of the default keeps the chats where they are, or lets them
+    // move, before any chat can run on it.
+    beforeChange: (change) => chatProviders.beforeDefaultChange(change),
+    log: createLogger("default-provider"),
+  });
+  codexLoginChoice.onCreditsChanged(() => {
+    void defaultProviders.reconcile().catch(() => undefined);
   });
   const anthropicProvider = new AnthropicProvider({ settingsRepo, account: claudeAccount });
   const codexProvider = new CodexAppServerProvider({
@@ -1086,6 +1151,7 @@ async function main() {
     providers: [anthropicProvider, codexProvider],
     tierModels: createTierModelsSetting(settingsRepo),
     codexLogins: codexAccountService,
+    defaults: defaultProviders,
     log: createLogger("model-resolver"),
   });
   const conversationTitleGenerator = createConversationTitleGenerator(modelResolver);
@@ -1293,9 +1359,86 @@ async function main() {
     ownerOf: async (taskId) => (await conciergeTasksRepo.getWithChat(taskId))?.owner ?? null,
   });
   const conciergeTasksRepo = new ConciergeTasksRepository(db);
+  // The connection behind a channel, for what its talker offers that no
+  // channel port carries: typing by the dashboard's rule, and reactions.
+  const connectionOfChannel = (channel: string) => {
+    const id = channelRecords.byId(channel)?.connectionId;
+    return id ? connectionRegistry.all().find((connection) => connection.id === id) : undefined;
+  };
   const concierge: ConciergeService = new ConciergeService({
     skillCatalog,
     settingsRepo,
+    reactInChat: async (chat, messageId, emoji) => {
+      const added = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.add(chat.threadId as ChatId, messageId, emoji),
+      );
+      if (!added) throw new Error("This chat's account takes no reaction.");
+      await added;
+    },
+    // What the Concierge says in a chat on a connection goes out as the inbox
+    // sends an agent's reply: past the send gate, and Envoy where it asks, to
+    // the platform through the chat's speaker, which records it.
+    sayInChat: (chat, message) =>
+      sayOnConnection(
+        {
+          gate: guardedSend,
+          connectionOf: (channel) => channelRecords.byId(channel)?.connectionId ?? null,
+          envoy: async (input) => {
+            let verdict: unknown;
+            for await (const event of agentRunner.run({
+              agentName: "envoy",
+              prompt: envoyPrompt(input),
+              initiatedBy: "system",
+            })) {
+              if (event.type === "result") verdict = event.structuredOutput;
+            }
+            return readEnvoyVerdict(verdict);
+          },
+          send: async (target, text, replyTo, turnId) => {
+            const channel = channels.find((candidate) => candidate.name === target.channel);
+            if (!channel) throw new Error(`Channel "${target.channel}" cannot send`);
+            const say = (quoting: string | undefined) =>
+              chatsWired.replies.send(
+                target.id,
+                channel,
+                { text, ...(quoting ? { replyTo: { key: quoting } } : {}) },
+                { turnId, agent: CONCIERGE_AGENT_ID },
+              );
+            let said: Awaited<ReturnType<typeof say>>;
+            try {
+              said = await say(replyTo);
+            } catch (error) {
+              // A platform that cannot quote that message takes it unquoted.
+              if (!replyTo || !isSendRefused(error) || error.reason !== "reply_unaddressable") {
+                throw error;
+              }
+              said = await say(undefined);
+            }
+            if (!said) throw new Error("This chat stands nowhere a message can be said.");
+            return said.sent;
+          },
+          record: async ({ status, description, chat: target, text }) => {
+            await approvalsRepo
+              .create({
+                type: "outgoing_message",
+                requestedBy: CONCIERGE_AGENT_ID,
+                description,
+                payload: { response: text, channel: target.channel, threadId: target.threadId },
+                status,
+              })
+              .catch((error: unknown) =>
+                log.warn("outgoing message not put on record", {
+                  error: error instanceof Error ? error.message : String(error),
+                }),
+              );
+          },
+        },
+        { chat, ...message },
+      ),
+    // Who answers a chat on a connection, as the inbox routes it: the
+    // account's agent (a task started there reports there when it is the
+    // Concierge).
+    channelAgentOf: byChannel(channelRecords, accountAgentResolver(accountAgents, agentLoader)),
     owners: createConciergeOwners({
       settingsRepo,
       visitorProfiles: new VisitorProfilesRepository(db),
@@ -1304,6 +1447,8 @@ async function main() {
     webchatRepo,
     sessionRepository,
     accounts: modelAccounts,
+    defaults: defaultProviders,
+    held: (chatId) => chatProviders.heldProvider(webchatSessionKey(chatId)) !== undefined,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { find: (continuityKey) => agentSessionManager.find(continuityKey) },
@@ -1326,6 +1471,26 @@ async function main() {
     phoneWatching,
     dashboardActivity,
   });
+  // A chat on a connection shows a message's status as the account's own
+  // reaction on it, since the platform draws none (docs/domains/chats.md#status).
+  const connectionStatus = new ConnectionStatusMarks({
+    chatOf: (chatId) => concierge.connectionChat(chatId),
+    add: async (chat, messageKey, emoji) => {
+      const added = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.add(chat.threadId as ChatId, messageKey, emoji),
+      );
+      if (added) await added;
+    },
+    remove: async (chat, messageKey, emoji) => {
+      const removed = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.remove(chat.threadId as ChatId, messageKey, emoji),
+      );
+      if (removed) await removed;
+    },
+  });
+  concierge.onMessageStatus((event) => {
+    void connectionStatus.statusChanged(event.sessionId, event.messageId, event.status);
+  });
   const channelSurface: ChannelSurfaces = (channel) => {
     if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
     const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))?.capabilities
@@ -1341,6 +1506,11 @@ async function main() {
     {
       agentLoader,
       sessionRepository,
+      // Rome credits are the instance's choice: while they run, every chat runs on them.
+      onRomeCredits: () =>
+        runsOnRomeCredits(defaultProviders.current(), defaultProviders.signedIn()),
+      // A conversation the guardian left on a provider when the default changed stays there.
+      heldProvider: (key) => chatProviders.heldProvider(key),
       systemPrompts,
       modelResolver,
       networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),
@@ -1360,11 +1530,12 @@ async function main() {
         // `until`. A store a personal account syncs, such as WhatsApp's, also
         // holds what the guardian said before Rome was connected, and refuses
         // `until` (app-host/accounts-service.ts), so it reads none.
-        latest: (place, { limit, until, olderThan }) =>
+        latest: (place, { limit, until, olderThan, newerThan }) =>
           channelsService.query(place.channel, {
             chatId: place.threadId as ChatId,
             until,
             ...(olderThan === undefined ? {} : { olderThan }),
+            ...(newerThan === undefined ? {} : { newerThan }),
             limit,
           }),
       }),
@@ -1372,7 +1543,15 @@ async function main() {
       subagentSessions: (manager, parentLink, inherited) =>
         subagentSessions(manager, parentLink, webchatRepo, inherited),
       turnMiddleware,
-      sessionSettings: new ChatSessionSettings({ webchatRepo }),
+      sessionSettings: new ChatSessionSettings({
+        webchatRepo,
+        follow: (saved) =>
+          followingSelection(
+            saved,
+            defaultProviders.current(),
+            modelAccounts.read().openai?.account,
+          ),
+      }),
       placeSetup: conciergePlaceSetup,
       chatInstructions: taskChatInstructions({ webchatRepo }),
       ownAccountName: ownAccountNames(connectionRegistry),
@@ -1429,10 +1608,42 @@ async function main() {
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
+  chatProviders = createChatProviders({
+    webchatRepo,
+    accounts: modelAccounts,
+    settings: settingsRepo,
+    currentDefault: () => defaultProviders.current(),
+    ranSince: (since) => sessionRepository.continuityKeysSince(since),
+    selectModel: (chatId, agentName, selection) =>
+      agentSessionManager
+        .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })
+        ?.selectModel(selection),
+    lastModel: async (chatId, agentName) => {
+      const agent = agentLoader.find(agentName ?? "main")?.name ?? agentName ?? "main";
+      const session = await sessionRepository.current(webchatSessionKey(chatId), agent);
+      return session?.provider && session.model
+        ? { providerId: session.provider, model: session.model }
+        : null;
+    },
+    agentTier: (agentName) => agentLoader.find(agentName ?? "main")?.definition.tier,
+  });
+  await chatProviders.ready();
   const actionWorkerCoordinator = new ActionWorkerCoordinator(actionEngine);
   actionEngine.setActionWorkerCoordinator(actionWorkerCoordinator);
   const chatResetPolicy: ChatResetPolicy = async (chat) =>
     (await chatSettings.get(chat)).effective.session.reset;
+  // Whether an agent's text stays private on a channel: the Concierge's
+  // does everywhere, and it speaks through `say` (docs/architecture/concierge.md).
+  const isTextPrivate = (agentName: string, channel: string) => {
+    const agent = agentLoader.find(agentName);
+    return (
+      agent !== undefined &&
+      policyInPlace(
+        resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }),
+        conciergePlaceSetup(agentName, { channel }),
+      ).finalText === "private"
+    );
+  };
   const agentSessionBridge = new AgentSessionBridge(
     agentSessionManager,
     webchatRepo,
@@ -1443,6 +1654,21 @@ async function main() {
     chatResetPolicy,
     openingFor,
     (chat, turn) => chatTurns.start(chat, turn),
+    observeTurnWith(
+      // A connected chat's typing indicator, by the dashboard's typing-dots rule.
+      connectionTyping({
+        typingOf: (channel) => {
+          const connection = connectionOfChannel(channel);
+          if (!connection?.withTalker((talker) => talker.typing !== undefined)) return null;
+          return (chatId) =>
+            connection.withTalker((talker) => talker.typing?.show(chatId as ChatId)) ??
+            Promise.resolve();
+        },
+      }),
+      // The status of the guardian's message a Concierge turn there works on.
+      (turn) => concierge.observeConnectionTurn(turn),
+    ),
+    isTextPrivate,
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1495,7 +1721,7 @@ async function main() {
 
   const backendTurnRunner = createBackendTurnRunner({
     resolveTurn: (params) => concierge.resolveTurn(params),
-    beforeTurn: ({ threadId }) => concierge.switchIfExhausted(threadId),
+    beforeTurn: ({ threadId }) => concierge.followDefault(threadId),
     agentRunner,
     // `channels` is built once every descriptor is registered, further down;
     // no backend turn runs before boot completes.
@@ -1505,17 +1731,127 @@ async function main() {
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
     replies: chatsWired.replies,
-    // The place can change the agent's policy: on a connection the
-    // Concierge's text is the reply (docs/architecture/concierge.md).
-    isTextPrivate: (agentName, channel) => {
-      const agent = agentLoader.find(agentName);
-      return (
-        agent !== undefined &&
-        policyInPlace(
-          resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }),
-          conciergePlaceSetup(agentName, { channel }),
-        ).finalText === "private"
-      );
+    isTextPrivate,
+  });
+
+  // A provider that cannot run shows a card in the chat, and for unattended
+  // chats one notice per incident in the Concierge main chat. Nothing moves a
+  // chat to another provider on its own.
+  const selectChatModel = (chatId: string, agentName: string | null, selection: string | null) => {
+    if (selection !== null && !isModelSelectionId(selection)) return;
+    agentSessionManager
+      .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })
+      ?.selectModel(selection);
+  };
+  const providerFailures = createProviderFailures({
+    accounts: modelAccounts,
+    defaults: defaultProviders,
+    chats: chatProviders,
+    swapModel: (chatId, agentName, failure) =>
+      concierge.switchForModelLimit(chatId, failure, agentName),
+    creditsUsable: () => codexLoginChoice.creditsUsable(),
+    held: (chatId) => chatProviders.heldProvider(webchatSessionKey(chatId)) !== undefined,
+    // A recovery turn acts for the chat's owner, as a continuation does for its turn's.
+    actorOf: async (chatId) => {
+      const chat = await webchatRepo.getSession(chatId);
+      return chat ? actorOfOwner(db, ownerOf(chat)) : undefined;
+    },
+    // A newer message in the chat answers instead of a card's resumed turn.
+    movedOnSince: (chatId, since) => webchatRepo.chatMovedOnSince(chatId, since),
+    // A quota card promises only what the usage-limit continuation will do.
+    continuesAfterLimit: (chatId, until) =>
+      usageLimitContinuationTakes(webchatRepo, chatId, Date.parse(until), modelAccounts.read()),
+    selectModel: selectChatModel,
+    canonicalAgent: (agentName) => agentLoader.find(agentName)?.name ?? agentName,
+    webchatRepo,
+    settings: settingsRepo,
+    mainChatId: (owner) => concierge.findChatId(owner),
+    // A refused send names the agent as the chat does ("main"), its session
+    // by the canonical id ("core:main").
+    runtimeOf: async (chatId, agentName) =>
+      (
+        await sessionRepository.current(
+          webchatSessionKey(chatId),
+          agentLoader.find(agentName)?.name ?? agentName,
+        )
+      )?.id ??
+      // A chat whose first turn never ran has no session yet: open it as
+      // its first message would have.
+      (await concierge.dashboard.chats.openSession(chatId).catch(() => null)),
+    runner: backendTurnRunner,
+    notify: notifyClient,
+  });
+  const stopProviderFailureTurns = turnListeners.listen({
+    // A live session refused on its model before the turn began: the same
+    // card as a send refused before any session opened.
+    couldNotStart: (event) => {
+      const thread = event.turn.threadContext;
+      const code = event.failure?.code;
+      if (event.turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
+      if (
+        code !== "model_provider_unavailable" &&
+        code !== "no_model_provider_available" &&
+        code !== "model_unavailable"
+      )
+        return;
+      void providerFailures
+        .failed(
+          {
+            chatId: thread.threadId,
+            agentName: event.turn.agentName,
+            sessionId: event.turn.sessionId,
+            turnId: event.turn.turnId,
+            failure: {
+              kind: "resolution",
+              payload: {
+                error: event.error,
+                code,
+                ...(event.failure?.provider
+                  ? { provider: event.failure.provider as "anthropic" | "openai" }
+                  : {}),
+                ...(event.failure?.reason ? { reason: event.failure.reason } : {}),
+                ...(event.failure?.usageLimitUntil
+                  ? { usageLimitUntil: event.failure.usageLimitUntil }
+                  : {}),
+              } as ModelResolutionErrorPayload,
+            },
+          },
+          { final: true },
+        )
+        .catch((error: unknown) =>
+          log.warn("provider failure handling failed", { error: String(error) }),
+        );
+    },
+    ended: (event) => {
+      const thread = event.turn.threadContext;
+      if (event.turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
+      if (event.status === "completed") {
+        // Only a turn that answered a person, not a system or backend turn,
+        // supersedes a recovery still waiting to run.
+        const answers =
+          webchatRepo.getTurnPromptSenders({
+            sessionId: thread.threadId,
+            turnId: event.turn.turnId,
+          }).length > 0;
+        void providerFailures.succeeded(thread.threadId, answers).catch(() => undefined);
+        return;
+      }
+      // A turn that did not run to its end leaves its recovery unfinished.
+      if (event.status === "interrupted" || event.status === "stopped") {
+        providerFailures.interrupted(thread.threadId);
+      }
+      if (event.status !== "error" || !event.output.failure) return;
+      void providerFailures
+        .failed({
+          chatId: thread.threadId,
+          agentName: event.turn.agentName,
+          sessionId: event.turn.sessionId,
+          turnId: event.turn.turnId,
+          failure: { kind: "turn", failure: event.output.failure },
+        })
+        .catch((error: unknown) =>
+          log.warn("provider failure handling failed", { error: String(error) }),
+        );
     },
   });
 
@@ -1566,7 +1902,14 @@ async function main() {
       messages: settledMarks,
     });
   }
-  startConciergeEvents(concierge, turnListeners);
+  startConciergeEvents(concierge, turnListeners, {
+    // What the Concierge's own retry or model move could not get past shows a card.
+    unrecovered: (failed) =>
+      providerFailures.failed(
+        { ...failed, failure: { kind: "turn", failure: failed.failure } },
+        { final: true },
+      ),
+  });
   // The Concierge reaches the connector's watch actions as itself.
   startConciergeFollowing(concierge, {
     timezoneMoved: (owner, timezone) => taskSchedules.rezone(owner, timezone),
@@ -1817,7 +2160,11 @@ async function main() {
     favorService,
     appConnections,
   });
+  // Rome's Discord bot deposits into the instance's own mailbox, marked by its
+  // header: those frames go to its connection, never to the app the mailbox
+  // otherwise serves (connections/kinds/discord-app/drain.ts).
   const relayDrainer = new RelayDrainer(relayDrains, async (drain, event) => {
+    if (isDiscordFrame(event.headers)) return deliverDiscordFrame(connectionRegistry, event);
     const res = await relayDispatcher.dispatch(
       drain.targetAppId,
       buildRelayReplayRequest(drain, event),
@@ -2009,6 +2356,15 @@ async function main() {
       listAgents: () => agentLoader.list().map((agent) => agent.name),
       accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
       hasAgent: (name) => agentLoader.find(name) !== undefined,
+    }),
+    discordApp({
+      cloud: romeCloudDiscordApp(),
+      depositUrl: async () => {
+        const relay = await settingsRepo.get<Partial<RelayDrainSetting>>(RELAY_SETTING_KEY);
+        return typeof relay?.depositUrl === "string" && relay.depositUrl ? relay.depositUrl : null;
+      },
+      nameOf: async (userId) =>
+        (await peopleRepo.byAccount({ platform: "discord", id: userId }))?.displayName,
     }),
     linkedin({
       syncSink: refreshingAfter(
@@ -2453,7 +2809,7 @@ async function main() {
       channels,
       platformOfChannel,
       recordedOn: (platform: string) => channelRecords.namesOn(platform),
-      sendersOn: (platform: string) => channelRecords.sendersOn(platform),
+      sendersOn: runningSendersOn(channelRecords, connectionRegistry),
       accountOf: (channel: string) => channelRecords.accountOf(channel),
       accountNames,
       assistants: listedAgents,
@@ -2503,6 +2859,10 @@ async function main() {
       modelAccounts,
       codexAccountService,
       claudeAccount,
+      defaultProviders,
+      providerFailures,
+      chatProviders,
+      romeCreditsUsable: () => codexLoginChoice.creditsUsable(),
       romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
       permissions,
       dashboardAccessState,
@@ -2731,8 +3091,12 @@ async function main() {
     runner: backendTurnRunner,
     actorOf: continuationActorOf,
     // A Concierge turn a limit stopped shows its messages failed; run again,
-    // they work again until the continuation ends.
-    onContinue: (turn) => concierge.deps.tasks.repo.reopenTurn(turn.sessionId, turn.turnId),
+    // they work again until the continuation ends. A provider card in the
+    // chat settles once the continued turn succeeds.
+    onContinue: (turn) => {
+      providerFailures.continuing(turn.sessionId);
+      return concierge.deps.tasks.repo.reopenTurn(turn.sessionId, turn.turnId);
+    },
   });
 
   // Best-effort instance-identity check. Fire-and-forget: announces
@@ -2844,6 +3208,8 @@ async function main() {
     shutdownLog.info("capability discovery stopped");
 
     stopUsageLimitContinuation();
+    stopProviderFailureTurns();
+    providerFailures.stop();
     stopCodexLoginChoice();
     unsubscribeInstanceLinked();
     visitorAllowListSync.stop();

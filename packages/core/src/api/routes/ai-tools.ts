@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import type { ProviderSwitch } from "../../webchat/provider-failures.js";
+import { isDefaultProvider } from "../../agent/index.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 import {
@@ -21,6 +23,8 @@ import {
 } from "../../agent/index.js";
 import { closeAuthTabs, openServerBrowserTab } from "./desktop.js";
 import { getErrorMessage } from "../../lib/error-message.js";
+import { currentChatOwner } from "../../access/session-actor.js";
+import { canOpenChat } from "../../webchat/privacy.js";
 import { fetchRomeCredits } from "../../agent/index.js";
 import type { RomeCreditsResponse } from "@rome/api-types/rome-credits";
 
@@ -64,9 +68,54 @@ async function anthropicCompatibleJson(claude: Pick<ClaudeLogins, "storedCredent
 }
 
 export function aiToolsRoutes(
-  deps: Pick<ApiDeps, "modelAccounts" | "codexAccountService" | "claudeAccount">,
+  deps: Pick<
+    ApiDeps,
+    | "modelAccounts"
+    | "codexAccountService"
+    | "claudeAccount"
+    | "defaultProviders"
+    | "providerFailures"
+    | "chatProviders"
+    | "romeCreditsUsable"
+    | "webchatRepo"
+  >,
 ): Hono {
   const app = new Hono();
+
+  // A card or a notice is its chats': only who may open every one of them may
+  // act on it or read it, as on the chats themselves (docs/domains/chats.md#concierge-chat).
+  const mayOpenAll = async (chatIds: readonly string[]) => {
+    if (chatIds.length === 0) return false;
+    const owner = await currentChatOwner();
+    for (const chatId of chatIds) {
+      if (!(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, owner))) {
+        return false;
+      }
+    }
+    return true;
+  };
+  const outageChats = (outage: { noticeChatId: string; chats: Array<{ chatId: string }> }) => [
+    outage.noticeChatId,
+    ...outage.chats.map((chat) => chat.chatId),
+  ];
+
+  // The default provider, the providers it can be, the note a logout left,
+  // how many chats a change moves, and whether Rome credits could run chats
+  // once no AI account is logged in.
+  const defaultJson = async () => {
+    const defaults = deps.defaultProviders;
+    if (!defaults) return null;
+    await defaults.ready();
+    const note = defaults.note();
+    const followingChats = await deps.chatProviders?.followingCount().catch(() => 0);
+    return {
+      provider: defaults.current(),
+      signedIn: defaults.signedIn(),
+      ...(note ? { note } : {}),
+      followingChats: followingChats ?? 0,
+      romeCreditsUsable: deps.romeCreditsUsable?.() ?? false,
+    };
+  };
 
   const statusJson = async () => {
     const state = deps.modelAccounts.read();
@@ -97,6 +146,101 @@ export function aiToolsRoutes(
         lastError: login.lastError,
       },
       anthropicCompatible: claude.anthropicCompatible,
+      defaultProvider: await defaultJson(),
+    });
+  });
+
+  app.get("/ai-tools/default", async (c) => c.json({ defaultProvider: await defaultJson() }));
+
+  // The guardian's choice of default, after the confirm dialog. With
+  // `moveExisting` false, the chats that follow the default stay on the
+  // provider they run on; otherwise each moves on its next run.
+  app.put("/ai-tools/default", async (c) => {
+    const defaults = deps.defaultProviders;
+    if (!defaults) return c.json({ error: "No default provider here" }, 404);
+    const body = (await c.req.json().catch(() => null)) as {
+      provider?: unknown;
+      moveExisting?: unknown;
+    } | null;
+    if (!isDefaultProvider(body?.provider)) return c.json({ error: "Unknown provider" }, 400);
+    try {
+      await defaults.choose(body.provider, { moveExisting: body.moveExisting !== false });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 409);
+    }
+    return c.json({ defaultProvider: await defaultJson() });
+  });
+
+  app.delete("/ai-tools/default/note", async (c) => {
+    await deps.defaultProviders?.dismissNote();
+    return c.json({ defaultProvider: await defaultJson() });
+  });
+
+  /** A card's switch, as the body names it. */
+  const switchOf = (body: unknown): ProviderSwitch | null => {
+    if (typeof body !== "object" || body === null) return null;
+    const value = body as Record<string, unknown>;
+    if (value.kind === "model" && typeof value.selection === "string") {
+      return { kind: "model", selection: value.selection };
+    }
+    if (value.kind === "provider" && isDefaultProvider(value.provider)) {
+      return {
+        kind: "provider",
+        provider: value.provider,
+        makeDefault: value.makeDefault === true,
+        // As in Settings; a client that sends none moved them, as before.
+        moveExisting: value.moveExisting !== false,
+      };
+    }
+    return null;
+  };
+
+  // A card's switch: this chat moves (and with `makeDefault`, the default
+  // too; Rome credits always are), and the stopped turn runs again at once.
+  app.post("/ai-tools/provider-failures/:messageId/switch", async (c) => {
+    if (!deps.providerFailures) return c.json({ error: "Not available" }, 404);
+    const change = switchOf(await c.req.json().catch(() => null));
+    if (!change) return c.json({ error: "A provider or a model is required" }, 400);
+    const messageId = c.req.param("messageId");
+    const card = (await deps.providerFailures.cards()).find((open) => open.messageId === messageId);
+    if (card && !(await mayOpenAll([card.chatId]))) return c.json({ error: "Not found" }, 404);
+    try {
+      const outcome = await deps.providerFailures.switchCard(messageId, change);
+      // An option that no longer works wrote a fresh card with those that do.
+      return c.json({ ok: true, ...(outcome === "refreshed" ? { refreshed: true } : {}) });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 409);
+    }
+  });
+
+  // A card's [Continue]: the stopped turn runs again at once, where it ran.
+  app.post("/ai-tools/provider-failures/:messageId/continue", async (c) => {
+    if (!deps.providerFailures) return c.json({ error: "Not available" }, 404);
+    const messageId = c.req.param("messageId");
+    const card = (await deps.providerFailures.cards()).find((open) => open.messageId === messageId);
+    if (card && !(await mayOpenAll([card.chatId]))) return c.json({ error: "Not found" }, 404);
+    try {
+      await deps.providerFailures.continueCard(messageId);
+      return c.json({ ok: true });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 409);
+    }
+  });
+
+  app.get("/ai-tools/provider-outages", async (c) => {
+    const outages = [];
+    for (const outage of (await deps.providerFailures?.outages()) ?? []) {
+      if (await mayOpenAll(outageChats(outage))) outages.push(outage);
+    }
+    return c.json({
+      outages: outages.map(({ id, provider, reason, until, chats, since }) => ({
+        id,
+        provider,
+        reason,
+        ...(until ? { until } : {}),
+        chatIds: chats.map((chat) => chat.chatId),
+        since,
+      })),
     });
   });
 
@@ -187,11 +331,36 @@ export function aiToolsRoutes(
     });
   });
 
-  app.delete("/ai-tools/anthropic-compatible-credentials", async (c) => {
-    await deps.claudeAccount.removeCredential();
-    await deps.modelAccounts.refresh("anthropic");
-    return c.json({ ok: true });
-  });
+  // The logout dialog's "Move existing chats too", for a logout that moves the
+  // default. A client that sends none moved them, as before.
+  // The choice holds until the accounts read the provider as logged out,
+  // however late that read lands. A logout that failed drops it.
+  const loggingOut = async (
+    c: { req: { json(): Promise<unknown> } },
+    provider: "anthropic" | "openai",
+    logout: () => Promise<Response>,
+  ): Promise<Response> => {
+    const body = (await c.req.json().catch(() => null)) as { moveExisting?: unknown } | null;
+    const failed = deps.defaultProviders?.expectLogout(provider, {
+      moveExisting: body?.moveExisting !== false,
+    });
+    try {
+      const res = await logout();
+      if (!res.ok) await failed?.();
+      return res;
+    } catch (error) {
+      await failed?.();
+      throw error;
+    }
+  };
+
+  app.delete("/ai-tools/anthropic-compatible-credentials", async (c) =>
+    loggingOut(c, "anthropic", async () => {
+      await deps.claudeAccount.removeCredential();
+      await deps.modelAccounts.refresh("anthropic");
+      return c.json({ ok: true });
+    }),
+  );
 
   // Start ChatGPT OAuth on the shared app-server and open the returned URL in
   // the noVNC-visible server browser. Completion arrives as the process-global
@@ -235,31 +404,35 @@ export function aiToolsRoutes(
   });
 
   // Re-read the account on success so the agent gate reflects it immediately.
-  app.post("/ai-tools/claude/logout", async (c) => {
-    try {
-      await deps.claudeAccount.revoke();
-    } catch (err) {
-      const error = getErrorMessage(err);
-      log.warn("claude logout failed", { error });
-      return c.json({ error }, 500);
-    }
-    await deps.modelAccounts.refresh("anthropic");
-    return c.json({ ok: true });
-  });
+  app.post("/ai-tools/claude/logout", async (c) =>
+    loggingOut(c, "anthropic", async () => {
+      try {
+        await deps.claudeAccount.revoke();
+      } catch (err) {
+        const error = getErrorMessage(err);
+        log.warn("claude logout failed", { error });
+        return c.json({ error }, 500);
+      }
+      await deps.modelAccounts.refresh("anthropic");
+      return c.json({ ok: true });
+    }),
+  );
 
   // Log out of Codex via the app-server `account/logout` RPC (no PTY terminal).
   // Re-probe login state on success so the agent gate reflects it immediately.
-  app.post("/ai-tools/codex/logout", async (c) => {
-    try {
-      await deps.codexAccountService.revoke();
-      await deps.modelAccounts.refresh("openai");
-      return c.json({ ok: true });
-    } catch (err) {
-      const error = getErrorMessage(err);
-      log.warn("codex logout failed", { error });
-      return c.json({ error }, 500);
-    }
-  });
+  app.post("/ai-tools/codex/logout", async (c) =>
+    loggingOut(c, "openai", async () => {
+      try {
+        await deps.codexAccountService.revoke();
+        await deps.modelAccounts.refresh("openai");
+        return c.json({ ok: true });
+      } catch (err) {
+        const error = getErrorMessage(err);
+        log.warn("codex logout failed", { error });
+        return c.json({ error }, 500);
+      }
+    }),
+  );
 
   return app;
 }

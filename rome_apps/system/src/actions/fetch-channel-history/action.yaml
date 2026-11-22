@@ -3,7 +3,8 @@ type: system
 description: >
   Fetch recent message history from a channel that keeps its messages, such
   as WhatsApp, LinkedIn or the dashboard chat, or that reads them from the
-  platform, such as Discord or a Slack direct message, which needs threadId.
+  platform, such as Discord or Slack, which needs threadId: without one, such
+  an account answers the chats it may read, each with its threadId.
   A read from the platform can return fewer messages than were said: Slack
   answers at most 15 at a time. On Discord, pass olderThan or newerThan with a
   message id to read just before or after it, such as to fill a gap in what

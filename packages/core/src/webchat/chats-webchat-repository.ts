@@ -1,3 +1,4 @@
+import { TASK_CHAT_TRIGGER_KIND } from "./privacy.js";
 import { automatedSource, speaksForGuardian } from "./automated-source.js";
 // The dashboard's repository over Chats' tables. Vocabulary:
 // docs/domains/chats.md and docs/domains/participation.md.
@@ -401,6 +402,27 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return true;
   }
 
+  /**
+   * Whether dashboard chat `sessionId` moved on after `sinceMs`: a person
+   * wrote in it, it was archived, or it is gone. A card's click then no
+   * longer runs the turn it stopped.
+   */
+  chatMovedOnSince(sessionId: string, sinceMs: number): boolean {
+    const since = Math.floor(sinceMs / 1000);
+    const chat = this.db.get<{ archived: number; wrote: number }>(sql`
+      SELECT (s.archived_at IS NOT NULL) AS archived,
+        EXISTS (
+          SELECT 1 FROM ${CHAT_MESSAGES} m
+          WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+            AND m.sender_account_id IS NOT NULL AND m.sender_agent IS NULL
+            AND m.said_at > ${since}
+        ) AS wrote
+      FROM ${romeSessions} s
+      WHERE s.id = ${sessionId}
+    `);
+    return !chat || chat.archived === 1 || chat.wrote === 1;
+  }
+
   /** Rechecked at dispatch: only an unchanged guardian root chat can continue. */
   canContinueAfterRestart(turn: InterruptedTurn): boolean {
     return (
@@ -433,6 +455,39 @@ export class ChatsWebChatRepository extends WebChatRepository {
               WHERE l2.message_id = m.id AND l2.session_id = s.id
                 AND l2.turn_id = ${turn.turnId} AND l2.role = 'prompt'
             )
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM ${romeAgentMessages} n
+          WHERE n.session_id = s.id AND n.role = 'trace' AND n.id <> t.id
+            AND (n.created_at > t.created_at OR (n.created_at = t.created_at AND n.rowid > t.rowid))
+        )
+    `)?.eligible === 1
+    );
+  }
+
+  /**
+   * Rechecked at dispatch: a turn a usage limit stopped continues in an
+   * unchanged guardian root chat, as after a restart, and also in a task chat,
+   * which runs unattended: there the turn may come from the Concierge or a
+   * scheduled run, and the guardian has not written in it since.
+   */
+  canContinueAfterUsageLimit(turn: InterruptedTurn): boolean {
+    if (this.canContinueAfterRestart(turn)) return true;
+    return (
+      this.db.get<{ eligible: number }>(sql`
+      SELECT 1 AS eligible
+      FROM ${romeSessions} s
+      JOIN ${CHATS} c ON c.id = s.chat_id AND c.platform = 'webchat'
+      JOIN ${romeAgentMessages} t ON t.id = ${turn.messageId} AND t.session_id = s.id
+      WHERE s.id = ${turn.sessionId} AND s.type = 'channel' AND s.chat_platform = 'webchat'
+        AND (s.owner_key IS NULL OR s.owner_key = 'guardian')
+        AND s.parent_session_id IS NULL AND s.parent_turn_id IS NULL
+        AND s.archived_at IS NULL AND s.trigger_kind = ${TASK_CHAT_TRIGGER_KIND}
+        AND NOT EXISTS (
+          SELECT 1 FROM ${CHAT_MESSAGES} m
+          WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+            AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
+            AND m.said_at > t.created_at
         )
         AND NOT EXISTS (
           SELECT 1 FROM ${romeAgentMessages} n
@@ -690,6 +745,54 @@ export class ChatsWebChatRepository extends WebChatRepository {
     };
     this.emitMessageInserted(message);
     return message;
+  }
+
+  /** As the base, with a chat's messages read from Chats, where its lines are said. */
+  override async followingChats(): Promise<
+    Array<{ id: string; largeModelSelection: string | null }>
+  > {
+    return this.db
+      .all<{ id: string; large_model_selection: string | null }>(sql`
+        SELECT s.id, s.large_model_selection FROM ${romeSessions} s
+        WHERE s.type = 'channel' AND s.chat_platform = 'webchat'
+          AND s.parent_session_id IS NULL
+          AND (s.large_model_selection IS NULL OR s.large_model_selection_by = 'auto')
+          AND (
+            EXISTS (SELECT 1 FROM ${CHAT_MESSAGES} m WHERE m.chat_id = s.chat_id)
+            OR EXISTS (SELECT 1 FROM ${romeAgentMessages} r WHERE r.session_id = s.id)
+          )
+      `)
+      .map((row) => ({ id: row.id, largeModelSelection: row.large_model_selection }));
+  }
+
+  /**
+   * A dashboard line said in a chat is rewritten there, and the chat's live
+   * view told. Any other message is the session's own, as in the base.
+   */
+  override async updateMessageContent(id: string, content: string): Promise<boolean> {
+    const chat = this.lines.chatHolding(WEBCHAT_PLATFORM, id);
+    if (!chat) return super.updateMessageContent(id, content);
+    assertWidgetAloneInContent(content);
+    this.lines.setParts(chat, id, JSON.stringify(partsOf(content)));
+    const session = this.db.get<{ id: string }>(sql`
+      SELECT id FROM ${romeSessions}
+      WHERE chat_id = ${chat.id} AND type = 'channel' AND chat_platform = 'webchat'
+        AND parent_session_id IS NULL
+      LIMIT 1
+    `);
+    if (!session) return true;
+    const [line] = this.selectLines([session.id], sql`WHERE id = ${id}`);
+    if (line) {
+      this.emitMessageUpdated({
+        id: line.id,
+        sessionId: session.id,
+        turnId: line.turnId,
+        role: line.role,
+        content: line.content,
+        createdAt: line.createdAt,
+      });
+    }
+    return true;
   }
 
   override async getMessages(sessionId: string) {

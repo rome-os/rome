@@ -52,7 +52,10 @@
     "title": "Connect {{title}}",
     "onDevice": "Connect {{title}} on {{device}}: open the Rome app there and turn it on under Settings › Connections. Then go back to the chat and say it's done.",
     "connected": "{{title}} is connected on {{device}}. Go back to the chat and say it's done.",
-    "yourDevice": "your device"
+    "yourDevice": "your device",
+    "retry": "Try again",
+    "notAComputer": "This connection turns on one capability of a device that already uses Rome. It doesn't add a computer or bring an offline one back online.",
+    "devicesLink": "Manage computers in Settings › Devices"
   },
   "connections": {
     "loading": "Loading connections",
@@ -208,20 +211,17 @@
         "bot": {
           "title": "Rome in your Slack",
           "bullets": {
-            "reply": "Answer direct messages in your Slack workspace as your Concierge"
+            "reply": "Answer your direct messages and mentions in your Slack workspace",
+            "tasks": "Run tasks you ask for there and reply with the result"
           }
         }
       },
-      "slack_bot": {
+      "discord_app": {
         "bot": {
-          "titleFallback": "Your agent's Slack account",
+          "title": "Rome in your Discord",
           "bullets": {
-            "reply": "Reply when people message {{identity}} or mention it in a channel",
-            "start": "Start a task when a new message arrives"
-          },
-          "bulletsFallback": {
-            "reply": "Reply when people message this account or mention it in a channel",
-            "start": "Start a task when a new message arrives"
+            "reply": "Answer your direct messages, and your @mentions in your servers",
+            "tasks": "Run tasks you ask for there and reply with the result"
           }
         }
       },
@@ -278,15 +278,6 @@
             "work": "Read your Outlook mail, and send messages only after you approve each one"
           },
           "privacyNote": "You approve access on Microsoft; you can disconnect here anytime."
-        }
-      },
-      "slack": {
-        "user": {
-          "title": "Your Slack account",
-          "bullets": {
-            "work": "Send and read messages in your Slack workspace as you"
-          },
-          "privacyNote": "You approve access on Slack; you can disconnect here anytime."
         }
       },
       "shopify": {
@@ -559,6 +550,24 @@
       "botTokenLabel": "Bot token",
       "botTokenPlaceholder": "Bot token from @BotFather"
     },
+    "discordApp": {
+      "link": "Link Discord",
+      "blurb": "Talk to Rome on Discord",
+      "add": "Add to server",
+      "remove": "Remove",
+      "removing": "Removing…",
+      "retry": "Retry",
+      "loadFailed": "Couldn't load your servers.",
+      "addFailed": "Couldn't open Discord. Try again.",
+      "removeFailed": "Couldn't remove {{name}}. Try again.",
+      "howTo": "@Rome in a channel. Run /rome there to enable direct messages.",
+      "blurbDetail": "Add it to a server, then @mention it or enable direct messages with /rome.",
+      "servers": "Servers",
+      "empty": "Add Rome to a server to @mention it in channels.",
+      "manage": "More",
+      "disconnect": "Disconnect Discord",
+      "linkedAs": "Direct messages enabled for {{name}}"
+    },
     "telegramUser": {
       "fallbackName": "Telegram user",
       "disconnectFailedFallback": "Failed to disconnect Telegram user account."
@@ -656,10 +665,7 @@
       "name": "Rome credits",
       "status": {
         "inUse": "In use",
-        "ready": "Ready",
-        "standby": "Standby",
         "usedUp": "Used up",
-        "usedUpWithClaude": "Used up",
         "paused": "Paused"
       },
       "ofGranted": "of {{amount}}",
@@ -685,7 +691,6 @@
       "needsReauth": "Needs re-login",
       "apiKeyActive": "API key active",
       "apiKeyNeedsUpdate": "API key needs update",
-      "comingSoon": "Coming soon",
       "signedInWith": "Signed in with <1>{{method}}</1>",
       "signedIn": "Signed in",
       "accountType": "Account type: <1>{{type}}</1>"
@@ -765,6 +770,27 @@
           "emptyEnv": "Add at least one environment variable."
         }
       }
+    },
+    "defaultProvider": {
+      "badge": "Default",
+      "setAsDefault": "Set as default",
+      "confirmTitle": "Make {{provider}} the default?",
+      "confirmBody": "Ongoing chats switch to {{provider}} on their next reply.",
+      "confirmBodyStay": "New chats use {{provider}}. Ongoing chats stay on the provider they run on.",
+      "moveExisting": "Move existing chats too",
+      "confirm": "Make default",
+      "saveFailed": "Failed to change the default provider",
+      "removedNote": "{{to}} is now the default, because you logged out of {{from}}.",
+      "dismissNote": "Dismiss"
+    },
+    "logoutOutcome": {
+      "otherBecomesDefault": "{{provider}} becomes the default. Chats move to it on their next reply.",
+      "otherBecomesDefaultStay": "{{provider}} becomes the default for new chats. Existing chats stay on {{leaving}} and wait until you log in again.",
+      "otherExpired": "Its login has expired: log in to {{provider}} again after you log out.",
+      "creditsBecomeDefault": "Rome credits become the default. Chats move to them on their next reply.",
+      "creditsBecomeDefaultStay": "Rome credits become the default for new chats. Existing chats stay on {{leaving}} and wait until you log in again.",
+      "pause": "Chats pause until you log in again.",
+      "pauseOrCredits": "Chats pause until you log in again, or until you switch every chat to Rome credits."
     }
   },
   "sentinelLog": {
@@ -1036,7 +1062,7 @@
       "stopped": "Idle",
       "connecting": "Connecting",
       "retrying": "Reconnecting",
-      "revoked": "Access revoked",
+      "revoked": "Removed from your account",
       "superseded": "Connection replaced",
       "not_configured": "Not configured",
       "unavailable": "Unavailable",

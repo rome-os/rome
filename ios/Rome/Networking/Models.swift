@@ -23,6 +23,17 @@ struct ChatSession: Codable, Identifiable, Hashable, Sendable {
     var largeModelSelection: String?
     /// When its owner pinned it; a topic chat only. Nil when not pinned.
     var pinnedAt: String?
+
+    /// The agent that answers a Concierge chat, a topic chat's included.
+    static let conciergeAgent = "core:concierge"
+    /// What a task chat is started by.
+    static let taskChatTrigger = "concierge"
+
+    /// An archived Concierge topic chat, as the web's chat list tells one:
+    /// the Concierge's agent, and not a task chat.
+    var isArchivedTopicChat: Bool {
+        archivedAt != nil && agentName == Self.conciergeAgent && triggerKind != Self.taskChatTrigger && id != conciergeChatID
+    }
 }
 
 /// One stored message. `content` is a JSON array of parts, or plain text on old rows.
@@ -311,18 +322,23 @@ struct ConciergeChatWork: Codable, Hashable, Sendable {
 
     var follows: [Follow]
     var openTasks: [OpenTask]
+    /// While the chat is archived: the follows its archive moved to the main
+    /// chat that are still there, which a restore can move back.
+    var movedFollows: [Follow]
 
-    private enum CodingKeys: String, CodingKey { case follows, openTasks }
+    private enum CodingKeys: String, CodingKey { case follows, openTasks, movedFollows }
 
-    init(follows: [Follow] = [], openTasks: [OpenTask] = []) {
+    init(follows: [Follow] = [], openTasks: [OpenTask] = [], movedFollows: [Follow] = []) {
         self.follows = follows
         self.openTasks = openTasks
+        self.movedFollows = movedFollows
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         follows = try container.decodeIfPresent([Follow].self, forKey: .follows) ?? []
         openTasks = try container.decodeIfPresent([OpenTask].self, forKey: .openTasks) ?? []
+        movedFollows = try container.decodeIfPresent([Follow].self, forKey: .movedFollows) ?? []
     }
 
     var isEmpty: Bool { follows.isEmpty && openTasks.isEmpty }

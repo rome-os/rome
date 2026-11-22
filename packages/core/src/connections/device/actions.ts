@@ -244,7 +244,7 @@ async function runOperation(
       error:
         `target_unavailable: ${name} did not answer: it is offline or its Rome app is not ` +
         "running, and Rome keeps no request for later. Say so plainly: the guardian opens the " +
-        "Rome app on it and asks again. " +
+        "Rome app on it and asks again. No connect card brings a device back online. " +
         (access === "write"
           ? "Nothing was changed."
           : "Answer from what you have, such as synced personal data, and say how fresh it is."),

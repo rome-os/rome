@@ -827,6 +827,26 @@
         }
       }
     },
+    "Archived" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已归档"
+          }
+        }
+      }
+    },
+    "Archived · %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已归档 · %lld"
+          }
+        }
+      }
+    },
     "Ask the owner of this Rome to turn it on." : {
       "localizations" : {
         "zh-Hans" : {
@@ -1333,6 +1353,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更早"
+          }
+        }
+      }
+    },
+    "Earlier this month" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本月早些时候"
           }
         }
       }
@@ -2565,12 +2595,32 @@
         }
       }
     },
+    "Keep in Chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "留在 Chat"
+          }
+        }
+      }
+    },
     "Language" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "语言"
+          }
+        }
+      }
+    },
+    "Last active %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次活跃 %@"
           }
         }
       }
@@ -2955,6 +3005,16 @@
         }
       }
     },
+    "Move them back" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "挪回这个对话"
+          }
+        }
+      }
+    },
     "Move to Chat" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3111,6 +3171,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有可用的 AI 工具"
+          }
+        }
+      }
+    },
+    "No archived chats" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有已归档的对话"
           }
         }
       }
@@ -4015,6 +4085,16 @@
         }
       }
     },
+    "Removed from your account" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已从账号移除"
+          }
+        }
+      }
+    },
     "Rename" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4249,16 +4329,6 @@
         }
       }
     },
-    "Revoked" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已撤销"
-          }
-        }
-      }
-    },
     "Rome" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4485,6 +4555,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "查看用量"
+          }
+        }
+      }
+    },
+    "Select text" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择文本"
           }
         }
       }
@@ -5409,6 +5489,16 @@
         }
       }
     },
+    "This chat is archived" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话已归档"
+          }
+        }
+      }
+    },
     "This Rome is a development build and cannot be updated." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5605,6 +5695,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这次在后台更新，不影响聊天等核心功能；更新完成前，个别新功能可能暂时用不了。"
+          }
+        }
+      }
+    },
+    "This week" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本周"
           }
         }
       }
@@ -5865,6 +5965,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在回复"
+          }
+        }
+      }
+    },
+    "Unarchive" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消归档"
+          }
+        }
+      }
+    },
+    "Unarchive “%@”?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消归档“%@”？"
           }
         }
       }
@@ -6313,6 +6433,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "收到 %@ 时"
+          }
+        }
+      }
+    },
+    "When this chat was archived, these follows moved to Chat:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个对话归档时，以下关注转到了 Chat："
           }
         }
       }
@@ -6845,6 +6975,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "每天早上 9 点，我会把睡眠、步数和静息心率发给你，有异常会特别提醒。"
+          }
+        }
+      }
+    },
+    "Older · %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更早 · %lld"
           }
         }
       }

@@ -69,6 +69,8 @@ import type {
   Account,
   ChannelMessage,
   ChannelMessageQuery,
+  ChannelChatsPage,
+  ChannelChatsQuery,
   ChannelSummary,
   ChannelsService,
   MessageReceipt,
@@ -373,6 +375,20 @@ export class ChannelsServiceProxy implements ChannelsService {
         },
         { timeoutMs: CHANNEL_QUERY_RPC_TIMEOUT_MS },
       ),
+    );
+  }
+
+  chats(channel: Account | string, query: ChannelChatsQuery = {}): Promise<ChannelChatsPage> {
+    // The first page of a listing with archived threads reads a platform's
+    // archive chat by chat, which can take longer than a query does.
+    return callMain<ChannelChatsPage>(
+      "channels.chats",
+      { channel, ...query },
+      {
+        timeoutMs: query.includeArchivedThreads
+          ? APP_INSTALL_RPC_TIMEOUT_MS
+          : CHANNEL_QUERY_RPC_TIMEOUT_MS,
+      },
     );
   }
 }

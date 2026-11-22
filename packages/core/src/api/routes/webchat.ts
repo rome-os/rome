@@ -143,7 +143,7 @@ import {
 } from "../../concierge/automated-input.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../agent/index.js";
-import { MessageWriting, messageWritingModeOf } from "./message-writing.js";
+import { MessageWriting, messageWritingModeOf } from "../../core/message-writing.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { EMPTY_WORKSPACE_CONTEXT } from "../../core/sticky-headers.js";
 import type {
@@ -1171,6 +1171,16 @@ function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 }
 
 export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: WebchatRuntime } {
+  // A chat as the APIs show it, with whether it follows the default provider.
+  const sessionResponse = (
+    session: Parameters<typeof toWebchatSessionResponse>[0],
+    messageCount: number,
+  ) =>
+    toWebchatSessionResponse(
+      session,
+      messageCount,
+      deps.chatProviders?.heldProvider(webchatSessionKey(session.id)),
+    );
   const activeStreams = new Map<string, ActiveWebchatStream[]>();
   /**
    * secondary index for direct lookup by turnId. Populated when a
@@ -1388,6 +1398,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         }
       });
     });
+    // A message rewritten in place, as a provider failure card that settled:
+    // the client replaces the one it holds with the same id.
+    const unsubscribeUpdates = deps.webchatRepo.onMessageUpdated((message) => {
+      if (message.sessionId !== sessionId) return;
+      inserting = inserting.then(() => emit("message_insert", message));
+    });
     // A card a task card shows settled: the client patches it in place.
     const unsubscribeCards = deps.concierge?.onCardSettled((event) => {
       if (event.sessionId === sessionId) emit("chat_card_settled", event);
@@ -1408,6 +1424,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       runningListeners.delete(runningListener);
       writingListeners.delete(writingListener);
       unsubscribeMessages();
+      unsubscribeUpdates();
       unsubscribeSessionName();
       unsubscribeReaction();
       unsubscribeStatus?.();
@@ -2862,11 +2879,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       sessions.map((session) => {
         const running = isSessionRunning(session.id);
         return {
-          ...toWebchatSessionResponse(session, session.messageCount),
+          ...sessionResponse(session, session.messageCount),
           running,
           // A new turn's trace is written a moment after it starts, so until
           // then the newest trace is the previous turn's. Running wins.
-          lastTurnFailed: session.lastTurnFailed && !running,
+          // A provider card in the chat says why and what to do: no red mark beside it.
+          lastTurnFailed:
+            session.lastTurnFailed && !running && !deps.providerFailures?.carded(session.id),
           awaitingGuardian: session.awaitingGuardian && !running,
         };
       }),
@@ -2918,7 +2937,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
     return c.json(
       matches.map((match) => ({
-        session: toWebchatSessionResponse(match.session, match.session.messageCount),
+        session: sessionResponse(match.session, match.session.messageCount),
         message: {
           id: match.message.id,
           role: match.message.role,
@@ -3134,7 +3153,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       deviceFolder: deviceFolder !== null,
       ...(await sessionActorLogAttributes()),
     });
-    return answer(toWebchatSessionResponse(createdSession, 0));
+    return answer(sessionResponse(createdSession, 0));
   };
 
   app.post("/chat/sessions", async (c) => {
@@ -3173,7 +3192,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     await deps.webchatRepo.updateSessionProject(sessionId, project.name, project.path);
     return c.json(
-      toWebchatSessionResponse(
+      sessionResponse(
         { ...session, projectName: project.name, projectPath: project.path },
         messageCount,
       ),
@@ -3211,7 +3230,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         ? await deps.concierge?.deps.tasks.repo.getWithChat(sessionId)
         : null;
     return c.json({
-      ...toWebchatSessionResponse(session, messageCount),
+      ...sessionResponse(session, messageCount),
       model: runtimeSession?.model ?? null,
       reasoningEffort: runtimeSession?.reasoningEffort ?? null,
       ...(task
@@ -3257,6 +3276,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // goes with the chat in the delete's own transaction.
     if (deps.concierge) await deps.concierge.endTaskChat(sessionId, "deleted");
     else await deps.webchatRepo.deleteSession(sessionId);
+    // A held conversation goes with its chat.
+    await deps.chatProviders?.release(sessionId);
     // Told after the delete, as an archive is, so the activity reads the
     // chat's finished rows as the main chat's.
     if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo, true);
@@ -3307,7 +3328,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse(session, messageCount));
+    return c.json(sessionResponse(session, messageCount));
   });
 
   // The checks pending in a chat, which its owner can cancel there.
@@ -3357,7 +3378,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse(session, messageCount));
+    return c.json(sessionResponse(session, messageCount));
   });
 
   // The model picker of an open chat. The pick is stored on the chat and the
@@ -3391,15 +3412,36 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "The model selector is turned off" }, 409);
     }
     const selection = resolveWebchatLargeModelSelection(requested);
-    await deps.webchatRepo.updateSessionLargeModelSelection(
-      sessionId,
-      selection?.id ?? null,
-      "owner",
-    );
+    // One transition with the chat's hold: Auto lets a held conversation go,
+    // and a pick on another provider takes the hold there.
+    if (deps.chatProviders) await deps.chatProviders.pick(sessionId, selection?.id ?? null);
+    else {
+      await deps.webchatRepo.updateSessionLargeModelSelection(
+        sessionId,
+        selection?.id ?? null,
+        "owner",
+      );
+    }
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse(session, messageCount));
+    return c.json(sessionResponse(session, messageCount));
+  });
+
+  // "Back to default": a chat pinned to a model, kept by a card or a change of
+  // the default, or picked by its owner, follows the default provider again
+  // from its next turn, at the strength it runs now.
+  app.post("/chat/sessions/:id/model/follow-default", async (c) => {
+    const sessionId = c.req.param("id");
+    // A fork chat the guardian can keep talking to is held as any chat is.
+    const lookup = await getContinuableSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    if (!deps.chatProviders) return c.json({ error: "Not available" }, 404);
+    await deps.chatProviders.follow(sessionId);
+    const session = await deps.webchatRepo.getSession(sessionId);
+    if (!session) return c.json({ error: "Session not found" }, 404);
+    const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
+    return c.json(sessionResponse(session, messageCount));
   });
 
   app.patch("/chat/sessions/:id/name", async (c) => {
@@ -3430,7 +3472,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     await deps.webchatRepo.updateSessionName(sessionId, name);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse({ ...session, name }, messageCount));
+    return c.json(sessionResponse({ ...session, name }, messageCount));
   });
 
   app.get("/chat/sessions/:id/layout", async (c) => {
@@ -4545,17 +4587,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const contextSuffix = buildWebchatContextSuffix();
     let largeModelSelection = session.largeModelSelection;
-    if (isConciergeChat(session)) {
-      await deps.concierge?.switchIfExhausted(sessionId);
+    if (isConciergeChat(session) || session.largeModelSelectionBy === "auto") {
+      // A model Rome chose follows the default provider.
+      await deps.concierge?.followDefault(sessionId);
       // A background turn may also have moved the chat since this send read it.
       largeModelSelection =
         (await deps.webchatRepo.getSession(sessionId))?.largeModelSelection ?? null;
     }
-    // A branch has no stored selection: it continues the model thread
-    // `persistForkThread` saved, on whatever model that thread pinned.
+    // A branch continues the model thread `persistForkThread` saved, on the
+    // model that thread pinned, unless it stores one of its own: kept by a
+    // change of the default, or Rome's strength after Back to default. A
+    // model the first message names does not apply to a branch.
     const modelSelection =
       session.parentSessionId !== null
-        ? null
+        ? resolveStoredModelSelection(largeModelSelection)
         : await resolveSessionModelSelectionForTurn(
             {
               id: sessionId,
@@ -4730,13 +4775,36 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         if (autoTitle) {
           void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
         }
+        // The chat shows why, and what the guardian can do, beside the error,
+        // which older clients read.
+        const messageId = randomUUID();
+        const errorPart = { type: "error", ...modelError };
+        const card = await deps.providerFailures
+          ?.cardFor(
+            {
+              chatId: sessionId,
+              agentName,
+              turnId,
+              failure: { kind: "resolution", payload: modelError },
+            },
+            messageId,
+            [errorPart],
+          )
+          .catch((error: unknown) => {
+            log.warn("provider failure card failed", { sessionId, error: String(error) });
+            return null;
+          });
         await deps.webchatRepo.addMessage(
-          randomUUID(),
+          messageId,
           sessionId,
           "assistant",
-          JSON.stringify([{ type: "error", ...modelError }]),
+          JSON.stringify([errorPart, ...(card ? [card] : [])]),
           turnId,
         );
+        // A card that settled while this message was being written takes its settled form.
+        if (card) {
+          await deps.providerFailures?.written(messageId).catch(() => undefined);
+        }
         // Keep this as a real failed turn on the standard trace wire. The
         // stream remains replayable for 30 seconds after completion and the
         // persisted trace renders on reload even if navigation finishes later.
@@ -5539,7 +5607,30 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     };
 
     await runOnStream(stream, "backend webchat task", async () => {
-      await task({ emit, stopRequested: () => stream.stopRequested === true });
+      try {
+        await task({ emit, stopRequested: () => stream.stopRequested === true });
+      } catch (err) {
+        // A turn Rome ran by itself, such as a card's resumed turn, that the
+        // resolver refused shows its card, as a refused send does.
+        const modelError = toModelResolutionErrorPayload(err);
+        if (modelError && deps.providerFailures) {
+          const agentName = (await deps.webchatRepo.getSession(sessionId))?.agentName ?? "main";
+          await deps.providerFailures
+            .failed(
+              {
+                chatId: sessionId,
+                agentName,
+                turnId: stream.turnId,
+                failure: { kind: "resolution", payload: modelError },
+              },
+              { final: true },
+            )
+            .catch((error: unknown) =>
+              log.warn("provider failure card failed", { sessionId, error: String(error) }),
+            );
+        }
+        throw err;
+      }
       await recordedCardWrites;
       // Persist cards before the final narration so transcript order matches the
       // foreground path ("choose above"). `addBackendMessage` also pushes a

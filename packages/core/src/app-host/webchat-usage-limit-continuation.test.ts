@@ -19,6 +19,7 @@ import { continueInterruptedTurns } from "../webchat/restart-continuation.js";
 import {
   startUsageLimitContinuation,
   usageLimitContinuationPrompt,
+  usageLimitContinuationTakes,
 } from "../webchat/usage-limit-continuation.js";
 
 const HOUR = 60 * 60 * 1000;
@@ -624,7 +625,6 @@ describe("usage-limit continuation", () => {
       { parentSessionId: "parent" },
       { ownerKey: "visitor:someone" },
       { triggerKind: "routine" },
-      { triggerKind: "concierge" },
       { archivedAt: new Date() },
       { chatId: null },
     ])("leaves an out-of-scope chat stopped: %j", async (change) => {
@@ -634,6 +634,34 @@ describe("usage-limit continuation", () => {
       start(runner);
       await clearAndSweep();
       expect(agent.calls).toHaveLength(0);
+    });
+
+    it("tells a card what it may promise by the sweep's own rule: within a day, in a chat it takes", async () => {
+      await stopped();
+      const takes = (until: number) =>
+        usageLimitContinuationTakes(repo, "chat", until, accounts.read());
+      expect(takes(Date.now() + 60 * 60_000)).toBe(true);
+      // A weekly limit ends after the day the sweep looks back over.
+      expect(takes(Date.now() + 3 * 24 * 60 * 60_000)).toBe(false);
+      // A visitor's chat the sweep leaves stopped.
+      await db.db
+        .update(romeSessions)
+        .set({ ownerKey: "visitor:someone" })
+        .where(eq(romeSessions.id, "chat"));
+      expect(takes(Date.now() + 60 * 60_000)).toBe(false);
+    });
+
+    it("continues a task chat, which runs unattended, until the guardian writes in it", async () => {
+      await stopped();
+      await db.db
+        .update(romeSessions)
+        .set({ triggerKind: "concierge" })
+        .where(eq(romeSessions.id, "chat"));
+      await db.db.run("DELETE FROM agent_turn_messages");
+      const { agent, runner } = backend();
+      start(runner);
+      await clearAndSweep();
+      expect(agent.calls).toHaveLength(1);
     });
 
     describe("a Concierge chat", () => {

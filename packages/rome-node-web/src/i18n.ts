@@ -1,4 +1,4 @@
-import type { HostPhase } from "./types";
+import type { AuditUnavailableCode, HostPhase } from "./types";
 
 export type Locale = "en" | "zh-CN";
 
@@ -31,6 +31,11 @@ export const messages = {
     toolName: "Node",
     appSubtitle: "Node · Container host control",
     loading: "Loading…",
+    nav: {
+      label: "Views",
+      overview: "Overview",
+      log: "Log",
+    },
     header: {
       themeLight: "Switch to light mode",
       themeDark: "Switch to dark mode",
@@ -46,7 +51,7 @@ export const messages = {
       online: "Online",
       retrying: "Reconnecting",
       disconnected: "Disconnected",
-      revoked: "Revoked",
+      revoked: "Removed from your account",
       superseded: "Superseded",
       error: "Error",
     } satisfies Record<HostPhase, string>,
@@ -112,7 +117,8 @@ export const messages = {
       auditState: "Audit log",
       auditOk: "Healthy",
       auditUnavailable: "Unavailable",
-      auditCloudHint: "Full activity & logs in Rome → Settings → Devices",
+      auditCloudHint: "Inspect local requests in Audit log or manage devices in Rome Cloud.",
+      viewLog: "View log",
       openCloud: "Open Rome Cloud",
       auditUnavailableTitle: "Audit log unavailable — remote requests are refused",
       auditUnavailableHint:
@@ -160,9 +166,63 @@ export const messages = {
       resetConfirm: "Reset credential",
       cancel: "Cancel",
       revokedNotice:
-        "This device authorization was revoked or rejected by Rome Cloud. Authorize the container again to restore access.",
+        "This device was removed from your account, or Rome Cloud rejected its authorization. Authorize the container again to add it back.",
       supersededNotice:
         "Another process connected with the same device credential and replaced this session.",
+    },
+    log: {
+      title: "Audit log",
+      thisNode: "This node",
+      storageMeta: (size: string, requests: number, days: number) =>
+        `${size} · ${requests.toLocaleString("en")} requests · ${days}d retention`,
+      unavailableSuffix: "Remote requests to this node are refused until it is fixed.",
+      unavailable: {
+        sqlite_missing: {
+          title: "This runtime cannot write an audit log.",
+          next: "Run Rome Node on Node.js 24+ with built-in SQLite support.",
+        },
+        newer_schema: {
+          title: "The audit log was written by a newer version of Rome Node.",
+          next: "Update Rome Node. The database file is left untouched.",
+        },
+        unreadable: {
+          title: "The audit log file cannot be read.",
+          next: "Stop the node and move the file aside to keep it. Rome never deletes it; a new log starts on the next launch.",
+        },
+        io: {
+          title: "The audit log cannot be written.",
+          next: "Check volume permissions and free disk space. Rome retries when the next request arrives.",
+        },
+      } satisfies Record<AuditUnavailableCode, { title: string; next: string }>,
+      detail: {
+        defaultCwd: "where Rome Node runs",
+        process: "Process",
+        direction: "Direction",
+        path: "Path",
+        size: "Size",
+        sha256: "SHA-256",
+        replacedFile: "Replaced file",
+        replacedNone: "none",
+        acknowledged: "Acknowledged",
+        entries: "Entries",
+        requestId: "Request ID",
+        from: "From",
+        unverified: "Unverified",
+        unverifiedTitle: "Reported by Rome Cloud. This node cannot verify it.",
+        environment: "Environment",
+        envSummary: (count: number) => `${count} names, no values`,
+        noEndNotice: "No end record: the node stopped while this ran, or it is still running.",
+        interruptedNotice:
+          "Interrupted: the connection was replaced while this ran, and no reply was sent.",
+        largePushNotice: "Larger than 10 MiB, so only its size and SHA-256 are kept.",
+        recordTruncatedNotice: "Very long fields were shortened for display.",
+        truncatedBadge: (kept: string) => `Truncated · kept ${kept}`,
+        truncatedPreview: (shown: string) => `\n… first ${shown} shown`,
+        binaryNotice: (size: string) => `Binary payload (${size}) — preview omitted.`,
+        prunedNotice: "Removed by the retention rule.",
+        contentLoadFailed: "Could not load content preview.",
+        loadingPreview: "Loading preview…",
+      },
     },
   },
   "zh-CN": {
@@ -170,6 +230,11 @@ export const messages = {
     toolName: "Node",
     appSubtitle: "Node · 容器节点控制面",
     loading: "加载中…",
+    nav: {
+      label: "视图切换",
+      overview: "概览",
+      log: "日志",
+    },
     header: {
       themeLight: "切换到浅色模式",
       themeDark: "切换到深色模式",
@@ -185,7 +250,7 @@ export const messages = {
       online: "在线",
       retrying: "重连中",
       disconnected: "已断开",
-      revoked: "已撤销",
+      revoked: "已从账号移除",
       superseded: "连接被替换",
       error: "异常",
     } satisfies Record<HostPhase, string>,
@@ -248,7 +313,8 @@ export const messages = {
       auditState: "审计日志",
       auditOk: "正常",
       auditUnavailable: "不可用",
-      auditCloudHint: "完整活动与日志请在 Rome「设置 → 设备」中查看",
+      auditCloudHint: "可在「审计日志」查看本机完整请求，或在 Rome Cloud 管理设备。",
+      viewLog: "查看日志",
       openCloud: "打开 Rome Cloud",
       auditUnavailableTitle: "审计日志不可用 — 所有远程请求将被拒绝",
       auditUnavailableHint:
@@ -292,8 +358,62 @@ export const messages = {
       resetDialogBody: "此操作将断开容器连接并删除本地保存的设备凭证，已有审计日志不会被删除。",
       resetConfirm: "确认清除",
       cancel: "取消",
-      revokedNotice: "设备授权已被 Rome Cloud 撤销或失效，请重新发起设备授权以恢复接入。",
+      revokedNotice:
+        "此设备已从账号移除，或授权已被 Rome Cloud 拒绝。请重新发起设备授权以重新添加。",
       supersededNotice: "另一进程使用了相同设备凭证上线，当前连接已被替换。",
+    },
+    log: {
+      title: "审计日志",
+      thisNode: "当前节点",
+      storageMeta: (size: string, requests: number, days: number) =>
+        `${size} · ${requests.toLocaleString("zh-CN")} 条请求 · 保留 ${days} 天`,
+      unavailableSuffix: "在修复前，本节点将拒绝所有远程请求。",
+      unavailable: {
+        sqlite_missing: {
+          title: "当前运行环境无法写入审计日志。",
+          next: "请使用支持内置 SQLite 的 Node.js 24+ 运行 Rome Node。",
+        },
+        newer_schema: {
+          title: "审计日志由更高版本的 Rome Node 写入。",
+          next: "请升级 Rome Node，原数据库文件保持原样未被修改。",
+        },
+        unreadable: {
+          title: "审计日志文件无法读取。",
+          next: "请停止节点并将该文件移到其他位置备份。Rome 不会自动删除它，下次启动将创建新日志。",
+        },
+        io: {
+          title: "无法写入审计日志。",
+          next: "请检查挂载卷权限和剩余磁盘空间，下次收到请求时 Rome 会自动重试。",
+        },
+      } satisfies Record<AuditUnavailableCode, { title: string; next: string }>,
+      detail: {
+        defaultCwd: "Rome Node 运行目录",
+        process: "进程 PID",
+        direction: "传输方向",
+        path: "路径",
+        size: "大小",
+        sha256: "SHA-256",
+        replacedFile: "被覆盖文件",
+        replacedNone: "无",
+        acknowledged: "已确认大小",
+        entries: "目录项数",
+        requestId: "请求 ID",
+        from: "来源",
+        unverified: "未验证",
+        unverifiedTitle: "由 Rome Cloud 上报，当前节点无法独立验证。",
+        environment: "环境变量",
+        envSummary: (count: number) => `${count} 个变量名（不记录值）`,
+        noEndNotice: "无结束记录：节点在执行期间停止，或该请求仍在运行中。",
+        interruptedNotice: "已中断：执行期间连接被替换，未发送响应。",
+        largePushNotice: "文件大于 10 MiB，仅保留其大小与 SHA-256 校验值。",
+        recordTruncatedNotice: "部分超长字段已截断显示。",
+        truncatedBadge: (kept: string) => `已截断 · 保留 ${kept}`,
+        truncatedPreview: (shown: string) => `\n… 仅展示前 ${shown}`,
+        binaryNotice: (size: string) => `二进制内容（${size}），已省略文本预览。`,
+        prunedNotice: "该内容已按保留策略清理。",
+        contentLoadFailed: "无法加载内容预览。",
+        loadingPreview: "正在加载预览…",
+      },
     },
   },
 } as const;

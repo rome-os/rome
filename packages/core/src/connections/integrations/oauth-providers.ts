@@ -12,9 +12,8 @@
 //
 // Grant names follow the grant table: grants are about grants, not
 // token count. GitHub, Google and Microsoft each mint one user credential → one `user`
-// grant. Slack's single OAuth dance mints TWO tokens (bot + user) that live
-// together in ONE `workspace` grant's material. Shopify mints one offline token
-// for a store, not a person → one `store` grant.
+// grant. Shopify mints one offline token for a store, not a person → one
+// `store` grant.
 
 import { z } from "zod";
 import { createGmailActor } from "../gmail/api.js";
@@ -68,24 +67,6 @@ export const githubGrantProfileSchema = z
   .strict();
 export type GithubGrantProfile = z.infer<typeof githubGrantProfileSchema>;
 
-/** Slack's grant profile: the installer's identity plus workspace identity. */
-export const slackGrantProfileSchema = z
-  .object({
-    /** `<teamId>:<installerUserId>` — stable per installer-in-workspace. */
-    subject: identityField,
-    /** Workspace name — Rome Cloud surfaces it as the account label. */
-    login: identityField,
-    displayName: identityField,
-    email: identityField,
-    avatarUrl: identityField,
-    scopes: scopesField,
-    /** Slack workspace id — identity, never credential material; the token-file
-     *  custody writes it beside the secret tokens. */
-    teamId: identityField,
-  })
-  .strict();
-export type SlackGrantProfile = z.infer<typeof slackGrantProfileSchema>;
-
 /** Google's grant profile: OIDC identity. Google mints no handle — there is
  *  deliberately no `login` key in this schema. */
 export const googleGrantProfileSchema = z
@@ -133,7 +114,6 @@ export type MicrosoftGrantProfile = z.infer<typeof microsoftGrantProfileSchema>;
 
 export const OAUTH_PROVIDER_PROFILE_SCHEMAS = {
   github: githubGrantProfileSchema,
-  slack: slackGrantProfileSchema,
   google: googleGrantProfileSchema,
   shopify: shopifyGrantProfileSchema,
   microsoft: microsoftGrantProfileSchema,
@@ -143,7 +123,6 @@ export const OAUTH_PROVIDER_PROFILE_SCHEMAS = {
  *  per provider (e.g. the token-file serializer). */
 export type OAuthProviderGrantProfile =
   | GithubGrantProfile
-  | SlackGrantProfile
   | GoogleGrantProfile
   | ShopifyGrantProfile
   | MicrosoftGrantProfile;
@@ -161,7 +140,6 @@ export function parseOAuthProviderProfile(
 export const OAUTH_PROVIDER_GRANTS: Record<OAuthProvider, GrantName> = {
   github: "user",
   google: "user",
-  slack: "workspace",
   shopify: "store",
   microsoft: "user",
 };
@@ -169,22 +147,12 @@ export const OAUTH_PROVIDER_GRANTS: Record<OAuthProvider, GrantName> = {
 // Pure display mappings: parsed profile (plain data) in, frozen display
 // object out. The returned object is what satisfies the readonly
 // `ProfileDisplay` interface — there are no profile classes. Kind-specific
-// values a generic reader can't render (subject, scopes, Slack's teamId) stay
+// values a generic reader can't render (subject, scopes) stay
 // on the parsed profile for owner-side readers and never reach the display.
 
 export function toGithubDisplay(profile: GithubGrantProfile): ProfileDisplay {
   return Object.freeze({
     displayName: profile.displayName,
-    handle: profile.login,
-    email: profile.email,
-    avatarUrl: profile.avatarUrl,
-  });
-}
-
-export function toSlackDisplay(profile: SlackGrantProfile): ProfileDisplay {
-  return Object.freeze({
-    displayName: profile.displayName,
-    /** The workspace name reads as Slack's handle. */
     handle: profile.login,
     email: profile.email,
     avatarUrl: profile.avatarUrl,
@@ -226,14 +194,13 @@ export function toMicrosoftDisplay(profile: MicrosoftGrantProfile): ProfileDispl
  *  that no longer matches the schema throws instead of displaying sparsely. */
 const OAUTH_PROVIDER_REVIVERS: Record<OAuthProvider, (record: ProfileRecord) => ProfileDisplay> = {
   github: (record) => toGithubDisplay(githubGrantProfileSchema.parse(record)),
-  slack: (record) => toSlackDisplay(slackGrantProfileSchema.parse(record)),
   google: (record) => toGoogleDisplay(googleGrantProfileSchema.parse(record)),
   shopify: (record) => toShopifyDisplay(shopifyGrantProfileSchema.parse(record)),
   microsoft: (record) => toMicrosoftDisplay(microsoftGrantProfileSchema.parse(record)),
 };
 
 /**
- * Custody for a Rome Cloud-OAuth provider: the tmpfs token file (github/slack) and
+ * Custody for a Rome Cloud-OAuth provider: the tmpfs token file (github/shopify) and
  * the `gh`/git shell auth (github only). The registry fires this off grant
  * transitions, so the artifacts are a pure function of grant state — present and
  * current iff the grant is authorized. The shell auth runs first (it swallows its
@@ -262,7 +229,6 @@ const MAIL_ACTORS: Partial<Record<OAuthProvider, (credential: Credential) => Act
 /** Human-facing provider labels for the setup's success view. */
 const OAUTH_PROVIDER_LABELS: Record<OAuthProvider, string> = {
   github: "GitHub",
-  slack: "Slack",
   google: "Google",
   shopify: "Shopify",
   microsoft: "Microsoft",
@@ -404,8 +370,8 @@ export function makeOAuthProviderDescriptor(
     grant: OAUTH_PROVIDER_GRANTS[provider],
     auth: scheme,
     reviveProfile: (record) => OAUTH_PROVIDER_REVIVERS[provider](record),
-    // The provider's own id for the signed-in identity: the user, or for Slack
-    // the installer in its workspace, and for Shopify the store.
+    // The provider's own id for the signed-in identity: the user, or for
+    // Shopify the store.
     accountIdOf: (record) => (typeof record.subject === "string" && record.subject) || null,
     custody: makeOAuthProviderCustody(provider),
     capabilities: MAIL_ACTORS[provider] ? { actor: { build: MAIL_ACTORS[provider] } } : {},

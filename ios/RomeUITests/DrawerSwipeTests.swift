@@ -1,8 +1,8 @@
 import XCTest
 
-/// The drawer's topic chat rows: swipe right to pin, swipe left for Archive
-/// and Delete, press and hold for all three, on the demo data. The drawer
-/// still closes from the page beside it. Each check keeps a screenshot.
+/// The drawer's topic chat rows: swipe right to pin, no swipe to the left,
+/// press and hold for Rename, Pin, Archive and Delete, on the demo data. The
+/// drawer still closes from the page beside it. Each check keeps a screenshot.
 final class DrawerSwipeTests: XCTestCase {
     /// A demo topic chat with no unread replies, so its pin shows.
     private let topic = "读书笔记"
@@ -57,12 +57,6 @@ final class DrawerSwipeTests: XCTestCase {
         add(shot)
     }
 
-    /// The element is drawn inside the window, not slid away with the drawer.
-    @MainActor
-    private func onScreen(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
-        element.exists && app.windows.firstMatch.frame.contains(CGPoint(x: element.frame.midX, y: element.frame.midY))
-    }
-
     @MainActor
     private func waitFor(_ format: String, _ element: XCUIElement, timeout: TimeInterval = 5) {
         expectation(for: NSPredicate(format: format), evaluatedWith: element)
@@ -95,22 +89,67 @@ final class DrawerSwipeTests: XCTestCase {
         waitForExpectations(timeout: 5)
     }
 
+    /// A swipe to the left shows no buttons: Archive and Delete were too
+    /// easy to set off there.
     @MainActor
-    func testSwipeLeftOffersArchiveAndDeleteAndDeleteAsks() {
+    func testSwipeLeftOffersNothing() {
         let app = launch()
         openDrawer(app)
         let row = row(app, topic)
-        // A short swipe, so it stops at the buttons rather than archiving.
-        let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
-        start.press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5)))
-        let archive = app.buttons["Archive"].firstMatch
-        let delete = app.buttons["Delete"].firstMatch
-        XCTAssertTrue(archive.waitForExistence(timeout: 3))
-        XCTAssertTrue(delete.exists)
-        keep("swipe-left-archive-delete")
-        // The swipe left the drawer open: the other rows stay where they were.
-        XCTAssertTrue(onScreen(app, self.row(app, "出错的情况")))
+        row.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5)))
+        XCTAssertFalse(app.buttons["Archive"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["Delete"].exists)
+    }
 
+    @MainActor
+    func testPressAndHoldOffersRenamePinArchiveAndDelete() {
+        let app = launch()
+        openDrawer(app)
+        let row = row(app, topic)
+        row.press(forDuration: 1.2)
+        let pin = app.buttons["Pin"].firstMatch
+        XCTAssertTrue(pin.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["Rename"].exists)
+        XCTAssertTrue(app.buttons["Archive"].exists)
+        XCTAssertTrue(app.buttons["Delete"].exists)
+        keep("press-and-hold-menu")
+        pin.tap()
+        expectation(for: NSPredicate(format: "label == %@ AND value CONTAINS %@", topic, "Pinned"), evaluatedWith: firstRow(app))
+        waitForExpectations(timeout: 5)
+    }
+
+    /// Rename asks for the name, with the current one filled in, and the
+    /// row shows the new one.
+    @MainActor
+    func testRenameFromTheMenu() {
+        let app = launch()
+        openDrawer(app)
+        row(app, topic).press(forDuration: 1.2)
+        let rename = app.buttons["Rename"].firstMatch
+        XCTAssertTrue(rename.waitForExistence(timeout: 3))
+        rename.tap()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        let field = alert.textFields.firstMatch
+        XCTAssertEqual(field.value as? String, topic)
+        field.tap()
+        field.typeText(" 2")
+        keep("rename-asks")
+        alert.buttons["Rename"].tap()
+        XCTAssertTrue(self.row(app, "\(topic) 2").waitForExistence(timeout: 5))
+    }
+
+    /// Delete from the menu always asks; Archive goes ahead at once for a
+    /// chat with nothing to move.
+    @MainActor
+    func testDeleteFromTheMenuAsksAndArchiveDoesNot() {
+        let app = launch()
+        openDrawer(app)
+        let row = row(app, topic)
+        row.press(forDuration: 1.2)
+        let delete = app.buttons["Delete"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: 3))
         delete.tap()
         let alert = app.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
@@ -119,27 +158,11 @@ final class DrawerSwipeTests: XCTestCase {
         alert.buttons["Cancel"].tap()
         XCTAssertTrue(row.waitForExistence(timeout: 3))
 
-        // Archive goes ahead at once for a chat with nothing to move.
-        start.press(forDuration: 0.05, thenDragTo: row.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5)))
+        row.press(forDuration: 1.2)
+        let archive = app.buttons["Archive"].firstMatch
         XCTAssertTrue(archive.waitForExistence(timeout: 3))
         archive.tap()
         waitFor("exists == false", row)
-    }
-
-    @MainActor
-    func testPressAndHoldOffersPinArchiveAndDelete() {
-        let app = launch()
-        openDrawer(app)
-        let row = row(app, topic)
-        row.press(forDuration: 1.2)
-        let pin = app.buttons["Pin"].firstMatch
-        XCTAssertTrue(pin.waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["Archive"].exists)
-        XCTAssertTrue(app.buttons["Delete"].exists)
-        keep("press-and-hold-menu")
-        pin.tap()
-        expectation(for: NSPredicate(format: "label == %@ AND value CONTAINS %@", topic, "Pinned"), evaluatedWith: firstRow(app))
-        waitForExpectations(timeout: 5)
     }
 
     /// A phone's drawer closes with a swipe to the left on the page beside it, as before.

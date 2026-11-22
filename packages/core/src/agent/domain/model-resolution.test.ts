@@ -2,6 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import type { ModelAccountReport, ModelAccountReports } from "./model-account-report.js";
 import type { CodexLogin } from "./model-login.js";
 import {
+  modelResolutionRequest,
   type ModelResolutionFacts,
   type ModelResolutionRequest,
   resolveModel,
@@ -118,9 +119,9 @@ describe("resolveModel", () => {
       "claude-opus-5-5[1m]",
     ],
     [
-      "Rome credits when no guardian account can serve",
+      "Rome credits when no guardian account is logged in",
       large,
-      facts({ reports: reports(unauthorized, limited), logins: { openai: credits() } }),
+      facts({ reports: reports(unauthorized, unauthorized), logins: { openai: credits() } }),
       "openai",
       "gpt-6.1-sol",
     ],
@@ -128,7 +129,7 @@ describe("resolveModel", () => {
       "Terra on credits when the gateway does not serve Sol",
       large,
       facts({
-        reports: reports(unauthorized, limited),
+        reports: reports(unauthorized, unauthorized),
         logins: { openai: credits(["gpt-5.6-terra"]) },
       }),
       "openai",
@@ -149,7 +150,10 @@ describe("resolveModel", () => {
   it("does not limit a model on Rome credits by the guardian's plan", () => {
     const given = facts({ reports: reports(restricted), logins: { openai: credits() } });
     expect(
-      resolveModel({ kind: "exact", providerId: "openai", model: "gpt-6.1-sol" }, given),
+      resolveModel(
+        { kind: "exact", providerId: "openai", model: "gpt-6.1-sol", credits: true },
+        given,
+      ),
     ).toMatchObject({ ok: true });
   });
 
@@ -229,7 +233,7 @@ describe("resolveModel", () => {
     [
       "Rome credits count as connected and not limited",
       facts({
-        reports: reports(unauthorized, limited),
+        reports: reports(unauthorized, unauthorized),
         logins: { openai: credits(["gpt-6.1-sol"]) },
       }),
       false,
@@ -237,5 +241,255 @@ describe("resolveModel", () => {
   ])("fails as none usable when %s", (_name, given, allAtUsageLimit) => {
     const outcome = resolveModel({ kind: "tier", tier: "small" }, given);
     expect(outcome).toEqual({ ok: false, failure: { kind: "none_usable", allAtUsageLimit } });
+  });
+});
+
+describe("resolveModel on the default provider", () => {
+  it("runs a tier on the default provider, even when another comes first in the old order", () => {
+    const given = facts({ reports: reports(available, available), defaultProvider: "anthropic" });
+    expect(resolveModel(large, given)).toEqual({
+      ok: true,
+      providerId: "anthropic",
+      model: "claude-opus-5-5[1m]",
+    });
+  });
+
+  it("keeps the session's model while it is on the default provider", () => {
+    const pin = { providerId: "anthropic" as const, model: "claude-sonnet-5-5" };
+    const given = facts({ reports: reports(available, available), defaultProvider: "anthropic" });
+    expect(resolveModel({ ...large, pin }, given)).toEqual({
+      ok: true,
+      providerId: "anthropic",
+      model: "claude-sonnet-5-5",
+    });
+  });
+
+  it("drops a pin on another provider than the default", () => {
+    const pin = { providerId: "openai" as const, model: "gpt-6.1-sol" };
+    const given = facts({ reports: reports(available, available), defaultProvider: "anthropic" });
+    expect(resolveModel({ ...large, pin }, given)).toMatchObject({
+      ok: true,
+      providerId: "anthropic",
+    });
+  });
+
+  it("fails when the default cannot run, and never moves to another provider", () => {
+    const given = facts({ reports: reports(available, limited), defaultProvider: "anthropic" });
+    expect(resolveModel(large, given)).toEqual({
+      ok: false,
+      failure: {
+        kind: "provider_unavailable",
+        provider: "anthropic",
+        availability: "usage_limit_reached",
+        usageLimitUntil: "2026-11-07T12:00:00.000Z",
+        followsDefault: true,
+      },
+    });
+  });
+
+  it("runs one ask on the provider an override names", () => {
+    const given = facts({ reports: reports(available, limited), defaultProvider: "anthropic" });
+    expect(resolveModel({ ...large, override: "openai" }, given)).toMatchObject({
+      ok: true,
+      providerId: "openai",
+    });
+  });
+
+  it("runs Codex on Rome credits when they are the default", () => {
+    const given = facts({
+      reports: reports(unauthorized, available),
+      logins: { openai: credits() },
+      defaultProvider: "rome_credits",
+    });
+    expect(resolveModel(large, given)).toMatchObject({ ok: true, providerId: "openai" });
+  });
+
+  it("does not spend Rome credits for a chat that follows ChatGPT after its login went", () => {
+    const given = facts({
+      reports: reports(unauthorized, unauthorized),
+      logins: { openai: credits() },
+      defaultProvider: "openai",
+    });
+    expect(resolveModel(large, given)).toMatchObject({
+      ok: false,
+      failure: { kind: "provider_unavailable", provider: "openai", availability: "unauthorized" },
+    });
+    // An exact model the chat was kept on is no different.
+    expect(
+      resolveModel({ kind: "exact", providerId: "openai", model: "gpt-6.1-sol" }, given),
+    ).toMatchObject({ ok: false, failure: { kind: "provider_unavailable" } });
+  });
+
+  it("spends Rome credits for an ask whose chat was moved onto them", () => {
+    const given = facts({
+      reports: reports(unauthorized, unauthorized),
+      logins: { openai: credits() },
+      defaultProvider: "openai",
+    });
+    expect(
+      resolveModel(
+        { kind: "exact", providerId: "openai", model: "gpt-6.1-sol", credits: true },
+        given,
+      ),
+    ).toMatchObject({ ok: true, providerId: "openai" });
+  });
+
+  it("spends Rome credits with no default set only while no AI account is logged in", () => {
+    const exact = { kind: "exact", providerId: "openai", model: "gpt-6.1-sol" } as const;
+    const claudeIn = facts({
+      reports: reports(unauthorized, available),
+      logins: { openai: credits() },
+    });
+    expect(resolveModel(exact, claudeIn)).toMatchObject({
+      ok: false,
+      failure: { kind: "provider_unavailable", provider: "openai" },
+    });
+    const noneIn = facts({
+      reports: reports(unauthorized, unauthorized),
+      logins: { openai: credits() },
+    });
+    expect(resolveModel(exact, noneIn)).toMatchObject({ ok: true, providerId: "openai" });
+  });
+
+  it("runs a chat on Rome credits on Codex, at the strength of the model it keeps", () => {
+    expect(
+      modelResolutionRequest("claude-opus-5-5", undefined, { tier: "large" }, true),
+    ).toMatchObject({ kind: "exact", providerId: "openai", credits: true });
+    expect(modelResolutionRequest(undefined, undefined, { tier: "large" }, true)).toEqual({
+      kind: "tier",
+      tier: "large",
+      override: "openai",
+      credits: true,
+    });
+    expect(modelResolutionRequest("claude-opus-5-5", undefined, { tier: "large" })).toMatchObject({
+      kind: "exact",
+      providerId: "anthropic",
+    });
+  });
+
+  it("runs every chat on Rome credits while they are the default, a kept one too", () => {
+    const given = facts({
+      reports: reports(unauthorized, unauthorized),
+      logins: { openai: credits() },
+      defaultProvider: "rome_credits",
+    });
+    const kept = { kind: "exact", providerId: "openai", model: "gpt-6.1-sol" } as const;
+    expect(resolveModel(kept, given)).toMatchObject({ ok: true, providerId: "openai" });
+    // Once a login replaced them as the default, the same ask reads the guardian's account.
+    expect(resolveModel(kept, { ...given, defaultProvider: "openai" })).toMatchObject({
+      ok: false,
+      failure: { kind: "provider_unavailable", provider: "openai" },
+    });
+  });
+
+  it("runs a chat on Rome credits on the served model of its strength", () => {
+    const given = facts({
+      reports: reports(unauthorized, unauthorized),
+      logins: { openai: credits(["gpt-6-luna", "gpt-5.6-terra"]) },
+    });
+    expect(
+      resolveModel(
+        { kind: "exact", providerId: "openai", model: "gpt-6-astra", credits: true },
+        given,
+      ),
+    ).toEqual({ ok: true, providerId: "openai", model: "gpt-5.6-terra" });
+  });
+
+  it("finds none usable with no default and nothing signed in", () => {
+    const given = facts({ reports: reports(unauthorized, unauthorized) });
+    expect(resolveModel(large, given)).toMatchObject({
+      ok: false,
+      failure: { kind: "none_usable" },
+    });
+  });
+});
+
+describe("an unchecked move keeps every existing chat: a held session", () => {
+  const heldOn = (
+    provider: "anthropic" | "openai",
+    selection?: Parameters<typeof modelResolutionRequest>[0],
+    pin?: { providerId: "anthropic" | "openai"; model: string },
+  ) => modelResolutionRequest(selection, pin, { tier: "large" }, true, provider);
+
+  it("runs its tier on the provider it was held on, not on the default", () => {
+    expect(
+      resolveModel(
+        heldOn("anthropic"),
+        facts({ reports: reports(available, available), defaultProvider: "openai" }),
+      ),
+    ).toMatchObject({ ok: true, providerId: "anthropic" });
+  });
+
+  it("keeps the model it last ran there", () => {
+    const pin = { providerId: "anthropic" as const, model: "claude-sonnet-5-5" };
+    expect(
+      resolveModel(
+        heldOn("anthropic", undefined, pin),
+        facts({ reports: reports(available, available), defaultProvider: "openai" }),
+      ),
+    ).toEqual({ ok: true, providerId: "anthropic", model: "claude-sonnet-5-5" });
+  });
+
+  it("never spends Rome credits: a held ChatGPT chat shows its own account's card", () => {
+    expect(
+      resolveModel(
+        heldOn("openai", "gpt-6-1-sol"),
+        facts({
+          reports: reports(unauthorized, unauthorized),
+          logins: { openai: credits() },
+          defaultProvider: "rome_credits",
+        }),
+      ),
+    ).toMatchObject({
+      ok: false,
+      failure: { kind: "provider_unavailable", provider: "openai", availability: "unauthorized" },
+    });
+  });
+
+  it("a held Claude chat shows Claude's card while Rome credits are the default", () => {
+    expect(
+      resolveModel(
+        heldOn("anthropic"),
+        facts({
+          reports: reports(unauthorized, unauthorized),
+          logins: { openai: credits() },
+          defaultProvider: "rome_credits",
+        }),
+      ),
+    ).toMatchObject({ ok: false, failure: { provider: "anthropic" } });
+  });
+
+  it("keeps a held chat with a provider-restricted agent on its own account under a credits default", () => {
+    const ask = modelResolutionRequest(
+      "gpt-6-1-sol",
+      undefined,
+      { tier: "large", providerId: "openai" },
+      true,
+      "openai",
+    );
+    expect(ask).toMatchObject({ kind: "exact", providerId: "openai", ownAccount: true });
+    expect(ask).not.toHaveProperty("credits");
+    expect(
+      resolveModel(
+        ask,
+        facts({
+          reports: reports(unauthorized, unauthorized),
+          logins: { openai: credits() },
+          defaultProvider: "rome_credits",
+        }),
+      ),
+    ).toMatchObject({ ok: false, failure: { provider: "openai", availability: "unauthorized" } });
+  });
+
+  it("leaves an agent restricted to a provider where its agent put it", () => {
+    expect(
+      modelResolutionRequest(
+        undefined,
+        undefined,
+        { tier: "large", providerId: "openai" },
+        false,
+        "anthropic",
+      ),
+    ).toEqual({ kind: "tier", tier: "large", providerId: "openai", ownAccount: true });
   });
 });

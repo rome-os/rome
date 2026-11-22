@@ -98,16 +98,15 @@ const SERVICE_ORDER = [
   "whatsapp",
   "wechat",
   "linkedin",
+  "discord_app",
   "discord",
   "email",
   "feishu",
   "slack_app",
-  "slack_bot",
   "agents",
   "github",
   "google",
   "microsoft",
-  "slack",
   "shopify",
 ];
 
@@ -116,7 +115,8 @@ const LABELS: Record<string, string> = {
   whatsapp: "WhatsApp",
   wechat: "WeChat",
   linkedin: "LinkedIn",
-  discord: "Discord",
+  discord: "Discord bot",
+  discord_app: "Discord",
   email: "Email",
   feishu: "Feishu",
   lark: "Lark",
@@ -127,31 +127,29 @@ const LABELS: Record<string, string> = {
   microsoft: "Microsoft",
   slack: "Slack",
   slack_app: "Slack",
-  slack_bot: "Slack bot",
   shopify: "Shopify",
   composio: "Composio",
 };
 
-const OAUTH_SERVICES = new Set(["github", "google", "microsoft", "slack", "shopify"]);
+const OAUTH_SERVICES = new Set(["github", "google", "microsoft", "shopify"]);
 
 /** The copy slot key each registry grant renders under. A channel's single
  *  Talk grant is the generic `bot` slot whatever the grant is named; an OAuth
- *  grant is the `user` slot (Slack's `workspace` grant included). */
+ *  grant is the `user` slot. */
 const SLOT_KEY_BY_GRANT: Record<string, Record<string, SlotKey>> = {
   telegram: { bot: "bot" },
   whatsapp: { session: "bot" },
   wechat: { account: "bot" },
   linkedin: { session: "bot" },
   discord: { bot: "bot" },
+  discord_app: { bot: "bot" },
   email: { inbox: "bot" },
   feishu: { app: "bot" },
   slack_app: { bot: "bot" },
-  slack_bot: { bot: "bot" },
   agents: { cloud: "bot" },
   github: { user: "user" },
   google: { user: "user" },
   microsoft: { user: "user" },
-  slack: { workspace: "user" },
   shopify: { store: "user" },
 };
 

@@ -19,7 +19,7 @@ export const devicesStatusSchema = z.object({
       id: z.string(),
       name: z.string(),
       platform: z.string().nullable(),
-      status: z.enum(["connected", "not_connected", "unknown", "revoked"]),
+      status: z.enum(["connected", "not_connected", "unknown"]),
       /** The device's own audit log. While unavailable, the device refuses remote actions. */
       audit: z
         .object({
@@ -68,15 +68,8 @@ export type DeviceFilesErrorCode =
   | "permission_denied"
   | "unavailable";
 
-/**
- * Why renaming or removing a device failed. `revocation_pending` means the
- * device is revoked but Cloud still lists it until the Gateway confirms.
- */
-export type DeviceManageErrorCode =
-  | "device_not_found"
-  | "invalid_device_name"
-  | "revocation_pending"
-  | "unavailable";
+/** Why renaming or removing a device failed. */
+export type DeviceManageErrorCode = "device_not_found" | "invalid_device_name" | "unavailable";
 
 /**
  * The folder a chat works in on a rome-node device. The name and platform are

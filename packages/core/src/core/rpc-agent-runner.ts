@@ -82,6 +82,7 @@ export class RpcAgentRunner implements AgentRunnerInterface {
       input: { prompt: params.prompt, images: params.images },
       platformMessageId: params.platformMessageId,
       replyTo: params.replyTo,
+      ...(params.inThread ? { inThread: params.inThread } : {}),
       sessionId: params.sessionId,
       hookInvocationContext: getCurrentHookInvocationContext(),
       actionContext: getCurrentActionContext(),

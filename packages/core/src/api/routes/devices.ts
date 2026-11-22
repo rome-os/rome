@@ -16,7 +16,6 @@ const filesErrorStatus = {
 const manageErrorStatus = {
   device_not_found: 404,
   invalid_device_name: 400,
-  revocation_pending: 409,
   unavailable: 503,
 } as const satisfies Record<DeviceManageErrorCode, number>;
 

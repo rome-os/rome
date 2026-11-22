@@ -3,10 +3,15 @@ import { createServer, request as httpRequest, type Server } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
 import { gzipSync } from "node:zlib";
 import { WebSocketServer, type WebSocket } from "ws";
-import { createFileCredentialStore, type HostCredential } from "@rome-os/node-core/host";
+import {
+  AuditStore,
+  createFileCredentialStore,
+  type HostCredential,
+} from "@rome-os/node-core/host";
 import { createWebAuth, isLoopbackHost } from "./auth.js";
 import { HostController } from "./host-controller.js";
 import { startWebServer } from "./server.js";
@@ -1112,5 +1117,465 @@ describe("rome-node web server", () => {
     await expect(
       createWebAuth({ host: "127.0.0.1", configDirectory: corruptedDir }),
     ).rejects.toThrow(/invalid format/i);
+  });
+
+  it("serves read-only /api/audit/* endpoints with auth, same-origin, sanitization, pagination, and bounded content previews", async () => {
+    const configDir = await mkdtemp(join(tmpdir(), "rome-node-web-audit-api-"));
+    cleanup.push(() => rm(configDir, { recursive: true, force: true }));
+    const assetsDir = await createAssetsFixture();
+
+    // Anchor timestamps inside the last 8 hours so 30-day retention keeps every seeded record.
+    const baseTime = Math.floor((Date.now() - 8 * 60 * 60 * 1000) / 3_600_000) * 3_600_000;
+    let seedTime = baseTime;
+    const auditPath = join(configDir, "audit", "audit.db");
+    const writer = await AuditStore.open({
+      path: auditPath,
+      entry: "cli",
+      hint: "Run rome-node audit status.",
+      now: () => seedTime,
+    });
+
+    // Record 1: successful exec with stdin + stdout
+    seedTime = baseTime + 1_000;
+    const seqExecOk = await writer.start(
+      "exec",
+      {
+        requestId: "req-exec-ok",
+        from: "caller-alpha",
+        args: { command: "git", args: ["status", "--short"], cwd: "/workspace/needle-project" },
+        envKeys: ["PATH", "NODE_ENV"],
+      },
+      { stdin: Buffer.from("hello stdin\n", "utf8") },
+    );
+    expect(seqExecOk).not.toBeNull();
+    seedTime = baseTime + 1_250;
+    writer.end(
+      seqExecOk!,
+      "exec",
+      "ok",
+      { exitCode: 0, durationMs: 250, pid: 1001 },
+      { stdout: Buffer.from("M README.md\n", "utf8") },
+    );
+
+    // Record 2: failed exec with > 256 KiB stderr where a 3-byte UTF-8 char straddles 256 KiB
+    seedTime = baseTime + 60 * 60 * 1000;
+    const seqExecFail = await writer.start("exec", {
+      requestId: "req-exec-fail",
+      from: "caller-beta",
+      args: { command: "npm", args: ["test"], cwd: "/workspace/app" },
+    });
+    expect(seqExecFail).not.toBeNull();
+    const boundaryPrefix = Buffer.alloc(256 * 1024 - 1, 0x61); // 'a' * (256KiB - 1)
+    const multiByte = Buffer.from("中tail", "utf8"); // '中' is 3 bytes: 1 byte inside 256KiB, 2 bytes outside
+    const hugeStderr = Buffer.concat([boundaryPrefix, multiByte]);
+    writer.end(
+      seqExecFail!,
+      "exec",
+      "exit_nonzero",
+      { exitCode: 2, durationMs: 900 },
+      { stderr: hugeStderr },
+    );
+
+    // Record 3: fs.list with entries array (must be projected to entriesCount, never exposing entries)
+    seedTime = baseTime + 2 * 60 * 60 * 1000;
+    const seqFsList = await writer.start("fs.list", {
+      requestId: "req-fs-list",
+      args: { path: "/workspace/secret-dir" },
+    });
+    expect(seqFsList).not.toBeNull();
+    writer.end(seqFsList!, "fs.list", "ok", {
+      durationMs: 12,
+      entries: [{ name: "secret-a.txt" }, { name: "secret-b.txt" }, { name: "secret-c.txt" }],
+    });
+
+    // Record 4: transfer.open push with binary file content (contains NUL byte)
+    seedTime = baseTime + 3 * 60 * 60 * 1000;
+    const seqTransfer = await writer.start("transfer.open", {
+      requestId: "req-transfer-bin",
+      args: { direction: "push", path: "/tmp/archive.bin" },
+    });
+    expect(seqTransfer).not.toBeNull();
+    const binaryPayload = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d, 0x0a, 0x1a, 0x0a]);
+    writer.end(
+      seqTransfer!,
+      "transfer.open",
+      "ok",
+      { durationMs: 45, bytes: binaryPayload.byteLength, path: "/tmp/archive.bin" },
+      { file: binaryPayload },
+    );
+
+    // Record 5: exec with pruned stdout content + Record 6: no_result (no end record)
+    seedTime = baseTime + 4 * 60 * 60 * 1000;
+    const seqPruned = await writer.start("exec", {
+      requestId: "req-pruned",
+      args: { command: "cat", args: ["old.log"] },
+    });
+    expect(seqPruned).not.toBeNull();
+    writer.end(
+      seqPruned!,
+      "exec",
+      "ok",
+      { exitCode: 0, durationMs: 5 },
+      { stdout: Buffer.from("will be pruned", "utf8") },
+    );
+
+    seedTime = baseTime + 5 * 60 * 60 * 1000;
+    const seqNoResult = await writer.start("exec", {
+      requestId: "req-no-result",
+      args: { command: "sleep", args: ["999"] },
+    });
+    expect(seqNoResult).not.toBeNull();
+
+    writer.close();
+
+    // Simulate pruned content blob for seqPruned's end record directly in SQLite.
+    const rawDb = new DatabaseSync(auditPath);
+    rawDb
+      .prepare(
+        "DELETE FROM content WHERE name = 'stdout' AND seq IN (SELECT seq FROM events WHERE start_seq = ?)",
+      )
+      .run(seqPruned!);
+    rawDb.close();
+
+    const web = await startWebServer({
+      host: "127.0.0.1",
+      port: 0,
+      configDirectory: configDir,
+      assetsDir,
+      password: "audit-secret-password",
+      log: () => {},
+    });
+    cleanup.push(() => web.close());
+
+    // 1. Unauthenticated requests are rejected with 401.
+    expect((await fetch(`${web.url}/api/audit/summary`)).status).toBe(401);
+    expect((await fetch(`${web.url}/api/audit/items`)).status).toBe(401);
+
+    // Log in to get a session cookie.
+    const loginRes = await fetch(`${web.url}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: "audit-secret-password" }),
+    });
+    expect(loginRes.status).toBe(200);
+    const cookie = (loginRes.headers.get("set-cookie") ?? "").split(";")[0]!;
+
+    // 2. Cross-origin GET on /api/audit/* is rejected with 403 even with a valid session cookie.
+    const crossOriginAudit = await fetch(`${web.url}/api/audit/summary`, {
+      headers: { cookie, origin: "https://evil.example" },
+    });
+    expect(crossOriginAudit.status).toBe(403);
+
+    // 3. Non-GET methods are rejected with 405 and Allow: GET.
+    const postAudit = await fetch(`${web.url}/api/audit/items`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(postAudit.status).toBe(405);
+    expect(postAudit.headers.get("allow")).toBe("GET");
+
+    // 4. GET /api/audit/summary returns sanitized summary + counts without exposing local DB path.
+    const summaryRes = await fetch(`${web.url}/api/audit/summary`, { headers: { cookie } });
+    expect(summaryRes.status).toBe(200);
+    expect(summaryRes.headers.get("cache-control")).toBe("no-store");
+    expect(summaryRes.headers.get("x-content-type-options")).toBe("nosniff");
+    const summaryBody = (await summaryRes.json()) as {
+      status: { state: string };
+      requests: number;
+      counts: { all: number; succeeded: number; failed: number; no_result: number } | null;
+      path?: string;
+    };
+    expect(summaryBody.status).toEqual({ state: "ok" });
+    expect(summaryBody.requests).toBe(6);
+    expect(summaryBody.counts).toEqual({ all: 6, succeeded: 4, failed: 1, no_result: 1 });
+    expect(summaryBody.path).toBeUndefined();
+    expect(JSON.stringify(summaryBody)).not.toContain(configDir);
+
+    // 5. GET /api/audit/stats returns bucketed stats and validates parameters.
+    const statsRes = await fetch(
+      `${web.url}/api/audit/stats?since=${baseTime}&until=${baseTime + 6 * 60 * 60 * 1000}&bucketMs=3600000`,
+      { headers: { cookie } },
+    );
+    expect(statsRes.status).toBe(200);
+    const statsBody = (await statsRes.json()) as {
+      groups: { bucket: number; result: string; count: number }[];
+    };
+    const totalCount = statsBody.groups.reduce((sum, g) => sum + g.count, 0);
+    expect(totalCount).toBe(6);
+
+    expect((await fetch(`${web.url}/api/audit/stats`, { headers: { cookie } })).status).toBe(400);
+    expect(
+      (
+        await fetch(
+          `${web.url}/api/audit/stats?since=${baseTime + 100}&until=${baseTime}&bucketMs=60000`,
+          { headers: { cookie } },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await fetch(
+          `${web.url}/api/audit/stats?since=${baseTime}&until=${baseTime + 3600000}&bucketMs=1000`,
+          { headers: { cookie } },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await fetch(`${web.url}/api/audit/stats?since=0&until=${1001 * 60_000}&bucketMs=60000`, {
+          headers: { cookie },
+        })
+      ).status,
+    ).toBe(400);
+
+    // 6. GET /api/audit/items supports pagination, filtering, text search, and projects fs.list safely.
+    const page1Res = await fetch(`${web.url}/api/audit/items?limit=4`, { headers: { cookie } });
+    expect(page1Res.status).toBe(200);
+    const page1 = (await page1Res.json()) as {
+      items: {
+        seq: number;
+        kind: string;
+        action: string;
+        end: { record: Record<string, unknown> } | null;
+      }[];
+      hasMore: boolean;
+    };
+    expect(page1.items).toHaveLength(4);
+    expect(page1.hasMore).toBe(true);
+    expect(page1.items.every((item) => item.kind === "start")).toBe(true);
+
+    const fsListItem = page1.items.find((item) => item.seq === seqFsList);
+    expect(fsListItem?.end?.record.entriesCount).toBe(3);
+    expect(fsListItem?.end?.record.entries).toBeUndefined();
+    expect(JSON.stringify(fsListItem)).not.toContain("secret-a.txt");
+
+    const oldestSeqPage1 = page1.items[page1.items.length - 1]!.seq;
+    const page2Res = await fetch(`${web.url}/api/audit/items?limit=4&beforeSeq=${oldestSeqPage1}`, {
+      headers: { cookie },
+    });
+    expect(page2Res.status).toBe(200);
+    const page2 = (await page2Res.json()) as { items: { seq: number }[]; hasMore: boolean };
+    expect(page2.items).toHaveLength(2);
+    expect(page2.hasMore).toBe(false);
+
+    // Filter by result
+    const failedRes = await fetch(`${web.url}/api/audit/items?result=failed`, {
+      headers: { cookie },
+    });
+    const failedBody = (await failedRes.json()) as { items: { seq: number }[] };
+    expect(failedBody.items.map((item) => item.seq)).toEqual([seqExecFail]);
+
+    const noResultRes = await fetch(`${web.url}/api/audit/items?result=no_result`, {
+      headers: { cookie },
+    });
+    const noResultBody = (await noResultRes.json()) as { items: { seq: number }[] };
+    expect(noResultBody.items.map((item) => item.seq)).toEqual([seqNoResult]);
+
+    // Filter by text
+    const searchRes = await fetch(`${web.url}/api/audit/items?text=needle-project`, {
+      headers: { cookie },
+    });
+    const searchBody = (await searchRes.json()) as { items: { seq: number }[] };
+    expect(searchBody.items.map((item) => item.seq)).toEqual([seqExecOk]);
+
+    // Invalid list parameters
+    expect(
+      (await fetch(`${web.url}/api/audit/items?limit=201`, { headers: { cookie } })).status,
+    ).toBe(400);
+    expect(
+      (await fetch(`${web.url}/api/audit/items?result=bogus`, { headers: { cookie } })).status,
+    ).toBe(400);
+    expect(
+      (await fetch(`${web.url}/api/audit/items?text=${"x".repeat(257)}`, { headers: { cookie } }))
+        .status,
+    ).toBe(400);
+
+    // 7. GET /api/audit/items/:seq returns detail for start records, 404 for host/missing records, 400 for invalid seq.
+    const detailRes = await fetch(`${web.url}/api/audit/items/${seqExecOk}`, {
+      headers: { cookie },
+    });
+    expect(detailRes.status).toBe(200);
+    const detailBody = (await detailRes.json()) as {
+      item: { seq: number; record: { envKeys?: string[]; from?: string } };
+    };
+    expect(detailBody.item.seq).toBe(seqExecOk);
+    expect(detailBody.item.record.from).toBe("caller-alpha");
+    expect(detailBody.item.record.envKeys).toEqual(["PATH", "NODE_ENV"]);
+
+    // Seq 1 is the internal `host` record — must never be exposed.
+    expect((await fetch(`${web.url}/api/audit/items/1`, { headers: { cookie } })).status).toBe(404);
+    expect((await fetch(`${web.url}/api/audit/items/99999`, { headers: { cookie } })).status).toBe(
+      404,
+    );
+    expect((await fetch(`${web.url}/api/audit/items/abc`, { headers: { cookie } })).status).toBe(
+      400,
+    );
+    expect(
+      (await fetch(`${web.url}/api/audit/items/%E0%A4%A`, { headers: { cookie } })).status,
+    ).toBe(400);
+
+    // 8. GET /api/audit/items/:seq/content/:name: text, bounded truncation with UTF-8 boundary, binary, pruned, 404, 400.
+    const stdoutRes = await fetch(`${web.url}/api/audit/items/${seqExecOk}/content/stdout`, {
+      headers: { cookie },
+    });
+    expect(stdoutRes.status).toBe(200);
+    expect(await stdoutRes.json()).toMatchObject({
+      seq: seqExecOk,
+      name: "stdout",
+      available: true,
+      truncated: false,
+      isBinary: false,
+      text: "M README.md\n",
+    });
+
+    const stdinRes = await fetch(
+      `${web.url}/api/audit/items/${seqExecOk}/content/stdin?maxBytes=5`,
+      {
+        headers: { cookie },
+      },
+    );
+    expect(stdinRes.status).toBe(200);
+    expect(await stdinRes.json()).toMatchObject({
+      seq: seqExecOk,
+      name: "stdin",
+      available: true,
+      truncated: true,
+      previewBytes: 5,
+      isBinary: false,
+      text: "hello",
+    });
+
+    // Huge stderr: bounded at 256 KiB and cleanly trims the incomplete 3-byte UTF-8 sequence at the end.
+    const hugeRes = await fetch(`${web.url}/api/audit/items/${seqExecFail}/content/stderr`, {
+      headers: { cookie },
+    });
+    expect(hugeRes.status).toBe(200);
+    const hugeBody = (await hugeRes.json()) as {
+      available: boolean;
+      size: number;
+      previewBytes: number;
+      truncated: boolean;
+      isBinary: boolean;
+      text: string | null;
+    };
+    expect(hugeBody.available).toBe(true);
+    expect(hugeBody.size).toBe(hugeStderr.byteLength);
+    expect(hugeBody.previewBytes).toBe(256 * 1024 - 1);
+    expect(hugeBody.truncated).toBe(true);
+    expect(hugeBody.isBinary).toBe(false);
+    expect(hugeBody.text).toHaveLength(256 * 1024 - 1);
+    expect(hugeBody.text).not.toContain("\uFFFD");
+
+    // Binary file content -> isBinary: true, text: null
+    const binRes = await fetch(`${web.url}/api/audit/items/${seqTransfer}/content/file`, {
+      headers: { cookie },
+    });
+    expect(binRes.status).toBe(200);
+    expect(await binRes.json()).toMatchObject({
+      seq: seqTransfer,
+      name: "file",
+      available: true,
+      isBinary: true,
+      text: null,
+    });
+
+    // Pruned content -> available: false, text: null
+    const prunedRes = await fetch(`${web.url}/api/audit/items/${seqPruned}/content/stdout`, {
+      headers: { cookie },
+    });
+    expect(prunedRes.status).toBe(200);
+    expect(await prunedRes.json()).toMatchObject({
+      seq: seqPruned,
+      name: "stdout",
+      available: false,
+      text: null,
+    });
+
+    // Missing stream -> 404; invalid stream name / malformed encoding -> 400
+    expect(
+      (
+        await fetch(`${web.url}/api/audit/items/${seqExecOk}/content/stderr`, {
+          headers: { cookie },
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await fetch(`${web.url}/api/audit/items/${seqExecOk}/content/bogus`, {
+          headers: { cookie },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await fetch(`${web.url}/api/audit/items/${seqExecOk}/content/%E0%A4%A`, {
+          headers: { cookie },
+        })
+      ).status,
+    ).toBe(400);
+  });
+
+  it("returns 503 when the audit database is unavailable and enforces /api/audit/* rate limiting", async () => {
+    const configDir = await mkdtemp(join(tmpdir(), "rome-node-web-audit-unavail-"));
+    cleanup.push(() => rm(configDir, { recursive: true, force: true }));
+    const assetsDir = await createAssetsFixture();
+
+    await mkdir(join(configDir, "audit"), { recursive: true });
+    await writeFile(join(configDir, "audit", "audit.db"), Buffer.from("not a sqlite db", "utf8"));
+
+    let fakeNow = 2_000_000;
+    const web = await startWebServer({
+      host: "127.0.0.1",
+      port: 0,
+      configDirectory: configDir,
+      assetsDir,
+      log: () => {},
+      deps: { now: () => fakeNow },
+    });
+    cleanup.push(() => web.close());
+
+    // Summary reports unavailable status cleanly with HTTP 200.
+    const summaryRes = await fetch(`${web.url}/api/audit/summary`);
+    expect(summaryRes.status).toBe(200);
+    const summaryBody = (await summaryRes.json()) as {
+      status: { state: string; code?: string };
+      counts: unknown;
+    };
+    expect(summaryBody.status.state).toBe("unavailable");
+    expect(summaryBody.status.code).toBe("unreadable");
+    expect(summaryBody.counts).toBeNull();
+
+    // Data endpoints fail closed with HTTP 503.
+    const itemsRes = await fetch(`${web.url}/api/audit/items`);
+    expect(itemsRes.status).toBe(503);
+    expect(await itemsRes.json()).toMatchObject({
+      status: { state: "unavailable", code: "unreadable" },
+    });
+
+    const statsRes = await fetch(`${web.url}/api/audit/stats?since=0&until=3600000&bucketMs=60000`);
+    expect(statsRes.status).toBe(503);
+
+    const detailRes = await fetch(`${web.url}/api/audit/items/1`);
+    expect(detailRes.status).toBe(503);
+
+    // Rate limit: 4 requests already consumed above; 596 more succeed, 601st gets 429 with Retry-After.
+    for (let sent = 0; sent < 596; sent += 50) {
+      const batch = Math.min(50, 596 - sent);
+      const responses = await Promise.all(
+        Array.from({ length: batch }, () => fetch(`${web.url}/api/audit/summary`)),
+      );
+      for (const res of responses) {
+        expect(res.status).toBe(200);
+      }
+    }
+    const limitedRes = await fetch(`${web.url}/api/audit/summary`);
+    expect(limitedRes.status).toBe(429);
+    expect(Number(limitedRes.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+
+    // Advancing clock past the 60s window resets the limiter.
+    fakeNow += 60_000;
+    const afterWindow = await fetch(`${web.url}/api/audit/summary`);
+    expect(afterWindow.status).toBe(200);
   });
 });

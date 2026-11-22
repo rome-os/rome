@@ -74,7 +74,19 @@ TestFlight ships under Rome's own Apple Developer team, not a personal one. The 
 
    The archive is signed with the development profile, so its app reads `aps-environment` = `development` even in Release. The export re-signs it with `production`. To check that before uploading, export once with `destination` set to `export` in a copy of `ExportOptions.plist`, then read the entitlements of the app in the `.ipa`.
 
-4. Delete `/tmp/rome-archive` when the build shows up in App Store Connect.
+4. Once App Store Connect shows the build as VALID, tag the commit you archived, and publish a GitHub prerelease for it:
+
+   ```bash
+   git tag -a ios-v<MARKETING_VERSION>-<build> <archived commit> -m "iOS TestFlight build <build> (<MARKETING_VERSION>)"
+   git push origin ios-v<MARKETING_VERSION>-<build>
+   gh release create ios-v<MARKETING_VERSION>-<build> --verify-tag --prerelease --latest=false --title "iOS <MARKETING_VERSION> (<build>) — TestFlight" --notes-file <notes>
+   ```
+
+   The archived commit is the one that carries the raised minimums. A squash merge gives main a different commit, so tag the archived one. The tag keeps it reachable after its branch is deleted. The notes say what changed for a tester: one line per PR since the previous `ios-v*` tag, grouped under New and Fixes, with the PR number. They also give the minimum instance versions before and after the bump. The `ios-` prefix keeps these tags out of `bump-minimum.mjs`, which reads only `v1.*`, and out of the server image build, which runs on `v*`. A prerelease never becomes the repository's latest release.
+
+5. Merge the archived commit's branch into main.
+
+6. Delete `/tmp/rome-archive` when the build shows up in App Store Connect.
 
 ### Signing with the API key
 
@@ -122,6 +134,7 @@ Debug builds read these environment variables (set them in the scheme's Run opti
 | `ROME_DEMO=update` | Opens the demo data on a Rome below the app's minimum version, so the update page covers the app; "Update now" finishes after a few seconds. |
 | `ROME_DEMO=update-offered` | Opens the demo data on a Rome behind its latest release but new enough for the app: the banner and the drawer's line offer the update. |
 | `ROME_DEMO=visitor` | Opens the demo data as a dashboard admin of a shared Rome. |
+| `ROME_DEMO=older-topics` | A short topic list with recent, pinned, unread and older chats for drawer checks. |
 | `ROME_DEMO=many-apps` | Opens the demo data with a screenful of apps, for the Apps grid and the widget. |
 | `ROME_PERF=<scenario>` | With `ROME_DEMO=long-chat`: runs one scenario for about 20 s and logs frame hitches and how often rows, screens and parses ran (`PerfProbe`). Scenarios: `idle`, `idle-apps`, `stream`, `stream-apps`, `taskstream`, `sections`, `settings`, `scroll`, `chats`, `paging`, twelve flings up through older pages, and `pagingdown`, ten flings back down after paging past 520 messages (add `ROME_DEMO_PAIRS=300`, a deeper chat with pictures and cards). Both report `holdDriftPt`, how far a row mid-screen moved while each fling rested, and the time each older page took to go in. The result is in the log (category `Perf`) and in `tmp/perf-<scenario>.txt` in the app's container. |
 | `ROME_LOCAL_ORIGIN`, `ROME_LOCAL_USER`, `ROME_LOCAL_PASSWORD` | Signs in to a Rome on this Mac with a local test guardian instead of Rome Cloud. |

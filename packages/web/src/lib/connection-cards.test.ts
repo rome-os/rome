@@ -250,7 +250,7 @@ describe("buildConnectionCards — Composio card", () => {
 describe("buildConnectionCards — ordering", () => {
   it("sorts known services into the fixed order regardless of input order", () => {
     const cards = buildConnectionCards([
-      conn({ connectionKind: "slack" }),
+      conn({ connectionKind: "shopify" }),
       conn({ connectionKind: "google" }),
       conn({ connectionKind: "github" }),
       conn({ connectionKind: "email" }),
@@ -269,7 +269,7 @@ describe("buildConnectionCards — ordering", () => {
       "feishu",
       "github",
       "google",
-      "slack",
+      "shopify",
     ]);
   });
 
@@ -277,13 +277,19 @@ describe("buildConnectionCards — ordering", () => {
     const cards = buildConnectionCards(
       [
         conn({ connectionKind: "zulip" }),
-        conn({ connectionKind: "slack" }),
+        conn({ connectionKind: "shopify" }),
         conn({ connectionKind: "acme" }),
         conn({ connectionKind: "telegram" }),
       ],
       composio(),
     );
-    expect(cards.map((c) => c.service)).toEqual(["telegram", "slack", "acme", "zulip", "composio"]);
+    expect(cards.map((c) => c.service)).toEqual([
+      "telegram",
+      "shopify",
+      "acme",
+      "zulip",
+      "composio",
+    ]);
   });
 });
 
@@ -302,13 +308,13 @@ describe("buildConnectionCards — slot mapping", () => {
     expect(cards.find((c) => c.service === "wechat")?.slots[0].grant).toBe("account");
   });
 
-  it("maps OAuth grants onto the user slot, Slack's workspace grant included", () => {
+  it("maps OAuth grants onto the user slot, Shopify's store grant included", () => {
     const cards = buildConnectionCards([
-      conn({ connectionKind: "slack", grants: { workspace: "authorized" } }),
+      conn({ connectionKind: "shopify", grants: { store: "authorized" } }),
       conn({ connectionKind: "github", grants: { user: "authorized" } }),
     ]);
-    const slack = cards.find((c) => c.service === "slack");
-    expect(slack?.slots[0]).toMatchObject({ key: "user", grant: "workspace" });
+    const shopify = cards.find((c) => c.service === "shopify");
+    expect(shopify?.slots[0]).toMatchObject({ key: "user", grant: "store" });
     expect(cards.find((c) => c.service === "github")?.slots[0].key).toBe("user");
   });
 
@@ -327,9 +333,9 @@ describe("buildConnectionCards — slot mapping", () => {
         display: { user: display({ handle: "ada", email: "ada@example.com" }) },
       }),
       conn({
-        connectionKind: "slack",
-        grants: { workspace: "authorized" },
-        display: { workspace: display({ email: "ada@example.com" }) },
+        connectionKind: "shopify",
+        grants: { store: "authorized" },
+        display: { store: display({ email: "ada@example.com" }) },
       }),
       conn({ connectionKind: "telegram", grants: { bot: "unauthorized" }, display: {} }),
     ]);
@@ -337,7 +343,7 @@ describe("buildConnectionCards — slot mapping", () => {
       cards.find((c) => c.service === service)?.slots[0].identity;
     expect(identityOf("github")).toBe("Ada");
     expect(identityOf("google")).toBe("ada");
-    expect(identityOf("slack")).toBe("ada@example.com");
+    expect(identityOf("shopify")).toBe("ada@example.com");
     expect(identityOf("telegram")).toBeNull();
   });
 
@@ -354,11 +360,11 @@ describe("buildConnectionCards — slot mapping", () => {
 });
 
 describe("buildConnectionCards — kind and labels", () => {
-  it("assigns oauth kind to github/google/slack and channel kind to the talk channels", () => {
+  it("assigns oauth kind to github/google/shopify and channel kind to the talk channels", () => {
     const cards = buildConnectionCards([
       conn({ connectionKind: "github" }),
       conn({ connectionKind: "google" }),
-      conn({ connectionKind: "slack" }),
+      conn({ connectionKind: "shopify" }),
       conn({ connectionKind: "telegram" }),
       conn({ connectionKind: "whatsapp" }),
       conn({ connectionKind: "email" }),
@@ -366,7 +372,7 @@ describe("buildConnectionCards — kind and labels", () => {
     const kindOf = (service: string) => cards.find((c) => c.service === service)?.kind;
     expect(kindOf("github")).toBe("oauth");
     expect(kindOf("google")).toBe("oauth");
-    expect(kindOf("slack")).toBe("oauth");
+    expect(kindOf("shopify")).toBe("oauth");
     expect(kindOf("telegram")).toBe("channel");
     expect(kindOf("whatsapp")).toBe("channel");
     expect(kindOf("email")).toBe("channel");
@@ -499,7 +505,8 @@ describe("buildConnectionCards — several accounts per service", () => {
       conn({ connectionKind: "discord", id: null, channel: null, grants: { bot: "unauthorized" } }),
     ]);
     expect(cards[0].route).toBe("discord");
-    expect(cards[0].label).toBe("Discord");
+    // The bot the guardian makes; Rome's own Discord bot is "Discord".
+    expect(cards[0].label).toBe("Discord bot");
   });
 
   it("renders as before when the server omits the account fields", () => {
@@ -515,10 +522,13 @@ describe("Connected cards", () => {
   it("counts working and broken connections as connected, and placeholders as not", () => {
     const cards = buildConnectionCards([
       conn({ connectionKind: "github", grants: { user: "authorized" } }),
-      conn({ connectionKind: "slack", grants: { workspace: "degraded" } }),
+      conn({ connectionKind: "shopify", grants: { store: "degraded" } }),
       conn({ connectionKind: "google", id: null, grants: { user: "unauthorized" } }),
     ]);
-    expect(cards.filter(isConnectedCard).map((card) => card.service)).toEqual(["github", "slack"]);
+    expect(cards.filter(isConnectedCard).map((card) => card.service)).toEqual([
+      "github",
+      "shopify",
+    ]);
   });
 
   it("counts a Telegram card with only its personal account as connected", () => {
