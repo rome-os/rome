@@ -550,7 +550,7 @@
     "quota": "{{from}} quota ran out, switched to {{to}}",
     "login": "{{from}} sign-in failed, switched to {{to}}",
     "temporary": "{{from}} is temporarily unavailable, switched to {{to}}",
-    "model_limit": "{{fromModel}} limit reached, switched to {{toModel}}",
+    "model_limit": "Switched to {{toModel}}; {{fromModel}} is unavailable for now",
     "notice": "Switched to {{model}}"
   },
   "modelSelector": {
@@ -562,6 +562,7 @@
     "noMatches": "No matching models.",
     "options": {
       "auto": "Auto",
+      "autoFollowsDefault": "Auto (default provider)",
       "claudeOpus": "Opus",
       "opus55": "Opus 5.5",
       "opus5": "Opus 5",
@@ -780,6 +781,62 @@
       "provider_unavailable": "Rome Cloud's transcription service is unavailable. Listening stopped",
       "insufficient_credits": "Not enough Rome credits for voice input. Listening stopped"
     }
+  },
+  "providerFailure": {
+    "quota": "{{provider}} hit its usage limit. You can continue once it resets.",
+    "quotaUntil": "{{provider}} hit its usage limit. Rome continues after {{date}}, {{time}}.",
+    "quotaUntilToday": "{{provider}} hit its usage limit. Rome continues after {{time}}.",
+    "quotaUntilTomorrow": "{{provider}} hit its usage limit. Rome continues tomorrow after {{time}}.",
+    "temporary": "{{provider}} is unavailable for now.",
+    "login": "{{provider}} needs you to log in again",
+    "removed": "{{provider}} is not logged in",
+    "creditsUsedUp": "Rome credits are used up",
+    "spendCap": "{{provider}} reached its spending limit",
+    "account": "{{provider}} cannot run on this account",
+    "modelUnavailable": "{{model}} is unavailable",
+    "reasonQuota": "{{provider}} quota used up",
+    "reasonTemporary": "{{provider}} is unavailable for now",
+    "status": {
+      "pausedToday": "Paused · continues after {{time}}",
+      "pausedTomorrow": "Paused · continues tomorrow after {{time}}",
+      "pausedOn": "Paused · continues after {{date}}, {{time}}",
+      "needsYou": "Needs you",
+      "modelUnavailable": "Model unavailable",
+      "paused": "Paused",
+      "pausedUntilToday": "Paused until {{time}}",
+      "pausedUntilTomorrow": "Paused until tomorrow {{time}}",
+      "pausedUntilOn": "Paused until {{date}}, {{time}}"
+    },
+    "logIn": "Log in",
+    "switchTo": "Switch to {{target}}",
+    "useCredits": "Use Rome credits",
+    "alsoMakeDefault": "Also make default",
+    "details": "Details",
+    "switchFailed": "Could not switch",
+    "switched": "Switched to {{target}}",
+    "switchedContinued": "Switched to {{target}}, continued",
+    "recovered": "Recovered",
+    "recoveredContinued": "Recovered, continued",
+    "confirm": {
+      "title": "Switch to {{provider}}?",
+      "body": "This chat continues on {{provider}}, and the stopped turn picks up again.",
+      "bodyCredits": "Every chat runs on Rome credits ({{balance}} left), and the stopped turn picks up again.",
+      "makeDefaultHelp": "Other chats that follow the default switch to {{provider}} on their next reply.",
+      "moveExisting": "Move existing chats too",
+      "moveExistingHelp": "Other chats switch to {{provider}} on their next reply.",
+      "switch": "Switch",
+      "cancel": "Cancel",
+      "bodyCreditsAll": "Every chat runs on Rome credits, and the stopped turn picks up again."
+    },
+    "continue": "Continue",
+    "quotaPausedUntil": "{{provider}} hit its usage limit. You can continue after {{date}}, {{time}}.",
+    "quotaPausedUntilToday": "{{provider}} hit its usage limit. You can continue after {{time}}.",
+    "quotaPausedUntilTomorrow": "{{provider}} hit its usage limit. You can continue tomorrow after {{time}}.",
+    "retry": "Retry"
+  },
+  "providerOutage": {
+    "waiting_one": "{{count}} task waiting",
+    "waiting_other": "{{count}} tasks waiting"
   },
   "outputs": {
     "title": "Outputs",

@@ -22,6 +22,9 @@ import {
 
 const DEFAULT_WEBCHAT_PROJECT_NAME = "default";
 
+/** Who chose a chat's stored model. docs/domains/agents.md#kept-provider */
+export type ModelSelectionBy = "owner" | "auto" | "kept";
+
 export const sessions = sqliteTable(
   "sessions",
   {
@@ -309,43 +312,6 @@ export const linkedinMessages = sqliteTable(
   ],
 );
 
-// Rome's Slack app's own copy of the direct messages it hears, one row per
-// Slack event. Only connections/kinds/slack-app reads or writes it, through
-// its repository there: outside the connection, nothing can tell whether the
-// copy exists. The mailbox is told a message was received only once its row
-// is written, so a crash or a stop before then loses nothing: the mailbox
-// delivers it again, and on start the connection hands over what it kept but
-// never handed over.
-export const slackAppMessages = sqliteTable(
-  "slack_app_messages",
-  {
-    teamId: text("team_id").notNull(),
-    // Slack's event id: Slack retries and the relay delivers at least once, so
-    // a second delivery of the same event writes nothing.
-    eventId: text("event_id").notNull(),
-    // The direct message's conversation id (D…).
-    channelId: text("channel_id").notNull(),
-    ts: text("ts").notNull(),
-    threadTs: text("thread_ts"),
-    userId: text("user_id").notNull(),
-    // The text as Rome reads it, Slack's markup decoded.
-    text: text("text").notNull(),
-    saidAt: integer("said_at", { mode: "timestamp_ms" }).notNull(),
-    // The message as the connection keeps it, without Slack's raw payload.
-    // The connection hands Rome its `Message` made from this.
-    message: text("message", { mode: "json" }).notNull(),
-    receivedAt: integer("received_at", { mode: "timestamp_ms" }).notNull(),
-    // When it was handed to Rome. Null when the connection stopped between
-    // keeping it and handing it over, so the next start hands it over.
-    handedOverAt: integer("handed_over_at", { mode: "timestamp_ms" }),
-  },
-  (table) => [
-    primaryKey({ columns: [table.teamId, table.eventId] }),
-    index("idx_slack_app_messages_chat_said").on(table.teamId, table.channelId, table.saidAt),
-    index("idx_slack_app_messages_unhanded").on(table.teamId, table.handedOverAt),
-  ],
-);
-
 // One row per LinkedIn account seen in a thread's participant list. Person-level
 // facts live here rather than on the membership row so a name or headline is
 // stored once, not once per thread the person appears in.
@@ -561,9 +527,11 @@ export const romeSessions = sqliteTable(
     largeModelSelection: text("large_model_selection"),
     // Who set large_model_selection: `owner` from the model menu or a first
     // message that named a model, `auto` when Rome picked it, as for a
-    // Concierge chat's default or a quota failover. NULL for selections made
-    // before this was kept. A change of Rome's default moves only `auto` ones.
-    largeModelSelectionBy: text("large_model_selection_by").$type<"owner" | "auto">(),
+    // Concierge chat's default. `kept` is Rome's pick that stays on its
+    // provider: the guardian switched only this chat, or changed the default
+    // without moving existing chats. NULL for selections made before this was
+    // kept. A change of the default moves only `auto` ones.
+    largeModelSelectionBy: text("large_model_selection_by").$type<ModelSelectionBy>(),
     // The reasoning effort a message to the chat runs at when it names none,
     // such as the brief and follow-ups the Concierge sends a task chat. NULL
     // takes the dashboard's setting.

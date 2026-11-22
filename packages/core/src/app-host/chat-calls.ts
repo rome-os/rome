@@ -53,6 +53,9 @@ const QueryParams = z
 const ChatsParams = z
   .object({
     channel: AccountOrChannel,
+    query: z.string().optional(),
+    limit: z.number().int().positive().optional(),
+    cursor: z.string().optional(),
     includeThreads: z.boolean().optional(),
     includeArchivedThreads: z.boolean().optional(),
   })
@@ -191,13 +194,21 @@ export function chatWorkerCalls(
       );
     },
     "channels.chats": async (params, caller) => {
-      const { channel, ...query } = parseWorkerCallParams("channels.chats", ChatsParams, params);
-      // A turn others read reads only its own chat, so it lists none.
+      const { channel, query, limit, cursor, includeThreads, includeArchivedThreads } =
+        parseWorkerCallParams("channels.chats", ChatsParams, params);
+      if (!channelsService.chats) throw new Error("This Rome lists no chats");
+      // A listing names no one chat, so it reads as a query of no chat would:
+      // a turn others read lists nothing.
       if (!readsAnyChat(caller?.callerActionContext)) {
         throw new Error("A turn others read lists no chats");
       }
-      if (!channelsService.chats) throw new Error("This host lists no chats");
-      return channelsService.chats(channel, query);
+      return await channelsService.chats(channel, {
+        ...(query ? { query } : {}),
+        ...(limit ? { limit } : {}),
+        ...(cursor ? { cursor } : {}),
+        ...(includeThreads ? { includeThreads } : {}),
+        ...(includeArchivedThreads ? { includeArchivedThreads } : {}),
+      });
     },
     "agentNames.resolve": async (params) => {
       const { name } = parseWorkerCallParams("agentNames.resolve", AgentNamesResolveParams, params);

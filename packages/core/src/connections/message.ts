@@ -21,8 +21,14 @@ export interface MessageWhere {
   readonly name?: string;
   /** The platform thread it was said in, when it was said in one: the chat
    *  the thread was opened under, and the account that started it when the
-   *  platform says. */
-  readonly thread?: { readonly parentChatId: ChatId; readonly startedBy?: string };
+   *  platform says. A thread that lives inside its chat, as on Slack, also
+   *  gives `id`, the platform's id for the thread, by which a read reaches
+   *  the thread's own messages; `chatId` is then the chat it lives in. */
+  readonly thread?: {
+    readonly parentChatId: ChatId;
+    readonly startedBy?: string;
+    readonly id?: ChatId;
+  };
   /** The group it was said in, where the platform carries a group's messages
    *  on a direct chat with each sender, as WeChat's bot does. */
   readonly group?: { readonly id: string };

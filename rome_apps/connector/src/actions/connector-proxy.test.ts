@@ -27,16 +27,6 @@ rs.mock("../api/github-proxy.js", () => ({
   githubProxyCall: (args: unknown) => githubProxyCall(args),
 }));
 
-// Slack is likewise brokered by Rome's own integration, not Composio — fake the
-// direct Slack proxy (token read + HTTP call) so its branch is exercised as a
-// black box without a token file on disk or a live Slack API.
-const readSlackOAuthTokens = rs.fn();
-const slackProxyCall = rs.fn();
-rs.mock("../api/slack-proxy.js", () => ({
-  readSlackOAuthTokens: () => readSlackOAuthTokens(),
-  slackProxyCall: (args: unknown) => slackProxyCall(args),
-}));
-
 // Shopify is likewise brokered by Rome's own integration — fake the token read
 // and the HTTP call, keeping the real GraphQL error detection.
 const readShopifyOAuthToken = rs.fn();
@@ -367,11 +357,9 @@ describe("connector_proxy response mapping", () => {
     expect(readGithubOAuthToken).not.toHaveBeenCalled();
   });
 
-  it("routes an unconnected Slack (no token) to Settings, not connector_connect", async () => {
-    // Slack bypasses Composio entirely — "not connected" means no OAuth token
-    // file, so the agent is pointed at Settings → Connections, never asked to
-    // run connector_connect (which can't broker a Rome-managed toolkit).
-    readSlackOAuthTokens.mockResolvedValueOnce(null);
+  it("routes Slack with no Slack app connected to Settings, not connector_connect", async () => {
+    // Slack goes through Rome's own Slack app, never Composio, so the agent is
+    // pointed at Settings → Connections, never asked to run connector_connect.
     loadConnectorClient.mockImplementation(() => {
       throw new Error("Composio must not be reached for Slack");
     });
@@ -380,73 +368,9 @@ describe("connector_proxy response mapping", () => {
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/settings/i);
     expect(result.error).not.toMatch(/connector_connect/);
-    expect(slackProxyCall).not.toHaveBeenCalled();
   });
 
-  it("proxies Slack directly with the OAuth token, bypassing Composio", async () => {
-    readSlackOAuthTokens.mockResolvedValueOnce({
-      botToken: "xoxb-bot",
-      userToken: "xoxp-user",
-      teamId: "T1",
-    });
-    loadConnectorClient.mockImplementation(() => {
-      throw new Error("Composio must not be reached for Slack");
-    });
-    let received: unknown;
-    slackProxyCall.mockImplementation(async (args: unknown) => {
-      received = args;
-      return { status: 200, data: { ok: true, channel: "C1" }, headers: {} };
-    });
-    const result = await run({
-      toolkit: "slack",
-      path: "/api/chat.postMessage",
-      method: "POST",
-      body: { channel: "C1", text: "hi" },
-    });
-    expect(received).toMatchObject({
-      tokens: { botToken: "xoxb-bot" },
-      endpoint: "https://slack.com/api/chat.postMessage",
-      method: "POST",
-    });
-    expect(result).toMatchObject({ status: "ok", data: { status: 200, data: { ok: true } } });
-  });
-
-  it("fails closed when Slack returns ok:false inside a 200 (logical failure)", async () => {
-    readSlackOAuthTokens.mockResolvedValueOnce({
-      botToken: "xoxb-bot",
-      userToken: null,
-      teamId: "T1",
-    });
-    slackProxyCall.mockResolvedValueOnce({
-      status: 200,
-      data: { ok: false, error: "channel_not_found" },
-      headers: {},
-    });
-    const result = await run({ toolkit: "slack", path: "/api/chat.postMessage", method: "POST" });
-    expect(result.status).toBe("error");
-    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
-    expect(result.error).toMatch(/ok:false/);
-    expect(result.error).toMatch(/channel_not_found/);
-  });
-
-  it("fails closed when Slack rejects the request (non-2xx -> action error)", async () => {
-    readSlackOAuthTokens.mockResolvedValueOnce({
-      botToken: "xoxb-bot",
-      userToken: null,
-      teamId: "T1",
-    });
-    slackProxyCall.mockResolvedValueOnce({
-      status: 429,
-      data: { error: "rate_limited" },
-      headers: {},
-    });
-    const result = await run({ toolkit: "slack", path: "/api/chat.postMessage", method: "POST" });
-    expect(result.status).toBe("error");
-    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
-    expect(result.error).toMatch(/429/);
-  });
-
-  it("refuses an off-provider host for Slack before reading the token", async () => {
+  it("refuses an off-provider host for Slack before asking the Slack app", async () => {
     const result = await run({
       toolkit: "slack",
       host: "evil.example.com",
@@ -456,7 +380,6 @@ describe("connector_proxy response mapping", () => {
     expect(result.status).toBe("error");
     if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
     expect(result.error).toMatch(/Refusing to proxy/);
-    expect(readSlackOAuthTokens).not.toHaveBeenCalled();
   });
 });
 
@@ -700,6 +623,76 @@ describe("Rome-managed Gmail routing", () => {
   it("preserves the Composio path when no Google connection exists", async () => {
     loadConnectorClient.mockResolvedValueOnce(
       clientWithProxy(async () => ({ status: 200, data: { messages: [] }, headers: {} })),
+    );
+    expect(await run(input)).toMatchObject({ status: "ok" });
+    expect(loadConnectorClient).toHaveBeenCalled();
+  });
+});
+
+describe("Rome-managed Outlook routing", () => {
+  const input = { toolkit: "outlook", path: "/v1.0/me/messages", method: "GET" };
+  it("uses Core without Composio sign-in or sharing the Microsoft credential", async () => {
+    const managed = {
+      status: "ok",
+      data: { status: 200, data: { value: [] }, connectionId: "microsoft-1" },
+    };
+    runAction.mockResolvedValueOnce(managed);
+    expect(await run(input)).toEqual(managed);
+    expect(runAction).toHaveBeenCalledWith("core:outlook_read", {
+      path: input.path,
+      method: "GET",
+      host: "graph.microsoft.com",
+    });
+    expect(loadConnectorClient).not.toHaveBeenCalled();
+  });
+  it("does not silently switch mailboxes on a broken Microsoft grant", async () => {
+    runAction.mockResolvedValueOnce({
+      status: "error",
+      error: "Outlook connection is unavailable.",
+    });
+    expect(await run(input)).toMatchObject({ status: "error" });
+    expect(loadConnectorClient).not.toHaveBeenCalled();
+  });
+  it("routes every mail path variant to core, never to Composio", async () => {
+    runAction.mockResolvedValue({ status: "error", error: "Only Outlook mail GETs are allowed." });
+    for (const path of [
+      "/v1.0/me",
+      "/v1.0/me/sendMail",
+      "/v1.0/me/MailFolders/inbox/messages",
+      "/beta/me/messages",
+      "/v1.0/me/messages?$top=5",
+      " /v1.0/me/messages ",
+      "/v1.0/me/mailFolders('Inbox')/messages",
+      "/v1.0/users/someone@example.com/messages",
+      "/v1.0/me/%6Dessages",
+      "/v1.0/me/microsoft.graph.sendMail",
+      "/v1.0/$batch",
+    ]) {
+      runAction.mockClear();
+      await run({ ...input, path });
+      expect(runAction).toHaveBeenCalledWith(
+        "core:outlook_read",
+        expect.objectContaining({ path }),
+      );
+    }
+    expect(loadConnectorClient).not.toHaveBeenCalled();
+  });
+  it("leaves calendar, contacts and other Graph calls on Composio", async () => {
+    for (const path of ["/v1.0/me/events", "/v1.0/me/contacts", "/v1.0/me/messagesExtra"]) {
+      loadConnectorClient.mockResolvedValueOnce(
+        clientWithProxy(async () => ({ status: 200, data: { value: [] }, headers: {} })),
+      );
+      expect(await run({ ...input, path })).toMatchObject({ status: "ok" });
+    }
+    expect(runAction).not.toHaveBeenCalledWith("core:outlook_read", expect.anything());
+  });
+  it("preserves the Composio path when no Microsoft connection exists", async () => {
+    runAction.mockResolvedValueOnce({
+      status: "error",
+      error: "outlook_not_connected: No Rome-managed Microsoft connection.",
+    });
+    loadConnectorClient.mockResolvedValueOnce(
+      clientWithProxy(async () => ({ status: 200, data: { value: [] }, headers: {} })),
     );
     expect(await run(input)).toMatchObject({ status: "ok" });
     expect(loadConnectorClient).toHaveBeenCalled();

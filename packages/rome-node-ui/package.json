@@ -15,10 +15,16 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./activity": {
+      "types": "./dist/activity.d.ts",
+      "default": "./dist/activity.js"
+    },
+    "./activity.css": "./src/activity.css",
     "./styles.css": "./src/styles.css"
   },
   "files": [
     "dist",
+    "src/activity.css",
     "src/styles.css"
   ],
   "scripts": {

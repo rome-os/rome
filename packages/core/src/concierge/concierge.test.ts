@@ -162,6 +162,12 @@ function setup(
   options: {
     settingsDelayMs?: number;
     delay?: (ms: number) => Promise<void>;
+    /** Where a failure the Concierge's own recovery could not get past goes. */
+    unrecovered?: Parameters<typeof startConciergeEvents>[2] extends infer O
+      ? O extends { unrecovered?: infer U }
+        ? U
+        : never
+      : never;
     startEvents?: boolean;
     /** False: the turn has said nothing yet, so a new task row has no message to point to. */
     said?: boolean;
@@ -203,6 +209,8 @@ function setup(
   /** The real chat rows the task rows link to. */
   const storedChats = new ChatsWebChatRepository(testDb.db);
   const approvalListeners = new Set<(approval: unknown) => void>();
+  /** The approvals made, as the repository would find them by id. */
+  const approvalRows = new Map<string, Record<string, unknown> & { threadId: string | null }>();
   const resolvedListeners = new Set<(approval: unknown) => void>();
   const quietFlags: boolean[] = [];
   /** Every guardian setting written, in order. */
@@ -418,6 +426,7 @@ function setup(
     },
     tasks,
     approvals: {
+      findById: async (id: string) => approvalRows.get(id) ?? null,
       onCreated: (listener: (approval: unknown) => void) => {
         approvalListeners.add(listener);
         return () => approvalListeners.delete(listener);
@@ -500,7 +509,7 @@ function setup(
           return () => {};
         },
       },
-      { delay: options.delay },
+      { delay: options.delay, unrecovered: options.unrecovered },
     );
   if (options.startEvents !== false) startEvents();
   /** Lets the event handlers run: real time, or fake time moved a little. */
@@ -680,9 +689,18 @@ function setup(
     },
     // As the repository tells it: with the chat its payload names kept apart.
     createApproval: (approval: Record<string, unknown>) => {
-      for (const listener of approvalListeners)
-        listener({ ...approval, threadId: threadIdOf(approval.payload) });
+      const row = {
+        id: `approval-${approvalRows.size + 1}`,
+        type: "action_execution",
+        ...approval,
+        threadId: threadIdOf(approval.payload),
+      };
+      approvalRows.set(String(row.id), row);
+      for (const listener of approvalListeners) listener(row);
+      return row;
     },
+    /** The approval `id` as the repository holds it now. */
+    approvalRow: (id: string) => approvalRows.get(id),
     resolveApproval: (approval: Record<string, unknown>) => {
       for (const listener of resolvedListeners)
         listener({ ...approval, threadId: threadIdOf(approval.payload) });
@@ -1267,9 +1285,14 @@ describe("Concierge tools", () => {
     }
   });
 
-  it("chat_start runs a task on the strength and effort it names, on the Concierge chat's provider", async () => {
+  it("chat_start runs a task on the strength and effort it names, on the default provider whoever picked the Concierge chat's model", async () => {
     const s = setup();
-    s.sessions.set(CONCIERGE_CHAT, { id: CONCIERGE_CHAT, largeModelSelection: "claude-opus-5-5" });
+    s.service.deps.defaults = { current: () => "anthropic" };
+    s.sessions.set(CONCIERGE_CHAT, {
+      id: CONCIERGE_CHAT,
+      largeModelSelection: "claude-opus-5-5",
+      largeModelSelectionBy: "owner",
+    });
     await s.tool("chat_start", {
       title: "Hours",
       brief: "Find the hours",
@@ -1294,6 +1317,28 @@ describe("Concierge tools", () => {
     const refused = await s.tool("chat_start", { title: "X", brief: "X", model: "huge" });
     expect(refused.isError).toBe(true);
     expect(refused.content[0].text).toContain("model must be one of fast, strong");
+  });
+
+  it("chat_start runs a task on the default provider when Rome chose the Concierge chat's model", async () => {
+    const s = setup();
+    s.service.deps.defaults = { current: () => "anthropic" };
+    s.sessions.set(CONCIERGE_CHAT, {
+      id: CONCIERGE_CHAT,
+      largeModelSelection: "gpt-6-1-sol",
+      largeModelSelectionBy: "auto",
+    });
+    await s.tool("chat_start", { title: "Hours", brief: "Find the hours", model: "fast" });
+    expect(s.chats.startChat).toHaveBeenLastCalledWith(
+      expect.objectContaining({ model: "claude-sonnet" }),
+      "guardian",
+    );
+    // With no default, a task runs by its agent's tier.
+    s.service.deps.defaults = undefined;
+    await s.tool("chat_start", { title: "Plan", brief: "Plan it", model: "strong" });
+    expect(s.chats.startChat).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ model: expect.anything() }),
+      "guardian",
+    );
   });
 
   it("chat_start rejects an unknown project and names the valid ones", async () => {
@@ -1893,6 +1938,7 @@ describe("Concierge tools", () => {
 
   it("topic_start starts a topic chat and answers its link", async () => {
     const s = setup();
+    s.service.deps.defaults = { current: () => "anthropic" };
     const result = await s.tool("topic_start", { name: "Trips" });
     const started = JSON.parse(result.content[0].text) as { chatId: string; link: string };
     expect(started.link).toBe(`/chat/${started.chatId}`);
@@ -1901,7 +1947,7 @@ describe("Concierge tools", () => {
       "Trips",
       undefined,
       undefined,
-      // The main chat has no stored model, so the pick for a new chat.
+      // The main chat has no stored model, so the default provider's strong model.
       "claude-opus-5-5",
       undefined,
       CONCIERGE_AGENT_ID,
@@ -2031,6 +2077,81 @@ describe("Concierge tools", () => {
       s.messages.get(CONCIERGE_CHAT)?.push(questionRow("own-1"));
       expect((await s.tool("card_forward", { cardId: "own-1" })).isError).toBe(true);
       expect(stored(s).some((parts) => parts[0]?.type === "task_chat")).toBe(false);
+    });
+
+    /** A pending approval asked in the task chat `chatId`. */
+    const askApproval = (
+      s: ReturnType<typeof setup>,
+      chatId: string,
+      extra: Record<string, unknown> = {},
+    ) =>
+      s.createApproval({
+        status: "pending",
+        description: "Send the booking email",
+        payload: { channelContext: { threadId: chatId } },
+        ...extra,
+      });
+
+    it("forwards a task's pending approval as the card itself, and decides nothing", async () => {
+      const s = await withRows();
+      const asked = askApproval(s, "task-1");
+      const result = text(await s.tool("card_forward", { cardId: String(asked.id) }));
+      expect(result).toMatchObject({ forwarded: "card" });
+      const row = s.messages.get(CONCIERGE_CHAT)?.at(-1);
+      expect(JSON.parse(row?.content ?? "[]")).toEqual([
+        {
+          type: "task_chat",
+          chatId: "task-1",
+          title: "Health",
+          show: "ask",
+          waitedOn: { kind: "approval", id: asked.id },
+        },
+      ]);
+      expect(row?.replyTo).toBe("ack-1");
+      // Twice in one turn is one message.
+      expect(text(await s.tool("card_forward", { cardId: String(asked.id) })).messageId).toBe(
+        result.messageId,
+      );
+      expect(stored(s).filter((parts) => parts[0]?.type === "task_chat")).toHaveLength(1);
+      // Only the guardian's tap decides it.
+      expect(s.approvalRow(String(asked.id))?.status).toBe("pending");
+    });
+
+    it("refuses an approval where this chat cannot draw cards, and names the task chat", async () => {
+      const s = await withRows();
+      const asked = askApproval(s, "task-1");
+      s.drawWidgets("plain_text");
+      const before = stored(s).length;
+      const result = await s.tool("card_forward", { cardId: String(asked.id) });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("decide it in the task chat");
+      expect(stored(s)).toHaveLength(before);
+      expect(s.approvalRow(String(asked.id))?.status).toBe("pending");
+    });
+
+    it("refuses an approval already decided, one outside a task chat, one of another Concierge chat's task, and an unknown id", async () => {
+      const s = await withRows();
+      await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+      s.messages.set(TOPIC_CHAT, [{ id: "t0", role: "user", content: "[]", turnId: "ask" }]);
+      const decided = askApproval(s, "task-1", { status: "approved" });
+      const outside = askApproval(s, CONCIERGE_CHAT);
+      const other = askApproval(s, "task-1");
+      const before = stored(s).length;
+      const refused = async (cardId: string) => {
+        const result = await s.tool("card_forward", { cardId });
+        expect(result.isError).toBe(true);
+        return result.content[0].text as string;
+      };
+
+      expect(await refused(String(decided.id))).toContain("already decided");
+      expect(await refused(String(outside.id))).toContain("No card");
+      expect(await refused("no-such-approval")).toContain("No card");
+      // Another Concierge chat's turn may not forward this chat's task's approval.
+      s.turnIn(TOPIC_CHAT);
+      s.inTurn("ask");
+      expect(await refused(String(other.id))).toContain("belongs to another Concierge chat");
+      expect(stored(s)).toHaveLength(before);
+      expect(s.messages.get(TOPIC_CHAT)).toHaveLength(1);
     });
 
     it("forwards the card itself, issued again, alone in its message and replying to the task's start", async () => {
@@ -3228,7 +3349,7 @@ describe("Concierge events", () => {
     await s.settle();
     await rs.advanceTimersByTimeAsync(5_000);
     expect(s.backendTurns).toEqual([]);
-    s.createApproval({
+    const pending = s.createApproval({
       status: "pending",
       description: "Send the booking email",
       payload: { channelContext: { threadId: chatId } },
@@ -3236,8 +3357,27 @@ describe("Concierge events", () => {
     await s.settle();
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns[0].prompt).toContain('changes="approval"');
-    expect(s.backendTurns[0].prompt).toContain("approval: Send the booking email");
+    expect(s.backendTurns[0].prompt).toContain(`card id=${pending.id}: Send the booking email`);
+    expect(s.backendTurns[0].prompt).not.toContain("approval: ");
     expect(s.quietFlags).toEqual([true]);
+  });
+
+  it("names a pending approval by its preview's title when it has one", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    const asked = s.createApproval({
+      status: "pending",
+      description: 'Action "system:vault_apply" requires guardian approval',
+      payload: {
+        channelContext: { threadId: chatId },
+        preview: { kind: "secret_access", title: "Use CF_API_TOKEN for 15 min", summary: "x" },
+      },
+    });
+    await s.settle();
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns[0].prompt).toContain(`card id=${asked.id}: Use CF_API_TOKEN for 15 min`);
+    expect(s.backendTurns[0].prompt).not.toContain("requires guardian approval");
   });
 
   it("tells the Concierge at once of a task turn that failed before it started, either way it is told", async () => {
@@ -3716,6 +3856,7 @@ describe("Concierge chat", () => {
     state: Record<string, unknown>,
     exists: boolean,
     stored: string | null = null,
+    defaultProvider: "anthropic" | "openai" | "rome_credits" | null = "openai",
   ) => {
     const createSession = rs.fn(async () => {});
     const update = rs.fn(async () => {});
@@ -3728,6 +3869,7 @@ describe("Concierge chat", () => {
         updateSessionLargeModelSelection: update,
       },
       accounts: fakeAccounts(() => state),
+      defaults: { current: () => defaultProvider },
     } as unknown as ConciergeDeps);
     return { service, createSession, update };
   };
@@ -3737,7 +3879,7 @@ describe("Concierge chat", () => {
     openai: reportOf("available"),
   };
 
-  it("creates the chat at its fixed id, on the model the signed-in providers serve best", async () => {
+  it("creates the chat at its fixed id, on the default provider's strong model", async () => {
     const { service, createSession } = serviceWith(codexOnly, false);
     const [first, second] = await Promise.all([service.ensureChatId(), service.ensureChatId()]);
     expect([first, second]).toEqual(["concierge", "concierge"]);
@@ -3779,30 +3921,37 @@ describe("Concierge chat", () => {
     );
   });
 
-  describe("moving off the old default model", () => {
-    const withChats = (chats: Record<string, Record<string, unknown>>) => {
-      const update = rs.fn(async () => {});
-      const service = new ConciergeService({
-        settingsRepo: { get: async () => null },
-        webchatRepo: {
-          getSession: async (id: string) => (chats[id] ? { id, ...chats[id] } : null),
-          updateSessionLargeModelSelection: update,
-        },
-        accounts: fakeAccounts(() => ({
-          anthropic: reportOf("available"),
-          openai: reportOf("available"),
-        })),
-      } as unknown as ConciergeDeps);
-      return { service, update };
-    };
+  const withChats = (
+    chats: Record<string, Record<string, unknown>>,
+    defaultProvider?: "anthropic" | "openai" | "rome_credits" | null,
+  ) => {
+    const update = rs.fn(async () => {});
+    const selectModel = rs.fn();
+    const find = rs.fn(() => ({ selectModel }));
+    const service = new ConciergeService({
+      settingsRepo: { get: async () => null },
+      webchatRepo: {
+        getSession: async (id: string) => (chats[id] ? { id, ...chats[id] } : null),
+        updateSessionLargeModelSelection: update,
+      },
+      accounts: fakeAccounts(() => ({
+        anthropic: reportOf("available"),
+        openai: reportOf("available"),
+      })),
+      agentSessionManager: { find },
+      ...(defaultProvider === undefined ? {} : { defaults: { current: () => defaultProvider } }),
+    } as unknown as ConciergeDeps);
+    return { service, update, selectModel, find };
+  };
 
+  describe("moving off the old default model", () => {
     it("moves a Concierge chat Rome left on Sonnet or Luna to its provider's strong model, once", async () => {
       const { service, update } = withChats({
         concierge: { agentName: CONCIERGE_AGENT_ID, largeModelSelection: "claude-sonnet" },
         topic: { agentName: CONCIERGE_AGENT_ID, largeModelSelection: "gpt-6-luna" },
       });
-      await service.switchIfExhausted("concierge");
-      await service.switchIfExhausted("topic");
+      await service.followDefault("concierge");
+      await service.followDefault("topic");
       expect(update.mock.calls).toEqual([
         ["concierge", "claude-opus-5-5", "auto"],
         ["topic", "gpt-6-1-sol", "auto"],
@@ -3825,9 +3974,81 @@ describe("Concierge chat", () => {
         ordinary: { agentName: null, largeModelSelection: "claude-sonnet" },
         task: { agentName: "main", largeModelSelection: "gpt-6-luna" },
       });
-      for (const id of ["concierge", "topic", "ordinary", "task"])
-        await service.switchIfExhausted(id);
+      for (const id of ["concierge", "topic", "ordinary", "task"]) await service.followDefault(id);
       expect(update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("following the default provider", () => {
+    it("moves a model Rome chose to the default provider's model of the same strength, live session included", async () => {
+      const { service, update, selectModel, find } = withChats(
+        {
+          concierge: {
+            agentName: CONCIERGE_AGENT_ID,
+            largeModelSelection: "gpt-6-1-sol",
+            largeModelSelectionBy: "auto",
+          },
+        },
+        "anthropic",
+      );
+      expect(await service.followDefault("concierge")).toEqual({
+        from: "openai",
+        to: "anthropic",
+      });
+      expect(update.mock.calls).toEqual([["concierge", "claude-opus-5-5", "auto"]]);
+      expect(find).toHaveBeenCalledWith({
+        agentName: CONCIERGE_AGENT_ID,
+        channelThreadKey: "webchat:concierge",
+      });
+      expect(selectModel).toHaveBeenCalledWith("claude-opus-5-5");
+    });
+
+    it("keeps a model its owner picked", async () => {
+      const { service, update, selectModel } = withChats(
+        {
+          concierge: {
+            agentName: CONCIERGE_AGENT_ID,
+            largeModelSelection: "gpt-6-1-sol",
+            largeModelSelectionBy: "owner",
+          },
+        },
+        "anthropic",
+      );
+      expect(await service.followDefault("concierge")).toBeNull();
+      expect(update).not.toHaveBeenCalled();
+      expect(selectModel).not.toHaveBeenCalled();
+    });
+
+    it("moves a task chat Rome put on a fast model to the default provider's fast model", async () => {
+      const { service, update, selectModel, find } = withChats(
+        {
+          task: {
+            agentName: "main",
+            largeModelSelection: "claude-sonnet",
+            largeModelSelectionBy: "auto",
+          },
+        },
+        "openai",
+      );
+      expect(await service.followDefault("task")).toEqual({ from: "anthropic", to: "openai" });
+      expect(update.mock.calls).toEqual([["task", "gpt-6-luna", "auto"]]);
+      expect(find).toHaveBeenCalledWith({ agentName: "main", channelThreadKey: "webchat:task" });
+      expect(selectModel).toHaveBeenCalledWith("gpt-6-luna");
+    });
+
+    it("moves nothing while no default is set", async () => {
+      const chats = {
+        concierge: {
+          agentName: CONCIERGE_AGENT_ID,
+          largeModelSelection: "gpt-6-1-sol",
+          largeModelSelectionBy: "auto",
+        },
+      };
+      for (const unset of [withChats(chats), withChats(chats, null)]) {
+        expect(await unset.service.followDefault("concierge")).toBeNull();
+        expect(unset.update).not.toHaveBeenCalled();
+        expect(unset.selectModel).not.toHaveBeenCalled();
+      }
     });
   });
 
@@ -3916,7 +4137,7 @@ describe("Concierge chat", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it("gives a chat created before any login its model once a provider is signed in", async () => {
+  it("gives a chat created before any default its model once a default is set", async () => {
     const { service, update } = serviceWith(codexOnly, true, null);
     await service.ensureChatId();
     expect(update).toHaveBeenCalledWith("concierge", "gpt-6-1-sol", "auto");
@@ -3934,128 +4155,61 @@ describe("Concierge chat", () => {
       { anthropic: reportOf("available"), openai: codexOnly.openai },
       true,
       null,
+      "anthropic",
     );
     await claude.service.ensureChatId();
     expect(claude.update).toHaveBeenCalledWith("concierge", "claude-opus-5-5", "auto");
   });
 
-  it("stores nothing for an existing chat while no provider is signed in", async () => {
-    const { service, update } = serviceWith(
-      { anthropic: signedOut, openai: reportOf("unauthorized") },
+  it("stores nothing for an existing chat while no default is set, or Claude is a compatible provider", async () => {
+    const none = serviceWith(codexOnly, true, null, null);
+    expect(await none.service.ensureChatId()).toBe("concierge");
+    expect(none.update).not.toHaveBeenCalled();
+    const compatible = serviceWith(
+      {
+        anthropic: reportOf("available", { authMethod: "stored-compatible" }),
+        openai: codexOnly.openai,
+      },
       true,
       null,
+      "anthropic",
     );
-    expect(await service.ensureChatId()).toBe("concierge");
-    expect(update).not.toHaveBeenCalled();
+    await compatible.service.ensureChatId();
+    expect(compatible.update).not.toHaveBeenCalled();
   });
 });
 
-describe("Concierge quota failover", () => {
-  const state = () => ({
-    anthropic: reportOf("usage_limit_reached"),
-    openai: reportOf("available"),
-  });
-  it("stores a selection, changes a live session, and persists a pushed notice excluded from history", async () => {
-    const s = setup({ startEvents: false });
-    await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
-    await s.storedChats.updateSessionLargeModelSelection(CONCIERGE_CHAT, "claude-sonnet", "owner");
-    s.service.deps.webchatRepo = s.storedChats;
-    const raw = state();
-    s.deps.accounts = fakeAccounts(() => raw);
-    s.deps.sessionRepository.current = rs.fn(async () => ({ provider: "openai" }) as never);
-    const selectModel = rs.fn();
-    s.deps.agentSessionManager.find = rs.fn(() => ({ selectModel }) as never);
-    const inserted = rs.fn();
-    s.storedChats.onMessageInserted(inserted);
-    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toEqual({
-      from: "anthropic",
-      to: "openai",
-      selectionId: "gpt-6-1-sol",
-      reason: "quota",
-    });
-    expect(selectModel).toHaveBeenCalledWith("gpt-6-1-sol");
-    expect((await s.storedChats.getSession(CONCIERGE_CHAT))?.largeModelSelection).toBe(
-      "gpt-6-1-sol",
-    );
-    expect(inserted).toHaveBeenCalledTimes(1);
-    const [notice] = await s.storedChats.getMessages(CONCIERGE_CHAT);
-    expect(JSON.parse(notice.content)).toEqual([
-      {
-        type: "quota_switch",
-        from: "anthropic",
-        to: "openai",
-        model: "gpt-6.1-sol",
-        reason: "quota",
-        fromModel: "claude-sonnet-5-5",
-      },
-    ]);
-    // Transcript order breaks same-second ties by turn id, so it must sort by time.
-    expect(notice.turnId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
-    expect(await readWebchatMessages(s.storedChats, CONCIERGE_CHAT, new Date(0))).toEqual([]);
-    raw.anthropic = reportOf("available");
-    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
-  });
+describe("Concierge usage-limit and sign-in failures", () => {
   it.each([
-    "both out",
-    "not exhausted",
-    "credits",
-    "reauth",
-    "api key",
-    "other chat",
-  ])("leaves %s alone", async (reason) => {
-    const s = setup({ startEvents: false });
-    const raw = state();
-    s.deps.accounts = fakeAccounts(() => raw);
-    if (reason === "both out") raw.openai = reportOf("usage_limit_reached");
-    if (reason === "not exhausted") raw.anthropic = reportOf("available");
-    if (reason === "credits") raw.openai = reportOf("unauthorized");
-    if (reason === "reauth") raw.openai = reportOf("expired");
-    if (reason === "api key")
-      raw.openai = reportOf("available", { accountType: "api_key", usageLimited: false });
-    expect(
-      await s.service.switchIfExhausted(reason === "other chat" ? "task-chat" : CONCIERGE_CHAT),
-    ).toBeNull();
-    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).not.toHaveBeenCalled();
-    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
-  });
-  it("uses the runtime provider before the sole-exhausted fallback", async () => {
-    const s = setup({ startEvents: false });
-    s.deps.accounts = fakeAccounts(state);
-    s.deps.sessionRepository.current = rs.fn(async () => ({ provider: "openai" }) as never);
-    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
-    s.deps.sessionRepository.current = rs.fn(async () => null);
-    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toMatchObject({
-      from: "anthropic",
-      to: "openai",
+    ["quota", "monthly spend limit", "usage_limit"],
+    ["login", "Failed to authenticate", undefined],
+  ] as const)("keeps the chat on its provider after a %s failure, with no note and no recovery", async (_reason, message, code) => {
+    const s = setup({ delay: async () => {} });
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(
+      CONCIERGE_CHAT,
+      "claude-opus-5-5",
+      "auto",
+    );
+    s.deps.accounts = fakeAccounts({
+      anthropic: reportOf(code ? "usage_limit_reached" : "unauthorized"),
+      openai: reportOf("available"),
     });
-  });
-  it("runs one recovery and never recovers the recovery, even across a slow settings read", async () => {
-    const s = setup({ settingsDelayMs: 10 });
-    const raw = state();
-    s.deps.accounts = fakeAccounts(() => raw);
-    s.onBackendTurn(() => {
-      raw.anthropic = reportOf("available");
-      raw.openai = reportOf("usage_limit_reached");
-      if (s.backendTurns.length < 3)
-        void s.finish({
-          turnId: "recovery",
-          agentName: CONCIERGE_AGENT_ID,
-          chatId: CONCIERGE_CHAT,
-          status: "error",
-        });
-    });
+    const switchModel = rs.spyOn(s.service, "switchForModelLimit");
     await s.finish({
-      turnId: "quota",
-      failure: { provider: "anthropic", message: "usage limit", code: "usage_limit" },
+      turnId: "failed",
+      failure: { provider: "anthropic", message, ...(code ? { code } : {}) },
       agentName: CONCIERGE_AGENT_ID,
       chatId: CONCIERGE_CHAT,
       status: "error",
     });
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(s.backendTurns.map((turn) => turn.prompt)).toEqual([
-      MAIN_LINE + quotaRecoveryPrompt("Claude"),
-    ]);
+    await s.settle();
+    expect(s.backendTurns).toEqual([]);
+    expect(switchModel).not.toHaveBeenCalled();
     expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenCalledTimes(1);
+    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+    expect(s.sessions.get(CONCIERGE_CHAT)).toMatchObject({
+      largeModelSelection: "claude-opus-5-5",
+    });
   });
   it.each([
     "no failure",
@@ -4063,7 +4217,7 @@ describe("Concierge quota failover", () => {
     "task chat",
   ])("does not recover %s", async (reason) => {
     const s = setup();
-    const switchModel = rs.spyOn(s.service, "switchIfExhausted");
+    const switchModel = rs.spyOn(s.service, "switchForModelLimit");
     await s.finish({
       turnId: reason,
       agentName: reason === "task chat" ? "main" : CONCIERGE_AGENT_ID,
@@ -4101,124 +4255,105 @@ describe("Concierge provider recovery", () => {
     await s.deps.webchatRepo.updateSessionLargeModelSelection(
       CONCIERGE_CHAT,
       "claude-opus-5-5",
-      "owner",
+      "auto",
     );
     return { s, raw };
   }
   it.each([
-    [
-      "anthropic",
-      "claude-sonnet",
-      "You've hit your Sonnet limit",
-      "model_limit",
-      "claude-opus-5-5",
-    ],
-    ["openai", "gpt-6-luna", "Selected model is at capacity.", "model_limit", "gpt-5-6-terra"],
-    ["anthropic", "claude-sonnet", "monthly spend limit", "quota", "gpt-6-1-sol"],
-    ["openai", "gpt-6-luna", "Failed to authenticate", "login", "claude-opus-5-5"],
-  ] as const)("moves %s from %s on %s", async (provider, selection, message, reason, target) => {
+    ["anthropic", "claude-sonnet", "You've hit your Sonnet limit", "claude-opus-5-5", "kept"],
+    ["openai", "gpt-6-luna", "Selected model is at capacity.", "gpt-5-6-terra", "auto"],
+  ] as const)("moves %s from %s on %s to the same provider's other model, keeping who chose it", async (provider, selection, message, target, by) => {
     const { s } = await prepared({ startEvents: false });
-    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, selection, "owner");
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, selection, by);
     expect(
-      await s.service.switchForFailure(CONCIERGE_CHAT, failure(message, provider), reason),
-    ).toMatchObject({ selectionId: target, reason });
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure(message, provider)),
+    ).toMatchObject({ from: provider, to: provider, selectionId: target });
+    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenLastCalledWith(
+      CONCIERGE_CHAT,
+      target,
+      by,
+    );
     expect(s.deps.agentSessionManager.find).toHaveBeenCalled();
+    expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenLastCalledWith(
+      CONCIERGE_CHAT,
+      expect.any(String),
+      [
+        expect.objectContaining({
+          type: "quota_switch",
+          from: provider,
+          to: provider,
+          reason: "model_limit",
+        }),
+      ],
+    );
   });
-  it("falls back on the same provider only for ambiguous quota, without marking it", async () => {
-    const { s, raw } = await prepared({ startEvents: false });
-    raw.openai = reportOf("unauthorized");
+  it("keeps a chat on Rome credits there when Codex's model hits its limit", async () => {
+    const { s } = await prepared({ startEvents: false });
+    // An owner-free chat on a Claude model, while every chat runs on Rome credits: it runs on Codex.
+    s.service.deps.defaults = { current: () => "rome_credits" };
+    const selectModel = rs.fn();
+    (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue({ selectModel });
     expect(
-      await s.service.switchForFailure(CONCIERGE_CHAT, failure("You've hit your limit"), "quota"),
-    ).toMatchObject({ selectionId: "claude-sonnet" });
-    expect(raw.anthropic?.state).toBe("available");
+      await s.service.switchForModelLimit(
+        CONCIERGE_CHAT,
+        failure("Selected model is at capacity.", "openai"),
+      ),
+    ).toMatchObject({ from: "openai", to: "openai", selectionId: "gpt-6-luna" });
+    expect(selectModel).toHaveBeenCalledWith("gpt-6-luna");
   });
-  it.each([
-    "api source",
-    "credits target",
-    "both out",
-    "other chat",
-  ])("refuses %s", async (kind) => {
+  it("moves a chat whose turns never ran off the provider's strong model", async () => {
+    const { s } = await prepared({ startEvents: false });
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, null, "auto");
+    expect(
+      await s.service.switchForModelLimit(
+        CONCIERGE_CHAT,
+        failure("Selected model is at capacity. Please try a different model.", "openai"),
+      ),
+    ).toMatchObject({ from: "openai", to: "openai" });
+  });
+  it("never moves off a model its owner picked: the chat shows a card", async () => {
+    const { s } = await prepared({ startEvents: false });
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(
+      CONCIERGE_CHAT,
+      "claude-sonnet",
+      "owner",
+    );
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Sonnet limit")),
+    ).toBeNull();
+    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+  });
+  it.each(["api source", "other chat"])("refuses %s", async (kind) => {
     const { s, raw } = await prepared({ startEvents: false });
     if (kind === "api source")
       raw.anthropic = reportOf("available", {
         authMethod: "environment",
         usageLimited: false,
       });
-    if (kind === "credits target") raw.openai = reportOf("unauthorized");
-    if (kind === "both out") {
-      raw.anthropic = reportOf("usage_limit_reached");
-      raw.openai = reportOf("usage_limit_reached");
-    }
     expect(
-      await s.service.switchForFailure(
+      await s.service.switchForModelLimit(
         kind === "other chat" ? "task" : CONCIERGE_CHAT,
-        failure("monthly spend limit"),
-        "quota",
+        failure("You've hit your Opus limit"),
       ),
     ).toBeNull();
     expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
   });
   it("blocks a return for ten minutes but permits it after the interval", async () => {
     const { s } = await prepared({ startEvents: false });
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(
+      CONCIERGE_CHAT,
+      "claude-sonnet",
+      "auto",
+    );
     const now = rs.spyOn(Date, "now").mockReturnValue(1_000_000);
     expect(
-      await s.service.switchForFailure(CONCIERGE_CHAT, failure("Sign-in failed"), "login"),
-    ).not.toBeNull();
-    expect(
-      await s.service.switchForFailure(
-        CONCIERGE_CHAT,
-        failure("Sign-in failed", "openai"),
-        "login",
-      ),
-    ).toBeNull();
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Sonnet limit")),
+    ).toMatchObject({ selectionId: "claude-opus-5-5" });
+    expect(await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Opus limit"))).toBeNull();
     now.mockReturnValue(1_600_001);
     expect(
-      await s.service.switchForFailure(
-        CONCIERGE_CHAT,
-        failure("Sign-in failed", "openai"),
-        "login",
-      ),
-    ).not.toBeNull();
-  });
-  it.each(["loggedOut", "reauth"])("switches before a turn when %s", async (kind) => {
-    const { s, raw } = await prepared({ startEvents: false });
-    raw.anthropic = reportOf(kind === "loggedOut" ? "unauthorized" : "expired");
-    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toMatchObject({
-      reason: "login",
-      to: "openai",
-    });
-  });
-  it("moves an Auto chat whose first turn failed before any provider was recorded", async () => {
-    const s = setup({ startEvents: false });
-    await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
-    s.service.deps.webchatRepo = s.storedChats;
-    // No turn has succeeded, so the runtime row records no provider, and
-    // neither provider is marked: only the failed turn names its provider.
-    s.service.deps.sessionRepository = {
-      current: rs.fn(async () => ({ provider: null, model: null })),
-    } as never;
-    s.service.deps.accounts = fakeAccounts(bothAvailable());
-    expect(
-      await s.service.switchForFailure(
-        CONCIERGE_CHAT,
-        { message: "You've hit your limit", provider: "anthropic" },
-        "quota",
-      ),
-    ).toMatchObject({ from: "anthropic", to: "openai" });
-  });
-  it("keeps a Codex pick on Rome credits, and still moves on a Codex reauth", async () => {
-    const s = setup({ startEvents: false });
-    await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
-    await s.storedChats.updateSessionLargeModelSelection(CONCIERGE_CHAT, "gpt-6-luna", "owner");
-    s.service.deps.webchatRepo = s.storedChats;
-    const raw: ModelAccountReports = {
-      anthropic: reportOf("available"),
-      openai: reportOf("unauthorized"),
-    };
-    s.deps.accounts = fakeAccounts(() => raw);
-    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toBeNull();
-    raw.openai = reportOf("expired");
-    expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toMatchObject({ reason: "login" });
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Opus limit")),
+    ).toMatchObject({ selectionId: "claude-sonnet" });
   });
   it("drops a pending retry when the failed subscription stops paying during the wait", async () => {
     let release!: () => void;
@@ -4282,25 +4417,25 @@ describe("Concierge provider recovery", () => {
   it.each([
     "temporary",
     "model_limit",
-  ] as const)("tries one cross-provider recovery after %s recovery fails, then terminates", async (reason) => {
+  ] as const)("runs one recovery after a %s failure, and nothing more when it fails too", async (reason) => {
     const { s } = await prepared({ delay: async () => {} });
     s.onBackendTurn(() => {
-      void finish(
-        s,
-        failure("Connection error", s.backendTurns.length === 2 ? "openai" : "anthropic"),
-        "recovery",
-      );
+      void finish(s, failure("Connection error"), "recovery");
     });
     await finish(
       s,
-      failure(reason === "temporary" ? "Connection error" : "You've hit your Sonnet limit"),
+      failure(reason === "temporary" ? "Connection error" : "You've hit your Opus limit"),
     );
     await s.settle();
-    expect(s.backendTurns).toHaveLength(2);
-    expect(s.backendTurns.every((t) => t.prompt.includes("Do only what remains"))).toBe(true);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0]?.prompt).toContain("Do only what remains");
+    // Only the model-limit move writes a note; no other provider takes over.
     expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenCalledTimes(
-      reason === "temporary" ? 1 : 2,
+      reason === "temporary" ? 0 : 1,
     );
+    expect(s.sessions.get(CONCIERGE_CHAT)).toMatchObject({
+      largeModelSelection: reason === "temporary" ? "claude-opus-5-5" : "claude-sonnet",
+    });
   });
   it.each([
     ["background failure", false],
@@ -4343,11 +4478,12 @@ describe("Concierge provider recovery", () => {
     expect(delay).toHaveBeenCalledWith(30_000);
     release();
     await s.settle();
-    expect(retries).toBe(retryFails ? 2 : 1);
+    // A failed retry is not retried again, on this provider or another.
+    expect(retries).toBe(1);
     expect(s.backendTurns.filter((turn) => turn.prompt.includes("<quota_recovery>"))).toHaveLength(
-      retryFails ? 2 : 1,
+      1,
     );
-    expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenCalledTimes(retryFails ? 1 : 0);
+    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
     expect(delay).toHaveBeenCalledTimes(1);
   });
   it.each([
@@ -4355,11 +4491,7 @@ describe("Concierge provider recovery", () => {
     { reason: "model_access_denied" },
   ] as const)("moves a structured model refusal %j to another model on the same provider", async (fields) => {
     const { s } = await prepared();
-    await s.deps.webchatRepo.updateSessionLargeModelSelection(
-      CONCIERGE_CHAT,
-      "gpt-6-luna",
-      "owner",
-    );
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, "gpt-6-luna", "auto");
     s.onBackendTurn(() => {
       void finish(s);
     });
@@ -4402,18 +4534,8 @@ describe("Concierge provider recovery", () => {
       async () => ({ provider: "anthropic", model: "claude-sonnet-5-5" }) as never,
     );
     expect(
-      await s.service.switchForFailure(CONCIERGE_CHAT, failure("Sonnet limit"), "model_limit"),
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Sonnet limit")),
     ).toMatchObject({ selectionId: "claude-opus-5-5" });
-  });
-  it("does not return to a same-provider model within the cooldown", async () => {
-    const { s, raw } = await prepared({ startEvents: false });
-    raw.openai = reportOf("unauthorized");
-    expect(
-      await s.service.switchForFailure(CONCIERGE_CHAT, failure("Sonnet limit"), "model_limit"),
-    ).not.toBeNull();
-    expect(
-      await s.service.switchForFailure(CONCIERGE_CHAT, failure("Opus limit"), "model_limit"),
-    ).toBeNull();
   });
   it("does not move again after an excluded retry failure", async () => {
     const { s } = await prepared({ delay: async () => {} });
@@ -4427,11 +4549,7 @@ describe("Concierge provider recovery", () => {
   });
   it("recovers a topic chat as the main chat, and keeps each chat's cooldown its own", async () => {
     const { s } = await prepared({ delay: async () => {} });
-    await s.deps.webchatRepo.updateSessionLargeModelSelection(
-      TOPIC_CHAT,
-      "claude-opus-5-5",
-      "owner",
-    );
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(TOPIC_CHAT, "claude-sonnet", "auto");
     s.onBackendTurn(() => {
       void s.finish({
         turnId: "ok",
@@ -4445,25 +4563,44 @@ describe("Concierge provider recovery", () => {
       agentName: CONCIERGE_AGENT_ID,
       chatId: TOPIC_CHAT,
       status: "error",
-      failure: failure("monthly spend limit"),
+      failure: failure("You've hit your Sonnet limit"),
       text: "done",
     });
     await s.settle();
     expect(s.backendTurns.at(-1)).toMatchObject({ threadId: TOPIC_CHAT });
-    expect(s.sessions.get(TOPIC_CHAT)).toMatchObject({ largeModelSelection: "gpt-6-1-sol" });
-    // The topic chat left Opus; the main chat may still move to it.
+    expect(s.sessions.get(TOPIC_CHAT)).toMatchObject({ largeModelSelection: "claude-opus-5-5" });
+    // The topic chat left Sonnet; the main chat may still move to it.
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Opus limit")),
+    ).toMatchObject({ selectionId: "claude-sonnet" });
+  });
+
+  it("hands a model limit no other model could take to the card handler", async () => {
+    const unrecovered = rs.fn(async () => {});
+    const { s } = await prepared({ unrecovered });
     await s.deps.webchatRepo.updateSessionLargeModelSelection(
       CONCIERGE_CHAT,
-      "gpt-6-luna",
+      "claude-opus-5-5",
       "owner",
     );
-    expect(
-      await s.service.switchForFailure(
-        CONCIERGE_CHAT,
-        failure("monthly spend limit", "openai"),
-        "quota",
-      ),
-    ).toMatchObject({ selectionId: "claude-opus-5-5" });
+    await finish(s, failure("You've hit your Opus limit"));
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(0);
+    expect(unrecovered).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: CONCIERGE_CHAT, turnId: "failed" }),
+    );
+  });
+
+  it("hands a temporary failure its retry did not get past to the card handler", async () => {
+    const unrecovered = rs.fn(async () => {});
+    const { s } = await prepared({ delay: async () => {}, unrecovered });
+    s.onBackendTurn(() => {
+      void finish(s, failure("Connection error"), "retry");
+    });
+    await finish(s, failure("Connection error"));
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(1);
+    expect(unrecovered).toHaveBeenCalledWith(expect.objectContaining({ turnId: "retry" }));
   });
 
   it("ignores a task chat's temporary failure", async () => {
@@ -4553,16 +4690,15 @@ describe("Concierge chats", () => {
     await expect(s.service.resolveTurn(unowned)).rejects.toThrow("no owner");
   });
 
-  it("moves an unused chat off an exhausted provider before opening its runtime for a delivery", async () => {
+  it("moves an unused chat Rome chose a model for to the default provider before opening its runtime for a delivery", async () => {
     const s = setup({ startEvents: false });
     s.deps.sessionRepository.current = (async () => null) as never;
-    s.deps.accounts = fakeAccounts({
-      anthropic: reportOf("usage_limit_reached"),
-      openai: reportOf("available"),
-    });
+    s.deps.accounts = fakeAccounts(bothAvailable());
+    s.service.deps.defaults = { current: () => "openai" };
     s.sessions.set(CONCIERGE_CHAT, {
       ...s.sessions.get(CONCIERGE_CHAT),
-      largeModelSelection: "claude-sonnet",
+      largeModelSelection: "claude-opus-5-5",
+      largeModelSelectionBy: "auto",
     });
     const openedOn: unknown[] = [];
     s.chats.openSession = rs.fn(async (chatId: string) => {
@@ -4570,7 +4706,7 @@ describe("Concierge chats", () => {
       return `opened-${chatId}`;
     });
     await s.service.runSystemTurn(CONCIERGE_CHAT, "<external_events/>");
-    // The runtime opens on the provider the quota check moved it to.
+    // The runtime opens on the default provider's model.
     expect(openedOn).toEqual(["gpt-6-1-sol"]);
     expect(s.backendTurns.at(-1)).toMatchObject({ sessionId: `opened-${CONCIERGE_CHAT}` });
   });
@@ -4888,20 +5024,6 @@ describe("Concierge chats", () => {
     s.deps.checks = { timesScheduled: async () => new Map() } as never;
     expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe("");
   });
-
-  it("switches a topic chat's provider when its quota runs out, as the main chat's", async () => {
-    const s = setup({ startEvents: false });
-    s.deps.accounts = fakeAccounts({
-      anthropic: reportOf("usage_limit_reached"),
-      openai: reportOf("available", { ...RESTRICTED_PLAN }),
-    });
-    s.sessions.set(TOPIC_CHAT, {
-      ...s.sessions.get(TOPIC_CHAT),
-      largeModelSelection: "claude-sonnet",
-    });
-    expect(await s.service.switchIfExhausted(TOPIC_CHAT)).toMatchObject({ from: "anthropic" });
-    expect(await s.service.switchIfExhausted("task-1")).toBeNull();
-  });
 });
 
 describe("Concierge connect_card", () => {
@@ -5032,6 +5154,34 @@ describe("Concierge connect_card", () => {
 
     expect(result.isError).toBeFalsy();
     expect(text(result)).toMatchObject({ connected: true });
+    expect(cards(s)).toEqual([]);
+  });
+
+  it("takes the one service labelled with the name it was given", async () => {
+    const s = setup();
+    withServices(s, [
+      { service: "slack_app", label: "Slack", state: "working", connect: null },
+      { service: "mail", label: "Mail", state: null, connect: MAIL_CONNECT },
+    ]);
+
+    const result = await s.tool("connect_card", { service: "slack" });
+
+    expect(result.isError).toBeFalsy();
+    expect(text(result)).toMatchObject({ connected: true });
+    expect(cards(s)).toEqual([]);
+  });
+
+  it("refuses a name several services are labelled with, naming each", async () => {
+    const s = setup();
+    withServices(s, [
+      { service: "slack_app", label: "Slack", state: "working", connect: null },
+      { service: "slack_bot", label: "Slack", state: null, connect: null },
+    ]);
+
+    const result = await s.tool("connect_card", { service: "slack" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("slack_app (working), slack_bot (not connected)");
     expect(cards(s)).toEqual([]);
   });
 

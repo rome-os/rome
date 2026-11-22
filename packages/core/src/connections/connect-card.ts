@@ -167,14 +167,24 @@ export function connectableKinds(): OAuthProvider[] {
 export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKind[] {
   const rank = { working: 0, off: 1, broken: 2 } as const;
   const kinds = new Map<string, DeviceKind>();
+  // A kind's summary is the first one reported in device-id order, whatever
+  // each connection's state, so `connect_account`'s description does not
+  // change when the devices' states do.
+  const summaries = new Map<string, string>();
+  for (const connection of connections) {
+    if (connection.summary && !summaries.has(connection.capability)) {
+      summaries.set(connection.capability, connection.summary);
+    }
+  }
   for (const connection of connections) {
     if (isOAuthProvider(connection.capability)) continue;
     const known = kinds.get(connection.capability);
     if (known?.state && rank[known.state] <= rank[connection.state]) continue;
+    const summary = summaries.get(connection.capability);
     kinds.set(connection.capability, {
       kind: connection.capability,
       label: known?.label ?? connection.title,
-      ...(connection.summary ? { summary: connection.summary } : {}),
+      ...(summary ? { summary } : {}),
       ...(connection.icon ? { icon: connection.icon } : {}),
       ...(connection.labels && Object.keys(connection.labels).length > 0
         ? { labels: connection.labels }

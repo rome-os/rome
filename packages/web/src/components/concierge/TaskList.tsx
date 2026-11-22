@@ -12,7 +12,14 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import { type PointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -49,6 +56,7 @@ import {
 import { useLiveEvents } from "@/hooks/use-live-events";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { fetchJson } from "@/lib/fetch-json";
+import { isPlainClick } from "@/lib/plain-click";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { cn } from "@/lib/utils";
 import { TaskGlyph } from "./TaskGlyph";
@@ -169,7 +177,7 @@ function Row({
   actions?: RowAction[];
   /** An action is under way: the menu stays shown and takes no other. */
   pending?: boolean;
-  onNavigate?: () => void;
+  onNavigate?: (event: MouseEvent<HTMLAnchorElement>) => void;
 }) {
   const { t } = useTranslation("chat");
   const titleClass = cn(
@@ -389,6 +397,7 @@ function TaskRow({
   onStop,
   onDone,
   onNavigate,
+  onOpenTask,
 }: {
   item: TaskListTaskItem;
   now: number;
@@ -396,6 +405,7 @@ function TaskRow({
   onStop: () => void;
   onDone: () => void;
   onNavigate?: () => void;
+  onOpenTask?: (taskChatId: string, name: string) => void;
 }) {
   const { t, i18n } = useTranslation("chat");
   const { task } = item;
@@ -448,7 +458,16 @@ function TaskRow({
       dimmed={status.status === "ended"}
       actions={actions}
       pending={pending !== undefined}
-      onNavigate={onNavigate}
+      onNavigate={(event) => {
+        // A plain press opens the task chat where the list is; any other
+        // keeps the link's own meaning, such as a new browser tab.
+        if (onOpenTask && isPlainClick(event)) {
+          event.preventDefault();
+          onOpenTask(task.chat.id, task.title);
+          return;
+        }
+        onNavigate?.();
+      }}
     />
   );
 }
@@ -642,7 +661,17 @@ function LoadingRows() {
  * and show pending until the list reads again. It reads again whenever the
  * server says something in it changed.
  */
-export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: () => void }) {
+export function TaskList({
+  chatId,
+  onNavigate,
+  onOpenTask,
+}: {
+  chatId: string;
+  /** Called as a row's link leaves the list for its task chat's page. */
+  onNavigate?: () => void;
+  /** Opens a task chat beside the chat, in the side pane's tab for it. */
+  onOpenTask?: (taskChatId: string, name: string) => void;
+}) {
   const { t } = useTranslation("chat");
   const [endedOpen, setEndedOpen] = useState(false);
   // Older ended rows "Show more" read, past the first page, and the next page's cursor.
@@ -817,6 +846,7 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
             onStop={() => stop(item)}
             onDone={() => markDone(item)}
             onNavigate={onNavigate}
+            onOpenTask={onOpenTask}
           />
         );
       case "check":

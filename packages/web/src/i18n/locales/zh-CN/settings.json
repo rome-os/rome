@@ -52,7 +52,10 @@
     "title": "连接 {{title}}",
     "onDevice": "请在{{device}}上连接 {{title}}：打开那台设备上的 Rome App，在“设置 › 连接”里打开它。然后回到聊天，告诉 Agent 已连接。",
     "connected": "{{title}} 已在{{device}}上连接。回到聊天，告诉 Agent 已连接。",
-    "yourDevice": "你的设备"
+    "yourDevice": "你的设备",
+    "retry": "重试",
+    "notAComputer": "这项连接只开启已在用 Rome 的设备上的一项能力，不能添加电脑，也不能让离线的电脑重新上线。",
+    "devicesLink": "在“设置 › 设备”里管理电脑"
   },
   "connections": {
     "loading": "正在加载连接",
@@ -212,19 +215,6 @@
           }
         }
       },
-      "slack_bot": {
-        "bot": {
-          "titleFallback": "智能体的 Slack 账号",
-          "bullets": {
-            "reply": "有人私信 {{identity}} 或在频道中提及它时自动回复",
-            "start": "收到新消息时启动任务"
-          },
-          "bulletsFallback": {
-            "reply": "有人私信这个账号或在频道中提及它时自动回复",
-            "start": "收到新消息时启动任务"
-          }
-        }
-      },
       "feishu": {
         "bot": {
           "title": "智能体的飞书账号",
@@ -271,13 +261,13 @@
           "privacyNote": "你在 Google 上授权访问，随时可以在这里断开。"
         }
       },
-      "slack": {
+      "microsoft": {
         "user": {
-          "title": "你的 Slack 账号",
+          "title": "你的 Microsoft 账号",
           "bullets": {
-            "work": "以你的身份在你的 Slack 工作区收发消息"
+            "work": "读取你的 Outlook 邮件，每封邮件经你批准后才发送"
           },
-          "privacyNote": "你在 Slack 上授权访问，随时可以在这里断开。"
+          "privacyNote": "你在 Microsoft 上授权访问，随时可以在这里断开。"
         }
       },
       "shopify": {
@@ -647,10 +637,7 @@
       "name": "Rome 额度",
       "status": {
         "inUse": "使用中",
-        "ready": "就绪",
-        "standby": "待用",
         "usedUp": "已用完",
-        "usedUpWithClaude": "已用完",
         "paused": "已暂停"
       },
       "ofGranted": "共 {{amount}}",
@@ -676,7 +663,6 @@
       "needsReauth": "需要重新登录",
       "apiKeyActive": "API 密钥生效中",
       "apiKeyNeedsUpdate": "API 密钥需要更新",
-      "comingSoon": "即将推出",
       "signedInWith": "已通过 <1>{{method}}</1> 登录",
       "signedIn": "已登录",
       "accountType": "账号类型：<1>{{type}}</1>"
@@ -756,6 +742,23 @@
           "emptyEnv": "请至少添加一个环境变量。"
         }
       }
+    },
+    "defaultProvider": {
+      "badge": "默认",
+      "setAsDefault": "设为默认",
+      "confirmTitle": "将 {{provider}} 设为默认？",
+      "confirmBody": "进行中的聊天会在下一次回复时切换到 {{provider}}。",
+      "confirmBodyStay": "新聊天使用 {{provider}}，进行中的聊天保留原来的提供方。",
+      "moveExisting": "已有聊天也一起切过去",
+      "confirm": "设为默认",
+      "saveFailed": "未能更改默认提供方",
+      "removedNote": "你已退出 {{from}}，{{to}} 现在是默认。",
+      "dismissNote": "关闭"
+    },
+    "logoutOutcome": {
+      "otherBecomesDefault": "{{provider}} 会成为默认，聊天在下一次回复时切换过去。",
+      "pause": "聊天会暂停，直到你重新登录。",
+      "pauseOrCredits": "聊天会暂停，直到你重新登录，或让所有聊天改用 Rome 额度。"
     }
   },
   "sentinelLog": {

@@ -296,6 +296,40 @@ export interface RuntimeKit {
   // kit.webhook() lands in phase 6 — do not add it now.
 }
 
+/** How long a delivered message may wait to be recorded before its
+ *  delivery rejects, so the platform can deliver it again. A chat records its
+ *  messages one at a time, so a message waits behind its chat's earlier ones. */
+export const DELIVERY_ACCEPT_TIMEOUT_MS = 2 * 60_000;
+
+/** A delivery that a consumer refused to accept for now, though nothing is
+ *  wrong with the message or its handler: the platform can deliver it again.
+ *  Each kind of refusal is logged where it happens, so it is not a handler
+ *  error (Talker.start). */
+export class DeliveryRefused extends Error {}
+
+/** A delivery's rejection when nothing records its message: recording
+ *  stopped before the message was on record, or nobody records the channel
+ *  now, as during a hook swap or while no app's message hook is loaded. A
+ *  connection can let its platform deliver the message again without treating
+ *  the refusal as a fault, and the message stays with the platform until
+ *  recording is back. */
+export class RecordingStopped extends DeliveryRefused {
+  constructor() {
+    super("dropped before it was recorded: recording stopped");
+    this.name = "RecordingStopped";
+  }
+}
+
+/** A delivery's rejection when its message was not recorded within
+ *  {@link DELIVERY_ACCEPT_TIMEOUT_MS}, as behind a busy chat. The platform can
+ *  deliver it again, and Chats records it once. */
+export class NotRecordedInTime extends DeliveryRefused {
+  constructor(timeoutMs: number) {
+    super(`not recorded within ${timeoutMs}ms`);
+    this.name = "NotRecordedInTime";
+  }
+}
+
 /** Builder-side Talk implementation. Long-lived; faults are REPORTED not thrown. */
 export interface Talker extends TalkFeatures {
   /**
@@ -308,8 +342,27 @@ export interface Talker extends TalkFeatures {
    * Different chats may deliver in any order. A `KeyedMutex` keyed by chat,
    * held from the platform's event to `deliver`, keeps the rule; the adapter
    * conformance suite checks it.
+   *
+   * Acceptance: a Talker that declares {@link Talker.awaitsAcceptance} gets
+   * from `deliver` a promise that settles once the message's consumers have
+   * accepted it. For Chats that means recorded in its chat, or found on
+   * record already. It rejects when a consumer did not accept it: dropped
+   * before it was recorded, failed, or not recorded within
+   * {@link DELIVERY_ACCEPT_TIMEOUT_MS}. A message Rome decides to leave out,
+   * such as one with nothing to answer or from a sender admission refuses,
+   * counts as accepted. Any other Talker gets nothing back, so forwarding
+   * `deliver` from a receive loop never makes the loop wait on recording.
+   * Either way `deliver` returns at once, and awaiting the promise never
+   * holds up the next `deliver`: the order is the order of the calls
+   * (docs/domains/connections.md#message).
    */
-  start(deliver: (msg: Message) => void, fault: (err: StreamFault) => void): void;
+  start(deliver: (msg: Message) => void | Promise<void>, fault: (err: StreamFault) => void): void;
+  /** Contract: a Talker that sets this tells its platform it has a message
+   *  only after that message's delivery has resolved, and never after one
+   *  that rejected, so the platform delivers it again. Only then does
+   *  `deliver` return the acceptance promise (`start`). Absent means it does
+   *  not wait. */
+  readonly awaitsAcceptance?: boolean;
   /** Stop the transport. May return a promise the runtime awaits on graceful
    *  shutdown (`ConnectionRegistry.stopAll`) so in-flight sends / long-poll
    *  drain before the process exits; relock teardown does NOT await it. */
@@ -410,6 +463,11 @@ export interface ConnectionDescriptor {
    *  (webchat, email), leaves it unset. Vocabulary:
    *  docs/domains/chats.md#account. */
   severalAccounts?: boolean;
+  /** True when agents act on the platform with this kind's grant alone,
+   *  through the connector's proxy, though the kind has no actor: `act` is
+   *  then unlocked while every grant is authorized (connections/acts-with-grant.ts).
+   *  Absent means they do not. */
+  actsWithGrant?: boolean;
   /** The platform's own id for the account a grant's profile names (a bot id,
    *  an app id, an inbox address), or null when the profile names none. It reads
    *  the one field rather than parsing the strict profile schema, so a stored

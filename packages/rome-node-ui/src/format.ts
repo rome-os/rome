@@ -124,3 +124,9 @@ export function platformOf(platform: string | null | undefined): {
   if (value.startsWith("linux")) return { kind: "server", label: "Linux" };
   return { kind: "server", label: platform || null };
 }
+
+/** Returns trimmed text when it meets the minimum length (default 3 for trigram search). */
+export function activeTextFilter(text: string | undefined, minLength = 3): string | undefined {
+  const trimmed = text?.trim();
+  return trimmed && [...trimmed].length >= minLength ? trimmed : undefined;
+}

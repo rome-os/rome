@@ -5,6 +5,7 @@ import {
   type Action,
   type ActionConfig,
   type AppActionRuntimeDeps,
+  type ChannelsService,
 } from "@rome-os/app-runtime";
 
 import type { ProxiedResponse } from "../../api/composio-client.js";
@@ -16,7 +17,12 @@ import {
   shopifyProxyCall,
   type ShopifyOAuthToken,
 } from "../../api/shopify-proxy.js";
-import { readSlackOAuthTokens, slackProxyCall } from "../../api/slack-proxy.js";
+import {
+  SLACK_APP_CONNECT_HINT,
+  SLACK_APP_NOT_READY,
+  slackAppConnection,
+  slackAppProxyCall,
+} from "../../api/slack-app-proxy.js";
 import {
   buildProxyEndpoint,
   composioActionError,
@@ -32,6 +38,25 @@ const log = createAppLogger("connector_proxy");
 const GITHUB_TOOLKIT = "github";
 const SLACK_TOOLKIT = "slack";
 const SHOPIFY_TOOLKIT = "shopify";
+// Whether an Outlook call touches mail, which a Rome-managed Microsoft
+// connection answers. It reads the built endpoint's decoded path, so spacing, a
+// query string, an encoded segment or another user's mailbox can't route mail
+// around core; core's strict allowlist then refuses what it doesn't support.
+// Anything undecodable counts as mail, so it fails closed.
+function isOutlookMailCall(endpoint: string): boolean {
+  let path: string;
+  try {
+    path = decodeURIComponent(new URL(endpoint).pathname);
+  } catch {
+    return true;
+  }
+  return (
+    /^\/[^/]+\/me\/?$/i.test(path) ||
+    // A batch can carry mail sub-requests; core refuses it.
+    /\/\$batch\/?$/i.test(path) ||
+    /\/(?:messages|mailfolders|(?:microsoft\.graph\.)?sendmail)(?:[/(]|$)/i.test(path)
+  );
+}
 
 /**
  * Map a verbatim upstream response to an ActionResult, fail-closed. The proxy
@@ -95,7 +120,10 @@ const inputSchema = z.object({
     .describe("Extra request headers as { name: value }, e.g. { 'Notion-Version': '2022-06-28' }."),
 });
 
-export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): Action {
+export function createAction(
+  config: ActionConfig,
+  deps: AppActionRuntimeDeps<{ channelsService?: ChannelsService }>,
+): Action {
   return defineAction({
     config,
     schema: inputSchema,
@@ -154,39 +182,25 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         }
       }
 
-      // Slack is likewise brokered by Rome's own integration (Rome Cloud OAuth),
-      // not Composio: core writes the credential to a token file on connect and
-      // the connector proxies directly with the guardian's Slack OAuth token. The
-      // endpoint has already cleared the host allowlist above, so the token is
-      // only ever sent to a slack.com host.
+      // Slack goes through Rome's own Slack app connection, which keeps its
+      // token to itself, so this app hands it the call. The endpoint has
+      // already cleared the host allowlist above.
       if (toolkit.toLowerCase() === SLACK_TOOLKIT) {
-        const tokens = await readSlackOAuthTokens();
-        if (!tokens) {
-          return { status: "error", error: romeManagedConnectHint(toolkit) };
-        }
-        try {
-          const res = await slackProxyCall({ tokens, endpoint, method, body, query, headers });
-          // Slack returns HTTP 200 even on a logical failure — `ok: false` in the
-          // body is the real signal. Fail closed on it (mirroring the non-2xx
-          // mapping) so a refusal can't be read as success via `.data`.
-          if (res.status >= 200 && res.status < 300) {
-            const okFlag = (res.data as { ok?: unknown } | null)?.ok;
-            if (okFlag === false) {
-              const slackError = (res.data as { error?: unknown } | null)?.error;
-              return {
-                status: "error",
-                error: `slack API returned ok:false for ${method} ${endpoint}: ${
-                  typeof slackError === "string" ? slackError : JSON.stringify(res.data)
-                }`,
-              };
-            }
-          }
-          return mapProxyResponse(toolkit, method, endpoint, res);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          log.error("slack proxy call failed", { endpoint, method, error: message });
-          return { status: "error", error: `Slack proxy call failed: ${message}` };
-        }
+        const channels = deps.channelsService;
+        const app = channels ? await slackAppConnection(channels) : null;
+        if (!channels || !app) return { status: "error", error: SLACK_APP_CONNECT_HINT };
+        if (!app.account) return { status: "error", error: SLACK_APP_NOT_READY };
+        // A parameter can come in the path's query string as well as in
+        // `query`; `query` wins a clash.
+        const url = new URL(endpoint);
+        return slackAppProxyCall({
+          channels,
+          account: app.account,
+          method,
+          path: url.pathname,
+          body,
+          query: { ...Object.fromEntries(url.searchParams), ...query },
+        });
       }
 
       // Shopify is brokered by Rome's own integration (Rome Cloud OAuth), not
@@ -245,6 +259,23 @@ export function createAction(config: ActionConfig, deps: AppActionRuntimeDeps): 
         // Only absence falls back. A broken Google grant must not silently read
         // a different mailbox through Composio.
         if (managed.status !== "error" || !managed.error.startsWith("gmail_not_connected:")) {
+          return managed;
+        }
+      }
+
+      // Only mail goes to core. Calendar, contacts and the rest of Graph stay on
+      // Composio's Outlook connection.
+      if (toolkit.toLowerCase() === "outlook" && isOutlookMailCall(endpoint)) {
+        const managed = await deps.appContext.runAction("core:outlook_read", {
+          path,
+          method,
+          host: new URL(endpoint).host,
+          ...(query ? { query } : {}),
+          ...(body !== undefined ? { body } : {}),
+          ...(headers !== undefined ? { headers } : {}),
+        });
+        // Only absence falls back, as for Gmail.
+        if (managed.status !== "error" || !managed.error.startsWith("outlook_not_connected:")) {
           return managed;
         }
       }

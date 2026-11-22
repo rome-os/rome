@@ -4,19 +4,19 @@
 // Cloud, not to the instance. Rome Cloud checks Slack's signature, finds the
 // instance the workspace is bound to, and deposits the event, signed with the
 // workspace's forward secret, into that workspace's relay mailbox. This adapter
-// drains that mailbox, checks the forward signature and the workspace, drops
-// what it has already seen by Slack's event id, and delivers each direct
-// message as the connection's own record. Replies go straight to Slack's Web
-// API with the bot token the instance got at sign-in.
-//
-// Phase 1 hears direct messages only. Mentions in a group come in phase 2.
+// drains that mailbox, checks the forward signature and the workspace, and
+// hands each direct message, and each mention of the app in a group, to Rome,
+// telling the mailbox it arrived only once Chats has it on record. The
+// connection keeps no record of its own. Replies go straight to Slack's Web
+// API with the bot token the instance got at sign-in; a reply to a mention
+// goes in a thread under it.
 
 import type { ChannelMessage, ChatId, MessageReceipt, OutgoingMessage } from "@rome-os/app-runtime";
 import { createLogger } from "../../../logger.js";
 import { InboundDedup } from "../../inbound/inbound-dedup.js";
 import { refuseAttachments, replyToShaped, textToSend } from "../../outbound/send-refusals.js";
+import type { TalkHistoryRead } from "../../types.js";
 import {
-  decodeSlackText,
   isSlackCredentialError,
   parseSlackChatId,
   replyThreadOf,
@@ -29,12 +29,15 @@ import {
   splitSlackText,
 } from "../slack/slack.js";
 import { isForwardedBy } from "./forward.js";
-import type { SlackMessageCopy } from "./message-copy.js";
-
-export type { SlackMessageCopy } from "./message-copy.js";
+import { authorOf, inTimeline, isSaid, slackMessage, type SlackWireMessage } from "./message.js";
+import { SlackReadGate } from "./read-gate.js";
+import { type FetchHistoryPage, readTimeline } from "./timeline.js";
+import { SlackMemberChannels } from "./channels.js";
+import { compareTs } from "./timeline-order.js";
 import type { SlackAppMailbox } from "./rome-cloud.js";
-import type { SlackAppWebApi } from "./web-api.js";
+import type { SlackAppWebApi, SlackChannel } from "./web-api.js";
 import type { Message } from "../../message.js";
+import { RecordingStopped } from "../../types.js";
 
 const log = createLogger("slack-app");
 
@@ -44,10 +47,19 @@ const HOUR_MS = 60 * 60 * 1000;
 /** Renew the drain key this long before it expires. Rome Cloud issues 90-day keys. */
 const RENEW_BEFORE_EXPIRY_MS = 7 * 24 * HOUR_MS;
 const RENEW_RETRY_MS = HOUR_MS;
-/** A message handed to Rome this soon before the last hand-off is handed over
- *  again on start: handing over does not wait for Rome to record it, so a
- *  stop may have cut it off. Rome ignores a message it already holds. */
-const HAND_OVER_AGAIN_MS = 15 * 60 * 1000;
+/** How long a history read waits for its authors' names. */
+const NAME_WAIT_MS = 3_000;
+/** How long after a removal event the token it outlived is looked at again. */
+const REMOVAL_RECHECK_MS = 30_000;
+
+/** Slack's allowance for conversations.history: one request a minute in a
+ *  workspace, of at most 15 messages. */
+const HISTORY_INTERVAL_MS = 60 * 1000;
+const HISTORY_PAGE = 15;
+/** The longest a read holds its turn waiting for Slack's next request. */
+const HISTORY_MAX_WAIT_MS = 60 * 1000;
+/** Slack's refusals that mean the app may not read a conversation. */
+const NOT_READABLE = new Set(["channel_not_found", "not_in_channel", "missing_scope"]);
 /** Under setTimeout's 24.8-day ceiling; a longer wait is taken in steps. */
 const MAX_TIMER_MS = 24 * HOUR_MS;
 
@@ -69,12 +81,13 @@ export interface MailboxFrame {
  * HTTP-style status says what happened to it: 2xx handled, a 4xx other than a
  * transient one dropped for good, anything else retried and then held. The
  * mailbox keeps frames while nothing drains it, so events sent while the
- * instance is stopped arrive once it starts again.
+ * instance is stopped arrive once it starts again. `attempts` is how many
+ * times the drain delivers one frame before it holds it until resumed.
  */
 export type OpenMailbox = (
   mailbox: SlackAppMailbox,
   onFrame: (frame: MailboxFrame) => Promise<{ status: number }>,
-) => { stop(): Promise<void> | void };
+) => { stop(): Promise<void> | void; attempts: number };
 
 export interface SlackAppAdapterConfig {
   /** The connection kind the channel records carry. */
@@ -95,14 +108,16 @@ export interface SlackAppAdapterConfig {
    *  leave a restart with a refused one. */
   onMailboxRefreshed?: (mailbox: SlackAppMailbox) => Promise<void>;
   onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
-  /** The connection's own copy of the direct messages it hears. */
-  copy: SlackMessageCopy;
   /** Whether Rome listens to the account now. A message heard while it does
-   *  not is neither kept nor handed over, so linking an agent later brings
+   *  not is not handed over, so linking an agent later brings
    *  none of it back (docs/domains/chats.md). Absent, Rome always listens. */
   listened?: () => boolean;
-  /** Now, for the copy's times. */
-  now?: () => Date;
+  /** How reads of Slack's history take turns. Defaults to Slack's allowance. */
+  readGate?: SlackReadGate;
+  /** How reads of a thread take turns. Slack allows conversations.replies
+   *  its own request a minute, apart from conversations.history. Defaults to
+   *  `readGate` when one is given, else to Slack's allowance. */
+  repliesGate?: SlackReadGate;
 }
 
 function isExternalAuthor(payload: SlackEventCallback): boolean {
@@ -112,18 +127,61 @@ function isExternalAuthor(payload: SlackEventCallback): boolean {
   );
 }
 
+/** What a read of a channel says when the workspace was connected before
+ *  Rome's Slack app asked to read channels. */
+export const REAPPROVE_FOR_HISTORY =
+  "Rome's Slack app may not read channels in this workspace yet: it was connected before the app asked for that. Ask the guardian to approve the app again from Slack in Settings › Connections.";
+
+/** A read's failure as an agent reads it: a chat the app may not read named,
+ *  with what would let it. */
+function unreadable(error: unknown, chatId: string): unknown {
+  if (!(error instanceof SlackApiError) || !NOT_READABLE.has(error.code)) return error;
+  if (error.code === "missing_scope") {
+    return new Error(
+      `This Slack account may not read chat ${chatId} (missing_scope). ${REAPPROVE_FOR_HISTORY}`,
+    );
+  }
+  if (error.code === "not_in_channel") {
+    return new Error(
+      `Rome's Slack app is not a member of chat ${chatId}, so it may not read it (not_in_channel). Someone in Slack can add it with /invite.`,
+    );
+  }
+  return new Error(`This Slack account may not read chat ${chatId} (${error.code})`);
+}
+
+/** The message's own ts: a reply's id names its thread first. */
+function tsOfId(messageId: string | undefined): string {
+  return messageId ? messageId.slice(messageId.lastIndexOf(":") + 1) : "";
+}
+
+/** Whether a message said at `ts` is within a read's bounds. */
+function withinRead(ts: string, read: TalkHistoryRead): boolean {
+  const at = Number.parseFloat(ts) * 1_000;
+  if (read.since && at < read.since.getTime()) return false;
+  if (read.until && at > read.until.getTime()) return false;
+  if (read.olderThan && compareTs(ts, read.olderThan) >= 0) return false;
+  if (read.newerThan && compareTs(ts, read.newerThan) <= 0) return false;
+  return true;
+}
+
 /**
- * The connection's `Message` for `kept`, a message as its copy keeps it, said
- * to the bot account `receivedBy`. Platform facts only: Rome works out whom it
+ * The connection's `Message` for `kept`, a message as the connection reads
+ * it, said to the bot account `receivedBy`. Platform facts only: Rome works out whom it
  * addresses (docs/domains/connections.md#message). The app hears a group only
- * when it is mentioned, so a mention lists the bot's account; the copy keeps
- * no other account a message mentions, so none is listed.
+ * when it is mentioned, so a mention lists the bot's account; no other account
+ * a message mentions is listed.
  */
 export function messageOf(kept: ChannelMessage, receivedBy: string): Message {
   const direct = kept.thread?.kind === "dm";
   return {
     id: kept.messageId,
-    where: { chatId: kept.chatId, kind: direct ? "direct" : "group" },
+    where: {
+      chatId: kept.chatId,
+      kind: direct ? "direct" : "group",
+      // A reply in a group's thread. The thread lives inside the chat, so the
+      // chat stays the conversation and the thread is named by its own id.
+      ...(kept.inThread ? { thread: { parentChatId: kept.chatId, id: kept.inThread } } : {}),
+    },
     sender: {
       accountId: kept.senderId,
       ...(kept.senderDisplayName !== undefined ? { name: kept.senderDisplayName } : {}),
@@ -143,20 +201,41 @@ function describe(error: unknown): string {
 }
 
 export class SlackAppAdapter {
-  private handler?: (message: Message) => void;
-  private drain: { stop(): Promise<void> | void } | null = null;
+  private handler?: (message: Message) => void | Promise<void>;
+  private drain: ReturnType<OpenMailbox> | null = null;
+  /** How many times in a row each frame not yet acknowledged was refused
+   *  because recording stopped, by its event id. Kept so a refusal that
+   *  outlasts the drain's retries reports the connection down instead of
+   *  leaving the frame held. An entry goes when its frame is answered
+   *  otherwise; the whole map goes when a drain opens. */
+  private readonly refusedWhileStopped = new Map<string, number>();
+  /** The last opened drain's `attempts`, kept while a renewal swaps drains. */
+  private drainAttempts = 1;
   private readonly dedup = new InboundDedup(5_000);
   private readonly userNames = new Map<string, SlackUserName>();
   private abort = new AbortController();
   private appId: string | undefined;
   private mailbox: SlackAppMailbox;
   private renewTimer: ReturnType<typeof setTimeout> | null = null;
-
+  /** A second look at the token after a removal event it outlived. */
+  private recheckTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly readGate: SlackReadGate;
+  private readonly repliesGate: SlackReadGate;
+  /** The channels the app is a member of, by name. */
+  private readonly memberChannels: SlackMemberChannels;
   constructor(private readonly config: SlackAppAdapterConfig) {
     this.mailbox = config.mailbox;
+    this.memberChannels = new SlackMemberChannels({ api: config.api, botToken: config.botToken });
+    this.readGate =
+      config.readGate ??
+      new SlackReadGate({ intervalMs: HISTORY_INTERVAL_MS, maxWaitMs: HISTORY_MAX_WAIT_MS });
+    this.repliesGate =
+      config.repliesGate ??
+      config.readGate ??
+      new SlackReadGate({ intervalMs: HISTORY_INTERVAL_MS, maxWaitMs: HISTORY_MAX_WAIT_MS });
   }
 
-  onInbound(handler: (message: Message) => void): void {
+  onInbound(handler: (message: Message) => void | Promise<void>): void {
     this.handler = handler;
   }
 
@@ -187,10 +266,17 @@ export class SlackAppAdapter {
     if (this.keyExpired()) {
       throw new Error("The Slack mailbox key expired and Rome Cloud could not renew it.");
     }
-    this.handOverKept();
-    this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
+    this.openDrain();
     this.scheduleRenewal();
     log.info("slack app started", { teamId: this.config.teamId });
+  }
+
+  /** A new drain delivers each frame afresh, so the refusals counted
+   *  against the last one start over. */
+  private openDrain(): void {
+    this.refusedWhileStopped.clear();
+    this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
+    this.drainAttempts = this.drain.attempts;
   }
 
   /** Ask Rome Cloud for drain credentials; true when they changed. An answer
@@ -254,7 +340,7 @@ export class SlackAppAdapter {
         this.drain = null;
         await old?.stop();
         if (signal.aborted) return;
-        this.drain = this.config.openMailbox(this.mailbox, (frame) => this.handleFrame(frame));
+        this.openDrain();
         log.info("slack app mailbox key renewed", { teamId: this.config.teamId });
       }
       // A key Rome Cloud answered that is already due again, the same one or
@@ -279,6 +365,7 @@ export class SlackAppAdapter {
   async stop(): Promise<void> {
     this.abort.abort(new Error("Slack app adapter stopped."));
     this.clearRenewal();
+    this.clearRecheck();
     const drain = this.drain;
     this.drain = null;
     await drain?.stop();
@@ -315,103 +402,99 @@ export class SlackAppAdapter {
     return this.handleEvent(payload, payload.event_id);
   }
 
-  /** Hand Rome again what it may not hold: what the copy kept but never
-   *  handed over, and what it handed over just before it last stopped,
-   *  however long ago. Rome ignores a message it already holds. */
-  private handOverKept(): void {
-    const kept = this.config.copy.mayNotHold(this.config.teamId, HAND_OVER_AGAIN_MS);
-    if (kept.length > 0) {
-      log.info("slack app handing over kept messages", { count: kept.length });
-    }
-    for (const { eventId, message } of kept) {
-      this.handOver(eventId, { ...message, channel: this.config.channel });
-    }
-  }
-
-  /** Hand `message` to Rome without waiting on it, and note it was handed. */
-  private handOver(eventId: string, message: ChannelMessage): void {
-    if (!this.handler) return;
-    try {
-      this.handler(messageOf(message, slackSenderId(this.config.teamId, this.config.botUserId)));
-    } catch (error) {
-      log.error("message handler error", { messageId: message.messageId, error: describe(error) });
-    }
-    this.config.copy.handedOver(this.config.teamId, eventId, this.now());
-  }
-
-  private now(): Date {
-    return this.config.now?.() ?? new Date();
-  }
-
   private async handleEvent(
     payload: SlackEventCallback,
     eventId: string,
   ): Promise<{ status: number }> {
     const event = payload.event;
-    if (event.type !== "message") {
+    // A direct message arrives as `message` in an `im`. In a group the app
+    // hears only what mentions it, as `app_mention`; Slack sends no other
+    // group message, and one that came anyway is neither answered nor kept.
+    const direct = event.type === "message" && event.channel_type === "im";
+    const mention =
+      event.type === "app_mention" &&
+      event.channel_type !== "im" &&
+      typeof event.channel === "string" &&
+      !event.channel.startsWith("D");
+    if (event.type !== "message" && event.type !== "app_mention") {
       // Slack retries and the relay delivers at least once.
       if (this.dedup.checkAndRecord(eventId)) return { status: 200 };
       await this.handleSignal(payload);
       return { status: 200 };
     }
-    if (event.channel_type !== "im") return { status: 200 };
+    if (!direct && !mention) return { status: 200 };
+    if (!event.channel || !event.ts) return { status: 200 };
+    const wire: SlackWireMessage = { ...event, ts: event.ts };
+    // Slack sends the app an event for each of its own posts. Those are
+    // matched on the bot's own user from the install, not on any bot id, so
+    // another bot that mentions the app is still heard. Its own post is never
+    // handed over.
+    if (event.user === this.config.botUserId) return { status: 200 };
     // Slack user ids are per workspace: an author from another workspace
     // (Slack Connect) never speaks under this workspace's address.
     if (isExternalAuthor(payload)) return { status: 200 };
-    if (event.bot_id || event.user === this.config.botUserId) return { status: 200 };
-    if (event.subtype && event.subtype !== "file_share") return { status: 200 };
-    if (!event.user || !event.channel || !event.ts || typeof event.text !== "string") {
-      return { status: 200 };
-    }
-    const text = decodeSlackText(event.text, this.config.botUserId);
-    if (!text) return { status: 200 };
+    // A bot or workflow that mentions the app posts as a bot_message, often
+    // with no user: the bot is its author. Only a mention is taken from one,
+    // since the app's own posts are told apart by their user.
+    if (!isSaid(event.subtype)) return { status: 200 };
+    const author = event.user ?? (mention ? authorOf(event) : undefined);
+    if (!author || typeof event.text !== "string") return { status: 200 };
+    const said = slackMessage(this.context(event.channel), wire);
+    if (!said) return { status: 200 };
+    // Rome does not listen to the account, so the message is not handed over. A read once an agent is linked asks Slack for it.
     if (this.config.listened && !this.config.listened()) return { status: 200 };
 
-    const name = await this.lookUpName(event.user);
+    const name = event.user ? await this.lookUpName(event.user) : {};
     const message: ChannelMessage = {
-      channel: this.config.channel,
-      direction: "inbound",
-      chatId: event.channel as ChatId,
-      messageId: slackMessageId(event.ts, event.thread_ts),
-      senderId: slackSenderId(payload.team_id, event.user),
+      ...said,
       ...(name.displayName ? { senderDisplayName: name.displayName } : {}),
       ...(name.username ? { senderUsername: name.username } : {}),
-      text,
-      attachments: [],
-      timestamp: new Date(Number.parseFloat(event.ts) * 1_000),
       raw: payload,
+      // A thread lives inside its conversation's chat. The reply finds the
+      // thread from the id of the message it answers.
       ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
-      thread: { kind: "dm" },
+      // A reply in a thread is read with the thread's earlier messages, which
+      // the conversation's chat does not hold.
+      // In a direct message the app hears every reply, so only a thread in a
+      // group is read.
+      ...(!direct && event.thread_ts && event.thread_ts !== event.ts
+        ? { inThread: `${event.channel}:${event.thread_ts}` as ChatId }
+        : {}),
     };
-    // The mailbox is told the message was received only once the copy holds
-    // it: a write that fails answers 500, and the mailbox delivers it again.
-    // The drain gives up on a frame after a few retries and waits to be
-    // resumed, so the failure also reports the connection down: the runtime
-    // starts it again after a backoff, with a fresh drain that retries the
-    // frame. An event the copy holds already is a redelivery.
-    let fresh: boolean;
+    // The mailbox is told the message was received only once Chats has it on
+    // record (docs/domains/connections.md#message). A delivery that is
+    // refused or not recorded in time answers 500, and the mailbox delivers it
+    // again; Chats records a message it already holds only once. The drain
+    // gives up on a frame after a few retries and waits to be resumed, so the
+    // refusal also reports the connection down: the runtime starts it again
+    // after a backoff, with a fresh drain that retries the frame. Recording
+    // stopping is no fault while the drain's own retries remain: an app
+    // swapping its hook stops it for a moment. A stop that outlasts them is.
+    if (!this.handler) return { status: 500 };
     try {
-      fresh = this.config.copy.keep(
-        {
-          teamId: payload.team_id,
-          eventId,
-          channelId: event.channel,
-          ts: event.ts,
-          ...(event.thread_ts ? { threadTs: event.thread_ts } : {}),
-          userId: event.user,
-          text,
-          message,
-        },
-        this.now(),
+      await this.handler(
+        messageOf(message, slackSenderId(this.config.teamId, this.config.botUserId)),
       );
     } catch (error) {
-      log.error("slack app could not keep a message", { error: describe(error) });
+      if (error instanceof RecordingStopped) {
+        const refused = (this.refusedWhileStopped.get(eventId) ?? 0) + 1;
+        if (refused < this.drainAttempts) {
+          this.refusedWhileStopped.set(eventId, refused);
+          log.info("slack app message not recorded yet: recording stopped");
+          return { status: 500 };
+        }
+        this.refusedWhileStopped.delete(eventId);
+        log.warn("slack app message refused past the drain's retries: recording stopped");
+        this.config.onFault?.({ kind: "transport", cause: error });
+        return { status: 500 };
+      }
+      this.refusedWhileStopped.delete(eventId);
+      log.error("slack app message not accepted", { error: describe(error) });
       this.config.onFault?.({ kind: "transport", cause: error });
       return { status: 500 };
     }
-    if (!fresh) return { status: 200 };
+    this.refusedWhileStopped.delete(eventId);
     log.info("message received", { chatId: message.chatId });
-    this.handOver(eventId, message);
     return { status: 200 };
   }
 
@@ -428,19 +511,47 @@ export class SlackAppAdapter {
       event.type === "app_uninstalled" ||
       (event.type === "tokens_revoked" && !!event.tokens?.bot?.includes(this.config.botUserId));
     if (!removed) return;
+    if (await this.tokenRefused()) return;
+    log.info("slack app's token outlived a removal event", { event: event.type });
+    // Slack may take back the token a moment after it reports the removal,
+    // so the token is looked at once more. One that still works is a token
+    // minted since, by connecting again, which the event came before.
+    if (this.recheckTimer) return;
+    const signal = this.abort.signal;
+    this.recheckTimer = setTimeout(() => {
+      this.recheckTimer = null;
+      if (!signal.aborted) void this.tokenRefused();
+    }, REMOVAL_RECHECK_MS);
+    this.recheckTimer.unref?.();
+  }
+
+  /** Whether Slack refuses the token now, reported as the connection's fault. */
+  private async tokenRefused(): Promise<boolean> {
+    const signal = this.abort.signal;
     try {
-      await this.config.api.authTest(this.config.botToken, this.abort.signal);
-      log.info("slack app's token outlived a removal event", { event: event.type });
+      await this.config.api.authTest(this.config.botToken, signal);
+      return false;
     } catch (error) {
+      if (signal.aborted) return true;
       this.config.onFault?.({
         kind: isSlackCredentialError(error) ? "credential" : "transport",
         cause: error,
       });
+      return true;
     }
   }
 
-  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+  private clearRecheck(): void {
+    if (this.recheckTimer) clearTimeout(this.recheckTimer);
+    this.recheckTimer = null;
+  }
+
+  async send(named: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     refuseAttachments("slack", message);
+    // Only a channel's name waits on Slack, so a send by id posts at once.
+    const chatId = named.startsWith("#")
+      ? await this.memberChannels.resolve(named, this.abort.signal, { fresh: true })
+      : named;
     const text = textToSend("slack", message).trim();
     const replyTo = replyToShaped("slack", message.replyToMessageId, SLACK_MESSAGE_ID);
     const parsed = parseSlackChatId(chatId);
@@ -457,6 +568,154 @@ export class SlackAppAdapter {
     return { chatId, ...(firstTs ? { messageId: slackMessageId(firstTs, threadTs) } : {}) };
   }
 
+  private context(chatId: string) {
+    return {
+      channel: this.config.channel,
+      teamId: this.config.teamId,
+      botUserId: this.config.botUserId,
+      chatId,
+    };
+  }
+
+  /** One page of a chat's history, taking its turn at the read gate. History
+   *  and a thread's replies each name their own kind of call, so a page
+   *  ending at a thread's root never takes the thread's answer. */
+  private historyPage: FetchHistoryPage = (channelId, bounds) =>
+    this.readGate.run(
+      `history:${channelId}:${bounds.latest ?? ""}`,
+      () => this.fetchPage(channelId, bounds.latest),
+      this.abort.signal,
+    );
+
+  private async fetchPage(channelId: string, latest: string | undefined) {
+    const page = await this.config.api.conversationHistory(
+      this.config.botToken,
+      { channel: channelId, ...(latest ? { latest } : {}), limit: HISTORY_PAGE },
+      this.abort.signal,
+    );
+    const wires = page.messages.filter(inTimeline);
+    const names = await this.namesOf(
+      wires.flatMap((wire) =>
+        wire.user && wire.user !== this.config.botUserId ? [wire.user] : [],
+      ),
+    );
+    const messages: Array<{ ts: string; message: ChannelMessage }> = [];
+    for (const wire of wires) {
+      const name = (wire.user && names.get(wire.user)) || {};
+      const message = slackMessage(this.context(channelId), wire, name);
+      if (message) {
+        messages.push({
+          ts: wire.ts,
+          message,
+        });
+      }
+    }
+    return { messages, hasMore: page.hasMore, oldest: page.messages.at(-1)?.ts };
+  }
+
+  /**
+   * The messages of a chat's timeline within `read`'s bounds, newest first.
+   * Replies inside a thread are not in it. Rejects naming the chat when the
+   * app may not read it.
+   */
+  async readHistory(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]> {
+    // A broadcast reply's id names its thread too, as `<thread ts>:<ts>`; its
+    // place in the timeline is its own ts.
+    const bound = (field: "olderThan" | "newerThan", id: string | undefined) => {
+      if (id === undefined) return undefined;
+      const match = /^(?:\d+\.\d+:)?(\d+\.\d+)$/.exec(id);
+      if (!match) {
+        throw new Error(
+          `${field} "${id}" is no Slack message id here: one looks like 1700000000.000100`,
+        );
+      }
+      return match[1];
+    };
+    const olderThan = bound("olderThan", read.olderThan);
+    const newerThan = bound("newerThan", read.newerThan);
+    read = {
+      ...read,
+      ...(olderThan ? { olderThan } : {}),
+      ...(newerThan ? { newerThan } : {}),
+    };
+    const resolved = chatId.startsWith("#")
+      ? await this.memberChannels.resolve(chatId, this.abort.signal)
+      : chatId;
+    const { channelId, threadTs } = parseSlackChatId(resolved);
+    try {
+      if (threadTs) return await this.readThread(channelId, threadTs, read);
+      return await readTimeline(this.historyPage, channelId as ChatId, read);
+    } catch (error) {
+      throw unreadable(error, chatId);
+    }
+  }
+
+  /**
+   * A thread's messages within `read`'s bounds, newest first, its root
+   * included. Slack answers a thread oldest first, one page of 15 a minute,
+   * so one read is one page: a read below a bound (`olderThan`, `until`)
+   * answers the newest of the thread's first page, and any other read answers
+   * the oldest `limit` from the thread's start or just after `newerThan`. A
+   * longer thread is read on with `newerThan`, each page asking Slack from
+   * there, until a read comes back empty.
+   */
+  private async readThread(
+    channelId: string,
+    threadTs: string,
+    read: TalkHistoryRead,
+  ): Promise<ChannelMessage[]> {
+    const oldest = read.newerThan;
+    const page = await this.repliesGate.run(
+      `replies:${channelId}:${threadTs}:${oldest ?? ""}`,
+      () =>
+        this.config.api.conversationReplies(
+          this.config.botToken,
+          {
+            channel: channelId,
+            ts: threadTs,
+            limit: HISTORY_PAGE,
+            ...(oldest ? { oldest } : {}),
+          },
+          this.abort.signal,
+        ),
+      this.abort.signal,
+    );
+    const wires = page.messages.filter((wire) => isSaid(wire.subtype));
+    const names = await this.namesOf(
+      wires.flatMap((wire) =>
+        wire.user && wire.user !== this.config.botUserId ? [wire.user] : [],
+      ),
+    );
+    const messages: ChannelMessage[] = [];
+    for (const wire of wires) {
+      if (!withinRead(wire.ts, read)) continue;
+      const name = (wire.user && names.get(wire.user)) || {};
+      const message = slackMessage(this.context(channelId), wire, name);
+      if (message) messages.push(message);
+    }
+    // A page Slack goes on from that held nothing Rome reads, such as only
+    // file shares with no text, must not read as the thread's end.
+    const lastRaw = page.messages.at(-1)?.ts;
+    if (messages.length === 0 && page.nextCursor && lastRaw) {
+      throw new Error(
+        `Slack's page of thread ${channelId}:${threadTs} held only messages Rome does not read, such as files with no text, and the thread goes on. Read on with newerThan=${lastRaw}, which conversations.replies takes as its cursor.`,
+      );
+    }
+    messages.sort((a, b) => compareTs(tsOfId(b.messageId), tsOfId(a.messageId)));
+    // A read on from a message answers the messages just after it, whatever
+    // bounds it above.
+    const below =
+      read.newerThan === undefined && (read.olderThan !== undefined || read.until !== undefined);
+    return below
+      ? messages.slice(0, read.limit)
+      : messages.slice(Math.max(0, messages.length - read.limit));
+  }
+
+  /** The channels the app is a member of, by name. */
+  async channels(): Promise<SlackChannel[]> {
+    return this.memberChannels.list(this.abort.signal);
+  }
+
   /** The direct-message conversation with a member of this workspace. */
   async directConversationFor(senderId: string): Promise<ChatId | null> {
     const separator = senderId.indexOf("/");
@@ -468,6 +727,27 @@ export class SlackAppAdapter {
       userId,
       this.abort.signal,
     )) as ChatId;
+  }
+
+  /** The names of `authors`, each looked up once and all together. A page is
+   *  answered without the names Slack has not given within
+   *  {@link NAME_WAIT_MS}, so a slow lookup never holds up a read. */
+  private async namesOf(authors: readonly string[]): Promise<Map<string, SlackUserName>> {
+    const unique = [...new Set(authors)];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), NAME_WAIT_MS);
+    });
+    try {
+      const named = await Promise.all(
+        unique.map(
+          async (id) => [id, (await Promise.race([this.lookUpName(id), late])) ?? {}] as const,
+        ),
+      );
+      return new Map(named);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** A member's name, best effort: a failed lookup leaves the message unnamed. */

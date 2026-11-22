@@ -12,20 +12,24 @@
 
 import type {
   Account,
+  ChannelChatsPage,
+  ChannelChatsQuery,
   ChannelMessage,
   ChannelMessageQuery,
   ChannelSummary,
   ChannelsService,
-  ChatDescriptor,
   ChatId,
-  ChatListQuery,
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { platformOf } from "../connections/platform.js";
 import type { Connection } from "../connections/types.js";
-import type { Channel, Channels } from "../chats/connected-accounts/connected-account.js";
+import {
+  AccountNotConnected,
+  type Channel,
+  type Channels,
+} from "../chats/connected-accounts/connected-account.js";
 import { sendThrough, type ChannelOf } from "../chats/connected-accounts/connection-ports.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 import { parseMessageCursor } from "@rome/api-types/message";
@@ -68,6 +72,10 @@ export interface ChannelsServiceDeps {
   accounts?: RomeAccounts;
 }
 
+/** How many chats a listing answers when it names no limit, and at most. */
+const CHATS_LIMIT = 100;
+const CHATS_LIMIT_MAX = 200;
+
 /** Every Connection that can talk, whether or not it is unlocked now. */
 function talking(registry: Pick<ConnectionRegistry, "all">): Connection[] {
   return registry.all().filter((connection) => connection.status().chat.state !== "unsupported");
@@ -103,11 +111,6 @@ export class AccountNotHeld extends Error {
     this.name = "AccountNotHeld";
   }
 }
-
-/** How many chats one page of a listing asks a Connection for: as many as
- *  a directory answers at once, so a listing that reads a platform's archive
- *  reads it once, not once per page. */
-const CHAT_PAGE = 10_000;
 
 export function createChannelsService(deps: ChannelsServiceDeps): ChannelsService {
   const find = (name: string) => deps.channels()?.find((channel) => channel.name === name);
@@ -167,45 +170,59 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     }));
   }
 
-  /** The chats the Connection behind `target` can see, paged to the end of
-   *  what its directory lists. Rejects when it has no directory, or while its
-   *  talk is locked. */
+  /** The Connection backing `target`'s channel, and the account it is. */
+  function backing(target: Account | string): {
+    channel: string;
+    account: Account | null;
+    connection: Connection;
+  } {
+    if (isAccount(target)) {
+      const connection = holding(target);
+      const channel = deps.channelOf(connection);
+      if (channel === null) throw new AccountNotHeld(target);
+      return { channel, account: { platform: target.platform, id: target.id }, connection };
+    }
+    const connection = backingConnection(deps.registry, target, deps.channelOf);
+    if (!connection) throw new AccountNotConnected(target);
+    return { channel: target, account: accountOf(connection), connection };
+  }
+
   async function chats(
     target: Account | string,
-    read: ChatListQuery = {},
-  ): Promise<ChatDescriptor[]> {
-    const connection = isAccount(target)
-      ? holding(target)
-      : backingConnection(deps.registry, target, deps.channelOf);
-    const name = isAccount(target) ? accountLabel(target) : target;
-    if (!connection) throw new Error(`No connection reaches "${name}"`);
-    const listed: ChatDescriptor[] = [];
-    const seen = new Set<string>();
-    let cursor: string | undefined;
-    do {
-      // A directory whose cursor stops advancing would list forever.
-      if (cursor !== undefined) {
-        if (seen.has(cursor)) throw new Error(`"${name}" listing did not advance`);
-        seen.add(cursor);
-      }
-      const page = connection.withTalker((talker) =>
-        talker.directory
-          ? talker.directory.listConversations({
-              limit: CHAT_PAGE,
-              ...(cursor ? { cursor } : {}),
-              includeTopics: read.includeThreads === true || read.includeArchivedThreads === true,
-              ...(read.includeArchivedThreads ? { includeArchived: true } : {}),
-            })
-          : null,
+    { query, limit, cursor, includeThreads, includeArchivedThreads }: ChannelChatsQuery = {},
+  ): Promise<ChannelChatsPage> {
+    const { channel, connection } = backing(target);
+    const capped = Math.min(Math.max(1, Math.floor(limit ?? CHATS_LIMIT)), CHATS_LIMIT_MAX);
+    // The connection's own listing, so its paging holds and a refusal from the
+    // platform comes back as one.
+    const listed = connection.withTalker((talker) =>
+      talker.directory?.listConversations({
+        limit: capped,
+        includeTopics: includeThreads === true || includeArchivedThreads === true,
+        ...(includeArchivedThreads ? { includeArchived: true } : {}),
+        ...(query ? { query } : {}),
+        ...(cursor ? { cursor } : {}),
+      }),
+    );
+    if (!listed) {
+      const state = connection.status().chat.state;
+      throw new Error(
+        state === "unlocked"
+          ? `Channel "${channel}" lists no chats`
+          : `Channel "${channel}" cannot list chats now: its connection is ${state}`,
       );
-      if (page === undefined)
-        throw new Error(`"${name}" lists no chats while its connection is locked`);
-      if (page === null) throw new Error(`"${name}" lists no chats`);
-      const { conversations, nextCursor } = await page;
-      listed.push(...conversations);
-      cursor = nextCursor;
-    } while (cursor);
-    return listed;
+    }
+    const page = await listed;
+    return {
+      chats: page.conversations.map((chat) => ({
+        chatId: chat.ref.chatId,
+        name: chat.displayName,
+        kind: chat.kind,
+        ...(chat.parent ? { parent: chat.parent.chatId } : {}),
+        ...(chat.archived ? { archived: true } : {}),
+      })),
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+    };
   }
 
   return withRemovedMembers<ChannelsService>(
@@ -217,7 +234,12 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
           if (name === null) continue;
           const platform = deps.platformOf?.(name) ?? platformOf(connection.connectionKind);
           const account = accountOf(connection);
-          summaries.set(name, { name, ...(account ? { account } : {}), platform, sendable: true });
+          summaries.set(name, {
+            name,
+            ...(account ? { account } : {}),
+            platform,
+            sendable: true,
+          });
         }
         for (const channel of deps.own ?? []) {
           const platform = deps.platformOf?.(channel.name) ?? platformOf(channel.name);

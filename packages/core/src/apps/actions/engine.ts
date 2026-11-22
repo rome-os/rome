@@ -157,10 +157,14 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   // Reads of the personal-data store (personal-data/actions.ts).
   "core:personal_data_catalog",
   "core:personal_data_query",
-  // The device actions (connections/device/actions.ts). The node client that
-  // calls a device lives in main.
+  // The mail actions (connections/gmail, connections/outlook). Only main holds
+  // the mail credentials.
   "core:gmail_read",
   "core:gmail_send",
+  "core:outlook_read",
+  "core:outlook_send",
+  // The device actions (connections/device/actions.ts). The node client that
+  // calls a device lives in main.
   "core:device_describe",
   "core:device_run",
   "core:app_connection_read",
@@ -2190,6 +2194,18 @@ export class ActionEngine {
     store: ReplayStore,
     context: ActionRunContext | undefined,
   ): Promise<string> {
+    // The preview and the replay both run as the turn that asked: without
+    // them a chatless turn reads as outside any turn (app-host chat-calls). A
+    // nested call's own context names no turn, so the caller's is read.
+    const caller = actionExecutionContext.getStore();
+    const turnId = context?.turnId ?? caller?.turnId;
+    const audience = context?.audience ?? caller?.audience;
+    // The preview is the action's own code, so it runs with what its execute
+    // would get (executeNestedInvocation): the audience only for a
+    // first-party action in main, and the caller's accountable human. The
+    // replay goes back through run(), which gates the audience itself.
+    const previewAudience =
+      this.processRole === "main" && this.isTrustedForAudience(actionName) ? audience : undefined;
     let preview: PreviewPayload | undefined;
     try {
       const action = this.registry.get(actionName);
@@ -2200,13 +2216,14 @@ export class ActionEngine {
         parentExecutionId: context?.parentExecutionId,
         parentActionName: context?.parentActionName,
         initiator: context?.initiator ?? "unknown",
-        actor: context?.actor,
+        actor: caller?.actor ?? context?.actor,
         callerAppId: context?.callerAppId,
         engine: this,
         channelContext: context?.channelContext,
         sharedContext: context?.sharedContext,
         sessionId: context?.sessionId,
-        turnId: context?.turnId,
+        turnId,
+        audience: previewAudience,
         agentName: context?.agentName,
         channelThreadKey: context?.channelThreadKey,
       };
@@ -2233,11 +2250,8 @@ export class ActionEngine {
         sessionId: context?.sessionId,
         agentName: context?.agentName,
         channelThreadKey: context?.channelThreadKey,
-        // The replay reads as the turn that asked: without them a chatless
-        // turn's replay reads as outside any turn (app-host chat-calls). A
-        // nested call's own context names no turn, so the caller's is read.
-        turnId: context?.turnId ?? actionExecutionContext.getStore()?.turnId,
-        audience: context?.audience ?? actionExecutionContext.getStore()?.audience,
+        turnId,
+        audience,
         preview,
       },
     });

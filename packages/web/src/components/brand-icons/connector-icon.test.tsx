@@ -16,8 +16,8 @@ describe("ConnectorIcon", () => {
     expect(el.className).toContain("h-9 w-9");
   });
 
-  it("draws a brand mark a kind shares with another, such as the Slack bot's", () => {
-    expect(tile("brand:slack_bot", "Slack bot").querySelector("svg")).not.toBeNull();
+  it("draws a brand mark a kind shares with another, such as Rome's Slack app's", () => {
+    expect(tile("brand:slack_app", "Slack").querySelector("svg")).not.toBeNull();
   });
 
   it("draws a provider's glyph", () => {

@@ -7,7 +7,9 @@ import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 import { BUILTIN_ACCOUNT_LINKS } from "../../test/db.js";
 import { feishu, type FeishuDescriptorDeps } from "../kinds/feishu/index.js";
 import { linkedin, type LinkedInDescriptorDeps } from "../kinds/linkedin/index.js";
-import type { ConnectionRegistry } from "../registry.js";
+import { ConnectionRegistry } from "../registry.js";
+import type { ConnectionsRepository, StoredConnection } from "../repository.js";
+import type { Logger } from "../../logger.js";
 import type { ConnectionDescriptor, RuntimeKit } from "../types.js";
 import { type BuiltinConnectionDeps, registerBuiltinConnections } from "./index.js";
 import type {
@@ -41,8 +43,7 @@ function registerEveryKind(registry: ConnectionRegistry): void {
     slackApp: {
       api: {},
       cloud: {},
-      openMailbox: () => ({ stop() {} }),
-      copy: {},
+      openMailbox: () => ({ stop() {}, attempts: 4 }),
       listens: () => true,
     },
   } as unknown as BuiltinConnectionDeps);
@@ -99,6 +100,35 @@ describe("registerBuiltinConnections", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  // Stored Slack bot (`slack_bot`) connections stay in the store after the
+  // kind is removed.
+  it("boots past a stored Slack bot, skipping it, and still offers Rome's Slack app", async () => {
+    const stored = {
+      id: "conn-slack-bot",
+      connectionKind: "slack_bot",
+      label: "Slack bot",
+      createdAt: new Date("2026-10-01T00:00:00Z"),
+      grant: { state: "unauthorized" },
+    } as unknown as StoredConnection;
+    const warn = rs.fn();
+    const logger = { warn, info() {}, error() {}, debug() {} } as unknown as Logger;
+    const registry = new ConnectionRegistry({
+      repository: { all: async () => [stored] } as unknown as ConnectionsRepository,
+      logger,
+    });
+    registerEveryKind(registry);
+
+    await registry.load();
+
+    expect(warn).toHaveBeenCalledWith("Skipping connection for unregistered connectionKind", {
+      connectionId: "conn-slack-bot",
+      connectionKind: "slack_bot",
+    });
+    expect(registry.all()).toEqual([]);
+    expect(registry.registeredKinds()).toContain("slack_app");
+    expect(registry.registeredKinds()).not.toContain("slack_bot");
+  });
+
   // A bot takes an agent as its own account and the guardian's signed-in
   // account as a delegate; Dream and the test fixtures keep their own lists of
   // these kinds, so all three must agree.
@@ -120,7 +150,6 @@ describe("registerBuiltinConnections", () => {
       feishu: "own_account",
       telegram: "own_account",
       discord: "own_account",
-      slack_bot: "own_account",
       slack_app: "own_account",
       telegram_user: "delegate",
     });

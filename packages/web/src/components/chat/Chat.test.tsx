@@ -21,7 +21,11 @@ import {
   CONCIERGE_LEADING_SLOT,
   CONCIERGE_TITLEBAR_SLOT,
 } from "@/components/concierge/ConciergeHeaderStatus";
-import { ToolTasksContext, type ToolTasksHost } from "@/pages/free/tool-tasks";
+import {
+  TaskChatInPaneContext,
+  ToolTasksContext,
+  type ToolTasksHost,
+} from "@/pages/free/tool-tasks";
 import { Chat } from "./Chat";
 import enChat from "@/i18n/locales/en/chat.json";
 import zhChat from "@/i18n/locales/zh-CN/chat.json";
@@ -3303,6 +3307,26 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() => expect(conciergeStopVoiceInput).toHaveBeenCalledOnce());
   });
 
+  it("stops listening when its tab in the side pane's Tasks tab is hidden", async () => {
+    const at = (active: boolean) => (
+      <MemoryRouter>
+        {pane(
+          <TaskChatInPaneContext.Provider value={{ active, onClose: rs.fn() }}>
+            <Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />
+          </TaskChatInPaneContext.Provider>,
+        )}
+      </MemoryRouter>
+    );
+    twoTurns();
+    const view = render(at(true), { wrapper: withQueries() });
+    await screen.findAllByTestId("user-row");
+    conciergeStopVoiceInput.mockClear();
+    view.rerender(at(true));
+    expect(conciergeStopVoiceInput).not.toHaveBeenCalled();
+    view.rerender(at(false));
+    await waitFor(() => expect(conciergeStopVoiceInput).toHaveBeenCalledOnce());
+  });
+
   it("stops listening when the task list's sheet covers the composer", async () => {
     const at = () => (
       <MemoryRouter>
@@ -3903,6 +3927,20 @@ describe("Chat header archive of a Concierge topic chat", () => {
         },
       ]),
     );
+  });
+
+  it("offers no Rename or Pin in an archived topic chat's menu", async () => {
+    identity("2026-11-01T00:00:00.000Z");
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    // An archived topic chat is renamed and pinned once it is unarchived.
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.menu.outputs",
+      "share.title",
+      "navbar.unarchive",
+      "navbar.delete",
+    ]);
   });
 
   it("asks before unarchiving an archived topic chat that opens as an ordinary chat", async () => {

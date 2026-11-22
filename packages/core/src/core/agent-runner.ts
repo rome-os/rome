@@ -304,13 +304,17 @@ export class AgentRunner {
     // AgentSession and surfaced on the stream's turn_start event.
     if (params.shouldRun && !params.shouldRun()) return;
     const receipt = session.submit(
-      { prompt: params.prompt, images: params.images },
+      {
+        prompt: params.prompt,
+        images: params.images,
+      },
       {
         priority: "after",
         threadContext,
         sharedContext: params.sharedContext,
         romeSessionId,
         replyTo: params.replyTo,
+        ...(params.inThread ? { inThread: params.inThread } : {}),
         ...(lines ? { quotedId: lines.quoted, currentId: lines.prompt } : {}),
         initiatedBy: params.initiatedBy ?? "user",
         ...(params.pushLevel ? { pushLevel: params.pushLevel } : {}),

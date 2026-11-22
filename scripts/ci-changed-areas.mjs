@@ -40,6 +40,7 @@ export const AREA_PATHS = {
     "packages/ui/",
     "packages/web-content/",
     "packages/rome-node-ui/",
+    "packages/rome-node-web/",
     "packages/api-types/",
     "packages/app-runtime-sdk/",
     // Every package launches its suite through this wrapper, so a change to it

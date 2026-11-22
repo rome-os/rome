@@ -1,13 +1,14 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { TaskLinkDto } from "@rome/api-types/task-list";
 import { chatTasksTopicName } from "@rome/api-types/live-events";
 import { taskChatOfLink, taskLink } from "@rome/api-types/task-link";
 import i18n from "@/i18n";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
+import { ToolTasksContext, type ToolTasksHost } from "@/pages/free/tool-tasks";
 import { acceptLatestSocket, fakeSocketLiveEventsClient } from "@/test/fake-websocket";
 import { ChatLink } from "../ChatLink";
 import { TaskLinksScope } from "./task-links";
@@ -48,19 +49,37 @@ const link = (id: string, text: string) => (
   <ChatLink href={taskLink(text, id).match(/\((.*)\)/)![1]}>{text}</ChatLink>
 );
 
-function renderLinks(children: React.ReactNode, chatId: string | null = "concierge") {
+function renderLinks(
+  children: React.ReactNode,
+  chatId: string | null = "concierge",
+  pane: ToolTasksHost | null = null,
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
-        <MemoryRouter>
-          <TaskLinksScope chatId={chatId}>
-            <p>{children}</p>
-          </TaskLinksScope>
+        <MemoryRouter initialEntries={["/chat/concierge"]}>
+          <ToolTasksContext.Provider value={pane}>
+            <Routes>
+              <Route
+                path="/chat/concierge"
+                element={
+                  <TaskLinksScope chatId={chatId}>
+                    <p>{children}</p>
+                  </TaskLinksScope>
+                }
+              />
+              <Route path="/chat/:id" element={<p>Task chat page</p>} />
+            </Routes>
+          </ToolTasksContext.Provider>
         </MemoryRouter>
       </LiveEventsClientContext.Provider>
     </QueryClientProvider>,
   );
+}
+
+function paneHost(compact: boolean, openTask = rs.fn()): ToolTasksHost {
+  return { active: false, view: "tasks", compact, show: rs.fn(), hide: rs.fn(), openTask };
 }
 
 describe("a task link in a Concierge message", () => {
@@ -115,6 +134,26 @@ describe("a task link in a Concierge message", () => {
     expect(chip.querySelector("svg")?.getAttribute("class")).toContain(glyph);
     expect(chip.querySelector("svg")?.getAttribute("class")).toContain(colour);
     expect(chip.textContent).toBe("Taxes");
+  });
+
+  it("opens the task chat in the side pane's Tasks tab, and the Concierge chat stays", async () => {
+    known = [{ id: "chat-1", name: "Taxes", status: "active", endReason: null }];
+    const openTask = rs.fn();
+    renderLinks(link("chat-1", "Taxes"), "concierge", paneHost(false, openTask));
+    const chip = await screen.findByRole("link", { name: "Taxes, Active" });
+    fireEvent.click(chip);
+    expect(openTask).toHaveBeenCalledWith("concierge", "chat-1", "Taxes");
+    expect(screen.queryByText("Task chat page")).toBeNull();
+    expect(screen.getByRole("link", { name: "Taxes, Active" })).toBeTruthy();
+  });
+
+  it("opens the task chat's page where the pane would cover the chat", async () => {
+    known = [{ id: "chat-1", name: "Taxes", status: "active", endReason: null }];
+    const openTask = rs.fn();
+    renderLinks(link("chat-1", "Taxes"), "concierge", paneHost(true, openTask));
+    fireEvent.click(await screen.findByRole("link", { name: "Taxes, Active" }));
+    expect(openTask).not.toHaveBeenCalled();
+    expect(await screen.findByText("Task chat page")).toBeTruthy();
   });
 
   it("reads as plain text for a foreign or unknown task chat, and outside a Concierge chat", async () => {

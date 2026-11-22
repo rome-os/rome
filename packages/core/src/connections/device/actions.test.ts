@@ -450,6 +450,9 @@ describe("device actions", () => {
       status: "error",
       error: expect.stringMatching(/^target_unavailable: iPhone did not answer/),
     });
+    expect((result as { error: string }).error).toContain(
+      "No connect card brings a device back online.",
+    );
     expect(calls).toHaveLength(1);
   });
 

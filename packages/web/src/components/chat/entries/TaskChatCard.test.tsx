@@ -290,6 +290,7 @@ beforeEach(async () => {
       return Response.json({ id: "approval-1", status: "pending" });
     if (url === "/api/approvals/approval-1/approve" && init?.method === "POST")
       return Response.json({ ok: true });
+    if (url === "/api/vault/grants" && init?.method === "POST") return Response.json({ ok: true });
     throw new Error(`Unexpected request: ${url}`);
   });
   rs.stubGlobal("fetch", fetchMock);
@@ -1134,6 +1135,39 @@ describe("TaskChatCard drawn from the card Rome filled in", () => {
       </QueryClientProvider>,
     );
     expect(await screen.findByText("Rejected")).toBeTruthy();
+  });
+
+  it("asks for the PIN on a vault approval's forwarded card, and allows it through the vault, not the generic approve", async () => {
+    waiting = false;
+    renderCard({
+      kind: "approval",
+      id: "approval-1",
+      title: "Use CF_API_TOKEN for 15 min",
+      actionName: "system:vault_apply",
+      preview: {
+        kind: "secret_access",
+        name: "CF_API_TOKEN",
+        ttlMinutes: 15,
+        reason: "Update the DNS record",
+        title: "Use CF_API_TOKEN for 15 min",
+        summary: "Update the DNS record",
+      },
+      since: 1,
+    });
+    await userEvent.type(await screen.findByLabelText("PIN"), "123456");
+    await userEvent.click(screen.getByRole("button", { name: "Allow 15 min" }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    const [url, init] = posts()[0];
+    expect(url).toBe("/api/vault/grants");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      approvalId: "approval-1",
+      names: ["CF_API_TOKEN"],
+      ttlMinutes: 15,
+      pin: "123456",
+    });
+    expect(fetchMock.mock.calls.map(([target]) => String(target))).not.toContain(
+      "/api/approvals/approval-1/approve",
+    );
   });
 
   it("asks nothing of the server per card: no transcript pages and no approval list", async () => {

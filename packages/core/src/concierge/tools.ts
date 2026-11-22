@@ -7,8 +7,8 @@
 import { randomUUID } from "node:crypto";
 import { pushBody } from "./push.js";
 import { turnPrompts as turnPromptsOf } from "./reply-target.js";
-import { taskCardLine } from "./task-cards.js";
-import type { ForwardedFrom } from "@rome/api-types/chat";
+import { approvalLine, taskCardLine } from "./task-cards.js";
+import type { ForwardedFrom, TaskChatWaitedOn } from "@rome/api-types/chat";
 import type { AgentPlan } from "@rome/api-types/trace-segments";
 import { CONCIERGE_REACTIONS } from "@rome/api-types/concierge";
 import { CONCIERGE_TASK_STATUSES } from "@rome/api-types/concierge-task-status";
@@ -698,8 +698,7 @@ export async function buildConciergeTools(
 
   // The question card message `id` of a task chat holds: its chat, the tool
   // use it waits on, and its questions in one line. Null for any other
-  // message, such as an approval or an app's own card, which its task chat
-  // answers.
+  // message, such as an app's own card, which its task chat answers.
   const questionCardIn = async (id: string) => {
     const message = await webchatRepo.widgetMessage(id);
     if (!message) return null;
@@ -710,24 +709,40 @@ export async function buildConciergeTools(
     return asked && toolUseId ? { chatId: message.chatId, toolUseId, line: asked.line } : null;
   };
 
-  // Forwards task chat question card `cardId` as the card itself: a task
-  // card that shows the question it waits on and answers it in its task chat,
-  // so both chats show the same card and its one answer
+  // The approval `id` of a task chat: its chat, whether it still waits, and
+  // what it asks in one line. Null for any other id.
+  const approvalIn = async (id: string) => {
+    const approval = await service.deps.approvals.findById(id);
+    if (!approval?.threadId || approval.type !== "action_execution") return null;
+    const holder = await webchatRepo.getSession(approval.threadId);
+    if (holder?.triggerKind !== TASK_CHAT_TRIGGER_KIND) return null;
+    return {
+      chatId: approval.threadId,
+      pending: approval.status === "pending",
+      line: approvalLine(approval.payload, approval.description),
+    };
+  };
+
+  // Forwards the question or approval `waitedOn` of task chat `taskChatId` as
+  // the card itself: a task card that shows what it waits on and settles in
+  // its task chat, so both chats show the same card and its one outcome
   // (docs/domains/chats.md#task). It replies to the task's start message.
-  // Where this chat cannot draw cards, the questions go as a message, which
-  // the guardian answers in words. Forwarding it twice in one turn is one message.
-  const forwardQuestion = async (
-    question: { chatId: string; toolUseId: string; line: string },
+  // Where this chat cannot draw cards, a question goes as a message, which
+  // the guardian answers in words; `card_forward` refuses an approval there
+  // before it gets here. Forwarding it twice in one turn is one message.
+  const forwardAsk = async (
+    taskChatId: string,
+    waitedOn: TaskChatWaitedOn,
     cardId: string,
     title: string,
+    line: string,
   ) => {
     const { chatId, turnId } = currentTurn();
     const key = sayKey(`card:${cardId}`, undefined);
     const repeated = service.saidInTurn(turnId, key);
     if (repeated) return repeated;
-    const task = await tasks.repo.findBySession(question.chatId);
+    const task = await tasks.repo.findBySession(taskChatId);
     const start = await startMessageOf(task?.id);
-    const waitedOn = { kind: "question" as const, id: question.toolUseId, messageId: cardId };
     // A card replies with no quote, as a forwarded result card does.
     const id =
       context.widgets === "card"
@@ -735,7 +750,7 @@ export async function buildConciergeTools(
             await webchatRepo.addBackendMessage(
               chatId,
               turnId,
-              [{ type: "task_chat", chatId: question.chatId, title, show: "ask", waitedOn }],
+              [{ type: "task_chat", chatId: taskChatId, title, show: "ask", waitedOn }],
               start ? { replyTo: start.id } : {},
             )
           ).id
@@ -743,12 +758,12 @@ export async function buildConciergeTools(
             [
               {
                 type: "text",
-                content: `${taskLink(title, question.chatId)}: ${question.line}`,
+                content: `${taskLink(title, taskChatId)}: ${line}`,
               },
             ],
             start,
           );
-    said(chatId, turnId, `${title}: ${pushBody(question.line)}`);
+    said(chatId, turnId, `${title}: ${pushBody(line)}`);
     service.keepSaid(turnId, key, id);
     return id;
   };
@@ -1398,7 +1413,7 @@ export async function buildConciergeTools(
       name: "card_forward",
       description:
         "Send the guardian one card a task chat showed, as it is, by its id: Rome copies the card, so you pass no content. The id is the `id` of a `card id=…` line in a task event, or the `cardId` of a message chat_read shows. Where this chat cannot show cards, the card's plain-text line goes instead. " +
-        "A task's question card goes as the card itself: the guardian answers it here or in the task chat, and both show the one answer. An approval is decided in its task chat, so it is refused. " +
+        "A task's question card or approval goes as the card itself: the guardian answers or decides it here or in the task chat, and both show the one outcome. Only the guardian's tap on the card decides an approval, and a vault approval still asks for their PIN there; you never decide one. An approval already decided, or one this chat cannot show as a card, is refused and nothing is sent. " +
         "To send several cards, call it once for each: every card is a message of its own. Any card of a task chat started from this Concierge chat can go, from any turn. " +
         "An id that names no such card is refused and nothing is sent: then tell the result yourself with say, replying to the task's start message. " +
         "The message replies to the task's start message and leaves it where it is, so several cards all reply to the same one.",
@@ -1413,14 +1428,48 @@ export async function buildConciergeTools(
           currentTurn();
           const found = await messages.cardIn(cardId);
           const holder = found ? await webchatRepo.getSession(found.chatId) : undefined;
-          // A task's question card goes as itself: the same card, answered
-          // wherever it is.
+          // A task's question card or approval goes as itself: the same card,
+          // answered or decided wherever it is.
           if (!found) {
             const question = await questionCardIn(cardId);
             if (question) {
               const chat = await requireOwnTaskChat(question.chatId);
-              const messageId = await forwardQuestion(question, cardId, chat.name);
+              const waitedOn = {
+                kind: "question" as const,
+                id: question.toolUseId,
+                messageId: cardId,
+              };
+              const messageId = await forwardAsk(
+                question.chatId,
+                waitedOn,
+                cardId,
+                chat.name,
+                question.line,
+              );
               return { forwarded: context.widgets === "card" ? "card" : "card_text", messageId };
+            }
+            const approval = await approvalIn(cardId);
+            if (approval) {
+              const chat = await requireOwnTaskChat(approval.chatId);
+              if (!approval.pending) {
+                throw new Error(
+                  `Approval ${cardId} is already decided. Nothing was sent; its outcome reaches you as a task event.`,
+                );
+              }
+              // Nothing here writes the approval: only the guardian's tap on the card decides it.
+              if (context.widgets !== "card") {
+                throw new Error(
+                  "This chat cannot show cards, so the approval stays in its task chat. Nothing was sent. Say once, in one short line with the task's link, what it asks to do and that they decide it in the task chat.",
+                );
+              }
+              const messageId = await forwardAsk(
+                approval.chatId,
+                { kind: "approval", id: cardId },
+                cardId,
+                chat.name,
+                approval.line,
+              );
+              return { forwarded: "card", messageId };
             }
           }
           // Everything that can refuse comes before anything is said.
@@ -1453,10 +1502,22 @@ export async function buildConciergeTools(
           const wanted = requireString(args, "service");
           const { chatId, turnId } = currentTurn();
           const { connectors } = await service.following.list(await ownerHere());
-          const connector = connectors.find((entry) => entry.service === wanted);
+          // An agent may name a service as the guardian reads it: "slack" for
+          // the entry labelled Slack, whose service is slack_app. Only a label
+          // one service carries names it.
+          const named = connectors.filter(
+            (entry) => entry.label.toLowerCase() === wanted.toLowerCase(),
+          );
+          const connector =
+            connectors.find((entry) => entry.service === wanted) ??
+            (named.length === 1 ? named[0] : undefined);
           if (!connector) {
             throw new Error(
-              `No service ${wanted}. Use core:concierge_following_list for the service names.`,
+              named.length > 0
+                ? `No service ${wanted}. Services labelled ${named[0].label}: ${named
+                    .map((entry) => `${entry.service} (${entry.state ?? "not connected"})`)
+                    .join(", ")}. Pass one of those.`
+                : `No service ${wanted}. Use core:concierge_following_list for the service names.`,
             );
           }
           if (connector.state === "working") {

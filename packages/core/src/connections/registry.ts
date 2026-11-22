@@ -31,6 +31,7 @@ import {
   DuplicateKindConnectionsError,
   RenewalUnavailable,
 } from "./errors.js";
+import { DeliveryRefused } from "./types.js";
 import type {
   Act,
   Actor,
@@ -1125,16 +1126,42 @@ class ConnectionImpl implements Connection {
   private startInstance(slot: CapabilitySlot, epoch: Epoch): void {
     const fault = (err: StreamFault) => this.handleFault(slot, err, epoch);
     if (slot.kind === "talker") {
-      (epoch.instance as Talker).start((msg) => {
-        epoch.disconnectStreak = 0; // a successful delivery ends any backoff run
-        for (const handler of slot.messageHandlers) {
-          void handler(msg).catch((err) => {
-            this.log.error("Talk onMessage handler threw", {
-              connectionId: this.id,
-              error: errMsg(err),
-            });
-          });
-        }
+      const talker = epoch.instance as Talker;
+      talker.start((msg) => {
+        // A successful delivery ends any backoff run. For a Talker that waits
+        // for acceptance, only an accepted one does: a delivery refused again
+        // after each rebuild must not hold the backoff at its first step.
+        if (!talker.awaitsAcceptance) epoch.disconnectStreak = 0;
+        // Settles once every handler has: the Talker's acceptance (Talker.start).
+        const accepted = Promise.all(
+          slot.messageHandlers.map((handler) =>
+            handler(msg).catch((err: unknown) => {
+              // A refusal is logged where it happens, and is no handler bug.
+              if (err instanceof DeliveryRefused) {
+                this.log.debug("Talk delivery refused for now", {
+                  connectionId: this.id,
+                  error: errMsg(err),
+                });
+              } else {
+                this.log.error("Talk onMessage handler threw", {
+                  connectionId: this.id,
+                  error: errMsg(err),
+                });
+              }
+              throw err;
+            }),
+          ),
+        ).then(() => undefined);
+        // Only a Talker that declares it waits gets the promise (Talker.start),
+        // so one that forwards `deliver` cannot wait on recording by accident.
+        // The catch leaves no unhandled rejection when nobody awaits it.
+        accepted.then(
+          () => {
+            if (talker.awaitsAcceptance) epoch.disconnectStreak = 0;
+          },
+          () => {},
+        );
+        return talker.awaitsAcceptance ? accepted : undefined;
       }, fault);
     } else if (slot.kind === "watcher") {
       (epoch.instance as Watcher).start((event) => {

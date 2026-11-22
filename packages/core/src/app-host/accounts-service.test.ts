@@ -192,71 +192,6 @@ describe("createChannelsService", () => {
     );
   });
 
-  it("lists the chats a Connection sees, every page, and says when it lists none", async () => {
-    const listConversations = rs.fn(
-      async (input: { cursor?: string; includeArchived?: boolean }) =>
-        input.cursor
-          ? { conversations: [{ displayName: "b" }] }
-          : { conversations: [{ displayName: "a" }], nextCursor: "next" },
-    );
-    const directory = { listConversations };
-    const all = [
-      {
-        id: "discord-1",
-        connectionKind: "discord",
-        withTalker: (call: (live: object) => unknown) => call({ directory }),
-        status: () => ({ chat: { state: "unlocked" } }),
-      },
-      {
-        id: "tg-a",
-        connectionKind: "telegram_user",
-        withTalker: (call: (live: object) => unknown) => call({}),
-        status: () => ({ chat: { state: "unlocked" } }),
-      },
-    ] as unknown as Connection[];
-    const channelsService = createChannelsService({
-      channels: () => [] as unknown as Channels,
-      registry: { all: () => all },
-      channelOf: kindChannelOf,
-    });
-
-    const chats = await channelsService.chats!("discord", { includeArchivedThreads: true });
-
-    expect(chats.map((chat) => chat.displayName)).toEqual(["a", "b"]);
-    expect(listConversations).toHaveBeenLastCalledWith({
-      limit: 10_000,
-      cursor: "next",
-      includeTopics: true,
-      includeArchived: true,
-    });
-    await expect(channelsService.chats!("telegram_user")).rejects.toThrow(
-      '"telegram_user" lists no chats',
-    );
-  });
-
-  it("stops a listing whose directory hands back a cursor it already gave", async () => {
-    const directory = {
-      listConversations: async () => ({ conversations: [], nextCursor: "same" }),
-    };
-    const all = [
-      {
-        id: "discord-1",
-        connectionKind: "discord",
-        withTalker: (call: (live: object) => unknown) => call({ directory }),
-        status: () => ({ chat: { state: "unlocked" } }),
-      },
-    ] as unknown as Connection[];
-    const channelsService = createChannelsService({
-      channels: () => [] as unknown as Channels,
-      registry: { all: () => all },
-      channelOf: kindChannelOf,
-    });
-
-    await expect(channelsService.chats!("discord")).rejects.toThrow(
-      '"discord" listing did not advance',
-    );
-  });
-
   it("reads by message id and until a time only from a store read live", async () => {
     const copy = rs.fn(async () => [line("m", 1_000)]);
     const live = rs.fn(async () => [line("m", 1_000)]);
@@ -399,6 +334,114 @@ describe("ChannelsService — by account", () => {
     expect(query).toHaveBeenCalledTimes(2);
     expect(byValue?.account).toEqual(TG);
     expect(byName?.account).toEqual(TG);
+  });
+});
+
+describe("ChannelsService — chats", () => {
+  const SLACK = { platform: "slack", id: "T1/B1" };
+  const accounts: RomeAccounts = {
+    accountOf: (id) => (id === "slack-1" ? SLACK : null),
+    holderOf: (account) => (account.id === SLACK.id ? "slack-1" : null),
+  };
+
+  function listing(listConversations: (input: object) => Promise<unknown>) {
+    const talkers: Record<string, object> = {
+      "slack-1": { send: async () => RECEIPT, directory: { listConversations } },
+      "discord-1": { send: async () => RECEIPT },
+    };
+    const all = Object.entries({ "slack-1": "slack_app", "discord-1": "discord" }).map(
+      ([id, kind]) =>
+        ({
+          id,
+          connectionKind: kind,
+          withTalker: (call: (live: object) => unknown) => call(talkers[id] as object),
+          status: () => ({ chat: { state: "unlocked" } }),
+        }) as unknown as Connection,
+    );
+    return createChannelsService({
+      channels: () => [] as unknown as Channels,
+      registry: { all: () => all },
+      channelOf: kindChannelOf,
+      accounts,
+    });
+  }
+
+  it("answers the account's own connection's page, with its cursor", async () => {
+    const listConversations = rs.fn(async () => ({
+      conversations: [
+        {
+          ref: { connectionId: "slack-1", chatId: "C1" },
+          connectionKind: "slack_app",
+          service: "slack_app",
+          kind: "channel",
+          displayName: "#news",
+        },
+      ],
+      nextCursor: "1",
+    }));
+    const channelsService = listing(listConversations);
+
+    const page = await channelsService.chats?.(SLACK, { query: "ne", cursor: "0", limit: 5_000 });
+
+    expect(listConversations).toHaveBeenCalledWith({
+      limit: 200,
+      includeTopics: false,
+      query: "ne",
+      cursor: "0",
+    });
+    expect(page).toEqual({
+      chats: [{ chatId: "C1", name: "#news", kind: "channel" }],
+      nextCursor: "1",
+    });
+  });
+
+  it("lists threads, archived ones too, each naming its chat", async () => {
+    const listConversations = rs.fn(async () => ({
+      conversations: [
+        {
+          ref: { connectionId: "slack-1", chatId: "C1" },
+          connectionKind: "slack_app",
+          service: "slack_app",
+          kind: "channel",
+          displayName: "#news",
+        },
+        {
+          ref: { connectionId: "slack-1", chatId: "T1" },
+          connectionKind: "slack_app",
+          service: "slack_app",
+          kind: "topic",
+          displayName: "launch",
+          parent: { connectionId: "slack-1", chatId: "C1" },
+          archived: true,
+        },
+      ],
+    }));
+    const channelsService = listing(listConversations);
+
+    const page = await channelsService.chats?.(SLACK, { includeArchivedThreads: true });
+
+    expect(listConversations).toHaveBeenCalledWith({
+      limit: 100,
+      includeTopics: true,
+      includeArchived: true,
+    });
+    expect(page).toEqual({
+      chats: [
+        { chatId: "C1", name: "#news", kind: "channel" },
+        { chatId: "T1", name: "launch", kind: "topic", parent: "C1", archived: true },
+      ],
+    });
+  });
+
+  it("rejects with the platform's refusal rather than an empty page", async () => {
+    const channelsService = listing(async () => {
+      throw new Error("Ask the guardian to approve the app again");
+    });
+
+    await expect(channelsService.chats?.(SLACK)).rejects.toThrow("approve the app again");
+    await expect(channelsService.chats?.("discord")).rejects.toThrow(
+      'Channel "discord" lists no chats',
+    );
   });
 });
 

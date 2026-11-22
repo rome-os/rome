@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -157,7 +157,14 @@ afterEach(() => {
   rs.unstubAllGlobals();
 });
 
-function renderPanel(props: { selectedId?: string; taskChats?: boolean } = {}) {
+function renderPanel(
+  props: {
+    selectedId?: string;
+    taskChats?: boolean;
+    onOpenTaskChat?: (id: string) => void;
+    onNavigate?: () => void;
+  } = {},
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(
     <QueryClientProvider client={client}>
@@ -201,6 +208,23 @@ describe("OutputsPanel", () => {
     expect(chip.getAttribute("href")).toBe("/chat/task-1");
     const earlier = screen.getByRole("list", { name: "Earlier" });
     expect(earlier.textContent).toContain("Page·Written");
+  });
+
+  it("opens the task chat an output came from beside the chat where the host can", async () => {
+    outputs = [
+      output("budget", {
+        name: "budget.csv",
+        from: { chatId: "task-1", name: "Draft the report" },
+      }),
+    ];
+    const onOpenTaskChat = rs.fn();
+    const onNavigate = rs.fn();
+    renderPanel({ onOpenTaskChat, onNavigate });
+    const chip = await screen.findByRole("link", { name: "from Draft the report" });
+    expect(chip.getAttribute("href")).toBe("/chat/task-1");
+    fireEvent.click(chip);
+    expect(onOpenTaskChat).toHaveBeenCalledWith("task-1", "Draft the report");
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
   it("filters by documents, spreadsheets and pages, and keeps other kinds under All", async () => {

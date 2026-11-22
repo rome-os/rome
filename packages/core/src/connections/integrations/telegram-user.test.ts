@@ -228,7 +228,7 @@ describe("telegram_user inbound delivery", () => {
     });
     const delivered: unknown[] = [];
     talker.start(
-      (msg) => delivered.push(msg),
+      (msg) => void delivered.push(msg),
       () => {},
     );
     const raw = { id: 7, out: false };

@@ -3,16 +3,19 @@ type: system
 description: >
   Fetch recent message history from a channel that keeps its messages, such
   as WhatsApp, LinkedIn or the dashboard chat, or that reads them from the
-  platform, such as Discord, which needs threadId. On Discord, pass olderThan
-  or newerThan with a message id to read just before or after it, such as to
-  fill a gap in what you have seen; a full page read forward returns
-  nextNewerThan to read on from.
+  platform, such as Discord or Slack, which needs threadId: without one, such
+  an account answers the chats it may read, each with its threadId.
+  A read from the platform can return fewer messages than were said: Slack
+  answers at most 15 at a time. On Discord, pass olderThan or newerThan with a
+  message id to read just before or after it, such as to fill a gap in what
+  you have seen; a full page read forward returns nextNewerThan to read on
+  from.
   Pass threadId to fetch a specific thread, or omit it to fetch all accessible
   threads.
   Returns the newest messages as a markdown-formatted summary grouped by
-  thread. To page back a few at a time, pass limit, then pass the returned
-  nextCursor as cursor to read the messages before that page; paging needs
-  threadId. Pass
+  thread. A read of one thread returns nextCursor: pass it as cursor to read
+  the messages before that page, until a read comes back empty. To page back
+  a few at a time, pass limit too; paging needs threadId. Pass
   includeMessages=true to additionally receive a structured `messages` array
   with per-message attachment metadata (url, fileName, mimeType, localPath).
 complexity: moderate

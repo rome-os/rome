@@ -117,6 +117,8 @@ final class Workspace {
     private(set) var concierge: TranscriptStore
     /// The topic chats, for the drawer.
     let topics: TopicChatsStore
+    /// The archived topic chats, for the drawer's Archived row and its sheet.
+    let archivedTopics: ArchivedTopicsStore
     /// The opened topic chats' transcripts, the newest `keptStores` of them
     /// kept while the instance is open, so coming back to a chat does not
     /// load it from the top again.
@@ -217,6 +219,7 @@ final class Workspace {
         if main.loaded { conciergeState = .ready }
         concierge = main
         topics = TopicChatsStore(backend: backend, fold: TopicChatsFold(host: host))
+        archivedTopics = ArchivedTopicsStore(backend: backend)
     }
 
     /// The main Chat's sharing, for its Shared links in Settings; nil until
@@ -353,6 +356,7 @@ final class Workspace {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, (try? await backend.renameChat(chatId, to: trimmed)) != nil else { return false }
         topics.rename(chatId, to: trimmed)
+        archivedTopics.rename(chatId, to: trimmed)
         return true
     }
 
@@ -371,9 +375,56 @@ final class Workspace {
     /// of moving them to the main Chat.
     @discardableResult
     func archiveTopic(_ chatId: String, stoppingWork: Bool = false) async -> Bool {
+        let chat = topics.chat(chatId)
         guard (try? await backend.archiveChat(chatId, stoppingWork: stoppingWork)) != nil else { return false }
         dropTopic(chatId)
+        archivedTopics.add(chat ?? ConciergeChat(id: chatId, name: "", main: false))
         return true
+    }
+
+    /// Restores an archived topic chat: it is back in the drawer, pinned
+    /// again if it was. Returns whether the server took it.
+    /// `movingFollowsBack` moves the follows its archive moved to the main
+    /// Chat back to it.
+    @discardableResult
+    func restoreTopic(_ chatId: String, movingFollowsBack: Bool = false) async -> Bool {
+        guard (try? await backend.unarchiveChat(chatId, movingFollowsBack: movingFollowsBack)) != nil else { return false }
+        // Listed in the drawer now, under its name; the refetch brings its pin and place.
+        if let chat = archivedTopics.chat(chatId) { topics.add(chat) } else { topics.refresh() }
+        archivedTopics.remove(chatId)
+        // Its tasks read as its own again.
+        taskChats.resync()
+        return true
+    }
+
+    /// A topic chat by id, from the drawer's list or the archived one.
+    func topicChat(_ chatId: String) -> ConciergeChat? {
+        topics.chat(chatId) ?? archivedTopics.chat(chatId)
+    }
+
+    /// Where a search hit opens.
+    enum SearchHitTarget: Equatable {
+        case main
+        case topic(String)
+        case taskChat(String, title: String)
+    }
+
+    /// Where a search hit opens. The hit's own archive state wins over the
+    /// drawer's list, which may be older: an archived topic chat opens read
+    /// only, and leaves the drawer if it was still listed there.
+    func openSearchHit(_ session: ChatSession) -> SearchHitTarget {
+        if isMainChat(session.id) { return .main }
+        if archivedTopics.note(session) {
+            topics.remove(session.id)
+            return .topic(session.id)
+        }
+        if topics.chat(session.id) != nil { return .topic(session.id) }
+        return .taskChat(session.id, title: session.name)
+    }
+
+    /// Whether topic chat `chatId` is archived: it opens read only.
+    func isArchivedTopic(_ chatId: String?) -> Bool {
+        chatId.map(archivedTopics.contains) ?? false
     }
 
     /// Deletes a topic chat and drops it from the drawer. Returns whether the
@@ -407,6 +458,7 @@ final class Workspace {
 
     private func dropTopic(_ chatId: String) {
         topics.remove(chatId)
+        archivedTopics.remove(chatId)
         topicStores.removeValue(forKey: chatId)?.close()
     }
 
@@ -444,6 +496,7 @@ final class Workspace {
         watchAgentName()
         taskChats.start()
         topics.start()
+        archivedTopics.refresh()
         Task {
             if role == .unknown { await readRole() }
             // The widget shows this instance's apps, even before Apps opens.

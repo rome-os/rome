@@ -13,10 +13,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { IconButton } from "@/components/ui/icon-button";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { DefaultModelProvider } from "@rome/api-types/chat";
 import {
   COMMON_LARGE_MODEL_IDS,
   DEFAULT_LARGE_MODEL_SELECTION,
-  LARGE_MODEL_OPTIONS,
+  runnableLargeModelOptions,
 } from "@/lib/chat-constants";
 
 // A value no model id can collide with, so the "show all" row and the model
@@ -29,6 +30,8 @@ export interface ModelSelectorMenuProps {
   value: string;
   onChange: (next: string) => void;
   disabled: boolean;
+  /** Signed-in providers. Models of the others are not offered; null offers all. */
+  signedIn?: Record<DefaultModelProvider, boolean> | null;
 }
 
 /**
@@ -46,6 +49,7 @@ export function ModelSelectorMenu({
   value,
   onChange,
   disabled,
+  signedIn = null,
 }: ModelSelectorMenuProps) {
   const { t } = useTranslation("chat");
   const [query, setQuery] = useState("");
@@ -53,16 +57,27 @@ export function ModelSelectorMenu({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   // Resolve labels once so the trigger, the filter, and the rows all read the
-  // exact same text — a single source for "what the model is called".
+  // exact same text — a single source for "what the model is called". Only
+  // models a signed-in provider can run are offered, plus the chat's own pick.
+  // "Auto" follows the default provider, so its row says so.
   const options = useMemo(
-    () => LARGE_MODEL_OPTIONS.map((option) => ({ ...option, label: t(option.labelKey) })),
-    [t],
+    () =>
+      runnableLargeModelOptions(signedIn, value).map((option) => ({
+        ...option,
+        label: t(option.labelKey),
+        rowLabel:
+          option.id === DEFAULT_LARGE_MODEL_SELECTION
+            ? t("modelSelector.options.autoFollowsDefault")
+            : t(option.labelKey),
+      })),
+    [t, signedIn, value],
   );
 
   // `auto` is a value like any other, so the trigger always has something to
   // name. The label IS the state — nothing has to encode "non-default" on top.
   // Resolved from `options` (not raw LARGE_MODEL_OPTIONS) so the trigger renders
   // the same translated label as the rows, with no second lookup path.
+  // "auto" belongs to no provider, so it is always among the options.
   const selected =
     options.find((option) => option.id === value) ??
     options.find((option) => option.id === DEFAULT_LARGE_MODEL_SELECTION)!;
@@ -80,7 +95,7 @@ export function ModelSelectorMenu({
       return {
         rows: options.filter(
           (option) =>
-            option.label.toLowerCase().includes(trimmedQuery) ||
+            option.rowLabel.toLowerCase().includes(trimmedQuery) ||
             option.id.toLowerCase().includes(trimmedQuery),
         ),
         showAllRow: false,
@@ -196,7 +211,7 @@ export function ModelSelectorMenu({
                     value === option.id ? "text-info-fg" : "text-foreground",
                   )}
                 >
-                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{option.rowLabel}</span>
                   <span className="flex w-3.5 justify-center">
                     {value === option.id ? (
                       <Check className="size-3.5 shrink-0" aria-hidden="true" />

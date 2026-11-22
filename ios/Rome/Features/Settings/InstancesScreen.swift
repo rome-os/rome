@@ -245,6 +245,14 @@ struct SearchScreen: View {
                                             .romeFont(13, .semibold)
                                             .foregroundStyle(Palette.sub)
                                             .lineLimit(1)
+                                        if hit.session.archivedAt != nil {
+                                            Text("Archived")
+                                                .romeFont(11, .medium)
+                                                .foregroundStyle(Palette.sub)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 1)
+                                                .background(Palette.fill, in: Capsule())
+                                        }
                                         Spacer()
                                         if let date = RomeDate.parse(hit.message.createdAt) {
                                             Text(RelativeTime.ago(date)).romeFont(12).foregroundStyle(Palette.sub)

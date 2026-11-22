@@ -10,7 +10,6 @@ import type { Talker } from "../connections/types.js";
 import type { DiscordAdapter } from "../connections/kinds/discord/discord.js";
 import type { EmailAdapter } from "../connections/kinds/email/email.js";
 import type { FeishuAdapter } from "../connections/kinds/feishu/feishu.js";
-import type { SlackAdapter } from "../connections/kinds/slack/slack.js";
 import type { TelegramAdapter } from "../connections/kinds/telegram/telegram.js";
 import type { TelegramUserAdapter } from "../connections/kinds/telegram-user/telegram-user.js";
 import type { WechatAdapter } from "../connections/kinds/wechat/wechat.js";
@@ -74,7 +73,6 @@ holds<Equals<Addressed, "rome" | "others" | "nobody">>();
 holds<Equals<InboundOf<DiscordAdapter>, Message>>();
 holds<Equals<InboundOf<EmailAdapter>, Message>>();
 holds<Equals<InboundOf<FeishuAdapter>, Message>>();
-holds<Equals<InboundOf<SlackAdapter>, Message>>();
 holds<Equals<InboundOf<TelegramAdapter>, Message>>();
 holds<Equals<InboundOf<TelegramUserAdapter>, Message>>();
 holds<Equals<InboundOf<WechatAdapter>, Message>>();
@@ -101,6 +99,7 @@ holds<
     | "thread"
     | "chatThread"
     | "openedThread"
+    | "inThread"
     | "addressing"
     | "fromBot"
     | "mentionsOthers"

@@ -38,6 +38,7 @@ import type {
 import { ProjectSelector } from "@/components/project-selector";
 import { useChatLocations } from "@/hooks/use-chat-locations";
 import { useSettings } from "@/hooks/use-settings";
+import { useSignedInProviders } from "@/hooks/use-default-provider";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import {
   COMMON_LARGE_MODEL_IDS,
@@ -45,6 +46,7 @@ import {
   DEFAULT_PROJECT_NAME,
   DEFAULT_REASONING_EFFORT,
   LARGE_MODEL_OPTIONS,
+  runnableLargeModelOptions,
 } from "@/lib/chat-constants";
 import { isReasoningEffort } from "@/lib/chat-helpers";
 import { extractFilesFromClipboard } from "@/lib/clipboard-files";
@@ -341,10 +343,13 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     const [showAllModels, setShowAllModels] = useState(false);
     // Like the model picker in other chats: the common models and the chat's
     // own pick first, every model after "show all".
+    // Only models a signed-in provider can run, plus the chat's own pick.
+    const signedInProviders = useSignedInProviders();
+    const modelOptions = (value: string) => runnableLargeModelOptions(signedInProviders, value);
     const modelRows = (value: string) =>
       showAllModels
-        ? LARGE_MODEL_OPTIONS
-        : LARGE_MODEL_OPTIONS.filter(
+        ? modelOptions(value)
+        : modelOptions(value).filter(
             (option) => COMMON_LARGE_MODEL_IDS.includes(option.id) || option.id === value,
           );
     const modelLabel = (id: string) =>
@@ -488,7 +493,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                         >
                           {modelRows(modelSelection.value).map((option) => (
                             <DropdownMenuRadioItem key={option.id} value={option.id}>
-                              {t(option.labelKey)}
+                              {option.id === DEFAULT_LARGE_MODEL_SELECTION
+                                ? t("modelSelector.options.autoFollowsDefault")
+                                : t(option.labelKey)}
                             </DropdownMenuRadioItem>
                           ))}
                         </DropdownMenuRadioGroup>
@@ -503,7 +510,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                           >
                             <MoreHorizontal aria-hidden />
                             {t("modelSelector.showAll", {
-                              count: LARGE_MODEL_OPTIONS.length,
+                              count: modelOptions(modelSelection.value).length,
                             })}
                           </DropdownMenuItem>
                         )}

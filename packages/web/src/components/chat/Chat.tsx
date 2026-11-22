@@ -160,7 +160,7 @@ import {
 } from "./outputs/chat-outputs";
 import { useTopicChatArchive } from "@/components/concierge/TopicChatArchiveDialog";
 import { TopicChatDeleteDialog } from "@/components/concierge/TopicChatDeleteDialog";
-import { useToolTasks } from "@/pages/free/tool-tasks";
+import { useTaskChatInPane, useToolTasks } from "@/pages/free/tool-tasks";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
@@ -1153,6 +1153,9 @@ export function Chat({
     return () => document.removeEventListener("visibilitychange", flush);
   }, [markSessionRead]);
 
+  // A task chat open in the side pane's Chat tab, beside its Concierge chat.
+  const inPane = useTaskChatInPane();
+
   // Delete the current chat from the navbar's "⋯" menu, then refresh the
   // sidebar list and drop back to a fresh chat. `stopWork` ends a topic
   // chat's follows and open tasks instead of moving them to the main chat.
@@ -1167,11 +1170,16 @@ export function Chat({
         // best-effort — the list refresh below reconciles either way
       }
       notifySessionsChanged();
+      // In the side pane only its tab goes: the Concierge chat beside it stays.
+      if (inPane) {
+        inPane.onClose();
+        return;
+      }
       // `forkable` holds for a common or fork chat, the ordinary chats. Leaving
       // one for the main chat's page would switch the chat list to Concierge.
       navigate(forkable ? "/chat" : MAIN_CHAT_PATH);
     },
-    [forkable, mainSessionId, notifySessionsChanged, navigate],
+    [forkable, mainSessionId, notifySessionsChanged, navigate, inPane],
   );
 
   // Archive (read-only soft-hide) or restore the current chat. Archiving does
@@ -1343,9 +1351,17 @@ export function Chat({
 
   // Subscribe to the main session's events through useLiveEvents.
   const sessionEventIds = useMemo(() => (mainSessionId ? [mainSessionId] : []), [mainSessionId]);
+  // Turns a provider card explains: their end shows no error banner.
+  const cardedTurnsRef = useRef(new Set<string>());
   const handleMessageInsert = useCallback(
     (sid: string, message: ChatMessage) => {
       if (message.sessionId !== sid) return;
+      // A provider failure card says why the turn stopped and what to do, so
+      // the composer's error banner would only repeat it.
+      if (message.content.includes('"provider_failure"')) {
+        if (message.turnId) cardedTurnsRef.current.add(message.turnId);
+        if (sid === mainSessionIdRef.current) setStreamError(null);
+      }
       setMessages((prev) => {
         const next = new Map(prev);
         const existing = next.get(sid) ?? [];
@@ -1462,6 +1478,7 @@ export function Chat({
                 !payload.success &&
                 payload.error &&
                 !isModelResolutionErrorCode(payload.code) &&
+                !cardedTurnsRef.current.has(turnId) &&
                 sessionId === mainSessionIdRef.current
               ) {
                 setStreamError({
@@ -1484,6 +1501,7 @@ export function Chat({
               if (
                 payload.error &&
                 !isModelResolutionErrorCode(payload.code) &&
+                !cardedTurnsRef.current.has(turnId) &&
                 sessionId === mainSessionIdRef.current
               ) {
                 setStreamError({
@@ -2265,8 +2283,10 @@ export function Chat({
   // A narrow workspace shows the open tool pane in place of the chat.
   const toolTasksHost = useToolTasks();
   const paneCoversChat = toolTrace.paneOpen && Boolean(toolTasksHost?.compact);
-  // Either one stops listening: no one could see it listen.
-  const composerHidden = sharingRef.current || paneCoversChat;
+  // Any of these stops listening: no one could see it listen. A task chat in
+  // the side pane is hidden, not unmounted, while another tab shows, so its
+  // field keeps a size and the voice input cannot tell by itself.
+  const composerHidden = sharingRef.current || paneCoversChat || inPane?.active === false;
   useEffect(() => {
     if (composerHidden) composerRef.current?.stopVoiceInput();
   }, [composerHidden, composerRef]);
@@ -2519,7 +2539,8 @@ export function Chat({
       : []),
   ];
   const actions: HeaderMenuItem[] = [
-    ...(isMainChat
+    // An archived topic chat is renamed once it is unarchived.
+    ...(isMainChat || (isTopicChat && isArchived)
       ? []
       : [
           {
@@ -2671,7 +2692,7 @@ export function Chat({
       {/* The phone shell's back and menu buttons move in here, and its bar
           steps aside. Not while the tool pane covers the chat: the shell's
           bar is then the only way back from the pane. */}
-      {taskOf ? (
+      {inPane ? null : taskOf ? (
         // A task chat names the Concierge chat it reports to, and goes back
         // there. On the phone it takes the place of the chat list's button.
         <BackToConciergeChat

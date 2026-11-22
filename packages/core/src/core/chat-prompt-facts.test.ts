@@ -89,14 +89,20 @@ describe("chatPromptFacts earlier messages", () => {
     timestamp: new Date(Date.UTC(2026, 7, 3, 8, minute)),
     account: { platform: "slack", id: "T_A/U_ROME" },
   });
-  const earlierFacts = (page: unknown[], promptContext = true) => {
+  const earlierFacts = (
+    page: unknown[],
+    promptContext = true,
+    keys: Record<number, string> = {},
+  ) => {
     const read = rs.fn(async (lines: readonly { senderName: string | null; account: unknown }[]) =>
       lines.map((line) => ({ ...line, sender: line.senderName, who: "labelled" })),
     );
     const latest = rs.fn(async () => page as never);
     const promptFacts = chatPromptFacts({
       facts: { unseen: () => [], seen: () => undefined },
-      messages: { byIds: () => [] },
+      messages: {
+        byIds: (ids) => ids.flatMap((id) => (keys[id] ? [{ key: keys[id] } as never] : [])),
+      },
       labels: { read: read as never, readUnseen: async () => [] },
       channelOfChat: () => null,
       channelSurface: () => ({ interactiveCards: false, promptContext }),
@@ -153,6 +159,78 @@ describe("chatPromptFacts earlier messages", () => {
       ["Rome", null],
       ["Ouou", null],
     ]);
+  });
+
+  it("keeps what was said earlier in the second of the session's first message", async () => {
+    const at = (ms: number, id: string, text: string) => ({
+      ...message(20, text),
+      messageId: id,
+      timestamp: new Date(Date.UTC(2026, 7, 3, 8, 20, 0, ms)),
+    });
+    // Newest first, as a platform answers: the question at .900 opens the
+    // session, a fact came at .100, and a follow-up at .950.
+    const page = [
+      at(950, "q2", "and also"),
+      at(900, "q1", "what is it?"),
+      // Shares the question's millisecond: Slack's ts orders the two finer
+      // than a Date can, and the page answers in that order.
+      at(900, "g", "or 43"),
+      at(100, "f", "it is 42"),
+    ];
+    const { promptFacts, latest } = earlierFacts(page, true, { 31: "q1" });
+    // Rome's record holds the question at the whole second.
+    const before = new Date(Date.UTC(2026, 7, 3, 8, 20));
+
+    const earlier = await promptFacts.earlier?.(place, before, 31);
+
+    expect(earlier?.map((m) => m.text)).toEqual(["it is 42", "or 43"]);
+    expect(latest).toHaveBeenCalledWith(place, {
+      limit: 16,
+      until: new Date(before.getTime() + 999),
+      olderThan: "q1",
+    });
+  });
+
+  it("reads a thread again from the last message the model was shown there", async () => {
+    const group = { channel: "slack_app", threadId: "C1", threadType: "group" as const };
+    const before = new Date(Date.UTC(2026, 7, 3, 8, 30));
+    // The thread from its start, as a platform reads one: the first mention
+    // (m5) and replies that did not mention Rome before it.
+    const fromStart = earlierFacts([message(5), message(3)], true, { 42: "m5" });
+    // From the first mention on: replies that did not mention Rome, then
+    // the second mention (m9), newest first.
+    const since = earlierFacts([message(9), message(8), message(7)], true, {
+      41: "m5",
+      42: "m9",
+    });
+
+    const first = await fromStart.promptFacts.thread?.(group, "C1:root", before, 42);
+    const later = await since.promptFacts.thread?.(group, "C1:root", before, 42, 41);
+
+    expect(first?.messages.map((m) => m.text)).toEqual(["message 3"]);
+    expect(later?.messages.map((m) => m.text)).toEqual(["message 7", "message 8"]);
+    expect(later?.cut).toBe(false);
+    // Asked from the message shown last, which the platform answers after:
+    // a thread longer than a page still reads what came since.
+    expect(since.latest).toHaveBeenCalledWith(
+      { ...group, threadId: "C1:root" },
+      { limit: 16, until: new Date(before.getTime() + 999), newerThan: "m5" },
+    );
+  });
+
+  it("says a later thread read stops short when its page does not reach the turn's message, however short the page", async () => {
+    const group = { channel: "slack_app", threadId: "C1", threadType: "group" as const };
+    const before = new Date(Date.UTC(2026, 7, 3, 8, 30));
+    // Fourteen replies since the mention shown last (m5), newest first: the
+    // connection left out the thread's root, which Slack puts on every page,
+    // and more replies come before the turn's mention (m29).
+    const page = Array.from({ length: 14 }, (_, i) => message(19 - i));
+    const since = earlierFacts(page, true, { 41: "m5", 42: "m29" });
+
+    const later = await since.promptFacts.thread?.(group, "C1:root", before, 42, 41);
+
+    expect(later?.messages).toHaveLength(14);
+    expect(later?.cut).toBe(true);
   });
 
   it("asks for what was said up to the turn, so a backlog said since takes no room on the page", async () => {

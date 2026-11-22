@@ -18,6 +18,7 @@
     "packages/cdp-client/public/**",
     "packages/web/public/**",
     "packages/web/mock/public/**",
+    "packages/rome-node-web/public/**",
     // Scaffolding copied into a new app's directory by `rome init`. It is a
     // template, so its imports resolve against the generated app's manifest
     // rather than this workspace.
@@ -128,6 +129,18 @@
       "rstest": false,
       "entry": ["src/**/*.test.{ts,tsx}", "src/test/setup.ts", "rstest.config.mts"]
     },
+    "packages/rome-node-web": {
+      // Same rstest plugin crash as packages/web.
+      "rstest": false,
+      "entry": [
+        "src/main.tsx",
+        "src/**/*.test.{ts,tsx}",
+        "src/test/setup.ts",
+        "rsbuild.config.ts",
+        "rstest.config.mts",
+        "postcss.config.mjs"
+      ]
+    },
     "packages/desktop": {
       "entry": ["src/preload/index.ts", "src/**/*.test.ts", "build/*.mjs", "scripts/*.mjs"],
       // Built by a `pnpm --filter` step in this package's own build script,
@@ -136,6 +149,8 @@
     },
     "packages/lib": { "entry": ["src/**/*.test.ts"] },
     "packages/rome-node-core": {
+      // scripts/*.ts and native/check-*.ts are standalone macOS native helper
+      // build/verification scripts and node --test checks invoked directly.
       "entry": [
         "src/**/*.test.ts",
         "src/index.ts",
@@ -145,7 +160,9 @@
         "src/host.ts",
         "src/auth.ts",
         "src/storage.ts",
-        "src/daemon.ts"
+        "src/daemon.ts",
+        "scripts/*.ts",
+        "native/check-*.ts"
       ]
     },
     "packages/rome-node-cli": {

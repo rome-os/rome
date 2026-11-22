@@ -30,7 +30,7 @@ describe("connect_account", () => {
   });
 
   it("asks the model to send the guardian to Settings where no card shows", () => {
-    expect(connectAccountToolOutput("slack", false)).toContain("Settings › Connections");
+    expect(connectAccountToolOutput("github", false)).toContain("Settings › Connections");
   });
 
   it("says why instead of showing a card whose Connect could only fail", () => {
@@ -67,6 +67,31 @@ describe("connect_account for a device kind", () => {
       { kind: "apple_health", label: "Apple Health", state: "working", device: "iPhone" },
       { kind: "device", label: "Device", state: "broken", device: "iPhone" },
     ]);
+  });
+
+  it("keeps a kind's summary when the devices that report it change state", () => {
+    const summarized = (
+      deviceId: string,
+      summary: string,
+      state: DeviceConnection["state"],
+    ): DeviceConnection => ({ ...row(deviceId, "device", "Device", state), summary });
+    const summaryOf = (first: DeviceConnection["state"], second: DeviceConnection["state"]) =>
+      deviceKinds([
+        summarized("dev-1", "Reads this phone's battery.", first),
+        summarized("dev-2", "Reads this phone's battery and network.", second),
+      ])[0]?.summary;
+    expect(summaryOf("off", "working")).toBe("Reads this phone's battery.");
+    expect(summaryOf("working", "off")).toBe("Reads this phone's battery.");
+  });
+
+  it("takes a later device's summary when the first reported none, whatever their states", () => {
+    const summaryOf = (first: DeviceConnection["state"], second: DeviceConnection["state"]) =>
+      deviceKinds([
+        row("dev-1", "device", "Device", first),
+        { ...row("dev-2", "device", "Device", second), summary: "Reads this phone's battery." },
+      ])[0]?.summary;
+    expect(summaryOf("working", "off")).toBe("Reads this phone's battery.");
+    expect(summaryOf("off", "working")).toBe("Reads this phone's battery.");
   });
 
   it("parses a reported device kind, and lists it among the kinds when refusing", () => {

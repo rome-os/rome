@@ -20,6 +20,7 @@ import { createRomeCloudOAuthStartUrl } from "../../connections/oauth/rome-cloud
 import type { ConnectionRegistry } from "../../connections/index.js";
 import type { GrantValue } from "../../connections/grant.js";
 import { reachedAccount } from "../../connections/connection.js";
+import { actStatusOf } from "../../connections/acts-with-grant.js";
 import type {
   Capability,
   CapabilityStatus,
@@ -50,8 +51,12 @@ export type WireCapabilities = Record<Capability, CapabilityStatus> & {
   talk: CapabilityStatus;
 };
 
-function wireCapabilities(status: Record<Capability, CapabilityStatus>): WireCapabilities {
-  return { ...status, talk: status.chat };
+function wireCapabilities(
+  status: Record<Capability, CapabilityStatus>,
+  descriptor: ConnectionDescriptor | null | undefined,
+  grants: Record<GrantName, GrantState>,
+): WireCapabilities {
+  return { ...status, act: actStatusOf(descriptor, status.act, grants), talk: status.chat };
 }
 
 /** Per-grant active-setup ids for a connection.
@@ -216,7 +221,11 @@ function buildConnectionView(
     state: conn.state(),
     grants,
     display,
-    capabilities: wireCapabilities(conn.status()),
+    capabilities: wireCapabilities(
+      conn.status(),
+      registry.getDescriptor(conn.connectionKind),
+      grants,
+    ),
     connect: connectHint(conn.connectionKind, conn.state()),
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
     channel: channel?.id ?? null,
@@ -294,11 +303,15 @@ function placeholderView(
     state: null,
     grants,
     display,
-    capabilities: wireCapabilities({
-      chat: capStatus("talker"),
-      act: capStatus("actor"),
-      watch: capStatus("watcher"),
-    }),
+    capabilities: wireCapabilities(
+      {
+        chat: capStatus("talker"),
+        act: capStatus("actor"),
+        watch: capStatus("watcher"),
+      },
+      descriptor,
+      grants,
+    ),
     connect: connectHint(connectionKind, null),
     setups: activeSetups(manager, connectionKind, [descriptor.grant]),
     channel: null,

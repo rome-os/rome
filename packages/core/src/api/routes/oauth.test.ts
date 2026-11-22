@@ -1,4 +1,4 @@
-// The /oauth/redeem provider write path (github/slack/google).
+// The /oauth/redeem provider write path (github/google).
 //
 // The grant ledger is now the SOLE OAuth store. Redeem makes one direct write:
 // import the redeemed bundle into the provider's grant (credential + the
@@ -56,13 +56,12 @@ rs.mock("../../access/auth.js", () => ({
 }));
 rs.mock("../../access/guardian-session.js", () => ({ resolveGuardianSession }));
 rs.mock("../../connections/oauth/oauth-providers.js", () => ({
-  OAUTH_PROVIDERS: ["google", "github", "slack"],
-  getEnabledOAuthProviders: () => ["github", "slack"],
+  OAUTH_PROVIDERS: ["google", "github"],
+  getEnabledOAuthProviders: () => ["github"],
   isEnabledOAuthProvider: () => true,
   OAUTH_PROVIDER_DESCRIPTORS: {
     google: { label: "Google", description: "" },
     github: { label: "GitHub", description: "" },
-    slack: { label: "Slack", description: "" },
   },
 }));
 
@@ -85,7 +84,7 @@ function makeLedger(): DrizzleConnectionsRepository {
 
 function makeRegistry(): ConnectionRegistry {
   const registry = new ConnectionRegistry({ repository: makeLedger() });
-  for (const provider of ["github", "slack", "google"] as const) {
+  for (const provider of ["github", "google"] as const) {
     registry.register(makeOAuthProviderDescriptor(provider));
   }
   return registry;
@@ -149,33 +148,9 @@ describe("POST /oauth/redeem — ledger-only provider write path", () => {
       accessToken: "gho_redeemed",
     });
     // Only github was minted.
-    expect(registry.find("slack")).toHaveLength(0);
     expect(registry.find("google")).toHaveLength(0);
     // A redeem with no session yet is a sign-in.
     expect(logins).toEqual(["oauth"]);
-  });
-
-  it("slack: imports the two-token bundle into the workspace grant", async () => {
-    redeemRomeCloudOAuthHandoff.mockResolvedValueOnce({
-      provider: "slack",
-      profile: "default",
-      tokens: {
-        accessToken: "xoxb-redeemed",
-        raw: { authed_user: { access_token: "xoxp-redeemed" }, team: { id: "T123" } },
-      },
-      metadata: null,
-    });
-    const registry = makeRegistry();
-
-    const res = await postRedeem(makeDeps(registry));
-
-    expect(res.status).toBe(200);
-    const conn = registry.find("slack")[0];
-    expect(conn).toBeDefined();
-    expect(conn.auth.grants().workspace).toBe("authorized");
-    const grant = await registry.grantOf(conn.id);
-    expect(grant?.profile).toMatchObject({ teamId: "T123" });
-    expect(registry.find("github")).toHaveLength(0);
   });
 
   it("google: imports the expiring bundle into the user grant (env gating does not apply)", async () => {

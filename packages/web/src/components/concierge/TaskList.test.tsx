@@ -141,13 +141,13 @@ function Where() {
   return <output aria-label="Location">{useLocation().pathname}</output>;
 }
 
-function renderList() {
+function renderList(onOpenTask?: (taskChatId: string, name: string) => void) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
         <MemoryRouter>
-          <TaskList chatId="concierge" />
+          <TaskList chatId="concierge" onOpenTask={onOpenTask} />
           <Where />
         </MemoryRouter>
       </LiveEventsClientContext.Provider>
@@ -428,6 +428,18 @@ describe("TaskList", () => {
       "/chat/chat-Review%20PRs",
     );
     expect(within(rowOf("Daily summary")).queryByRole("link")).toBeNull();
+  });
+
+  it("opens the task chat beside the chat where the pane can hold it", async () => {
+    const onOpenTask = rs.fn();
+    renderList(onOpenTask);
+    await screen.findByRole("region", { name: "Active" });
+    const link = within(rowOf("Review PRs")).getByRole("link", { name: "Review PRs" });
+    // The row keeps its address, for a new tab.
+    expect(link.getAttribute("href")).toBe("/chat/chat-Review%20PRs");
+    fireEvent.click(link);
+    expect(onOpenTask).toHaveBeenCalledWith("chat-Review PRs", "Review PRs");
+    expect(screen.getByRole("status", { name: "Location" }).textContent).toBe("/");
   });
 
   it("marks each task row with the status glyph it shares with a task link", async () => {

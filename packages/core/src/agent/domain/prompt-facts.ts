@@ -14,6 +14,17 @@ export interface PromptMessage {
   readonly at: Date;
 }
 
+/** A platform thread's messages as a later read finds them: `cut` when the
+ *  read did not reach the turn's message, so the latest replies before it
+ *  are not among them. */
+export interface ThreadRead {
+  messages: UnseenMessage[];
+  cut: boolean;
+  /** The thread could not be read in time, or the platform refused the
+   *  read: `messages` is empty, and the turn says so. */
+  unread?: boolean;
+}
+
 /** A message the session has not seen, with the message it quotes. */
 export interface UnseenMessage extends PromptMessage {
   readonly fromRome: boolean;
@@ -48,6 +59,24 @@ export interface PromptFacts {
    * said it as {@link PromptMessage} does. Null where none can be read: a
    * place whose channel hands the agent every message, a platform with no
    * read, or a read that failed or ran out of time. Absent, nothing is read.
+   * `first`, when given, is the id of the message the session opens on: it,
+   * and what was said after it within `before`'s second, are left out by the
+   * platform's own order, since Rome's record keeps whole seconds.
    */
-  earlier?(place: ThreadContext, before: Date): Promise<UnseenMessage[] | null>;
+  earlier?(place: ThreadContext, before: Date, first?: number): Promise<UnseenMessage[] | null>;
+  /**
+   * The earlier messages of platform thread `thread`, said in `place`'s
+   * conversation, read as {@link earlier} reads a chat: before `before` and
+   * below message `first`, oldest first. `since`, when given, is the id of
+   * the last message of the thread the model was shown: it, and what was said
+   * before it, are left out. Null where none can be read. Absent, a thread's
+   * earlier messages are not read.
+   */
+  thread?(
+    place: ThreadContext,
+    thread: string,
+    before: Date,
+    first?: number,
+    since?: number,
+  ): Promise<ThreadRead | null>;
 }

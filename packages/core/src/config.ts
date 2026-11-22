@@ -122,7 +122,7 @@ const configSchema = z.object({
 
   // Slack's origin for Rome's own Slack app connection (`slack_app`): its Web
   // API calls go to `<origin>/api/<method>`. A test environment points it at a
-  // stand-in Slack. The guardian-made Slack bot (`slack_bot`) does not read it.
+  // stand-in Slack.
   slackApiBaseUrl: z
     .string()
     .url()

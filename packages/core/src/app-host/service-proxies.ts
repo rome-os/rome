@@ -69,10 +69,10 @@ import type {
   Account,
   ChannelMessage,
   ChannelMessageQuery,
+  ChannelChatsPage,
+  ChannelChatsQuery,
   ChannelSummary,
   ChannelsService,
-  ChatDescriptor,
-  ChatListQuery,
   MessageReceipt,
   OutgoingMessage,
   ListChatSettingsInput,
@@ -378,13 +378,17 @@ export class ChannelsServiceProxy implements ChannelsService {
     );
   }
 
-  chats(channel: Account | string, query: ChatListQuery = {}): Promise<ChatDescriptor[]> {
-    // Listing archived threads reads a platform chat by chat, which can
-    // take longer than a short call allows.
-    return callMain<ChatDescriptor[]>(
+  chats(channel: Account | string, query: ChannelChatsQuery = {}): Promise<ChannelChatsPage> {
+    // The first page of a listing with archived threads reads a platform's
+    // archive chat by chat, which can take longer than a query does.
+    return callMain<ChannelChatsPage>(
       "channels.chats",
       { channel, ...query },
-      { timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS },
+      {
+        timeoutMs: query.includeArchivedThreads
+          ? APP_INSTALL_RPC_TIMEOUT_MS
+          : CHANNEL_QUERY_RPC_TIMEOUT_MS,
+      },
     );
   }
 }

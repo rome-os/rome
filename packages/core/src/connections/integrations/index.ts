@@ -21,7 +21,6 @@ import { makeEmailDescriptor } from "./email.js";
 import { makeTelegramDescriptor } from "./telegram.js";
 import { makeTelegramUserDescriptor } from "./telegram-user.js";
 import { makeOAuthProviderDescriptor } from "./oauth-providers.js";
-import { makeSlackBotDescriptor } from "./slack-bot.js";
 import { makeSlackAppDescriptor, type SlackAppDescriptorDeps } from "./slack-app.js";
 import { createWechatDescriptor } from "./wechat.js";
 import { createWhatsAppDescriptor } from "./whatsapp.js";
@@ -35,7 +34,6 @@ export { makeEmailDescriptor } from "./email.js";
 export { makeAgentsDescriptor } from "./agents.js";
 export { createWhatsAppDescriptor } from "./whatsapp.js";
 export { makeOAuthProviderDescriptor, OAUTH_PROVIDER_GRANTS } from "./oauth-providers.js";
-export { makeSlackBotDescriptor, SLACK_BOT_KIND } from "./slack-bot.js";
 export { makeSlackAppDescriptor, SLACK_APP_KIND } from "./slack-app.js";
 
 /**
@@ -94,7 +92,6 @@ export function registerBuiltinConnections(
     }),
   );
   registry.register(makeTelegramUserDescriptor());
-  registry.register(makeSlackBotDescriptor());
   if (deps.slackApp) registry.register(makeSlackAppDescriptor(deps.slackApp));
   registry.register(createWechatDescriptor());
   registry.register(
@@ -138,7 +135,7 @@ export function registerBuiltinConnections(
           }),
         redeem: async (handoff, state) => {
           const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
-          const credential = credentialFromBundle(redeemed.provider, redeemed.tokens);
+          const credential = credentialFromBundle(redeemed.tokens);
           if (!credential) {
             throw new Error("OAuth redemption produced no usable credential for the grant ledger.");
           }
@@ -154,7 +151,6 @@ export function registerBuiltinConnections(
         refresh: ROME_CLOUD_REFRESHABLE_PROVIDERS.has(provider)
           ? async (refreshToken) => {
               const credential = credentialFromBundle(
-                provider,
                 await refreshRomeCloudOAuthGrant(provider, refreshToken),
               );
               if (!credential) {

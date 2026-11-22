@@ -86,13 +86,15 @@ function createRomeManagedAdapter(slug: string, name: string): CredentialStatusA
   // The connect URL learned from checkAvailability, reused by start() so we don't
   // re-fetch mid-flow. Rome-managed authorize URLs are stable per provider.
   let connectUrl: string | null = null;
+  // Slack is Rome's own Slack app, which the guardian connects in Settings.
+  const kind = slug === "slack" ? "slack_app" : slug;
 
   async function loadStatus(): Promise<ConnectionStatus | null> {
     try {
       const res = await fetch("/api/connections", { credentials: "include", cache: "no-store" });
       if (!res.ok) return null;
       const body = (await res.json()) as { connections?: ConnectionStatus[] };
-      return body.connections?.find((c) => (c.connectionKind ?? c.service) === slug) ?? null;
+      return body.connections?.find((c) => (c.connectionKind ?? c.service) === kind) ?? null;
     } catch {
       return null;
     }
