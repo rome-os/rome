@@ -19,6 +19,7 @@ struct TranscriptList<Row: View>: View {
     /// Goes up when the newest rows must come into view (a tapped push).
     var latestRequest = 0
     var thread: ThreadFocus? = nil
+    var focusPosition: TranscriptFocusPosition? = nil
     var onBlankTap: (() -> Void)? = nil
     @ViewBuilder let row: (TranscriptRow, TranscriptRow?) -> Row
 
@@ -37,13 +38,13 @@ struct TranscriptList<Row: View>: View {
         GeometryReader { proxy in
             ChatCollection(
                 rows: rows,
-                hasOlder: thread?.hasOlder ?? store.hasOlder,
+                hasOlder: thread.map { $0.initial == nil && $0.hasOlder } ?? store.hasOlder,
                 footer: footer,
                 insets: proxy.safeAreaInsets,
                 alignTop: alignTop,
                 scroll: scroll,
                 selection: store.textSelection,
-                position: thread == nil ? store.focusPosition : nil,
+                position: focusPosition ?? (thread == nil ? store.focusPosition : nil),
                 thread: thread,
                 suspended: store.threadFocus != nil,
                 onBlankTap: onBlankTap,
@@ -105,13 +106,14 @@ struct TranscriptList<Row: View>: View {
         // A Reply from the menu: the replied message stays in
         // view as the keyboard comes up (`TranscriptScroll.keep`).
         .onChange(of: store.replies) {
+            guard thread == nil, store.threadFocus == nil else { return }
             repliedAt = .now
             if let row = store.replyRow { scroll.keep(row) }
         }
         .onChange(of: composerFocused) { _, focused in
             // Brought up by a Reply, the composer leaves the list where it is.
             if focused, let repliedAt, Date.now.timeIntervalSince(repliedAt) < 1 { return }
-            if focused, store.threadFocus == nil {
+            if focused, thread == nil, store.threadFocus == nil {
                 Task {
                     try? await Task.sleep(for: .milliseconds(300))
                     if store.threadFocus == nil { scroll.toBottom() }
@@ -352,6 +354,7 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
         coordinator.onDividerAbove = onDividerAbove
         coordinator.scroll = scroll
         coordinator.selection = selection
+        if thread != nil { coordinator.layoutKeepsBottom(false) }
         coordinator.initialThread = thread
         coordinator.initialRows = rows
         view.accessibilityIdentifier = thread == nil ? "transcript" : "reply-chain-transcript"
@@ -362,7 +365,12 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
         coordinator.onBlankTap = onBlankTap
         coordinator.focusHitAreas = context.environment.threadFocusHitAreas
         coordinator.onNearBottom = thread.map { thread in { Task { await thread.load(.after) } } }
-        position?.frame = { [weak coordinator] id in coordinator?.windowFrame(id) }
+        coordinator.focusPosition = position
+        if thread == nil {
+            position?.main = view
+            position?.pause = { [weak coordinator] in coordinator?.pauseForFocus() }
+            position?.frame = { [weak coordinator] id in coordinator?.windowFrame(id) }
+        }
         scroll.target = coordinator
         PerfProbe.count("listUpdate")
         coordinator.cells.environment = context.environment
@@ -383,12 +391,14 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     var onNearTop: () -> Void = {}
     var onNearBottom: (() -> Void)?
     var onBlankTap: (() -> Void)?
+    weak var focusPosition: TranscriptFocusPosition?
     var focusHitAreas: ThreadFocusHitAreas?
     var suspended = false
     private(set) var positionedThread = false
     var initialThread: ThreadFocus?
     var initialRows: [TranscriptRow] = []
     private var positioningThread = false
+    private var threadReading: (id: String, y: CGFloat)?
     private var applyingRows = false
     private var askedNewer: ContinuousClock.Instant?
     var onDividerAbove: (Bool) -> Void = { _ in }
@@ -429,6 +439,18 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         self.alignTop = alignTop
     }
 
+    func pauseForFocus() {
+        suspended = true
+        endHold()
+        revealing = nil
+        keeping = nil
+        if let view { view.setContentOffset(view.contentOffset, animated: false) }
+    }
+
+    func layoutKeepsBottom(_ keeps: Bool) {
+        layout.keepContentOffsetAtBottomOnBatchUpdates = keeps
+    }
+
     func makeView() -> UICollectionView {
         layout.delegate = self
         cells.topHold.action = { [weak self] id in self?.holdTop(of: id) }
@@ -442,7 +464,8 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         let view = TranscriptCollectionView(frame: .zero, collectionViewLayout: layout)
         view.onLayout = { [weak self] in
             guard let self, let thread = self.initialThread else { return }
-            self.positionThread(thread, rows: self.initialRows)
+            if self.positionedThread { self.alignThreadReading() }
+            else { self.positionThread(thread, rows: self.initialRows) }
         }
         view.backgroundColor = .clear
         view.contentInsetAdjustmentBehavior = .never
@@ -535,7 +558,11 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
 
     func apply(rows: [TranscriptRow], hasOlder: Bool, footer: Bool) {
         applyingRows = true
-        defer { applyingRows = false }
+        if positionedThread, threadReading == nil { captureThreadReading() }
+        defer {
+            applyingRows = false
+            if positionedThread { alignThreadReading() }
+        }
         var next: [String] = []
         next.reserveCapacity(rows.count + 2)
         if hasOlder { next.append(ItemID.older) }
@@ -706,7 +733,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         holdLink = nil
         guard held != nil else { return }
         held = nil
-        layout.keepContentOffsetAtBottomOnBatchUpdates = true
+        layout.keepContentOffsetAtBottomOnBatchUpdates = initialThread == nil
         readScroll()
         // Opened below the screen, the list no longer follows the newest
         // row, as after a drag: a bar that moves next must not pull it back.
@@ -729,6 +756,11 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         guard !suspended else { return }
         guard next != screenInsets, let view else { return }
         screenInsets = next
+        if positionedThread {
+            view.verticalScrollIndicatorInsets = next
+            alignThreadReading()
+            return
+        }
         // Keep what the guardian sees above the bar that moved: the newest
         // row on the bottom, or the row nearest the bottom where it was.
         let anchor = (scroll?.following ?? true) ? nil : layout.getContentOffsetSnapshot(from: .bottom)
@@ -795,6 +827,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        threadReading = nil
         // A scroll ends select mode, but not one a selection's own drag
         // makes as it reaches the edge.
         if !SelectingTextView.dragging { selection?.end() }
@@ -815,6 +848,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     private func cameToRest() {
+        if positionedThread { captureThreadReading() }
         scroll?.set(following: scroll?.atBottom ?? true)
     }
 
@@ -833,6 +867,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        guard !suspended else { return }
         if scroll?.following == true {
             // Rows measured on the way down: land on the newest row exactly.
             restoreToBottom()
@@ -921,7 +956,7 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
     func positionThread(_ thread: ThreadFocus, rows: [TranscriptRow]) {
         // The first snapshot restores its bottom after laying out. Position
         // only after that whole apply, or its restore overwrites this one.
-        guard !applyingRows, !positionedThread, let view, view.window != nil, view.bounds.height > 0,
+        guard !applyingRows, !positionedThread, let view, view.window != nil, view.bounds.height > 0, view.bounds.width > 0,
               let index = rows.firstIndex(where: { $0.id == thread.row }),
               let item = items.firstIndex(of: thread.row) else { return }
         positionedThread = true
@@ -944,24 +979,43 @@ private final class TranscriptCoordinator<RowView: View>: NSObject, UICollection
         // before the first visible frame, after those measurements.
         if let frame = layout.layoutAttributesForItem(at: IndexPath(item: item, section: 0))?.frame {
             let offset = frame.minY - y
-            view.contentInset.top = max(screenInsets.top, -offset)
-            view.contentInset.bottom = max(screenInsets.bottom, offset + view.bounds.height - view.contentSize.height)
             view.contentOffset.y = offset
         }
+        threadReading = (thread.row, thread.bubbleY ?? view.convert(CGPoint(x: 0, y: view.contentOffset.y + screenInsets.top), to: nil).y)
+        alignThreadReading()
         view.layoutIfNeeded()
-        view.alpha = 1
-        if !UIAccessibility.isReduceMotionEnabled {
-            let cells = view.visibleCells.filter { view.indexPath(for: $0)?.item != item }
-            for cell in cells {
-                cell.alpha = 0
-                cell.transform = CGAffineTransform(translationX: 0, y: cell.frame.midY < view.contentOffset.y + y ? 12 : -12)
-            }
-            UIViewPropertyAnimator(duration: 0.25, curve: .easeOut) {
-                for cell in cells { cell.alpha = 1; cell.transform = .identity }
-            }.startAnimation()
-        }
+        if let focusPosition { focusPosition.ready(view, for: thread) } else { view.alpha = 1 }
         positioningThread = false
         readScroll()
+    }
+
+    private func captureThreadReading() {
+        guard let view else { return }
+        let top = view.contentOffset.y + screenInsets.top
+        guard let cell = view.visibleCells.sorted(by: { $0.frame.minY < $1.frame.minY }).first(where: { $0.frame.maxY > top && $0.accessibilityIdentifier.flatMap { self.boxes[$0] } != nil }),
+              let id = cell.accessibilityIdentifier, let box = boxes[id] else { return }
+        let gap = TranscriptSpacing.top(box.row, after: box.previous)
+        threadReading = (id, view.convert(CGPoint(x: 0, y: cell.frame.minY + gap), to: nil).y)
+    }
+
+    private func alignThreadReading() {
+        guard !applyingRows, !isUserScrolling, let view, let reading = threadReading,
+              let index = items.firstIndex(of: reading.id), let box = boxes[reading.id],
+              let frame = layout.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame else { return }
+        let origin = view.convert(view.bounds.origin, to: nil).y
+        let gap = TranscriptSpacing.top(box.row, after: box.previous)
+        let offset = frame.minY + gap - (reading.y - origin)
+        let wasPositioning = positioningThread
+        positioningThread = true
+        UIView.performWithoutAnimation {
+            let insets = UIEdgeInsets(top: max(screenInsets.top, -offset), left: 0,
+                                      bottom: max(screenInsets.bottom, offset + view.bounds.height - view.contentSize.height), right: 0)
+            if view.contentInset != insets { view.contentInset = insets }
+            if abs(view.contentOffset.y - offset) > 0.01 {
+                view.setContentOffset(CGPoint(x: view.contentOffset.x, y: offset), animated: false)
+            }
+        }
+        positioningThread = wasPositioning
     }
 
     // MARK: Heights

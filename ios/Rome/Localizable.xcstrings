@@ -2945,6 +2945,16 @@
         }
       }
     },
+    "Message in thread" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在回复串中发送消息"
+          }
+        }
+      }
+    },
     "Message" : {
       "localizations" : {
         "zh-Hans" : {

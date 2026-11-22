@@ -292,7 +292,7 @@ final class TranscriptStore {
     }
 
     func stop() {
-        closeThread()
+        closeThread(animated: false)
         for token in tokens { backend.events.unsubscribe(token) }
         tokens = []
         for poll in approvalPolls.values { poll.cancel() }
@@ -699,33 +699,56 @@ final class TranscriptStore {
 
     var threadFocus: ThreadFocus?
     @ObservationIgnored let focusPosition = TranscriptFocusPosition()
-    @ObservationIgnored private var openingThread = false
     @ObservationIgnored private var threadEpoch = 0
 
     func openThread(from messageId: String, row: String, original: String) async {
-        guard threadFocus == nil, !openingThread else { return }
-        openingThread = true
+        guard threadFocus == nil else { return }
+        focusPosition.pause()
+        let root = message(messageId)?.chatThreadId ?? messageId
+        let y = focusPosition.frame(row)?.minY
+        let gap = rows.firstIndex(where: { $0.id == row }).map { index in
+            TranscriptSpacing.top(rows[index], after: index > 0 ? rows[index - 1] : nil)
+        } ?? 0
+        let focus = ThreadFocus(sessionId: sessionId, anchor: messageId, row: row,
+                                bubbleY: y.map { $0 + gap },
+                                page: ThreadPage(messages: ThreadFocus.memory(messages, root: root, anchor: messageId), hasOlder: true, hasNewer: true),
+                                backend: backend, pending: true, root: root, original: original)
+        focusPosition.begin(focus)
+        threadFocus = focus
+        await readThread(focus, original: original)
+    }
+
+    private func readThread(_ focus: ThreadFocus, original: String) async {
         let epoch = threadEpoch
-        defer { openingThread = false }
         do {
-            let page = try await backend.threadPage(sessionId: sessionId, anchor: messageId, before: nil, after: nil, limit: 10)
-            guard !Task.isCancelled, epoch == threadEpoch else { return }
-            let y = focusPosition.frame(row)?.minY
-            let gap = rows.firstIndex(where: { $0.id == row }).map { index in
-                TranscriptSpacing.top(rows[index], after: index > 0 ? rows[index - 1] : nil)
-            } ?? 0
-            threadFocus = ThreadFocus(sessionId: sessionId, anchor: messageId, row: row, bubbleY: y.map { $0 + gap }, page: page, backend: backend)
-        } catch APIError.notFound {
-            guard epoch == threadEpoch else { return }
-            await reveal(quoted: original)
+            let page = try await backend.threadPage(sessionId: sessionId, anchor: focus.anchor, before: nil, after: nil, limit: 10)
+            guard !Task.isCancelled, epoch == threadEpoch, threadFocus === focus else { return }
+            focus.hydrate(page)
         } catch {
-            // A failed read leaves the mounted chat and its position alone.
+            guard !Task.isCancelled, epoch == threadEpoch, threadFocus === focus else { return }
+            switch error as? APIError {
+            case .notFound, .unauthorized, .conciergeOff, .server(status: 403, message: _):
+                closeThread(animated: false)
+                if error as? APIError == .notFound { await reveal(quoted: original) }
+            default:
+                focus.failed()
+            }
         }
     }
 
-    func closeThread() {
+    func retryThread() {
+        guard let focus = threadFocus, focus.initial == .failed else { return }
+        focus.retry()
+        Task { await readThread(focus, original: focus.original) }
+    }
+
+    func closeThread(animated: Bool = true) {
         threadEpoch += 1
-        threadFocus = nil
+        guard let focus = threadFocus else { return }
+        focusPosition.close(animated: animated) { [weak self, weak focus] in
+            guard let self, let focus, self.threadFocus === focus else { return }
+            self.threadFocus = nil
+        }
     }
 
     func holdThreadMessages(_ next: [ChatMessage]) {
@@ -745,21 +768,21 @@ final class TranscriptStore {
     private(set) var jumpTarget: String?
     @ObservationIgnored private var untint: Task<Void, Never>?
 
-    /// What the composer's next send replies to, and what its draft keeps.
-    var composerReply: ReplyTarget? { threadFocus?.reply.map { ReplyTarget(messageId: $0.id) } ?? quote }
+    /// An explicit reply wins over the focused chain's implicit send target.
+    var composerReply: ReplyTarget? { quote ?? threadFocus?.reply.map { ReplyTarget(messageId: $0.id) } }
 
     /// Whether the reply bar shows.
-    var showsQuoteBar: Bool { composerReply != nil }
+    var showsQuoteBar: Bool { quote != nil }
 
     /// The quoted message, when it is held.
     var quotedMessage: ChatMessage? {
-        threadFocus?.reply ?? quote.flatMap { message($0.messageId) }
+        quote.flatMap { threadFocus?.transcript.message($0.messageId) ?? message($0.messageId) }
     }
 
     /// Reply on a message, from the menu of its `row`: the reply bar
     /// quotes it.
     func reply(to messageId: String, row: String? = nil) {
-        guard kind == .concierge, message(messageId) != nil else { return }
+        guard kind == .concierge, message(messageId) != nil || threadFocus?.transcript.message(messageId) != nil else { return }
         quote = ReplyTarget(messageId: messageId)
         replyRow = row ?? rows.first(where: { $0.messageId == messageId })?.id
         replies += 1
@@ -777,7 +800,7 @@ final class TranscriptStore {
     }
 
     func dismissQuote() {
-        if threadFocus != nil { closeThread() } else { cancelQuote() }
+        cancelQuote()
     }
 
     /// A restored draft was written as a reply: the reply bar comes back.
@@ -795,6 +818,7 @@ final class TranscriptStore {
         guard kind == .concierge else { return nil }
         return { [weak self] in
             guard let self else { return }
+            if from != nil && row != nil { self.focusPosition.pause() }
             Task {
                 if let from, let row {
                     await self.openThread(from: from, row: row, original: original)
