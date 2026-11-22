@@ -247,6 +247,25 @@ enum SnapshotRunner {
                 model.debugCommand = .section(.chat)
                 try? await Task.sleep(for: .seconds(0.4))
             }
+            if only.isEmpty || !only.isDisjoint(with: ["05f-drawer-older-collapsed", "05g-drawer-older-expanded", "05h-drawer-older-open"]) {
+                model.openDemo(.olderTopics)
+                try? await Task.sleep(for: .seconds(2))
+                model.workspace?.topics.setFolded(false)
+                await capture("05f-drawer-older-collapsed", style: styleName, in: directory) {
+                    model.workspace?.topics.setOlderExpanded(false)
+                    model.debugCommand = .drawer(true)
+                }
+                await capture("05g-drawer-older-expanded", style: styleName, in: directory) {
+                    model.workspace?.topics.setOlderExpanded(true)
+                }
+                model.workspace?.topics.setOlderExpanded(false)
+                model.debugCommand = .section(.topic("topic-meals"))
+                try? await Task.sleep(for: .seconds(1))
+                await capture("05h-drawer-older-open", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
+                model.debugCommand = .drawer(false)
+                model.openDemo()
+                try? await Task.sleep(for: .seconds(1))
+            }
             // Two topic chats pinned: atop the list, the latest pinned first, each with a pin.
             if only.isEmpty || only.contains("05f-drawer-pinned"), let workspace = model.workspace {
                 await workspace.pinTopic("topic-books", pinned: true)

@@ -956,6 +956,10 @@ final class AppModel {
             openDemo(.manyApps)
             return
         }
+        if environment["ROME_DEMO"] == "older-topics" {
+            openDemo(.olderTopics)
+            return
+        }
         if environment["ROME_DEMO"] == "long-chat" {
             openDemo(.longChat)
             return

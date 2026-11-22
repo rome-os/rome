@@ -14,6 +14,7 @@ struct DrawerView: View {
     var onArchived: () -> Void = {}
     /// How many topic chats show; a scroll near the end adds a page.
     @State private var topicLimit = TopicChatsStore.pageSize
+    @State private var olderLimit = TopicChatsStore.pageSize
     /// Archive or Delete from a row, while it is read and asked.
     @State private var retiring: TopicRetireRequest?
     /// Rename from a row's menu, while its alert is up.
@@ -45,6 +46,37 @@ struct DrawerView: View {
     private func retire(_ action: TopicRetireRequest.Action, _ chat: ConciergeChat) {
         guard retiring == nil else { return }
         retiring = TopicRetireRequest(chatId: chat.id, name: TopicChatsStore.title(chat), action: action)
+    }
+
+    private func topicRow(_ chat: ConciergeChat) -> some View {
+        let pinned = workspace.topics.isPinned(chat.id)
+        return TopicItem(chat: chat, selected: section == .topic(chat.id), pinned: pinned) {
+            onSection(.topic(chat.id))
+        }
+        // A row sliding to its new place goes over the rows it passes,
+        // and the selected row over its neighbours, whose opaque rows
+        // would cover its shadow.
+        .zIndex(workspace.topics.moving == chat.id ? 2 : section == .topic(chat.id) ? 1 : 0)
+        .drawerRow()
+        // Right: pin or unpin, all the way across too. The row
+        // moves once its swipe has closed: moved while it is
+        // still closing, the list fades the row out and in.
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            TopicPinButton(pinned: pinned) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.swipeCloseDelay) { pin(chat.id, !pinned) }
+            }
+            .tint(Palette.primary)
+        }
+        // No swipe to the left: Archive and Delete, too easy to
+        // set off by accident there, are in the menu.
+        .contextMenu {
+            Button {
+                renaming = TopicRenameRequest(chatId: chat.id, name: TopicChatsStore.title(chat))
+            } label: { Label("Rename", systemImage: "pencil") }
+            TopicPinButton(pinned: pinned) { pin(chat.id, !pinned) }
+            Button { retire(.archive, chat) } label: { Label("Archive", systemImage: "archivebox") }
+            Button(role: .destructive) { retire(.delete, chat) } label: { Label("Delete", systemImage: "trash") }
+        }
     }
 
     var body: some View {
@@ -127,57 +159,60 @@ struct DrawerView: View {
             // its own, and the same 2 pt between rows.
             let chats = workspace.topics.chats
             let openId = chats.first { section == .topic($0.id) }?.id
-            // Folded, only the open chat stays, so it is still reachable.
-            let shown = folded ? 0 : TopicChatsStore.shownCount(
-                chats.count,
-                limit: topicLimit,
-                openIndex: chats.firstIndex { $0.id == openId }
+            let groups = TopicChatsStore.groups(chats, lastActive: workspace.topics.lastActive, pinnedAt: workspace.topics.pinnedAt, openId: openId)
+            let rows = folded ? TopicChatsStore.foldedRows(chats, openId: openId) : TopicChatsStore.page(
+                groups.current, limit: topicLimit, pinnedAt: workspace.topics.pinnedAt, openId: openId
             )
-            let rows = folded ? TopicChatsStore.foldedRows(chats, openId: openId) : Array(chats.prefix(shown))
+            let olderExpanded = workspace.topics.olderExpanded
+            let olderShown = min(olderLimit, groups.older.count)
             List {
-                ForEach(rows) { chat in
-                    let pinned = workspace.topics.isPinned(chat.id)
-                    TopicItem(chat: chat, selected: section == .topic(chat.id), pinned: pinned) {
-                        onSection(.topic(chat.id))
-                    }
-                    // A row sliding to its new place goes over the rows it passes,
-                    // and the selected row over its neighbours, whose opaque rows
-                    // would cover its shadow.
-                    .zIndex(workspace.topics.moving == chat.id ? 2 : section == .topic(chat.id) ? 1 : 0)
-                    .drawerRow()
-                    // Right: pin or unpin, all the way across too. The row
-                    // moves once its swipe has closed: moved while it is
-                    // still closing, the list fades the row out and in.
-                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        TopicPinButton(pinned: pinned) {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + Self.swipeCloseDelay) { pin(chat.id, !pinned) }
-                        }
-                        .tint(Palette.primary)
-                    }
-                    // No swipe to the left: Archive and Delete, too easy to
-                    // set off by accident there, are in the menu.
-                    .contextMenu {
-                        Button {
-                            renaming = TopicRenameRequest(chatId: chat.id, name: TopicChatsStore.title(chat))
-                        } label: { Label("Rename", systemImage: "pencil") }
-                        TopicPinButton(pinned: pinned) { pin(chat.id, !pinned) }
-                        Button { retire(.archive, chat) } label: { Label("Archive", systemImage: "archivebox") }
-                        Button(role: .destructive) { retire(.delete, chat) } label: { Label("Delete", systemImage: "trash") }
-                    }
-                }
-                if !folded && shown < chats.count {
-                    // A new view for each page, so an end still in view
-                    // after a page lands asks for the next one.
+                ForEach(rows) { chat in topicRow(chat) }
+                if !folded && rows.count < groups.current.count {
                     Color.clear
                         .frame(height: 1)
-                        .id(shown)
-                        .onAppear { topicLimit = shown + TopicChatsStore.pageSize }
+                        .id("current-\(topicLimit)")
+                        .onAppear { topicLimit += TopicChatsStore.pageSize }
                         .accessibilityHidden(true)
                         .drawerRow()
                 }
-                // After the last topic chat, so it scrolls with them; only
-                // once every one shows, and never folded.
+                if !folded && !groups.older.isEmpty {
+                    Button {
+                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) {
+                            workspace.topics.setOlderExpanded(!olderExpanded)
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: olderExpanded ? "chevron.down" : "chevron.right")
+                                .romeFont(10, .bold)
+                                .frame(width: 22)
+                                .accessibilityHidden(true)
+                            Text("Older · \(groups.older.count)").romeFont(15)
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(Palette.sub)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityValue(olderExpanded ? Text("Expanded") : Text("Collapsed"))
+                    .accessibilityIdentifier("older-topic-chats-header")
+                    .drawerRow()
+                    if olderExpanded {
+                        ForEach(groups.older.prefix(olderShown)) { chat in topicRow(chat) }
+                        if olderShown < groups.older.count {
+                            Color.clear
+                                .frame(height: 1)
+                                .id("older-\(olderShown)")
+                                .onAppear { olderLimit += TopicChatsStore.pageSize }
+                                .accessibilityHidden(true)
+                                .drawerRow()
+                        }
+                    }
+                }
                 let archived = workspace.archivedTopics.count
+                let shown = rows.count + (olderExpanded ? olderShown : groups.older.count)
                 if ArchivedTopicsStore.showsEntry(archived: archived, folded: folded, shownTopics: shown, topics: chats.count) {
                     ArchivedTopicsEntry(count: archived, action: onArchived)
                         .drawerRow()

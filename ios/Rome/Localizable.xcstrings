@@ -6978,6 +6978,16 @@
           }
         }
       }
+    },
+    "Older · %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更早 · %lld"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
