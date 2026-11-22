@@ -563,7 +563,7 @@ function OutputPreview({
       )}
       {kind === "markdown" ? (
         <div className="px-4" data-testid="output-markdown">
-          <Markdown inert>{body}</Markdown>
+          <Markdown>{body}</Markdown>
         </div>
       ) : (
         <pre className="mx-4 overflow-x-auto rounded-8 bg-surface-muted p-3 font-mono text-aux whitespace-pre text-foreground">
