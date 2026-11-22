@@ -1,33 +1,57 @@
 // Frames the Slack gateway Worker deposits into the instance's own relay
-// mailbox, picked out of that mailbox's drain. The mailbox otherwise serves an
-// app's webhooks, so a Slack frame never fails in a way that holds those up for
-// good: with no Slack connection it is dropped, and one its connection could
-// not take yet is delivered again.
+// mailbox, picked out of that mailbox's drain. The mailbox also serves an app's
+// webhooks and Rome's Discord bot, and it holds every later frame behind one it
+// is asked to deliver again. So a Slack frame is delivered again only while its
+// connection is starting and will take it: with no Slack connection, or one
+// that is broken, waiting for the guardian or locked, it is dropped and logged
+// (docs/architecture/channels.md).
 
+import { createLogger } from "../../../logger.js";
 import { SLACK_APP_KIND } from "../../integrations/slack-app.js";
 import type { ConnectionRegistry } from "../../registry.js";
+import type { Connection } from "../../types.js";
 import type { MailboxFrame } from "./slack-app.js";
+
+const log = createLogger("slack-app");
+
+/** Whether `conn` has no ingress yet only because it is starting: its chat is
+ *  unlocked and not waiting on the guardian, so it opens ingress on its own. */
+function isStarting(conn: Pick<Connection, "status">): boolean {
+  const chat = conn.status().chat;
+  return chat.state === "unlocked" && !chat.degradation;
+}
 
 /**
  * Hands a Slack frame to Rome's Slack app connections, answering an HTTP status
  * the drain acts on. Each connection holds one workspace and answers 400 for a
- * frame of another, so the frame goes to the one that takes it; a frame none
- * takes is dropped.
+ * frame of another, so the frame goes to the one that takes it. A frame none
+ * takes is dropped, unless a connection that may take it is still starting.
  */
 export async function deliverSlackFrame(
   registry: Pick<ConnectionRegistry, "find" | "ingest">,
   frame: MailboxFrame,
 ): Promise<{ status: number }> {
+  let starting = false;
+  const notRunning: string[] = [];
   for (const conn of registry.find(SLACK_APP_KIND)) {
     let status: number;
     try {
       const result = (await registry.ingest(conn.id, frame)) as { status?: unknown } | null;
       status = typeof result?.status === "number" ? result.status : 200;
     } catch {
-      // Ingress opens when the connection starts; until then the frame waits.
-      return { status: 503 };
+      // No ingress: the connection is starting, or it will not start alone.
+      if (isStarting(conn)) starting = true;
+      else notRunning.push(conn.id);
+      continue;
     }
     if (status !== 400) return { status };
+  }
+  // Ingress opens when the connection starts, and its start resumes the drain.
+  if (starting) return { status: 503 };
+  if (notRunning.length > 0) {
+    log.warn("slack frame dropped: the connection is not running", {
+      connectionIds: notRunning,
+    });
   }
   return { status: 200 };
 }
