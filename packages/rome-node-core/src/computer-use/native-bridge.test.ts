@@ -609,6 +609,7 @@ describe("native computer-use transport", () => {
       ["hello"],
       ["hello"],
     ]);
+    expect(f.calls.find((call) => call.method === "shutdown")?.params).toEqual({ idleOnly: true });
     expect(assets.prepare).toHaveBeenCalledTimes(2);
     expect(assets.launch).toHaveBeenCalledTimes(1);
   });
@@ -658,6 +659,53 @@ describe("native computer-use transport", () => {
       });
     }
     expect(f.calls.some((call) => call.method === "shutdown")).toBe(false);
+    expect(assets.prepare).not.toHaveBeenCalled();
+    expect(assets.launch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "helper_busy",
+    "input_busy",
+  ])("fails closed when a concurrent bind lands after the verification hello (%s)", async (rejectionCode) => {
+    const source = {
+      path: "/bundled/app",
+      requirement: "stable",
+      implementationSha256: "a".repeat(64),
+      executableSha256: "b".repeat(64),
+      architecture: "arm64" as const,
+    };
+    const oldHello = {
+      protocolVersion: 1,
+      bundleId: "com.rome.computer-use",
+      permissions: { accessibility: true, screenCapture: true },
+      capabilities: { actions: [] },
+      architecture: "arm64",
+      implementationSha256: "9".repeat(64),
+      activeSessions: 0,
+      execution: { busy: false },
+    };
+    const f = await server((request, send, fail) => {
+      if (request.method === "hello") {
+        send(oldHello);
+      } else if (request.method === "shutdown") {
+        fail({
+          code: rejectionCode,
+          message: "Another host bound a session after verification hello.",
+        });
+      }
+    });
+    assets.inspect.mockResolvedValue(source);
+    const bridge = createComputerUseNativeBridge({
+      bundledAppPath: source.path,
+      stateDir: f.stateDir,
+      startupTimeoutMs: 500,
+    });
+    await expect(bridge.call("hello", {})).rejects.toMatchObject({
+      code: "helper_update_required",
+      details: { effectStatus: "not_dispatched" },
+    });
+    expect(f.connections).toEqual([["hello"], ["hello", "shutdown"]]);
+    expect(f.calls.find((call) => call.method === "shutdown")?.params).toEqual({ idleOnly: true });
     expect(assets.prepare).not.toHaveBeenCalled();
     expect(assets.launch).not.toHaveBeenCalled();
   });

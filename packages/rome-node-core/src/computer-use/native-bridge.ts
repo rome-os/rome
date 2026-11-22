@@ -400,7 +400,7 @@ export function createComputerUseNativeBridge(
         // The helper is an LSUIElement with no Dock icon; after an auto-update or CLI upgrade,
         // ask an idle older Rome helper to shut down so we can stage and start this version.
         try {
-          await callSocket("shutdown", {}, (currentHello) => {
+          await callSocket("shutdown", { idleOnly: true }, (currentHello) => {
             if (!isIdleMismatchedHelper(currentHello, source)) {
               assertComputerUseImplementation(currentHello, source);
               return false;
