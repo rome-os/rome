@@ -834,6 +834,8 @@ final class VoiceInputTests: XCTestCase {
         app.launchEnvironment["ROME_LOCAL_USER"] = user
         app.launchEnvironment["ROME_LOCAL_PASSWORD"] = password
         app.launchArguments += ["-AppleLanguages", "(\(language))"]
+        // Experiment: no header blur, so its paused animators cannot hold off idle.
+        app.launchArguments += ["-RomeUITestsNoHeaderBlur", "YES"]
         if let microphone {
             app.launchArguments += ["-RomeVoiceInputMicrophone", microphone]
         } else if recording == Self.cycles {
