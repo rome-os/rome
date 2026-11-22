@@ -3,7 +3,6 @@ import { readdir, realpath, stat } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, resolve } from "node:path";
 import { actionError, isRecord, type ActionResponse } from "./actions.js";
-import { scrollUsage } from "./computer-use/protocol.js";
 import { AUDIT_PUSH_BYTES, type AuditOutcome, type AuditStore } from "./audit.js";
 import {
   decodeMeta,
@@ -15,11 +14,7 @@ import {
 } from "./frame.js";
 import type { InboundEnvelope, OutboundEnvelope } from "./protocol.js";
 import { parseTransferMessage, TRANSFER_VERSION, TransferHost } from "./transfer.js";
-import {
-  computerUseAction,
-  sanitizeComputerUseArgs,
-  type ComputerUseHost,
-} from "./computer-use.js";
+import { sanitizeComputerUseArgs, type ComputerUseHost } from "./computer-use.js";
 
 const windowBindingAuthority = { allowPreemption: true, leaseIfAvailable: true } as const;
 
@@ -168,29 +163,14 @@ export function createExecutor(
   secrets: string[] = [],
   sendFrame: (frame: Frame) => boolean = () => false,
   nativeHost?: ComputerUseHost,
-  scope?: { kind: "window_only"; peer: string },
 ) {
   const computerUse = nativeHost;
   const children = new Set<ChildProcess>();
-  const transfers = scope ? undefined : new TransferHost({ keepBytes: AUDIT_PUSH_BYTES });
+  const transfers = new TransferHost({ keepBytes: AUDIT_PUSH_BYTES });
   let generation = 0;
   const info = async (): Promise<ActionResponse> => {
     const native = await computerUse?.describe();
-    const advertised = Array.isArray(native?.actions) ? native.actions : [];
-    const offered = scope
-      ? advertised.filter((action) => typeof action === "string" && computerUseAction(action))
-      : advertised;
-    const actions = scope ? offered.filter((action) => action !== "computer.preempt") : offered;
-    const capability =
-      native && scope
-        ? {
-            prefix: "computer",
-            personal: true,
-            ...(Number.isSafeInteger(native.version) ? { version: native.version } : {}),
-            ...(typeof native.configured === "boolean" ? { configured: native.configured } : {}),
-            actions,
-          }
-        : native;
+    const actions = Array.isArray(native?.actions) ? native.actions : [];
     const readiness = await audit.status();
     return {
       type: "response",
@@ -201,52 +181,15 @@ export function createExecutor(
           platform() === "darwin" ? "macos" : platform() === "win32" ? "windows" : platform(),
         // Lists caller-facing actions only. transfer.open is an internal frame protocol for
         // rome-node cp, so it is omitted on purpose. Callers detect it through transferVersion.
-        actions: ["system.info", ...(scope ? [] : ["exec", "fs.list"]), ...actions],
-        ...(capability ? { capabilities: [capability] } : {}),
-        ...(scope && actions.includes("computer.observe")
-          ? {
-              usage: {
-                "computer.bind":
-                  'Pass {"windowRef":"<windowRef from computer.windows>"} promptly. Refresh the window list if the reference expires. For ordinary tasks add "foregroundNavigationFallback":true only if the window advertises it. Omit it if the target must stay in the background.',
-                ...(actions.includes("computer.act")
-                  ? {
-                      "computer.act":
-                        '{"sessionId":"<bound session>","actionId":"<new unique id>","observationId":"<latest observation>","stateVersion":1,"ref":"<element ref>","action":{"type":"click"}}\nCopy observationId, numeric stateVersion and ref from the latest observation. For a repeatable navigation click that removes its source, add top-level "navigation":true if foregroundNavigationFallback is bound. Prefer a named return link in a detail pane. When controls overlap, match the intended toolbar by its parent and nearby labels before using its advertised press. A matching pixel alone cannot identify which control to press. Observe again to verify the destination.' +
-                        " " +
-                        scrollUsage,
-                    }
-                  : {}),
-                "computer.observe":
-                  'Pass {"sessionId":"<bound session>"} for a full first observation. For a region use {"sessionId":"<bound session>","full":true,"region":{"x":0,"y":0,"width":240,"height":100}} in window image pixels when the binding advertises observationRegion. If a floating pane is missing from an incomplete region, set region.fromEnd to true. For changes to the same region, pass its last stateVersion as baseVersion.',
-              },
-            }
-          : {}),
+        actions: ["system.info", "exec", "fs.list", ...actions],
+        ...(native ? { capabilities: [native] } : {}),
         frameVersion: 1,
-        ...(transfers ? { transferVersion: TRANSFER_VERSION } : {}),
+        transferVersion: TRANSFER_VERSION,
         // Unavailable means every other action is refused until the owner fixes the log.
-        audit: scope ? { state: readiness.state } : readiness,
+        audit: readiness,
       },
     };
   };
-  function refuseWindowOnlyRequest(peer: string, action: string): ActionResponse | undefined {
-    if (!scope) return;
-    if (peer !== scope.peer)
-      return actionError("computer_use_denied", "This computer-use request was not authorized.", {
-        effectStatus: "not_dispatched",
-      });
-    if (
-      action === "system.info" ||
-      (computerUse && computerUseAction(action) && action !== "computer.preempt")
-    )
-      return;
-    return actionError(
-      "unsupported_action",
-      "This connection offers background-window actions only.",
-      {
-        effectStatus: "not_dispatched",
-      },
-    );
-  }
   // A request the log could not record never runs, so its outcome is known: nothing happened.
   const refused = () =>
     actionError(
@@ -433,11 +376,6 @@ export function createExecutor(
     if (!isDeviceActionRequest(request)) return;
     const current = generation;
     const action = request.action;
-    const refusal = refuseWindowOnlyRequest(message.from, action);
-    if (refusal) {
-      send({ id: message.id, to: message.from, payload: refusal });
-      return;
-    }
     const handler = Object.hasOwn(handlers, action) ? handlers[action] : undefined;
     const notes: Notes = { fields: {}, content: {} };
     // system.info changes nothing and is probed on every dashboard refresh, so it is not
@@ -468,7 +406,7 @@ export function createExecutor(
                   action,
                   request.args,
                   message.from,
-                  ...(!scope && (action === "computer.bind" || action === "computer.preempt")
+                  ...(action === "computer.bind" || action === "computer.preempt"
                     ? [windowBindingAuthority]
                     : []),
                 )
@@ -501,12 +439,10 @@ export function createExecutor(
   async function receiveFrame(frame: Frame) {
     if (frame.type !== FRAME_TYPE.request) return;
     const request = decodeMeta(frame.meta);
-    if (transfers) {
-      const transfer = parseTransferMessage(request);
-      if (transfer) {
-        transfers.receive(frame.id, frame.peer, transfer, frame.body);
-        return;
-      }
+    const transfer = parseTransferMessage(request);
+    if (transfer) {
+      transfers.receive(frame.id, frame.peer, transfer, frame.body);
+      return;
     }
     if (!isDeviceActionRequest(request)) return;
     const current = generation;
@@ -520,11 +456,6 @@ export function createExecutor(
         meta: encodeMeta(response),
         body: empty,
       });
-    const refusal = refuseWindowOnlyRequest(frame.peer, action);
-    if (refusal) {
-      respond(refusal);
-      return;
-    }
     const started = Date.now();
     const seq =
       action === "system.info"
@@ -549,7 +480,7 @@ export function createExecutor(
       endRecord(action, seq, started, replaced(), true, { fields: {}, content: {} }, 0);
       return;
     }
-    if (transfers && action === "transfer.open") {
+    if (action === "transfer.open") {
       // The transfer outlives this frame. Later frames for it arrive through transfers.receive.
       const transfer = transfers.open(frame.id, frame.peer, request.args, (meta, body = empty) => {
         // A transfer from an earlier connection must never send on its replacement.
@@ -590,7 +521,7 @@ export function createExecutor(
               request.args,
               frame.body,
               frame.peer,
-              ...(!scope && (action === "computer.bind" || action === "computer.preempt")
+              ...(action === "computer.bind" || action === "computer.preempt"
                 ? [windowBindingAuthority]
                 : []),
             )
@@ -643,7 +574,7 @@ export function createExecutor(
   function disconnect() {
     generation++;
     computerUse?.disconnect();
-    transfers?.abortAll();
+    transfers.abortAll();
     for (const child of children) {
       child.kill("SIGTERM");
       const timer = setTimeout(() => {

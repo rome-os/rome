@@ -128,19 +128,6 @@ describe("executor credential lifecycle", () => {
     expect(await options.beforeConnect!()).toBeNull();
     expect(mocks.login).not.toHaveBeenCalled();
   });
-  it("rejects asynchronously when windowPeer is empty", async () => {
-    const promise = connectHost({
-      cloudUrl: saved.cloudUrl,
-      name: "Test",
-      signal: new AbortController().signal,
-      credentials: { load: mocks.read, save: mocks.write, clear: mocks.remove },
-      authorize: mocks.login,
-      audit: noAudit,
-      windowPeer: "",
-    });
-    await expect(promise).rejects.toThrow("window-only");
-    expect(mocks.connect).not.toHaveBeenCalled();
-  });
   it("keeps computer use disabled unless explicitly provided", async () => {
     let sent: unknown;
     mocks.connect.mockImplementation((options: GatewayClientOptions) => {
