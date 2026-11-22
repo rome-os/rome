@@ -333,20 +333,24 @@ export function aiToolsRoutes(
 
   // The logout dialog's "Move existing chats too", for a logout that moves the
   // default. A client that sends none moved them, as before.
-  // The choice holds until the logout and its account read have ended.
-  const loggingOut = async <T>(
+  // The choice holds until the accounts read the provider as logged out,
+  // however late that read lands. A logout that failed drops it.
+  const loggingOut = async (
     c: { req: { json(): Promise<unknown> } },
     provider: "anthropic" | "openai",
-    logout: () => Promise<T>,
-  ): Promise<T> => {
+    logout: () => Promise<Response>,
+  ): Promise<Response> => {
     const body = (await c.req.json().catch(() => null)) as { moveExisting?: unknown } | null;
-    const done = deps.defaultProviders?.expectLogout(provider, {
+    const failed = deps.defaultProviders?.expectLogout(provider, {
       moveExisting: body?.moveExisting !== false,
     });
     try {
-      return await logout();
-    } finally {
-      await done?.();
+      const res = await logout();
+      if (!res.ok) await failed?.();
+      return res;
+    } catch (error) {
+      await failed?.();
+      throw error;
     }
   };
 

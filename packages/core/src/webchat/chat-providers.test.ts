@@ -251,6 +251,32 @@ describe("an unchecked move keeps every existing chat", () => {
     ).toEqual({ by: "kept", providerId: "anthropic", selection: null, model: null });
   });
 
+  it("counts a fork chat among the chats a move would move, before and after it is held", async () => {
+    const forkId = "01a1b2a1-2a30-7489-8e21-9dfe73454e96";
+    const { providers, webchatRepo } = await setup({
+      currentDefault: "anthropic",
+      ran: { openai: [`webchat:${forkId}`] },
+    });
+    await webchatRepo.ensureRomeSession({
+      id: forkId,
+      type: "webchat",
+      name: "Fork",
+      agentName: null,
+      trigger: { triggerKind: "fork", triggerName: "branch" },
+      parentSessionId: "plain",
+      parentTurnId: "t1",
+    });
+    // Two web chats that follow, and the fork.
+    expect(await providers.followingCount()).toBe(3);
+    await providers.beforeDefaultChange(unchecked);
+    expect(await providers.followingCount()).toBe(3);
+  });
+
+  it("counts no chat its owner picked a model for, though it ran lately", async () => {
+    const { providers } = await setup({ ran: { anthropic: ["webchat:picked"] } });
+    expect(await providers.followingCount()).toBe(2);
+  });
+
   it("holds only conversations active in the last 30 days", async () => {
     const asked: Date[] = [];
     const { providers } = await setup({ ran: { anthropic: ["telegram:42"] }, asked });
@@ -374,6 +400,19 @@ describe("a pinned chat always reports it is pinned", () => {
       pinnedModelOf({ largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "auto" }),
     ).toBeNull();
     expect(pinnedModelOf({ largeModelSelection: null })).toBeNull();
+    // A model Rome chose, while its conversation is held: pinned there.
+    expect(
+      pinnedModelOf(
+        { largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "auto" },
+        "anthropic",
+      ),
+    ).toMatchObject({ by: "kept", providerId: "anthropic", selection: "claude-opus-5-5" });
+    expect(
+      pinnedModelOf(
+        { largeModelSelection: "gpt-6-1-sol", largeModelSelectionBy: "auto" },
+        "anthropic",
+      ),
+    ).toEqual({ by: "kept", providerId: "anthropic", selection: null, model: null });
   });
 
   it("Back to default lets a kept chat follow again, at its strength on the default", async () => {

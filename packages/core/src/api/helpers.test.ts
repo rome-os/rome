@@ -123,6 +123,19 @@ describe("a pinned chat always reports it is pinned, in the chat API", () => {
     });
   });
 
+  it("reports a model Rome chose as pinned while its conversation is held", () => {
+    expect(
+      toWebchatSessionResponse(
+        { ...chat, largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "auto" },
+        0,
+        "anthropic",
+      ),
+    ).toMatchObject({
+      followsDefault: false,
+      pinnedModel: { by: "kept", providerId: "anthropic", selection: "claude-opus-5-5" },
+    });
+  });
+
   it("reports nothing pinned for a model Rome chose", () => {
     expect(
       toWebchatSessionResponse(

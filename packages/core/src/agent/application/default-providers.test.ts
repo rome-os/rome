@@ -114,6 +114,7 @@ describe("the default provider as Rome keeps it", () => {
       stored: { provider: "anthropic" },
       credits: () => true,
     });
+    defaults.expectLogout("anthropic", { moveExisting: true });
     reports.anthropic = reportOf("unauthorized");
     await defaults.reconcile();
     expect(defaults.current()).toBe("rome_credits");
@@ -299,6 +300,70 @@ describe("the default provider as Rome keeps it", () => {
     ]);
     await defaults.choose("anthropic");
     expect(changes.at(-1)).toMatchObject({ moveExisting: true });
+  });
+
+  it("a later top-up never changes the default: credits take over only in the logout", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("unauthorized"),
+    };
+    let usable = false;
+    const { defaults, changes } = keeper(reports, {
+      stored: { provider: "anthropic" },
+      credits: () => true,
+      creditsUsable: () => usable,
+    });
+    defaults.expectLogout("anthropic", { moveExisting: true });
+    reports.anthropic = reportOf("unauthorized");
+    await defaults.reconcile();
+    expect(defaults.current()).toBe("anthropic");
+    // The guardian tops up afterwards: the chats keep their cards.
+    usable = true;
+    await defaults.reconcile();
+    expect(defaults.current()).toBe("anthropic");
+    expect(changes).toHaveLength(0);
+  });
+
+  it("credits do not take over when the default's login is lost without a logout", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("unauthorized"),
+    };
+    const { defaults } = keeper(reports, {
+      stored: { provider: "anthropic" },
+      credits: () => true,
+    });
+    reports.anthropic = reportOf("unauthorized");
+    await defaults.reconcile();
+    expect(defaults.current()).toBe("anthropic");
+  });
+
+  it("keeps the logout's choice through a stale account read that lands after the route", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("available"),
+    };
+    const { defaults, changes } = keeper(reports, { stored: { provider: "openai" } });
+    defaults.expectLogout("openai", { moveExisting: false });
+    // The route has ended; a read joined before the revoke still says logged in.
+    await defaults.reconcile();
+    reports.openai = reportOf("unauthorized");
+    await defaults.reconcile();
+    expect(changes.at(-1)).toMatchObject({ to: "anthropic", moveExisting: false });
+  });
+
+  it("choosing the default again with Move existing chats too lets every held chat follow", async () => {
+    const { defaults, changes } = keeper(
+      { anthropic: reportOf("available"), openai: reportOf("available") },
+      { stored: { provider: "anthropic" } },
+    );
+    await defaults.choose("anthropic", { moveExisting: false });
+    expect(changes).toHaveLength(0);
+    await defaults.choose("anthropic");
+    expect(changes).toEqual([
+      expect.objectContaining({ from: "anthropic", to: "anthropic", moveExisting: true }),
+    ]);
+    expect(defaults.current()).toBe("anthropic");
   });
 
   it("lets the guardian pick only a signed-in provider, and clears the note", async () => {

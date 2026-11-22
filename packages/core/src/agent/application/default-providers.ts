@@ -53,7 +53,9 @@ export interface DefaultProviders {
    * Before the guardian logs out of `provider`: whether the chats that follow
    * the default move with it, if the logout moves it. Absent, they move. The
    * choice holds until the returned call, once the logout has ended, so a
-   * reconcile that runs first does not spend it.
+   * reconcile that runs first does not spend it. The accounts reading the
+   * provider as logged out spends it. The returned call drops it when the
+   * logout failed.
    */
   expectLogout(
     provider: AccountedProviderId,
@@ -155,16 +157,23 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
       if (options.providers.some((provider) => reports[provider] === undefined)) return;
       const now_ = signedIn();
       const seeded = state.provider === null ? await options.seed?.().catch(() => null) : null;
+      const leaving = state.provider ? providerOfDefault(state.provider) : null;
+      // Rome credits take the default over only in the guardian's logout of
+      // it, as its dialog said: a later top-up never changes the default.
+      const loggingOut = leaving !== null && logouts.has(leaving) && !now_[leaving];
       const { provider, moved } = reconciledDefault(
         state.provider,
         now_,
         seeded && now_[seeded] ? seeded : legacyDefault(reports, now_),
-        options.creditsUsable?.() ?? true,
+        loggingOut && (options.creditsUsable?.() ?? true),
       );
+      // A logout the accounts now read as done has spent its choice.
+      const choice = leaving ? logouts.get(leaving) : undefined;
+      for (const [logout] of logouts) if (!now_[logout]) logouts.delete(logout);
       if (!provider || provider === state.provider) return;
       const from = state.provider;
       const removed = moved && from ? providerOfDefault(from) : null;
-      const moveExisting = (removed && logouts.get(removed)?.moveExisting) ?? true;
+      const moveExisting = (removed && removed === leaving && choice?.moveExisting) ?? true;
       await store(
         {
           provider,
@@ -194,12 +203,18 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
         await loaded;
         if (!signedIn()[provider]) throw new Error(`${provider} is not signed in`);
         const from = state.provider;
-        await store(
-          { provider },
-          from === provider
-            ? undefined
-            : { from, to: provider, by: "guardian", moveExisting: choice?.moveExisting ?? true },
-        );
+        const moveExisting = choice?.moveExisting ?? true;
+        if (from === provider) {
+          // Choosing the default again with "Move existing chats too" lets
+          // every held conversation follow it, as a checked change does.
+          if (moveExisting) {
+            await options.beforeChange?.({ from, to: provider, by: "guardian", moveExisting });
+          }
+          // Picking it clears a removal's note.
+          await store({ provider });
+          return;
+        }
+        await store({ provider }, { from, to: provider, by: "guardian", moveExisting });
       }),
     dismissNote: () =>
       serial(async () => {
@@ -209,7 +224,7 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
     expectLogout(provider, choice) {
       const token = { moveExisting: choice.moveExisting };
       logouts.set(provider, token);
-      // Queued behind the reconcile the logout's account read starts.
+      // Queued behind any reconcile already waiting, which may still spend it.
       return () =>
         serial(async () => {
           if (logouts.get(provider) === token) logouts.delete(provider);

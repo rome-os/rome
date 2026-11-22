@@ -1931,12 +1931,12 @@ export class WebChatRepository {
    * The kept chats: a change of the default that moves existing chats lets
    * them follow it again.
    */
-  async keptChatCount(): Promise<number> {
+  async keptChats(): Promise<string[]> {
     const rows = await this.db
-      .select({ count: sql<number>`count(*)`.mapWith(Number) })
+      .select({ id: romeSessions.id })
       .from(romeSessions)
       .where(eq(romeSessions.largeModelSelectionBy, "kept"));
-    return rows[0]?.count ?? 0;
+    return rows.map((row) => row.id);
   }
 
   /**

@@ -77,7 +77,11 @@ export function pinnedModelOf(
         model: selection.model,
       };
     }
-    if (!held || selection.providerId === held) return null;
+    // A model Rome chose, while the conversation is held: it stays there.
+    if (!held) return null;
+    return selection.providerId === held
+      ? { by: "kept", providerId: held, selection: stored, model: selection.model }
+      : { by: "kept", providerId: held, selection: null, model: null };
   }
   if (!held) return null;
   return { by: "kept", providerId: held, selection: null, model: null };
@@ -90,7 +94,7 @@ export interface ChatProvidersDeps {
     WebChatRepository,
     | "getSession"
     | "followingChats"
-    | "keptChatCount"
+    | "keptChats"
     | "releaseKeptChats"
     | "updateSessionLargeModelSelection"
   >;
@@ -336,16 +340,24 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
       await loaded;
       const [following, kept] = await Promise.all([
         deps.webchatRepo.followingChats(),
-        deps.webchatRepo.keptChatCount(),
+        deps.webchatRepo.keptChats(),
       ]);
-      // The conversations that are not a web chat counted above, such as a
-      // channel's chat: those held, and those active lately, which follow it.
-      const others = new Set(
-        [...held.keys(), ...(await conversationsSince())].filter(
-          (key) => !key.startsWith("webchat:"),
-        ),
+      const counted = new Set(
+        [...following.map((chat) => chat.id), ...kept].map((id) => webchatSessionKey(id)),
       );
-      return following.length + kept + others.size;
+      // The other conversations a checked change would move: those held, and
+      // those active lately, which follow the default. A fork chat counts; a
+      // chat its owner picked a model for never moves with the default.
+      let others = 0;
+      for (const key of new Set([...held.keys(), ...(await conversationsSince())])) {
+        if (counted.has(key)) continue;
+        if (key.startsWith("webchat:")) {
+          const chat = await deps.webchatRepo.getSession(key.slice("webchat:".length));
+          if (!chat || pinnedModelOf(chat)?.by === "owner") continue;
+        }
+        others++;
+      }
+      return counted.size + others;
     },
   };
 }
