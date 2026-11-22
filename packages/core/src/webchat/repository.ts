@@ -1928,10 +1928,6 @@ export class WebChatRepository {
   }
 
   /**
-   * The kept chats: a change of the default that moves existing chats lets
-   * them follow it again.
-   */
-  /**
    * The chats among `ids` that exist, with the model each stored and who
    * chose it, in one read.
    */
@@ -1967,6 +1963,10 @@ export class WebChatRepository {
     return out;
   }
 
+  /**
+   * The kept chats: a change of the default that moves existing chats lets
+   * them follow it again.
+   */
   async keptChats(): Promise<string[]> {
     const rows = await this.db
       .select({ id: romeSessions.id })

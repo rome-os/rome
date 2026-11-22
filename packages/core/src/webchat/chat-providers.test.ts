@@ -2,6 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/db.js";
 import { reportOf } from "../test/kit/model-accounts.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
+import { MODEL_SELECTIONS } from "../agent/index.js";
 import { createChatProviders, pinnedModelOf } from "./chat-providers.js";
 
 async function setup(
@@ -322,6 +323,20 @@ describe("an unchecked move keeps every existing chat", () => {
     // A chat that is not held stays unheld.
     await providers.picked("empty", "openai");
     expect(providers.heldProvider("webchat:empty")).toBeUndefined();
+  });
+
+  it("a card's switch and Back to default at once leave the chat in one consistent state", async () => {
+    const { providers, row } = await setup({ currentDefault: "openai", slowWrites: true });
+    await Promise.all([providers.keep("fast", "anthropic"), providers.follow("fast")]);
+    const after = await row("fast");
+    // Either order alone: kept on Claude and held there, or following the default and not held.
+    if (after.by === "kept") {
+      expect(MODEL_SELECTIONS[after.selection as "claude-sonnet"].providerId).toBe("anthropic");
+      expect(providers.heldProvider("webchat:fast")).toBe("anthropic");
+    } else {
+      expect(after.by).toBe("auto");
+      expect(providers.heldProvider("webchat:fast")).toBeUndefined();
+    }
   });
 
   it("holds only conversations active in the last 30 days", async () => {
