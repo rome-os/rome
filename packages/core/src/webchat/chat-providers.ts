@@ -280,14 +280,35 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
       const ran = await conversationsSince();
       // Every conversation with a session left, however old.
       const live = await conversationsSince(new Date(0));
+      const following = new Set(chats.map((chat) => webchatSessionKey(chat.id)));
+      // Where each other conversation is held: a web chat with a model of its
+      // own (its owner's pick, or kept from before) is held where that model
+      // runs, so its subagents stay with it. A fork whose model Rome chose is
+      // kept on the old default, as a chat that follows it is.
+      const holdOn = new Map<string, AccountedProviderId>();
+      for (const root of ran) {
+        if (following.has(root) || held.has(root)) continue;
+        holdOn.set(root, provider);
+        if (!root.startsWith("webchat:")) continue;
+        const chatId = root.slice("webchat:".length);
+        const chat = await deps.webchatRepo.getSession(chatId);
+        const stored = chat?.largeModelSelection ?? null;
+        if (!chat || !isModelSelectionId(stored)) continue;
+        if (chat.largeModelSelectionBy === "auto") {
+          await keepOn(chatId, chat.agentName ?? null, stored, provider);
+          continue;
+        }
+        const own = MODEL_SELECTIONS[stored].providerId;
+        if (own === "anthropic" || own === "openai") holdOn.set(root, own);
+      }
       const added = await changeHeld((map) => {
         // A held conversation other than a web chat goes once it has no session left.
         for (const key of [...map.keys()]) {
           if (!key.startsWith("webchat:") && !live.has(key)) map.delete(key);
         }
         const before = map.size;
-        for (const chat of chats) map.set(webchatSessionKey(chat.id), provider);
-        for (const root of ran) if (!map.has(root)) map.set(root, provider);
+        for (const key of following) map.set(key, provider);
+        for (const [root, on] of holdOn) if (!map.has(root)) map.set(root, on);
         return map.size - before;
       });
       log.info("chats kept on the old default", { provider, chats: chats.length, added });

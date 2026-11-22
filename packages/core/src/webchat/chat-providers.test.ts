@@ -277,6 +277,41 @@ describe("an unchecked move keeps every existing chat", () => {
     expect(await providers.followingCount()).toBe(2);
   });
 
+  it("keeps a held fork whose model Rome chose on the old default, so it does not follow the new one", async () => {
+    const forkId = "01a1b2a2-867a-74bd-8a0b-eee3c7b7106d";
+    const { providers, webchatRepo, row } = await setup({
+      ran: { anthropic: [`webchat:${forkId}`] },
+    });
+    await webchatRepo.ensureRomeSession({
+      id: forkId,
+      type: "webchat",
+      name: "Fork",
+      agentName: null,
+      trigger: { triggerKind: "concierge_fork", triggerName: "branch" },
+      parentSessionId: "plain",
+      parentTurnId: "t1",
+    });
+    // An older overload swap left Rome's choice on the fork.
+    await webchatRepo.updateSessionLargeModelSelection(forkId, "claude-sonnet", "auto");
+    await providers.beforeDefaultChange(unchecked);
+    expect(await row(forkId)).toEqual({ selection: "claude-sonnet", by: "kept" });
+    expect(providers.heldProvider(`webchat:${forkId}`)).toBe("anthropic");
+  });
+
+  it("holds a chat kept from before, or its owner's pick, where its own model runs", async () => {
+    const { providers, webchatRepo } = await setup({
+      ran: { openai: ["webchat:old-kept", "webchat:picked"] },
+    });
+    await webchatRepo.createSession("old-kept", "Old kept");
+    // Kept on ChatGPT under the old rule, with no held entry.
+    await webchatRepo.updateSessionLargeModelSelection("old-kept", "gpt-6-1-sol", "kept");
+    await providers.beforeDefaultChange(unchecked);
+    // Its subagents stay with it on ChatGPT, not on the old default.
+    expect(providers.heldProvider("webchat:old-kept:subagent:abc")).toBe("openai");
+    // The owner picked Claude Opus: its conversation is held on Claude.
+    expect(providers.heldProvider("webchat:picked")).toBe("anthropic");
+  });
+
   it("holds only conversations active in the last 30 days", async () => {
     const asked: Date[] = [];
     const { providers } = await setup({ ran: { anthropic: ["telegram:42"] }, asked });
