@@ -62,6 +62,7 @@ import {
   storedAgentChoice,
 } from "../../../chats/connected-accounts/account-agents.js";
 import { isLinkCodeMessage } from "../../../people/link-code/index.js";
+import { archivedDiscordThreads } from "./discord-threads.js";
 import type { TalkHistoryRead } from "../../types.js";
 import { type DiscordGet, readDiscordHistory, type WireChannel } from "./discord-history.js";
 import { botReadsHistory } from "./discord-permissions.js";
@@ -276,6 +277,8 @@ export interface GuildChannelInfo {
   guildName: string;
   type: "text" | "news" | "thread" | "forum";
   parentId?: string;
+  /** True for a thread Discord has archived. */
+  archived?: boolean;
 }
 
 /**
@@ -285,7 +288,12 @@ export interface GuildChannelInfo {
  * hand-written structural cast silently rot.
  */
 export interface DiscordAdapterLike {
+  /** Whether the gateway has logged in, so the chats it names are all of them. */
+  isReady(): boolean;
+  /** Whether the bot may see a chat the gateway names. */
+  sees(chat: GuildChannelInfo): boolean;
   listGuildChannels(): GuildChannelInfo[];
+  listArchivedThreads(): Promise<GuildChannelInfo[]>;
   executeApiRequest(request: ConnectionApiRequest): Promise<ConnectionApiResult>;
 }
 
@@ -419,6 +427,12 @@ export class DiscordAdapter {
 
   private _botToken: string;
 
+  /** Whether the gateway has logged in, so `listGuildChannels` names every
+   *  chat the bot sees rather than none. */
+  isReady(): boolean {
+    return this.client.isReady();
+  }
+
   /**
    * Enumerate text-capable channels across all guilds the bot is in, so an
    * caller (via Talk's `directory` feature) can resolve a
@@ -435,7 +449,12 @@ export class DiscordAdapter {
         let kind: "text" | "news" | "thread" | "forum" | null = null;
         if (channel.type === discordJs().ChannelType.GuildText) kind = "text";
         else if (channel.type === discordJs().ChannelType.GuildAnnouncement) kind = "news";
-        else if (channel.type === discordJs().ChannelType.GuildForum) kind = "forum";
+        // A media chat holds posts as a forum does, so it lists as one.
+        else if (
+          channel.type === discordJs().ChannelType.GuildForum ||
+          channel.type === discordJs().ChannelType.GuildMedia
+        )
+          kind = "forum";
         else if (isThreadType(channel.type)) kind = "thread";
         if (!kind) continue;
         out.push({
@@ -448,10 +467,88 @@ export class DiscordAdapter {
             "parentId" in channel && typeof channel.parentId === "string"
               ? channel.parentId
               : undefined,
+          // The gateway keeps a thread it saw archived in its cache.
+          ...(channel.isThread() && channel.archived ? { archived: true } : {}),
         });
       }
     }
     return out;
+  }
+
+  /**
+   * The threads Discord has archived in every chat the bot sees, read from
+   * Discord: public ones, and private ones the bot has joined. The gateway
+   * names only active threads. A chat whose archive the bot may not see
+   * contributes none; any other failure rejects, naming the chat.
+   */
+  async listArchivedThreads(): Promise<GuildChannelInfo[]> {
+    // A chat the bot may not read answers 403, which Discord counts toward
+    // banning the bot's address, so only chats it may read are asked.
+    const chats = this.listGuildChannels().filter(
+      (channel) => channel.type !== "thread" && this.readsArchiveOf(channel),
+    );
+    const byId = new Map(chats.map((chat) => [chat.id, chat]));
+    // The scan must not outlive this credential's epoch: `stop` aborts it,
+    // and no request is sent once it has.
+    const { get, done } = this.epochGet("Discord connection stopped during the listing");
+    let threads: Awaited<ReturnType<typeof archivedDiscordThreads>>;
+    try {
+      threads = await archivedDiscordThreads(
+        get,
+        chats.map((chat) => ({ id: chat.id, holdsPrivateThreads: chat.type === "text" })),
+      );
+    } finally {
+      // A failed listing leaves the other readers mid-chat: they stop too.
+      done();
+    }
+    return threads.flatMap((thread) => {
+      const chat = byId.get(thread.parentId);
+      if (!chat) return [];
+      return [
+        {
+          id: thread.id,
+          name: thread.name,
+          guildId: chat.guildId,
+          guildName: chat.guildName,
+          type: "thread" as const,
+          parentId: chat.id,
+          archived: true,
+        },
+      ];
+    });
+  }
+
+  /** Whether the gateway says the bot may see `chat`. The gateway names
+   *  chats the bot cannot see too. A chat it cannot tell about counts as seen. */
+  sees(chat: GuildChannelInfo): boolean {
+    return this.holds(chat, [discordJs().PermissionFlagsBits.ViewChannel]);
+  }
+
+  /** Whether the gateway says the bot may read `chat`'s history. A chat it
+   *  cannot tell about is asked, and a 403 then skips it. */
+  private readsArchiveOf(chat: GuildChannelInfo): boolean {
+    const flags = discordJs().PermissionFlagsBits;
+    return this.holds(chat, [flags.ViewChannel, flags.ReadMessageHistory]);
+  }
+
+  private holds(chat: GuildChannelInfo, permissions: bigint[]): boolean {
+    const guild = this.client.guilds.cache.get(chat.guildId);
+    const channel = guild?.channels.cache.get(chat.id);
+    const me = guild?.members.me;
+    if (!channel || !me) return true;
+    // discord.js types this as never null, yet a thread whose parent has left
+    // the cache answers null: a chat it cannot tell about counts as seen.
+    const granted: ReturnType<typeof me.permissionsIn> | null = me.permissionsIn(channel);
+    if (!granted) return true;
+    // A private thread's permissions are its parent's, yet only its members
+    // and those who manage threads see it.
+    if (
+      channel.type === discordJs().ChannelType.PrivateThread &&
+      !channel.joined &&
+      !granted.has(discordJs().PermissionFlagsBits.ManageThreads)
+    )
+      return false;
+    return granted.has(permissions);
   }
 
   /** Execute a provider-relative request through the epoch-owned discord.js
@@ -1410,15 +1507,31 @@ Use \`/channel agent clear\` to undo.`,
   async readHistory(chatId: ChatId, read: TalkHistoryRead): Promise<ChannelMessage[]> {
     // A read must not outlive this credential's epoch: `stop` aborts it, and
     // no request is sent once it has.
+    const { get, signal, done } = this.epochGet("Discord connection stopped during the read");
+    try {
+      return await this.readHistoryWith(get, chatId, read, signal);
+    } finally {
+      // Whatever ended the read, nothing it started sends on.
+      done();
+    }
+  }
+
+  /** A GET bound to this credential's epoch: `stop` aborts it, after which it
+   *  sends nothing and rejects with `stoppedMessage`. A 401 is reported as a
+   *  rejected credential. `done` ends it, aborting whatever is still in
+   *  flight. Throws once the connection has stopped. */
+  private epochGet(stoppedMessage: string): {
+    get: DiscordGet;
+    signal: AbortSignal;
+    done: () => void;
+  } {
     if (this.stopped) throw new Error("Discord connection has stopped");
     const controller = new AbortController();
     this.activeApiRequestControllers.add(controller);
     const aborted = new Promise<never>((_resolve, reject) => {
-      controller.signal.addEventListener(
-        "abort",
-        () => reject(new Error("Discord connection stopped during the read")),
-        { once: true },
-      );
+      controller.signal.addEventListener("abort", () => reject(new Error(stoppedMessage)), {
+        once: true,
+      });
     });
     void aborted.catch(() => undefined);
     const get: DiscordGet = async (route, query) => {
@@ -1433,13 +1546,11 @@ Use \`/channel agent clear\` to undo.`,
       void request.catch(() => undefined);
       return Promise.race([request, aborted]);
     };
-    try {
-      return await this.readHistoryWith(get, chatId, read, controller.signal);
-    } finally {
-      // Whatever ended the read, nothing it started sends on.
+    const done = () => {
       controller.abort();
       this.activeApiRequestControllers.delete(controller);
-    }
+    };
+    return { get, signal: controller.signal, done };
   }
 
   private async readHistoryWith(

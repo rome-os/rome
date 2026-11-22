@@ -39,6 +39,7 @@ A channel is its name plus four ports: `send`, `inbound`, `accounts` and `messag
 - An inbound subscription outlives a reconnect of whatever backs it.
 - Inbound hears a channel only while Rome listens to its account ([An account's agent](#an-accounts-agent)). While Rome does not, the channel keeps its subscribers, but nothing it receives reaches them, and admission does not run.
 - `directory` lists the chats a channel can see, each with its `ChatRef`, so chat settings reach a channel's chats without reaching a Connection. A listing that fails is logged and answers no chats.
+- An app lists the chats one of Rome's accounts can see through the channels service, a page at a time, threads too when it asks. Unlike `directory`, that listing fails with an error rather than answering none. Threads a platform has archived are listed only when asked for, read from the platform, since they are not kept live.
 
 ### Adapter keys
 
