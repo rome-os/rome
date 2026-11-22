@@ -25,6 +25,10 @@
       "types": "./dist/host.d.ts",
       "default": "./dist/host.js"
     },
+    "./computer-use": {
+      "types": "./dist/computer-use.d.ts",
+      "default": "./dist/computer-use.js"
+    },
     "./daemon": {
       "types": "./dist/daemon.d.ts",
       "default": "./dist/daemon.js"

@@ -128,4 +128,35 @@ describe("executor credential lifecycle", () => {
     expect(await options.beforeConnect!()).toBeNull();
     expect(mocks.login).not.toHaveBeenCalled();
   });
+  it("keeps computer use disabled unless explicitly provided", async () => {
+    let sent: unknown;
+    mocks.connect.mockImplementation((options: GatewayClientOptions) => {
+      const client = {
+        stop: rs.fn(),
+        send: rs.fn((envelope: unknown) => {
+          sent = envelope;
+          queueMicrotask(() => options.onStatus?.("superseded"));
+          return true;
+        }),
+        sendFrame: rs.fn(),
+      };
+      queueMicrotask(() => {
+        options.onMessage?.({
+          id: "0f8fad5b-d9cb-469f-a165-70867728950e",
+          from: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+          payload: { type: "request", action: "system.info", args: {} },
+        });
+      });
+      return client;
+    });
+    await expect(runHost(new AbortController().signal)).rejects.toThrow("replaced");
+    expect(sent).toMatchObject({
+      payload: {
+        ok: true,
+        result: {
+          actions: ["system.info", "exec", "fs.list"],
+        },
+      },
+    });
+  });
 });

@@ -443,6 +443,53 @@ describe("caller daemon observation", () => {
     return raw;
   }
 
+  it("omits computer input from persisted rows and live events on both transports", async () => {
+    const f = await fixture();
+    const raw = await observer(f);
+    await raw.call({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "events.subscribe",
+      params: { topic: "node" },
+    });
+    await raw.next();
+    const args = {
+      sessionId: "session",
+      actionId: "action",
+      observationId: "observation",
+      stateVersion: 1,
+      ref: "private-target",
+      action: { type: "setValue", value: "PRIVATE_INPUT_SENTINEL" },
+    };
+    await f.client.run(offline, "computer.act", args);
+    await f.client.runBinary(offline, "computer.act", args);
+    const events: unknown[] = [];
+    let ended = 0;
+    while (ended < 2) {
+      const message = JSON.parse((await raw.next()).data.toString());
+      events.push(message);
+      if (message.params?.type === "action" && message.params.phase === "end") ended++;
+    }
+    const result = await raw.call({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "log.query",
+      params: { kind: "actions" },
+    });
+    expect(result.result.rows).toHaveLength(2);
+    for (const row of result.result.rows) {
+      expect(JSON.parse(row.args)).toEqual({
+        action: "computer.act",
+        sessionId: "session",
+        actionId: "action",
+        operation: "setValue",
+        valueBytes: 22,
+      });
+    }
+    expect(JSON.stringify([events, result])).not.toContain("PRIVATE_INPUT_SENTINEL");
+    expect(JSON.stringify([events, result])).not.toContain("private-target");
+  });
+
   it("records sent actions and skips system.info", async () => {
     const f = await fixture();
     const raw = await observer(f);
