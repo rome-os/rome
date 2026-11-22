@@ -185,6 +185,9 @@ function harness(
     actorOf: async (chatId) =>
       chatId === "visitors" ? ({ kind: "visitor", accountId: "acct-v" } as never) : undefined,
     ...(options.movedOnSince ? { movedOnSince: options.movedOnSince } : {}),
+    // As the chat reads: the last message written in it.
+    newestMessageId: async (chatId) =>
+      [...messages].filter(([, message]) => message.chatId === chatId).at(-1)?.[0] ?? null,
     ...(options.continuesAfterLimit ? { continuesAfterLimit: options.continuesAfterLimit } : {}),
     selectModel: (chatId, _agentName, selection) => {
       selected.push({ chatId, selection });
@@ -586,11 +589,9 @@ describe("the three cards", () => {
   });
 
   it("moves a chat's open card to the newest failed turn, one card per chat", async () => {
-    // Someone wrote in the chat since the first card.
     const h = harness(
       { chat: {} },
       { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
-      { movedOnSince: () => true },
     );
     await h.fail("chat", quota);
     await h.fail("chat", spendCap);
@@ -602,32 +603,50 @@ describe("the three cards", () => {
     expect(parts.map((part) => part.resolved?.by)).toEqual(["moved", undefined]);
   });
 
-  it("rewrites the open card in place while nobody writes in the chat", async () => {
-    const asked: Array<{ chatId: string; since: number }> = [];
-    const h = harness(
-      { chat: {} },
-      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
-      {
-        movedOnSince: (chatId, since) => {
-          asked.push({ chatId, since });
-          return false;
-        },
-      },
-    );
-    await h.fail("chat", quota);
+  it("rewrites the open card in place while refusals repeat and it is the newest message", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("unauthorized") });
+    const refuse = () =>
+      h.failures.failed(
+        { chatId: "chat", agentName: "main", failure: refused("anthropic", "not_logged_in") },
+        { final: true },
+      );
+    await refuse();
     const [first] = await h.failures.cards();
-    // A retry that fails again and again adds no message: the chat's one card
-    // reads as the newest failure, and nothing else unread is said.
-    await h.fail("chat", quota);
-    await h.fail("chat", spendCap);
+    // A retry refused again and again adds no message, so nothing unread piles up.
+    await refuse();
+    await refuse();
     expect(h.messages.size).toBe(1);
     expect(h.shownCards("chat")).toHaveLength(1);
-    expect(h.cardIn("chat")).toMatchObject({ reason: "spend_cap" });
     const [card] = await h.failures.cards();
     expect(card?.messageId).toBe(first!.messageId);
     expect(card?.since).toBe(first!.since);
-    expect(asked.every((ask) => ask.chatId === "chat")).toBe(true);
-    expect(asked).toHaveLength(2);
+  });
+
+  it("writes a new card for a refusal once anything was said after the open card", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("unauthorized") });
+    const refuse = () =>
+      h.failures.failed(
+        { chatId: "chat", agentName: "main", failure: refused("anthropic", "not_logged_in") },
+        { final: true },
+      );
+    await refuse();
+    // A reply of the agent's, or someone's message, comes after the card.
+    h.messages.set("said", { chatId: "chat", parts: [{ type: "text", content: "Done." }] });
+    await refuse();
+    expect(h.shownCards("chat")).toHaveLength(1);
+    const parts = [...h.messages.values()]
+      .flatMap((m) => m.parts as ProviderFailurePart[])
+      .filter((part) => part.type === "provider_failure");
+    expect(parts.map((part) => part.resolved?.by)).toEqual(["moved", undefined]);
+  });
+
+  it("keeps a card for each turn that ran and failed, its newest message or not", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("usage_limit_reached") });
+    await h.fail("chat", quota);
+    await h.fail("chat", quota);
+    // Each turn's own card explains its error where the turn shows.
+    expect(h.messages.size).toBe(2);
+    expect(h.shownCards("chat")).toHaveLength(1);
   });
 
   it("settles a card when a later turn in the chat runs", async () => {

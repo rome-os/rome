@@ -93,8 +93,6 @@ export interface OpenProviderCard {
   /** Parts written beside the card in its message, kept when it is rewritten. */
   beside: unknown[];
   since: string;
-  /** When its message was last written. Absent on a card stored before this was kept. */
-  writtenAt?: string;
 }
 
 /** One incident that stopped unattended chats, as stored. */
@@ -165,6 +163,11 @@ export interface ProviderFailuresDeps {
    * Absent, nobody did.
    */
   movedOnSince?: (chatId: string, since: number) => boolean;
+  /**
+   * The id of the newest message the chat shows, or null when it has none.
+   * Absent, a card is never rewritten in place.
+   */
+  newestMessageId?: (chatId: string) => Promise<string | null>;
   /**
    * Whether the usage-limit continuation, sweeping once the limit ends at
    * `until`, would run the chat's stopped turn again. Absent, it would not.
@@ -590,35 +593,27 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
 
   /**
    * Writes a chat's open card with the turn that failed. A chat shows one open
-   * card. While nobody has written in the chat since the open card, the card
-   * is rewritten in place, so failures that repeat add no message. Otherwise,
-   * or when `fresh` asks for a new card, the older one leaves its message,
-   * which keeps what else it held.
+   * card: an older one leaves its message, which keeps what else it held. A
+   * turn refused before it started (`inPlace`) leaves nothing of its own in
+   * the chat, so while the open card is still the chat's newest message it is
+   * rewritten there: refusals that repeat add no message.
    */
   const writeCard = (
     turn: Pick<ChatTurnFailure, "chatId" | "agentName" | "turnId">,
     part: ProviderFailurePart,
     runsOn: AccountedProviderId,
     written?: { messageId: string; beside: unknown[] },
-    fresh = false,
+    inPlace = false,
   ) =>
     serial(async () => {
       const cards = await readCards();
       const open = cards.find((card) => card.chatId === turn.chatId);
-      const writtenAt = now().toISOString();
       if (
         open &&
-        !written &&
-        !fresh &&
-        !(deps.movedOnSince?.(turn.chatId, Date.parse(open.writtenAt ?? open.since)) ?? false)
+        inPlace &&
+        (await deps.newestMessageId?.(turn.chatId).catch(() => null)) === open.messageId
       ) {
-        const rewritten: OpenProviderCard = {
-          ...open,
-          agentName: turn.agentName,
-          runsOn,
-          part,
-          writtenAt,
-        };
+        const rewritten: OpenProviderCard = { ...open, agentName: turn.agentName, runsOn, part };
         const wrote = await deps.webchatRepo
           .updateMessageContent(open.messageId, content(rewritten))
           .catch(() => false);
@@ -653,8 +648,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         runsOn,
         part,
         beside: written?.beside ?? [],
-        since: open?.since ?? writtenAt,
-        writtenAt,
+        since: open?.since ?? now().toISOString(),
       };
       await writeCards([...cards.filter((other) => other.chatId !== turn.chatId), card]);
       return card;
@@ -868,13 +862,7 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       ...(card.part.detail ? { detail: card.part.detail } : {}),
     });
     if (!part) return;
-    await writeCard(
-      { chatId: card.chatId, agentName: card.agentName },
-      part,
-      card.runsOn,
-      undefined,
-      true,
-    );
+    await writeCard({ chatId: card.chatId, agentName: card.agentName }, part, card.runsOn);
   };
 
   const runFromCard = async (
@@ -1088,7 +1076,13 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       const turn = canonical(raw);
       const decided = await decide(turn, options?.final === true, retried);
       if (!decided) return;
-      await writeCard(turn, decided.part, decided.runsOn);
+      await writeCard(
+        turn,
+        decided.part,
+        decided.runsOn,
+        undefined,
+        turn.failure.kind === "resolution",
+      );
       // The stopped turn is stored now: what the continuation will do with it is known.
       await repromise((card) => card.chatId === turn.chatId);
       if (decided.unattended) await groupIn(turn, decided.part);
