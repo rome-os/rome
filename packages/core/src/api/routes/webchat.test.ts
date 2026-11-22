@@ -7707,6 +7707,40 @@ describe("Webchat API", () => {
       });
     });
 
+    it("runs a branch's own stored selection on its next send, not the first message's", async () => {
+      await deps.settingsRepo.set("enableModelSelector", true);
+      await deps.webchatRepo.updateSessionLargeModelSelection(PROMOTED_ID, "gpt-6-luna", "kept");
+      rs.spyOn(deps.sessionRepository, "current").mockResolvedValue(withThread(PROMOTED_ID));
+      let selectionId: unknown = "unset";
+      deps.agentSessionManager = fakeSessionManager(async (_key, init) => {
+        selectionId = init?.selectionId;
+        return {
+          key: { agentName: "main", channelThreadKey: `webchat:${PROMOTED_ID}` },
+          sessionId: "fork-agent-session",
+          status: "idle",
+          startTurn() {
+            return testTurnHandle({
+              turnId: "follow-up-turn",
+              events: (async function* () {
+                yield { type: "result", content: "ok" };
+              })(),
+              turnContext: otelContext.active(),
+            });
+          },
+          onStatusChange: () => () => undefined,
+          stop: async () => undefined,
+          close: async () => undefined,
+        } satisfies FakeSession;
+      });
+      const app = createWebchatRuntime(deps).routes;
+      await app.request(`/chat/sessions/${PROMOTED_ID}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "and then?", largeModelSelection: "claude-opus" }),
+      });
+      expect(selectionId).toBe("gpt-6-luna");
+    });
+
     it("resumes a branch under its persisted key even when a selection is sent", async () => {
       // `persistForkThread` stored the row without a model-selection suffix. If
       // a follow-up ever recomputed a suffixed key, `open` would open a

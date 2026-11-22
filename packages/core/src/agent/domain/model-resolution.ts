@@ -332,8 +332,15 @@ export function modelResolutionRequest(
   credits = false,
   held?: AccountedProviderId,
 ): ModelResolutionRequest {
-  if (held && agent.modelId === undefined && !agent.providerId) {
-    return { ...modelAsk(selectionId, pin, { ...agent, providerId: held }), ownAccount: true };
+  if (held) {
+    // An agent that names its own provider keeps it; one that does not runs
+    // its tier where the conversation is held. Either way the ask stays on
+    // the guardian's own account, and Rome credits never stand in.
+    const restricted = agent.modelId !== undefined || agent.providerId !== undefined;
+    return {
+      ...modelAsk(selectionId, pin, restricted ? agent : { ...agent, providerId: held }),
+      ownAccount: true,
+    };
   }
   if (!credits) return modelAsk(selectionId, pin, agent);
   // Rome credits run Codex: the chat's model, whoever chose it, runs at its

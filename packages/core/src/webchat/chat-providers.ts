@@ -360,17 +360,19 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
         });
         if (!pinnedModelOf(chat, heldOn)) return null;
         const stored = chat.largeModelSelection;
+        const current = deps.currentDefault?.() ?? null;
         if (!isModelSelectionId(stored)) {
-          // Held with no model of its own, as a fork is: it follows by its tier again.
-          deps.selectModel(chatId, chat.agentName ?? null, null);
-          return null;
+          // Held with no model of its own, as a fork is: it follows the
+          // default at the strength of the model it last ran, as Rome's choice.
+          const next = current
+            ? await on(chatId, chat.agentName ?? null, null, providerOfDefault(current))
+            : null;
+          if (next) await deps.webchatRepo.updateSessionLargeModelSelection(chatId, next, "auto");
+          deps.selectModel(chatId, chat.agentName ?? null, next);
+          return next;
         }
         // Its strength stays: the default's model of the same strength.
-        const next = followingSelection(
-          stored,
-          deps.currentDefault?.() ?? null,
-          deps.accounts.read().openai?.account,
-        );
+        const next = followingSelection(stored, current, deps.accounts.read().openai?.account);
         await deps.webchatRepo.updateSessionLargeModelSelection(chatId, next, "auto");
         deps.selectModel(chatId, chat.agentName ?? null, next);
         return next;

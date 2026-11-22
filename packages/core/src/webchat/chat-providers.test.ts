@@ -340,6 +340,32 @@ describe("an unchecked move keeps every existing chat", () => {
     expect(providers.heldProvider("webchat:fast:subagent:abc")).toBe(on);
   });
 
+  it("Back to default keeps a model-less fork's strength, from the model it last ran", async () => {
+    const forkId = "01a1b2a1-2a30-7489-8e21-9dfe73454e96";
+    const { providers, webchatRepo, row, selected } = await setup({
+      currentDefault: "openai",
+      tier: "large",
+      ran: { anthropic: [`webchat:${forkId}`] },
+      lastModel: { [forkId]: { providerId: "anthropic", model: "claude-sonnet-5-5" } },
+    });
+    await webchatRepo.ensureRomeSession({
+      id: forkId,
+      type: "webchat",
+      name: "Fork",
+      agentName: null,
+      trigger: { triggerKind: "fork", triggerName: "branch" },
+      parentSessionId: "plain",
+      parentTurnId: "t1",
+    });
+    await providers.beforeDefaultChange({ ...unchecked, from: "anthropic", to: "openai" });
+    expect(providers.heldProvider(`webchat:${forkId}`)).toBe("anthropic");
+    // A Sonnet fork on a large-tier agent comes back as the fast model, not Sol.
+    expect(await providers.follow(forkId)).toBe("gpt-6-luna");
+    expect(await row(forkId)).toEqual({ selection: "gpt-6-luna", by: "auto" });
+    expect(selected.at(-1)).toEqual([forkId, "gpt-6-luna"]);
+    expect(providers.heldProvider(`webchat:${forkId}`)).toBeUndefined();
+  });
+
   it("holds only conversations active in the last 30 days", async () => {
     const asked: Date[] = [];
     const { providers } = await setup({ ran: { anthropic: ["telegram:42"] }, asked });
