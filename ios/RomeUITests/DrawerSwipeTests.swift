@@ -13,7 +13,7 @@ final class DrawerSwipeTests: XCTestCase {
 
     @MainActor
     private func launch() -> XCUIApplication {
-        let app = XCUIApplication()
+        let app = XCUIApplication.forUITests()
         app.launchEnvironment["ROME_DEMO"] = "1"
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()

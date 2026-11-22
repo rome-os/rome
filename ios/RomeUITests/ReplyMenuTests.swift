@@ -11,7 +11,7 @@ final class ReplyMenuTests: XCTestCase {
 
     @MainActor
     private func launch() -> XCUIApplication {
-        let app = XCUIApplication()
+        let app = XCUIApplication.forUITests()
         app.launchEnvironment["ROME_DEMO"] = "long-chat"
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))

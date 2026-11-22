@@ -6,7 +6,7 @@ import XCTest
 final class LaunchTests: XCTestCase {
     @MainActor
     func testTheDemoAppOpens() {
-        let app = XCUIApplication()
+        let app = XCUIApplication.forUITests()
         app.launchEnvironment["ROME_DEMO"] = "1"
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))

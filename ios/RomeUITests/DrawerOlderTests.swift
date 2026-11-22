@@ -24,7 +24,7 @@ final class DrawerOlderTests: XCTestCase {
 
     @MainActor
     func testFoldingPersistenceAndOpenException() {
-        let app = XCUIApplication()
+        let app = XCUIApplication.forUITests()
         app.launchEnvironment["ROME_DEMO"] = "older-topics"
         app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()

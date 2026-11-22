@@ -829,7 +829,7 @@ final class VoiceInputTests: XCTestCase {
             try assertAnswers(origin)
             Self.instanceAnswered = true
         }
-        let app = XCUIApplication()
+        let app = XCUIApplication.forUITests()
         app.launchEnvironment["ROME_LOCAL_ORIGIN"] = origin
         app.launchEnvironment["ROME_LOCAL_USER"] = user
         app.launchEnvironment["ROME_LOCAL_PASSWORD"] = password
