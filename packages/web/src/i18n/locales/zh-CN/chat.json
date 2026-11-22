@@ -452,6 +452,7 @@
   "composer": {
     "placeholderDefault": "今天我能帮你做点什么?",
     "lockedByCard": "请先回答上方的卡片，再继续。",
+    "placeholderInThread": "在回复串中发送消息",
     "placeholderWithUploads": "添加消息或直接发送已上传的文件...",
     "hints": {
       "skill": "输入 / 使用技能",

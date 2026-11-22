@@ -118,6 +118,7 @@ const actions = {
 
 interface Seen {
   chain?: ReturnType<typeof useChainFocus>;
+  draft?: ReturnType<typeof useReplyDraftState>;
   fallback: ReturnType<typeof rs.fn>;
 }
 
@@ -133,6 +134,7 @@ function Harness({ seen }: { seen: Seen }) {
     onDismiss: focus.close,
     focusComposer: () => {},
   });
+  seen.draft = draft;
   const rows = buildRows(main, new Map(), idle.identity, {
     runningTurnId: null,
     isStreaming: false,
@@ -411,34 +413,49 @@ describe("a message that arrives while the layer is open", () => {
 describe("the composer", () => {
   const bar = () => document.querySelector<HTMLElement>("[data-reply-bar]");
 
-  it("replies to the last message of the chain that has text", async () => {
-    // The chain ends in a message without text, so the one before it is the target.
-    thread.mockResolvedValue(page([...chain, say("c1", "assistant", " ", 7, { root: "g1" })]));
-    renderChat();
-    expect(bar()).toBeNull();
-    await pressQuote("a2");
-    await waitFor(() => expect(bar()).not.toBeNull());
-    expect(bar()?.getAttribute("title")).toBe("The cheaper one");
-  });
-
-  it("follows the chain's last message as one arrives, and drops the reply when the layer closes", async () => {
+  it("does not pick a reply on focus, live updates, or after a send clears the draft", async () => {
     thread.mockResolvedValue(page(chain));
     const seen = renderChat();
     await pressQuote("a2");
-    await waitFor(() => expect(bar()?.getAttribute("title")).toBe("The cheaper one"));
+    expect(layer()).not.toBeNull();
+    expect(seen.draft!.target).toBeNull();
+    expect(bar()).toBeNull();
     act(() => seen.chain!.onLive(say("a3", "assistant", "Booked it", 8, { root: "g1" })));
-    await waitFor(() => expect(bar()?.getAttribute("title")).toBe("Booked it"));
+    expect(seen.draft!.target).toBeNull();
+    expect(bar()).toBeNull();
+    act(() => seen.draft!.clear());
+    expect(seen.draft!.target).toBeNull();
+    expect(bar()).toBeNull();
+    expect(layer()).not.toBeNull();
+  });
+
+  it("preserves an ordinary explicit reply through focus, new messages, and close", async () => {
+    thread.mockResolvedValue(page(chain));
+    const seen = renderChat();
+    const manual = { messageId: "x1", author: "agent" as const, preview: "Weather is clear today" };
+    act(() => seen.draft!.set(manual, { quiet: true }));
+    await pressQuote("a2");
+    expect(seen.draft!.target).toEqual(manual);
+    act(() => seen.chain!.onLive(say("a3", "assistant", "Booked it", 8, { root: "g1" })));
+    expect(seen.draft!.target).toEqual(manual);
     await act(async () => {
       await seen.chain!.close();
     });
-    expect(bar()).toBeNull();
+    expect(seen.draft!.target).toEqual(manual);
+    expect(bar()?.getAttribute("title")).toBe(manual.preview);
   });
 
-  it("leaves the focus when the reply bar is cancelled", async () => {
+  it("keeps an explicitly picked reply's normal cancel behavior", async () => {
     thread.mockResolvedValue(page(chain));
-    renderChat();
+    const seen = renderChat();
     await pressQuote("a2");
-    await waitFor(() => expect(bar()).not.toBeNull());
+    act(() =>
+      seen.draft!.set(
+        { messageId: "g1", author: "guardian", preview: "Plan Tokyo" },
+        { quiet: true },
+      ),
+    );
+    expect(bar()).not.toBeNull();
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
     });

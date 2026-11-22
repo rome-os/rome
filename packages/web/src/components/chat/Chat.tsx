@@ -104,7 +104,7 @@ import {
 } from "@/components/chat/reply/reply-draft";
 import { ChainFocusLayer } from "@/components/chat/reply/ChainFocusLayer";
 import { useChainFocus } from "@/components/chat/reply/use-chain-focus";
-import { findMessageAnchor } from "@/components/chat/reply/reply-source";
+import { findMessageAnchor, lastTextMessage, targetOf } from "@/components/chat/reply/reply-source";
 import { LANDING_MS, playLanding } from "@/components/chat/reply/thread-anchor";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
@@ -287,6 +287,7 @@ const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
   content: z.string(),
   createdAt: z.string(),
   traceSummary: traceSummarySchema.nullable().optional(),
+  chatThreadId: z.string().nullable().optional(),
 });
 
 const sessionNameSchema = z.object({
@@ -2103,7 +2104,8 @@ export function Chat({
             baseOptimisticText.trim() ? ` ${baseOptimisticText}` : ""
           }`
         : baseOptimisticText;
-      const { replyTo } = snapshot;
+      const last = chain.focus && lastTextMessage(chain.focus.messages);
+      const replyTo = snapshot.replyTo ?? (last ? targetOf(last) : undefined);
       // The quote shows at once; the accepted row carries the server's snapshot of it.
       const optimisticContent = JSON.stringify([
         ...(replyTo
@@ -2131,8 +2133,8 @@ export function Chat({
             formData.set("largeModelSelection", snapshot.largeModelSelection);
           formData.set("reasoningEffort", snapshot.reasoningEffort);
           if (concierge) formData.set("priority", "now");
-          // The reply names its message, the one the quote above shows, and the
-          // server stores it as given.
+          // An explicit reply wins; otherwise a focused chain supplies its last
+          // text message without changing the composer's reply draft.
           if (replyTo) {
             for (const [name, value] of Object.entries(replyFormFields(replyTo))) {
               formData.set(name, value);
@@ -2166,6 +2168,7 @@ export function Chat({
       startSession,
       notifySessionsChanged,
       concierge,
+      chain.focus,
     ],
   );
 
@@ -3074,6 +3077,7 @@ export function Chat({
                         ref={composerRef}
                         chatId={mainSessionId}
                         boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                        placeholder={chain.focus ? t("composer.placeholderInThread") : undefined}
                         onSend={handleComposerSend}
                         isStreaming={displayedStreaming}
                         onStop={stopComposerTurn}
@@ -3094,6 +3098,7 @@ export function Chat({
                         // The box look lives on the composer now so the chip row can sit
                         // outside it; this mount adds the floating blur/translucency.
                         boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                        placeholder={chain.focus ? t("composer.placeholderInThread") : undefined}
                         onSend={handleComposerSend}
                         // A draft picks the session's project, model, and agent.
                         // A session keeps its project and agent, and its model

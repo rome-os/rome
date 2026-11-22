@@ -215,6 +215,15 @@ function ReplyJump() {
       <button type="button" data-testid="reply-jump" onClick={() => reply?.jump?.("a2", "m-2")}>
         jump
       </button>
+      <button
+        type="button"
+        data-testid="pick-reply"
+        onClick={() =>
+          reply?.set({ messageId: "a2", author: "agent", preview: "Lisbon", quote: "Lisbon" })
+        }
+      >
+        reply
+      </button>
       {/* A click on the quote of a message, which names m-1. */}
       <button type="button" data-testid="quote-jump" onClick={() => reply?.jump?.("m-1", "m-2")}>
         quote
@@ -333,6 +342,7 @@ rs.mock("@/components/chat/ChatComposer", () => ({
   // the way the real composer's Stop button does.
   // Memoized, as the real one is: it renders again only for new props.
   ChatComposer: memo(function ChatComposer(props: {
+    placeholder?: string;
     isStreaming?: boolean;
     onStop?: () => void;
     onSend?: (snapshot: unknown, controls: unknown) => Promise<void>;
@@ -340,7 +350,11 @@ rs.mock("@/components/chat/ChatComposer", () => ({
   }) {
     renders.composer += 1;
     return (
-      <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
+      <div
+        data-testid="chat-composer"
+        data-placeholder={props.placeholder ?? ""}
+        data-streaming={props.isStreaming ? "true" : "false"}
+      >
         {props.streamError ? (
           <div data-testid="stream-error">
             {typeof props.streamError === "string" ? props.streamError : props.streamError.message}
@@ -444,6 +458,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       isStreaming?: boolean;
       onStop?: () => void;
       chatName?: string | null;
+      placeholder?: string;
     },
     ref,
   ) {
@@ -459,6 +474,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
         data-testid="chat-composer"
         data-streaming={props.isStreaming ? "true" : "false"}
         data-chat-name={props.chatName ?? ""}
+        data-placeholder={props.placeholder ?? ""}
       >
         <button
           type="button"
@@ -3667,6 +3683,96 @@ describe("Chat Concierge jump to a message", () => {
       expect(scrollTo).not.toHaveBeenCalled();
       fireEvent.click(document.querySelector("[data-chain-layer] > div")!);
       await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
+    });
+
+    it("sends implicitly in the chain and restores the placeholder on close", async () => {
+      const messages = [message(1), message(2), { ...message(3), content: " " }];
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages,
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        nextCursor: null,
+      });
+      rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: false, error: "intercepted" });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      await screen.findByTestId("quote-jump");
+      const composer = screen.getByTestId("chat-composer");
+      expect(composer.dataset.placeholder).toBe("");
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+      expect(screen.getByTestId("chat-composer")).toBe(composer);
+      expect(composer.dataset.placeholder).toBe("composer.placeholderInThread");
+      fireEvent.click(screen.getByTestId("concierge-send-button"));
+      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+      const form = rs.mocked(postSessionTurn).mock.calls[0][1] as FormData;
+      expect(form.get("replyToMessageId")).toBe("m-2");
+      expect(form.get("replyQuote")).toBeNull();
+      expect(document.querySelector("[data-reply-bar]")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "reply.closeChain" }));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
+      expect(composer.dataset.placeholder).toBe("");
+      expect(screen.getByTestId("chat-composer")).toBe(composer);
+    });
+
+    it("takes the implicit target from a live chain update without picking a reply draft", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        nextCursor: null,
+      });
+      rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: false, error: "intercepted" });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      fireEvent.click(await screen.findByTestId("quote-jump"));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+      await waitFor(() => expect(chatEvents()).toBeTruthy());
+      act(() => chatEvents()!.emit("message_insert", { ...message(4), chatThreadId: "m-2" }));
+      fireEvent.click(screen.getByTestId("concierge-send-button"));
+      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledOnce());
+      expect(
+        (rs.mocked(postSessionTurn).mock.calls[0][1] as FormData).get("replyToMessageId"),
+      ).toBe("m-4");
+      expect(document.querySelector("[data-reply-bar]")).toBeNull();
+    });
+
+    it("keeps an explicitly selected reply ahead of the chain's implicit target", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        nextCursor: null,
+      });
+      rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: false, error: "intercepted" });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      fireEvent.click(await screen.findByTestId("pick-reply"));
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+      fireEvent.click(screen.getByTestId("concierge-send-button"));
+      await waitFor(() => expect(postSessionTurn).toHaveBeenCalledTimes(1));
+      const form = rs.mocked(postSessionTurn).mock.calls[0][1] as FormData;
+      expect(form.get("replyToMessageId")).toBe("a2");
+      expect(form.get("replyQuote")).toBe("Lisbon");
     });
 
     it("uses one round back arrow in the header's leading column, keeping the phone outlet registered", async () => {

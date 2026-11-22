@@ -11,11 +11,8 @@ import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
 import type { BlockActions } from "@/components/chat/MessageList";
 import { type AgentIdentity, buildRows } from "@/components/chat/chat-view";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
-import type { ChatMessage } from "@/lib/chat-types";
-import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { type ChainFocus } from "./use-chain-focus";
-import { ReplyDraftProvider, type ReplyTarget, useReplyDraft } from "./reply-draft";
-import { lastTextMessage, replyPreview } from "./reply-source";
+import { ReplyDraftProvider, useReplyDraft } from "./reply-draft";
 
 /** How far from an edge of the layer the next page of the chain starts to load. */
 const LOAD_AHEAD_PX = 800;
@@ -26,23 +23,11 @@ const KEEP =
 
 const noop = () => {};
 
-/** What replying to `message` quotes: the whole of its text. */
-function targetOf(message: ChatMessage): ReplyTarget {
-  const text = parseMessageEntries(message)
-    .flatMap((part) => (part.type === "text" && part.content.trim() ? [part.content] : []))
-    .join("\n\n");
-  return {
-    messageId: message.id,
-    author: message.role === "user" ? "guardian" : "agent",
-    preview: replyPreview(text),
-  };
-}
-
 /**
  * The reply chain in focus, as a layer over the chat's transcript, which stays
  * under it (docs/domains/chats.md#chat-thread). It draws the loaded window of
  * the chain with the chat's own messages, a quote in it is plain text, and the
- * chat's composer replies to the chain's last message with text.
+ * chat's composer sends to the chain without picking a reply draft.
  *
  * The scroller keeps blank above and below the messages when there are too
  * few to hold the pressed message where it was: the blank below is given to a
@@ -69,8 +54,6 @@ export function ChainFocusLayer({
   onClose: () => void;
 }) {
   const draft = useReplyDraft();
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
   // A quote here is plain: its original is in the chain, right above.
   const plain = useMemo(() => (draft ? { ...draft, jump: undefined } : null), [draft]);
   const rows = useMemo(
@@ -90,29 +73,6 @@ export function ChainFocusLayer({
       identity,
     }),
     [identity],
-  );
-
-  // The composer replies to the chain's last message with text. A reply the
-  // reader picked instead stays until the chain has a newer one, and the
-  // chain's own is dropped with the layer.
-  const last = lastTextMessage(focus.messages);
-  const lastRef = useRef(last);
-  lastRef.current = last;
-  const lastId = last?.id;
-  const replying = draft?.target != null;
-  const picked = useRef<string | null>(null);
-  useEffect(() => {
-    const message = lastRef.current;
-    if (!message || (picked.current === message.id && replying)) return;
-    picked.current = message.id;
-    draftRef.current?.set(targetOf(message), { quiet: true });
-  }, [lastId, replying]);
-  useEffect(
-    () => () => {
-      const current = draftRef.current;
-      if (picked.current !== null && current?.target?.messageId === picked.current) current.clear();
-    },
-    [],
   );
 
   const [floorHeight, setFloorHeight] = useState(floor?.offsetHeight ?? 0);
