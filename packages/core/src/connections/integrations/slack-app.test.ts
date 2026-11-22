@@ -224,6 +224,8 @@ describe("the Slack app's channels in chat settings", () => {
         conversationReplies: async () => ({ messages: [] }),
         memberChannels,
         revoke: async () => {},
+        addReaction: async () => {},
+        removeReaction: async () => {},
       },
       cloud: cloud(),
       openMailbox: () => ({ stop: () => {}, attempts: 4 }),
