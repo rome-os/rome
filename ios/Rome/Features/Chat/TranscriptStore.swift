@@ -713,7 +713,7 @@ final class TranscriptStore {
         quote.flatMap { message($0.messageId) }
     }
 
-    /// Reply on a message, from its menu or a swipe on `row`: the reply bar
+    /// Reply on a message, from the menu of its `row`: the reply bar
     /// quotes it.
     func reply(to messageId: String, row: String? = nil) {
         guard kind == .concierge, message(messageId) != nil else { return }

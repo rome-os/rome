@@ -1357,6 +1357,16 @@
         }
       }
     },
+    "Earlier this month" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本月早些时候"
+          }
+        }
+      }
+    },
     "Expand input" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2601,6 +2611,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "语言"
+          }
+        }
+      }
+    },
+    "Last active %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次活跃 %@"
           }
         }
       }
@@ -5675,6 +5695,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这次在后台更新，不影响聊天等核心功能；更新完成前，个别新功能可能暂时用不了。"
+          }
+        }
+      }
+    },
+    "This week" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本周"
           }
         }
       }
