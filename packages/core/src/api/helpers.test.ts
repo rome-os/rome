@@ -108,9 +108,16 @@ describe("a pinned chat always reports it is pinned, in the chat API", () => {
   });
 
   it("reports a chat held on a provider with no model of its own, such as a fork", () => {
-    expect(
-      toWebchatSessionResponse({ ...chat, largeModelSelection: null }, 0, "openai"),
-    ).toMatchObject({
+    // As a fork chat reads: top level, with its parent chat, and no stored model.
+    const fork = {
+      ...chat,
+      parentSessionId: "parent-chat",
+      triggerKind: "fork",
+      agentName: null,
+      largeModelSelection: null,
+      largeModelSelectionBy: null,
+    };
+    expect(toWebchatSessionResponse(fork, 3, "openai")).toMatchObject({
       followsDefault: false,
       pinnedModel: { by: "kept", providerId: "openai", selection: null, model: null },
     });

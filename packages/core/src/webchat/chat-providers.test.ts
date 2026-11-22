@@ -65,13 +65,12 @@ async function setup(
       },
     },
     currentDefault: () => options.currentDefault ?? "openai",
-    ranOn: async (provider, since) => {
+    // As the session store answers: every live conversation, whatever its last provider.
+    ranSince: async (since) => {
       options.asked?.push(since);
-      return provider
-        ? (options.ran?.[provider] ?? [])
-        : Object.values(options.ran ?? {})
-            .flat()
-            .concat(options.alive ?? []);
+      return Object.values(options.ran ?? {})
+        .flat()
+        .concat(options.alive ?? []);
     },
     now: () => new Date("2026-11-22T12:00:00.000Z"),
   });
@@ -234,6 +233,22 @@ describe("an unchecked move keeps every existing chat", () => {
     expect(providers.heldProvider(fork)).toBe("anthropic");
     expect(providers.heldProvider(`${fork}:subagent:abc`)).toBe("anthropic");
     expect(providers.heldProvider("main:0b7e7a5e-3c1f-4c8e-9a51-2f4f6f3d9f10")).toBeUndefined();
+  });
+
+  it("holds a fork chat whose last turn ran on another provider on the old default, and reports it pinned", async () => {
+    // As on the stack: a top-level fork chat (triggerKind fork, a parent chat,
+    // no stored model) whose only turns ran on Codex before the default was Claude.
+    const forkId = "01a1b2a1-2a30-7489-8e21-9dfe73454e96";
+    const { providers } = await setup({ ran: { openai: [`webchat:${forkId}`] } });
+    await providers.beforeDefaultChange(unchecked);
+    expect(providers.heldProvider(`webchat:${forkId}`)).toBe("anthropic");
+    // The chat APIs read it as pinned to Claude: a kept chat with no model of its own.
+    expect(
+      pinnedModelOf(
+        { largeModelSelection: null, largeModelSelectionBy: null },
+        providers.heldProvider(`webchat:${forkId}`),
+      ),
+    ).toEqual({ by: "kept", providerId: "anthropic", selection: null, model: null });
   });
 
   it("holds only conversations active in the last 30 days", async () => {

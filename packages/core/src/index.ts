@@ -1503,7 +1503,7 @@ async function main() {
     accounts: modelAccounts,
     settings: settingsRepo,
     currentDefault: () => defaultProviders.current(),
-    ranOn: (provider, since) => sessionRepository.continuityKeysOn(provider, since),
+    ranSince: (since) => sessionRepository.continuityKeysSince(since),
     selectModel: (chatId, agentName, selection) =>
       agentSessionManager
         .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })

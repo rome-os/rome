@@ -45,19 +45,18 @@ export class DrizzleSessionRepository implements SessionRepository {
   }
 
   /**
-   * The continuity keys of the active sessions active since `since` whose
-   * last turn ran on `provider`, or on any provider when it is absent, each
-   * once. Outside the port: the web chat side reads it to hold conversations
-   * on a provider when the default changes.
+   * The continuity keys of the active sessions that ran a turn and were
+   * active since `since`, each once. Outside the port: the web chat side reads
+   * it to hold conversations on a provider when the default changes.
    */
-  async continuityKeysOn(provider: string | undefined, since: Date): Promise<string[]> {
+  async continuityKeysSince(since: Date): Promise<string[]> {
     const rows = await this.db
       .selectDistinct({ key: sessions.channelThreadKey })
       .from(sessions)
       .where(
         and(
           eq(sessions.status, "active"),
-          provider ? eq(sessions.provider, provider) : isNotNull(sessions.provider),
+          isNotNull(sessions.provider),
           isNotNull(sessions.channelThreadKey),
           gte(sessions.lastActiveAt, since),
         ),

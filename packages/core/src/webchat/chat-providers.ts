@@ -100,11 +100,11 @@ export interface ChatProvidersDeps {
   /** The default now, so a chat that goes back to it runs its strength there. */
   currentDefault?: () => DefaultProvider | null;
   /**
-   * The keys of the live sessions active since `since` whose last turn ran on
-   * `provider`, or on any provider when it is absent: every conversation, a
-   * fork's, a channel's and a subagent's included.
+   * The keys of the live sessions that ran a turn and were active since
+   * `since`: every conversation, a fork's, a channel's and a subagent's
+   * included, whatever provider its last turn ran on.
    */
-  ranOn?: (provider: AccountedProviderId | undefined, since: Date) => Promise<string[]>;
+  ranSince?: (since: Date) => Promise<string[]>;
   now?: () => Date;
   /** Tells a chat's live session, if one is open, the model its next turn runs. */
   selectModel: (
@@ -226,10 +226,10 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
   };
   const rootOf = (key: string) => walkToRoot(key).stored;
   const since = () => new Date((deps.now?.() ?? new Date()).getTime() - HELD_SESSION_WINDOW_MS);
-  /** The conversations, by root, whose sessions ran on `provider` since `from`. */
-  const conversationsOn = async (provider: AccountedProviderId | undefined, from = since()) => {
+  /** The conversations, by root, whose sessions were active since `from`. */
+  const conversationsSince = async (from = since()) => {
     const roots = new Set<string>();
-    for (const key of (await deps.ranOn?.(provider, from)) ?? []) {
+    for (const key of (await deps.ranSince?.(from)) ?? []) {
       const root = rootOf(key);
       if (!ADHOC_KEY.test(root)) roots.add(root);
     }
@@ -269,11 +269,13 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
         const row = await deps.webchatRepo.getSession(chat.id);
         await keepOn(chat.id, row?.agentName ?? null, chat.largeModelSelection, provider);
       }
-      // Every other conversation that ran there lately stays too: a fork, a
-      // channel's chat, and the subagents under them and under the chats.
-      const ran = await conversationsOn(provider);
+      // Every other conversation active lately stays on the old default too:
+      // a fork, a channel's chat, and the subagents under them and under the
+      // chats. It follows the default, so the old default is where it runs,
+      // whatever provider its last turn ran on.
+      const ran = await conversationsSince();
       // Every conversation with a session left, however old.
-      const live = await conversationsOn(undefined, new Date(0));
+      const live = await conversationsSince(new Date(0));
       const added = await changeHeld((map) => {
         // A held conversation other than a web chat goes once it has no session left.
         for (const key of [...map.keys()]) {
@@ -337,14 +339,11 @@ export function createChatProviders(deps: ChatProvidersDeps): ChatProviders {
         deps.webchatRepo.keptChatCount(),
       ]);
       // The conversations that are not a web chat counted above, such as a
-      // channel's chat: those held, and those that ran on the default lately.
-      const current = deps.currentDefault?.();
-      const onDefault =
-        current && current !== "rome_credits"
-          ? await conversationsOn(providerOfDefault(current))
-          : new Set<string>();
+      // channel's chat: those held, and those active lately, which follow it.
       const others = new Set(
-        [...held.keys(), ...onDefault].filter((key) => !key.startsWith("webchat:")),
+        [...held.keys(), ...(await conversationsSince())].filter(
+          (key) => !key.startsWith("webchat:"),
+        ),
       );
       return following.length + kept + others.size;
     },
