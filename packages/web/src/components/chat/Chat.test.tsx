@@ -3669,6 +3669,50 @@ describe("Chat Concierge jump to a message", () => {
       await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
     });
 
+    it("uses one round back arrow in the header's leading column, keeping the phone outlet registered", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3)],
+        nextCursor: null,
+      });
+      const seen = { outlet: false };
+      function Probe() {
+        seen.outlet = useSlotOutlet(CONCIERGE_LEADING_SLOT);
+        return null;
+      }
+      renderChat(
+        <ThemeProvider>
+          <SlotProvider>
+            <Probe />
+            <Chat sessionId="concierge" variant="concierge" />
+          </SlotProvider>
+        </ThemeProvider>,
+      );
+      await waitFor(() => expect(rows()).toBe(3));
+      expect(seen.outlet).toBe(true);
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      const back = await screen.findByRole("button", { name: "reply.closeChain" });
+      const header = document.querySelector<HTMLElement>("[data-concierge-header]")!;
+      expect(within(header).getByRole("button", { name: "reply.closeChain" })).toBe(back);
+      expect(back.querySelector(".lucide-arrow-left")).not.toBeNull();
+      expect(back.textContent).toBe("");
+      expect(back.className).toContain("rounded-full");
+      expect(back.parentElement!.className).toContain("col-start-1 row-start-1");
+      expect(screen.getAllByRole("button", { name: "reply.closeChain" })).toHaveLength(1);
+      expect(seen.outlet).toBe(true);
+      expect(header.querySelector(".invisible.pointer-events-none")).not.toBeNull();
+      expect(
+        document.querySelector("[data-chain-layer] button[aria-label='reply.closeChain']"),
+      ).toBeNull();
+      fireEvent.click(back);
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
+      expect(seen.outlet).toBe(true);
+    });
+
     // A message of the guardian's that replies to m-1.
     const reply = (n: number) => ({
       ...message(n),

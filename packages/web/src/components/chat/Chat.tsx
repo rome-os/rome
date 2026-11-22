@@ -27,6 +27,7 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
+  ArrowLeft,
   Cpu,
   FileOutput,
   FolderOpen,
@@ -2712,26 +2713,46 @@ export function Chat({
   // buttons either side, centred on the badge. The equal side columns keep the
   // middle centred over the chat. Only its pieces take the pointer, so the
   // messages under the gaps stay reachable.
+  const chainBack = chain.focus ? (
+    <IconButton
+      data-chain-back
+      size="md"
+      label={t("reply.closeChain")}
+      icon={<ArrowLeft />}
+      onClick={chain.close}
+      className={cn("pointer-events-auto rounded-full", actionBadge)}
+    />
+  ) : null;
   const floatingHeader = (trailing: ReactNode) => (
     <div
       data-concierge-header
       className="pointer-events-none absolute inset-x-0 top-0 z-20 grid grid-cols-[1fr_minmax(0,max-content)_1fr] items-center gap-x-2 px-2 pt-2 max-md:pt-[calc(var(--rome-safe-area-top)+0.5rem)] md:px-3 md:pt-[var(--control-header-pt)]"
     >
       <ChatEdgeBlur edge="top" />
+      {chainBack ? (
+        <div className="col-start-1 row-start-1 justify-self-start">{chainBack}</div>
+      ) : null}
       {/* The phone shell's back and menu buttons move in here, and its bar
           steps aside. Not while the tool pane covers the chat: the shell's
           bar is then the only way back from the pane. */}
       {inPane ? null : taskOf ? (
-        // A task chat names the Concierge chat it reports to, and goes back
-        // there. On the phone it takes the place of the chat list's button.
-        <BackToConciergeChat
-          to={taskOf.main ? MAIN_CHAT_PATH : `/chat/${encodeURIComponent(taskOf.conciergeChatId)}`}
-          name={taskOf.main ? t("taskLink.mainChat") : taskOf.conciergeChatName}
-        />
+        chain.focus ? null : (
+          // A task chat names the Concierge chat it reports to, and goes back
+          // there. On the phone it takes the place of the chat list's button.
+          <BackToConciergeChat
+            to={
+              taskOf.main ? MAIN_CHAT_PATH : `/chat/${encodeURIComponent(taskOf.conciergeChatId)}`
+            }
+            name={taskOf.main ? t("taskLink.mainChat") : taskOf.conciergeChatName}
+          />
+        )
       ) : paneCoversChat ? null : (
         <SlotOutlet
           name={CONCIERGE_LEADING_SLOT}
-          className="pointer-events-auto col-start-1 row-start-1 flex items-center gap-1 justify-self-start md:hidden"
+          className={cn(
+            "pointer-events-auto col-start-1 row-start-1 flex items-center gap-1 justify-self-start md:hidden",
+            chain.focus && "invisible pointer-events-none",
+          )}
         />
       )}
       {headerBadge}
@@ -2747,6 +2768,7 @@ export function Chat({
     ? (trailing: ReactNode) => (
         <>
           <SlotContent name={navbarSlot}>
+            {chainBack}
             <div className="min-w-0 flex-1" />
             {trailing}
           </SlotContent>
@@ -2787,7 +2809,7 @@ export function Chat({
           {...fileDrop.dropAreaProps}
         >
           {/* ---- Main Chat Area ---- */}
-          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <div data-chat-surface className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             {isDraggingFiles && (
               <div className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-16 border-2 border-dashed border-info bg-info-bg/85 text-ui text-info-fg md:inset-6">
                 {t("composer.dropFiles")}

@@ -138,7 +138,7 @@ function Harness({ seen }: { seen: Seen }) {
   });
   return (
     <ReplyDraftProvider value={draft}>
-      <div className="relative">
+      <div data-chat-surface className="relative">
         <div ref={setScroller} data-testid="main">
           <div className="contents" style={focus.focus ? { visibility: "hidden" } : undefined}>
             <ConciergeTranscript rows={rows} live={idle} actions={actions} contentRef={() => {}} />
@@ -155,6 +155,9 @@ function Harness({ seen }: { seen: Seen }) {
             onMore={focus.more}
             onClose={focus.close}
           />
+        ) : null}
+        {focus.focus ? (
+          <button type="button" aria-label="Close reply chain" onClick={focus.close} />
         ) : null}
         <ReplyBar />
       </div>
@@ -251,6 +254,68 @@ describe("opening a chain from a quote", () => {
     expect(seen.fallback).toHaveBeenCalledWith("g1");
     expect(layer()).toBeNull();
   });
+});
+
+describe("placing a chain", () => {
+  for (const [kind, natural, end] of [
+    ["short", 552, 731],
+    ["long", 2000, 2500],
+  ] as const) {
+    for (const y of [130, 483, 700]) {
+      it(`keeps a ${kind} chain's pressed bubble at y${y}, including a viewport taller than its content`, async () => {
+        const offsets = new WeakMap<Element, number>();
+        const rect = (top: number, height = 66) =>
+          ({
+            top,
+            bottom: top + height,
+            height,
+            left: 0,
+            right: 600,
+            width: 600,
+            x: 0,
+            y: top,
+            toJSON: () => ({}),
+          }) as DOMRect;
+        rs.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function () {
+          return Number.parseFloat(this.style.height) || 0;
+        });
+        rs.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(900);
+        rs.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(function () {
+          const top = this.querySelector<HTMLElement>("[data-chain-top]")?.offsetHeight ?? 0;
+          const bottom = this.querySelector<HTMLElement>("[data-chain-bottom]")?.offsetHeight ?? 0;
+          return Math.max(900, top + end + bottom);
+        });
+        rs.spyOn(Element.prototype, "scrollTop", "get").mockImplementation(function () {
+          return offsets.get(this) ?? 0;
+        });
+        rs.spyOn(Element.prototype, "scrollTop", "set").mockImplementation(function (value) {
+          offsets.set(this, Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight)));
+        });
+        rs.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function () {
+          const scroller = this.closest<HTMLElement>("[data-chain-layer] > div");
+          const blank = scroller?.querySelector<HTMLElement>("[data-chain-top]")?.offsetHeight ?? 0;
+          const offset = scroller?.scrollTop ?? 0;
+          if (this.hasAttribute("data-chain-content")) return rect(blank - offset, end);
+          if (this.getAttribute("data-timeline-anchor") === "a2")
+            return rect(scroller ? natural + blank - offset : y);
+          return rect(0, 900);
+        });
+        thread.mockResolvedValue(page(chain));
+        const seen = renderChat();
+        await pressQuote("a2");
+        await waitFor(() => expect(layer()).not.toBeNull());
+        const anchor = layer()!.querySelector<HTMLElement>('[data-timeline-anchor="a2"]')!;
+        expect(anchor.getBoundingClientRect().top).toBe(y);
+        const content = layer()!.querySelector<HTMLElement>("[data-chain-content]")!;
+        expect(content.className).toContain("shrink-0");
+        expect(content.className).not.toContain("flex-1");
+        await act(async () => seen.chain!.close());
+        expect(
+          mainEl().querySelector('[data-timeline-anchor="a2"]')!.getBoundingClientRect().top,
+        ).toBe(y);
+      });
+    }
+  }
 });
 
 describe("paging inside the layer", () => {
@@ -474,9 +539,11 @@ describe("the view transition", () => {
     expect(nameOf(mainEl(), "g1")).toBe("");
     expect(nameOf(layer()!, "g1")).toBe("tm-g1-0");
     expect(document.documentElement.hasAttribute("data-chain-transition")).toBe(true);
+    expect(mainEl().closest("[data-chat-surface]")!.hasAttribute("data-chain-active")).toBe(true);
     await act(async () => motion.end());
     await waitFor(() => expect(nameOf(layer()!, "g1")).toBe(""));
     expect(document.documentElement.hasAttribute("data-chain-transition")).toBe(false);
+    expect(mainEl().closest("[data-chat-surface]")!.hasAttribute("data-chain-active")).toBe(false);
   });
 
   it("closes the other way: the layer's names go to the chat's messages, and clear when it ends", async () => {

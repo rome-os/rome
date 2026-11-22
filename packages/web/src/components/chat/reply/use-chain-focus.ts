@@ -63,6 +63,7 @@ function nameBubbles(root: HTMLElement, ids: ReadonlySet<string> | null): HTMLEl
  * transitions, or with reduced motion, the update is at once.
  */
 async function swap(
+  scroller: HTMLElement,
   update: () => void,
   nameOld: () => HTMLElement[],
   nameNew: () => HTMLElement[],
@@ -75,6 +76,8 @@ async function swap(
   const named = nameOld();
   const root = document.documentElement;
   root.dataset.chainTransition = "";
+  const surface = scroller.closest<HTMLElement>("[data-chat-surface]");
+  if (surface) surface.dataset.chainActive = "";
   const motion = start(() => {
     for (const bubble of named.splice(0)) bubble.style.removeProperty(NAME);
     update();
@@ -83,6 +86,7 @@ async function swap(
   await motion.finished.catch(() => {});
   for (const bubble of named) bubble.style.removeProperty(NAME);
   delete root.dataset.chainTransition;
+  if (surface) delete surface.dataset.chainActive;
 }
 
 const px = (el: HTMLElement | null) => el?.offsetHeight ?? 0;
@@ -98,13 +102,21 @@ const setBlank = (el: HTMLElement | null, height: number) => {
 function place(layer: HTMLElement, id: string, y: number) {
   const anchor = findMessageAnchor(layer, id);
   if (!anchor) return;
-  const diff = anchor.getBoundingClientRect().top - layer.getBoundingClientRect().top - y;
-  setBlank(layer.querySelector("[data-chain-top]"), -diff);
+  const top = layer.querySelector<HTMLElement>("[data-chain-top]");
+  const bottom = layer.querySelector<HTMLElement>("[data-chain-bottom]");
+  const content = layer.querySelector<HTMLElement>("[data-chain-content]");
+  if (!content) return;
+  setBlank(top, 0);
+  setBlank(bottom, 0);
+  layer.scrollTop = 0;
+  const origin = layer.getBoundingClientRect().top;
+  const diff = anchor.getBoundingClientRect().top - origin - y;
+  setBlank(top, -diff);
   const want = Math.max(diff, 0);
-  setBlank(
-    layer.querySelector("[data-chain-bottom]"),
-    want - (layer.scrollHeight - layer.clientHeight),
-  );
+  // scrollHeight is at least the viewport height, even for a short chain.
+  // Use the real content end, with nonflexing spacers, to make room to scroll.
+  const end = content.getBoundingClientRect().bottom - origin;
+  setBlank(bottom, want + layer.clientHeight - end);
   layer.scrollTop = want;
 }
 
@@ -150,6 +162,10 @@ export function useChainFocus({
     if (!scroller || !sessionId || busy.current || focus) return;
     busy.current = true;
     const openedAt = epoch.current;
+    const pressed = findMessageAnchor(scroller, from);
+    const y = pressed
+      ? pressed.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+      : 0;
     try {
       const page = await getThreadPage(sessionId, from, { limit: OPEN_LIMIT }).catch(() => null);
       if (openedAt !== epoch.current || latest.current.sessionId !== sessionId) return;
@@ -161,11 +177,8 @@ export function useChainFocus({
         ...page,
       };
       const ids = new Set(page.messages.map((message) => message.id));
-      const pressed = findMessageAnchor(scroller, from);
-      const y = pressed
-        ? pressed.getBoundingClientRect().top - scroller.getBoundingClientRect().top
-        : 0;
       await swap(
+        scroller,
         () => {
           flushSync(() => setFocus(next));
           if (layer.current) place(layer.current, from, y);
@@ -185,6 +198,7 @@ export function useChainFocus({
     try {
       const ids = new Set(focus.messages.map((message) => message.id));
       await swap(
+        scroller,
         () => flushSync(() => setFocus(null)),
         () => (layer.current ? nameBubbles(layer.current, null) : []),
         () => nameBubbles(scroller, ids),

@@ -1,4 +1,3 @@
-import { X } from "lucide-react";
 import {
   type RefObject,
   useCallback,
@@ -8,11 +7,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { useTranslation } from "react-i18next";
 import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
 import type { BlockActions } from "@/components/chat/MessageList";
 import { type AgentIdentity, buildRows } from "@/components/chat/chat-view";
-import { IconButton } from "@/components/ui/icon-button";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import type { ChatMessage } from "@/lib/chat-types";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
@@ -71,7 +68,6 @@ export function ChainFocusLayer({
   onMore: (side: "before" | "after") => void;
   onClose: () => void;
 }) {
-  const { t } = useTranslation("chat");
   const draft = useReplyDraft();
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -169,23 +165,13 @@ export function ChainFocusLayer({
         className="scrollbar-hover-shown concierge-header-clear flex h-full flex-col overflow-y-auto overscroll-contain bg-chat-canvas"
       >
         <div data-chain-top aria-hidden className="shrink-0" />
-        <div ref={content} className="flex flex-1 flex-col">
+        <div ref={content} data-chain-content className="flex shrink-0 flex-col">
           <ReplyDraftProvider value={plain}>
             <ConciergeTranscript rows={rows} live={live} actions={actions} contentRef={noop} />
           </ReplyDraftProvider>
           <div aria-hidden className="shrink-0" style={{ height: floorHeight }} />
         </div>
         <div data-chain-bottom aria-hidden className="shrink-0" />
-      </div>
-      {/* Under the floating header, on the transcript's top-right corner. */}
-      <div className="pointer-events-none absolute top-[calc(var(--rome-concierge-header-offset)+0.5rem)] right-3 z-10 md:right-6">
-        <IconButton
-          size="md"
-          label={t("reply.closeChain")}
-          icon={<X />}
-          onClick={onClose}
-          className="pointer-events-auto rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md hover:text-foreground"
-        />
       </div>
     </div>
   );

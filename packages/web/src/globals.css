@@ -1121,6 +1121,45 @@ html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
 :root[data-chain-transition]::view-transition-new(*) {
   animation-duration: 250ms;
 }
+/* Named bubbles paint above the root snapshot. Give the header and each
+   masked blur layer their own groups too, so the blur samples the moving
+   bubbles, not just the document behind the transition. The browser carries
+   backdrop-filter to each group. Repeat ProgressiveBlur's masks on those
+   groups: a mask on a captured span alone cannot mask its group's backdrop. */
+:root[data-chain-transition] [data-chain-active] > [data-concierge-header] {
+  view-transition-name: chain-header;
+}
+:root[data-chain-transition] [data-chain-active] > [data-concierge-header] [data-slot="progressive-blur"] > :nth-child(1) {
+  view-transition-name: chain-blur-1;
+}
+:root[data-chain-transition] [data-chain-active] > [data-concierge-header] [data-slot="progressive-blur"] > :nth-child(2) {
+  view-transition-name: chain-blur-2;
+}
+:root[data-chain-transition] [data-chain-active] > [data-concierge-header] [data-slot="progressive-blur"] > :nth-child(3) {
+  view-transition-name: chain-blur-3;
+}
+:root[data-chain-transition] [data-chain-active] > [data-concierge-header] [data-slot="progressive-blur"] > :nth-child(4) {
+  view-transition-name: chain-blur-4;
+}
+:root[data-chain-transition]::view-transition-group(chain-blur-1) {
+  z-index: 1;
+  mask-image: linear-gradient(to top, transparent 0%, black 25%);
+}
+:root[data-chain-transition]::view-transition-group(chain-blur-2) {
+  z-index: 1;
+  mask-image: linear-gradient(to top, transparent 25%, black 50%);
+}
+:root[data-chain-transition]::view-transition-group(chain-blur-3) {
+  z-index: 1;
+  mask-image: linear-gradient(to top, transparent 50%, black 75%);
+}
+:root[data-chain-transition]::view-transition-group(chain-blur-4) {
+  z-index: 1;
+  mask-image: linear-gradient(to top, transparent 75%, black 100%);
+}
+:root[data-chain-transition]::view-transition-group(chain-header) {
+  z-index: 2;
+}
 /* A run of the Concierge's replies to one message sits close: 2px between the
    bubbles instead of the group's 8px (a quarter of the gap), and the corners
    where they meet are 4px (ConciergeGroup, reply-drawing.ts). */
