@@ -334,6 +334,29 @@ describe("DiscordAdapter REST broker capability", () => {
     expect(adapter.sees(thread("2"))).toBe(true);
   });
 
+  it("counts a thread as seen when discord.js answers no permissions for it", () => {
+    const adapter = new DiscordAdapter({ botToken: "not-exposed" });
+    // A thread whose parent has left the cache answers null.
+    const guild = {
+      channels: { cache: new Map([["1", { type: ChannelType.PrivateThread, joined: false }]]) },
+      members: { me: { permissionsIn: () => null } },
+    };
+    (adapter as unknown as { client: { guilds: { cache: Map<string, unknown> } } }).client = {
+      guilds: { cache: new Map([["9", guild]]) },
+    };
+
+    expect(
+      adapter.sees({
+        id: "1",
+        name: "thread 1",
+        guildId: "9",
+        guildName: "Rome",
+        type: "thread",
+        parentId: "4",
+      }),
+    ).toBe(true);
+  });
+
   it("lists a media chat as a forum, so a listing reads its archived posts", () => {
     const adapter = new DiscordAdapter({ botToken: "not-exposed" });
     const chat = (id: string, type: ChannelType) => ({

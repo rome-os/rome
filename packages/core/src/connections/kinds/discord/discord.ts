@@ -536,7 +536,10 @@ export class DiscordAdapter {
     const channel = guild?.channels.cache.get(chat.id);
     const me = guild?.members.me;
     if (!channel || !me) return true;
-    const granted = me.permissionsIn(channel);
+    // discord.js types this as never null, yet a thread whose parent has left
+    // the cache answers null: a chat it cannot tell about counts as seen.
+    const granted: ReturnType<typeof me.permissionsIn> | null = me.permissionsIn(channel);
+    if (!granted) return true;
     // A private thread's permissions are its parent's, yet only its members
     // and those who manage threads see it.
     if (
