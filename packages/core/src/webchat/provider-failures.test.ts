@@ -586,9 +586,11 @@ describe("the three cards", () => {
   });
 
   it("moves a chat's open card to the newest failed turn, one card per chat", async () => {
+    // Someone wrote in the chat since the first card.
     const h = harness(
       { chat: {} },
       { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+      { movedOnSince: () => true },
     );
     await h.fail("chat", quota);
     await h.fail("chat", spendCap);
@@ -598,6 +600,34 @@ describe("the three cards", () => {
     // The older turn keeps its card, hidden.
     const parts = [...h.messages.values()].flatMap((m) => m.parts as ProviderFailurePart[]);
     expect(parts.map((part) => part.resolved?.by)).toEqual(["moved", undefined]);
+  });
+
+  it("rewrites the open card in place while nobody writes in the chat", async () => {
+    const asked: Array<{ chatId: string; since: number }> = [];
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+      {
+        movedOnSince: (chatId, since) => {
+          asked.push({ chatId, since });
+          return false;
+        },
+      },
+    );
+    await h.fail("chat", quota);
+    const [first] = await h.failures.cards();
+    // A retry that fails again and again adds no message: the chat's one card
+    // reads as the newest failure, and nothing else unread is said.
+    await h.fail("chat", quota);
+    await h.fail("chat", spendCap);
+    expect(h.messages.size).toBe(1);
+    expect(h.shownCards("chat")).toHaveLength(1);
+    expect(h.cardIn("chat")).toMatchObject({ reason: "spend_cap" });
+    const [card] = await h.failures.cards();
+    expect(card?.messageId).toBe(first!.messageId);
+    expect(card?.since).toBe(first!.since);
+    expect(asked.every((ask) => ask.chatId === "chat")).toBe(true);
+    expect(asked).toHaveLength(2);
   });
 
   it("settles a card when a later turn in the chat runs", async () => {

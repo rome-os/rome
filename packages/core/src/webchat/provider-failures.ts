@@ -93,6 +93,8 @@ export interface OpenProviderCard {
   /** Parts written beside the card in its message, kept when it is rewritten. */
   beside: unknown[];
   since: string;
+  /** When its message was last written. Absent on a card stored before this was kept. */
+  writtenAt?: string;
 }
 
 /** One incident that stopped unattended chats, as stored. */
@@ -588,17 +590,43 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
 
   /**
    * Writes a chat's open card with the turn that failed. A chat shows one open
-   * card: an older one leaves its message, which keeps what else it held.
+   * card. While nobody has written in the chat since the open card, the card
+   * is rewritten in place, so failures that repeat add no message. Otherwise,
+   * or when `fresh` asks for a new card, the older one leaves its message,
+   * which keeps what else it held.
    */
   const writeCard = (
     turn: Pick<ChatTurnFailure, "chatId" | "agentName" | "turnId">,
     part: ProviderFailurePart,
     runsOn: AccountedProviderId,
     written?: { messageId: string; beside: unknown[] },
+    fresh = false,
   ) =>
     serial(async () => {
       const cards = await readCards();
       const open = cards.find((card) => card.chatId === turn.chatId);
+      const writtenAt = now().toISOString();
+      if (
+        open &&
+        !written &&
+        !fresh &&
+        !(deps.movedOnSince?.(turn.chatId, Date.parse(open.writtenAt ?? open.since)) ?? false)
+      ) {
+        const rewritten: OpenProviderCard = {
+          ...open,
+          agentName: turn.agentName,
+          runsOn,
+          part,
+          writtenAt,
+        };
+        const wrote = await deps.webchatRepo
+          .updateMessageContent(open.messageId, content(rewritten))
+          .catch(() => false);
+        if (wrote) {
+          await writeCards([...cards.filter((other) => other.chatId !== turn.chatId), rewritten]);
+          return rewritten;
+        }
+      }
       if (open) {
         // The older turn keeps its card, hidden, so it still reads as explained.
         const moved = {
@@ -625,7 +653,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         runsOn,
         part,
         beside: written?.beside ?? [],
-        since: open?.since ?? now().toISOString(),
+        since: open?.since ?? writtenAt,
+        writtenAt,
       };
       await writeCards([...cards.filter((other) => other.chatId !== turn.chatId), card]);
       return card;
@@ -839,7 +868,13 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       ...(card.part.detail ? { detail: card.part.detail } : {}),
     });
     if (!part) return;
-    await writeCard({ chatId: card.chatId, agentName: card.agentName }, part, card.runsOn);
+    await writeCard(
+      { chatId: card.chatId, agentName: card.agentName },
+      part,
+      card.runsOn,
+      undefined,
+      true,
+    );
   };
 
   const runFromCard = async (
