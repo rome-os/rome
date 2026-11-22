@@ -1,10 +1,10 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { CredentialRejected } from "../errors.js";
+import { CredentialRejected, Disconnected } from "../errors.js";
 import { SlackApiError } from "../kinds/slack/slack.js";
 import { depositSignature, SLACK_SIGNATURE_HEADER } from "../kinds/slack-app/deposit.js";
 import type { SlackAppCloud, SlackAppWorkspace } from "../kinds/slack-app/rome-cloud.js";
 import { SlackAppRefused } from "../kinds/slack-app/rome-cloud.js";
-import type { SlackAppWebApi } from "../kinds/slack-app/web-api.js";
+import { ROME_CLOUD_UNAVAILABLE, type SlackAppWebApi } from "../kinds/slack-app/web-api.js";
 import type { SetupForm, SetupInteraction, SetupView } from "../setup/types.js";
 import type { RuntimeKit } from "../types.js";
 import {
@@ -319,6 +319,46 @@ describe("the Slack app talker", () => {
     await settle();
     expect(faults).toHaveLength(1);
     expect(faults[0]).toBeInstanceOf(CredentialRejected);
+  });
+
+  it("keeps the grant authorized when Rome Cloud refuses this Rome's own token, and retries", async () => {
+    for (const refusal of [
+      new SlackAppRefused("unauthorized", "Rome Cloud did not accept this Rome.", 401),
+      new SlackAppRefused("not_enrolled", "Link it in Settings, then connect again.", 0),
+    ]) {
+      const talker = descriptor({
+        cloud: cloud({
+          connect: rs.fn(async () => {
+            throw refusal;
+          }),
+        }),
+      }).capabilities.talker?.build({ material: MATERIAL, expiresAt: "never" }, kit().kit);
+      const faults: unknown[] = [];
+      talker?.start(
+        () => {},
+        (fault) => faults.push(fault),
+      );
+      await settle();
+      expect(faults).toHaveLength(1);
+      expect(faults[0]).toBeInstanceOf(Disconnected);
+      expect(faults[0]).not.toBeInstanceOf(CredentialRejected);
+      expect(String((faults[0] as Disconnected).cause)).toContain("can't reach Rome Cloud");
+    }
+  });
+
+  it("sends nothing as a refused credential while this Rome can't sign in to Rome Cloud", async () => {
+    const talker = descriptor({
+      api: fakeApi({
+        postMessage: async () => {
+          throw new SlackApiError(ROME_CLOUD_UNAVAILABLE, "Rome can't reach Rome Cloud.");
+        },
+      }),
+    }).capabilities.talker?.build({ material: MATERIAL, expiresAt: "never" }, kit().kit);
+    const failed = await talker
+      ?.send("D1" as never, { text: "hi" } as never)
+      .catch((error: unknown) => error);
+    expect(failed).toMatchObject({ code: ROME_CLOUD_UNAVAILABLE });
+    expect(failed).not.toBeInstanceOf(CredentialRejected);
   });
 
   it("keeps working on the stored key while the Worker is unreachable", async () => {

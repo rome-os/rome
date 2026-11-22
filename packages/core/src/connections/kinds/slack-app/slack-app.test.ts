@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { depositSignature, SLACK_DEPOSIT_HEADER, SLACK_SIGNATURE_HEADER } from "./deposit.js";
 import { type MailboxFrame, SlackAppAdapter } from "./slack-app.js";
-import { createSlackAppWebApi, type SlackAppWebApi } from "./web-api.js";
+import { createSlackAppWebApi, ROME_CLOUD_UNAVAILABLE, type SlackAppWebApi } from "./web-api.js";
 import { slackMessage, type SlackWireMessage } from "./message.js";
 import { isSlackCredentialError, SlackApiError } from "../slack/slack.js";
 import { SlackReadGate } from "./read-gate.js";
@@ -620,6 +620,31 @@ describe("Slack app Web API", () => {
       .postMessage(TEAM, { channel: "D1", markdown: "hi" })
       .catch((error: unknown) => error);
     expect(isSlackCredentialError(refused)).toBe(true);
+  });
+
+  it("reads this Rome not signed in to Rome Cloud as a passing fault, never a refused Slack credential", async () => {
+    const send = (fetchImpl: typeof fetch, bearer: () => Promise<string | null>) =>
+      createSlackAppWebApi("http://slack-gateway.test", fetchImpl, bearer)
+        .postMessage(TEAM, { channel: "D1", markdown: "hi" })
+        .catch((error: unknown) => error);
+    const calls: unknown[] = [];
+    const noBearer = await send(
+      (async () => {
+        calls.push(1);
+        return Response.json({ ok: true });
+      }) as unknown as typeof fetch,
+      async () => null,
+    );
+    const workerRefused = await send(
+      (async () =>
+        Response.json({ error: "unauthorized" }, { status: 401 })) as unknown as typeof fetch,
+      async () => "instance-jwt",
+    );
+    for (const refused of [noBearer, workerRefused]) {
+      expect(refused).toMatchObject({ code: ROME_CLOUD_UNAVAILABLE });
+      expect(isSlackCredentialError(refused)).toBe(false);
+    }
+    expect(calls).toEqual([]);
   });
 
   it("passes on Slack's own refusal", async () => {

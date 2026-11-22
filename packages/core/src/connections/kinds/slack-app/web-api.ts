@@ -90,12 +90,23 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-/** A refusal the Worker made itself, as the connection reads it: an instance
- *  it does not take, or a workspace no longer bound to this instance, is a
- *  credential Rome no longer holds. */
+/** What a call answers while this Rome can't sign in to Rome Cloud: a
+ *  passing fault of its link to Rome Cloud, retried, never a refused Slack
+ *  credential, since approving the app again in Slack would not fix it. */
+export const ROME_CLOUD_UNAVAILABLE = "rome_cloud_unavailable";
+
+export function romeCloudUnavailable(): SlackApiError {
+  return new SlackApiError(
+    ROME_CLOUD_UNAVAILABLE,
+    "Rome can't reach Rome Cloud for Slack right now. It will try again.",
+  );
+}
+
+/** A refusal the Worker made itself, as the connection reads it. A workspace
+ *  no longer bound to this instance is a credential Rome no longer holds; an
+ *  instance token the Worker did not take is this Rome's link to Rome Cloud. */
 function workerRefusal(status: number, error: string | undefined): SlackApiError {
-  if (status === 401)
-    return new SlackApiError("not_authed", "Rome Cloud did not accept this Rome.");
+  if (status === 401) return romeCloudUnavailable();
   if (error === "not_bound") {
     return new SlackApiError(
       "app_uninstalled",
@@ -124,12 +135,7 @@ export function createSlackAppWebApi(
     signal?: AbortSignal,
   ): Promise<Response> {
     const token = await bearer();
-    if (!token) {
-      throw new SlackApiError(
-        "not_authed",
-        "Rome's Slack app needs this Rome linked to Rome Cloud. Link it in Settings.",
-      );
-    }
+    if (!token) throw romeCloudUnavailable();
     return fetchImpl(`${origin}/v1/slack/${method}`, {
       method: "POST",
       headers: {

@@ -26,7 +26,7 @@ import {
 } from "../kinds/slack-app/rome-cloud.js";
 import { legacyBotToken, revokeLegacyBotToken } from "../kinds/slack-app/legacy-token.js";
 import { type MailboxFrame, SlackAppAdapter } from "../kinds/slack-app/slack-app.js";
-import type { SlackAppWebApi } from "../kinds/slack-app/web-api.js";
+import { romeCloudUnavailable, type SlackAppWebApi } from "../kinds/slack-app/web-api.js";
 import type { SetupFn } from "../setup/types.js";
 import { directoryPage } from "./talk-features.js";
 import type {
@@ -391,8 +391,13 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
               depositKey = connected.depositKey;
               adapter.setDepositKey(depositKey);
             } catch (error) {
+              // This Rome's own token refused, or not linked: its link to
+              // Rome Cloud, retried, never Slack needing approval again.
               if (isSlackAppCredentialError(error)) {
-                routeFault(error, "credential");
+                log.warn("Rome Cloud did not take this Rome's token for Slack", {
+                  error: describe(error),
+                });
+                routeFault(romeCloudUnavailable(), "transport");
                 return;
               }
               log.warn("slack connect on start failed; keeping the stored key", {
