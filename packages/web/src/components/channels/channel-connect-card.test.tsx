@@ -279,7 +279,7 @@ describe("ChannelConnectCard — shared frame", () => {
 // ── Per-service config variations ───────────────────────────────────────────
 
 describe("ChannelConnectCard — config variations", () => {
-  it("uses the same Connect label for every channel", () => {
+  it("uses the same Connect label for every channel but one that names its own", () => {
     stubFetch();
     for (const cfg of Object.values(CHANNEL_CONFIGS)) {
       const { unmount } = renderCard(
@@ -290,7 +290,8 @@ describe("ChannelConnectCard — config variations", () => {
           onRefresh={() => {}}
         />,
       );
-      expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy();
+      const label = cfg.connectLabelKey ? "Link Discord" : "Connect";
+      expect(screen.getByRole("button", { name: label })).toBeTruthy();
       unmount();
     }
   });

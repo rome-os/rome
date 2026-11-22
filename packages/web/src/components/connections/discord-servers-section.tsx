@@ -1,46 +1,130 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Ellipsis, Plus, Trash2 } from "lucide-react";
+import {
+  Section,
+  SectionActions,
+  SectionHeader,
+  SectionHeading,
+  SectionTitle,
+} from "@rome-os/ui/page";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { IconButton } from "@/components/ui/icon-button";
 
 /** A server and an account bound to this Rome, as the Discord bot's Worker lists them. */
 interface DiscordServer {
   serverId: string;
   serverName: string;
-  createdAt: number;
+  /** Its icon on Discord's CDN, or null when it has none. */
+  serverIcon: string | null;
 }
 interface DiscordAccount {
   userId: string;
-  createdAt: number;
   name?: string;
 }
 
 const BASE = "/api/connections/discord-app";
 
 async function readError(response: Response): Promise<string | null> {
-  const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+  const payload = (await response.json().catch(() => null)) as {
+    error?: unknown;
+  } | null;
   return typeof payload?.error === "string" ? payload.error : null;
 }
 
+/** Discord's page that adds Rome's bot to a server and links the guardian's
+ *  Discord account. Rejects with the server's words when it gives none. */
+export async function discordInstallLink(): Promise<string> {
+  const response = await fetch(`${BASE}/install-link`, { method: "POST" });
+  if (!response.ok) throw new Error((await readError(response)) ?? "");
+  const { url } = (await response.json()) as { url: string };
+  return url;
+}
+
+/** The first letters of a name's first two words, as Discord marks a server
+ *  that has no icon. */
+function initials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  return words
+    .slice(0, 2)
+    .map((word) => Array.from(word)[0] ?? "")
+    .join("")
+    .toUpperCase();
+}
+
+/** A server's mark: its icon, or its initials until one loads. */
+function Mark({ name, icon }: { name: string; icon: string | null }) {
+  return (
+    <Avatar className="rounded-8 after:rounded-8">
+      {icon && <AvatarImage src={icon} alt="" className="rounded-8" />}
+      <AvatarFallback className="rounded-8 text-aux">{initials(name)}</AvatarFallback>
+    </Avatar>
+  );
+}
+
+/** A server's "…" menu, holding Remove. */
+function RowMenu({
+  label,
+  item,
+  disabled,
+  onSelect,
+}: {
+  label: string;
+  item: string;
+  disabled?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <IconButton label={label} icon={<Ellipsis />} size="sm" disabled={disabled} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem variant="destructive" onSelect={onSelect}>
+          <Trash2 className="size-4" aria-hidden />
+          {item}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 /**
- * The servers Rome's Discord bot was added to, under its connected card: one
- * row each with Remove, Add to server, and the guardian's Discord accounts.
- * Adding happens on Discord's own page, in a new tab; the list reads again
- * when the guardian comes back to this one.
+ * The connected view of Rome's Discord bot: the servers it was added to, one
+ * tile each with Remove in its menu, the Discord account Rome listens to, and
+ * Disconnect at the bottom. Adding happens on Discord's own page, in a new
+ * tab; the list reads again when the guardian comes back to this one.
  */
-export function DiscordServersSection() {
-  const { t } = useTranslation("settings");
+export function DiscordServersSection({
+  onDisconnect,
+  disconnecting,
+}: {
+  onDisconnect: () => void;
+  disconnecting: boolean;
+}) {
+  const { t, i18n } = useTranslation("settings");
   const [servers, setServers] = useState<DiscordServer[] | null>(null);
   const [accounts, setAccounts] = useState<DiscordAccount[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
-
   const load = useCallback(async () => {
     try {
       const response = await fetch(`${BASE}/servers`);
       if (!response.ok) throw new Error(String(response.status));
-      const data = (await response.json()) as { servers: DiscordServer[]; users: DiscordAccount[] };
+      const data = (await response.json()) as {
+        servers: DiscordServer[];
+        users: DiscordAccount[];
+      };
       setServers(data.servers);
       setAccounts(data.users);
       setLoadError(false);
@@ -69,9 +153,7 @@ export function DiscordServersSection() {
     const tab = window.open("", "_blank");
     setAdding(true);
     try {
-      const response = await fetch(`${BASE}/install-link`, { method: "POST" });
-      if (!response.ok) throw new Error((await readError(response)) ?? "");
-      const { url } = (await response.json()) as { url: string };
+      const url = await discordInstallLink();
       if (tab) {
         tab.opener = null;
         tab.location.href = url;
@@ -104,67 +186,91 @@ export function DiscordServersSection() {
     }
   }
 
-  const dateOf = (ms: number) =>
-    ms > 0 ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+  const names = accounts.map((account) => account.name ?? `…${account.userId.slice(-4)}`);
+  const accountName = names.length > 0 ? new Intl.ListFormat(i18n.language).format(names) : "";
+
+  const addButton = (
+    <Button size="sm" onClick={() => void addToServer()} disabled={adding}>
+      <Plus data-icon="inline-start" aria-hidden />
+      {t("channels.discordApp.add")}
+    </Button>
+  );
+  const serverMenu = (server: DiscordServer) => (
+    <RowMenu
+      label={t("channels.discordApp.manage")}
+      item={t("channels.discordApp.remove")}
+      disabled={removing !== null}
+      onSelect={() => void remove(server)}
+    />
+  );
+  // Whom Rome listens to, then how to reach it.
+  const hint = [
+    accountName && t("channels.discordApp.linkedAs", { name: accountName }),
+    t("channels.discordApp.howTo"),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const loadFailed = loadError && (
+    <div className="flex items-center gap-2">
+      <p className="text-aux text-destructive-fg">{t("channels.discordApp.loadFailed")}</p>
+      <Button variant="outline" size="sm" onClick={() => void load()}>
+        {t("channels.discordApp.retry")}
+      </Button>
+    </div>
+  );
+  const errorLine = actionError && <p className="text-aux text-destructive-fg">{actionError}</p>;
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <h4 className="text-aux font-medium text-foreground">{t("channels.discordApp.servers")}</h4>
-        {loadError ? (
-          <div className="flex items-center gap-2">
-            <p className="text-aux text-destructive-fg">{t("channels.discordApp.loadFailed")}</p>
-            <Button variant="outline" size="sm" onClick={() => void load()}>
-              {t("channels.discordApp.retry")}
-            </Button>
+    <div className="space-y-8">
+      <Section className="gap-3">
+        <SectionHeader>
+          <SectionHeading>
+            <SectionTitle className="text-ui font-medium">
+              {t("channels.discordApp.servers")}
+            </SectionTitle>
+          </SectionHeading>
+          <SectionActions>{addButton}</SectionActions>
+        </SectionHeader>
+        {servers !== null && servers.length === 0 && !loadError ? (
+          <div className="rounded-12 border border-dashed border-border-strong px-4 py-8 text-center text-ui text-muted-foreground">
+            {t("channels.discordApp.empty")}
           </div>
-        ) : servers === null ? null : servers.length === 0 ? (
-          <p className="text-aux text-muted-foreground">{t("channels.discordApp.empty")}</p>
         ) : (
-          <ul className="divide-y divide-border rounded-4 border border-border">
-            {servers.map((server) => (
-              <li key={server.serverId} className="flex items-center gap-3 px-3 py-2">
-                <span className="min-w-0 flex-1 truncate text-ui text-foreground">
-                  {server.serverName || server.serverId}
-                </span>
-                <span className="text-aux text-muted-foreground">{dateOf(server.createdAt)}</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void remove(server)}
-                  disabled={removing !== null}
-                >
-                  {removing === server.serverId
-                    ? t("channels.discordApp.removing")
-                    : t("channels.discordApp.remove")}
-                </Button>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {servers?.map((server) => (
+              <li key={server.serverId} className="grid">
+                <Card className="flex-row items-center gap-3 p-3">
+                  <Mark name={server.serverName || "?"} icon={server.serverIcon} />
+                  <span className="min-w-0 flex-1 truncate text-ui font-medium text-foreground">
+                    {server.serverName || server.serverId}
+                  </span>
+                  {removing === server.serverId ? (
+                    <span className="text-aux text-muted-foreground">
+                      {t("channels.discordApp.removing")}
+                    </span>
+                  ) : (
+                    serverMenu(server)
+                  )}
+                </Card>
               </li>
             ))}
           </ul>
         )}
-        <Button size="sm" onClick={() => void addToServer()} disabled={adding}>
-          {t("channels.discordApp.add")}
+        {loadFailed}
+        {errorLine}
+        {servers !== null && <p className="text-aux text-muted-foreground">{hint}</p>}
+      </Section>
+      <div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-2 text-destructive hover:text-destructive"
+          onClick={onDisconnect}
+          disabled={disconnecting}
+        >
+          {disconnecting ? t("common.disconnecting") : t("channels.discordApp.disconnect")}
         </Button>
-        {actionError && <p className="text-aux text-destructive-fg">{actionError}</p>}
       </div>
-      {accounts.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="text-aux font-medium text-foreground">
-            {t("channels.discordApp.accounts")}
-          </h4>
-          <ul className="space-y-1">
-            {accounts.map((account) => (
-              <li key={account.userId} className="flex items-center gap-3 text-ui">
-                <span className="min-w-0 flex-1 truncate text-foreground">
-                  {account.name ?? `…${account.userId.slice(-4)}`}
-                </span>
-                <span className="text-aux text-muted-foreground">{dateOf(account.createdAt)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <p className="text-aux text-muted-foreground">{t("channels.discordApp.howTo")}</p>
     </div>
   );
 }

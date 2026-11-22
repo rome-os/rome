@@ -551,17 +551,22 @@
       "botTokenPlaceholder": "来自 @BotFather 的机器人 Token"
     },
     "discordApp": {
-      "servers": "服务器",
-      "accounts": "你的 Discord 账号",
+      "link": "链接 Discord",
+      "blurb": "在 Discord 里找 Rome",
       "add": "添加到服务器",
       "remove": "移除",
       "removing": "正在移除…",
       "retry": "重试",
-      "empty": "把 Rome 添加到你管理的服务器，然后在那里或私信里给它发消息。",
       "loadFailed": "无法加载你的服务器。",
       "addFailed": "无法打开 Discord，请重试。",
       "removeFailed": "无法移除 {{name}}，请重试。",
-      "howTo": "私信 Rome，或在频道里 @Rome。回复 Rome 时请保持 @ 开启。"
+      "howTo": "私信 Rome，或在频道里 @Rome。",
+      "blurbDetail": "私信它，或把它加到你的服务器。",
+      "servers": "服务器",
+      "empty": "加到服务器后，就能在频道里 @Rome。",
+      "manage": "更多",
+      "disconnect": "断开 Discord",
+      "linkedAs": "以 {{name}} 的身份链接"
     },
     "telegramUser": {
       "fallbackName": "Telegram 用户",

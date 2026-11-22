@@ -151,6 +151,26 @@ describe("the Discord gateway Worker and Rome Cloud, as the instance calls them"
     ).rejects.toBeInstanceOf(DiscordAppRefused);
   });
 
+  it("reads this instance's servers through the proxy, with icons only from icon hashes", async () => {
+    const { cloud, calls } = answering(200, [
+      { id: "500000000000000005", name: "Lab", icon: "a".repeat(32) },
+      { id: "500000000000000006", name: "Hikes", icon: null },
+      { id: "500000000000000007", name: "Odd", icon: "../x" },
+      { id: "not an id", name: "Bad" },
+    ]);
+    expect(await cloud.servers()).toEqual([
+      {
+        id: "500000000000000005",
+        name: "Lab",
+        icon: `https://cdn.discordapp.com/icons/500000000000000005/${"a".repeat(32)}.png?size=96`,
+      },
+      { id: "500000000000000006", name: "Hikes", icon: null },
+      { id: "500000000000000007", name: "Odd", icon: null },
+    ]);
+    expect(calls[0]?.method).toBe("GET");
+    expect(new URL(calls[0]?.url ?? "").pathname).toBe("/v1/discord/users/@me/guilds");
+  });
+
   it("reads the bindings, keeping only well-formed rows", async () => {
     const { cloud } = answering(200, {
       servers: [{ serverId: "5", serverName: "Lab", createdAt: 10 }, { serverName: "no id" }],

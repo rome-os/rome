@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import i18n from "@/i18n";
 import { DiscordServersSection } from "@/components/connections/discord-servers-section";
 
@@ -14,7 +14,14 @@ afterEach(() => {
 });
 
 const LISTED = {
-  servers: [{ serverId: "5", serverName: "Ray's Lab", createdAt: 1 }],
+  servers: [
+    {
+      serverId: "5",
+      serverName: "Ray's Lab",
+      serverIcon: "https://cdn.discordapp.com/icons/5/abc.png?size=96",
+      createdAt: 1,
+    },
+  ],
   users: [{ userId: "700000000000000007", createdAt: 2, name: "Ray" }],
 };
 
@@ -32,36 +39,59 @@ function answering(handlers: Record<string, () => Response>) {
   return calls;
 }
 
+const section = (onDisconnect = () => {}) =>
+  render(<DiscordServersSection onDisconnect={onDisconnect} disconnecting={false} />);
+
+/** Opens the "…" menu of the tile named `name`. */
+async function openMenuOf(name: string) {
+  const tile = (await screen.findByText(name)).closest("[data-slot=card]") as HTMLElement;
+  const trigger = within(tile).getByRole("button", { name: "More" });
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+  return screen.findByRole("menu");
+}
+
 describe("the servers Rome's Discord bot was added to", () => {
-  it("lists each server and the guardian's accounts", async () => {
+  it("lists each server and the guardian's account", async () => {
     answering({
       "GET /api/connections/discord-app/servers": () => Response.json(LISTED),
     });
-    render(<DiscordServersSection />);
+    section();
     expect(await screen.findByText("Ray's Lab")).toBeTruthy();
-    expect(screen.getByText("Ray")).toBeTruthy();
+    expect(screen.getByText("Linked as Ray · DM Rome, or @Rome in a channel.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add to server" })).toBeTruthy();
   });
 
-  it("removes a server and reads the list again", async () => {
+  it("removes a server from its menu and reads the list again", async () => {
     const calls = answering({
       "GET /api/connections/discord-app/servers": () => Response.json(LISTED),
       "DELETE /api/connections/discord-app/servers/5": () =>
         Response.json({ removed: true, left: true }),
     });
-    render(<DiscordServersSection />);
-    fireEvent.click(await screen.findByRole("button", { name: "Remove" }));
+    section();
+    const menu = await openMenuOf("Ray's Lab");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Remove" }));
     await waitFor(() =>
       expect(calls.filter((call) => call.startsWith("GET")).length).toBeGreaterThan(1),
     );
     expect(calls).toContain("DELETE /api/connections/discord-app/servers/5");
   });
 
+  it("disconnects Discord from the bottom of the page", async () => {
+    answering({
+      "GET /api/connections/discord-app/servers": () => Response.json(LISTED),
+    });
+    const onDisconnect = rs.fn();
+    section(onDisconnect);
+    await screen.findByText("Ray's Lab");
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect Discord" }));
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+  });
+
   it("says when the list cannot be read, with a way to try again", async () => {
     answering({
       "GET /api/connections/discord-app/servers": () => new Response(null, { status: 502 }),
     });
-    render(<DiscordServersSection />);
+    section();
     expect(await screen.findByText("Couldn't load your servers.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
@@ -74,8 +104,8 @@ describe("the servers Rome's Discord bot was added to", () => {
     });
     const tab = { opener: {}, location: { href: "" }, close: rs.fn() };
     rs.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
-    render(<DiscordServersSection />);
-    expect(await screen.findByText(/Add Rome to a server you manage/)).toBeTruthy();
+    section();
+    expect(await screen.findByText(/Add Rome to a server to @mention it/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Add to server" }));
     await waitFor(() => expect(tab.location.href).toBe("https://discord.com/oauth2/authorize?x=1"));
     expect(tab.opener).toBeNull();

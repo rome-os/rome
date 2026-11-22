@@ -551,17 +551,22 @@
       "botTokenPlaceholder": "Bot token from @BotFather"
     },
     "discordApp": {
-      "servers": "Servers",
-      "accounts": "Your Discord accounts",
+      "link": "Link Discord",
+      "blurb": "Talk to Rome on Discord",
       "add": "Add to server",
       "remove": "Remove",
       "removing": "Removing…",
       "retry": "Retry",
-      "empty": "Add Rome to a server you manage, then message it there or in a direct message.",
       "loadFailed": "Couldn't load your servers.",
       "addFailed": "Couldn't open Discord. Try again.",
       "removeFailed": "Couldn't remove {{name}}. Try again.",
-      "howTo": "Message Rome in a direct message, or @Rome in a channel. When you reply to Rome, keep @ on."
+      "howTo": "DM Rome, or @Rome in a channel.",
+      "blurbDetail": "DM it, or add it to your servers.",
+      "servers": "Servers",
+      "empty": "Add Rome to a server to @mention it in channels.",
+      "manage": "More",
+      "disconnect": "Disconnect Discord",
+      "linkedAs": "Linked as {{name}}"
     },
     "telegramUser": {
       "fallbackName": "Telegram user",

@@ -1,6 +1,6 @@
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { User } from "lucide-react";
+import { ArrowUpRight, User } from "lucide-react";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
@@ -14,7 +14,10 @@ import {
 import { useSetup } from "@/components/setup/use-setup";
 import type { ConnectionSlot } from "@/lib/connection-cards";
 import { revokeConnectionGrant } from "@/lib/connections-api";
-import { DiscordServersSection } from "@/components/connections/discord-servers-section";
+import {
+  DiscordServersSection,
+  discordInstallLink,
+} from "@/components/connections/discord-servers-section";
 
 // Every Talk channel connects through the setup: the card
 // is a thin frame around `useSetup` (drives `/api/connections/:id/grants/:name/
@@ -79,7 +82,15 @@ export interface ChannelConnectConfig {
   disconnectFailedKey?: string;
   /** What the card shows under a working connection, such as the servers
    *  Rome's Discord bot was added to. */
-  connectedSection?: ComponentType;
+  connectedSection?: ComponentType<{ onDisconnect: () => void; disconnecting: boolean }>;
+  /** The one line an unconnected card shows in place of its bullets, for a
+   *  card with a `connectedSection`, which shows no bullets either. */
+  blurbKey?: string;
+  /** Copy key of the connect button; defaults to `common.connect`. */
+  connectLabelKey?: string;
+  /** A page to open in a new tab once connecting is done, such as Discord's
+   *  page that adds Rome's bot to a server: one click connects and opens it. */
+  pageAfterConnect?: () => Promise<string>;
 }
 
 /** The personal-account glyph — a muted user circle instead of the brand badge,
@@ -142,6 +153,9 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
     service: "discord_app",
     defaultGrant: "bot",
     connectedSection: DiscordServersSection,
+    blurbKey: "channels.discordApp.blurb",
+    connectLabelKey: "channels.discordApp.link",
+    pageAfterConnect: discordInstallLink,
   },
   agents: {
     service: "agents",
@@ -193,6 +207,20 @@ export function ChannelConnectCard({
   const confirmsDisconnect = Boolean(slot.link);
   const [error, setError] = useState<string | null>(null);
 
+  // The tab a connect opens its page in. Opened in the click, before the
+  // page is known, so no popup blocker stops it.
+  const pageTab = useRef<Window | null>(null);
+  const openPage = (tab: Window) => {
+    if (!config.pageAfterConnect) return;
+    void config.pageAfterConnect().then(
+      (url) => {
+        tab.opener = null;
+        tab.location.href = url;
+      },
+      () => tab.close(),
+    );
+  };
+
   // The setup addresses the connection by id, or by the bare service name when
   // the guardian has never connected or is adding another account (the
   // terminal grant mints the row).
@@ -205,10 +233,21 @@ export function ChannelConnectCard({
     // A caller that opens the account it connected refetches as it does, so
     // the refresh does not first drop a card whose route the connect moved.
     onDone: (connectionId) => {
+      const tab = pageTab.current;
+      pageTab.current = null;
+      if (tab) openPage(tab);
       if (onConnected) onConnected(connectionId);
       else void onRefresh();
     },
   });
+
+  // A connect that failed opens no page.
+  useEffect(() => {
+    if (setup.error && pageTab.current) {
+      pageTab.current.close();
+      pageTab.current = null;
+    }
+  }, [setup.error]);
 
   // A finished Reconnect is dropped once the account reads healthy, so a later
   // fault offers Reconnect again instead of the old finished view.
@@ -264,6 +303,9 @@ export function ChannelConnectCard({
     ? (slot.identity ?? (config.identityFallbackKey ? t(config.identityFallbackKey) : null))
     : null;
 
+  // A card with its own connected view draws the account and its action itself.
+  const ownView = Boolean(config.connectedSection) && connected && !broken;
+
   return (
     <ConnectionSlotCard
       service={config.copyService ?? config.service}
@@ -271,8 +313,9 @@ export function ChannelConnectCard({
       state={connected ? "connected" : "unconnected"}
       role={role}
       icon={config.icon ?? <ConnectionBrandBadge connection={config.service} />}
-      identityTitle={identityTitle}
-      action={disconnectAction}
+      identityTitle={ownView ? null : identityTitle}
+      action={ownView ? undefined : disconnectAction}
+      plain={Boolean(config.connectedSection)}
     >
       {error && <p className="text-aux text-destructive-fg">{error}</p>}
       <RomeConfirmDialog
@@ -302,7 +345,12 @@ export function ChannelConnectCard({
             <p className="text-aux text-success-fg">{t(config.guardianLinkedKey)}</p>
           </div>
         ) : config.connectedSection && !broken ? (
-          <config.connectedSection />
+          <config.connectedSection
+            onDisconnect={() =>
+              confirmsDisconnect ? setConfirming(true) : void handleDisconnect()
+            }
+            disconnecting={disconnecting}
+          />
         ) : null
       ) : setup.state ? (
         <SetupRenderer
@@ -315,15 +363,33 @@ export function ChannelConnectCard({
           renderPresenting={config.renderPresenting}
         />
       ) : (
-        <div className="space-y-3">
+        <div
+          className={
+            config.blurbKey
+              ? "flex flex-wrap items-center gap-4 rounded-12 border border-border bg-surface p-4"
+              : "space-y-3"
+          }
+        >
+          {config.blurbKey && (
+            <div className="min-w-0 flex-1 space-y-1">
+              <p className="text-ui font-medium text-foreground">{t(config.blurbKey)}</p>
+              <p className="text-aux text-muted-foreground">{t(`${config.blurbKey}Detail`)}</p>
+            </div>
+          )}
           {setup.error && <p className="text-aux text-destructive-fg">{setup.error}</p>}
           <Button
             variant={role === "secondary" ? "outline" : "default"}
             size={role === "secondary" ? "sm" : "md"}
-            onClick={() => setup.start()}
+            onClick={() => {
+              if (config.pageAfterConnect) pageTab.current = window.open("", "_blank");
+              setup.start();
+            }}
             disabled={setup.busy}
           >
-            {setup.busy ? t("common.connecting") : t("common.connect")}
+            {setup.busy ? t("common.connecting") : t(config.connectLabelKey ?? "common.connect")}
+            {config.pageAfterConnect && !setup.busy && (
+              <ArrowUpRight data-icon="inline-end" aria-hidden />
+            )}
           </Button>
         </div>
       )}

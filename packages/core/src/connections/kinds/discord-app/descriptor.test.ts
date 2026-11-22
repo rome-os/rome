@@ -11,6 +11,7 @@ function cloud(over: Partial<DiscordAppCloud> = {}): DiscordAppCloud {
     connect: async () => ({ botId: "1", botUsername: "Rome", depositKey: "key-1" }),
     disconnect: async () => {},
     bindings: async () => ({ servers: [], users: [] }),
+    servers: async () => [],
     removeServer: async () => ({ removed: true, left: true }),
     send: async () => ({ id: "9" }),
     typing: async () => {},
