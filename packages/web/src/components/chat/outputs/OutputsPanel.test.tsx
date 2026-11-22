@@ -320,6 +320,7 @@ describe("OutputsPanel", () => {
         y: 0,
       }) as DOMRect;
     Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.getAttribute("data-slot") === "output-filters") return box(0, rowWidth);
       const measure = this.closest('[data-slot="output-filters-measure"]');
       if (!measure) return original.call(this);
       if (!this.matches("[data-slot=filter-chip]")) return box(0, widthOf(this) + 16);
@@ -330,13 +331,6 @@ describe("OutputsPanel", () => {
       }
       return box(left, widthOf(this));
     };
-    const clientWidth = Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth");
-    Object.defineProperty(Element.prototype, "clientWidth", {
-      configurable: true,
-      get(this: Element) {
-        return this.getAttribute("data-slot") === "output-filters" ? rowWidth : 0;
-      },
-    });
     globalThis.ResizeObserver = class {
       constructor(callback: () => void) {
         resized.push(callback);
@@ -361,10 +355,19 @@ describe("OutputsPanel", () => {
       const chips = () => screen.getAllByRole("radio").map((chip) => chip.textContent);
       // 260px holds All (48), Documents (96) and More (72), not Pictures too.
       await waitFor(() => expect(chips()).toEqual(["All", "Documents"]));
-      rowWidth = 330;
-      act(() => {
-        for (const callback of resized) callback();
-      });
+      const resize = (width: number) => {
+        rowWidth = width;
+        act(() => {
+          for (const callback of resized) callback();
+        });
+      };
+      // 310px fits Pictures beside More (304) but not with the 12px to spare.
+      resize(310);
+      expect(chips()).toEqual(["All", "Documents"]);
+      // Choosing a filter does not bring it in either; only room to spare does.
+      await user.click(screen.getByRole("radio", { name: "Documents" }));
+      expect(chips()).toEqual(["All", "Documents"]);
+      resize(330);
       expect(chips()).toEqual(["All", "Documents", "Pictures"]);
       await user.click(screen.getByRole("button", { name: "More" }));
       expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
@@ -378,7 +381,6 @@ describe("OutputsPanel", () => {
       expect(chips()).toEqual(["All", "Documents", "Pictures"]);
     } finally {
       Element.prototype.getBoundingClientRect = original;
-      if (clientWidth) Object.defineProperty(Element.prototype, "clientWidth", clientWidth);
       globalThis.ResizeObserver = OriginalObserver;
     }
   });

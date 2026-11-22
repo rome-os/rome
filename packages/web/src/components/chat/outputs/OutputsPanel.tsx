@@ -147,8 +147,9 @@ export function kindsThatFit(size: FilterRowSize, chosen: number): number {
 export const FIT_SLACK = 12;
 
 /**
- * kindsThatFit as the row resizes: one fewer as soon as a chip no longer fits,
- * one more only once the row is FIT_SLACK past the width it needs.
+ * kindsThatFit as the row resizes or a filter is chosen: one fewer as soon as
+ * a chip no longer fits, one more only once the row is FIT_SLACK past the
+ * width it needs.
  */
 export function kindsThatStillFit(size: FilterRowSize, chosen: number, previous: number): number {
   const fits = kindsThatFit(size, chosen);
@@ -442,6 +443,9 @@ function KindFilters({
   const rowRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const [fitted, setFitted] = useState(CHIP_KINDS);
+  // The count last shown, kept across choosing a filter as well as resizes, so
+  // a click never adds a chip that only the slack was holding back.
+  const shownRef = useRef<number | null>(null);
   const count = Math.min(fitted, kinds.length);
   const chosen = value === "all" ? -1 : kinds.indexOf(value);
   const kindsKey = kinds.join(",");
@@ -452,9 +456,9 @@ function KindFilters({
     const row = rowRef.current;
     const measure = measureRef.current;
     if (!row || !measure) return;
-    let previous: number | null = null;
     const fit = () => {
-      const width = row.clientWidth;
+      // Unrounded, as the chips are measured, so a fractional width cannot round up past them.
+      const width = row.getBoundingClientRect().width;
       // Not laid out, as in a closed sheet: keep the most chips until it is.
       if (width === 0) return;
       const chips = [...measure.querySelectorAll<HTMLElement>("[data-slot=filter-chip]")];
@@ -468,9 +472,8 @@ function KindFilters({
         more: widthOf("[data-more]"),
         moreNamed: kinds.map((kind) => widthOf(`[data-more-named="${kind}"]`)),
       };
-      const next =
-        previous === null ? kindsThatFit(size, chosen) : kindsThatStillFit(size, chosen, previous);
-      previous = next;
+      const next = kindsThatStillFit(size, chosen, shownRef.current ?? CHIP_KINDS);
+      shownRef.current = next;
       setFitted(next);
     };
     fit();

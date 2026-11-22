@@ -16,7 +16,15 @@ export const outputProjectFolder = dir("projects/default", [
   file("projects/default/trip-plan.md", NOTES),
   file("projects/default/packing-list.txt", "Passport\nCharger\nRain jacket\n"),
   file("projects/default/空白笔记.txt", ""),
+  file("projects/default/trip-budget.csv", "Item,Cost\nFlights,420\nHotel,380\nFood,160\n"),
+  file(
+    "projects/default/fetch-fares.py",
+    'fares = {"SFO-HNL": 420, "SFO-OGG": 455}\nprint(min(fares, key=fares.get))\n',
+  ),
 ]);
+
+/** Where the demo's pictures and recording are served, from `mock/public`. */
+const DEMO_FILES = "/demo-outputs";
 
 function projectBody(name: string): string | undefined {
   return outputProjectFolder.children?.find((node) => node.name === name)?.content;
@@ -55,6 +63,7 @@ function outputsOf(chatId: string): ChatOutputDto[] {
       mimeType: "image/png",
       path: "/api/assets/0f3c2a9d7b1e4c6a8d5f2b7e9a1c3d4e.png",
       link: "/api/assets/0f3c2a9d7b1e4c6a8d5f2b7e9a1c3d4e.png",
+      contentUrl: `${DEMO_FILES}/beach-map.png`,
       at: new Date(Date.now() - HOUR / 2).toISOString(),
     }),
     output(chatId, "out-notes", {
@@ -86,12 +95,14 @@ function outputsOf(chatId: string): ChatOutputDto[] {
       mimeType: "image/jpeg",
       path: "/api/assets/6b2d8e4f1a3c5e7b9d0f2a4c6e8b1d3f.jpg",
       link: "/api/assets/6b2d8e4f1a3c5e7b9d0f2a4c6e8b1d3f.jpg",
+      contentUrl: `${DEMO_FILES}/hotel-photos.jpg`,
       at: new Date(Date.now() - 5 * HOUR).toISOString(),
     }),
     output(chatId, "out-voice", {
       name: "voice-note.wav",
       kind: "written",
       mimeType: "audio/wav",
+      contentUrl: `${DEMO_FILES}/voice-note.wav`,
       at: new Date(Date.now() - 25 * HOUR).toISOString(),
       from: { chatId: "task-chat-1", name: "Draft the itinerary" },
     }),
