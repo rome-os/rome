@@ -2,12 +2,16 @@ import { describe, expect, it } from "@rstest/core";
 import { createTestDb } from "../test/db.js";
 import { reportOf } from "../test/kit/model-accounts.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
-import { createChatProviders } from "./chat-providers.js";
+import { createChatProviders, pinnedModelOf } from "./chat-providers.js";
 
 async function setup(
   options: {
     lastModel?: Record<string, { providerId: string; model: string }>;
     tier?: "large" | "medium" | "small";
+    /** The session keys that last ran on each provider. */
+    ran?: Record<string, string[]>;
+    settings?: Map<string, unknown>;
+    currentDefault?: "anthropic" | "openai" | "rome_credits";
   } = {},
 ) {
   const testDb = createTestDb();
@@ -32,6 +36,7 @@ async function setup(
   // Never said anything.
   await webchatRepo.createSession("empty", "Empty");
   const selected: Array<[string, string | null]> = [];
+  const settings = options.settings ?? new Map<string, unknown>();
   // The plain chat last ran Opus.
   const lastModel = options.lastModel ?? {
     plain: { providerId: "anthropic", model: "claude-opus-5-5[1m]" },
@@ -46,12 +51,21 @@ async function setup(
     },
     lastModel: async (chatId) => lastModel[chatId] ?? null,
     agentTier: () => options.tier,
+    settings: {
+      get: async (key: string) => (settings.get(key) ?? null) as never,
+      set: async (key: string, value: unknown) => {
+        settings.set(key, structuredClone(value));
+      },
+    },
+    currentDefault: () => options.currentDefault ?? "openai",
+    ranOn: async (provider) => options.ran?.[provider] ?? [],
   });
+  await providers.ready();
   const row = async (id: string) => {
     const chat = await webchatRepo.getSession(id);
     return { selection: chat?.largeModelSelection, by: chat?.largeModelSelectionBy };
   };
-  return { providers, row, selected, webchatRepo };
+  return { providers, row, selected, webchatRepo, settings };
 }
 
 describe("which provider a chat that follows the default runs on", () => {
@@ -183,5 +197,114 @@ describe("a chat that moved on since a request", () => {
     expect(webchatRepo.chatMovedOnSince("plain", before)).toBe(true);
     expect(webchatRepo.chatMovedOnSince("plain", Date.now() + 60_000)).toBe(false);
     expect(webchatRepo.chatMovedOnSince("gone", before)).toBe(true);
+  });
+});
+
+describe("an unchecked move keeps every existing chat", () => {
+  const unchecked = {
+    from: "anthropic",
+    to: "openai",
+    by: "guardian",
+    moveExisting: false,
+  } as const;
+
+  it("holds a fork, a channel's chat and the subagents under any chat on the old provider", async () => {
+    const { providers } = await setup({
+      ran: {
+        anthropic: [
+          "webchat:fork-1",
+          "telegram:42",
+          // A subagent under a web chat, and a one-off run nobody resumes.
+          "webchat:plain:subagent:abc",
+          "main:0b7e7a5e-3c1f-4c8e-9a51-2f4f6f3d9f10",
+        ],
+      },
+    });
+    await providers.beforeDefaultChange(unchecked);
+    expect(providers.heldProvider("webchat:fork-1")).toBe("anthropic");
+    expect(providers.heldProvider("telegram:42")).toBe("anthropic");
+    expect(providers.heldProvider("webchat:plain")).toBe("anthropic");
+    expect(providers.heldProvider("main:0b7e7a5e-3c1f-4c8e-9a51-2f4f6f3d9f10")).toBeUndefined();
+  });
+
+  it("keeps what it held across a restart", async () => {
+    const settings = new Map<string, unknown>();
+    const first = await setup({ ran: { anthropic: ["telegram:42"] }, settings });
+    await first.providers.beforeDefaultChange(unchecked);
+    const again = await setup({ settings });
+    expect(again.providers.heldProvider("telegram:42")).toBe("anthropic");
+  });
+
+  it("a checked move releases every held conversation", async () => {
+    const { providers } = await setup({ ran: { anthropic: ["telegram:42"] } });
+    await providers.beforeDefaultChange(unchecked);
+    await providers.beforeDefaultChange({ ...unchecked, moveExisting: true });
+    expect(providers.heldProvider("telegram:42")).toBeUndefined();
+    expect(providers.heldProvider("webchat:plain")).toBeUndefined();
+  });
+
+  it("counts a held channel chat among the chats a checked move would move", async () => {
+    const { providers } = await setup({ ran: { anthropic: ["telegram:42"] } });
+    await providers.beforeDefaultChange(unchecked);
+    // Two web chats kept, and the channel's chat.
+    expect(await providers.followingCount()).toBe(3);
+  });
+
+  it("holds nothing on Rome credits: a login always moves every chat", async () => {
+    const { providers } = await setup({ ran: { openai: ["telegram:42"] } });
+    await providers.beforeDefaultChange({ ...unchecked, from: "rome_credits", to: "anthropic" });
+    expect(providers.heldProvider("telegram:42")).toBeUndefined();
+  });
+});
+
+describe("a pinned chat always reports it is pinned", () => {
+  it("reports an owner's pick, a kept chat and a held fork, and nothing for Rome's choice", () => {
+    expect(
+      pinnedModelOf({ largeModelSelection: "claude-haiku", largeModelSelectionBy: "owner" }),
+    ).toMatchObject({ by: "owner", providerId: "anthropic", selection: "claude-haiku" });
+    // A model stored before Rome recorded who chose it is its owner's.
+    expect(
+      pinnedModelOf({ largeModelSelection: "claude-haiku", largeModelSelectionBy: null }),
+    ).toMatchObject({
+      by: "owner",
+    });
+    expect(
+      pinnedModelOf({ largeModelSelection: "gpt-6-1-sol", largeModelSelectionBy: "kept" }),
+    ).toMatchObject({ by: "kept", providerId: "openai" });
+    expect(pinnedModelOf({ largeModelSelection: null }, "anthropic")).toEqual({
+      by: "kept",
+      providerId: "anthropic",
+      selection: null,
+      model: null,
+    });
+    expect(
+      pinnedModelOf({ largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "auto" }),
+    ).toBeNull();
+    expect(pinnedModelOf({ largeModelSelection: null })).toBeNull();
+  });
+
+  it("Back to default lets a kept chat follow again, at its strength on the default", async () => {
+    const { providers, row, selected } = await setup({ currentDefault: "openai" });
+    await providers.keep("fast", "anthropic");
+    expect(providers.heldProvider("webchat:fast")).toBe("anthropic");
+    expect(await providers.follow("fast")).toBe("gpt-6-luna");
+    expect(await row("fast")).toEqual({ selection: "gpt-6-luna", by: "auto" });
+    expect(providers.heldProvider("webchat:fast")).toBeUndefined();
+    expect(selected.at(-1)).toEqual(["fast", "gpt-6-luna"]);
+  });
+
+  it("Back to default clears an owner's pick too", async () => {
+    const { providers, row } = await setup({ currentDefault: "anthropic" });
+    expect(await providers.follow("picked")).toBe("claude-opus-5-5");
+    expect(await row("picked")).toEqual({ selection: "claude-opus-5-5", by: "auto" });
+    expect(
+      pinnedModelOf({ largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "auto" }),
+    ).toBeNull();
+  });
+
+  it("Back to default does nothing for a chat that follows the default", async () => {
+    const { providers, row } = await setup();
+    expect(await providers.follow("fast")).toBeNull();
+    expect(await row("fast")).toEqual({ selection: "claude-sonnet", by: "auto" });
   });
 });

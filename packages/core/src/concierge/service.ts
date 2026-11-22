@@ -23,6 +23,7 @@ import type { WebChatRepository } from "../webchat/repository.js";
 import type { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { SkillCatalog } from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
+import { selectionOfModel } from "../webchat/chat-providers.js";
 import type { AgentTurnFailedBeforeStart } from "../agent/index.js";
 import type { Sessions } from "../agent/index.js";
 import {
@@ -30,6 +31,7 @@ import {
   isModelSelectionId,
   MODEL_SELECTIONS,
   providerOfDefault,
+  runsOnRomeCredits,
   selectionOfStrength,
   type DefaultProviders,
   type ModelStrength,
@@ -254,7 +256,9 @@ export interface ConciergeDeps {
   sessionRepository: Pick<SessionRepository, "current">;
   accounts: Pick<ModelAccounts, "read">;
   /** The default provider. Absent, none is set, and chats keep their models. */
-  defaults?: Pick<DefaultProviders, "current">;
+  defaults?: Pick<DefaultProviders, "current"> & Partial<Pick<DefaultProviders, "signedIn">>;
+  /** Whether a chat is held on a provider, off Rome credits. Absent, none is. */
+  held?: (chatId: string) => boolean;
   agentSessionManager: Pick<Sessions, "find">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
@@ -892,9 +896,12 @@ export class ConciergeService {
   }
 
   /**
-   * A chat whose model hit a limit of its own moves to another model of the
-   * same provider, with a note. It never moves to another provider, and never
-   * off a model its owner picked: that chat shows a card instead.
+   * A chat whose model hit a limit of its own runs its next turn on another
+   * model of the same provider, with a note, and only that turn: the turn
+   * after it tries its own model again. The other model is never stored as the
+   * chat's. It never moves to another provider, and never off a model its
+   * owner picked: that chat shows a card instead. Null when it cannot move,
+   * as when the chat has no live session to run the turn in.
    */
   async switchForModelLimit(chatId: string, failure: AgentTurnFailure, agentName?: string) {
     const chat = await this.deps.webchatRepo.getSession(chatId);
@@ -908,9 +915,16 @@ export class ConciergeService {
         agentName ?? (isConciergeChat(chat) ? CONCIERGE_AGENT_ID : (chat.agentName ?? "main")),
       channelThreadKey: webchatSessionKey(chatId),
     };
+    const session = this.deps.agentSessionManager.find(key);
+    if (!session?.selectModelForOneTurn) return null;
     // On Rome credits every chat runs its model's strength on Codex, whatever
-    // provider its stored model names. A login takes the default off them.
-    const credits = this.deps.defaults?.current() === "rome_credits";
+    // provider its stored model names. They run only while no account is
+    // logged in, and never for a chat held on the guardian's own account.
+    const current = this.deps.defaults?.current() ?? null;
+    const credits =
+      (this.deps.defaults?.signedIn
+        ? runsOnRomeCredits(current, this.deps.defaults.signedIn())
+        : current === "rome_credits") && this.deps.held?.(chatId) !== true;
     const stored = resolveWebchatLargeModelSelection(chat.largeModelSelection);
     const selected = credits && stored?.providerId !== "openai" ? null : stored;
     const runtime = selected
@@ -942,13 +956,14 @@ export class ConciergeService {
       (this.leftModels.get(modelKey(MODEL_SELECTIONS[target.selectionId].model)) ?? 0) > Date.now()
     )
       return null;
-    await this.deps.webchatRepo.updateSessionLargeModelSelection(
-      chatId,
-      target.selectionId,
-      chat.largeModelSelectionBy === "kept" ? "kept" : "auto",
-    );
-    // The move keeps a kept chat kept.
-    this.deps.agentSessionManager.find(key)?.selectModel(target.selectionId);
+    // A chat with no stored model keeps the one it ran, as Rome's choice, so
+    // the turn after the swap resolves it again rather than the swapped one.
+    const own = stored?.id ?? selectionOfModel(fromModel);
+    if (!stored && own) {
+      await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, own, "auto");
+      session.selectModel(own);
+    }
+    session.selectModelForOneTurn(target.selectionId);
     this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);
     await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [
       {
@@ -958,6 +973,7 @@ export class ConciergeService {
         reason: "model_limit",
         fromModel,
         model: MODEL_SELECTIONS[target.selectionId].model,
+        oneTurn: true,
       },
     ]);
     return { from, to: target.provider, selectionId: target.selectionId };

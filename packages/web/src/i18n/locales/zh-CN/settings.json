@@ -757,6 +757,10 @@
     },
     "logoutOutcome": {
       "otherBecomesDefault": "{{provider}} 会成为默认，聊天在下一次回复时切换过去。",
+      "otherBecomesDefaultStay": "新聊天默认使用 {{provider}}。已有聊天留在 {{leaving}}，等你重新登录。",
+      "otherExpired": "它的登录已过期：登出后请重新登录 {{provider}}。",
+      "creditsBecomeDefault": "Rome 额度会成为默认，聊天在下一次回复时切换过去。",
+      "creditsBecomeDefaultStay": "新聊天默认使用 Rome 额度。已有聊天留在 {{leaving}}，等你重新登录。",
       "pause": "聊天会暂停，直到你重新登录。",
       "pauseOrCredits": "聊天会暂停，直到你重新登录，或让所有聊天改用 Rome 额度。"
     }

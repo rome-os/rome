@@ -1,10 +1,12 @@
 // The default provider as Rome keeps it: loaded once, changed by the guardian,
-// and moved only when the guardian removes the provider it was.
+// and moved only by a login when none could run, or a logout of the provider
+// it was. A failure never moves it.
 // docs/domains/agents.md carries the language.
 
 import type { AgentLog } from "../domain/agent-log.js";
 import {
   legacyDefault,
+  providerOfDefault,
   reconciledDefault,
   signedInProviders,
   type DefaultProvider,
@@ -26,7 +28,8 @@ export type DefaultProviderChange = {
   by: "guardian" | "removed" | "first";
   /**
    * Whether chats that follow the default move with it, each on its next run.
-   * Only the guardian's own change may leave them where they are.
+   * The guardian's own change and a logout may leave them where they are. A
+   * login that replaces Rome credits moves them all.
    */
   moveExisting: boolean;
 };
@@ -46,6 +49,11 @@ export interface DefaultProviders {
    */
   choose(provider: DefaultProvider, options?: { moveExisting?: boolean }): Promise<void>;
   dismissNote(): Promise<void>;
+  /**
+   * Before the guardian logs out of `provider`: whether the chats that follow
+   * the default move with it, if the logout moves it. Absent, they move.
+   */
+  expectLogout(provider: AccountedProviderId, options: { moveExisting: boolean }): void;
   /** Checks the default against the providers signed in now. */
   reconcile(): Promise<void>;
   onChanged(listener: (change: DefaultProviderChange) => void): () => void;
@@ -82,6 +90,8 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
   const now = options.now ?? (() => new Date());
   let state: DefaultProviderState = { provider: null };
   const listeners = new Set<(change: DefaultProviderChange) => void>();
+  // What the guardian chose in the logout dialog, until the logout moves the default.
+  const logouts = new Map<AccountedProviderId, boolean>();
   // One write at a time, in order, so a reconcile never undoes a choice.
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
@@ -139,14 +149,22 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
         now_,
         seeded && now_[seeded] ? seeded : legacyDefault(reports, now_),
       );
+      // A choice for a provider still logged in, or one that is not the default, moves nothing.
+      for (const logout of logouts.keys()) {
+        if (now_[logout] || state.provider === null || providerOfDefault(state.provider) !== logout)
+          logouts.delete(logout);
+      }
       if (!provider || provider === state.provider) return;
       const from = state.provider;
+      const removed = moved && from ? providerOfDefault(from) : null;
+      const moveExisting = (removed && logouts.get(removed)) ?? true;
+      if (removed) logouts.delete(removed);
       await store(
         {
           provider,
           ...(moved && from ? { note: { from, to: provider, at: now().toISOString() } } : {}),
         },
-        { from, to: provider, by: moved ? "removed" : "first", moveExisting: true },
+        { from, to: provider, by: moved ? "removed" : "first", moveExisting },
       );
     });
 
@@ -182,6 +200,9 @@ export function createDefaultProviders(options: CreateDefaultProvidersOptions): 
         await loaded;
         if (state.note && state.provider) await store({ provider: state.provider });
       }),
+    expectLogout(provider, choice) {
+      logouts.set(provider, choice.moveExisting);
+    },
     reconcile,
     onChanged(listener) {
       listeners.add(listener);

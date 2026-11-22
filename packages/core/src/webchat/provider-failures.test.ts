@@ -56,6 +56,8 @@ function harness(
     runtimeOf?: (chatId: string) => Promise<string | null>;
     /** What a recovery turn waits on in the chat's queue before it is dispatched. */
     queue?: Promise<void>;
+    /** The chats held on a provider. Default: none. */
+    held?: string[];
     /** Whether someone wrote in the chat since. Default: nobody did. */
     movedOnSince?: (chatId: string, since: number) => boolean;
     /** Whether the usage-limit continuation takes the chat. Default: it does not. */
@@ -99,6 +101,7 @@ function harness(
       },
       follow: async (chatId) => {
         followed.push(chatId);
+        return null;
       },
     },
     webchatRepo: {
@@ -164,6 +167,7 @@ function harness(
       return options.swap === false ? null : { moved: true };
     },
     creditsUsable: () => options.credits ?? false,
+    held: (chatId) => options.held?.includes(chatId) ?? false,
     actorOf: async (chatId) =>
       chatId === "visitors" ? ({ kind: "visitor", accountId: "acct-v" } as never) : undefined,
     ...(options.movedOnSince ? { movedOnSince: options.movedOnSince } : {}),
@@ -840,6 +844,95 @@ describe("a card's button", () => {
     await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
     await flush();
     expect(h.runs[0]?.actor).toMatchObject({ kind: "visitor", accountId: "acct-v" });
+  });
+});
+
+describe("a card's options stay as written, and Retry is on every card", () => {
+  it("an option that no longer works writes a fresh card with the options that work now", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("usage_limit_reached"),
+      openai: reportOf("available"),
+    };
+    const h = harness({ chat: {} }, reports);
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    expect(card?.part.alternatives).toEqual(["openai"]);
+    // ChatGPT's login expired after the card was written.
+    reports.openai = reportOf("expired");
+    expect(
+      await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" }),
+    ).toBe("refreshed");
+    await flush();
+    expect(h.runs).toEqual([]);
+    expect(h.kept).toEqual([]);
+    const shown = h.shownCards("chat");
+    expect(shown).toHaveLength(1);
+    expect(shown[0]).toMatchObject({ reason: "quota", alternatives: [] });
+    const [fresh] = await h.failures.cards();
+    expect(fresh?.messageId).not.toBe(card!.messageId);
+  });
+
+  it("a stale Use Rome credits writes a fresh card instead of failing", async () => {
+    // No balance is left now, whatever the card offered when it was written.
+    const h = harness(
+      { chat: {} },
+      { openai: reportOf("unauthorized"), anthropic: reportOf("unauthorized") },
+      { defaultProvider: "anthropic", signedIn: noAccount },
+    );
+    await h.fail("chat", notLoggedIn);
+    const [card] = await h.failures.cards();
+    expect(
+      await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "rome_credits" }),
+    ).toBe("refreshed");
+    expect(h.chose).toEqual([]);
+    expect(h.shownCards("chat")).toHaveLength(1);
+  });
+
+  it("Retry runs an account card's stopped turn too, at once", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("unauthorized") });
+    await h.fail("chat", notLoggedIn);
+    const [card] = await h.failures.cards();
+    expect(card?.part.card).toBe("account");
+    await h.failures.continueCard(card!.messageId);
+    await flush();
+    expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
+    expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "recovered", continued: true });
+  });
+
+  it("nothing resumes by itself after a login: the card waits for Retry", async () => {
+    const reports: ModelAccountReports = { anthropic: reportOf("unauthorized") };
+    const h = harness({ chat: {} }, reports);
+    await h.fail("chat", notLoggedIn);
+    reports.anthropic = reportOf("available");
+    await h.accountChanged("anthropic");
+    expect(h.runs).toEqual([]);
+    expect(await h.failures.cards()).toHaveLength(1);
+  });
+
+  it("a held chat runs on its own account: its ChatGPT card is not Rome credits used up", async () => {
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("unauthorized"), openai: reportOf("unauthorized") },
+      { defaultProvider: "rome_credits", signedIn: noAccount, credits: true, held: ["chat"] },
+    );
+    await h.fail("chat", revoked);
+    expect(h.cardIn("chat")).toMatchObject({
+      card: "account",
+      provider: "openai",
+      reason: "removed",
+    });
+  });
+
+  it("Use Rome credits on a held chat's card lets it follow them", async () => {
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("unauthorized"), openai: reportOf("unauthorized") },
+      { defaultProvider: "rome_credits", signedIn: noAccount, credits: true, held: ["chat"] },
+    );
+    await h.fail("chat", notLoggedIn);
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "rome_credits" });
+    expect(h.followed).toEqual(["chat"]);
   });
 });
 

@@ -1171,6 +1171,16 @@ function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 }
 
 export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: WebchatRuntime } {
+  // A chat as the APIs show it, with whether it follows the default provider.
+  const sessionResponse = (
+    session: Parameters<typeof toWebchatSessionResponse>[0],
+    messageCount: number,
+  ) =>
+    toWebchatSessionResponse(
+      session,
+      messageCount,
+      deps.chatProviders?.heldProvider(webchatSessionKey(session.id)),
+    );
   const activeStreams = new Map<string, ActiveWebchatStream[]>();
   /**
    * secondary index for direct lookup by turnId. Populated when a
@@ -2869,7 +2879,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       sessions.map((session) => {
         const running = isSessionRunning(session.id);
         return {
-          ...toWebchatSessionResponse(session, session.messageCount),
+          ...sessionResponse(session, session.messageCount),
           running,
           // A new turn's trace is written a moment after it starts, so until
           // then the newest trace is the previous turn's. Running wins.
@@ -2927,7 +2937,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
     return c.json(
       matches.map((match) => ({
-        session: toWebchatSessionResponse(match.session, match.session.messageCount),
+        session: sessionResponse(match.session, match.session.messageCount),
         message: {
           id: match.message.id,
           role: match.message.role,
@@ -3143,7 +3153,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       deviceFolder: deviceFolder !== null,
       ...(await sessionActorLogAttributes()),
     });
-    return answer(toWebchatSessionResponse(createdSession, 0));
+    return answer(sessionResponse(createdSession, 0));
   };
 
   app.post("/chat/sessions", async (c) => {
@@ -3182,7 +3192,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     await deps.webchatRepo.updateSessionProject(sessionId, project.name, project.path);
     return c.json(
-      toWebchatSessionResponse(
+      sessionResponse(
         { ...session, projectName: project.name, projectPath: project.path },
         messageCount,
       ),
@@ -3220,7 +3230,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         ? await deps.concierge?.deps.tasks.repo.getWithChat(sessionId)
         : null;
     return c.json({
-      ...toWebchatSessionResponse(session, messageCount),
+      ...sessionResponse(session, messageCount),
       model: runtimeSession?.model ?? null,
       reasoningEffort: runtimeSession?.reasoningEffort ?? null,
       ...(task
@@ -3316,7 +3326,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse(session, messageCount));
+    return c.json(sessionResponse(session, messageCount));
   });
 
   // The checks pending in a chat, which its owner can cancel there.
@@ -3366,7 +3376,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse(session, messageCount));
+    return c.json(sessionResponse(session, messageCount));
   });
 
   // The model picker of an open chat. The pick is stored on the chat and the
@@ -3408,7 +3418,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse(session, messageCount));
+    return c.json(sessionResponse(session, messageCount));
+  });
+
+  // "Back to default": a chat pinned to a model, kept by a card or a change of
+  // the default, or picked by its owner, follows the default provider again
+  // from its next turn, at the strength it runs now.
+  app.post("/chat/sessions/:id/model/follow-default", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getTopLevelWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    if (!deps.chatProviders) return c.json({ error: "Not available" }, 404);
+    await deps.chatProviders.follow(sessionId);
+    const session = await deps.webchatRepo.getSession(sessionId);
+    if (!session) return c.json({ error: "Session not found" }, 404);
+    const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
+    return c.json(sessionResponse(session, messageCount));
   });
 
   app.patch("/chat/sessions/:id/name", async (c) => {
@@ -3439,7 +3464,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     await deps.webchatRepo.updateSessionName(sessionId, name);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse({ ...session, name }, messageCount));
+    return c.json(sessionResponse({ ...session, name }, messageCount));
   });
 
   app.get("/chat/sessions/:id/layout", async (c) => {

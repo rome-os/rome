@@ -403,3 +403,71 @@ describe("resolveModel on the default provider", () => {
     });
   });
 });
+
+describe("an unchecked move keeps every existing chat: a held session", () => {
+  const heldOn = (
+    provider: "anthropic" | "openai",
+    selection?: Parameters<typeof modelResolutionRequest>[0],
+    pin?: { providerId: "anthropic" | "openai"; model: string },
+  ) => modelResolutionRequest(selection, pin, { tier: "large" }, true, provider);
+
+  it("runs its tier on the provider it was held on, not on the default", () => {
+    expect(
+      resolveModel(
+        heldOn("anthropic"),
+        facts({ reports: reports(available, available), defaultProvider: "openai" }),
+      ),
+    ).toMatchObject({ ok: true, providerId: "anthropic" });
+  });
+
+  it("keeps the model it last ran there", () => {
+    const pin = { providerId: "anthropic" as const, model: "claude-sonnet-5-5" };
+    expect(
+      resolveModel(
+        heldOn("anthropic", undefined, pin),
+        facts({ reports: reports(available, available), defaultProvider: "openai" }),
+      ),
+    ).toEqual({ ok: true, providerId: "anthropic", model: "claude-sonnet-5-5" });
+  });
+
+  it("never spends Rome credits: a held ChatGPT chat shows its own account's card", () => {
+    expect(
+      resolveModel(
+        heldOn("openai", "gpt-6-1-sol"),
+        facts({
+          reports: reports(unauthorized, unauthorized),
+          logins: { openai: credits() },
+          defaultProvider: "rome_credits",
+        }),
+      ),
+    ).toMatchObject({
+      ok: false,
+      failure: { kind: "provider_unavailable", provider: "openai", availability: "unauthorized" },
+    });
+  });
+
+  it("a held Claude chat shows Claude's card while Rome credits are the default", () => {
+    expect(
+      resolveModel(
+        heldOn("anthropic"),
+        facts({
+          reports: reports(unauthorized, unauthorized),
+          logins: { openai: credits() },
+          defaultProvider: "rome_credits",
+        }),
+      ),
+    ).toMatchObject({ ok: false, failure: { provider: "anthropic" } });
+  });
+
+  it("leaves an agent restricted to a provider where its agent put it", () => {
+    expect(
+      modelResolutionRequest(
+        undefined,
+        undefined,
+        { tier: "large", providerId: "openai" },
+        false,
+        "anthropic",
+      ),
+    ).toEqual({ kind: "tier", tier: "large", providerId: "openai" });
+  });
+});

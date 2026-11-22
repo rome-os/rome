@@ -103,19 +103,93 @@ describe("the default provider as Rome keeps it", () => {
     });
   });
 
-  it("never moves a logged-out default to Rome credits", async () => {
+  it("the default changes on the last logout: Rome credits take it over", async () => {
     const reports: ModelAccountReports = {
       anthropic: reportOf("available"),
       openai: reportOf("unauthorized"),
     };
-    const { defaults } = keeper(reports, {
+    const { defaults, changes } = keeper(reports, {
       stored: { provider: "anthropic" },
       credits: () => true,
     });
     reports.anthropic = reportOf("unauthorized");
     await defaults.reconcile();
+    expect(defaults.current()).toBe("rome_credits");
+    expect(defaults.note()).toMatchObject({ from: "anthropic", to: "rome_credits" });
+    expect(changes.at(-1)).toMatchObject({ to: "rome_credits", by: "removed", moveExisting: true });
+  });
+
+  it("the default stays on the last logout when Rome credits cannot run either", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("unauthorized"),
+    };
+    const { defaults } = keeper(reports, { stored: { provider: "anthropic" } });
+    reports.anthropic = reportOf("unauthorized");
+    await defaults.reconcile();
     expect(defaults.current()).toBe("anthropic");
-    expect(defaults.signedIn()).toEqual({ anthropic: false, openai: false, rome_credits: true });
+  });
+
+  it("a logout moves existing chats only as its dialog said", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("available"),
+    };
+    const { defaults, changes } = keeper(reports, { stored: { provider: "openai" } });
+    defaults.expectLogout("openai", { moveExisting: false });
+    reports.openai = reportOf("unauthorized");
+    await defaults.reconcile();
+    expect(changes.at(-1)).toMatchObject({ from: "openai", to: "anthropic", moveExisting: false });
+    // The choice is spent: the next logout that names none moves them.
+    reports.openai = reportOf("available");
+    await defaults.choose("openai");
+    reports.openai = reportOf("unauthorized");
+    await defaults.reconcile();
+    expect(changes.at(-1)).toMatchObject({ to: "anthropic", moveExisting: true });
+  });
+
+  it("the default changes on a logout to the other login even when its login expired", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("expired"),
+      openai: reportOf("available"),
+    };
+    const { defaults } = keeper(reports, { stored: { provider: "openai" } });
+    reports.openai = reportOf("unauthorized");
+    await defaults.reconcile();
+    expect(defaults.current()).toBe("anthropic");
+  });
+
+  it("a login while Rome credits are the default takes it, and moves every chat", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("unauthorized"),
+      openai: reportOf("unauthorized"),
+    };
+    let credits = true;
+    const { defaults, changes } = keeper(reports, {
+      stored: { provider: "rome_credits" },
+      credits: () => credits,
+    });
+    await defaults.reconcile();
+    reports.anthropic = reportOf("available");
+    credits = true;
+    await defaults.reconcile();
+    expect(defaults.current()).toBe("anthropic");
+    expect(defaults.note()).toBeUndefined();
+    expect(changes.at(-1)).toMatchObject({ from: "rome_credits", by: "first", moveExisting: true });
+  });
+
+  it("a failure never changes the default: a usage limit or an expired login keeps it", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("available"),
+      openai: reportOf("available"),
+    };
+    const { defaults, changes } = keeper(reports, { stored: { provider: "anthropic" } });
+    reports.anthropic = reportOf("usage_limit_reached");
+    await defaults.reconcile();
+    reports.anthropic = reportOf("expired");
+    await defaults.reconcile();
+    expect(defaults.current()).toBe("anthropic");
+    expect(changes).toHaveLength(0);
   });
 
   it("hides Rome credits while any account is logged in, an expired one included", async () => {

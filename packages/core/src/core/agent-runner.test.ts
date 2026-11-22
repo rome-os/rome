@@ -8192,6 +8192,49 @@ describe("AgentRunner", () => {
     const claudeProvider = (opens: ModelSessionParams[]): ModelProvider =>
       recordingProvider("anthropic", "claude-thread", opens);
 
+    it("an overload swap lasts one turn: the next turn runs the session's own model again", async () => {
+      const state = { openai: reportOf("unauthorized"), anthropic: reportOf("available") };
+      const opens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [claudeProvider(opens)],
+        accounts: fakeAccounts(() => state),
+      });
+      const manager = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      const session = await manager.open({
+        agentName: "test-main",
+        channelThreadKey: "webchat:one-turn-swap",
+      });
+      const ran = async (prompt: string) =>
+        (await collectMessages((await startAfter(session, { prompt })).events())).find(
+          (message) => message.type === "result",
+        );
+      const own = (await ran("first")) as { content: string };
+      session.selectModelForOneTurn?.("claude-sonnet");
+      expect(await ran("swapped")).toMatchObject({ content: "claude-sonnet-5-5" });
+      expect(await ran("after")).toMatchObject({ content: own.content });
+      await manager.shutdown();
+    });
+
+    it("an unchecked move keeps every existing chat: a held session runs where it was held", async () => {
+      const state = { openai: reportOf("available"), anthropic: reportOf("available") };
+      const opens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [codexProvider(opens), claudeProvider(opens)],
+        accounts: fakeAccounts(() => state),
+      });
+      const manager = createSessions(
+        {
+          ...managerDeps(modelResolver),
+          heldProvider: (key: string) => (key.startsWith("telegram:") ? "anthropic" : undefined),
+        },
+        { keepAliveAcrossTurns: true },
+      );
+      const held = await manager.open({ agentName: "test-main", channelThreadKey: "telegram:42" });
+      await collectMessages((await startAfter(held, { prompt: "hi" })).events());
+      expect(opens.at(-1)?.config.model).toMatch(/claude/);
+      await manager.shutdown();
+    });
+
     it("a pinned session keeps its model across an entitlement upgrade (no backend reopen)", async () => {
       const state = {
         openai: reportOf("available", { ...RESTRICTED_PLAN }),

@@ -1890,7 +1890,7 @@ export class WebChatRepository {
   /**
    * Stores the chat's model, with who chose it: its owner, or Rome. `kept` is
    * Rome's choice that a change of the default does not move: the chat stays
-   * on that model's provider (docs/domains/agents.md#kept-provider).
+   * on that model's provider (docs/domains/agents.md#pinned-chat).
    */
   async updateSessionLargeModelSelection(
     id: string,

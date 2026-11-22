@@ -453,7 +453,9 @@ function setup(
       },
     },
     sessionRepository: { current: async () => ({ id: "runtime-1" }) },
-    agentSessionManager: { find: rs.fn(() => ({ selectModel: rs.fn() })) },
+    agentSessionManager: {
+      find: rs.fn(() => ({ selectModel: rs.fn(), selectModelForOneTurn: rs.fn() })),
+    },
     accounts: fakeAccounts({
       anthropic: reportOf("available"),
       openai: reportOf("unauthorized"),
@@ -4262,18 +4264,23 @@ describe("Concierge provider recovery", () => {
   it.each([
     ["anthropic", "claude-sonnet", "You've hit your Sonnet limit", "claude-opus-5-5", "kept"],
     ["openai", "gpt-6-luna", "Selected model is at capacity.", "gpt-5-6-terra", "auto"],
-  ] as const)("moves %s from %s on %s to the same provider's other model, keeping who chose it", async (provider, selection, message, target, by) => {
+  ] as const)("an overload swap lasts one turn: %s from %s on %s runs the other model once, and the chat keeps its own", async (provider, selection, message, target, by) => {
     const { s } = await prepared({ startEvents: false });
     await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, selection, by);
+    const session = { selectModel: rs.fn(), selectModelForOneTurn: rs.fn() };
+    (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue(session);
+    (s.deps.webchatRepo.updateSessionLargeModelSelection as ReturnType<typeof rs.fn>).mockClear();
     expect(
       await s.service.switchForModelLimit(CONCIERGE_CHAT, failure(message, provider)),
     ).toMatchObject({ from: provider, to: provider, selectionId: target });
-    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenLastCalledWith(
-      CONCIERGE_CHAT,
-      target,
-      by,
-    );
-    expect(s.deps.agentSessionManager.find).toHaveBeenCalled();
+    // The weaker model is never stored: the next turn tries the chat's own again.
+    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).not.toHaveBeenCalled();
+    expect(s.sessions.get(CONCIERGE_CHAT)).toMatchObject({
+      largeModelSelection: selection,
+      largeModelSelectionBy: by,
+    });
+    expect(session.selectModelForOneTurn).toHaveBeenCalledWith(target);
+    expect(session.selectModel).not.toHaveBeenCalled();
     expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenLastCalledWith(
       CONCIERGE_CHAT,
       expect.any(String),
@@ -4283,23 +4290,55 @@ describe("Concierge provider recovery", () => {
           from: provider,
           to: provider,
           reason: "model_limit",
+          oneTurn: true,
         }),
       ],
     );
+  });
+  it("an overload swap needs the chat's live session, and moves nothing without one", async () => {
+    const { s } = await prepared({ startEvents: false });
+    (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue(undefined);
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Opus limit")),
+    ).toBeNull();
+    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
   });
   it("keeps a chat on Rome credits there when Codex's model hits its limit", async () => {
     const { s } = await prepared({ startEvents: false });
     // An owner-free chat on a Claude model, while every chat runs on Rome credits: it runs on Codex.
     s.service.deps.defaults = { current: () => "rome_credits" };
-    const selectModel = rs.fn();
-    (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue({ selectModel });
+    const selectModelForOneTurn = rs.fn();
+    (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue({
+      selectModel: rs.fn(),
+      selectModelForOneTurn,
+    });
     expect(
       await s.service.switchForModelLimit(
         CONCIERGE_CHAT,
         failure("Selected model is at capacity.", "openai"),
       ),
     ).toMatchObject({ from: "openai", to: "openai", selectionId: "gpt-6-luna" });
-    expect(selectModel).toHaveBeenCalledWith("gpt-6-luna");
+    expect(selectModelForOneTurn).toHaveBeenCalledWith("gpt-6-luna");
+  });
+  it("a chat held on its own account is not on Rome credits when its model hits its limit", async () => {
+    const { s } = await prepared({ startEvents: false });
+    s.service.deps.defaults = { current: () => "rome_credits" };
+    s.service.deps.held = () => true;
+    // Held on Claude: the swap stays on Claude, not on Codex through the credits.
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Opus limit")),
+    ).toMatchObject({ from: "anthropic", to: "anthropic", selectionId: "claude-sonnet" });
+  });
+  it("counts Rome credits only while no account is logged in, as every chat does", async () => {
+    const { s } = await prepared({ startEvents: false });
+    // A stale default of Rome credits beside a Claude login runs nothing on them.
+    s.service.deps.defaults = {
+      current: () => "rome_credits",
+      signedIn: () => ({ anthropic: true, openai: false, rome_credits: false }),
+    };
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Opus limit")),
+    ).toMatchObject({ from: "anthropic", selectionId: "claude-sonnet" });
   });
   it("moves a chat whose turns never ran off the provider's strong model", async () => {
     const { s } = await prepared({ startEvents: false });
@@ -4338,22 +4377,45 @@ describe("Concierge provider recovery", () => {
     ).toBeNull();
     expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
   });
-  it("blocks a return for ten minutes but permits it after the interval", async () => {
+  it("an overload swap lasts one turn: the chat's own model, still overloaded, swaps again", async () => {
     const { s } = await prepared({ startEvents: false });
     await s.deps.webchatRepo.updateSessionLargeModelSelection(
       CONCIERGE_CHAT,
       "claude-sonnet",
       "auto",
     );
-    const now = rs.spyOn(Date, "now").mockReturnValue(1_000_000);
     expect(
       await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Sonnet limit")),
     ).toMatchObject({ selectionId: "claude-opus-5-5" });
+    // The next turn ran Sonnet again, and it is still at its limit.
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Sonnet limit")),
+    ).toMatchObject({ selectionId: "claude-opus-5-5" });
+    expect(s.sessions.get(CONCIERGE_CHAT)).toMatchObject({ largeModelSelection: "claude-sonnet" });
+  });
+  it("blocks a swap to a model the chat left for ten minutes, and permits it after", async () => {
+    const { s } = await prepared({ startEvents: false });
+    const now = rs.spyOn(Date, "now").mockReturnValue(1_000_000);
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(
+      CONCIERGE_CHAT,
+      "claude-sonnet",
+      "auto",
+    );
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Sonnet limit")),
+    ).toMatchObject({ selectionId: "claude-opus-5-5" });
+    // The chat's own model is now Opus: a swap back to Sonnet waits ten minutes.
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(
+      CONCIERGE_CHAT,
+      "claude-opus-5-5",
+      "auto",
+    );
     expect(await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Opus limit"))).toBeNull();
     now.mockReturnValue(1_600_001);
     expect(
       await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Opus limit")),
     ).toMatchObject({ selectionId: "claude-sonnet" });
+    now.mockRestore();
   });
   it("drops a pending retry when the failed subscription stops paying during the wait", async () => {
     let release!: () => void;
@@ -4433,8 +4495,9 @@ describe("Concierge provider recovery", () => {
     expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenCalledTimes(
       reason === "temporary" ? 0 : 1,
     );
+    // Neither stores another model: a model-limit swap lasts its one turn.
     expect(s.sessions.get(CONCIERGE_CHAT)).toMatchObject({
-      largeModelSelection: reason === "temporary" ? "claude-opus-5-5" : "claude-sonnet",
+      largeModelSelection: "claude-opus-5-5",
     });
   });
   it.each([
@@ -4502,11 +4565,12 @@ describe("Concierge provider recovery", () => {
       ...fields,
     });
     await s.settle();
-    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenLastCalledWith(
+    expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenLastCalledWith(
       CONCIERGE_CHAT,
-      "gpt-5-6-terra",
-      "auto",
+      expect.any(String),
+      [expect.objectContaining({ type: "quota_switch", model: "gpt-5.6-terra", oneTurn: true })],
     );
+    expect(s.sessions.get(CONCIERGE_CHAT)).toMatchObject({ largeModelSelection: "gpt-6-luna" });
     expect(s.backendTurns).toHaveLength(1);
     expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenCalledTimes(1);
   });
@@ -4568,7 +4632,7 @@ describe("Concierge provider recovery", () => {
     });
     await s.settle();
     expect(s.backendTurns.at(-1)).toMatchObject({ threadId: TOPIC_CHAT });
-    expect(s.sessions.get(TOPIC_CHAT)).toMatchObject({ largeModelSelection: "claude-opus-5-5" });
+    expect(s.sessions.get(TOPIC_CHAT)).toMatchObject({ largeModelSelection: "claude-sonnet" });
     // The topic chat left Sonnet; the main chat may still move to it.
     expect(
       await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Opus limit")),

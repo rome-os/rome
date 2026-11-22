@@ -205,8 +205,9 @@ export function aiToolsRoutes(
     const card = (await deps.providerFailures.cards()).find((open) => open.messageId === messageId);
     if (card && !(await mayOpenAll([card.chatId]))) return c.json({ error: "Not found" }, 404);
     try {
-      await deps.providerFailures.switchCard(messageId, change);
-      return c.json({ ok: true });
+      const outcome = await deps.providerFailures.switchCard(messageId, change);
+      // An option that no longer works wrote a fresh card with those that do.
+      return c.json({ ok: true, ...(outcome === "refreshed" ? { refreshed: true } : {}) });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 409);
     }
@@ -330,7 +331,18 @@ export function aiToolsRoutes(
     });
   });
 
+  // The logout dialog's "Move existing chats too", for a logout that moves the
+  // default. A client that sends none moved them, as before.
+  const expectLogout = async (
+    c: { req: { json(): Promise<unknown> } },
+    provider: "anthropic" | "openai",
+  ) => {
+    const body = (await c.req.json().catch(() => null)) as { moveExisting?: unknown } | null;
+    deps.defaultProviders?.expectLogout(provider, { moveExisting: body?.moveExisting !== false });
+  };
+
   app.delete("/ai-tools/anthropic-compatible-credentials", async (c) => {
+    await expectLogout(c, "anthropic");
     await deps.claudeAccount.removeCredential();
     await deps.modelAccounts.refresh("anthropic");
     return c.json({ ok: true });
@@ -379,6 +391,7 @@ export function aiToolsRoutes(
 
   // Re-read the account on success so the agent gate reflects it immediately.
   app.post("/ai-tools/claude/logout", async (c) => {
+    await expectLogout(c, "anthropic");
     try {
       await deps.claudeAccount.revoke();
     } catch (err) {
@@ -393,6 +406,7 @@ export function aiToolsRoutes(
   // Log out of Codex via the app-server `account/logout` RPC (no PTY terminal).
   // Re-probe login state on success so the agent gate reflects it immediately.
   app.post("/ai-tools/codex/logout", async (c) => {
+    await expectLogout(c, "openai");
     try {
       await deps.codexAccountService.revoke();
       await deps.modelAccounts.refresh("openai");
