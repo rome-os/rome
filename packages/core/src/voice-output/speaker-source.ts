@@ -5,7 +5,7 @@
 import { createLogger } from "../logger.js";
 import { speakerFor } from "./create-speaker.js";
 import type { SpeakerListener, SpeakerSession } from "./speaker.js";
-import type { SpeechCredentialSource } from "./speech-credentials.js";
+import type { SpeechCredentialSource, SpeechUsage } from "./speech-credentials.js";
 import { resolveVoiceModeEnabled } from "./voice-mode-gate.js";
 
 const log = createLogger("voice-output");
@@ -72,9 +72,16 @@ export function createSpeakerSource(deps: SpeakerSourceDeps): SpeakerSource {
               log.warn("speech provider has no adapter", { provider: credentials.provider });
               return { ok: false, reason: "unknown-provider", detail: credentials.provider };
             }
+            const { sessionId } = credentials;
+            const record = deps.credentials.recordUsage?.bind(deps.credentials);
             return {
               ok: true,
-              session: speaker.open(listener),
+              session:
+                sessionId && record
+                  ? metered(speaker.open.bind(speaker), listener, (usage) =>
+                      record(sessionId, usage),
+                    )
+                  : speaker.open(listener),
               provider: credentials.provider,
               credentialSessionId: credentials.sessionId,
             };
@@ -87,6 +94,64 @@ export function createSpeakerSource(deps: SpeakerSourceDeps): SpeakerSource {
           }
         }
       }
+    },
+  };
+}
+
+/**
+ * Opens a session that counts the text it sends and the audio it gets back,
+ * and hands the count to `record` as each sentence finishes and when the
+ * session stops or ends.
+ */
+function metered(
+  open: (listener: SpeakerListener) => SpeakerSession,
+  listener: SpeakerListener,
+  record: (usage: SpeechUsage) => void,
+): SpeakerSession {
+  let characters = 0;
+  let audioBytes = 0;
+  const flush = () => {
+    if (characters === 0 && audioBytes === 0) return;
+    // PCM s16le mono: two bytes a sample.
+    record({ characters, seconds: audioBytes / 2 / session.format.sampleRate });
+    characters = 0;
+    audioBytes = 0;
+  };
+  const session = open({
+    onAudio(frame) {
+      audioBytes += frame.pcm.byteLength;
+      listener.onAudio(frame);
+    },
+    onSentenceEnd(sentenceId) {
+      flush();
+      listener.onSentenceEnd(sentenceId);
+    },
+    onSentenceError(sentenceId, error) {
+      flush();
+      listener.onSentenceError(sentenceId, error);
+    },
+    onClosed(error) {
+      flush();
+      listener.onClosed(error);
+    },
+  });
+  return {
+    get format() {
+      return session.format;
+    },
+    say(sentenceId, text) {
+      // Code points, so a character outside the BMP counts once.
+      characters += [...text].length;
+      session.say(sentenceId, text);
+    },
+    stop() {
+      const stopped = session.stop();
+      flush();
+      return stopped;
+    },
+    close() {
+      session.close();
+      flush();
     },
   };
 }

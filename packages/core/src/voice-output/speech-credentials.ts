@@ -1,7 +1,8 @@
 // Where each speaking session's credential comes from. The port keeps the
-// speaker free of how the credential was got: a later source asks Rome Cloud
-// for a short-lived speech key, as `voice-input/rome-cloud-session.ts` does for
-// listening. Until one exists, `NO_SPEECH_CREDENTIALS` says so plainly.
+// speaker free of how the credential was got: `rome-cloud-speech-credentials.ts`
+// asks Rome Cloud for a short-lived speech key, as
+// `voice-input/rome-cloud-session.ts` does for listening. Without a source,
+// `NO_SPEECH_CREDENTIALS` says so plainly.
 
 /** What one speaking session needs from its provider. */
 interface SpeechCredentials {
@@ -26,9 +27,19 @@ export type SpeechCredentialOutcome =
   /** The source could not be asked, or answered with something unreadable. */
   | { kind: "unavailable"; detail: string };
 
+/** What speaking on one credential used. */
+export interface SpeechUsage {
+  /** Characters of text sent to the provider. */
+  characters: number;
+  /** Seconds of audio the provider returned. */
+  seconds: number;
+}
+
 export interface SpeechCredentialSource {
   /** One credential for one speaking session. */
   get(): Promise<SpeechCredentialOutcome>;
+  /** Adds what a speaking session used on the credential with this `sessionId`. Never throws. */
+  recordUsage?(sessionId: string, usage: SpeechUsage): void;
 }
 
 /** No source at all: speaking is not set up on this instance. */

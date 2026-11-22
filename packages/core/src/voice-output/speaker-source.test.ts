@@ -8,7 +8,13 @@ import {
   type SpeechCredentialOutcome,
   type SpeechCredentialSource,
 } from "./speech-credentials.js";
-import { type FakeTts, startFakeTts, until } from "./test-helpers.js";
+import {
+  audioMessage,
+  type FakeTts,
+  startFakeTts,
+  terminatedMessage,
+  until,
+} from "./test-helpers.js";
 import { VOICE_MODE_GATE_NAME, resolveVoiceModeEnabled } from "./voice-mode-gate.js";
 
 const listener: SpeakerListener = {
@@ -176,5 +182,42 @@ describe("speaker source", () => {
       enabled: async () => true,
     });
     expect(await source.open(listener)).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("counts what each session speaks on its credential, as sentences finish and when it closes", async () => {
+    // One second of 24 kHz audio, in two frames.
+    const half = Buffer.alloc(24_000);
+    fake.onMessage = (message, reply) => {
+      if (message.text === undefined || message.text_end !== true) return;
+      const id = message.stream_id as string;
+      reply(audioMessage(id, half));
+      reply(audioMessage(id, half, true));
+      reply(terminatedMessage(id));
+    };
+    const usage: { sessionId: string; characters: number; seconds: number }[] = [];
+    const credentials = {
+      ...granted(),
+      recordUsage: (sessionId: string, used: { characters: number; seconds: number }) =>
+        usage.push({ sessionId, ...used }),
+    };
+    const ended: string[] = [];
+    const source = createSpeakerSource({ credentials, enabled: async () => true });
+    const outcome = await source.open({ ...listener, onSentenceEnd: (id) => ended.push(id) });
+    if (!outcome.ok) throw new Error(`expected a session, got ${outcome.reason}`);
+    opened.push(outcome.session);
+
+    outcome.session.say("a", "你好，Rome😀。");
+    await until(() => ended.length === 1);
+    expect(usage).toEqual([{ sessionId: "speech-1", characters: 9, seconds: 1 }]);
+
+    // A sentence stopped before it finished still sent its text.
+    fake.onMessage = () => {};
+    outcome.session.say("b", "再见。");
+    await until(() => fake.received.some((m) => m.text === "再见。"));
+    outcome.session.close();
+    expect(usage).toEqual([
+      { sessionId: "speech-1", characters: 9, seconds: 1 },
+      { sessionId: "speech-1", characters: 3, seconds: 0 },
+    ]);
   });
 });
