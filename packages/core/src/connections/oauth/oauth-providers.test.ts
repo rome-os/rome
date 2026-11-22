@@ -43,7 +43,7 @@ describe("oauth-providers", () => {
     delete process.env.SHOW_MICROSOFT_OAUTH;
 
     expect(showGoogleOAuth()).toBe(false);
-    expect(getEnabledOAuthProviders()).toEqual(["github", "slack", "shopify"]);
+    expect(getEnabledOAuthProviders()).toEqual(["github", "shopify"]);
     expect(isEnabledOAuthProvider("google")).toBe(false);
     expect(isEnabledOAuthProvider("github")).toBe(true);
   });
@@ -53,7 +53,7 @@ describe("oauth-providers", () => {
     delete process.env.SHOW_MICROSOFT_OAUTH;
 
     expect(showGoogleOAuth()).toBe(true);
-    expect(getEnabledOAuthProviders()).toEqual(["google", "github", "slack", "shopify"]);
+    expect(getEnabledOAuthProviders()).toEqual(["google", "github", "shopify"]);
     expect(isEnabledOAuthProvider("google")).toBe(true);
   });
 

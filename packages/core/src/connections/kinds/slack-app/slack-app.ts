@@ -31,9 +31,11 @@ import {
 import { isForwardedBy } from "./forward.js";
 import { authorOf, inTimeline, isSaid, slackMessage, type SlackWireMessage } from "./message.js";
 import { SlackReadGate } from "./read-gate.js";
-import { readTimeline } from "./timeline.js";
+import { type FetchHistoryPage, readTimeline } from "./timeline.js";
+import { SlackMemberChannels } from "./channels.js";
+import { compareTs } from "./timeline-order.js";
 import type { SlackAppMailbox } from "./rome-cloud.js";
-import type { SlackAppWebApi } from "./web-api.js";
+import type { SlackAppWebApi, SlackChannel } from "./web-api.js";
 import type { Message } from "../../message.js";
 import { RecordingStopped } from "../../types.js";
 
@@ -112,6 +114,10 @@ export interface SlackAppAdapterConfig {
   listened?: () => boolean;
   /** How reads of Slack's history take turns. Defaults to Slack's allowance. */
   readGate?: SlackReadGate;
+  /** How reads of a thread take turns. Slack allows conversations.replies
+   *  its own request a minute, apart from conversations.history. Defaults to
+   *  `readGate` when one is given, else to Slack's allowance. */
+  repliesGate?: SlackReadGate;
 }
 
 function isExternalAuthor(payload: SlackEventCallback): boolean {
@@ -119,6 +125,43 @@ function isExternalAuthor(payload: SlackEventCallback): boolean {
   return [event.team, event.user_team, event.source_team].some(
     (team) => typeof team === "string" && team !== payload.team_id,
   );
+}
+
+/** What a read of a channel says when the workspace was connected before
+ *  Rome's Slack app asked to read channels. */
+export const REAPPROVE_FOR_HISTORY =
+  "Rome's Slack app may not read channels in this workspace yet: it was connected before the app asked for that. Ask the guardian to approve the app again from Slack in Settings › Connections.";
+
+/** A read's failure as an agent reads it: a chat the app may not read named,
+ *  with what would let it. */
+function unreadable(error: unknown, chatId: string): unknown {
+  if (!(error instanceof SlackApiError) || !NOT_READABLE.has(error.code)) return error;
+  if (error.code === "missing_scope") {
+    return new Error(
+      `This Slack account may not read chat ${chatId} (missing_scope). ${REAPPROVE_FOR_HISTORY}`,
+    );
+  }
+  if (error.code === "not_in_channel") {
+    return new Error(
+      `Rome's Slack app is not a member of chat ${chatId}, so it may not read it (not_in_channel). Someone in Slack can add it with /invite.`,
+    );
+  }
+  return new Error(`This Slack account may not read chat ${chatId} (${error.code})`);
+}
+
+/** The message's own ts: a reply's id names its thread first. */
+function tsOfId(messageId: string | undefined): string {
+  return messageId ? messageId.slice(messageId.lastIndexOf(":") + 1) : "";
+}
+
+/** Whether a message said at `ts` is within a read's bounds. */
+function withinRead(ts: string, read: TalkHistoryRead): boolean {
+  const at = Number.parseFloat(ts) * 1_000;
+  if (read.since && at < read.since.getTime()) return false;
+  if (read.until && at > read.until.getTime()) return false;
+  if (read.olderThan && compareTs(ts, read.olderThan) >= 0) return false;
+  if (read.newerThan && compareTs(ts, read.newerThan) <= 0) return false;
+  return true;
 }
 
 /**
@@ -132,7 +175,13 @@ export function messageOf(kept: ChannelMessage, receivedBy: string): Message {
   const direct = kept.thread?.kind === "dm";
   return {
     id: kept.messageId,
-    where: { chatId: kept.chatId, kind: direct ? "direct" : "group" },
+    where: {
+      chatId: kept.chatId,
+      kind: direct ? "direct" : "group",
+      // A reply in a group's thread. The thread lives inside the chat, so the
+      // chat stays the conversation and the thread is named by its own id.
+      ...(kept.inThread ? { thread: { parentChatId: kept.chatId, id: kept.inThread } } : {}),
+    },
     sender: {
       accountId: kept.senderId,
       ...(kept.senderDisplayName !== undefined ? { name: kept.senderDisplayName } : {}),
@@ -171,10 +220,17 @@ export class SlackAppAdapter {
   /** A second look at the token after a removal event it outlived. */
   private recheckTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly readGate: SlackReadGate;
-
+  private readonly repliesGate: SlackReadGate;
+  /** The channels the app is a member of, by name. */
+  private readonly memberChannels: SlackMemberChannels;
   constructor(private readonly config: SlackAppAdapterConfig) {
     this.mailbox = config.mailbox;
+    this.memberChannels = new SlackMemberChannels({ api: config.api, botToken: config.botToken });
     this.readGate =
+      config.readGate ??
+      new SlackReadGate({ intervalMs: HISTORY_INTERVAL_MS, maxWaitMs: HISTORY_MAX_WAIT_MS });
+    this.repliesGate =
+      config.repliesGate ??
       config.readGate ??
       new SlackReadGate({ intervalMs: HISTORY_INTERVAL_MS, maxWaitMs: HISTORY_MAX_WAIT_MS });
   }
@@ -397,6 +453,13 @@ export class SlackAppAdapter {
       // A thread lives inside its conversation's chat. The reply finds the
       // thread from the id of the message it answers.
       ...(event.thread_ts ? { replyTo: { messageId: event.thread_ts } } : {}),
+      // A reply in a thread is read with the thread's earlier messages, which
+      // the conversation's chat does not hold.
+      // In a direct message the app hears every reply, so only a thread in a
+      // group is read.
+      ...(!direct && event.thread_ts && event.thread_ts !== event.ts
+        ? { inThread: `${event.channel}:${event.thread_ts}` as ChatId }
+        : {}),
     };
     // The mailbox is told the message was received only once Chats has it on
     // record (docs/domains/connections.md#message). A delivery that is
@@ -483,8 +546,12 @@ export class SlackAppAdapter {
     this.recheckTimer = null;
   }
 
-  async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
+  async send(named: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
     refuseAttachments("slack", message);
+    // Only a channel's name waits on Slack, so a send by id posts at once.
+    const chatId = named.startsWith("#")
+      ? await this.memberChannels.resolve(named, this.abort.signal, { fresh: true })
+      : named;
     const text = textToSend("slack", message).trim();
     const replyTo = replyToShaped("slack", message.replyToMessageId, SLACK_MESSAGE_ID);
     const parsed = parseSlackChatId(chatId);
@@ -510,6 +577,16 @@ export class SlackAppAdapter {
     };
   }
 
+  /** One page of a chat's history, taking its turn at the read gate. History
+   *  and a thread's replies each name their own kind of call, so a page
+   *  ending at a thread's root never takes the thread's answer. */
+  private historyPage: FetchHistoryPage = (channelId, bounds) =>
+    this.readGate.run(
+      `history:${channelId}:${bounds.latest ?? ""}`,
+      () => this.fetchPage(channelId, bounds.latest),
+      this.abort.signal,
+    );
+
   private async fetchPage(channelId: string, latest: string | undefined) {
     const page = await this.config.api.conversationHistory(
       this.config.botToken,
@@ -526,7 +603,12 @@ export class SlackAppAdapter {
     for (const wire of wires) {
       const name = (wire.user && names.get(wire.user)) || {};
       const message = slackMessage(this.context(channelId), wire, name);
-      if (message) messages.push({ ts: wire.ts, message });
+      if (message) {
+        messages.push({
+          ts: wire.ts,
+          message,
+        });
+      }
     }
     return { messages, hasMore: page.hasMore, oldest: page.messages.at(-1)?.ts };
   }
@@ -556,34 +638,82 @@ export class SlackAppAdapter {
       ...(olderThan ? { olderThan } : {}),
       ...(newerThan ? { newerThan } : {}),
     };
-    const { channelId, threadTs } = parseSlackChatId(chatId);
-    if (threadTs)
-      throw new Error(`Slack chat ${chatId} is a thread, and a read takes its conversation's id`);
-    // The app reads direct messages only (im:history), so a group's read is
-    // refused before it takes a turn of Slack's allowance from a read that
-    // can succeed.
-    if (!channelId.startsWith("D")) {
-      throw new Error(
-        `This Slack account may not read chat ${chatId} (it reads direct messages only)`,
-      );
-    }
+    const resolved = chatId.startsWith("#")
+      ? await this.memberChannels.resolve(chatId, this.abort.signal)
+      : chatId;
+    const { channelId, threadTs } = parseSlackChatId(resolved);
     try {
-      return await readTimeline(
-        (channel, bounds) =>
-          this.readGate.run(
-            `${channel}:${bounds.latest ?? ""}`,
-            () => this.fetchPage(channel, bounds.latest),
-            this.abort.signal,
-          ),
-        channelId as ChatId,
-        read,
-      );
+      if (threadTs) return await this.readThread(channelId, threadTs, read);
+      return await readTimeline(this.historyPage, channelId as ChatId, read);
     } catch (error) {
-      if (error instanceof SlackApiError && NOT_READABLE.has(error.code)) {
-        throw new Error(`This Slack account may not read chat ${chatId} (${error.code})`);
-      }
-      throw error;
+      throw unreadable(error, chatId);
     }
+  }
+
+  /**
+   * A thread's messages within `read`'s bounds, newest first, its root
+   * included. Slack answers a thread oldest first, one page of 15 a minute,
+   * so one read is one page: a read below a bound (`olderThan`, `until`)
+   * answers the newest of the thread's first page, and any other read answers
+   * the oldest `limit` from the thread's start or just after `newerThan`. A
+   * longer thread is read on with `newerThan`, each page asking Slack from
+   * there, until a read comes back empty.
+   */
+  private async readThread(
+    channelId: string,
+    threadTs: string,
+    read: TalkHistoryRead,
+  ): Promise<ChannelMessage[]> {
+    const oldest = read.newerThan;
+    const page = await this.repliesGate.run(
+      `replies:${channelId}:${threadTs}:${oldest ?? ""}`,
+      () =>
+        this.config.api.conversationReplies(
+          this.config.botToken,
+          {
+            channel: channelId,
+            ts: threadTs,
+            limit: HISTORY_PAGE,
+            ...(oldest ? { oldest } : {}),
+          },
+          this.abort.signal,
+        ),
+      this.abort.signal,
+    );
+    const wires = page.messages.filter((wire) => isSaid(wire.subtype));
+    const names = await this.namesOf(
+      wires.flatMap((wire) =>
+        wire.user && wire.user !== this.config.botUserId ? [wire.user] : [],
+      ),
+    );
+    const messages: ChannelMessage[] = [];
+    for (const wire of wires) {
+      if (!withinRead(wire.ts, read)) continue;
+      const name = (wire.user && names.get(wire.user)) || {};
+      const message = slackMessage(this.context(channelId), wire, name);
+      if (message) messages.push(message);
+    }
+    // A page Slack goes on from that held nothing Rome reads, such as only
+    // file shares with no text, must not read as the thread's end.
+    const lastRaw = page.messages.at(-1)?.ts;
+    if (messages.length === 0 && page.nextCursor && lastRaw) {
+      throw new Error(
+        `Slack's page of thread ${channelId}:${threadTs} held only messages Rome does not read, such as files with no text, and the thread goes on. Read on with newerThan=${lastRaw}, which conversations.replies takes as its cursor.`,
+      );
+    }
+    messages.sort((a, b) => compareTs(tsOfId(b.messageId), tsOfId(a.messageId)));
+    // A read on from a message answers the messages just after it, whatever
+    // bounds it above.
+    const below =
+      read.newerThan === undefined && (read.olderThan !== undefined || read.until !== undefined);
+    return below
+      ? messages.slice(0, read.limit)
+      : messages.slice(Math.max(0, messages.length - read.limit));
+  }
+
+  /** The channels the app is a member of, by name. */
+  async channels(): Promise<SlackChannel[]> {
+    return this.memberChannels.list(this.abort.signal);
   }
 
   /** The direct-message conversation with a member of this workspace. */

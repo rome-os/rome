@@ -16,14 +16,12 @@ describe("provider token files", () => {
     tempDir = mkdtempSync(join(tmpdir(), "rome-provider-token-files-"));
     for (const key of [
       "ROME_GITHUB_TOKEN_FILE",
-      "ROME_SLACK_TOKEN_FILE",
       "ROME_GOOGLE_TOKEN_FILE",
       "ROME_SHOPIFY_TOKEN_FILE",
     ]) {
       savedEnv[key] = process.env[key];
     }
     process.env.ROME_GITHUB_TOKEN_FILE = join(tempDir, "github-oauth-token");
-    process.env.ROME_SLACK_TOKEN_FILE = join(tempDir, "slack-oauth-token");
     process.env.ROME_GOOGLE_TOKEN_FILE = join(tempDir, "google-oauth-token");
     process.env.ROME_SHOPIFY_TOKEN_FILE = join(tempDir, "shopify-oauth-token");
   });
@@ -37,7 +35,7 @@ describe("provider token files", () => {
 
   it("resolves the path from the per-provider env override", () => {
     expect(getProviderTokenFilePath("github")).toBe(join(tempDir, "github-oauth-token"));
-    expect(getProviderTokenFilePath("slack")).toBe(join(tempDir, "slack-oauth-token"));
+    expect(getProviderTokenFilePath("shopify")).toBe(join(tempDir, "shopify-oauth-token"));
   });
 
   it("writes GitHub as a bare token line and trims whitespace", async () => {
@@ -47,32 +45,6 @@ describe("provider token files", () => {
     expect(readFileSync(file, "utf8")).toBe("gho_test_token\n");
     // 0o640 so the shared-fs reader (shell wrapper / connector) can read it.
     expect(statSync(file).mode & 0o777).toBe(0o640);
-  });
-
-  it("writes Slack as JSON carrying the bot token, user token, and team id", async () => {
-    // botToken/userToken are secret material; teamId is the non-secret profile.
-    await syncProviderTokenFile(
-      "slack",
-      { botToken: "xoxb-bot", userToken: "xoxp-user" },
-      { teamId: "T123" },
-    );
-
-    const file = getProviderTokenFilePath("slack");
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({
-      botToken: "xoxb-bot",
-      userToken: "xoxp-user",
-      teamId: "T123",
-    });
-  });
-
-  it("writes Slack with null user token / team id when absent from material/profile", async () => {
-    await syncProviderTokenFile("slack", { botToken: "xoxb-bot" }, {});
-
-    expect(JSON.parse(readFileSync(getProviderTokenFilePath("slack"), "utf8"))).toEqual({
-      botToken: "xoxb-bot",
-      userToken: null,
-      teamId: null,
-    });
   });
 
   it("writes Shopify as JSON carrying the access token and the store's domain", async () => {
@@ -105,14 +77,14 @@ describe("provider token files", () => {
   });
 
   it("removes the file on disconnect (and tolerates a missing file)", async () => {
-    const file = getProviderTokenFilePath("slack");
-    await syncProviderTokenFile("slack", { botToken: "xoxb-bot" }, {});
+    const file = getProviderTokenFilePath("github");
+    await syncProviderTokenFile("github", { accessToken: "gho_test_token" }, {});
     expect(existsSync(file)).toBe(true);
 
-    await clearProviderTokenFile("slack");
+    await clearProviderTokenFile("github");
     expect(existsSync(file)).toBe(false);
     // Idempotent: clearing an already-absent file does not throw.
-    await expect(clearProviderTokenFile("slack")).resolves.toBeUndefined();
+    await expect(clearProviderTokenFile("github")).resolves.toBeUndefined();
   });
 
   it("owns no file for a provider without a file consumer (google)", async () => {

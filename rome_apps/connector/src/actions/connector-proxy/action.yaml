@@ -27,6 +27,21 @@ description: |
   connected (connector:connector_connect) first. On a 2xx response, returns { status, data,
   headers } as `data`.
 
+  Slack through Rome's own Slack app takes four methods: `/api/chat.postMessage`
+  ({ channel, text, thread_ts? }) sends, `/api/conversations.history`
+  ({ channel, limit?, latest?, oldest? }) and `/api/conversations.replies`
+  ({ channel, ts, limit?, cursor? }) read, and `/api/conversations.list`
+  ({ query?, limit?, cursor? }) lists the channels the app is a member of,
+  reading on by passing `response_metadata.next_cursor` as `cursor`. A channel
+  is named by its id or as `#name`. History answers newest first, and a page
+  can hold fewer messages than `limit` with more before it: page back by
+  passing the oldest `ts` as `latest` until a page comes back empty, which is
+  the only one with `has_more: false`. A thread answers oldest first, from its
+  start: read on by passing `response_metadata.next_cursor` as `cursor` until
+  a page comes back empty. Any other Slack method is refused. With Rome's
+  Slack app not connected, a Slack call fails and says to ask the guardian to
+  connect it.
+
   With a Rome-managed Google connection, Gmail is restricted to GETs for
   /gmail/v1/users/me/profile, /messages, /messages/{id}, /threads and /threads/{id}
   (all under /gmail/v1/users/me), without custom headers/body. It never modifies,

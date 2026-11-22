@@ -37,6 +37,20 @@ describe("catchUpPrompt", () => {
     ]);
   });
 
+  it("says when a thread's latest replies before the turn's message were not read", () => {
+    const thread = [said(-1, "reply 4")];
+    const cut = catchUpPrompt("hi", { unseen: [], inThread: thread, inThreadCut: true });
+    const whole = catchUpPrompt("hi", { unseen: [], inThread: thread });
+
+    expect(cut.split("\n").slice(0, 4)).toEqual([
+      "<thread_messages>",
+      `[${at.toISOString()}] Ada: reply 4`,
+      "[later replies in this thread were not shown]",
+      "</thread_messages>",
+    ]);
+    expect(whole).not.toContain("were not shown");
+  });
+
   it("puts the message that started the thread first", () => {
     const starter: PromptMessage = { id: 9, sender: "Bo", who: null, text: "start", at };
     const prompt = catchUpPrompt("hi", {

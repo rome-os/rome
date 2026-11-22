@@ -1,4 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
+import { CredentialRejected } from "../errors.js";
+import { SlackApiError } from "../kinds/slack/slack.js";
 import type { SlackAppCloud, SlackAppInstall } from "../kinds/slack-app/rome-cloud.js";
 import { SlackAppRefused } from "../kinds/slack-app/rome-cloud.js";
 import { createSlackAppWebApi } from "../kinds/slack-app/web-api.js";
@@ -148,6 +150,8 @@ describe("the Slack app talker", () => {
         openDirectMessage: async () => "D1",
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
+        conversationReplies: async () => ({ messages: [] }),
+        memberChannels: async () => ({ channels: [] }),
         revoke: async () => {},
       },
       cloud: cloud({
@@ -201,6 +205,78 @@ describe("the Slack app talker", () => {
   });
 });
 
+describe("the Slack app's channels in chat settings", () => {
+  /** The talker of a connection whose channel listing Slack answers with
+   *  `memberChannels`. */
+  function channelTalker(
+    memberChannels: () => Promise<{ channels: { id: string; name: string; isPrivate: boolean }[] }>,
+  ) {
+    const descriptor = makeSlackAppDescriptor({
+      listens: () => true,
+      api: {
+        authTest: async () => ({ teamId: "T_A", botUserId: "U_BOT" }),
+        postMessage: async () => ({ ts: "3.0" }),
+        openDirectMessage: async () => "D1",
+        userName: async () => ({}),
+        conversationHistory: async () => ({ messages: [], hasMore: false }),
+        conversationReplies: async () => ({ messages: [] }),
+        memberChannels,
+        revoke: async () => {},
+      },
+      cloud: cloud(),
+      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
+    });
+    const talker = descriptor.capabilities.talker?.build(
+      {
+        material: {
+          teamId: "T_A",
+          botUserId: "U_BOT",
+          botToken: "xoxb-a",
+          forwardSecret: "secret",
+          connectUrl: "wss://relay.test/c/mbx",
+          drainKey: "k",
+        },
+        expiresAt: "never",
+      },
+      { connectionId: "c1", persist: async () => {}, registerIngress: () => () => {} },
+    );
+    return talker;
+  }
+
+  it("lists the channels the app is a member of by name, and finds one by part of it", async () => {
+    const talker = channelTalker(async () => ({
+      channels: [
+        { id: "C_NEWS", name: "news", isPrivate: false },
+        { id: "G_OPS", name: "ops", isPrivate: true },
+      ],
+    }));
+
+    const all = await talker?.directory?.listConversations({ limit: 10 });
+    const found = await talker?.directory?.listConversations({ query: "#NE", limit: 10 });
+
+    expect(all?.conversations.map((each) => each.displayName)).toEqual(["#news", "#ops"]);
+    expect(found?.conversations).toEqual([
+      {
+        ref: { connectionId: "c1", chatId: "C_NEWS" },
+        connectionKind: "slack_app",
+        service: "slack_app",
+        kind: "channel",
+        displayName: "#news",
+      },
+    ]);
+  });
+
+  it("reports a token Slack refuses as a rejected credential", async () => {
+    const talker = channelTalker(async () => {
+      throw new SlackApiError("token_revoked");
+    });
+
+    await expect(talker?.directory?.listConversations({ limit: 10 })).rejects.toBeInstanceOf(
+      CredentialRejected,
+    );
+  });
+});
+
 describe("disconnecting the Slack app in Rome (R8)", () => {
   const MATERIAL = {
     teamId: "T_A",
@@ -220,6 +296,8 @@ describe("disconnecting the Slack app in Rome (R8)", () => {
         openDirectMessage: async () => "D1",
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
+        conversationReplies: async () => ({ messages: [] }),
+        memberChannels: async () => ({ channels: [] }),
         revoke: async (token) => {
           steps.push(`revoke ${token}`);
           await revoke();

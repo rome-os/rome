@@ -1266,6 +1266,10 @@ export interface RunParams {
   platformMessageId?: string;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
+  /** The platform thread the triggering message was said in, as
+   *  {@link ChannelMessage.inThread} names it. A conversation's session reads
+   *  the thread's earlier messages the first time one of its turns is in it. */
+  inThread?: ChatId;
   /**
    * Ask the host to deliver the reply into `threadContext`'s conversation as
    * it is written, answering `platformMessageId`. The host does so only when
@@ -1830,6 +1834,12 @@ export interface ChannelMessage {
    *  account read live from its platform, such as Discord, where the message
    *  opened a thread or says that one was opened. */
   openedThread?: ChatId;
+  /** The platform thread this message was said in, by the id a read takes as
+   *  `chatId` to read the thread's earlier messages. Set by a channel whose
+   *  chat holds its threads, such as Slack's, where `chatId` names the
+   *  conversation and a thread is read apart from it. Absent where the
+   *  message is in no thread, or `chatId` already names the thread. */
+  inThread?: ChatId;
   /** Where this message sits in a channel read, as an opaque token. Set on
    *  what {@link ChannelsService.query} answers: pass it as
    *  {@link ChannelMessageQuery.after} to read the messages older than it. */
@@ -1892,6 +1902,28 @@ export interface ChannelSummary {
   sendable: boolean;
 }
 
+/** What {@link ChannelsService.chats} lists. */
+export interface ChannelChatsQuery {
+  /** Only chats whose name holds this, without regard to case. */
+  query?: string;
+  /** At most this many. Defaults to 100, capped at 200. */
+  limit?: number;
+  /** Where the page before ended, as its `nextCursor` said. */
+  cursor?: string;
+}
+
+/** One page of the chats an account is in. */
+export interface ChannelChatsPage {
+  chats: Array<{
+    chatId: ChatId;
+    /** The chat's name as the platform shows it, such as `#news`. */
+    name: string;
+    kind: ChatDescriptor["kind"];
+  }>;
+  /** Present while more chats follow this page. */
+  nextCursor?: string;
+}
+
 /**
  * The channels this Rome has, by name: how an app action sends on a channel
  * and reads what was said there. The same service in the main process and in
@@ -1925,6 +1957,14 @@ export interface ChannelsService {
    * chat.
    */
   query(account: Account | string, query?: ChannelMessageQuery): Promise<ChannelMessage[]>;
+  /**
+   * The chats one of Rome's accounts is in, as its platform lists them now,
+   * a page at a time. Rejects when the platform refuses the listing, with the
+   * platform's reason, rather than answer an empty page. Rejects for an
+   * account whose connection lists no chats. Absent on a host that predates
+   * it.
+   */
+  chats?(account: Account | string, query?: ChannelChatsQuery): Promise<ChannelChatsPage>;
 }
 
 /** Exact provider-neutral chat command recognized before an agent turn. */

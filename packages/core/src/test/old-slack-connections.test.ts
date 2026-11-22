@@ -30,15 +30,21 @@ import { ChannelRecordsRepository } from "../db/repositories/channel-records.js"
 import type { Logger } from "../logger.js";
 import { createTestDbFile, type TestDb } from "./db.js";
 
-/** The old Slack kinds, each with the account its stored grant reached. */
-const OLD = [{ id: "conn-old-slack-bot", kind: "slack_bot", account: "U_OLD_BOT" }];
+/** The old Slack kinds, each with the account its stored grant reached. The
+ *  Slack bot was a chat connection, with a channel and a connected account;
+ *  the Slack sign-in acted for the guardian and had neither. */
+const OLD = [
+  { id: "conn-old-slack-bot", kind: "slack_bot", account: "U_OLD_BOT", chats: true },
+  { id: "conn-old-slack-sign-in", kind: "slack", account: "U_GUARDIAN", chats: false },
+];
 
 const NOW = Math.floor(Date.now() / 1000);
 
 /** A stored Connection of `kind`, as Rome left it while it offered the kind:
- *  its live grant holding a token, its channel record and its connected
- *  account. */
-function storeOld(sqlite: Database.Database, id: string, kind: string, accountId: string): void {
+ *  its live grant holding a token and, for a chat connection, its channel
+ *  record and its connected account. */
+function storeOld(sqlite: Database.Database, old: (typeof OLD)[number]): void {
+  const { id, kind, account: accountId } = old;
   sqlite
     .prepare("INSERT INTO connections (id, connection_kind, label, created_at) VALUES (?, ?, ?, ?)")
     .run(id, kind, kind, NOW);
@@ -49,9 +55,10 @@ function storeOld(sqlite: Database.Database, id: string, kind: string, accountId
     )
     .run(
       id,
-      JSON.stringify({ material: { botToken: `xoxb-of-${id}` }, expiresAt: "never" }),
+      JSON.stringify({ material: { token: `xox-of-${id}` }, expiresAt: "never" }),
       accountId,
     );
+  if (!old.chats) return;
   sqlite
     .prepare(
       `INSERT INTO channels (id, connection_kind, platform, connection_id, platform_account_id, created_at)
@@ -85,7 +92,7 @@ async function bootOverOldRows(also?: (sqlite: Database.Database) => void) {
     store.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  for (const old of OLD) storeOld(store.sqlite, old.id, old.kind, old.account);
+  for (const old of OLD) storeOld(store.sqlite, old);
   also?.(store.sqlite);
 
   const logger = { warn: rs.fn(), error: rs.fn(), info() {}, debug() {} };
@@ -121,8 +128,11 @@ describe("a stored Connection of an old Slack kind", () => {
     }
     expect(logger.error).not.toHaveBeenCalled();
     expect(registry.all()).toEqual([]);
-    for (const table of ["connections", "connection_grants", "channels", "connected_accounts"]) {
+    for (const table of ["connections", "connection_grants"]) {
       expect(count(store.sqlite, table)).toBe(OLD.length);
+    }
+    for (const table of ["channels", "connected_accounts"]) {
+      expect(count(store.sqlite, table)).toBe(OLD.filter((old) => old.chats).length);
     }
   });
 
@@ -183,12 +193,17 @@ describe("a stored Connection of an old Slack kind", () => {
 
   it("is no sender beside Rome's Slack app, so a send that names none goes out from the app", async () => {
     const { store, registry } = await bootOverOldRows((sqlite) =>
-      storeOld(sqlite, "conn-slack-app", "slack_app", "T_A/U_APP"),
+      storeOld(sqlite, {
+        id: "conn-slack-app",
+        kind: "slack_app",
+        account: "T_A/U_APP",
+        chats: true,
+      }),
     );
     expect(registry.all().map((connection) => connection.connectionKind)).toEqual(["slack_app"]);
     const records = new ChannelRecordsRepository(store.db, accountLinkOf(registry));
     // The store alone still reaches the old channel through its kept grant.
-    expect(records.sendersOn("slack")).toHaveLength(OLD.length + 1);
+    expect(records.sendersOn("slack")).toHaveLength(OLD.filter((old) => old.chats).length + 1);
     expect(runningSendersOn(records, registry)("slack")).toEqual(["channel-conn-slack-app"]);
   });
 });

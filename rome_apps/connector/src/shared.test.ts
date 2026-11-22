@@ -1,9 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
 
 import type { ComposioClient } from "./api/composio-client.js";
+import { SLACK_APP_CONNECT_HINT } from "./api/slack-app-proxy.js";
 import {
   buildProxyEndpoint,
   isSupportedToolkit,
+  romeManagedConnectHint,
   ROME_MANAGED_TOOLKITS,
   SUPPORTED_TOOLKITS,
   subscribeTriggerFeed,
@@ -274,7 +276,6 @@ describe("subscribeTriggerFeed", () => {
   it.each([
     "github",
     "shopify",
-    "slack",
   ])("routes an unlinked %s trigger to its supported connection flow", async (toolkit) => {
     const client = fakeClient({
       triggerType: { slug: "NEW_EVENT", toolkit: { slug: toolkit } },
@@ -360,5 +361,18 @@ describe("subscribeTriggerFeed", () => {
     expect(result).toMatchObject({ ok: true, triggerInstanceId: "ti_2" });
     expect(resolved).toBe(false);
     expect(calls[0].connectedAccountId).toBe("ca_explicit");
+  });
+});
+
+describe("romeManagedConnectHint", () => {
+  it("sends Slack to Rome's Slack app, which has no connect_account kind", () => {
+    expect(romeManagedConnectHint("slack")).toBe(SLACK_APP_CONNECT_HINT);
+    expect(romeManagedConnectHint("Slack")).toBe(SLACK_APP_CONNECT_HINT);
+  });
+
+  it("sends the other Rome-managed toolkits to connect_account", () => {
+    expect(romeManagedConnectHint("github")).toContain(
+      'connect_account tool with {"kind":"github"}',
+    );
   });
 });

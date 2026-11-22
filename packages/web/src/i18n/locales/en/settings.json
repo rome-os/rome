@@ -270,15 +270,6 @@
           "privacyNote": "You approve access on Microsoft; you can disconnect here anytime."
         }
       },
-      "slack": {
-        "user": {
-          "title": "Your Slack account",
-          "bullets": {
-            "work": "Send and read messages in your Slack workspace as you"
-          },
-          "privacyNote": "You approve access on Slack; you can disconnect here anytime."
-        }
-      },
       "shopify": {
         "user": {
           "title": "Your Shopify store",

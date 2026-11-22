@@ -1,5 +1,6 @@
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { eq } from "drizzle-orm";
 import {
   FORWARD_SIGNATURE_HEADER,
   FORWARD_TEAM_HEADER,
@@ -48,6 +49,8 @@ function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
     openDirectMessage: rs.fn(async () => "D_NEW"),
     userName: rs.fn(async () => ({ displayName: "Ouou", username: "ouou" })),
     conversationHistory: rs.fn(async () => ({ messages: [], hasMore: false })),
+    conversationReplies: rs.fn(async () => ({ messages: [] })),
+    memberChannels: rs.fn(async () => ({ channels: [] })),
     revoke: rs.fn(async () => {}),
     ...overrides,
   };
@@ -870,6 +873,7 @@ function fakeSlackHistory() {
   );
   return {
     calls,
+    said,
     conversationHistory,
     /** A message said in Slack, by the member or by Rome's bot. */
     say(i: number, by: "member" | "bot" = "member", ts?: string): SlackWireMessage {
@@ -1073,36 +1077,6 @@ describe("Slack app reads a direct message (R13)", () => {
       /may not read chat D_GONE \(missing_scope\)/,
     );
   });
-
-  it("refuses a group's read before it takes Slack's turn, so a direct message read next is not held", async () => {
-    const slack = fakeSlackHistory();
-    slack.say(1);
-    const mailbox = fakeMailbox();
-    const waits: number[] = [];
-    const gate = new SlackReadGate({
-      intervalMs: 60_000,
-      maxWaitMs: 60_000,
-      now: () => 0,
-      sleep: async (ms) => {
-        waits.push(ms);
-      },
-    });
-    const { adapter: a } = historyAdapter(mailbox, slack, { gate });
-    await a.start();
-
-    await expect(a.readHistory("C_TEAM" as never, { limit: 5 })).rejects.toThrow(
-      /may not read chat C_TEAM \(it reads direct messages only\)/,
-    );
-    await expect(a.readHistory("G_PRIVATE" as never, { limit: 5 })).rejects.toThrow(
-      /may not read chat G_PRIVATE/,
-    );
-    expect(slack.calls).toHaveLength(0);
-
-    const read = await a.readHistory("D_GUARDIAN" as never, { limit: 5 });
-    expect(texts(read)).toEqual(["message 1"]);
-    expect(waits).toEqual([]);
-    expect(slack.calls).toHaveLength(1);
-  });
 });
 
 describe("Slack app reads take turns with Slack's allowance (R13)", () => {
@@ -1161,5 +1135,384 @@ describe("Slack app reads take turns with Slack's allowance (R13)", () => {
     release();
     expect(texts(await waiting)).toEqual(["message 2", "message 1"]);
     expect(texts(delivered)).toEqual(["message 2"]);
+  });
+});
+
+describe("Slack app reads Slack refused as too soon", () => {
+  it("waits out Slack's Retry-After and asks again, and starts the next turn from Slack's answer", async () => {
+    const asked: number[] = [];
+    let refuse = true;
+    const fetchImpl = (async () => {
+      asked.push(Date.now());
+      if (refuse) {
+        refuse = false;
+        return new Response(null, { status: 429, headers: { "retry-after": "1" } });
+      }
+      return Response.json({ ok: true, messages: [{ ts: "1.0", text: "root", user: "U1" }] });
+    }) as unknown as typeof fetch;
+    const api = createSlackAppWebApi("http://fake-slack.test", fetchImpl);
+    const gate = new SlackReadGate({ intervalMs: 300, maxWaitMs: 60_000 });
+    const replies = (ts: string) =>
+      gate.run(`replies:C1:${ts}`, () =>
+        api.conversationReplies("t", { channel: "C1", ts, limit: 15 }),
+      );
+
+    const [first, second] = await Promise.all([replies("1.0"), replies("2.0")]);
+    expect(first.messages.map((m) => m.text)).toEqual(["root"]);
+    expect(second.messages).toHaveLength(1);
+    expect(asked).toHaveLength(3);
+    // Retry-After held the first read a second before it asked again.
+    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(1_000);
+    // The second thread's turn began when Slack answered, not when the
+    // first read started.
+    expect(asked[2] - asked[1]).toBeGreaterThanOrEqual(300);
+  });
+
+  it("answers a read that waited its full turn behind one still in flight", async () => {
+    const asked: number[] = [];
+    const gate = new SlackReadGate({ intervalMs: 300, maxWaitMs: 300 });
+    const slow = () =>
+      new Promise<string>((resolve) => {
+        asked.push(Date.now());
+        setTimeout(() => resolve("page"), 100);
+      });
+
+    const first = gate.run("a", slow);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const second = gate.run("b", slow);
+
+    await expect(Promise.all([first, second])).resolves.toEqual(["page", "page"]);
+    // The second asked a full turn after Slack answered the first.
+    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(400);
+  });
+
+  it("refuses a read whose Retry-After would take it past its limit, without asking Slack again", async () => {
+    const asked: number[] = [];
+    const fetchImpl = (async () => {
+      asked.push(Date.now());
+      return new Response(null, { status: 429, headers: { "retry-after": "20" } });
+    }) as unknown as typeof fetch;
+    const api = createSlackAppWebApi("http://fake-slack.test", fetchImpl);
+    const gate = new SlackReadGate({ intervalMs: 300, maxWaitMs: 500 });
+
+    await expect(
+      gate.run("replies:C1:1.0", () =>
+        api.conversationReplies("t", { channel: "C1", ts: "1.0", limit: 15 }),
+      ),
+    ).rejects.toThrow(/Try again in 20 seconds/);
+    expect(asked).toHaveLength(1);
+  });
+});
+
+describe("Slack app in the channels it is a member of", () => {
+  const NEWS = { id: "C_NEWS", name: "news", isPrivate: false };
+  const OPS = { id: "G_OPS", name: "ops", isPrivate: true };
+
+  function channelApi(overrides: Partial<SlackAppWebApi> = {}) {
+    const history = fakeSlackHistory();
+    return fakeApi({
+      memberChannels: rs.fn(async () => ({ channels: [OPS, NEWS] })),
+      conversationHistory: history.conversationHistory,
+      ...overrides,
+    });
+  }
+
+  it("sends to a channel by the name people use for it", async () => {
+    const api = channelApi();
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
+    await a.start();
+
+    const receipt = await a.send("#news" as never, { text: "hello" });
+    await a.send("#News:1700000000.000001" as never, { text: "in thread" });
+
+    expect(api.postMessage).toHaveBeenNthCalledWith(
+      1,
+      "xoxb-a",
+      { channel: "C_NEWS", markdown: "hello", threadTs: undefined },
+      expect.anything(),
+    );
+    expect(api.postMessage).toHaveBeenNthCalledWith(
+      2,
+      "xoxb-a",
+      { channel: "C_NEWS", markdown: "in thread", threadTs: "1700000000.000001" },
+      expect.anything(),
+    );
+    expect(receipt.chatId).toBe("C_NEWS");
+    // Each send by name reads the listing again.
+    expect(api.memberChannels).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends by a name to the channel that holds it now, after a rename gave it to another", async () => {
+    let channels = [OPS, NEWS];
+    const api = channelApi({ memberChannels: rs.fn(async () => ({ channels })) });
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
+    await a.start();
+    await a.send("#news" as never, { text: "first" });
+
+    // #news is renamed #general, and #ops takes the name #news.
+    channels = [
+      { ...NEWS, name: "general" },
+      { ...OPS, name: "news" },
+    ];
+    await a.send("#news" as never, { text: "second" });
+
+    expect(api.postMessage).toHaveBeenNthCalledWith(
+      2,
+      "xoxb-a",
+      { channel: "G_OPS", markdown: "second", threadTs: undefined },
+      expect.anything(),
+    );
+  });
+
+  it("refuses a name no channel it is a member of has, saying so", async () => {
+    const api = channelApi();
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
+    await a.start();
+
+    await expect(a.send("#random" as never, { text: "hi" })).rejects.toThrow(
+      "Rome's Slack app is not a member of a channel named #random",
+    );
+    expect(api.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("reads a channel it is a member of from Slack, newest first, by name or id", async () => {
+    const said: SlackWireMessage[] = [1, 2, 3].map((i) => ({
+      ts: `1700000000.00000${i}`,
+      user: "U_MEMBER",
+      text: `news ${i}`,
+    }));
+    const api = channelApi({
+      conversationHistory: rs.fn(async () => ({ messages: [...said].reverse(), hasMore: false })),
+    });
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
+    await a.start();
+
+    const byName = await a.readHistory("#news" as never, { limit: 10 });
+
+    expect(texts(byName)).toEqual(["news 3", "news 2", "news 1"]);
+    expect(byName[0]).toMatchObject({ chatId: "C_NEWS", thread: { kind: "group" } });
+    expect(api.conversationHistory).toHaveBeenCalledWith(
+      "xoxb-a",
+      expect.objectContaining({ channel: "C_NEWS" }),
+      expect.anything(),
+    );
+  });
+
+  it("reads a thread from Slack's replies, its root included, newest first", async () => {
+    const api = channelApi({
+      conversationReplies: rs.fn(async () => ({
+        messages: [
+          {
+            ts: "1700000000.000001",
+            user: "U_MEMBER",
+            text: "root",
+            thread_ts: "1700000000.000001",
+          },
+          {
+            ts: "1700000000.000002",
+            user: "U_GUARDIAN",
+            text: "reply",
+            thread_ts: "1700000000.000001",
+          },
+          { ts: "1700000000.000003", user: BOT, text: "rome says", thread_ts: "1700000000.000001" },
+        ],
+      })),
+    });
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
+    await a.start();
+
+    const thread = await a.readHistory("C_NEWS:1700000000.000001" as never, { limit: 10 });
+    const older = await a.readHistory("C_NEWS:1700000000.000001" as never, {
+      olderThan: "1700000000.000001:1700000000.000003",
+      limit: 10,
+    });
+
+    expect(texts(thread)).toEqual(["rome says", "reply", "root"]);
+    expect(thread[0]).toMatchObject({ direction: "outbound" });
+    expect(thread[1]?.messageId).toBe("1700000000.000001:1700000000.000002");
+    expect(texts(older)).toEqual(["reply", "root"]);
+  });
+
+  it("reads a thread longer than Slack's page of 15 on from newerThan, each page asking Slack from there", async () => {
+    const root = "1700000000.000100";
+    // 20 replies after the root: Slack answers 15 a page, oldest first, from
+    // `oldest` when it names one.
+    const all = Array.from({ length: 21 }, (_, i) => ({
+      ts: `1700000000.${String(100 + i).padStart(6, "0")}`,
+      user: "U_MEMBER",
+      text: `message ${i}`,
+      thread_ts: root,
+    }));
+    const conversationReplies = rs.fn(
+      async (_token: string, input: { oldest?: string; limit: number }) => {
+        const after = all.filter((wire) => !input.oldest || wire.ts > input.oldest);
+        // Slack always answers the root first.
+        const page = [all[0], ...after.filter((wire) => wire.ts !== root)].slice(0, input.limit);
+        return {
+          messages: page as typeof all,
+          ...(after.length > input.limit ? { nextCursor: "more" } : {}),
+        };
+      },
+    );
+    const api = channelApi({ conversationReplies });
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
+    await a.start();
+
+    const first = await a.readHistory(`C_NEWS:${root}` as never, { limit: 100 });
+    const newest = first[0]?.messageId as string;
+    const second = await a.readHistory(`C_NEWS:${root}` as never, {
+      newerThan: newest,
+      limit: 100,
+    });
+    const last = await a.readHistory(`C_NEWS:${root}` as never, {
+      newerThan: second[0]?.messageId as string,
+      limit: 100,
+    });
+    const fromStart = await a.readHistory(`C_NEWS:${root}` as never, { limit: 3 });
+    // A read on from a message, bounded above too, still answers the messages
+    // just after it, so reading on from its newest skips none.
+    const onUntil = await a.readHistory(`C_NEWS:${root}` as never, {
+      newerThan: root,
+      until: new Date(1_800_000_000_000),
+      limit: 3,
+    });
+
+    expect(texts(first)).toHaveLength(15);
+    expect(texts(first).at(-1)).toBe("message 0");
+    expect(texts(second)).toEqual(
+      [
+        "message 15",
+        "message 16",
+        "message 17",
+        "message 18",
+        "message 19",
+        "message 20",
+      ].reverse(),
+    );
+    expect(last).toEqual([]);
+    expect(conversationReplies).toHaveBeenNthCalledWith(
+      2,
+      "xoxb-a",
+      expect.objectContaining({ oldest: "1700000000.000114" }),
+      expect.anything(),
+    );
+    // With no bound, a thread is read from its start, as Slack reads it.
+    expect(texts(fromStart)).toEqual(["message 2", "message 1", "message 0"]);
+    expect(texts(onUntil)).toEqual(["message 3", "message 2", "message 1"]);
+  });
+
+  it("says where to read on when a page of a thread held nothing Rome reads, rather than end the thread", async () => {
+    const root = "1700000000.000100";
+    const files = Array.from({ length: 15 }, (_, i) => ({
+      ts: `1700000000.${String(101 + i).padStart(6, "0")}`,
+      user: "U_MEMBER",
+      text: "",
+      subtype: "file_share",
+      thread_ts: root,
+    }));
+    const api = channelApi({
+      conversationReplies: rs.fn(async () => ({ messages: files, nextCursor: "more" })),
+    });
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
+    await a.start();
+
+    await expect(
+      a.readHistory(`C_NEWS:${root}` as never, { newerThan: root, limit: 100 }),
+    ).rejects.toThrow("Read on with newerThan=1700000000.000115");
+  });
+
+  it("reads a thread in the same minute as a page of history, since Slack paces each method on its own", async () => {
+    const root = "1700000000.000005";
+    const api = channelApi({
+      conversationHistory: rs.fn(async () => ({
+        messages: [{ ts: "1700000000.000004", user: "U_MEMBER", text: "in the channel" }],
+        hasMore: false,
+      })),
+      conversationReplies: rs.fn(async () => ({
+        messages: [{ ts: root, user: "U_MEMBER", text: "root", thread_ts: root }],
+      })),
+    });
+    const pace = () => new SlackReadGate({ intervalMs: 60_000, maxWaitMs: 0 });
+    const a = new SlackAppAdapter({
+      channel: "slack_app",
+      botToken: "xoxb-a",
+      teamId: TEAM,
+      botUserId: BOT,
+      forwardSecret: SECRET,
+      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      api,
+      openMailbox: fakeMailbox().open,
+      readGate: pace(),
+      repliesGate: pace(),
+    });
+    await a.start();
+
+    const history = await a.readHistory("C_NEWS" as never, { limit: 10 });
+    const thread = await a.readHistory(`C_NEWS:${root}` as never, { limit: 10 });
+
+    expect(texts(history)).toEqual(["in the channel"]);
+    expect(texts(thread)).toEqual(["root"]);
+  });
+
+  it("reads a thread and a page of history ending at its root as two calls to Slack", async () => {
+    const root = "1700000000.000005";
+    const api = channelApi({
+      conversationHistory: rs.fn(async () => ({
+        messages: [{ ts: "1700000000.000004", user: "U_MEMBER", text: "before the root" }],
+        hasMore: false,
+      })),
+      conversationReplies: rs.fn(async () => ({
+        messages: [{ ts: root, user: "U_MEMBER", text: "root", thread_ts: root }],
+      })),
+    });
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
+    await a.start();
+
+    const [thread, history] = await Promise.all([
+      a.readHistory(`C_NEWS:${root}` as never, { limit: 10 }),
+      a.readHistory("C_NEWS" as never, { olderThan: root, limit: 10 }),
+    ]);
+
+    expect(texts(thread)).toEqual(["root"]);
+    expect(texts(history)).toEqual(["before the root"]);
+    expect(api.conversationReplies).toHaveBeenCalledTimes(1);
+    expect(api.conversationHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps direct messages and mentions working in a workspace connected with the old scopes, and asks for approval for the rest", async () => {
+    const missing = async () => {
+      throw new SlackApiError("missing_scope");
+    };
+    const api = channelApi({ memberChannels: rs.fn(missing), conversationHistory: rs.fn(missing) });
+    const { adapter: a, delivered } = adapter(fakeMailbox(), api, { readGate: openGate() });
+    await a.start();
+
+    await a.handleFrame(frame(dmEvent(1)));
+    await a.handleFrame(frame(mentionEvent(2)));
+    await a.send("D_GUARDIAN" as never, { text: "still here" });
+
+    expect(texts(delivered)).toEqual(["message 1", "question 2"]);
+    expect(api.postMessage).toHaveBeenCalledTimes(1);
+    await expect(a.send("#news" as never, { text: "hi" })).rejects.toThrow(
+      "approve the app again from Slack in Settings › Connections",
+    );
+    await expect(a.readHistory("C_NEWS" as never, { limit: 5 })).rejects.toThrow(
+      "approve the app again from Slack in Settings › Connections",
+    );
+    await expect(a.channels()).rejects.toThrow("approve the app again");
+  });
+
+  it("refuses a read of a channel it is not a member of, saying how to add it", async () => {
+    const api = channelApi({
+      conversationHistory: rs.fn(async () => {
+        throw new SlackApiError("not_in_channel");
+      }),
+    });
+    const { adapter: a } = adapter(fakeMailbox(), api, { readGate: openGate() });
+    await a.start();
+
+    await expect(a.readHistory("C_ELSE" as never, { limit: 5 })).rejects.toThrow(
+      "Rome's Slack app is not a member of chat C_ELSE",
+    );
   });
 });

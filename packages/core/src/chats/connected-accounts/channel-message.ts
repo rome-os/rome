@@ -38,7 +38,12 @@ export function channelMessageOf(message: Message, channel: string): ChannelMess
     direction: "inbound",
     messageId: message.id,
     chatId: where.chatId,
-    ...(where.thread ? { parentChatId: where.thread.parentChatId } : {}),
+    // A thread with its own id lives inside the chat: the message stays in
+    // the chat, and says which thread to read for its earlier replies.
+    ...(where.thread && where.thread.id === undefined
+      ? { parentChatId: where.thread.parentChatId }
+      : {}),
+    ...(where.thread?.id !== undefined ? { inThread: where.thread.id } : {}),
     senderId: sender.accountId,
     ...(sender.name !== undefined ? { senderDisplayName: sender.name } : {}),
     ...(sender.handle !== undefined ? { senderUsername: sender.handle } : {}),
@@ -72,6 +77,6 @@ export function channelMessageOf(message: Message, channel: string): ChannelMess
 function threadOf({ where }: Message): NonNullable<ChannelMessage["thread"]> {
   if (where.group) return { kind: "group", name: where.group.id };
   const name = where.name !== undefined ? { name: where.name } : {};
-  if (where.thread) return { kind: "topic", ...name };
+  if (where.thread && where.thread.id === undefined) return { kind: "topic", ...name };
   return { kind: where.kind === "direct" ? "dm" : "group", ...name };
 }

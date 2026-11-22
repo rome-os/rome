@@ -71,6 +71,8 @@ export interface RunTurnRequest {
   input: AgentTurnInput;
   platformMessageId?: string;
   replyTo?: MessageReplyReference;
+  /** The platform thread the triggering message was said in (RunParams.inThread). */
+  inThread?: string;
   sessionId?: string;
   hookInvocationContext?: HookInvocationContext;
   actionContext?: CurrentActionContext;
@@ -323,6 +325,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           sharedContext: req.init?.sharedContext,
           romeSessionId,
           replyTo: req.replyTo,
+          ...(req.inThread ? { inThread: req.inThread } : {}),
           ...(lines ? { quotedId: lines.quoted, currentId: lines.prompt } : {}),
         }).turn;
         const turnLogFields = {

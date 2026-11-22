@@ -99,6 +99,7 @@ holds<
     | "thread"
     | "chatThread"
     | "openedThread"
+    | "inThread"
     | "addressing"
     | "fromBot"
     | "mentionsOthers"

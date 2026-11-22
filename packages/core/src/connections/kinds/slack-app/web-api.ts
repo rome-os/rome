@@ -5,6 +5,7 @@
 
 import { SlackApiError, type SlackBotIdentity, type SlackUserName } from "../slack/slack.js";
 import type { SlackWireMessage } from "./message.js";
+import { SlackTooSoonError } from "./read-gate.js";
 
 const SLACK_API_TIMEOUT_MS = 15_000;
 const SLACK_RATE_LIMIT_MAX_WAIT_MS = 30_000;
@@ -36,6 +37,26 @@ export interface SlackAppWebApi {
     input: { channel: string; latest?: string; limit: number },
     signal?: AbortSignal,
   ): Promise<{ messages: SlackWireMessage[]; hasMore: boolean }>;
+  /** One page of a thread's messages, oldest first, its root included: at
+   *  most `limit` after `cursor`, or from the start. */
+  conversationReplies(
+    botToken: string,
+    input: { channel: string; ts: string; cursor?: string; oldest?: string; limit: number },
+    signal?: AbortSignal,
+  ): Promise<{ messages: SlackWireMessage[]; nextCursor?: string }>;
+  /** One page of the channels the app is a member of, public and private. */
+  memberChannels(
+    botToken: string,
+    input: { cursor?: string; limit: number },
+    signal?: AbortSignal,
+  ): Promise<{ channels: SlackChannel[]; nextCursor?: string }>;
+}
+
+/** A channel the app is a member of, as Slack names it. */
+export interface SlackChannel {
+  id: string;
+  name: string;
+  isPrivate: boolean;
 }
 
 interface SlackApiResponse {
@@ -52,6 +73,12 @@ function timeout(signal?: AbortSignal): AbortSignal {
   return signal
     ? AbortSignal.any([signal, AbortSignal.timeout(SLACK_API_TIMEOUT_MS)])
     : AbortSignal.timeout(SLACK_API_TIMEOUT_MS);
+}
+
+/** How long Slack asked Rome to wait, at least a second. */
+function retryAfterMs(response: Response): number {
+  const seconds = Number(response.headers.get("retry-after") ?? "1");
+  return Math.max(1_000, Number.isFinite(seconds) ? seconds * 1_000 : 1_000);
 }
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -96,8 +123,7 @@ export function createSlackAppWebApi(
       if (response.status === 429 && !retried) {
         await response.body?.cancel().catch(() => {});
         retried = true;
-        const seconds = Number(response.headers.get("retry-after") ?? "1");
-        const waitMs = Math.max(1_000, Number.isFinite(seconds) ? seconds * 1_000 : 1_000);
+        const waitMs = retryAfterMs(response);
         if (waitMs > SLACK_RATE_LIMIT_MAX_WAIT_MS) {
           throw new SlackApiError("ratelimited", `Slack asked Rome to wait ${waitMs}ms.`);
         }
@@ -118,6 +144,11 @@ export function createSlackAppWebApi(
       `${origin}/api/${method}?${new URLSearchParams(query).toString()}`,
       { headers: { Authorization: `Bearer ${token}` }, signal: timeout(signal) },
     );
+    // The read gate waits out a refusal as too soon, within the read's limit.
+    if (response.status === 429) {
+      await response.body?.cancel().catch(() => {});
+      throw new SlackTooSoonError(retryAfterMs(response));
+    }
     return read(response);
   }
 
@@ -213,6 +244,58 @@ export function createSlackAppWebApi(
         ),
         hasMore: body.has_more === true,
       };
+    },
+    async conversationReplies(botToken, input, signal) {
+      const body = await get(
+        botToken,
+        "conversations.replies",
+        {
+          channel: input.channel,
+          ts: input.ts,
+          limit: String(input.limit),
+          ...(input.cursor ? { cursor: input.cursor } : {}),
+          ...(input.oldest ? { oldest: input.oldest } : {}),
+        },
+        signal,
+      );
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      const nextCursor = stringField(
+        (body.response_metadata as { next_cursor?: unknown } | undefined)?.next_cursor,
+      );
+      return {
+        messages: messages.filter(
+          (message): message is SlackWireMessage =>
+            typeof message === "object" &&
+            message !== null &&
+            typeof (message as { ts?: unknown }).ts === "string",
+        ),
+        ...(nextCursor ? { nextCursor } : {}),
+      };
+    },
+    async memberChannels(botToken, input, signal) {
+      const body = await get(
+        botToken,
+        "users.conversations",
+        {
+          types: "public_channel,private_channel",
+          exclude_archived: "true",
+          limit: String(input.limit),
+          ...(input.cursor ? { cursor: input.cursor } : {}),
+        },
+        signal,
+      );
+      const listed = Array.isArray(body.channels) ? body.channels : [];
+      const channels: SlackChannel[] = [];
+      for (const each of listed) {
+        const channel = each as { id?: unknown; name?: unknown; is_private?: unknown };
+        const id = stringField(channel.id);
+        const name = stringField(channel.name);
+        if (id && name) channels.push({ id, name, isPrivate: channel.is_private === true });
+      }
+      const nextCursor = stringField(
+        (body.response_metadata as { next_cursor?: unknown } | undefined)?.next_cursor,
+      );
+      return { channels, ...(nextCursor ? { nextCursor } : {}) };
     },
   };
 }

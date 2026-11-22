@@ -69,7 +69,6 @@ const BULLET_KEYS: Record<string, string[]> = {
   "github.user": ["work", "watch"],
   "google.user": ["work"],
   "microsoft.user": ["work"],
-  "slack.user": ["work"],
   "shopify.user": ["work"],
   "composio.user": ["act"],
 };
@@ -137,6 +136,5 @@ const PRIVACY_SLOTS = new Set([
   "github.user",
   "google.user",
   "microsoft.user",
-  "slack.user",
   "shopify.user",
 ]);
