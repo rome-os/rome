@@ -2045,6 +2045,24 @@ export const handlers = [
     HttpResponse.json({ agents: mockAgentNames.map((name) => ({ name })) }),
   ),
   http.get("/api/connections", () => HttpResponse.json(connections)),
+  // The iPhone app's battery-and-network capability, as a phone reports it,
+  // so a device connect card's page has something to describe.
+  http.get("/api/device-connections", () =>
+    HttpResponse.json({
+      connections: [
+        {
+          capability: "device",
+          title: "Device",
+          summary: "Your Rome reads this phone's battery and network.",
+          labels: {
+            "zh-CN": { title: "设备", summary: "让你的 Rome 读取这部手机的电量和网络。" },
+          },
+          device: { name: "iPhone" },
+          state: "off",
+        },
+      ],
+    }),
+  ),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
   // above without this would make every one of those buttons fail locally.
   // Teardown is real here, the way the route runs it: the grant relocks and

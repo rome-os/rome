@@ -51,6 +51,10 @@ final class DemoBackend: RomeBackend {
     private var chats: [String: ChatSession] = [:]
     private var tasks: [ConciergeTask] = []
     private var topicChats: [ConciergeChat] = []
+    /// Archived topic chats, latest archived first; their messages stay.
+    private var archivedTopics: [ConciergeChat] = []
+    /// The follows each archived chat's archive moved to the main chat.
+    private var movedFollows: [String: [ConciergeChatWork.Follow]] = [:]
     /// Each topic chat's last activity, for the chat list; the drawer sorts by it.
     private var topicActivity: [String: Date] = [:]
     /// When each pinned topic chat was pinned. None is pinned at first.
@@ -82,6 +86,7 @@ final class DemoBackend: RomeBackend {
             messages[conciergeChatID] = []
             tasks = []
             topicChats = []
+            archivedTopics = []
         }
         if variant == .longChat {
             lengthenMainChat()
@@ -231,11 +236,37 @@ final class DemoBackend: RomeBackend {
 
     func archiveChat(_ id: String) async throws {
         try await pause(0.2)
+        if let chat = topicChats.first(where: { $0.id == id }) { archivedTopics.insert(chat, at: 0) }
         topicChats.removeAll { $0.id == id }
     }
 
+    func archivedTopicChats() async throws -> [ChatSession] {
+        try await pause(0.2)
+        return archivedTopics.map { chat in
+            ChatSession(id: chat.id, name: chat.name, agentName: ChatSession.conciergeAgent, archivedAt: RomeDate.string(.now), activityAt: topicActivity[chat.id].map(RomeDate.string), pinnedAt: nil)
+        }
+    }
+
+    func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws {
+        try await pause(0.2)
+        guard let chat = archivedTopics.first(where: { $0.id == id }) else { throw APIError.notFound }
+        archivedTopics.removeAll { $0.id == id }
+        movedFollows[id] = nil
+        topicChats.append(chat)
+    }
+
+    /// An archived chat's follows its archive moved. Any other chat answers
+    /// as an older instance does, so its archive and delete ask as before.
+    func chatWork(chatId: String) async throws -> ConciergeChatWork {
+        try await pause(0.2)
+        guard archivedTopics.contains(where: { $0.id == chatId }) else { throw APIError.notFound }
+        return ConciergeChatWork(movedFollows: movedFollows[chatId] ?? [])
+    }
+
     func deleteChat(_ id: String) async throws {
-        try await archiveChat(id)
+        try await pause(0.2)
+        topicChats.removeAll { $0.id == id }
+        archivedTopics.removeAll { $0.id == id }
     }
 
     /// Chats whose messages cannot be read, for the load-error bar's snapshots.
@@ -634,7 +665,9 @@ final class DemoBackend: RomeBackend {
             for message in list where !message.isTrace {
                 let text = message.parts.compactMap(\.textContent).joined(separator: " ")
                 guard text.localizedCaseInsensitiveContains(query) else { continue }
-                let session = chats[sessionId] ?? ChatSession(id: sessionId, name: "Chat")
+                let session = chats[sessionId]
+                    ?? archivedTopics.first { $0.id == sessionId }.map { ChatSession(id: $0.id, name: $0.name, agentName: ChatSession.conciergeAgent, archivedAt: RomeDate.string(.now)) }
+                    ?? ChatSession(id: sessionId, name: "Chat")
                 hits.append(SearchHit(session: session, message: .init(id: message.id, role: message.role, snippet: text, createdAt: message.createdAt)))
             }
         }
@@ -1089,6 +1122,33 @@ final class DemoBackend: RomeBackend {
         // The cafés come eighth, past the first five, for the drawer over it.
         let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
+
+        // Archived topic chats, out of the drawer's list: the Archived row's
+        // sheet lists them, and each opens read only. The car's archive moved
+        // a follow to the main chat, so its Restore asks about it.
+        archivedTopics = [
+            ConciergeChat(id: "topic-archived-car", name: "二手车比价", main: false),
+            ConciergeChat(id: "topic-archived-holiday", name: "国庆出行", main: false),
+            ConciergeChat(id: "topic-archived-tax", name: "个税年度汇算", main: false),
+        ]
+        for (id, days) in ["topic-archived-car": 6, "topic-archived-holiday": 40, "topic-archived-tax": 120] {
+            topicActivity[id] = Date.now.addingTimeInterval(Double(-days * 86400))
+        }
+        movedFollows["topic-archived-car"] = [.init(source: "gmail", label: "Gmail", target: "dealer@example.com")]
+        messages["topic-archived-car"] = [
+            user("car-1", "帮我比较一下这三辆二手车：2019 款卡罗拉、2020 款思域和 2018 款马自达 3。", at: at(20, 10, daysAgo: 6), session: "topic-archived-car"),
+            agent("三辆车里，2020 款思域里程最少、车况记录最完整，但价格高出约 1.2 万。卡罗拉保值率最好，保养也最便宜。马自达 3 开起来最好，但有一次小事故记录。\n\n如果你主要在市区通勤，我推荐卡罗拉。", at: at(20, 11, daysAgo: 6), session: "topic-archived-car"),
+            user("car-2", "就卡罗拉吧，帮我盯着车商的邮件。", at: at(20, 15, daysAgo: 6), session: "topic-archived-car"),
+            agent("好的，我会关注车商发来的邮件，有报价或试驾时间就告诉你。", at: at(20, 15, daysAgo: 6), session: "topic-archived-car"),
+        ]
+        messages["topic-archived-holiday"] = [
+            user("holiday-1", "国庆去哪儿人少一点？", at: at(9, 0, daysAgo: 40), session: "topic-archived-holiday"),
+            agent("可以考虑错峰去皖南的小村子，比如查济或屏山，人比宏村少很多。", at: at(9, 1, daysAgo: 40), session: "topic-archived-holiday"),
+        ]
+        messages["topic-archived-tax"] = [
+            user("tax-1", "个税汇算要准备什么？", at: at(19, 30, daysAgo: 120), session: "topic-archived-tax"),
+            agent("准备好全年的收入明细和专项附加扣除的材料，在个税 App 里核对后提交就行。", at: at(19, 31, daysAgo: 120), session: "topic-archived-tax"),
+        ]
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, status: String? = nil, endReason: String? = nil, wait: JSONValue? = nil) -> ConciergeTask {
             let updated = nowMs - minutesAgo * 60_000

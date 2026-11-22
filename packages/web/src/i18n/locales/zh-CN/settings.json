@@ -52,7 +52,10 @@
     "title": "连接 {{title}}",
     "onDevice": "请在{{device}}上连接 {{title}}：打开那台设备上的 Rome App，在“设置 › 连接”里打开它。然后回到聊天，告诉 Agent 已连接。",
     "connected": "{{title}} 已在{{device}}上连接。回到聊天，告诉 Agent 已连接。",
-    "yourDevice": "你的设备"
+    "yourDevice": "你的设备",
+    "retry": "重试",
+    "notAComputer": "这项连接只开启已在用 Rome 的设备上的一项能力，不能添加电脑，也不能让离线的电脑重新上线。",
+    "devicesLink": "在“设置 › 设备”里管理电脑"
   },
   "connections": {
     "loading": "正在加载连接",

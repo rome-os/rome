@@ -164,7 +164,8 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
  * The sidebar's Concierge section: the main chat's entry, then the topic
  * chats, latest first, {@link TOPIC_CHATS_PAGE} at a time: scrolling near the
  * end of the list shows the next page. Each topic chat has its unread badge
- * and a menu to rename, pin or unpin, archive or unarchive, and delete it. The status filter applies here too:
+ * and a menu to rename, pin or unpin, archive or unarchive, and delete it; an archived one has only
+ * Unarchive and Delete. The status filter applies here too:
  * the main chat is never archived, so the archived filter hides it.
  */
 export function ConciergeChats({
@@ -341,10 +342,13 @@ function ConciergeTopicEntry({
           className="min-w-[180px]"
           {...rename.menuContentProps}
         >
-          <DropdownMenuItem onSelect={() => rename.start(chat.id, chat.name)}>
-            <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            {t("recentChats.rename")}
-          </DropdownMenuItem>
+          {/* An archived topic chat is renamed once it is unarchived. */}
+          {chat.archived ? null : (
+            <DropdownMenuItem onSelect={() => rename.start(chat.id, chat.name)}>
+              <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              {t("recentChats.rename")}
+            </DropdownMenuItem>
+          )}
           {chat.archived ? null : (
             <DropdownMenuItem onSelect={() => void togglePin()}>
               {pinned ? (
