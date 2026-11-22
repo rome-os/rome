@@ -26,6 +26,7 @@ A pnpm monorepo. All TypeScript code lives under `packages/*` and `rome_apps/*`;
 - When running the fullstack local loop, use `pnpm dev:all` — containerized Rome with `tsx --watch`, plus rome-obs, Traefik, and the Rsbuild dev server. `pnpm start` and `pnpm start:web` skip the production-shaped wiring, so reach for them only to debug the host process.
 - When changing a file the container does not watch (`package.json`, container env), run `docker compose restart <service>`.
 - When doing frontend-only work in `packages/web`, use `pnpm start:web:mock`.
+- When testing a feature the way a user meets it, look for an environment in [`environments/`](environments/README.md). When adding or changing one, follow the rules there.
 - When iterating on a change, run `pnpm preflight`. It runs Biome, the import rules, the type checks and the unit tests that the branch's changed files reach, in about 5 to 30 seconds.
 - When verifying a change, run `pnpm typecheck` on the host, then `pnpm test:unit`, then `pnpm dev:all` and confirm the rome container reaches `Rome started` in `docker logs`. For UI changes, also exercise the feature in the browser — type checks and tests verify code correctness, not feature correctness.
 - When adding a runtime dependency, declare it in `packages/core`.
