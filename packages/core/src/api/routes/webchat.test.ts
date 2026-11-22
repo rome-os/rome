@@ -7610,6 +7610,36 @@ describe("Webchat API", () => {
       expect((await app.request(`/chat/sessions/${LEGACY_FORK_ID}`)).status).toBe(404);
     });
 
+    it("Back to default lets a held fork chat follow the default again", async () => {
+      rs.spyOn(deps.sessionRepository, "current").mockImplementation(async (key) =>
+        key === `webchat:${FORK_ID}` ? withThread(FORK_ID) : null,
+      );
+      const held = new Set([`webchat:${FORK_ID}`, `webchat:${PROMOTED_ID}`]);
+      deps.chatProviders = {
+        heldProvider: (key) => (held.has(key) ? "anthropic" : undefined),
+        follow: async (chatId) => {
+          held.delete(`webchat:${chatId}`);
+          return null;
+        },
+        release: async () => {},
+        picked: async () => {},
+        followingCount: async () => 0,
+      };
+      const app = createWebchatRuntime(deps).routes;
+      for (const id of [FORK_ID, PROMOTED_ID]) {
+        const before = (await (await app.request(`/chat/sessions/${id}`)).json()) as {
+          followsDefault?: boolean;
+        };
+        expect(before.followsDefault).toBe(false);
+        const res = await app.request(`/chat/sessions/${id}/model/follow-default`, {
+          method: "POST",
+        });
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({ followsDefault: true, pinnedModel: null });
+      }
+      deps.chatProviders = undefined;
+    });
+
     it("leaves every other fork-facing route closed", async () => {
       // Legacy fork-typed rows keep the narrow surface. A branch that ships
       // today is born type "webchat" and deliberately gets every ordinary

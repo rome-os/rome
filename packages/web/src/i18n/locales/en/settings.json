@@ -785,6 +785,10 @@
     },
     "logoutOutcome": {
       "otherBecomesDefault": "{{provider}} becomes the default. Chats move to it on their next reply.",
+      "otherBecomesDefaultStay": "{{provider}} becomes the default for new chats. Existing chats stay on {{leaving}} and wait until you log in again.",
+      "otherExpired": "Its login has expired: log in to {{provider}} again after you log out.",
+      "creditsBecomeDefault": "Rome credits become the default. Chats move to them on their next reply.",
+      "creditsBecomeDefaultStay": "Rome credits become the default for new chats. Existing chats stay on {{leaving}} and wait until you log in again.",
       "pause": "Chats pause until you log in again.",
       "pauseOrCredits": "Chats pause until you log in again, or until you switch every chat to Rome credits."
     }

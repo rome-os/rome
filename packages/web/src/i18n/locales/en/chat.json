@@ -821,7 +821,7 @@
       "title": "Switch to {{provider}}?",
       "body": "This chat continues on {{provider}}, and the stopped turn picks up again.",
       "bodyCredits": "Every chat runs on Rome credits ({{balance}} left), and the stopped turn picks up again.",
-      "makeDefaultHelp": "Other chats that follow the default switch to {{provider}} on their next reply.",
+      "thisChatOnlyHelp": "Only this chat switches. Other chats stay where they are.",
       "moveExisting": "Move existing chats too",
       "moveExistingHelp": "Other chats switch to {{provider}} on their next reply.",
       "switch": "Switch",

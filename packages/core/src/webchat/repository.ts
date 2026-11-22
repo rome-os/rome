@@ -1890,7 +1890,7 @@ export class WebChatRepository {
   /**
    * Stores the chat's model, with who chose it: its owner, or Rome. `kept` is
    * Rome's choice that a change of the default does not move: the chat stays
-   * on that model's provider (docs/domains/agents.md#kept-provider).
+   * on that model's provider (docs/domains/agents.md#pinned-chat).
    */
   async updateSessionLargeModelSelection(
     id: string,
@@ -1928,15 +1928,51 @@ export class WebChatRepository {
   }
 
   /**
+   * The chats among `ids` that exist, with the model each stored and who
+   * chose it, in one read.
+   */
+  async modelSelectionsOf(ids: readonly string[]): Promise<
+    Map<
+      string,
+      {
+        agentName: string | null;
+        largeModelSelection: string | null;
+        largeModelSelectionBy: ModelSelectionBy | null;
+      }
+    >
+  > {
+    const out = new Map<
+      string,
+      {
+        agentName: string | null;
+        largeModelSelection: string | null;
+        largeModelSelectionBy: ModelSelectionBy | null;
+      }
+    >();
+    if (ids.length === 0) return out;
+    const rows = await this.db
+      .select({
+        id: romeSessions.id,
+        agentName: romeSessions.agentName,
+        largeModelSelection: romeSessions.largeModelSelection,
+        largeModelSelectionBy: romeSessions.largeModelSelectionBy,
+      })
+      .from(romeSessions)
+      .where(inArray(romeSessions.id, [...new Set(ids)]));
+    for (const { id, ...row } of rows) out.set(id, row);
+    return out;
+  }
+
+  /**
    * The kept chats: a change of the default that moves existing chats lets
    * them follow it again.
    */
-  async keptChatCount(): Promise<number> {
+  async keptChats(): Promise<string[]> {
     const rows = await this.db
-      .select({ count: sql<number>`count(*)`.mapWith(Number) })
+      .select({ id: romeSessions.id })
       .from(romeSessions)
       .where(eq(romeSessions.largeModelSelectionBy, "kept"));
-    return rows[0]?.count ?? 0;
+    return rows.map((row) => row.id);
   }
 
   /**

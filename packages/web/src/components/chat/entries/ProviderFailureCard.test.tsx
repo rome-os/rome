@@ -102,7 +102,9 @@ describe("ProviderFailureCard", () => {
       ),
     ).toBeTruthy();
     // Before the reset nothing offers to continue: the usage-limit sweep does.
+    // Retry is on every card, though.
     expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     expect(screen.getByText("ChatGPT quota used up")).toBeTruthy();
     expect(
       document.querySelector("[data-provider-failure]")?.className.includes("border-l-warning"),
@@ -121,9 +123,7 @@ describe("ProviderFailureCard", () => {
       ),
     ).toBeTruthy();
     expect(
-      within(dialog).getByText(
-        "Other chats that follow the default switch to Claude on their next reply.",
-      ),
+      within(dialog).getByText("Only this chat switches. Other chats stay where they are."),
     ).toBeTruthy();
     const makeDefault = within(dialog).getByRole("checkbox", { name: "Also make default" });
     expect(makeDefault.getAttribute("aria-checked")).toBe("false");
@@ -366,5 +366,62 @@ describe("failureCardKind", () => {
     expect(failureCardKind({ reason: "removed" })).toBe("account");
     expect(failureCardKind({ reason: "model_unavailable" })).toBe("model");
     expect(failureCardKind({ reason: "login", card: "wait" })).toBe("wait");
+  });
+});
+
+describe("Retry is on every card, and a stale option refreshes the card", () => {
+  it("offers Retry on an account card beside Log in, and runs the stopped turn", async () => {
+    const calls = mockApi();
+    renderCard({ reason: "login", card: "account", alternatives: [] });
+    expect(screen.getByRole("button", { name: "Log in" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === "POST")?.url).toBe(
+        "/api/ai-tools/provider-failures/m1/continue",
+      ),
+    );
+  });
+
+  it("offers Retry on a model card beside its switch", () => {
+    mockApi();
+    renderCard({
+      reason: "model_unavailable",
+      card: "model",
+      alternatives: [],
+      replacement: { selection: "gpt-5-6-terra", model: "gpt-5.6-terra" },
+    });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("an option that no longer works reads the chat again, where a fresh card waits", async () => {
+    const calls: Call[] = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
+      calls.push({ url: String(input), method: init?.method ?? "GET", body: undefined });
+      if (String(input).endsWith("/switch")) return Response.json({ ok: true, refreshed: true });
+      return Response.json({
+        defaultProvider: {
+          provider: "openai",
+          signedIn: { anthropic: true, openai: true, rome_credits: false },
+          followingChats: 1,
+        },
+      });
+    }) as typeof fetch);
+    const settled = rs.fn();
+    renderCard({ reason: "temporary" }, settled);
+    await userEvent.click(screen.getByRole("button", { name: "Switch to Claude" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Switch" }));
+    await waitFor(() => expect(settled).toHaveBeenCalled());
+    expect(screen.queryByText("Switched to Claude, continued")).toBeNull();
+  });
+
+  it("asks Move existing chats too only while another chat would move", async () => {
+    mockApi(1);
+    renderCard({});
+    await userEvent.click(screen.getByRole("button", { name: "Switch to Claude" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: "Also make default" }));
+    // The one chat that follows the default is this one, which moves anyway.
+    expect(within(dialog).queryByRole("checkbox", { name: "Move existing chats too" })).toBeNull();
   });
 });

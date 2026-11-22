@@ -1105,9 +1105,13 @@ async function main() {
   const stopCodexLoginChoice = () => codexLoginChoice.stop();
   // Wired once the chats' sessions exist, before Rome serves a request.
   let chatProviders: ChatProviders = {
+    ready: async () => {},
+    release: async () => {},
+    picked: async () => {},
     beforeDefaultChange: async () => {},
+    heldProvider: () => undefined,
     keep: async () => null,
-    follow: async () => {},
+    follow: async () => null,
     followingCount: async () => 0,
   };
   const defaultProviders = createDefaultProviders({
@@ -1115,6 +1119,8 @@ async function main() {
     accounts: modelAccounts,
     providers: ["anthropic", "openai"],
     creditsEnabled: () => codexLoginChoice.creditsEnabled(),
+    // The last logout hands the default to credits only when they can be spent.
+    creditsUsable: () => codexLoginChoice.creditsUsable(),
     // An upgrade keeps the Concierge where it runs: the provider of the model
     // Rome chose for the guardian's main chat, when it has one.
     seed: async () => {
@@ -1442,6 +1448,7 @@ async function main() {
     sessionRepository,
     accounts: modelAccounts,
     defaults: defaultProviders,
+    held: (chatId) => chatProviders.heldProvider(webchatSessionKey(chatId)) !== undefined,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { find: (continuityKey) => agentSessionManager.find(continuityKey) },
@@ -1502,6 +1509,8 @@ async function main() {
       // Rome credits are the instance's choice: while they run, every chat runs on them.
       onRomeCredits: () =>
         runsOnRomeCredits(defaultProviders.current(), defaultProviders.signedIn()),
+      // A conversation the guardian left on a provider when the default changed stays there.
+      heldProvider: (key) => chatProviders.heldProvider(key),
       systemPrompts,
       modelResolver,
       networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),
@@ -1602,6 +1611,9 @@ async function main() {
   chatProviders = createChatProviders({
     webchatRepo,
     accounts: modelAccounts,
+    settings: settingsRepo,
+    currentDefault: () => defaultProviders.current(),
+    ranSince: (since) => sessionRepository.continuityKeysSince(since),
     selectModel: (chatId, agentName, selection) =>
       agentSessionManager
         .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })
@@ -1615,6 +1627,7 @@ async function main() {
     },
     agentTier: (agentName) => agentLoader.find(agentName ?? "main")?.definition.tier,
   });
+  await chatProviders.ready();
   const actionWorkerCoordinator = new ActionWorkerCoordinator(actionEngine);
   actionEngine.setActionWorkerCoordinator(actionWorkerCoordinator);
   const chatResetPolicy: ChatResetPolicy = async (chat) =>
@@ -1737,6 +1750,7 @@ async function main() {
     swapModel: (chatId, agentName, failure) =>
       concierge.switchForModelLimit(chatId, failure, agentName),
     creditsUsable: () => codexLoginChoice.creditsUsable(),
+    held: (chatId) => chatProviders.heldProvider(webchatSessionKey(chatId)) !== undefined,
     // A recovery turn acts for the chat's owner, as a continuation does for its turn's.
     actorOf: async (chatId) => {
       const chat = await webchatRepo.getSession(chatId);

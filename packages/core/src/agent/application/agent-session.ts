@@ -331,6 +331,11 @@ export interface AgentSession {
    */
   submit(input: AgentTurnInput, options?: SubmitOptions): AgentInputReceipt;
   selectModel(selectionId: ModelSelectionId | null): void;
+  /**
+   * The next turn runs `selectionId`, and the turn after it resolves as
+   * before: a model overload swap lasts one turn.
+   */
+  selectModelForOneTurn?(selectionId: ModelSelectionId): void;
   fork(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent>;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   /** Stops the session's running turn, if it has one, and the subagent calls it waits on. */
@@ -456,6 +461,13 @@ interface ManagerDeps {
    * Read at open and before each turn. Absent, none does.
    */
   onRomeCredits?: () => boolean;
+  /**
+   * The provider a session is held on, by its channelThreadKey: the guardian
+   * changed the default without moving existing chats, or kept one chat on a
+   * card. A subagent's or a fork's key is read through its root. Read at open
+   * and before each turn. Absent, or undefined, the session follows the default.
+   */
+  heldProvider?: (channelThreadKey: string) => AccountedProviderId | undefined;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
   /** Stamps the session id on the spans a session starts and binds it for logs. */
@@ -2052,7 +2064,13 @@ async function openSession(
     });
   } else {
     initialResolution = await deps.modelResolver.resolve(
-      modelResolutionRequest(selectionId, sessionPin, config, credits),
+      modelResolutionRequest(
+        selectionId,
+        sessionPin,
+        config,
+        credits,
+        deps.heldProvider?.(key.channelThreadKey),
+      ),
     );
     modelSession = await openModelSession(initialResolution, resumed?.provider, modelThreadId);
     threadResumed =
@@ -2523,6 +2541,10 @@ class AgentSessionImpl implements AgentSession {
   /** The model the chat ran on before the current thread started. */
   private previousModel?: string;
   private selectionId?: ModelSelectionId;
+  /** A model the next turn runs instead, once: an overload swap. */
+  private oneTurnSelection?: ModelSelectionId;
+  /** The running turn runs a one-turn selection: its model does not become the pin. */
+  private runsOneTurnSelection = false;
   /**
    * The session model pin: the concrete model this session's history
    * was produced on. Seeded from the resumed row at open and refreshed after
@@ -2828,14 +2850,25 @@ class AgentSessionImpl implements AgentSession {
     this.selectionId = selectionId ?? undefined;
   }
 
-  private async ensureModelSessionForTurn(): Promise<void> {
+  selectModelForOneTurn(selectionId: ModelSelectionId): void {
+    this.oneTurnSelection = selectionId;
+  }
+
+  /** `turn` marks a turn of the session's own, which takes up a one-turn selection. */
+  private async ensureModelSessionForTurn(turn = false): Promise<void> {
     if (this.config.codeBacked) return;
+    const oneTurn = turn ? this.oneTurnSelection : undefined;
+    if (turn) {
+      this.oneTurnSelection = undefined;
+      this.runsOneTurnSelection = oneTurn !== undefined;
+    }
     const resolution = await this.deps.modelResolver.resolve(
       modelResolutionRequest(
-        this.selectionId,
+        oneTurn ?? this.selectionId,
         this.sessionPin,
         this.config,
         this.deps.onRomeCredits?.() === true,
+        this.deps.heldProvider?.(this.key.channelThreadKey),
       ),
     );
     if (
@@ -3446,10 +3479,20 @@ class AgentSessionImpl implements AgentSession {
     contextTokens?: number,
   ): Promise<void> {
     try {
+      // A swapped turn's model lives only in that turn: the row keeps the
+      // model it named before (none when the turn moved it to another
+      // provider's thread), and the pin stays as it was, so the next turn and
+      // a cold resume resolve what they would have without the swap.
+      const swapped = this.runsOneTurnSelection;
+      const model = !swapped
+        ? session.model
+        : this.session.provider === session.providerId
+          ? (this.session.model ?? undefined)
+          : undefined;
       this.session.recordTurn({
         provider: session.providerId,
         modelThreadId: session.modelThreadId,
-        model: session.model,
+        model,
         reasoningEffort,
         checkpoint: position ? { turnId, checkpointId: position.checkpointId } : undefined,
         ...(contextTokens !== undefined ? { contextTokens } : {}),
@@ -3458,7 +3501,7 @@ class AgentSessionImpl implements AgentSession {
       // The pin becomes readable only once recorded: later turns of this live
       // session now resolve exactly this model, matching what a cold resume
       // of the row would do.
-      this.sessionPin = { providerId: session.providerId, model: session.model };
+      if (!swapped) this.sessionPin = { providerId: session.providerId, model: session.model };
     } catch (err) {
       this.log.warn("failed to persist session turn", {
         sessionId: this.sessionId,
@@ -4166,7 +4209,7 @@ class AgentSessionImpl implements AgentSession {
     // boundary, before the sink is attached, so a backend replacement cannot
     // leak close events into the new turn.
     if (!sink.lifecycleInterrupted) {
-      await this.ensureModelSessionForTurn();
+      await this.ensureModelSessionForTurn(true);
     }
     if (sink.lifecycleInterrupted) {
       await this.modelSession.interrupt("user-stop");

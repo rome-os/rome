@@ -50,6 +50,11 @@ export type ModelResolutionRequest = (
    * spends them.
    */
   credits?: true;
+  /**
+   * The ask runs on the guardian's own account, never on Rome credits, even
+   * while they are the default: the session is held on a provider.
+   */
+  ownAccount?: true;
 };
 
 /** The guardian's choice of model for each tier and provider. */
@@ -71,10 +76,10 @@ export interface ModelResolutionFacts {
   /** Read only for a tier ask. */
   tierModels?: TierModels;
   /**
-   * The provider a tier that follows the default runs on. Null when none is
-   * set. Undefined keeps the order Rome used before the default existed.
+   * The provider a tier that follows the default runs on. Undefined, before
+   * a default is set, keeps the order Rome used before the default existed.
    */
-  defaultProvider?: DefaultProvider | null;
+  defaultProvider?: DefaultProvider;
 }
 
 /** Why no provider can serve the ask, as facts. The resolver words them. */
@@ -188,9 +193,10 @@ export function resolveModel(
   // with no default set, while no AI account is logged in. Any other ask reads
   // the guardian's own ChatGPT account, which shows its card.
   const spendsCredits =
-    request.credits === true ||
-    facts.defaultProvider === "rome_credits" ||
-    (!facts.defaultProvider && signedInProviders(reports, true).rome_credits);
+    request.ownAccount !== true &&
+    (request.credits === true ||
+      facts.defaultProvider === "rome_credits" ||
+      (!facts.defaultProvider && signedInProviders(reports, true).rome_credits));
   const login =
     facts.logins.openai?.kind === "rome_credits" && !spendsCredits
       ? undefined
@@ -239,8 +245,8 @@ export function resolveModel(
 
   const following =
     request.override ??
-    (facts.defaultProvider ? providerOfDefault(facts.defaultProvider) : facts.defaultProvider);
-  if (following !== undefined) return onDefault(following);
+    (facts.defaultProvider ? providerOfDefault(facts.defaultProvider) : undefined);
+  if (following) return onDefault(following);
 
   // Before the default existed: the pin decides, else the first usable
   // provider in a fixed order.
@@ -270,8 +276,8 @@ export function resolveModel(
 
   // The default provider runs the ask, or nothing does: no other provider
   // stands in. Within it the session keeps the model it last ran.
-  function onDefault(provider: AccountedProviderId | null): ModelResolutionOutcome {
-    if (provider === null || !runs(provider)) return runs("mock") ? onTier("mock") : noneUsable();
+  function onDefault(provider: AccountedProviderId): ModelResolutionOutcome {
+    if (!runs(provider)) return runs("mock") ? onTier("mock") : noneUsable();
     const failure = unusable(provider, reports, login);
     if (failure) {
       return {
@@ -313,16 +319,22 @@ export function resolveModel(
  * The ask: the chat's exact selection, else the agent's exact model, else its
  * tier. A tier that names no provider follows the default provider and keeps
  * the session's pin while the pin is on that provider. `credits` runs it on
- * Codex through Rome credits, at the strength the chat's model has. Throws
- * on an agent with neither a tier nor a provider and model, or with a model
- * beside a tier.
+ * Codex through Rome credits, at the strength the chat's model has. `held`
+ * keeps a session on the provider it was held on when the default changed:
+ * its tier runs there, on the guardian's own account, and Rome credits never
+ * stand in. Throws on an agent with neither a tier nor a provider and model,
+ * or with a model beside a tier.
  */
 export function modelResolutionRequest(
   selectionId: ModelSelectionId | undefined,
   pin: { providerId: ProviderId; model: string } | undefined,
   agent: { tier?: ModelTier; providerId?: ProviderId; modelId?: string },
   credits = false,
+  held?: AccountedProviderId,
 ): ModelResolutionRequest {
+  if (held && agent.modelId === undefined && !agent.providerId) {
+    return { ...modelAsk(selectionId, pin, { ...agent, providerId: held }), ownAccount: true };
+  }
   if (!credits) return modelAsk(selectionId, pin, agent);
   // Rome credits run Codex: the chat's model, whoever chose it, runs at its
   // strength there.

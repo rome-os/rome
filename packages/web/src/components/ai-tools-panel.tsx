@@ -19,7 +19,11 @@ import {
   type AiToolBrandIconName,
 } from "@/components/brand-icons/ai-tool-icons";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
-import { MakeDefaultProviderButton, useProviderName } from "@/components/default-provider";
+import {
+  LabeledCheckbox,
+  MakeDefaultProviderButton,
+  useProviderName,
+} from "@/components/default-provider";
 import { Badge } from "@/components/ui/badge";
 import { IconButton } from "@/components/ui/icon-button";
 import { readRomeCredits, RomeCreditsRow } from "@/components/rome-credits-row";
@@ -384,8 +388,11 @@ const LOGOUT_PROVIDER_CONFIG = {
 type LogoutProvider = keyof typeof LOGOUT_PROVIDER_CONFIG;
 
 /**
- * What logging out of `provider` does to the chats: the other logged-in
- * account becomes the default, or with none left, the chats pause.
+ * What logging out of `provider` does to the chats. A logout of the default
+ * hands it to the other logged-in account, an expired one included, and with
+ * none left to Rome credits when they can run. Either way the dialog asks
+ * "Move existing chats too" while chats would move. Unchecked, they stay on
+ * the logged-out provider and wait for a login. With neither, the chats pause.
  * docs/domains/agents.md#default-provider
  */
 export function logoutOutcome(
@@ -393,18 +400,39 @@ export function logoutOutcome(
   state: DefaultProviderState | null | undefined,
   providerName: (provider: DefaultModelProvider) => string,
   t: TFunction<"settings">,
-): string | null {
+  choice: { moveExisting?: boolean; otherExpired?: boolean } = {},
+): { text: string; asksToMove: boolean } | null {
   if (!state) return null;
   const leaving: DefaultModelProvider = provider === "claude" ? "anthropic" : "openai";
   const other: DefaultModelProvider = provider === "claude" ? "openai" : "anthropic";
-  if (state.signedIn[other]) {
-    return state.provider === leaving
-      ? t("aiTools.logoutOutcome.otherBecomesDefault", { provider: providerName(other) })
-      : null;
+  const moves = state.provider === leaving;
+  if (state.signedIn[other] && !moves) return null;
+  const asksToMove = moves && (state.followingChats ?? 0) > 0;
+  const stay = asksToMove && choice.moveExisting === false;
+  if (moves && state.signedIn[other]) {
+    const name = providerName(other);
+    const text = stay
+      ? t("aiTools.logoutOutcome.otherBecomesDefaultStay", {
+          provider: name,
+          leaving: providerName(leaving),
+        })
+      : t("aiTools.logoutOutcome.otherBecomesDefault", { provider: name });
+    return {
+      text: choice.otherExpired
+        ? `${text} ${t("aiTools.logoutOutcome.otherExpired", { provider: name })}`
+        : text,
+      asksToMove,
+    };
   }
-  return state.romeCreditsUsable
-    ? t("aiTools.logoutOutcome.pauseOrCredits")
-    : t("aiTools.logoutOutcome.pause");
+  if (moves && state.romeCreditsUsable) {
+    return {
+      text: stay
+        ? t("aiTools.logoutOutcome.creditsBecomeDefaultStay", { leaving: providerName(leaving) })
+        : t("aiTools.logoutOutcome.creditsBecomeDefault"),
+      asksToMove,
+    };
+  }
+  return { text: t("aiTools.logoutOutcome.pause"), asksToMove: false };
 }
 
 interface AiToolsPanelProps {
@@ -700,6 +728,11 @@ export function AiToolsPanel({
   const [logoutPending, setLogoutPending] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [removeAnthropicProviderOpen, setRemoveAnthropicProviderOpen] = useState(false);
+  // The logout dialog's "Move existing chats too", checked each time a dialog opens.
+  const [logoutMovesExisting, setLogoutMovesExisting] = useState(true);
+  useEffect(() => {
+    if (logoutProvider || removeAnthropicProviderOpen) setLogoutMovesExisting(true);
+  }, [logoutProvider, removeAnthropicProviderOpen]);
   const [toolStatus, setToolStatus] = useState<AIToolStatusMap>({});
   const [anthropicProviders, setAnthropicProviders] = useState<
     AnthropicCompatibleProviderSummary[]
@@ -925,7 +958,11 @@ export function AiToolsPanel({
     setLogoutPending(true);
     setLogoutError(null);
     try {
-      const res = await fetch(`/api/ai-tools/${provider}/logout`, { method: "POST" });
+      const res = await fetch(`/api/ai-tools/${provider}/logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ moveExisting: logoutMovesExisting }),
+      });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         setLogoutError(data.error || fallbackError);
@@ -1003,6 +1040,8 @@ export function AiToolsPanel({
     try {
       const res = await fetch("/api/ai-tools/anthropic-compatible-credentials", {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ moveExisting: logoutMovesExisting }),
       });
       if (!res.ok) {
         throw new Error(
@@ -1038,14 +1077,29 @@ export function AiToolsPanel({
     toolStatus.codex?.loggedIn === false &&
     defaultProvider?.signedIn.anthropic !== true &&
     defaultProvider?.signedIn.openai !== true;
+  // Whether the other account's login expired: it still takes the default.
+  const otherExpired = (leaving: LogoutProvider) =>
+    (leaving === "claude" ? toolStatus.codex : toolStatus.claude)?.needsReauth === true;
+  const outcomeOf = (leaving: LogoutProvider) =>
+    logoutOutcome(leaving, defaultProvider, providerName, t, {
+      moveExisting: logoutMovesExisting,
+      otherExpired: otherExpired(leaving),
+    });
+  const logoutOutcomeNow = logoutProvider ? outcomeOf(logoutProvider) : null;
+  const removeOutcome = outcomeOf("claude");
   const logoutDescription = logoutConfig
-    ? [
-        t(logoutConfig.descriptionKey),
-        logoutProvider ? logoutOutcome(logoutProvider, defaultProvider, providerName, t) : null,
-      ]
-        .filter(Boolean)
-        .join(" ")
+    ? [t(logoutConfig.descriptionKey), logoutOutcomeNow?.text].filter(Boolean).join(" ")
     : "";
+  const moveCheckbox = (outcome: ReturnType<typeof logoutOutcome>, disabled: boolean) =>
+    outcome?.asksToMove ? (
+      <LabeledCheckbox
+        checked={logoutMovesExisting}
+        disabled={disabled}
+        onCheckedChange={setLogoutMovesExisting}
+      >
+        {t("aiTools.defaultProvider.moveExisting")}
+      </LabeledCheckbox>
+    ) : null;
 
   useEffect(() => {
     if (!loadingStatus) onConnectedChange?.(anyConnected);
@@ -1633,7 +1687,9 @@ export function AiToolsPanel({
             confirmDisabled={logoutPending}
             onConfirm={() => void handleLogout()}
             onCancel={() => setLogoutProvider(null)}
-          />
+          >
+            {moveCheckbox(logoutOutcomeNow, logoutPending)}
+          </RomeConfirmDialog>
         )}
 
         {configuredAnthropicProvider && (
@@ -1647,7 +1703,7 @@ export function AiToolsPanel({
                 providerName: configuredAnthropicProvider.providerName,
               }),
               // Removing the key logs Claude out, as Log out does.
-              logoutOutcome("claude", defaultProvider, providerName, t),
+              removeOutcome?.text,
             ]
               .filter(Boolean)
               .join(" ")}
@@ -1656,7 +1712,9 @@ export function AiToolsPanel({
             confirmDisabled={savingAnthropicProvider}
             onConfirm={() => void clearAnthropicProviderCredentials()}
             onCancel={() => setRemoveAnthropicProviderOpen(false)}
-          />
+          >
+            {moveCheckbox(removeOutcome, savingAnthropicProvider)}
+          </RomeConfirmDialog>
         )}
       </PanelSection>
     </PanelMeasure>
