@@ -16,7 +16,8 @@ import type { ConnectionSlot } from "@/lib/connection-cards";
 import { revokeConnectionGrant } from "@/lib/connections-api";
 import {
   DiscordServersSection,
-  discordInstallLink,
+  openDiscordPage,
+  reserveDiscordTab,
 } from "@/components/connections/discord-servers-section";
 
 // Every Talk channel connects through the setup: the card
@@ -88,9 +89,15 @@ export interface ChannelConnectConfig {
   blurbKey?: string;
   /** Copy key of the connect button; defaults to `common.connect`. */
   connectLabelKey?: string;
-  /** A page to open in a new tab once connecting is done, such as Discord's
-   *  page that adds Rome's bot to a server: one click connects and opens it. */
-  pageAfterConnect?: () => Promise<string>;
+  /** A page to open once connecting is done, such as Discord's page that adds
+   *  Rome's bot to a server: one click connects and opens it. `reserve` runs
+   *  in the click (a tab, or null where the shell opens pages itself), `open`
+   *  after the connect; `failedKey` words an `open` that failed. */
+  pageAfterConnect?: {
+    reserve: () => Window | null;
+    open: (tab: Window | null) => Promise<void>;
+    failedKey: string;
+  };
 }
 
 /** The personal-account glyph — a muted user circle instead of the brand badge,
@@ -155,7 +162,11 @@ export const CHANNEL_CONFIGS: Record<string, ChannelConnectConfig> = {
     connectedSection: DiscordServersSection,
     blurbKey: "channels.discordApp.blurb",
     connectLabelKey: "channels.discordApp.link",
-    pageAfterConnect: discordInstallLink,
+    pageAfterConnect: {
+      reserve: reserveDiscordTab,
+      open: openDiscordPage,
+      failedKey: "channels.discordApp.addFailed",
+    },
   },
   agents: {
     service: "agents",
@@ -207,18 +218,13 @@ export function ChannelConnectCard({
   const confirmsDisconnect = Boolean(slot.link);
   const [error, setError] = useState<string | null>(null);
 
-  // The tab a connect opens its page in. Opened in the click, before the
-  // page is known, so no popup blocker stops it.
-  const pageTab = useRef<Window | null>(null);
-  const openPage = (tab: Window) => {
-    if (!config.pageAfterConnect) return;
-    void config.pageAfterConnect().then(
-      (url) => {
-        tab.opener = null;
-        tab.location.href = url;
-      },
-      () => tab.close(),
-    );
+  // A connect started from a click that also opens a page: whether the page is
+  // wanted, and the tab reserved for it in the click (null where the shell
+  // opens pages itself).
+  const page = useRef<{ tab: Window | null } | null>(null);
+  const begin = (again = false) => {
+    page.current = config.pageAfterConnect ? { tab: config.pageAfterConnect.reserve() } : null;
+    setup.start(again);
   };
 
   // The setup addresses the connection by id, or by the bare service name when
@@ -233,21 +239,29 @@ export function ChannelConnectCard({
     // A caller that opens the account it connected refetches as it does, so
     // the refresh does not first drop a card whose route the connect moved.
     onDone: (connectionId) => {
-      const tab = pageTab.current;
-      pageTab.current = null;
-      if (tab) openPage(tab);
+      const wanted = page.current;
+      page.current = null;
+      if (wanted && config.pageAfterConnect) {
+        const { failedKey } = config.pageAfterConnect;
+        config.pageAfterConnect
+          .open(wanted.tab)
+          .catch((cause: unknown) =>
+            setError((cause instanceof Error && cause.message) || t(failedKey)),
+          );
+      }
       if (onConnected) onConnected(connectionId);
       else void onRefresh();
     },
   });
 
-  // A connect that failed opens no page.
+  // A connect that failed or was cancelled opens no page.
+  const setupEnded = setup.state?.status === "failed" || setup.state?.status === "cancelled";
   useEffect(() => {
-    if (setup.error && pageTab.current) {
-      pageTab.current.close();
-      pageTab.current = null;
+    if ((setup.error || setupEnded) && page.current) {
+      page.current.tab?.close();
+      page.current = null;
     }
-  }, [setup.error]);
+  }, [setup.error, setupEnded]);
 
   // A finished Reconnect is dropped once the account reads healthy, so a later
   // fault offers Reconnect again instead of the old finished view.
@@ -359,7 +373,7 @@ export function ChannelConnectCard({
           error={setup.error}
           onSubmit={setup.submit}
           onCancel={setup.cancel}
-          onRetry={() => setup.start(true)}
+          onRetry={() => begin(true)}
           renderPresenting={config.renderPresenting}
         />
       ) : (
@@ -380,10 +394,7 @@ export function ChannelConnectCard({
           <Button
             variant={role === "secondary" ? "outline" : "default"}
             size={role === "secondary" ? "sm" : "md"}
-            onClick={() => {
-              if (config.pageAfterConnect) pageTab.current = window.open("", "_blank");
-              setup.start();
-            }}
+            onClick={() => begin()}
             disabled={setup.busy}
           >
             {setup.busy ? t("common.connecting") : t(config.connectLabelKey ?? "common.connect")}

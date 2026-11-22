@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
+import { isElectronShell } from "@/lib/electron-shell";
 
 /** A server and an account bound to this Rome, as the Discord bot's Worker lists them. */
 interface DiscordServer {
@@ -42,11 +43,46 @@ async function readError(response: Response): Promise<string | null> {
 
 /** Discord's page that adds Rome's bot to a server and links the guardian's
  *  Discord account. Rejects with the server's words when it gives none. */
-export async function discordInstallLink(): Promise<string> {
+async function discordInstallLink(): Promise<string> {
   const response = await fetch(`${BASE}/install-link`, { method: "POST" });
   if (!response.ok) throw new Error((await readError(response)) ?? "");
   const { url } = (await response.json()) as { url: string };
   return url;
+}
+
+/** When Rome last sent the guardian to Discord's page. Coming back to this
+ *  tab soon after reads the server list again; any other focus does not, so
+ *  the shared bot is not asked on every tab switch. */
+let sentToDiscordAt = 0;
+const BACK_FROM_DISCORD_MS = 10 * 60_000;
+
+/** A tab for Discord's page, opened during the click, before the link is
+ *  known, so no popup blocker stops it. The Mac app opens none: it hands every
+ *  page to the system browser. */
+export function reserveDiscordTab(): Window | null {
+  return isElectronShell() ? null : window.open("", "_blank");
+}
+
+/** Opens Discord's page: in the reserved tab, through the Mac app in the
+ *  system browser, or in this tab when the browser gave no tab. Rejects, with
+ *  the reserved tab closed, when there is no link. */
+export async function openDiscordPage(tab: Window | null): Promise<void> {
+  let url: string;
+  try {
+    url = await discordInstallLink();
+  } catch (error) {
+    tab?.close();
+    throw error;
+  }
+  sentToDiscordAt = Date.now();
+  if (tab) {
+    tab.opener = null;
+    tab.location.href = url;
+  } else if (isElectronShell()) {
+    window.open(url);
+  } else {
+    window.location.assign(url);
+  }
 }
 
 /** The first letters of a name's first two words, as Discord marks a server
@@ -135,9 +171,14 @@ export function DiscordServersSection({
 
   useEffect(() => {
     void load();
-    // Discord's page runs in another tab: coming back reads the list again.
+    // Discord's page runs in another tab: coming back from it reads the list again.
     const again = () => {
-      if (document.visibilityState === "visible") void load();
+      if (
+        document.visibilityState === "visible" &&
+        Date.now() - sentToDiscordAt < BACK_FROM_DISCORD_MS
+      ) {
+        void load();
+      }
     };
     window.addEventListener("focus", again);
     document.addEventListener("visibilitychange", again);
@@ -149,19 +190,11 @@ export function DiscordServersSection({
 
   async function addToServer() {
     setActionError(null);
-    // Opened in the click, before the link is known, so no popup blocker stops it.
-    const tab = window.open("", "_blank");
+    const tab = reserveDiscordTab();
     setAdding(true);
     try {
-      const url = await discordInstallLink();
-      if (tab) {
-        tab.opener = null;
-        tab.location.href = url;
-      } else {
-        window.location.href = url;
-      }
+      await openDiscordPage(tab);
     } catch (error) {
-      tab?.close();
       setActionError(
         (error instanceof Error && error.message) || t("channels.discordApp.addFailed"),
       );

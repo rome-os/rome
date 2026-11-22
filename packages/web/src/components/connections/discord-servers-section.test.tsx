@@ -110,4 +110,44 @@ describe("the servers Rome's Discord bot was added to", () => {
     await waitFor(() => expect(tab.location.href).toBe("https://discord.com/oauth2/authorize?x=1"));
     expect(tab.opener).toBeNull();
   });
+
+  it("hands Add to server to the system browser in the Mac app", async () => {
+    window.rome = {};
+    answering({
+      "GET /api/connections/discord-app/servers": () => Response.json(LISTED),
+      "POST /api/connections/discord-app/install-link": () =>
+        Response.json({ url: "https://discord.com/oauth2/authorize?x=2" }),
+    });
+    const open = rs.spyOn(window, "open").mockReturnValue(null);
+    section();
+    fireEvent.click(await screen.findByRole("button", { name: "Add to server" }));
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith("https://discord.com/oauth2/authorize?x=2"),
+    );
+    expect(open).not.toHaveBeenCalledWith("", "_blank");
+    delete window.rome;
+  });
+
+  it("reads the list again on coming back from Discord, and not on any other focus", async () => {
+    const calls = answering({
+      "GET /api/connections/discord-app/servers": () => Response.json(LISTED),
+      "POST /api/connections/discord-app/install-link": () =>
+        Response.json({ url: "https://discord.com/oauth2/authorize?x=3" }),
+    });
+    const reads = () => calls.filter((call) => call.startsWith("GET")).length;
+    // Long after any trip to Discord: a focus reads nothing.
+    const now = rs.spyOn(Date, "now").mockReturnValue(Date.UTC(2100, 0, 1));
+    section();
+    await screen.findByText("Ray's Lab");
+    fireEvent.focus(window);
+    expect(reads()).toBe(1);
+    now.mockRestore();
+    // Back from Discord's page: the list is read again.
+    const tab = { opener: {}, location: { href: "" }, close: rs.fn() };
+    rs.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    fireEvent.click(screen.getByRole("button", { name: "Add to server" }));
+    await waitFor(() => expect(tab.location.href).toContain("x=3"));
+    fireEvent.focus(window);
+    await waitFor(() => expect(reads()).toBe(2));
+  });
 });
