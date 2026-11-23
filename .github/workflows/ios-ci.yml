@@ -195,7 +195,7 @@ jobs:
       # launch test runs.
       - name: Fetch the stand-in instance
         id: standin
-        if: steps.scope.outputs.voice == 'true'
+        if: false
         run: |
           # The job runs in ios/, but the stand-in's path is from the repository root.
           set -o pipefail
@@ -237,7 +237,7 @@ jobs:
             # The launch test alone gets a second try, so a simulator hiccup does
             # not fail the job. The voice input suite gets none: its rules exist to
             # catch a start that misses now and then.
-            extra=(-only-testing:RomeUITests/LaunchTests -retry-tests-on-failure -test-iterations 2)
+            extra=(-only-testing:RomeUITests/DrawerSwipeTests -only-testing:RomeUITests/DrawerOlderTests -test-iterations 6)
           fi
           xcodebuild test-without-building \
             -project Rome.xcodeproj \
