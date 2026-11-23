@@ -1,12 +1,12 @@
-# CLAUDE.md Files
+# AGENTS.md Files
 
-A **CLAUDE.md** is a file of repo guidance that its own location loads into agent context. The root file loads on every turn of every session. A nested file loads when the agent works in that directory. This file defines the format of a CLAUDE.md and the bar an entry clears to enter one. It governs `CLAUDE.md` files only, not skills. Prose rules come from [WRITING.md](WRITING.md).
+An **AGENTS.md** is a file of repo guidance that its own location loads into agent context. The root file loads on every turn of every session. A nested file loads when the agent works in that directory. This file defines the format of an AGENTS.md and the bar an entry clears to enter one. It governs `AGENTS.md` files only, not skills. Prose rules come from [WRITING.md](WRITING.md).
 
-The miss this family guards against is bloat. An entry that restates a source of truth elsewhere spends context on every load and goes stale when that source moves. It takes two shapes here: one rule copied into several files, so a change lands in one and not the others, and a reference doc parked inside a package's CLAUDE.md, where it loads on every turn that touches the package.
+The miss this family guards against is bloat. An entry that restates a source of truth elsewhere spends context on every load and goes stale when that source moves. It takes two shapes here: one rule copied into several files, so a change lands in one and not the others, and a reference doc parked inside a package's AGENTS.md, where it loads on every turn that touches the package.
 
 ## Format
 
-A CLAUDE.md sits at the repo root, or at the root of a directory whose contents share the same guidance. It opens with an H1 naming what it governs: the repo, the package, or the directory path. A topic title fails. `[mech]`
+An AGENTS.md sits at the repo root, or at the root of a directory whose contents share the same guidance. It opens with an H1 naming what it governs: the repo, the package, or the directory path. A topic title fails. `[mech]`
 
 > Prefer: `# rome-web`, `# docs/ui/`.
 > Over: `# Design System`, `# Documentation Rules`.
@@ -68,7 +68,7 @@ An entry fails on **aspiration** when no failure follows from ignoring it. `[llm
 An entry fails on **scope** when it bears on only some of the work in its directory. A procedure that runs on some tasks becomes a skill, and reference material becomes a doc under `docs/`. The file keeps a `Playbook` entry naming the trigger. `[llm]`
 
 > Prefer: "Before building or editing an app, read [`app_creation/SKILL.md`](../../rome_apps/coding/src/skills/app_creation/SKILL.md)."
-> Over: the create and scaffold steps written out in `rome_apps/CLAUDE.md`.
+> Over: the create and scaffold steps written out in `rome_apps/AGENTS.md`.
 
 Each section adds its own bar.
 
@@ -110,5 +110,5 @@ When the agent asks a question an entry already answers, the entry is ambiguous.
 
 An entry lands in the file closest to the code it governs. `[llm]`
 
-> Prefer: a rule about `packages/ui` landing in `packages/ui/CLAUDE.md`.
+> Prefer: a rule about `packages/ui` landing in `packages/ui/AGENTS.md`.
 > Over: the same rule landing in the root file.

@@ -120,7 +120,6 @@ jobs:
       - run: pnpm lint
       - run: pnpm lint:prose
       - run: pnpm check:ui:tailwind
-      - run: pnpm lint:agents
       - run: pnpm lint:imports
 
       # Dead-code analysis. Knip resolves the import graph across every

@@ -34,6 +34,6 @@ Terms used on multiple surfaces with no entry yet. Chats, accounts, agents in ch
 
 - [`../../VISION.md`](../../VISION.md) — why Rome exists, posture, scope.
 - [`../architecture/`](../architecture/index.md) — components, surfaces, and the invariants binding them.
-- [`../../CLAUDE.md`](../../CLAUDE.md) — the repo map.
+- [`../../AGENTS.md`](../../AGENTS.md) — the repo map.
 
-For doc-writing rules, see [`../CLAUDE.md`](../CLAUDE.md).
+For doc-writing rules, see [`../AGENTS.md`](../AGENTS.md).

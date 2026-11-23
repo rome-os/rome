@@ -1,6 +1,6 @@
 # Design System
 
-The dashboard (`packages/web`) and the component kit (`@rome-os/ui`) share one token system. This file holds the layer model, the token vocabulary, and the rules for writing UI against it. The per-dimension scales live in [`ui/`](ui/CLAUDE.md), and [`authoring/ui-tokens.md`](authoring/ui-tokens.md) governs those docs.
+The dashboard (`packages/web`) and the component kit (`@rome-os/ui`) share one token system. This file holds the layer model, the token vocabulary, and the rules for writing UI against it. The per-dimension scales live in [`ui/`](ui/AGENTS.md), and [`authoring/ui-tokens.md`](authoring/ui-tokens.md) governs those docs.
 
 ## Two layers
 

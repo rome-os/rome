@@ -31,7 +31,6 @@
     "lint:fix": "biome check --write .",
     "lint:sh": "scripts/lint-shell.sh",
     "lint:prose": "node scripts/check-prose.mjs",
-    "lint:agents": "tsx lint/agents-symlinks.ts",
     "lint:imports": "tsx lint/import-rules.ts",
     "imports-of": "tsx scripts/imports-of.ts",
     "concierge:eval": "tsx scripts/concierge-eval/main.ts",
