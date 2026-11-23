@@ -93,16 +93,16 @@ enum AppLinks {
         if parts.count == 2, parts[0] == "chat", !parts[1].isEmpty {
             return .chat(id: parts[1], page: page)
         }
-        if let file = routeFile(decoded) { return .file(file) }
-        if let first = parts.first, diskRoots.contains(first) {
-            return diskFile(decoded).map(ChatLink.file) ?? .unopenableFile
-        }
+        if let file = routeFile(decoded) ?? diskFile(decoded) { return .file(file) }
+        if let first = parts.first, diskRoots.contains(first) { return .unopenableFile }
         return page.map(ChatLink.page) ?? .system
     }
 
     private static let segmentAllowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
 
-    /// The first folder of a path that is on a disk, never a page of the dashboard.
+    /// The first folder of a path that is on a disk, never a page of the
+    /// dashboard: a link under one that names no project or memory file
+    /// cannot be opened.
     private static let diskRoots: Set<String> = [
         "Users", "home", "root", "tmp", "private", "var", "opt", "mnt", "srv", "Volumes", "workspace", "etc", "usr",
     ]

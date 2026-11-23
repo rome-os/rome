@@ -1058,6 +1058,9 @@ final class StubBackend: RomeBackend {
         let budget = LinkedFile(apiPath: "/projects/download", query: "path=projects/demo/budget.csv", name: "budget.csv")
         #expect(try link("/home/rome/.rome/default/projects/demo/budget.csv") == .file(budget))
         #expect(try link("file:///home/rome/.rome/default/projects/demo/budget.csv") == .file(budget))
+        // Whatever the first folder, as the container's own home is.
+        #expect(try link("/rome-home/.rome/default/projects/demo/budget.csv") == .file(budget))
+        #expect(try link("https://me.romeos.cc/rome-home/.rome/default/projects/demo/budget.csv") == .file(budget))
         #expect(try link("file:///Users/lin/.rome/work/memory/notes.md") == .file(LinkedFile(apiPath: "/memory/download", query: "path=memory/notes.md", name: "notes.md")))
         #expect(try link("/tmp/run.log") == .unopenableFile)
         #expect(try link("/Users/lin/Desktop/a.csv") == .unopenableFile)
