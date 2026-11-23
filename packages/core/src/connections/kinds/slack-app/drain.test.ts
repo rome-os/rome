@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { isSlackFrame, SLACK_DEPOSIT_HEADER } from "./deposit.js";
 import type { CapabilityStatus } from "../../types.js";
-import { deliverSlackFrame } from "./drain.js";
+import { deliverSlackFrame, SlackSetupHolds } from "./drain.js";
 
 const frame = { headers: { [SLACK_DEPOSIT_HEADER]: "1" }, body: new Uint8Array([123, 125]) };
 
@@ -87,5 +87,27 @@ describe("Slack frames in the instance's mailbox", () => {
   it("waits for a starting connection before dropping a frame no running one takes", async () => {
     const r = registry({ c1: { status: 400 }, c2: new Error("Ingress is unavailable") });
     expect(await deliverSlackFrame(r, frame)).toEqual({ status: 503 });
+  });
+
+  it("holds a frame no connection takes while a setup waits for approval", async () => {
+    const holds = new SlackSetupHolds();
+    const released: string[] = [];
+    const release = holds.hold(() => released.push("resumed"));
+    expect(await deliverSlackFrame(registry({}), frame, holds)).toEqual({ status: 503 });
+    expect(
+      await deliverSlackFrame(
+        registry(
+          { c1: new Error("Ingress is unavailable") },
+          { c1: { state: "needs-auth", missingGrants: ["bot"] } },
+        ),
+        frame,
+        holds,
+      ),
+    ).toEqual({ status: 503 });
+    release();
+    release();
+    expect(released).toEqual(["resumed"]);
+    expect(holds.any).toBe(false);
+    expect(await deliverSlackFrame(registry({}), frame, holds)).toEqual({ status: 200 });
   });
 });

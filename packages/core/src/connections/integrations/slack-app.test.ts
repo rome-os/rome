@@ -184,6 +184,55 @@ describe("connecting Rome's Slack app (R1)", () => {
     expect(c.installUrl).not.toHaveBeenCalled();
   });
 
+  it("holds Slack frames from the Worker's connect until its grant has had time to make the connection", async () => {
+    const realSetTimeout = globalThis.setTimeout;
+    let afterCommit: (() => void) | undefined;
+    const timers = rs.spyOn(globalThis, "setTimeout").mockImplementation(((
+      callback: () => void,
+      delay?: number,
+    ) => {
+      if (delay === 5_000) {
+        afterCommit = callback;
+        return { unref: () => {} } as never;
+      }
+      return realSetTimeout(callback, delay);
+    }) as never);
+    try {
+      const events: string[] = [];
+      const grant = await makeSlackAppSetup({
+        cloud: cloud(),
+        depositUrl: async () => DEPOSIT_URL,
+        approval: { pollMs: 0, limitMs: 1_000 },
+        holdSlackFrames: () => {
+          events.push("held");
+          return () => events.push("released");
+        },
+      })(interaction().interact, ctx);
+      expect(grant.profile?.teamId).toBe("T_A");
+      expect(events).toEqual(["held"]);
+      afterCommit?.();
+      expect(events).toEqual(["held", "released"]);
+    } finally {
+      timers.mockRestore();
+    }
+  });
+
+  it("lets go of its hold at once when the setup fails", async () => {
+    const events: string[] = [];
+    await expect(
+      makeSlackAppSetup({
+        cloud: cloud({}, [[]]),
+        depositUrl: async () => DEPOSIT_URL,
+        approval: { pollMs: 1, limitMs: 5 },
+        holdSlackFrames: () => {
+          events.push("held");
+          return () => events.push("released");
+        },
+      })(interaction().interact, ctx),
+    ).rejects.toThrow(/was not added/);
+    expect(events).toEqual(["held", "released"]);
+  });
+
   it("fails the setup with the Worker's reason, in the guardian's words", async () => {
     const c = cloud({
       connect: rs.fn(async () => {

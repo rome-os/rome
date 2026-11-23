@@ -111,6 +111,9 @@ function materialOf(material: unknown): SlackAppMaterial | null {
  *  passed, and for how long: Rome Cloud's link lasts ten minutes. */
 const APPROVAL_POLL_MS = 2_000;
 const APPROVAL_LIMIT_MS = 10 * 60 * 1000;
+/** How long after approval a setup's hold outlasts it, for its grant to make
+ *  the connection that then takes the held frames. */
+const SETUP_COMMIT_MS = 5_000;
 
 export interface SlackAppSetupDeps {
   cloud: SlackAppCloud;
@@ -119,6 +122,9 @@ export interface SlackAppSetupDeps {
   depositUrl: () => Promise<string | null>;
   /** How often and how long the setup waits for Slack's approval. */
   approval?: { pollMs: number; limitMs: number };
+  /** Has the mailbox hold Slack frames while the setup waits for approval;
+   *  the returned function lets go and has held frames delivered again. */
+  holdSlackFrames?: () => () => void;
 }
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
@@ -178,11 +184,14 @@ export function makeSlackAppSetup(deps: SlackAppSetupDeps): SetupFn {
       throw new Error("Rome can't receive Slack messages yet. Try again in a minute.");
     let workspace: SlackAppWorkspace;
     let depositKey: string;
+    let release: (() => void) | undefined;
     try {
       const connected = await ctx.step("slack-app-connect", (signal) =>
         deps.cloud.connect(depositUrl, signal),
       );
       depositKey = connected.depositKey;
+      // From here the Worker may deposit this workspace's events.
+      release = deps.holdSlackFrames?.();
       const url = await ctx.step("slack-app-install-url", (signal) =>
         deps.cloud.installUrl(signal),
       );
@@ -203,10 +212,14 @@ export function makeSlackAppSetup(deps: SlackAppSetupDeps): SetupFn {
         ),
       );
     } catch (error) {
+      // Failed, cancelled, out of time or Rome stopping: no connection will
+      // take what is held.
+      release?.();
       // The Worker's and Rome Cloud's refusals are written for the guardian.
       if (error instanceof SlackAppRefused) throw new Error(error.message);
       throw error;
     }
+    if (release) setTimeout(release, SETUP_COMMIT_MS).unref?.();
 
     const profile = slackAppGrantProfileSchema.parse({
       teamId: workspace.teamId,
@@ -262,6 +275,8 @@ export interface SlackAppDescriptorDeps {
    *  retries a frame it gave up on while the connection was down; the
    *  returned function lets go. */
   claimMailbox?: () => () => void;
+  /** Has the mailbox hold Slack frames while a setup waits for approval. */
+  holdSlackFrames?: () => () => void;
   /** Whether Rome listens to the account behind a connection. */
   listens: (connectionId: string) => boolean;
   approval?: { pollMs: number; limitMs: number };

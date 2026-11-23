@@ -2,8 +2,9 @@
 // mailbox, picked out of that mailbox's drain. The mailbox also serves an app's
 // webhooks and Rome's Discord bot, and it holds every later frame behind one it
 // is asked to deliver again. So a Slack frame is delivered again only while its
-// connection is starting and will take it: with no Slack connection, or one
-// that is broken, waiting for the guardian or locked, it is dropped and logged
+// connection is starting and will take it, or while a Slack setup waits for the
+// guardian to approve the app: with no Slack connection, or one that is
+// broken, waiting for the guardian or locked, it is dropped and logged
 // (docs/architecture/channels.md).
 
 import { createLogger } from "../../../logger.js";
@@ -13,6 +14,29 @@ import type { Connection } from "../../types.js";
 import type { MailboxFrame } from "./slack-app.js";
 
 const log = createLogger("slack-app");
+
+/** The Slack setups waiting for approval. Slack's events for a workspace can
+ *  arrive once the guardian approves, before the setup sees it and its grant
+ *  makes the connection, so the mailbox holds them while a setup is open. */
+export class SlackSetupHolds {
+  private open = 0;
+
+  get any(): boolean {
+    return this.open > 0;
+  }
+
+  /** A hold for one setup. `released` runs once, on the first release. */
+  hold(released: () => void): () => void {
+    let done = false;
+    this.open++;
+    return () => {
+      if (done) return;
+      done = true;
+      this.open--;
+      released();
+    };
+  }
+}
 
 /** Whether `conn` has no ingress yet only because it is starting: its chat is
  *  unlocked and not waiting on the guardian, so it opens ingress on its own. */
@@ -25,11 +49,13 @@ function isStarting(conn: Pick<Connection, "status">): boolean {
  * Hands a Slack frame to Rome's Slack app connections, answering an HTTP status
  * the drain acts on. Each connection holds one workspace and answers 400 for a
  * frame of another, so the frame goes to the one that takes it. A frame none
- * takes is dropped, unless a connection that may take it is still starting.
+ * takes is dropped, unless a connection that may take it is still starting or
+ * a setup in `setups` may yet make one.
  */
 export async function deliverSlackFrame(
   registry: Pick<ConnectionRegistry, "find" | "ingest">,
   frame: MailboxFrame,
+  setups?: Pick<SlackSetupHolds, "any">,
 ): Promise<{ status: number }> {
   let starting = false;
   const notRunning: string[] = [];
@@ -47,7 +73,8 @@ export async function deliverSlackFrame(
     if (status !== 400) return { status };
   }
   // Ingress opens when the connection starts, and its start resumes the drain.
-  if (starting) return { status: 503 };
+  // A setup's end resumes it too.
+  if (starting || setups?.any) return { status: 503 };
   if (notRunning.length > 0) {
     log.warn("slack frame dropped: the connection is not running", {
       connectionIds: notRunning,

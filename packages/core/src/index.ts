@@ -433,7 +433,7 @@ import {
 import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
 import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
 import { isSlackFrame } from "./connections/kinds/slack-app/deposit.js";
-import { deliverSlackFrame } from "./connections/kinds/slack-app/drain.js";
+import { deliverSlackFrame, SlackSetupHolds } from "./connections/kinds/slack-app/drain.js";
 import { MailboxClaims } from "./relay/mailbox-claims.js";
 import {
   RELAY_SETTING_KEY,
@@ -2184,9 +2184,14 @@ async function main() {
   // Rome's Discord bot deposits into the instance's own mailbox, marked by its
   // header: those frames go to its connection, never to the app the mailbox
   // otherwise serves (connections/kinds/discord-app/drain.ts).
+  const slackSetupHolds = new SlackSetupHolds();
   const relayDrainer = new RelayDrainer(relayDrains, async (drain, event) => {
     if (isSlackFrame(event.headers)) {
-      return deliverSlackFrame(connectionRegistry, { headers: event.headers, body: event.body });
+      return deliverSlackFrame(
+        connectionRegistry,
+        { headers: event.headers, body: event.body },
+        slackSetupHolds,
+      );
     }
     if (isDiscordFrame(event.headers)) return deliverDiscordFrame(connectionRegistry, event);
     if (!drain.targetAppId) {
@@ -2340,6 +2345,9 @@ async function main() {
         relayDrainer.resumeBlocked();
         return release;
       },
+      // A setup's hold ends with the setup; frames held behind it then reach
+      // its connection or are dropped.
+      holdSlackFrames: () => slackSetupHolds.hold(() => relayDrainer.resumeBlocked()),
       listens: (connectionId) => accountListening.listens(connectionId),
     },
     settingsRepo,
