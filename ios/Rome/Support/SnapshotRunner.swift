@@ -335,9 +335,9 @@ enum SnapshotRunner {
             }
             await capture("11-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([]) }
             await capture("11b-settings-shared-links", style: styleName, in: directory, wait: 1.2) {
-                Task { await model.workspace?.openMainChatLinks() }
+                Task { await model.workspace?.sharedLinks.open() }
             }
-            model.workspace?.showsMainChatLinks = false
+            model.workspace?.sharedLinks.shows = false
             try? await Task.sleep(for: .seconds(0.6))
             await capture("27-settings-notifications-on", style: styleName, in: directory, wait: 1.2) {
                 model.push.debugSet(permission: .on, dismissedAt: .now)
@@ -460,19 +460,9 @@ enum SnapshotRunner {
                     if order.count > 1 { share.toggle(order[order.count - 2]) }
                 }
             }
-            await capture("62-shared-links", style: styleName, in: directory, wait: 1.5) {
-                guard let share = model.workspace?.topicStore("topic-trip").share else { return }
-                share.cancel()
-                share.openLinks()
-            }
-            await capture("63-shared-links-empty", style: styleName, in: directory, wait: 2) {
-                model.workspace?.topicStore("topic-trip").share.showsLinks = false
-                model.debugCommand = .section(.chat)
-                model.workspace?.concierge.share.openLinks()
-            }
+            model.workspace?.topicStore("topic-trip").share.cancel()
             // A task chat: its brief, a card, starts the first turn.
             await capture("64-share-task", style: styleName, in: directory, wait: 2.5) {
-                model.workspace?.concierge.share.showsLinks = false
                 model.debugCommand = .route([.taskChat(chatId: "chat-login", title: "修复登录页样式")])
                 Task {
                     try? await Task.sleep(for: .seconds(1.5))
@@ -484,8 +474,6 @@ enum SnapshotRunner {
             model.debugCommand = .route([])
             if let workspace = model.workspace {
                 workspace.topicStore("topic-trip").share.cancel()
-                workspace.topicStore("topic-trip").share.showsLinks = false
-                workspace.concierge.share.showsLinks = false
             }
             // A long chat, to scroll far from the bottom.
             await capture("53-topic-long-chat", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }

@@ -198,15 +198,11 @@ private let twoTurns = [
         #expect(store.share.error == nil)
     }
 
-    /// The Shared links sheet and the share sheet cover the chat: replies
-    /// behind them are not marked read.
-    @Test func shareSheetsCoverTheChat() async {
+    /// The share sheet covers the chat: replies behind it are not marked read.
+    @Test func theShareSheetCoversTheChat() async {
         let workspace = Workspace(backend: FakeBackend(), instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-share-cover-\(UUID().uuidString)/Drafts"), instance: "t"))
         defer { workspace.stop() }
         #expect(!workspace.sharingCoversChat)
-        workspace.concierge.share.showsLinks = true
-        #expect(workspace.sharingCoversChat)
-        workspace.concierge.share.showsLinks = false
         let topic = workspace.topicStore("topic-1")
         topic.share.outgoing = ShareOutgoing(url: URL(string: "https://test/share/x")!)
         #expect(workspace.sharingCoversChat)
@@ -236,26 +232,34 @@ private let twoTurns = [
         #expect(share.error != nil)
     }
 
-    /// The main Chat has no "…" menu: Settings lists its links, from the
-    /// main chat on the server, once the instance has named it.
-    @Test func settingsReachesTheMainChatsLinks() async {
+    /// Settings lists every link at once, whatever chat it came from, even
+    /// before the instance has named the main chat.
+    @Test func settingsListsEveryLink() async {
         let backend = FakeBackend()
-        backend.mainChat = ConciergeSessionInfo(id: "concierge", unread: 0)
-        backend.shareLinks = [ChatShareLink(id: "a", url: "/share/a", title: "Trip", createdAt: "2026-11-01T10:00:00Z")]
+        backend.shareLinks = [
+            ChatShareLink(id: "a", url: "/share/a", title: "Trip", createdAt: "2026-11-01T10:00:00Z", chatId: "topic-1", chatName: "Kyoto"),
+            ChatShareLink(id: "b", url: "/share/b", title: "Week", createdAt: "2026-11-02T10:00:00Z", chatId: "concierge", chatName: "Chat"),
+        ]
         let workspace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-share-settings-\(UUID().uuidString)/Drafts"), instance: "t"))
         defer { workspace.stop() }
-        #expect(workspace.mainChatShare == nil)
-        await workspace.openMainChatLinks()
-        #expect(!workspace.showsMainChatLinks && backend.sharesListed.isEmpty)
+        await workspace.sharedLinks.open()
+        #expect(workspace.sharedLinks.shows)
+        #expect(backend.sharesListed == 1)
+        #expect(workspace.sharedLinks.links?.map(\.id) == ["b", "a"])
+        #expect(workspace.sharedLinks.links?.map(\.chatName) == ["Chat", "Kyoto"])
+        // Nothing of it covers a chat.
+        #expect(!workspace.sharingCoversChat)
+    }
 
-        await workspace.openConcierge()
-        #expect(workspace.mainChatShare === workspace.concierge.share)
-        await workspace.openMainChatLinks()
-        #expect(workspace.showsMainChatLinks)
-        #expect(backend.sharesListed.last == "concierge")
-        #expect(workspace.concierge.share.links?.map(\.id) == ["a"])
-        // Its own sheet: the chat under Settings asks for none.
-        #expect(!workspace.concierge.share.showsLinks)
+    @Test func aFailedLoadSaysSoUntilALoadWorks() async {
+        let backend = FakeBackend()
+        backend.sharesError = .network
+        let links = SharedLinksStore(backend: backend)
+        await links.load()
+        #expect(links.failed && links.links == nil)
+        backend.sharesError = nil
+        await links.load()
+        #expect(!links.failed && links.links?.isEmpty == true)
     }
 
     @Test func revokeRemovesTheLink() async {
@@ -264,14 +268,13 @@ private let twoTurns = [
             ChatShareLink(id: "old", url: "/share/old", title: "Old", createdAt: "2026-11-01T10:00:00Z"),
             ChatShareLink(id: "new", url: "/share/new", title: "New", createdAt: "2026-11-09T10:00:00Z"),
         ]
-        let store = await chat(backend, twoTurns)
-        let share = store.share
-        await share.loadLinks()
+        let links = SharedLinksStore(backend: backend)
+        await links.load()
         // Newest first.
-        #expect(share.links?.map(\.id) == ["new", "old"])
-        await share.revoke(share.links![0])
+        #expect(links.links?.map(\.id) == ["new", "old"])
+        await links.revoke(links.links![0])
         #expect(backend.revoked == ["new"])
-        #expect(share.links?.map(\.id) == ["old"])
+        #expect(links.links?.map(\.id) == ["old"])
     }
 
     /// A refused revoke puts that link back into the list as it is by then,
@@ -283,15 +286,15 @@ private let twoTurns = [
         let c = ChatShareLink(id: "c", url: "/share/c", createdAt: "2026-11-09T10:00:00Z")
         backend.shareLinks = [a, b]
         backend.revokeError = .network
-        let store = await chat(backend, twoTurns)
-        await store.share.loadLinks()
+        let links = SharedLinksStore(backend: backend)
+        await links.load()
         backend.duringRevoke = {
             backend.shareLinks = [c, b]
-            await store.share.loadLinks()
+            await links.load()
         }
-        await store.share.revoke(a)
-        #expect(store.share.links?.map(\.id) == ["c", "b", "a"])
-        #expect(store.share.revokeFailed)
+        await links.revoke(a)
+        #expect(links.links?.map(\.id) == ["c", "b", "a"])
+        #expect(links.revokeFailed)
     }
 
     /// A link the instance no longer knows was revoked already.
@@ -299,26 +302,17 @@ private let twoTurns = [
         let backend = FakeBackend()
         backend.shareLinks = [ChatShareLink(id: "a", url: "/share/a")]
         backend.revokeError = .notFound
-        let store = await chat(backend, twoTurns)
-        await store.share.loadLinks()
-        await store.share.revoke(store.share.links![0])
-        #expect(store.share.links?.isEmpty == true)
-        #expect(!store.share.revokeFailed)
-    }
-
-    @Test func aNewLinkJoinsTheLoadedList() async {
-        let backend = FakeBackend()
-        let store = await chat(backend, twoTurns)
-        await store.share.loadLinks()
-        #expect(store.share.links?.isEmpty == true)
-        store.share.begin(turn: "t2")
-        await store.share.create()
-        #expect(store.share.links?.map(\.id) == ["s1"])
+        let links = SharedLinksStore(backend: backend)
+        await links.load()
+        await links.revoke(links.links![0])
+        #expect(links.links?.isEmpty == true)
+        #expect(!links.revokeFailed)
     }
 
     @Test func aShareLinkDecodesWithOrWithoutItsDate() throws {
-        let listed = try JSONDecoder().decode([ChatShareLink].self, from: Data(#"[{"id":"a","title":"T","url":"/share/a","createdAt":"2026-11-09T10:00:00.000Z"}]"#.utf8))
+        let listed = try JSONDecoder().decode([ChatShareLink].self, from: Data(#"[{"id":"a","title":"T","url":"/share/a","createdAt":"2026-11-09T10:00:00.000Z","chatId":"topic-1","chatName":"Kyoto"}]"#.utf8))
         #expect(listed.first?.date != nil)
+        #expect(listed.first?.chatId == "topic-1" && listed.first?.chatName == "Kyoto")
         let created = try JSONDecoder().decode(ChatShareLink.self, from: Data(#"{"id":"b","url":"/share/b","title":"T"}"#.utf8))
         #expect(created.date == nil && created.url == "/share/b")
     }

@@ -119,6 +119,8 @@ final class Workspace {
     let topics: TopicChatsStore
     /// The archived topic chats, for the drawer's Archived row and its sheet.
     let archivedTopics: ArchivedTopicsStore
+    /// Every share link of the signed-in person, for Settings' Shared links.
+    let sharedLinks: SharedLinksStore
     /// The opened topic chats' transcripts, the newest `keptStores` of them
     /// kept while the instance is open, so coming back to a chat does not
     /// load it from the top again.
@@ -220,25 +222,10 @@ final class Workspace {
         concierge = main
         topics = TopicChatsStore(backend: backend, fold: TopicChatsFold(host: host))
         archivedTopics = ArchivedTopicsStore(backend: backend)
+        sharedLinks = SharedLinksStore(backend: backend)
     }
 
-    /// The main Chat's sharing, for its Shared links in Settings; nil until
-    /// the instance names the main chat, whose links it then lists.
-    var mainChatShare: ChatShareFlow? {
-        mainChatServerID == nil ? nil : concierge.share
-    }
-    /// The main Chat's Shared links sheet is up over Settings. Its own flag:
-    /// the chat's would ask the chat, under Settings, for a second sheet.
-    var showsMainChatLinks = false
-
-    /// Settings' Shared links: the sheet, then the main Chat's links.
-    func openMainChatLinks() async {
-        guard let share = mainChatShare else { return }
-        showsMainChatLinks = true
-        await share.loadLinks()
-    }
-
-    /// A chat's Shared links sheet or share sheet is up: it covers the chat.
+    /// A chat's share sheet is up: it covers the chat.
     var sharingCoversChat: Bool {
         ([concierge] + Array(topicStores.values) + Array(taskStores.values)).contains { $0.share.coversChat }
     }

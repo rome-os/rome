@@ -189,12 +189,14 @@ final class FakeBackend: RomeBackend {
         return try shareAnswer.get()
     }
 
-    /// The chats whose links were listed, in order.
-    var sharesListed: [String] = []
-    func chatShares(sessionId: String) async throws -> [ChatShareLink] {
-        sharesListed.append(sessionId)
+    /// How many times every link was listed.
+    var sharesListed = 0
+    func allShares() async throws -> [ChatShareLink] {
+        sharesListed += 1
+        if let sharesError { throw sharesError }
         return shareLinks
     }
+    var sharesError: APIError?
 
     /// Runs inside a revoke, before it answers.
     var duringRevoke: (() async -> Void)?

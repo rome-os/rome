@@ -335,8 +335,8 @@ private struct TopicChatHeader: View {
     }
 }
 
-/// What a topic chat's header "…" offers for the chat itself, besides Share
-/// and Shared links: a blank chat nothing yet; an archived one, as on the web,
+/// What a topic chat's header "…" offers for the chat itself, besides Share:
+/// a blank chat nothing yet; an archived one, as on the web,
 /// only Unarchive and Delete, since it is renamed and pinned once it is back.
 struct TopicHeaderMenu: Equatable {
     enum Item: Equatable, CaseIterable { case rename, pin, archive, unarchive, delete }

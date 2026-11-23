@@ -23,7 +23,7 @@ A term earns an entry when all hold:
 
 Content banned from entries, regardless of the admission bar ([principles entries](principles.md#exclusions) ban the same list):
 
-- **Implementation pointers** — file paths, function/type names, code mechanisms. Contracts name behavior. The mechanism enforcing it [belongs in code review](../CLAUDE.md#traps), not here.
+- **Implementation pointers** — file paths, function/type names, code mechanisms. Contracts name behavior. The mechanism enforcing it [belongs in code review](../AGENTS.md#traps), not here.
 - **Environment caches** — restatements of what a lookup already answers: `package.json` scripts, config files, `--help` output, directory layout. The lookup cannot go stale. The restatement can. Link or omit.
 <!-- vale Rome.History = NO -->
 - **History** — prior states and change narration ("previously", "no longer", "renamed from"). Entries state what is true now. Git history owns the past.

@@ -6,15 +6,35 @@ final class DrawerOlderTests: XCTestCase {
     @MainActor
     private func openDrawer(_ app: XCUIApplication) {
         let header = app.buttons["older-topic-chats-header"].firstMatch
-        if header.exists && header.isHittable { return }
+        if header.exists && onScreen(app, header) && header.isHittable { return }
         let button = app.buttons.matching(identifier: "Open navigation").allElementsBoundByIndex
             .first { $0.isHittable && $0.frame.width <= 60 }
             ?? app.buttons["Open navigation"].firstMatch
         XCTAssertTrue(button.waitForExistence(timeout: 15))
         button.tap()
         XCTAssertTrue(header.waitForExistence(timeout: 10))
+        waitOnScreen(app, header)
         expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: header)
         waitForExpectations(timeout: 5)
+    }
+
+    /// The element is drawn inside the window, not slid away with the drawer.
+    @MainActor
+    private func onScreen(_ app: XCUIApplication, _ element: XCUIElement) -> Bool {
+        element.exists && app.windows.firstMatch.frame.contains(CGPoint(x: element.frame.midX, y: element.frame.midY))
+    }
+
+    /// Waits up to `timeout` for the element to come on screen. Asked while
+    /// the element is still off screen, as a row is while the drawer slides
+    /// in or moves to its new place, `isHittable` fails the test instead of
+    /// answering false, so it is asked only once this returns.
+    @MainActor
+    private func waitOnScreen(_ app: XCUIApplication, _ element: XCUIElement, timeout: TimeInterval = 5) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !onScreen(app, element), Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        XCTAssertTrue(onScreen(app, element), "\(element) never came on screen")
     }
 
     @MainActor

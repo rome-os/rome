@@ -1,7 +1,7 @@
 // Speech credentials from Rome Cloud. An account holds at most five unexpired
 // speech sessions, and Rome Cloud cannot end one early, so one session's key
-// serves every conversation until shortly before it expires, also across
-// restarts: the session is kept in settings. What Rome speaks on a session is
+// serves every conversation until shortly before it expires, or until the
+// provider refuses it, also across restarts: the session is kept in settings. What Rome speaks on a session is
 // added up as it goes and reported once, after the session has expired.
 // `speaker-source.ts` is the only caller and asks only while `voice_mode` is
 // on. Contract: docs/concepts/rome-cloud.md#voice-conversation.
@@ -88,6 +88,7 @@ export interface RomeCloudSpeechCredentialsDeps {
 
 export interface RomeCloudSpeechCredentials extends SpeechCredentialSource {
   recordUsage(sessionId: string, usage: SpeechUsage): void;
+  retire(sessionId: string): void;
   /** Reports every session whose time has come, such as those an earlier run left. */
   report(): Promise<void>;
   /** Stops the timer that reports the next session. */
@@ -166,15 +167,20 @@ export function createRomeCloudSpeechCredentials(
   };
 
   // Reports each session whose time has come, once, and returns the rest. A
-  // session whose report could not be queued stays, to be tried again. A
-  // session another sign-in opened is dropped: Rome Cloud would not know it.
+  // session whose report could not be queued stays, to be tried again, as do
+  // all of them while signed out. A session another sign-in opened is
+  // dropped: Rome Cloud would not know it.
   const reportDue = async (list: StoredSpeechSession[]): Promise<StoredSpeechSession[]> => {
     const at = now();
     if (at < retryAt) return list;
     const due = list.filter((s) => at >= s.expiresAt + REPORT_AFTER_EXPIRY_MS);
     if (due.length === 0) return list;
     const caller = deps.romeCloud();
-    const asker = caller ? askerOf(caller) : null;
+    if (!caller) {
+      retryAt = at + REPORT_RETRY_MS;
+      return list;
+    }
+    const asker = askerOf(caller);
     const done = new Set<StoredSpeechSession>();
     for (const session of due) {
       if (session.asker === asker && deps.usage) {
@@ -234,6 +240,19 @@ export function createRomeCloudSpeechCredentials(
         }
         session.characters += characters;
         session.seconds += seconds;
+        await save(list);
+      }).catch(() => {});
+    },
+
+    // The session ends now, as far as Rome is concerned: `get` asks for a new
+    // one, and the usage is reported once no stream on it can still be speaking.
+    retire(sessionId) {
+      void serially(async () => {
+        const list = await load();
+        const session = list?.find((s) => s.sessionId === sessionId);
+        if (!list || !session || session.expiresAt <= now()) return;
+        log.info("speech session retired", { sessionId });
+        session.expiresAt = now();
         await save(list);
       }).catch(() => {});
     },

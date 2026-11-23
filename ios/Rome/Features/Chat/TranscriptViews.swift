@@ -352,7 +352,7 @@ private struct UserImageTile: View {
 
 /// The agent's bubble. In a run of bubbles the first keeps a small bottom-left
 /// corner and the last a small top-left corner, as on the design's Chat board.
-/// Every reply sits in a bubble, a long one too: past about fifteen lines it
+/// Every reply sits in a bubble, a long one too: past about twenty-five lines it
 /// folds under a soft fade, with a small chevron below to unfold it.
 struct AgentBubble: View {
     let text: String
@@ -381,7 +381,7 @@ struct AgentBubble: View {
     @Environment(\.textSelection) private var selection
 
     /// How many lines a bubble shows before it folds.
-    nonisolated static let foldedLines = 15
+    nonisolated static let foldedLines = 25
 
     /// The height of `foldedLines` lines of body text at a text size.
     nonisolated static func foldHeight(for size: DynamicTypeSize) -> CGFloat {

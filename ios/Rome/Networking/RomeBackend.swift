@@ -159,8 +159,9 @@ protocol RomeBackend: AnyObject, Sendable {
     /// `agentName` (nil: the page says Rome). No title: the instance names
     /// the share after the first turn.
     func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink
-    /// The chat's live share links, newest first.
-    func chatShares(sessionId: String) async throws -> [ChatShareLink]
+    /// Every live share link of the signed-in person, across their chats,
+    /// newest first, each with its chat's name.
+    func allShares() async throws -> [ChatShareLink]
     /// Revokes a share link: it stops opening.
     func revokeShare(id: String) async throws
 }
@@ -504,8 +505,8 @@ final class LiveBackend: RomeBackend {
         return .object(body)
     }
 
-    func chatShares(sessionId: String) async throws -> [ChatShareLink] {
-        try await client.get("/chat/sessions/\(escape(sessionId))/shares")
+    func allShares() async throws -> [ChatShareLink] {
+        try await client.get("/chat/shares")
     }
 
     func revokeShare(id: String) async throws {
@@ -615,7 +616,7 @@ extension RomeBackend {
     func apps() async throws -> [InstalledApp] { [] }
     func webSessionCookie() -> HTTPCookie? { nil }
     func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink { throw APIError.notFound }
-    func chatShares(sessionId: String) async throws -> [ChatShareLink] { [] }
+    func allShares() async throws -> [ChatShareLink] { [] }
     func revokeShare(id: String) async throws {}
 }
 
