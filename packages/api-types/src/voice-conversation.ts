@@ -38,7 +38,7 @@ export const voiceConversationStopReasonSchema = z.enum([
   "listening-failed",
   /** Rome could not speak: the speech provider or its credential failed. */
   "speaking-failed",
-  /** The chat could not take the turn, such as a chat that does not exist. */
+  /** The chat could not take the turn: one the guardian may not open, whose agent does not answer in text, or whose agent could not start. */
   "chat-refused",
   /** The listening session reached its time limit. */
   "time-limit",
@@ -59,7 +59,7 @@ export const VOICE_CONVERSATION_ALIVE_INTERVAL_MS = 1_000;
  * - `state`: the conversation's state changed.
  * - `heard`: the guardian's turn so far: `settled` text and the unsettled `pending` tail.
  * - `turn`: the guardian finished a turn, and Rome sent `text` to the chat.
- * - `caption`: the next sentence of the reply, sent before its audio.
+ * - `caption`: the next sentence of the reply, sent before its audio. Plain text, never HTML: show it as text.
  * - `clear`: the guardian spoke over the reply: drop the audio not played yet.
  * - `alive`: every `VOICE_CONVERSATION_ALIVE_INTERVAL_MS`.
  * - `ended` closes a conversation the client stopped. `error` closes one that stopped for `reason`.

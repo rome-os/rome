@@ -61,6 +61,12 @@ describe("speakable reply", () => {
     expect(sentences.join("")).toBe(clause.repeat(8));
   });
 
+  it("leaves no tag behind, even one hidden inside another", () => {
+    const plain = plainSentence("看 <scr<script>ipt>alert(1)</script> 这里 <b>粗</b> a < b");
+    expect(plain).not.toMatch(/[<>]/);
+    expect(plain).toContain("这里 粗 a b");
+  });
+
   it("says nothing for punctuation alone", () => {
     expect(spoken("---\n\n***\n")).toEqual([]);
   });

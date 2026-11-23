@@ -3131,6 +3131,61 @@ describe("Webchat API", () => {
     });
   });
 
+  it("hands a spoken input the turn that answers it, in the guardian's chats only", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+    const { runtime } = createWebchatRuntime(deps);
+    const id = await runtime.startChat({}, "guardian");
+    const turn = await runtime.sendSpoken(id, "你好");
+    expect(turn.id).toEqual(expect.any(String));
+
+    await deps.webchatRepo.createSession(
+      "visitor-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await deps.webchatRepo.setSessionTrigger("visitor-task", {
+      triggerKind: "concierge",
+      triggerName: "Task",
+    });
+    await expect(runtime.sendSpoken("visitor-task", "你好")).rejects.toThrow("Session not found");
+    await expect(runtime.sendSpoken("no-such-chat", "你好")).rejects.toThrow("Session not found");
+    expect(await deps.webchatRepo.getMessages("visitor-task")).toEqual([]);
+  });
+
+  it("refuses a spoken input for an agent whose text is private", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      buildAgent(name, { name: "main", policy: { finalText: "private" } }),
+    );
+    const { runtime } = createWebchatRuntime(deps);
+    const id = await runtime.startChat({}, "guardian");
+    await expect(runtime.sendSpoken(id, "你好")).rejects.toThrow("does not answer in text");
+    expect(await deps.webchatRepo.getMessages(id)).toEqual([]);
+  });
+
+  it("rejects a spoken input whose agent cannot be opened, rather than waiting for a turn", async () => {
+    deps.agentSessionManager = {
+      open: rs.fn(async () => {
+        throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
+          code: "model_provider_unavailable",
+          provider: "openai",
+          reason: "not_logged_in",
+        });
+      }),
+      find: () => undefined,
+      shutdown: async () => undefined,
+    } as unknown as typeof deps.agentSessionManager;
+    const { runtime } = createWebchatRuntime(deps);
+    const id = await runtime.startChat({}, "guardian");
+    await expect(runtime.sendSpoken(id, "你好")).rejects.toThrow("No turn started");
+  });
+
   it("accepts a logged-out provider as a persisted failed turn", async () => {
     deps.agentSessionManager = {
       open: rs.fn(async () => {

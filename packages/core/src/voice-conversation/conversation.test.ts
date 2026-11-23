@@ -228,6 +228,28 @@ describe("voice conversation", () => {
     expect(t.sent).toEqual(["你好"]);
   });
 
+  it("drops Rome's own words heard just after they played, but not the same words said later", async () => {
+    const t = setup();
+    t.conversation.heard("查一下天气", "");
+    t.conversation.endpoint();
+    await settled();
+    t.clock.advance(LOOKING_AFTER_MS);
+    t.speak(0, 500);
+    // Recognition lags: the looking line comes back after its audio played.
+    t.clock.advance(1000);
+    expect(t.states().at(-1)).toBe("thinking");
+    t.conversation.heard("我查一下", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["查一下天气"]);
+
+    t.clock.advance(3000);
+    t.conversation.heard("我查一下", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["查一下天气", "我查一下"]);
+  });
+
   it("says once that it is looking when the agent works quietly for 2 s", async () => {
     const t = setup();
     t.conversation.heard("查一下天气", "");

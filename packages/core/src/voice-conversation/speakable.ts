@@ -93,6 +93,8 @@ export function plainSentence(sentence: string): string {
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/<\/?[a-z][^>]*>/gi, "")
+    // Not a sanitizer, only what is said: with no angle bracket left, no tag can remain.
+    .replace(/[<>]/g, "")
     .replace(/https?:\/\/\S+/g, "")
     .replace(/`([^`]*)`/g, "$1")
     .replace(/\*\*|__|~~|\*|`/g, "")

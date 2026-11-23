@@ -43,6 +43,9 @@ const FAILED = {
 };
 // What Rome said lately, to tell its own voice from the guardian's.
 const ECHO_MEMORY_CHARS = 600;
+// Recognition lags the audio, and the client still plays what it holds, so
+// Rome's own last words may be heard this long after they were sent.
+const ECHO_TAIL_MS = 2_000;
 
 /** A turn of the chat's agent, as far as the conversation reads it. */
 export interface ReplyTurn {
@@ -123,6 +126,8 @@ export function createConversation(deps: ConversationDeps): Conversation {
   const queue: Queued[] = [];
   // When the audio sent so far ends, as the client plays it.
   let playsUntil = 0;
+  // Until when what is heard may be Rome's own voice.
+  let echoUntil = 0;
   let stopPlayed = () => {};
   let stopLooking: (() => void) | null = null;
 
@@ -164,6 +169,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
     // PCM s16le mono: two bytes a sample.
     const ms = (pcm.byteLength / 2 / speaker.format.sampleRate) * 1000;
     playsUntil = Math.max(playsUntil, now()) + ms;
+    echoUntil = playsUntil + ECHO_TAIL_MS;
     stopPlayed();
     stopPlayed = schedule(Math.ceil(playsUntil - now()), update);
     update();
@@ -293,13 +299,12 @@ export function createConversation(deps: ConversationDeps): Conversation {
       settled += newSettled;
       pending = newPending;
       deps.message({ type: "heard", settled, pending });
-      if (state !== "speaking") return;
       const words = `${settled}${pending}`;
-      if (enoughWords(words) && !isEcho(words, echo)) {
+      if (state === "speaking" && enoughWords(words) && !isEcho(words, echo)) {
         log.info("guardian spoke over the reply");
         maybeEcho = false;
         drop();
-      } else if (words.trim()) {
+      } else if (words.trim() && now() < echoUntil) {
         maybeEcho = true;
       }
     },

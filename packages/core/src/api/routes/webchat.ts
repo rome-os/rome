@@ -1122,7 +1122,8 @@ export interface WebchatRuntime {
   /**
    * Sends what the guardian said aloud in a voice conversation as their message,
    * marked spoken, ending any turn the chat is running. Resolves with the turn
-   * that answers it. Throws the route's error.
+   * that answers it. Throws the route's error, and also for a chat the guardian
+   * may not open, an agent whose text is private, or a send that started no turn.
    */
   sendSpoken(chatId: string, text: string): Promise<AgentTurnHandle>;
   /** Whether the chat is running a turn now. */
@@ -4199,8 +4200,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       askingDeviceId?: string;
       taskActor?: SessionActor;
       taskInput?: TaskInputClaim;
-      /** Gets the turn this input starts or joins, once it has one. */
-      onTurn?: (turn: AgentTurnHandle) => void;
+      /** Gets the turn this input starts or joins, once the input is submitted. */
+      onTurn?: (turn: Promise<AgentTurnHandle>) => void;
     } = {},
   ): Promise<RouteAnswer> => {
     // A Concierge turn's timing starts when the owner's send reaches Rome.
@@ -5416,7 +5417,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       : agentSess.submit(input, options);
     // The turn this input started gets its stream here, and so does one a
     // queued input starts later. A turn it was folded or steered into has one.
-    if (said.onTurn) receipt.turn.then(said.onTurn, () => {});
+    said.onTurn?.(receipt.turn);
     const attached = receipt.turn.then((handle) => {
       if (attachedTurns.has(handle.id)) return undefined;
       attachedTurns.add(handle.id);
@@ -5838,17 +5839,30 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     },
     async sendSpoken(chatId, text) {
-      let resolveTurn!: (turn: AgentTurnHandle) => void;
-      const turn = new Promise<AgentTurnHandle>((resolve) => {
-        resolveTurn = resolve;
-      });
+      // The guardian's socket reaches the chats the guardian's dashboard opens, as the routes' gate allows.
+      const session = await deps.webchatRepo.getSession(chatId);
+      if (
+        !session ||
+        !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, "guardian"))
+      ) {
+        throw new Error("Session not found");
+      }
+      // An agent whose text is private answers through its tools, which a voice conversation does not read yet.
+      const policy = resolveAgentPolicy(
+        agentPolicySource(deps.agentLoader, session.agentName ?? "main"),
+      );
+      if (policy.finalText === "private")
+        throw new Error("The chat's agent does not answer in text");
+      const started: { turn?: Promise<AgentTurnHandle> } = {};
       const sent = await handleChatSend(
         chatId,
         { inputId: randomUUID(), text, spoken: true, priority: "now" },
-        { onTurn: resolveTurn },
+        { onTurn: (turn) => (started.turn = turn) },
       );
       if (sent.status >= 400) throw new Error(routeError(sent));
-      return turn;
+      // A send whose agent could not be opened records a failed turn and submits none.
+      if (!started.turn) throw new Error("No turn started");
+      return started.turn;
     },
     async sendAsGuardian(chatId, text) {
       const inputId = randomUUID();
