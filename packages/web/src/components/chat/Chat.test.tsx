@@ -16,6 +16,7 @@ import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
 import { ShareMessageButton } from "@/components/chat/ShareMessageButton";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
+import { taskLink } from "@rome/api-types/task-link";
 import { SlotOutlet, SlotProvider, useSlotOutlet } from "@/components/slot";
 import {
   CONCIERGE_LEADING_SLOT,
@@ -3722,6 +3723,67 @@ describe("Chat Concierge jump to a message", () => {
       expect(scrollTo).not.toHaveBeenCalled();
       fireEvent.click(document.querySelector("[data-chain-layer] > div")!);
       await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
+    });
+
+    it("keeps task links live in the chain, as they are in the chat", async () => {
+      const result = {
+        id: "m-5",
+        sessionId: "concierge",
+        turnId: "turn-5",
+        role: "assistant" as const,
+        content: JSON.stringify([
+          { type: "text", content: `Done: ${taskLink("Book Lisbon", "task-9")}` },
+        ]),
+        createdAt: new Date(Date.UTC(2026, 9, 27, 12, 0, 5)).toISOString(),
+      };
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2), result],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3)],
+        nextCursor: null,
+      });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      await waitFor(() => expect(rows()).toBe(3));
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      await waitFor(() =>
+        expect(
+          document.querySelector("[data-chain-layer] [data-task-link='task-9']"),
+        ).not.toBeNull(),
+      );
+    });
+
+    it("closes the chain when sharing starts, so the turns are picked on the chat", async () => {
+      rs.mocked(getThreadPage).mockResolvedValueOnce({
+        messages: [message(1), message(2)],
+        hasOlder: false,
+        hasNewer: false,
+      });
+      rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+        messages: [message(1), message(2), message(3)],
+        nextCursor: null,
+      });
+      renderChat(
+        <ThemeProvider>
+          <Chat sessionId="concierge" variant="concierge" />
+        </ThemeProvider>,
+      );
+      await waitFor(() => expect(rows()).toBe(3));
+      fireEvent.click(screen.getByTestId("quote-jump"));
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).not.toBeNull());
+      const row = document.querySelector<HTMLElement>(
+        '[data-testid="user-row"][data-timeline-anchor="m-2"]',
+      )!;
+      // The chat's own Share, which stays mounted under the chain.
+      fireEvent.click(row.querySelector('button[aria-label="message.share"]')!);
+      await waitFor(() => expect(document.querySelector("[data-chain-layer]")).toBeNull());
+      expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-2");
     });
 
     it("sends implicitly in the chain and restores the placeholder on close", async () => {

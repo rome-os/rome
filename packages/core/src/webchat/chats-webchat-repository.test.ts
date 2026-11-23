@@ -1,6 +1,6 @@
 import type { ChatId } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { eq } from "drizzle-orm";
+import { eq, type SQL } from "drizzle-orm";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { chatKey } from "../chats/storage/place.js";
 import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/schema.js";
@@ -957,6 +957,35 @@ describe("ChatsWebChatRepository", () => {
         ids: ["s3"],
         hasOlder: true,
       });
+    });
+
+    it("reads a chain from the root index and the root's row, not through the rest of the chat", async () => {
+      const db = testDb.db as unknown as {
+        dialect: { sqlToQuery(query: SQL): { sql: string; params: unknown[] } };
+        $client: {
+          prepare(sql: string): { all(...values: unknown[]): Array<{ detail: string }> };
+        };
+      };
+      const all = rs.spyOn(testDb.db, "all");
+      try {
+        await page("m1", { limit: 2, after: "m4" });
+        const plans = all.mock.calls
+          .map(([query]) => db.dialect.sqlToQuery(query as SQL))
+          .filter((query) => query.sql.includes(") chain"))
+          .map((query) =>
+            db.$client
+              .prepare(`EXPLAIN QUERY PLAN ${query.sql}`)
+              .all(...query.params)
+              .map((row) => row.detail)
+              .join("\n"),
+          );
+        expect(plans).toHaveLength(1);
+        expect(plans[0]).toContain("idx_chat_messages_root");
+        expect(plans[0]).toContain("INTEGER PRIMARY KEY");
+        expect(plans[0]).not.toContain("idx_chat_messages_page");
+      } finally {
+        all.mockRestore();
+      }
     });
 
     it("finds no message that is not the chat's, a trace, or one the session did not see, and refuses a cursor of another chain", async () => {

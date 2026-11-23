@@ -627,6 +627,78 @@ describe("paging inside the layer", () => {
     await waitFor(() => expect(bubbleIds(layer()!)).toEqual(["e1", "g1", "a1", "a2", "g2"]));
   });
 
+  it("keeps the message being read in place when an older page fills the blank kept below", async () => {
+    const offsets = new WeakMap<Element, number>();
+    const seenRef: { current?: Seen } = {};
+    const rows = () => seenRef.current?.chain?.focus?.messages ?? [];
+    const blankOf = (el: Element | null, edge: "top" | "bottom") =>
+      Number.parseFloat(
+        el?.querySelector<HTMLElement>(`[data-chain-${edge}]`)?.style.height ?? "",
+      ) || 0;
+    rs.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function () {
+      return this.hasAttribute("data-chain-content")
+        ? rows().length * 100
+        : Number.parseFloat(this.style.height) || 0;
+    });
+    rs.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(600);
+    rs.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(function () {
+      return Math.max(600, blankOf(this, "top") + rows().length * 100 + blankOf(this, "bottom"));
+    });
+    rs.spyOn(Element.prototype, "scrollTop", "get").mockImplementation(function () {
+      return offsets.get(this) ?? 0;
+    });
+    rs.spyOn(Element.prototype, "scrollTop", "set").mockImplementation(function (value) {
+      offsets.set(this, Math.max(0, Math.min(value, this.scrollHeight - this.clientHeight)));
+    });
+    rs.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function () {
+      const el = this.closest<HTMLElement>("[data-chain-layer] > div");
+      const shift = blankOf(el, "top") - (el?.scrollTop ?? 0);
+      const at = rows().findIndex(
+        (m) => m.id === this.getAttribute("data-timeline-anchor")?.split(" ")[0],
+      );
+      let top = el && at >= 0 ? shift + at * 100 : 0;
+      let height = at >= 0 ? 100 : 600;
+      if (this.hasAttribute("data-chain-content")) {
+        top = shift;
+        height = rows().length * 100;
+      }
+      return {
+        top,
+        bottom: top + height,
+        height,
+        y: top,
+        x: 0,
+        left: 0,
+        right: 600,
+        width: 600,
+        toJSON: () => ({}),
+      } as DOMRect;
+    });
+    const older = deferred<ReturnType<typeof page>>();
+    thread
+      .mockResolvedValueOnce(page(chain, { hasOlder: true }))
+      .mockReturnValueOnce(older.promise);
+    seenRef.current = renderChat();
+    await pressQuote("a2");
+    await waitFor(() =>
+      expect(thread).toHaveBeenCalledWith("concierge", "a2", { limit: 20, before: "g1" }),
+    );
+    const reading = () =>
+      layer()!.querySelector('[data-timeline-anchor="a2"]')!.getBoundingClientRect().top;
+    expect(reading()).toBe(0);
+    expect(blankOf(scrollerOf(), "bottom")).toBeGreaterThan(0);
+    await act(async () =>
+      older.resolve(
+        page([
+          say("e2", "user", "Second idea", -3, { root: "g1" }),
+          say("e1", "user", "First idea", -2, { root: "g1" }),
+        ]),
+      ),
+    );
+    expect(bubbleIds(layer()!)).toEqual(["e2", "e1", "g1", "a1", "a2", "g2"]);
+    expect(reading()).toBe(0);
+  });
+
   it("reads 20 below the last message when the view is at the bottom and the chain has newer ones", async () => {
     const later = [say("a3", "assistant", "Booked", 8, { root: "g1" })];
     thread

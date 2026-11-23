@@ -1067,11 +1067,14 @@ export function Chat({
   });
 
   // Share chat picks every turn in a common chat. A Concierge chat holds its
-  // owner's private history, so there it starts with none picked.
+  // owner's private history, so there it starts with none picked. Turns are
+  // picked on the chat itself, so a reply chain in focus closes first.
+  const closeChain = chain.close;
   const enterShareMode = useCallback(() => {
+    void closeChain();
     setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
     setShareMode(true);
-  }, [concierge, mainTurnIds]);
+  }, [closeChain, concierge, mainTurnIds]);
 
   // Share on a message: the same share mode, with only that message's turn
   // selected. A message outside the chat's own turns selects nothing. Read
@@ -1084,10 +1087,11 @@ export function Chat({
         ? (messagesRef.current.get(mainSessionId)?.find((m) => m.id === messageId)?.turnId ??
           (turn?.sessionId === mainSessionId ? turn.turnId : undefined))
         : undefined;
+      void closeChain();
       setSelectedShareTurns(new Set(turnId ? [turnId] : []));
       setShareMode(true);
     },
-    [mainSessionId],
+    [closeChain, mainSessionId],
   );
 
   const exitShareMode = useCallback(() => {
@@ -2961,39 +2965,41 @@ export function Chat({
                   !mainSessionId && "hidden",
                 )}
               >
-                {/* The left inset opens the timeline rail's lane. Without it the
-                transcript's own `max-w-5xl` body reaches the container edge
-                once the container drops under 1024px, and the markers would land
-                on the bubbles. Padding sits inside the scroller's border box,
-                so the scrollbar does not move — only the content shifts. The
-                query MUST match ChatTimelineRail's visibility gate. */}
-                <div
-                  ref={attachScroller}
-                  data-chat-scroller
-                  className={cn(
-                    "scrollbar-hover-shown relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
-                    // Concierge has no timeline rail, so no lane for it. Its
-                    // header floats over the messages, so the first one starts
-                    // below it, and a jump to a message stops below it too.
-                    concierge
-                      ? "concierge-header-clear"
-                      : "concierge-header-clear @min-[48rem]/transcript:pl-8",
-                  )}
-                >
-                  {mainSessionId ? (
-                    conciergeEmpty ? (
-                      blankTranscript
-                    ) : (
-                      // The chat under a reply chain in focus stays as it is, out of sight.
-                      <div
-                        className="contents"
-                        style={chain.focus ? { visibility: "hidden" } : undefined}
-                      >
-                        {hasOlder(mainSessionId) ? (
-                          <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
-                        ) : null}
-                        <TaskLinksScope chatId={concierge ? mainSessionId : null}>
-                          <TaskChatContext.Provider value={isTaskChat}>
+                {/* Around the chat and the reply chain over it alike, so a task
+                  link reads the same in both. */}
+                <TaskLinksScope chatId={concierge ? mainSessionId : null}>
+                  <TaskChatContext.Provider value={isTaskChat}>
+                    {/* The left inset opens the timeline rail's lane. Without it the
+                    transcript's own `max-w-5xl` body reaches the container edge
+                    once the container drops under 1024px, and the markers would land
+                    on the bubbles. Padding sits inside the scroller's border box,
+                    so the scrollbar does not move — only the content shifts. The
+                    query MUST match ChatTimelineRail's visibility gate. */}
+                    <div
+                      ref={attachScroller}
+                      data-chat-scroller
+                      className={cn(
+                        "scrollbar-hover-shown relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
+                        // Concierge has no timeline rail, so no lane for it. Its
+                        // header floats over the messages, so the first one starts
+                        // below it, and a jump to a message stops below it too.
+                        concierge
+                          ? "concierge-header-clear"
+                          : "concierge-header-clear @min-[48rem]/transcript:pl-8",
+                      )}
+                    >
+                      {mainSessionId ? (
+                        conciergeEmpty ? (
+                          blankTranscript
+                        ) : (
+                          // The chat under a reply chain in focus stays as it is, out of sight.
+                          <div
+                            className="contents"
+                            style={chain.focus ? { visibility: "hidden" } : undefined}
+                          >
+                            {hasOlder(mainSessionId) ? (
+                              <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
+                            ) : null}
                             <MessageList
                               rows={rows}
                               live={{
@@ -3029,32 +3035,32 @@ export function Chat({
                               unreadFrom={unread?.firstId ?? null}
                               tail={pinnedHint}
                             />
-                          </TaskChatContext.Provider>
-                        </TaskLinksScope>
-                      </div>
-                    )
-                  ) : null}
+                          </div>
+                        )
+                      ) : null}
 
-                  <div
-                    data-chat-floor-space
-                    aria-hidden
-                    className="shrink-0"
-                    style={{ height: floorHeight }}
-                  />
-                </div>
-                {chain.focus ? (
-                  <ChainFocusLayer
-                    focus={chain.focus}
-                    layerRef={chain.layer}
-                    floor={floorEl}
-                    identityBySession={identityBySession}
-                    identity={mainIdentity}
-                    actions={blockActions}
-                    onMore={chain.more}
-                    onRetry={chain.retry}
-                    onClose={chain.close}
-                  />
-                ) : null}
+                      <div
+                        data-chat-floor-space
+                        aria-hidden
+                        className="shrink-0"
+                        style={{ height: floorHeight }}
+                      />
+                    </div>
+                    {chain.focus ? (
+                      <ChainFocusLayer
+                        focus={chain.focus}
+                        layerRef={chain.layer}
+                        floor={floorEl}
+                        identityBySession={identityBySession}
+                        identity={mainIdentity}
+                        actions={blockActions}
+                        onMore={chain.more}
+                        onRetry={chain.retry}
+                        onClose={chain.close}
+                      />
+                    ) : null}
+                  </TaskChatContext.Provider>
+                </TaskLinksScope>
               </div>
               {!mainSessionId ? blankTranscript : null}
               {/* Outside the message-list scope: the same composer stays live

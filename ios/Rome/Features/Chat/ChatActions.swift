@@ -12,6 +12,6 @@ final class ChatActions {
     func retry(_ rowId: String) { store?.retry(rowId) }
     func remove(_ rowId: String) { store?.removePending(rowId) }
     func reply(to messageId: String, row: String? = nil) { store?.reply(to: messageId, row: row) }
-    func share(fromRow rowId: String) { store?.share.begin(fromRow: rowId) }
+    func share(fromRow rowId: String) { store?.beginShare(fromRow: rowId) }
     func quote(original: String, from: String, row: String) { store?.quoteAction(original: original, from: from, row: row)?() }
 }

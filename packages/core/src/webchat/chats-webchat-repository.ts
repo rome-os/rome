@@ -884,16 +884,16 @@ export class ChatsWebChatRepository extends WebChatRepository {
       if (found.root !== anchor.root) return { error: "not_in_thread" };
       cursor = found;
     }
-    const inChain = sql`(m.root_message_id = ${anchor.root} OR m.id = ${anchor.root})`;
     // One more than asked for tells whether there is more on that side.
     const side = (older: boolean) =>
       this.chainMessages(
         sessionId,
         older
-          ? sql`${inChain} AND (m.said_at, m.id) < (${cursor.at}, ${cursor.id})`
-          : sql`${inChain} AND (m.said_at, m.id) > (${cursor.at}, ${cursor.id})`,
+          ? sql`(m.said_at, m.id) < (${cursor.at}, ${cursor.id})`
+          : sql`(m.said_at, m.id) > (${cursor.at}, ${cursor.id})`,
         older ? "DESC" : "ASC",
         limit + 1,
+        anchor.root,
       );
     const older = after === undefined ? side(true) : [];
     const newer = before === undefined ? side(false) : [];
@@ -921,9 +921,29 @@ export class ChatsWebChatRepository extends WebChatRepository {
   }
 
   /** The session's own chat messages that `where` (over `m`) picks, `limit` of
-   *  them in `order`. A session sees the place from when it started there, as
-   *  {@link sessionLines} says, and one in no chat sees none. */
-  private chainMessages(sessionId: string, where: SQL, order: "ASC" | "DESC", limit: number) {
+   *  them in `order`, of the chain with `root` when it is given. A session sees
+   *  the place from when it started there, as {@link sessionLines} says, and one
+   *  in no chat sees none. */
+  private chainMessages(
+    sessionId: string,
+    where: SQL,
+    order: "ASC" | "DESC",
+    limit: number,
+    root?: number,
+  ) {
+    // The chain's messages come first, by the root index and the root's own
+    // row, so a short chain in a long chat is read without the rest of it.
+    const sees = sql`m.chat_id = s.chat_id AND m.thread_id IS s.thread_id AND m.said_at >= s.created_at`;
+    const from =
+      root === undefined
+        ? sql`rome_sessions s JOIN ${CHAT_MESSAGES} m ON ${sees}`
+        : sql`(
+            SELECT id FROM chat_messages WHERE root_message_id = ${root}
+              AND chat_id = (SELECT chat_id FROM rome_sessions WHERE id = ${sessionId})
+            UNION ALL SELECT ${root}
+          ) chain
+          CROSS JOIN ${CHAT_MESSAGES} m ON m.id = chain.id
+          JOIN rome_sessions s ON ${sees}`;
     return this.db.all<{
       key: string;
       id: number;
@@ -932,9 +952,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
       turn_id: string | null;
     }>(sql`
       SELECT m.key, m.id, m.said_at AS at, COALESCE(m.root_message_id, m.id) AS root, l.turn_id
-      FROM rome_sessions s
-      JOIN ${CHAT_MESSAGES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-        AND m.said_at >= s.created_at
+      FROM ${from}
       LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
         AND l.role IN ('prompt', 'answer')
       WHERE s.id = ${sessionId} AND ${where}

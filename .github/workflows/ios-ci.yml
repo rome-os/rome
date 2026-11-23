@@ -65,28 +65,8 @@ jobs:
             -skipPackagePluginValidation \
             -skipMacroValidation \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
-            -resultBundlePath "$RUNNER_TEMP/rome-unit.xcresult" \
             COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO
-      - name: Print failed unit test diagnostics
-        if: failure()
-        run: |
-          result="$RUNNER_TEMP/rome-unit.xcresult"
-          if [ -d "$result" ]; then
-            xcrun xcresulttool get test-results summary --path "$result"
-            for test in \
-              'ThreadFocusHandoffTests/cachedHandoffAndInverseKeepThePressedBubble(y:count:)' \
-              'ThreadFocusHandoffTests/pinnedFooterBelongsOnlyToMainAndFadesWithItsCollection()'; do
-              xcrun xcresulttool get test-results test-details --path "$result" --test-id "$test"
-            done
-          fi
-      - name: Keep failed unit test results
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: unit-test-results
-          path: ${{ runner.temp }}/rome-unit.xcresult
-          retention-days: 7
 
   # Debug builds can play a recording as the microphone for UI tests. Release
   # must hold no trace of it: no recording source and no launch argument.

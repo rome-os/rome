@@ -92,7 +92,6 @@ async function swap(
   delete root.dataset.chainTransition;
 }
 
-const px = (el: HTMLElement | null) => el?.offsetHeight ?? 0;
 const setBlank = (el: HTMLElement | null, height: number) => {
   if (el) el.style.height = height > 0.5 ? `${height}px` : "";
 };
@@ -144,29 +143,28 @@ function memoryChain(messages: ChatMessage[], root: string, anchor: string) {
   );
 }
 
+/** The message being read in `el`: the pressed one while it is still pinned, else the first on screen. */
+function readingRow(el: HTMLElement, fallback: { id: string; y: number }) {
+  const view = el.getBoundingClientRect();
+  const pressed = findMessageAnchor(el, fallback.id);
+  if (pressed && Math.abs(pressed.getBoundingClientRect().top - view.top - fallback.y) < 1)
+    return fallback;
+  const clear = view.top + (Number.parseFloat(getComputedStyle(el).scrollPaddingTop) || 0);
+  for (const row of el.querySelectorAll<HTMLElement>("[data-timeline-anchor]")) {
+    const rect = row.getBoundingClientRect();
+    if (rect.bottom > clear && rect.top < view.bottom)
+      return { id: row.dataset.timelineAnchor!.split(" ")[0], y: rect.top - view.top };
+  }
+  return fallback;
+}
+
 /** Keeps the first message being read in place while rows above or inside it change. */
 function keepReading(
   el: HTMLElement | null,
   fallback: { id: string; y: number },
   update: () => void,
 ) {
-  let anchor = fallback;
-  if (el) {
-    const view = el.getBoundingClientRect();
-    const pressed = findMessageAnchor(el, fallback.id);
-    const stillPinned =
-      pressed && Math.abs(pressed.getBoundingClientRect().top - view.top - fallback.y) < 1;
-    const clear = view.top + (Number.parseFloat(getComputedStyle(el).scrollPaddingTop) || 0);
-    for (const row of stillPinned
-      ? []
-      : el.querySelectorAll<HTMLElement>("[data-timeline-anchor]")) {
-      const rect = row.getBoundingClientRect();
-      if (rect.bottom > clear && rect.top < view.bottom) {
-        anchor = { id: row.dataset.timelineAnchor!.split(" ")[0], y: rect.top - view.top };
-        break;
-      }
-    }
-  }
+  const anchor = el ? readingRow(el, fallback) : fallback;
   update();
   if (el) place(el, anchor.id, anchor.y);
 }
@@ -261,7 +259,7 @@ export function useChainFocus({
       }).catch(() => null);
       const el = layer.current;
       if (!page || !el || token !== epoch.current || latest.current.sessionId !== sessionId) return;
-      const was = { top: el.scrollTop, height: el.scrollHeight };
+      const read = readingRow(el, { id: focus.anchor, y: opening.current?.y ?? 0 });
       flushSync(() =>
         setFocus(
           (held) =>
@@ -299,16 +297,8 @@ export function useChainFocus({
         if (!page.hasNewer) opening.current?.updates.clear();
         return;
       }
-      // The messages went in above what is read. The blank kept above is
-      // given back first, then the scroll moves, so the same message stays put.
-      const added = el.scrollHeight - was.height;
-      const top = el.querySelector<HTMLElement>("[data-chain-top]");
-      const take = Math.min(px(top), added + was.top);
-      setBlank(top, px(top) - take);
-      el.scrollTop = was.top + added - take;
-      // What the blank below gives to growth is not for this.
-      const bottom = el.querySelector<HTMLElement>("[data-chain-bottom]");
-      setBlank(bottom, px(bottom) + added);
+      // The messages went in above what is read, which stays where it was.
+      place(el, read.id, read.y);
     } finally {
       if (token === epoch.current) {
         reading.current = false;

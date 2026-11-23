@@ -18,9 +18,12 @@ final class TranscriptStore {
     // change builds the rows again, once, so a read is a plain property read.
     private(set) var messages: [ChatMessage] = [] { didSet {
         rebuildRows()
-        threadFocus?.updateHeld(messages)
+        threadFocus?.updateHeld(messages, changedFrom: oldValue)
     } }
-    private(set) var pending: [PendingSend] = [] { didSet { rebuildRows() } }
+    private(set) var pending: [PendingSend] = [] { didSet {
+        rebuildRows()
+        threadFocus?.updatePending(pending)
+    } }
     private(set) var loaded = false
     /// A read of the chat worked at least once (or it was made just now), so
     /// an empty transcript is a chat with nothing in it, not one that failed
@@ -722,6 +725,7 @@ final class TranscriptStore {
                                 backend: backend, pending: true, root: root, original: original)
         focusPosition.begin(focus)
         threadFocus = focus
+        focus.updatePending(pending)
         await readThread(focus, original: original)
     }
 
@@ -760,6 +764,24 @@ final class TranscriptStore {
 
     func holdThreadMessages(_ next: [ChatMessage]) {
         commit(next, persist: false)
+    }
+
+    /// The chat's sends a focused chain draws as its own: their Retry and
+    /// Delete still act on the chat, which holds them.
+    func holdThreadPending(_ next: [PendingSend]) {
+        let stored = Set(messages.map(\.id))
+        let next = next.filter { !stored.contains($0.id) }
+        if next != pending { pending = next }
+    }
+
+    /// A message's Share. Turns are picked on the chat itself, so a chain in
+    /// focus closes first, and gives the turn of a message only it holds.
+    func beginShare(fromRow rowId: String) {
+        guard let focus = threadFocus else { return share.begin(fromRow: rowId) }
+        let turn = ShareTurns(messages: focus.transcript.messages, rows: focus.transcript.rows).turnOfRow[rowId]
+            ?? share.turns?.turnOfRow[rowId]
+        closeThread()
+        share.begin(turn: turn)
     }
 
     // MARK: Replies

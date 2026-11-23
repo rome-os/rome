@@ -312,6 +312,78 @@ import Testing
         #expect(store.threadFocus == nil && store.messages.map(\.id) == ["m"])
     }
 
+    @Test func aSendToTheChainShowsInItWhileItSendsAndAfterItFails() async throws {
+        let backend = FakeBackend()
+        backend.threadPages["open"] = ThreadPage(messages: [message("m")], hasOlder: false, hasNewer: false)
+        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
+        await store.openThread(from: "m", row: "m:0", original: "m")
+        let focus = try #require(store.threadFocus)
+        #expect(store.send("next", reply: store.composerReply))
+        #expect(focus.transcript.pending.map(\.text) == ["next"])
+        for _ in 0..<20 { await Task.yield() }
+        let failed = try #require(focus.transcript.pending.first)
+        guard case .failed = failed.state else { Issue.record("the send did not fail"); return }
+        #expect(focus.transcript.rows.contains { $0.id == failed.id || $0.id.hasPrefix("\(failed.id):") })
+        // Its Retry and Delete act on the chat, which holds the send.
+        store.actions.remove(failed.id)
+        #expect(store.pending.isEmpty && focus.transcript.pending.isEmpty)
+        // A send to no message of the chain stays the chat's alone.
+        #expect(store.send("elsewhere"))
+        #expect(store.pending.count == 1 && focus.transcript.pending.isEmpty)
+    }
+
+    @Test func aHydratedEditSurvivesAnUnrelatedArrivalInTheChat() async throws {
+        let backend = FakeBackend()
+        backend.stored = [message("m", text: "cached")]
+        backend.threadPages["open"] = ThreadPage(messages: [message("m", text: "edited")], hasOlder: false, hasNewer: false)
+        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<100 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        await store.openThread(from: "m", row: "m:0", original: "m")
+        let focus = try #require(store.threadFocus)
+        #expect(focus.transcript.message("m")?.content == "edited")
+        backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("other", root: "other")))
+        #expect(store.message("other") != nil && store.message("m")?.content == "cached")
+        #expect(focus.transcript.message("m")?.content == "edited")
+    }
+
+    @Test func aRetrysReadSupersedesLiveEditsDrawnBeforeIt() async throws {
+        let backend = FakeBackend()
+        backend.stored = [message("m", text: "cached")]
+        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
+        await store.reload()
+        backend.threadError = .network
+        await store.openThread(from: "m", row: "m:0", original: "m")
+        let focus = try #require(store.threadFocus)
+        #expect(focus.initial == .failed)
+        focus.receive(message("m", text: "early edit"))
+        focus.receive(message("late"))
+        #expect(focus.transcript.message("m")?.content == "early edit" && focus.transcript.message("late") == nil)
+        backend.threadError = nil
+        backend.threadPages["open"] = ThreadPage(messages: [message("m", text: "newest")], hasOlder: false, hasNewer: false)
+        store.retryThread()
+        for _ in 0..<30 { await Task.yield() }
+        #expect(focus.initial == nil)
+        #expect(focus.transcript.message("m")?.content == "newest")
+        // An arrival not drawn before the retry still joins at the newest end.
+        #expect(focus.transcript.messages.map(\.id) == ["m", "late"])
+    }
+
+    @Test func shareFromAFocusedRowClosesTheChainAndPicksTheRowsTurn() async {
+        let backend = FakeBackend()
+        var answer = message("answer")
+        answer.turnId = "t9"
+        backend.stored = [message("m")]
+        backend.threadPages["open"] = ThreadPage(messages: [message("m"), answer], hasOlder: false, hasNewer: false)
+        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
+        await store.reload()
+        await store.openThread(from: "m", row: "m:0", original: "m")
+        #expect(store.message("answer") == nil)
+        store.actions.share(fromRow: "answer:0")
+        #expect(store.threadFocus == nil)
+        #expect(store.share.selection == ["t9"])
+    }
+
     @Test func closeReleasesFocusTranscript() {
         let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: FakeBackend())
         weak var child: TranscriptStore?

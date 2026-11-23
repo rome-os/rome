@@ -73,7 +73,14 @@ final class ThreadFocus {
     }
 
     func failed() { initial = .failed }
-    func retry() { initial = .loading }
+
+    /// A retry's read is newer than the live updates already drawn before it
+    /// began; only arrivals not drawn yet still wait for it.
+    func retry() {
+        initial = .loading
+        let shown = Set(transcript.messages.map(\.id))
+        updates.removeAll { shown.contains($0.id) }
+    }
 
     var reply: ChatMessage? {
         transcript.messages.last { message in
@@ -152,13 +159,24 @@ final class ThreadFocus {
         }
     }
 
-    func updateHeld(_ messages: [ChatMessage]) {
+    /// The chat's messages changed from `old`. Only the copies that change
+    /// pass to the chain: one the chat holds unchanged can be older than the
+    /// chain's own read. Without `old`, as from a fresh page, all pass.
+    func updateHeld(_ messages: [ChatMessage], changedFrom old: [ChatMessage]? = nil) {
         if initial != nil {
             for message in Self.memory(messages, root: root, anchor: anchor) where transcript.message(message.id) != message { receive(message) }
         }
-        let byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        let before = old.map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last }) }
+        let byID = Dictionary(messages.filter { before?[$0.id] != $0 }.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
         let held = transcript.messages.map { byID[$0.id] ?? $0 }
         if held != transcript.messages { transcript.holdThreadMessages(held) }
+    }
+
+    /// The guardian's sends to this chain that the server has not stored
+    /// yet, sending or failed, drawn here as the chat draws them.
+    func updatePending(_ pending: [PendingSend]) {
+        let held = Set(transcript.messages.map(\.id))
+        transcript.holdThreadPending(pending.filter { $0.reply.map { held.contains($0.messageId) } == true })
     }
 
     /// A newest-page read can include the guardian's own send, which has no
