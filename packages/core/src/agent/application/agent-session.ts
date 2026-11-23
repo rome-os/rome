@@ -1169,7 +1169,7 @@ function sessionSetupOf(
     createRomeTools({
       turn,
       actions: deps.actions,
-      skills: deps.skillCatalog,
+      skills: config.skills === false ? null : deps.skillCatalog,
       subagents: { list: () => subagents, run },
       // Without a speaker, action results that hand back a widget take their
       // plain-text forms. Otherwise the tool result claims a card was shown

@@ -3,9 +3,11 @@ description: Sorts events from what the Concierge follows by how much they matte
 tier: small
 permissionMode: bypassPermissions
 # It reads text written by strangers and only returns decisions, so it holds
-# no tools and no actions: anything it could call is reachable by injection.
+# no tools, no actions, and no skills: anything it could call is reachable by
+# injection.
 tools: []
 actions: []
+skills: false
 policy:
   finalText: private
   autoTitle: false

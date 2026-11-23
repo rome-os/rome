@@ -19,6 +19,8 @@ export interface AgentDefinition {
   systemPromptPrefix: string;
   tools: string[];
   actions?: string[];
+  /** Whether the agent gets the skill tools. Omitted means true, and false omits them. */
+  skills?: boolean;
   permissionMode: "acceptEdits" | "bypassPermissions" | "default";
   maxTurns?: number;
   /** Canonical ids once loaded. */

@@ -106,6 +106,7 @@ export const AgentConfigSchema = z
     systemPromptPrefix: z.string().min(1),
     tools: z.array(z.string().min(1)),
     actions: z.array(z.string().min(1)).optional(),
+    skills: z.boolean().optional(),
     permissionMode: z.enum(["acceptEdits", "bypassPermissions", "default"]),
     maxTurns: z.number().int().positive().optional(),
     allowedSubagents: z.array(z.string().min(1)).optional(),

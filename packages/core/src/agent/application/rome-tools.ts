@@ -24,7 +24,8 @@ export interface RomeToolsOptions {
   /** The turns the tools serve. */
   turn: TurnFacts;
   actions: AgentActions;
-  skills: Pick<SkillCatalog, "list">;
+  /** Null when the agent opts out of skills with `skills: false`. */
+  skills: Pick<SkillCatalog, "list"> | null;
   subagents: Subagents;
   widgetsShow: boolean;
   log: AgentLog;
@@ -47,7 +48,7 @@ export function createRomeTools(options: RomeToolsOptions): RomeTools {
   const groups: Record<RomeToolGroup, RomeTool[]> = {
     actions: actionTools(actions, turn, widgetsShow, run, log),
     subagents: subagentTools(subagents, run),
-    skills: skillTools(skills, run),
+    skills: skills ? skillTools(skills, run) : [],
     ask_user: askUserTools({ turn, widgetsShow, defer, sessionTools, repliesTo, run }),
   };
 

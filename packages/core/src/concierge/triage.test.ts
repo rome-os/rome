@@ -23,6 +23,7 @@ const agent = parseYaml(
   tier: string;
   tools: unknown[];
   actions: unknown[];
+  skills?: boolean;
   outputSchema: {
     properties: { items: { items: { properties: { decision: { enum: string[] } } } } };
   };
@@ -82,10 +83,11 @@ const runner = (answer: unknown | Error): AgentRunnerInterface & { prompts: stri
 };
 
 describe("the triage agent", () => {
-  it("is small, holds no tools or actions, and answers important, digest or ignore", () => {
+  it("is small, holds no tools, actions or skills, and answers important, digest or ignore", () => {
     expect(agent.tier).toBe("small");
     expect(agent.tools).toEqual([]);
     expect(agent.actions).toEqual([]);
+    expect(agent.skills).toBe(false);
     expect(agent.outputSchema.properties.items.items.properties.decision.enum).toEqual([
       "important",
       "digest",

@@ -186,6 +186,14 @@ describe("buildAnthropicMcpServers", () => {
     expect(tools.map((tool) => tool.name)).toEqual(["list_skills", "search_skills", "read_skill"]);
   });
 
+  it("omits the skills MCP server when the run serves no skill tools", () => {
+    const mcpServers = buildAnthropicMcpServers({
+      tools: testRomeTools({ skills: null }),
+    });
+    expect(mcpServers).not.toHaveProperty("skills");
+    expect(getSkillsServerTools()).toEqual([]);
+  });
+
   it("recommends the valid default limit on action and skill search tools", () => {
     build();
 
