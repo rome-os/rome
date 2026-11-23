@@ -308,7 +308,9 @@ import Testing
                 }
             }
             if !pictures.isEmpty { sawPictures = true }
-            if width == 390 && y == 440 && (count == 25 || pinned) && samples.isMultiple(of: 4) {
+            // Diagnostic rendering can outlast the animation on a busy runner.
+            // Observe its actual intermediate opacity before taking a picture.
+            if width == 390 && y == 440 && (count == 25 || pinned) && samples.isMultiple(of: 4) && (!pinned || fadingMain.contains(phase)) {
                 let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
                     window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
                 }
