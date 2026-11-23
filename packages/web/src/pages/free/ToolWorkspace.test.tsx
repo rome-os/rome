@@ -2,7 +2,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
@@ -46,25 +46,55 @@ rs.mock("@/components/concierge/TaskList", () => ({
   },
 }));
 
+// A task chat's status, as its task link reads it: it needs its owner.
+rs.mock("@/components/chat/task-link/task-links", () => ({
+  TaskLinksProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  useTaskLink: (id: string) => ({
+    state: "found",
+    task: { id, name: id, status: "needs_you", endReason: null },
+  }),
+}));
+
 rs.mock("@/components/chat/outputs/OutputsPanel", () => ({
+  outputTitle: (name: string) => name.replace(/\.[^.]+$/, ""),
   OutputsPanel: ({
     chatId,
-    selectedId,
     onOpenTaskChat,
+    onOpenOutput,
   }: {
     chatId: string;
-    selectedId?: string | null;
     onOpenTaskChat?: (id: string, name: string) => void;
+    onOpenOutput?: (output: { id: string; name: string; link: string | null }) => void;
   }) => (
     <>
-      <p>
-        Outputs body {chatId} {selectedId ?? "none"}
-      </p>
+      <p>Outputs body {chatId}</p>
       {onOpenTaskChat ? (
         <button type="button" onClick={() => onOpenTaskChat("task-8", "Q3 report")}>
           Open source task
         </button>
       ) : null}
+      <button
+        type="button"
+        onClick={() => onOpenOutput?.({ id: "out-3", name: "budget.csv", link: null })}
+      >
+        Open output row
+      </button>
+    </>
+  ),
+  OutputFile: ({
+    chatId,
+    opened,
+    actions,
+  }: {
+    chatId: string;
+    opened: { id: string };
+    actions: HTMLElement | null;
+  }) => (
+    <>
+      <p>
+        File body {chatId} {opened.id}
+      </p>
+      {actions ? createPortal(<button type="button">Download {opened.id}</button>, actions) : null}
     </>
   ),
 }));
@@ -967,6 +997,9 @@ function TaskChatStandIn({ id, onGone }: { id: string; onGone: () => void }) {
           <button type="button" onClick={inPane.onClose}>
             Delete chat {id}
           </button>
+          {inPane.actions
+            ? createPortal(<button type="button">More for {id}</button>, inPane.actions)
+            : null}
         </>
       ) : null}
       <p>Task chat {id}</p>
@@ -1125,6 +1158,37 @@ describe("ToolWorkspace Tasks tab", () => {
     await user.click(screen.getByRole("tab", { name: "Review PRs" }));
     expect(shows("Task chat task-7")).toBe(true);
     expect(listMounts).toHaveBeenCalledTimes(1);
+  });
+
+  it("makes the tab the task chat's header: its status mark, its menu and a new-tab link", async () => {
+    const user = userEvent.setup();
+    render(<TasksHarness withTaskChat />);
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    await user.click(screen.getByRole("button", { name: "Open task row" }));
+    const tab = screen.getByRole("tab", { name: "Review PRs" });
+    // The mark its task link draws: it needs its owner.
+    expect(tab.querySelector("svg.text-warning\\/80")).not.toBeNull();
+    const row = () => document.querySelector("[data-tool-tab-actions]")!;
+    expect(row().textContent).toBe("More for task-7");
+    expect(
+      screen.getByRole("link", { name: "Open Review PRs in new tab" }).getAttribute("href"),
+    ).toBe("/chat/task-7");
+    // Another tab chosen: the task chat's buttons and its link go.
+    await user.click(screen.getByRole("tab", { name: "Tasks" }));
+    expect(row().textContent).toBe("");
+    expect(screen.queryByRole("link", { name: "Open Review PRs in new tab" })).toBeNull();
+  });
+
+  it("shows a tab's close button on the chosen tab, and on another only on hover or focus", async () => {
+    const user = userEvent.setup();
+    render(<TasksHarness withTaskChat />);
+    await user.click(screen.getByRole("button", { name: "Show tasks" }));
+    await user.click(screen.getByRole("button", { name: "Open task row" }));
+    const close = (name: string) => screen.getByRole("button", { name: `Close ${name}` });
+    expect(close("Review PRs").className).not.toContain("opacity-0");
+    expect(close("Tasks").className).toContain("opacity-0");
+    expect(close("Tasks").className).toContain("group-hover/tab:opacity-100");
+    expect(close("Tasks").className).toContain("touch-show");
   });
 
   it("shows only the task chat opened last: another replaces it in the same tab", async () => {
@@ -1304,7 +1368,10 @@ function OutputsOwner() {
       <button type="button" onClick={() => pane?.show("chat-1")}>
         Show outputs
       </button>
-      <button type="button" onClick={() => pane?.show("chat-1", "out-2")}>
+      <button
+        type="button"
+        onClick={() => pane?.show("chat-1", { id: "out-2", name: "report.md", link: null })}
+      >
         Open output
       </button>
       <button type="button" onClick={() => pane?.show("chat-1", undefined, { taskChats: true })}>
@@ -1352,7 +1419,7 @@ describe("ToolWorkspace Outputs tab", () => {
     expect(tabNames()).toEqual(["Tasks", "Outputs", "desktop", "projects"]);
     expect(screen.getByRole("tab", { name: "Outputs" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("false");
-    expect(screen.getByText("Outputs body chat-1 none")).toBeTruthy();
+    expect(screen.getByText("Outputs body chat-1")).toBeTruthy();
     expect(JSON.parse(screen.getByTestId("outputs-host").textContent!)).toEqual({ active: true });
   });
 
@@ -1370,13 +1437,49 @@ describe("ToolWorkspace Outputs tab", () => {
     expect(shows("Task chat task-8")).toBe(true);
   });
 
-  it("opens on the output a link names, and goes with its close button", async () => {
+  it("opens the file a link names in a tab of its own, named for the file", async () => {
     const user = userEvent.setup();
     render(<OutputsHarness />);
     await user.click(screen.getByRole("button", { name: "Open output" }));
-    expect(screen.getByText("Outputs body chat-1 out-2")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Close Outputs" }));
+    expect(tabNames()).toEqual(["report", "desktop", "projects"]);
+    expect(selected("report")).toBe(true);
+    expect(shows("File body chat-1 out-2")).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Close report" }));
     expect(tabNames()).toEqual(["desktop", "projects"]);
-    expect(screen.getByRole("tab", { name: "desktop" }).getAttribute("aria-selected")).toBe("true");
+    expect(selected("desktop")).toBe(true);
+  });
+
+  it("opens each file from the list in its own tab, and an open one chooses its tab", async () => {
+    const user = userEvent.setup();
+    render(<OutputsHarness />);
+    await user.click(screen.getByRole("button", { name: "Open output" }));
+    await user.click(screen.getByRole("button", { name: "Show outputs" }));
+    await user.click(screen.getByRole("button", { name: "Open output row" }));
+    expect(tabNames()).toEqual(["Outputs", "report", "budget", "desktop", "projects"]);
+    expect(selected("budget")).toBe(true);
+    expect(shows("File body chat-1 out-3")).toBe(true);
+    expect(shows("File body chat-1 out-2")).toBe(false);
+
+    await user.click(screen.getByRole("tab", { name: "Outputs" }));
+    await user.click(screen.getByRole("button", { name: "Open output row" }));
+    expect(tabNames()).toEqual(["Outputs", "report", "budget", "desktop", "projects"]);
+    expect(selected("budget")).toBe(true);
+
+    // The Outputs tab's close leaves the files opened from it.
+    await user.click(screen.getByRole("button", { name: "Close Outputs" }));
+    expect(tabNames()).toEqual(["report", "budget", "desktop", "projects"]);
+  });
+
+  it("puts the chosen file's buttons in the tab row, and only the chosen one's", async () => {
+    const user = userEvent.setup();
+    render(<OutputsHarness />);
+    await user.click(screen.getByRole("button", { name: "Show outputs" }));
+    await user.click(screen.getByRole("button", { name: "Open output row" }));
+    const row = () => document.querySelector("[data-tool-tab-actions]")!;
+    expect(row().textContent).toBe("Download out-3");
+    await user.click(screen.getByRole("button", { name: "Open output" }));
+    expect(row().textContent).toBe("Download out-2");
+    await user.click(screen.getByRole("tab", { name: "Outputs" }));
+    expect(row().textContent).toBe("");
   });
 });

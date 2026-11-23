@@ -8,7 +8,7 @@ import {
   LiveTaskCardsProvider,
 } from "./entries/live-task-cards";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
-import { flushSync } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import {
   useCallback,
   useContext,
@@ -2615,7 +2615,7 @@ export function Chat({
           });
           const output = outputOfLink(list.outputs, path);
           if (!output) return false;
-          open(output.id);
+          open({ id: output.id, name: output.name, link: output.link });
           return true;
         } catch {
           return false;
@@ -2885,8 +2885,13 @@ export function Chat({
       )
     : floatingHeader;
   // Every chat floats the same header: its agent's badge, its name, and its
-  // buttons either side.
-  const chatHeader = (
+  // buttons either side. A task chat in the side pane's tab has none: the tab
+  // names it, and its ⋯ menu sits in the pane's tab row while the tab shows.
+  const chatHeader = inPane ? (
+    inPane.actions && mainSessionId ? (
+      createPortal(<ChatHeaderActions floating={false} menu={headerMenu} />, inPane.actions)
+    ) : null
+  ) : (
     <>
       {conciergeHeaderWith(navbarActions)}
       {taskList.sheet}
@@ -3254,6 +3259,7 @@ export function Chat({
             target={traceDrawerTarget}
             onClose={closeTraceDrawer}
             outlet={toolTrace.outlet}
+            actions={toolTrace.actions}
             renderInlineBlock={(block, key) =>
               renderSingleEntry(block, key, {
                 onApprovalResolved: refreshActiveSession,

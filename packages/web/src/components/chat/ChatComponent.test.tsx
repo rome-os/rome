@@ -171,6 +171,7 @@ function ChatHost({
 // The chat always sits in a tool workspace; this one has a collapsed pane.
 const toolPane: ToolTraceHost = {
   outlet: null,
+  actions: null,
   paneOpen: false,
   setPaneCollapsed: () => {},
   reveal: () => {},

@@ -23,6 +23,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import Markdown from "@/components/markdown";
@@ -242,8 +243,11 @@ interface OutputsPanelProps {
   onNavigate?: () => void;
   /** Opens a task chat beside the chat instead of as its page, as the side pane does. */
   onOpenTaskChat?: (taskChatId: string, name: string) => void;
-  /** Whether the panel names itself, where nothing around it does. */
-  heading?: boolean;
+  /**
+   * Opens a chosen output somewhere else, as the side pane opens it in a tab of
+   * its own. Without it the output's preview takes the list's place.
+   */
+  onOpenOutput?: (output: ChatOutput) => void;
   /** A Concierge chat: read again when one of its task chats changes, as its turn ends. */
   taskChats?: boolean;
   /**
@@ -264,7 +268,7 @@ export function OutputsPanel({
   selectionSeq = 0,
   onNavigate,
   onOpenTaskChat,
-  heading = true,
+  onOpenOutput,
   taskChats = false,
   leaveGuard,
 }: OutputsPanelProps) {
@@ -388,7 +392,7 @@ export function OutputsPanel({
               key={output.id}
               output={output}
               when={whenLabel(new Date(output.at), now, i18n.language)}
-              onOpen={() => setChosen(output.id)}
+              onOpen={() => (onOpenOutput ? onOpenOutput(output) : setChosen(output.id))}
               onNavigate={follow}
             />
           ))}
@@ -399,12 +403,6 @@ export function OutputsPanel({
   return (
     <div className="h-full overflow-y-auto pb-safe" data-testid="chat-outputs">
       <div className="flex flex-col gap-4 p-4 max-md:px-3">
-        {heading && (
-          <h2 className="flex items-baseline gap-2 text-title text-foreground">
-            {t("outputs.title")}
-            <span className="text-ui tabular-nums text-muted-foreground">{list.length}</span>
-          </h2>
-        )}
         {kinds.length > 0 && <KindFilters kinds={kinds} value={active} onValueChange={setFilter} />}
         {indexingNote}
         <div className="flex flex-col gap-4">
@@ -681,6 +679,58 @@ export async function readPrefix(
   return { text: text.slice(0, chars), cut: true };
 }
 
+/**
+ * Output `opened` of chat `chatId` in a file tab of the side pane: the file
+ * alone, with its Edit, Done and Download buttons in the pane's tab row. It
+ * follows the file when the agent writes it again under a new record, and says
+ * so when the file is gone.
+ */
+export function OutputFile({
+  chatId,
+  opened,
+  actions,
+  leaveGuard,
+}: {
+  chatId: string;
+  opened: { id: string; link: string | null };
+  /** Where the file's buttons go, or null while its tab is not the one showing. */
+  actions: HTMLElement | null;
+  /** Filled with the check the pane runs before it closes the tab. */
+  leaveGuard: LeaveGuard;
+}) {
+  const { t } = useTranslation("chat");
+  const outputs = useChatOutputs(chatId);
+  const list = outputs.data?.outputs ?? [];
+  const found =
+    list.find((output) => output.id === opened.id) ??
+    list.find((output) => opened.link !== null && output.link === opened.link) ??
+    null;
+  // The edit holds on to the record it began with, as the panel's does.
+  const [editing, setEditing] = useState<{ path: string; output: ChatOutput } | null>(null);
+  const output = editing?.output ?? found;
+  if (!output) {
+    if (outputs.isPending) return <Skeleton className="m-4 h-24" />;
+    return (
+      <p className="p-4 text-ui text-muted-foreground">
+        {outputs.isError ? t("outputs.loadFailed") : t("outputs.missing")}
+      </p>
+    );
+  }
+  return (
+    <div className="h-full overflow-y-auto pb-safe" data-testid="chat-output-file">
+      <OutputPreview
+        key={output.id}
+        output={output}
+        leaveGuard={leaveGuard}
+        editingPath={editing?.path ?? null}
+        onEdit={(path) => setEditing({ path, output })}
+        onDone={() => leaveEditor(leaveGuard, () => setEditing(null))}
+        actions={actions}
+      />
+    </div>
+  );
+}
+
 function OutputPreview({
   output,
   leaveGuard,
@@ -689,6 +739,7 @@ function OutputPreview({
   onDone,
   onBack,
   onNavigate,
+  actions,
 }: {
   output: ChatOutput;
   leaveGuard: LeaveGuard;
@@ -696,14 +747,21 @@ function OutputPreview({
   editingPath: string | null;
   onEdit: (path: string) => void;
   onDone: () => void;
-  onBack: () => void;
+  onBack?: () => void;
   onNavigate?: FollowTaskChat;
+  /**
+   * A file tab's buttons go here, and the preview draws no header, since its
+   * tab names it. Undefined in a list's place, where it draws its own header
+   * with a way back.
+   */
+  actions?: HTMLElement | null;
 }) {
   const { t } = useTranslation("chat");
   const kind = previewOf(output);
   const url = output.contentUrl;
   const textual = kind === "markdown" || kind === "text";
   const editing = editingPath !== null;
+  const inTab = actions !== undefined;
   // A text file the agent wrote into the projects folder can be edited in
   // place. Once it is being edited the folder's answer is not asked again.
   const editablePath = useEditablePath(output, textual && output.kind === "written" && !editing);
@@ -713,14 +771,26 @@ function OutputPreview({
     enabled: textual && Boolean(url) && !editing,
   });
 
-  const download = url ? (
+  // In a tab's row, beside the pane's own buttons, Download is an icon too.
+  const download = !url ? null : inTab ? (
+    <Button asChild variant="ghost" size="icon-sm">
+      <a
+        href={url}
+        download={output.name}
+        aria-label={t("outputs.download")}
+        title={t("outputs.download")}
+      >
+        <Download />
+      </a>
+    </Button>
+  ) : (
     <Button asChild variant="outline" size="sm">
       <a href={url} download={output.name}>
         <Download data-icon="inline-start" />
         {t("outputs.download")}
       </a>
     </Button>
-  ) : null;
+  );
   const editToggle =
     editingPath !== null ? (
       <Button variant="outline" size="sm" onClick={onDone}>
@@ -734,7 +804,17 @@ function OutputPreview({
         onClick={() => onEdit(editablePath)}
       />
     ) : null;
-  const header = (
+  const header = inTab ? (
+    actions ? (
+      createPortal(
+        <>
+          {editToggle}
+          {download}
+        </>,
+        actions,
+      )
+    ) : null
+  ) : (
     <div className="flex items-center gap-2 pt-2 pr-4 pl-2">
       <IconButton size="sm" label={t("outputs.back")} icon={<ChevronLeft />} onClick={onBack} />
       <div className="min-w-0 flex-1">
@@ -751,10 +831,12 @@ function OutputPreview({
       {download}
     </div>
   );
+  // With no header above it, the file starts a step below the tab row.
+  const frame = cn("flex flex-col gap-3", inTab && "pt-4");
 
   if (editingPath !== null) {
     return (
-      <div className="flex h-full flex-col gap-3">
+      <div className={cn(frame, "h-full", inTab && "pt-0")}>
         {header}
         <div className="min-h-0 flex-1">
           <OutputEditor path={editingPath} textUrl={url} leaveGuard={leaveGuard} />
@@ -765,7 +847,7 @@ function OutputPreview({
 
   if (!url) {
     return (
-      <div className="flex flex-col gap-3">
+      <div className={frame}>
         {header}
         <p className="px-4 text-ui text-muted-foreground">
           {output.missing ? t("outputs.missing") : t("outputs.unavailable")}
@@ -776,7 +858,7 @@ function OutputPreview({
 
   if (kind === "image") {
     return (
-      <div className="flex flex-col gap-3">
+      <div className={frame}>
         {header}
         <img
           src={url}
@@ -788,7 +870,7 @@ function OutputPreview({
   }
   if (kind === "file") {
     return (
-      <div className="flex flex-col gap-3">
+      <div className={frame}>
         {header}
         <p className="px-4 text-ui text-muted-foreground">{t("outputs.noPreview")}</p>
       </div>
@@ -796,7 +878,7 @@ function OutputPreview({
   }
   if (text.isPending) {
     return (
-      <div className="flex flex-col gap-3">
+      <div className={frame}>
         {header}
         <Skeleton className="mx-4 h-24" />
       </div>
@@ -804,7 +886,7 @@ function OutputPreview({
   }
   if (text.isError) {
     return (
-      <div className="flex flex-col gap-3">
+      <div className={frame}>
         {header}
         <p className="px-4 text-ui text-muted-foreground">{t("outputs.previewFailed")}</p>
       </div>
@@ -812,7 +894,7 @@ function OutputPreview({
   }
   const { text: body, cut } = text.data;
   return (
-    <div className="flex flex-col gap-3 pb-4">
+    <div className={cn(frame, "pb-4")}>
       {header}
       {cut && (
         <p className="px-4 text-aux text-muted-foreground">
