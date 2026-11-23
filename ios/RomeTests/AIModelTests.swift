@@ -98,7 +98,8 @@ import Testing
         #expect(AIAccountLine.of(Provider(loggedIn: true, usage: Self.usage), showsUsage: true) == .init(text: "Logged in · 12% of 5h used", tone: .plain, action: .logOut))
         #expect(AIAccountLine.of(Provider(loggedIn: true, usage: Self.usage), showsUsage: false).text == "Logged in")
         #expect(AIAccountLine.of(Provider(loggedIn: false), showsUsage: true) == .init(text: "Not logged in", tone: .plain, action: .logIn))
-        #expect(AIAccountLine.of(Provider(loggedIn: false, needsReauth: true), showsUsage: true) == .init(text: "Login expired", tone: .danger, action: .logIn))
+        // An expired login still counts as signed in: it can be logged in again or logged out.
+        #expect(AIAccountLine.of(Provider(loggedIn: false, needsReauth: true), showsUsage: true) == .init(text: "Login expired", tone: .danger, action: .logInOrOut))
         #expect(AIAccountLine.of(Provider(loggedIn: true, quotaExhausted: true), showsUsage: true) == .init(text: "Logged in · Quota used up", tone: .warning, action: .logOut))
         // An API key is managed on the web.
         #expect(AIAccountLine.of(Provider(loggedIn: true, authMethod: "environment"), showsUsage: true).action == .none)

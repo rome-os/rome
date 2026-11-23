@@ -1313,9 +1313,9 @@ final class TranscriptStore {
             failureErrors[messageId] = action
             return
         }
+        // A switch pins this chat, or lets it follow a new default: the
+        // resync reads that too.
         resync()
-        // A switch pins this chat, or lets it follow a new default.
-        if action.switchBody != nil { await readChatSession() }
         let limit = Self.failurePendingLimit
         Task { [weak self] in
             try? await Task.sleep(for: limit)

@@ -636,6 +636,8 @@ export function Chat({
     (pickedModel && pickedModel.sessionId === mainSessionId ? pickedModel.value : null) ??
     storedModelSelection ??
     DEFAULT_LARGE_MODEL_SELECTION;
+  // Counts model picks, so an answer to one a newer pick replaced is ignored.
+  const pickGeneration = useRef(0);
   const pickChatModel = useCallback(
     (next: string) => {
       if (!mainSessionId) return;
@@ -645,14 +647,19 @@ export function Chat({
       // The saved chat says whether the pick pinned it, or Auto let it follow.
       // Once it is applied, the pick stops overriding it, so a later change,
       // such as a failure card's switch, shows; a newer pick stays.
+      // Only the latest pick's answer counts: an earlier pick's that lands
+      // last would put back what the server has since replaced.
+      const pick = ++pickGeneration.current;
       updateSessionModel(sessionId, next).then(
         (saved) => {
+          if (pick !== pickGeneration.current) return;
           applySession(saved);
           setPickedModel((current) =>
             current?.sessionId === sessionId && current.value === next ? null : current,
           );
         },
         () => {
+          if (pick !== pickGeneration.current) return;
           setPickedModel({ sessionId, value: previous });
           setStreamError(t("modelSelector.saveFailed"));
         },
@@ -2285,6 +2292,16 @@ export function Chat({
     concierge &&
     (!mainSessionId || (messages.has(mainSessionId) && rows.length === 0)) &&
     !displayedStreaming;
+  // A pinned chat always says so in its last row, with one way back, an empty
+  // one too. The default is the guardian's: a visitor never sees it.
+  const pinnedHint =
+    mainSessionId && pinnedModel && !isArchived && viewer?.kind !== "visitor" ? (
+      <PinnedModelHint
+        sessionId={mainSessionId}
+        pinnedModel={pinnedModel}
+        onFollowed={followedDefault}
+      />
+    ) : null;
 
   // The composer is memoized so a streaming turn does not render it, which only
   // holds while what it is handed keeps its identity.
@@ -2825,16 +2842,20 @@ export function Chat({
                 )}
               >
                 {conciergeEmpty ? (
-                  mainSessionId === conciergeMainChatId ? (
-                    <ConciergeEmptyState
-                      onPick={(prompt) => composerRef.current?.insertText(prompt)}
-                    />
-                  ) : (
-                    // A topic chat: a suggestion goes into the composer, unsent.
-                    <ConciergeTopicEmptyState
-                      onStart={(prompt) => composerRef.current?.insertText(prompt)}
-                    />
-                  )
+                  <>
+                    {mainSessionId === conciergeMainChatId ? (
+                      <ConciergeEmptyState
+                        onPick={(prompt) => composerRef.current?.insertText(prompt)}
+                      />
+                    ) : (
+                      // A topic chat: a suggestion goes into the composer, unsent.
+                      <ConciergeTopicEmptyState
+                        onStart={(prompt) => composerRef.current?.insertText(prompt)}
+                      />
+                    )}
+                    {/* An empty chat can be pinned too, by a model pick. */}
+                    {pinnedHint ? <div className="px-3 md:px-6">{pinnedHint}</div> : null}
+                  </>
                 ) : mainSessionId ? (
                   <>
                     {hasOlder(mainSessionId) ? (
@@ -2878,18 +2899,7 @@ export function Chat({
                           // A pinned chat says so in its last row, with one way
                           // back. The default is the guardian's: a visitor never
                           // sees it.
-                          tail={
-                            mainSessionId &&
-                            pinnedModel &&
-                            !isArchived &&
-                            viewer?.kind !== "visitor" ? (
-                              <PinnedModelHint
-                                sessionId={mainSessionId}
-                                pinnedModel={pinnedModel}
-                                onFollowed={followedDefault}
-                              />
-                            ) : null
-                          }
+                          tail={pinnedHint}
                         />
                       </TaskChatContext.Provider>
                     </TaskLinksScope>

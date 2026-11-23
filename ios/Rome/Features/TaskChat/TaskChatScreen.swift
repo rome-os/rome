@@ -47,28 +47,26 @@ struct TaskChatScreen: View {
         .composerDraft(workspace.drafts, chat: chatId, text: $draft, attachments: attachments, transcript: store)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 10) {
-                Composer(
-                    text: $draft,
-                    placeholder: String(localized: "Reply to this task"),
-                    stopVisible: store.running,
-                    stopping: store.stopping,
-                    focused: $composerFocused,
-                    attachments: attachments,
-                    voiceInput: workspace.voiceInput,
-                    voiceKey: chatId,
-                    voiceField: .taskChat,
-                    onScreen: visibleChat == chatId && !store.share.isSelecting,
-                    onSend: {
-                        guard !attachments.isPreparing else { return }
-                        if store.send(draft, images: attachments.images, fromComposer: true) {
-                            draft = ""
-                            _ = attachments.take()
-                        }
-                    },
-                    onStop: { store.stopTurn() }
-                )
-            }
+            Composer(
+                text: $draft,
+                placeholder: String(localized: "Reply to this task"),
+                stopVisible: store.running,
+                stopping: store.stopping,
+                focused: $composerFocused,
+                attachments: attachments,
+                voiceInput: workspace.voiceInput,
+                voiceKey: chatId,
+                voiceField: .taskChat,
+                onScreen: visibleChat == chatId && !store.share.isSelecting,
+                onSend: {
+                    guard !attachments.isPreparing else { return }
+                    if store.send(draft, images: attachments.images, fromComposer: true) {
+                        draft = ""
+                        _ = attachments.take()
+                    }
+                },
+                onStop: { store.stopTurn() }
+            )
             .shareModeComposer(store.share)
             .padding(.horizontal, Metrics.pagePadding)
             .readableColumn()

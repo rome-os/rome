@@ -110,7 +110,9 @@ enum AIModelSummary: Equatable {
 
 /// What an account's row on the AI Tools page says, and the button it offers.
 struct AIAccountLine: Equatable {
-    enum Action: Equatable { case logIn, logOut, none }
+    /// `logInOrOut`: an expired login, which the server still counts as
+    /// signed in, so it can be logged in again or logged out.
+    enum Action: Equatable { case logIn, logOut, logInOrOut, none }
 
     let text: String
     let tone: AILineTone
@@ -125,7 +127,7 @@ struct AIAccountLine: Equatable {
                 : AIAccountLine(text: String(localized: "API key"), tone: .plain, action: .none)
         }
         if provider.needsReauth == true {
-            return AIAccountLine(text: String(localized: "Login expired"), tone: .danger, action: .logIn)
+            return AIAccountLine(text: String(localized: "Login expired"), tone: .danger, action: .logInOrOut)
         }
         guard provider.loggedIn == true else {
             return AIAccountLine(text: String(localized: "Not logged in"), tone: .plain, action: .logIn)
@@ -673,28 +675,15 @@ struct AIAccountRow: View {
                 }
                 switch line.action {
                 case .logIn:
-                    Button(action: onLogIn) {
-                        Text("Log in")
-                            .romeFont(CardScale.actionFont, .semibold)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 14)
-                            .frame(height: CardScale.actionHeight)
-                            .background(Palette.primary, in: Capsule())
-                    }
-                    .buttonStyle(PressScaleStyle())
+                    logInButton
                 case .logOut:
-                    Button(action: onLogOut) {
-                        Group {
-                            if busy { Spinner(size: 14, color: Palette.sub) } else { Text("Log out") }
-                        }
-                        .romeFont(CardScale.actionFont, .medium)
-                        .foregroundStyle(Palette.fg)
-                        .padding(.horizontal, 14)
-                        .frame(height: CardScale.actionHeight)
-                        .background(Palette.secondaryFill, in: Capsule())
+                    logOutButton
+                case .logInOrOut:
+                    // Log out the same way as a signed-in account; Log in leads.
+                    HStack(spacing: 8) {
+                        logOutButton
+                        logInButton
                     }
-                    .buttonStyle(PressScaleStyle())
-                    .disabled(busy)
                 case .none:
                     EmptyView()
                 }
@@ -708,5 +697,32 @@ struct AIAccountRow: View {
         .padding(.horizontal, 14)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ai-account-\(id)")
+    }
+
+    private var logInButton: some View {
+        Button(action: onLogIn) {
+            Text("Log in")
+                .romeFont(CardScale.actionFont, .semibold)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .frame(height: CardScale.actionHeight)
+                .background(Palette.primary, in: Capsule())
+        }
+        .buttonStyle(PressScaleStyle())
+    }
+
+    private var logOutButton: some View {
+        Button(action: onLogOut) {
+            Group {
+                if busy { Spinner(size: 14, color: Palette.sub) } else { Text("Log out") }
+            }
+            .romeFont(CardScale.actionFont, .medium)
+            .foregroundStyle(Palette.fg)
+            .padding(.horizontal, 14)
+            .frame(height: CardScale.actionHeight)
+            .background(Palette.secondaryFill, in: Capsule())
+        }
+        .buttonStyle(PressScaleStyle())
+        .disabled(busy)
     }
 }

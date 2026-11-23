@@ -255,12 +255,13 @@ import Testing
         #expect(backend.sessionReads == 0)
     }
 
-    @Test func aSwitchReadsWhetherTheChatIsPinnedNow() async {
+    @Test func aSwitchReadsWhetherTheChatIsPinnedNow() async throws {
         let backend = FakeBackend()
         backend.chatSessionRead = ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "kept", providerId: "anthropic"))
         let store = TranscriptStore(sessionId: "s", kind: .concierge, backend: backend)
         await store.send(.switchTo(.anthropic), messageId: "m1")
-        #expect(PinnedHint.text(store.chatSession) == "On Claude")
+        // The resync after the switch reads it.
+        try await until { PinnedHint.text(store.chatSession) == "On Claude" }
     }
 
     @Test func aOneTurnSwapSaysItWasForThisReply() {

@@ -149,6 +149,11 @@ struct ChatScreen: View {
                         .foregroundStyle(Palette.sub)
                     Spacer()
                     Spacer()
+                    // A pinned chat always says so, an empty one too: its
+                    // last row, as the transcript would have it.
+                    if let hint = PinnedHintLine.footer(store, visitor: workspace.isVisitor) {
+                        hint
+                    }
                 }
                 .padding(.horizontal, 32)
                 .frame(maxWidth: .infinity, alignment: .leading)
