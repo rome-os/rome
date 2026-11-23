@@ -621,9 +621,70 @@ describe("native computer-use transport", () => {
     expect(assets.launch).toHaveBeenCalledTimes(1);
   });
 
+  it("hands off an idle same-package-version helper when the bundled build number is newer", async () => {
+    const source = {
+      path: "/bundled/app",
+      version: "0.1.8.1795400200",
+      requirement: "stable",
+      implementationSha256: "a".repeat(64),
+      executableSha256: "b".repeat(64),
+      architecture: "arm64" as const,
+    };
+    const installed = { ...source, path: "/stable/app" };
+    const oldHello = {
+      protocolVersion: 1,
+      version: "0.1.8.1795400100",
+      bundleId: "com.rome.computer-use",
+      permissions: { accessibility: true, screenCapture: true },
+      capabilities: { actions: [] },
+      architecture: "arm64",
+      implementationSha256: "9".repeat(64),
+      activeSessions: 0,
+      execution: { busy: false },
+    };
+    const newHello = {
+      ...oldHello,
+      version: source.version,
+      implementationSha256: source.implementationSha256,
+    };
+    let phase: "old" | "down" | "new" = "old";
+    const f = await server((request, send, fail) => {
+      if (phase === "old") {
+        if (request.method === "hello") send(oldHello);
+        else if (request.method === "shutdown") {
+          phase = "down";
+          send({ stopping: true });
+        }
+      } else if (phase === "down") {
+        fail({
+          code: "helper_unavailable",
+          message: "Old helper exited",
+          details: { socketCode: "ENOENT", effectStatus: "not_dispatched" },
+        });
+      } else {
+        send(newHello);
+      }
+    });
+    assets.inspect.mockResolvedValue(source);
+    assets.prepare.mockResolvedValue(installed);
+    assets.launch.mockImplementation((...args: unknown[]) => {
+      phase = "new";
+      (args.at(-1) as (error: null, stdout: string, stderr: string) => void)(null, "", "");
+    });
+    const bridge = createComputerUseNativeBridge({
+      bundledAppPath: source.path,
+      stateDir: f.stateDir,
+      startupTimeoutMs: 2_000,
+    });
+    expect(await bridge.call("hello", {})).toEqual(newHello);
+    expect(assets.prepare).toHaveBeenCalledTimes(1);
+    expect(assets.launch).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses to downgrade or replace an idle newer, same-version, or unversioned Rome helper", async () => {
     for (const scenario of [
       { bundledVersion: "0.1.9", runningVersion: "0.1.10" },
+      { bundledVersion: "0.1.8.1795400100", runningVersion: "0.1.8.1795400200" },
       { bundledVersion: "0.1.9", runningVersion: "0.1.9" },
       { bundledVersion: "0.1.9", runningVersion: undefined },
       { bundledVersion: undefined, runningVersion: "0.1.8" },

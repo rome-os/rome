@@ -75,7 +75,16 @@ const packageManifest = JSON.parse(readFileSync(resolve(root, "package.json"), "
   version?: string;
 };
 const shortVersion = packageManifest.version?.match(/^(\d+(?:\.\d+)*)/)?.[1] ?? "0.1.0";
-const build = option("--build-number") ?? shortVersion;
+function defaultBuildNumber(version: string): string {
+  const result = spawnSync("git", ["log", "-1", "--format=%ct"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const timestamp = result.status === 0 ? result.stdout.trim() : "";
+  return /^\d+$/.test(timestamp) ? `${version}.${timestamp}` : version;
+}
+const build = option("--build-number") ?? defaultBuildNumber(shortVersion);
 if (!/^\d+(?:\.\d+)*$/.test(build))
   throw new Error("--build-number must contain numeric version components.");
 // Keep locks outside published dist/native directories while still sharing one lock across aliases and checkouts.
