@@ -180,7 +180,7 @@ struct ProviderOutageNotice: View {
 /// What a chat's provider failure cards ask its screen to show: the confirm
 /// of a move to another provider, and an account's login sheet. The pinned
 /// hint's Back to default confirm too, since a transcript row presents nothing.
-private struct ProviderFailurePrompts: ViewModifier {
+struct ProviderFailurePrompts: ViewModifier {
     let store: TranscriptStore
     let workspace: Workspace
 
@@ -195,7 +195,7 @@ private struct ProviderFailurePrompts: ViewModifier {
                 // Rome credits always do.
                 if case .switchTo(let provider) = prompt.action {
                     Button("Switch this chat") { confirm(prompt.action, prompt.messageId) }
-                    Button("Switch and make default") { confirm(.switchAndMakeDefault(provider), prompt.messageId) }
+                    Button(ProviderFailureAction.switchAndMakeDefault(provider).title) { confirm(.switchAndMakeDefault(provider), prompt.messageId) }
                 } else {
                     Button("Switch") { confirm(prompt.action, prompt.messageId) }
                 }
@@ -253,8 +253,10 @@ private struct ProviderFailurePrompts: ViewModifier {
     static func body(_ action: ProviderFailureAction) -> String {
         switch action {
         case .useCredits: return String(localized: "Every chat runs on Rome credits, and the stopped turn picks up again.")
-        // Switch and make default moves the other chats too, but not an owner's pick.
-        case .switchTo(let provider): return String(localized: "This chat continues on \(provider.name), and the stopped turn picks up again.") + "\n\n" + AIDefaultDialog.ownerPicksKeep
+        // "Switch all chats and make default" moves the other chats too, but not an owner's pick.
+        case .switchTo(let provider):
+            return String(localized: "This chat continues on \(provider.name), and the stopped turn picks up again.")
+                + "\n\n" + String(localized: "Your other chats move to \(provider.name) too.") + " " + AIDefaultDialog.ownerPicksKeep
         default: return ""
         }
     }

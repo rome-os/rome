@@ -240,7 +240,8 @@ import Testing
 
     @Test func aSwitchCanAlsoMakeTheAccountTheDefault() {
         #expect(ProviderFailureAction.switchAndMakeDefault(.anthropic).switchBody == .object(["kind": .string("provider"), "provider": .string("anthropic"), "makeDefault": .bool(true), "moveExisting": .bool(true)]))
-        #expect(ProviderFailureAction.switchAndMakeDefault(.anthropic).title == "Switch and make default")
+        #expect(ProviderFailureAction.switchAndMakeDefault(.anthropic).title == "Switch all chats and make default")
+        #expect(ProviderFailurePrompts.body(.switchTo(.anthropic)) == "This chat continues on Claude, and the stopped turn picks up again.\n\nYour other chats move to Claude too. Chats where you picked a model keep it.")
     }
 
     @Test func aStaleOptionRedrawsWithNoError() async {

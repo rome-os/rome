@@ -200,7 +200,7 @@ enum ProviderFailureAction: Hashable, Sendable {
         case .continueTurn: return String(localized: "Continue")
         case .logIn: return String(localized: "Log in")
         case .switchTo(let provider): return String(localized: "Switch to \(provider.name)")
-        case .switchAndMakeDefault: return String(localized: "Switch and make default")
+        case .switchAndMakeDefault: return String(localized: "Switch all chats and make default")
         case .useCredits: return String(localized: "Use Rome credits")
         case .switchModel(let replacement): return String(localized: "Switch to \(ModelNames.display(replacement.model))")
         }
