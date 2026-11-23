@@ -1,4 +1,5 @@
 import { ChevronRight, CirclePause, Info, TriangleAlert } from "lucide-react";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -9,7 +10,7 @@ import type {
   ProviderFailureReason,
   ProviderFailureResolution,
 } from "@rome/api-types/chat";
-import { LabeledCheckbox, useProviderName } from "@/components/default-provider";
+import { LabeledCheckbox, OwnerPicksNote, useProviderName } from "@/components/default-provider";
 import { ChatNotice } from "@/components/chat/ChatNotice";
 import { ProviderSignIn } from "@/components/chat/ProviderSignIn";
 import { Button } from "@/components/ui/button";
@@ -414,6 +415,9 @@ export function ProviderFailureCard({
     try {
       const answer = (await send()) as { refreshed?: boolean } | undefined;
       if (!answer?.refreshed) setSwitched(settled);
+      // A switch pins this chat, or moves the default: the open chat reads
+      // itself again, so its pinned hint and model menu show where it runs.
+      emitSessionsChanged();
       onSettled?.();
     } catch {
       setFailed(true);
@@ -564,6 +568,7 @@ function OpenSwitchConfirmDialog({
                 >
                   {t("providerFailure.confirm.moveExisting")}
                 </LabeledCheckbox>
+                <OwnerPicksNote />
                 {moveExisting && (
                   <p className="pl-6 text-aux text-muted-foreground">
                     {t("providerFailure.confirm.moveExistingHelp", { provider: name })}

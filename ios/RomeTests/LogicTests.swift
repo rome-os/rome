@@ -514,6 +514,19 @@ final class StubBackend: RomeBackend {
         #expect(AppLinks.fullURL(origin: origin, app: InstalledApp(id: "x", fullHref: "https://evil.example/x"))?.host() == "me.romeos.cc")
     }
 
+    /// Open in Safari opens the page the sheet shows, not the app's first page.
+    @Test func openInSafariOpensThePageShown() {
+        let app = InstalledApp(id: "habits", fullHref: "/full/apps/habits")
+        let detail = URL(string: "https://me.romeos.cc/full/apps/habits/week/12")!
+        let moved = URL(string: "https://me.romeos.cc/full/apps/habits/settings")!
+        // Opened at a detail page, before the view reports where it is.
+        #expect(AppWebScreen.safariURL(shown: nil, page: nil, start: detail, web: origin, app: app) == detail)
+        // The app moved on within itself: that page.
+        #expect(AppWebScreen.safariURL(shown: moved, page: nil, start: detail, web: origin, app: app) == moved)
+        // Opened at its first page: the app.
+        #expect(AppWebScreen.safariURL(shown: nil, page: nil, start: nil, web: origin, app: app)?.absoluteString == "https://me.romeos.cc/full/apps/habits")
+    }
+
     /// The session goes to the instance alone; every other site opens in Safari.
     @Test func onlyTheInstanceStaysInTheWebView() {
         #expect(AppLinks.staysInApp(URL(string: "https://me.romeos.cc/full/apps/x/page")!, origin: origin))

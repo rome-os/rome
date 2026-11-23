@@ -21,12 +21,112 @@
         }
       }
     },
+    "%@ becomes the default." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 会成为默认。"
+          }
+        }
+      }
+    },
+    "%@ cannot run on this account" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 的账号目前无法运行"
+          }
+        }
+      }
+    },
     "%@ has an update" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 有新版本了"
+          }
+        }
+      }
+    },
+    "%@ hit its usage limit. Rome continues after %@, %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 用量已到上限，%@ %@ 之后 Rome 会接着做。"
+          }
+        }
+      }
+    },
+    "%@ hit its usage limit. Rome continues after %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 用量已到上限，%@ 之后 Rome 会接着做。"
+          }
+        }
+      }
+    },
+    "%@ hit its usage limit. Rome continues tomorrow after %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 用量已到上限，明天 %@ 之后 Rome 会接着做。"
+          }
+        }
+      }
+    },
+    "%@ hit its usage limit. You can continue after %@, %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 用量已到上限，%@ %@ 之后可以继续。"
+          }
+        }
+      }
+    },
+    "%@ hit its usage limit. You can continue after %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 用量已到上限，%@ 之后可以继续。"
+          }
+        }
+      }
+    },
+    "%@ hit its usage limit. You can continue once it resets." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 用量已到上限，重置后可以继续。"
+          }
+        }
+      }
+    },
+    "%@ hit its usage limit. You can continue tomorrow after %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 用量已到上限，明天 %@ 之后可以继续。"
+          }
+        }
+      }
+    },
+    "%@ is not logged in" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 未登录"
           }
         }
       }
@@ -51,12 +151,52 @@
         }
       }
     },
+    "%@ is unavailable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 用不了了"
+          }
+        }
+      }
+    },
+    "%@ is unavailable for now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 暂时用不了"
+          }
+        }
+      }
+    },
+    "%@ is unavailable for now." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 暂时用不了。"
+          }
+        }
+      }
+    },
     "%@ is upgrading to %@…" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 正在升级到 %@…"
+          }
+        }
+      }
+    },
+    "%@ left" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "剩余 %@"
           }
         }
       }
@@ -81,12 +221,42 @@
         }
       }
     },
+    "%@ needs you to log in again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 需要重新登录"
+          }
+        }
+      }
+    },
     "%@ quota ran out, switched to %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 额度用完，已切换到 %@"
+          }
+        }
+      }
+    },
+    "%@ quota used up" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 额度用完了"
+          }
+        }
+      }
+    },
+    "%@ reached its spending limit" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 已达到消费上限"
           }
         }
       }
@@ -127,16 +297,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 已升级到 %@"
-          }
-        }
-      }
-    },
-    "%@ usage" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 用量"
           }
         }
       }
@@ -407,12 +567,60 @@
         }
       }
     },
+    "%lld tasks waiting" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld task waiting"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld tasks waiting"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个任务在等待"
+          }
+        }
+      }
+    },
     "%lld unread" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 条未读"
+          }
+        }
+      }
+    },
+    "%lld%% of 5h used" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5 小时额度已用 %lld%%"
+          }
+        }
+      }
+    },
+    "%lld%% of 7d used" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7 天额度已用 %lld%%"
           }
         }
       }
@@ -507,12 +715,42 @@
         }
       }
     },
+    "AI Tools" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI 工具"
+          }
+        }
+      }
+    },
     "AI tool" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "AI 工具"
+          }
+        }
+      }
+    },
+    "API key" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API 密钥"
+          }
+        }
+      }
+    },
+    "API key needs update" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "API 密钥需要更新"
           }
         }
       }
@@ -907,6 +1145,16 @@
         }
       }
     },
+    "Back to the default?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "改回默认？"
+          }
+        }
+      }
+    },
     "BMI" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1217,6 +1465,16 @@
         }
       }
     },
+    "Chats where you picked a model keep it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你指定了模型的聊天会保留它。"
+          }
+        }
+      }
+    },
     "Check if it runs hot" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1337,12 +1595,132 @@
         }
       }
     },
+    "Continue" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继续"
+          }
+        }
+      }
+    },
+    "Continuing…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在继续…"
+          }
+        }
+      }
+    },
+    "Copied" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已复制"
+          }
+        }
+      }
+    },
+    "Copy code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制代码"
+          }
+        }
+      }
+    },
+    "Could not continue" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能继续"
+          }
+        }
+      }
+    },
+    "Could not go back to the default. Try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能改回默认，请重试。"
+          }
+        }
+      }
+    },
+    "Could not log out of %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能退出 %@ 登录"
+          }
+        }
+      }
+    },
+    "Could not switch" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能切换"
+          }
+        }
+      }
+    },
+    "Default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认"
+          }
+        }
+      }
+    },
     "Deleting…" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在删除…"
+          }
+        }
+      }
+    },
+    "Details" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "详情"
+          }
+        }
+      }
+    },
+    "Device code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备码"
+          }
+        }
+      }
+    },
+    "Device code login must be on in ChatGPT, under Settings → Security." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要先在 ChatGPT 的「设置 → 安全」里开启设备码登录。"
           }
         }
       }
@@ -1363,6 +1741,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更早"
+          }
+        }
+      }
+    },
+    "Enter this code on the ChatGPT login page." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 ChatGPT 登录页面输入这个代码。"
+          }
+        }
+      }
+    },
+    "Every chat runs on Rome credits, and the stopped turn picks up again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有聊天都改用 Rome 额度，停下的那一轮会接着跑。"
           }
         }
       }
@@ -2307,6 +2705,16 @@
         }
       }
     },
+    "Getting a code…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在获取代码…"
+          }
+        }
+      }
+    },
     "Guardian" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2491,6 +2899,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 分钟后"
+          }
+        }
+      }
+    },
+    "In use" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用中"
           }
         }
       }
@@ -2845,6 +3263,146 @@
         }
       }
     },
+    "Log in" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录"
+          }
+        }
+      }
+    },
+    "Log in again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要重新登录"
+          }
+        }
+      }
+    },
+    "Log in to ChatGPT" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录 ChatGPT"
+          }
+        }
+      }
+    },
+    "Log in to Claude" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录 Claude"
+          }
+        }
+      }
+    },
+    "Log in to an account so Chat can reply." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录一个账号，Chat 才能回复。"
+          }
+        }
+      }
+    },
+    "Log out" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退出登录"
+          }
+        }
+      }
+    },
+    "Log out of %@?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退出 %@ 登录？"
+          }
+        }
+      }
+    },
+    "Logged in" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已登录"
+          }
+        }
+      }
+    },
+    "Logged in to ChatGPT" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已登录 ChatGPT"
+          }
+        }
+      }
+    },
+    "Logged in to Claude" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已登录 Claude"
+          }
+        }
+      }
+    },
+    "Login did not complete" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录未完成"
+          }
+        }
+      }
+    },
+    "Login did not complete: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录未完成：%@"
+          }
+        }
+      }
+    },
+    "Login expired" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录已过期"
+          }
+        }
+      }
+    },
+    "Logs out on this server only." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只在此服务器上退出登录。"
+          }
+        }
+      }
+    },
     "Low" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3005,6 +3563,16 @@
         }
       }
     },
+    "Model unavailable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型不可用"
+          }
+        }
+      }
+    },
     "More" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3141,6 +3709,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新聊天"
+          }
+        }
+      }
+    },
+    "New code" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "换一个代码"
           }
         }
       }
@@ -3355,16 +3933,6 @@
         }
       }
     },
-    "No usage data yet" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暂无用量数据"
-          }
-        }
-      }
-    },
     "Normal" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3445,6 +4013,16 @@
         }
       }
     },
+    "Not logged in" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未登录"
+          }
+        }
+      }
+    },
     "Not now" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3485,6 +4063,16 @@
         }
       }
     },
+    "Not set up" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未设置"
+          }
+        }
+      }
+    },
     "Not shared" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3501,16 +4089,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rome Cloud 尚未设置"
-          }
-        }
-      }
-    },
-    "Not signed in" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未登录"
           }
         }
       }
@@ -3605,6 +4183,16 @@
         }
       }
     },
+    "Older · %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更早 · %lld"
+          }
+        }
+      }
+    },
     "On" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3675,6 +4263,16 @@
         }
       }
     },
+    "Open Claude sign-in" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Claude 登录页"
+          }
+        }
+      }
+    },
     "Open Settings" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3725,6 +4323,16 @@
         }
       }
     },
+    "Open login page" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开登录页面"
+          }
+        }
+      }
+    },
     "Open navigation" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3751,6 +4359,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未完成的任务：%@"
+          }
+        }
+      }
+    },
+    "Open the Claude sign-in page and approve access." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Claude 登录页，授权访问。"
           }
         }
       }
@@ -3791,6 +4409,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在网页上打开连接"
+          }
+        }
+      }
+    },
+    "Opens Safari" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Safari 中打开"
           }
         }
       }
@@ -3855,6 +4483,16 @@
         }
       }
     },
+    "Paste the code the page shows." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "粘贴页面上显示的代码。"
+          }
+        }
+      }
+    },
     "Pause" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3871,6 +4509,66 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已暂停"
+          }
+        }
+      }
+    },
+    "Paused until %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停，到 %@"
+          }
+        }
+      }
+    },
+    "Paused until %@, %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停，到 %@ %@"
+          }
+        }
+      }
+    },
+    "Paused until tomorrow %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停，到明天 %@"
+          }
+        }
+      }
+    },
+    "Paused · continues after %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停 · %@ 之后继续"
+          }
+        }
+      }
+    },
+    "Paused · continues after %@, %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停 · %@ %@ 之后继续"
+          }
+        }
+      }
+    },
+    "Paused · continues tomorrow after %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停 · 明天 %@ 之后继续"
           }
         }
       }
@@ -3965,12 +4663,42 @@
         }
       }
     },
+    "Preparing sign-in…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备登录…"
+          }
+        }
+      }
+    },
     "Put lunch with Sam on Friday at 12:30." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "周五 12:30 加一个和 Sam 吃午饭。"
+          }
+        }
+      }
+    },
+    "Quota used up" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "额度已用完"
+          }
+        }
+      }
+    },
+    "Quota used up until %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "额度已用完，%@ 恢复"
           }
         }
       }
@@ -4041,6 +4769,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "最近读取"
+          }
+        }
+      }
+    },
+    "Recovered" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已恢复"
+          }
+        }
+      }
+    },
+    "Recovered, continued" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已恢复，已继续"
           }
         }
       }
@@ -4161,100 +4909,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "回复这个任务"
-          }
-        }
-      }
-    },
-    "Resets in %lld days" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Resets in %lld day"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Resets in %lld days"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 天后重置"
-          }
-        }
-      }
-    },
-    "Resets in %lld hours" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Resets in %lld hour"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Resets in %lld hours"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 小时后重置"
-          }
-        }
-      }
-    },
-    "Resets in %lld minutes" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Resets in %lld minute"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Resets in %lld minutes"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 分钟后重置"
-          }
-        }
-      }
-    },
-    "Resets soon" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "即将重置"
           }
         }
       }
@@ -4425,6 +5079,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rome Cloud 的转写服务暂不可用，已停止收听"
+          }
+        }
+      }
+    },
+    "Rome credits" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 额度"
+          }
+        }
+      }
+    },
+    "Rome credits are used up" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 额度用完了"
           }
         }
       }
@@ -5219,6 +5893,26 @@
         }
       }
     },
+    "Switch" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换"
+          }
+        }
+      }
+    },
+    "Switch all chats and make default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有聊天都切换并设为默认"
+          }
+        }
+      }
+    },
     "Switch instance" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5229,12 +5923,42 @@
         }
       }
     },
+    "Switch to %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到 %@"
+          }
+        }
+      }
+    },
+    "Switch to %@?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到 %@？"
+          }
+        }
+      }
+    },
     "Switched to %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "已切换到 %@"
+          }
+        }
+      }
+    },
+    "Switched to %@, continued" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已切换到 %@，已继续"
           }
         }
       }
@@ -5439,12 +6163,42 @@
         }
       }
     },
+    "That code did not work. Paste it again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个代码无效，请重新粘贴。"
+          }
+        }
+      }
+    },
     "The app cannot be used during this update, which takes a few minutes." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "这次更新期间暂时无法使用，大约需要几分钟。"
+          }
+        }
+      }
+    },
+    "The connection closed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接已断开"
+          }
+        }
+      }
+    },
+    "The default runs new chats and the chats that follow it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认的模型用于新聊天，以及跟随默认的聊天。"
           }
         }
       }
@@ -5465,6 +6219,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "最新版本是 %@。App 需要更新的 Rome。"
+          }
+        }
+      }
+    },
+    "The sign-in page did not come" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有拿到登录页面"
           }
         }
       }
@@ -5499,12 +6263,42 @@
         }
       }
     },
+    "This chat follows your default from its next reply." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个聊天从下一次回复起改用你的默认。"
+          }
+        }
+      }
+    },
     "This chat is archived" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个对话已归档"
+          }
+        }
+      }
+    },
+    "This chat moves from %@ to %@, your default, from its next reply." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个聊天从下一次回复起，从 %@ 改用你的默认 %@。"
+          }
+        }
+      }
+    },
+    "This chat stops using %@ and follows your default, %@, from its next reply." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个聊天从下一次回复起不再用 %@，改用你的默认 %@。"
           }
         }
       }
@@ -5555,6 +6349,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这张卡片已不可用"
+          }
+        }
+      }
+    },
+    "This chat continues on %@, and the stopped turn picks up again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个聊天改用 %@ 继续，停下的那一轮会接着跑。"
           }
         }
       }
@@ -6179,12 +6983,12 @@
         }
       }
     },
-    "Usage resets automatically" : {
+    "Use Rome credits" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "用量会自动重置"
+            "value" : "改用 Rome 额度"
           }
         }
       }
@@ -6293,6 +7097,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等待 %@"
+          }
+        }
+      }
+    },
+    "Waiting for you to finish…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等你完成…"
           }
         }
       }
@@ -6607,6 +7421,16 @@
         }
       }
     },
+    "Your other chats move to %@ too." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的其他聊天也会切到 %@。"
+          }
+        }
+      }
+    },
     "Your Rome" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6777,6 +7601,16 @@
         }
       }
     },
+    "Back to default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "改回默认"
+          }
+        }
+      }
+    },
     "by day" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6817,12 +7651,42 @@
         }
       }
     },
+    "Chats on %@ will ask you to log in again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %@ 上的聊天会请你重新登录。"
+          }
+        }
+      }
+    },
+    "Chats pause until you log in again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聊天会暂停，直到你重新登录。"
+          }
+        }
+      }
+    },
     "conversation got long" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "对话较长"
+          }
+        }
+      }
+    },
+    "Could not change the default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未能更改默认"
           }
         }
       }
@@ -6999,12 +7863,142 @@
         }
       }
     },
-    "Older · %lld" : {
+    "Its login has expired: log in to %@ again after you log out." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "更早 · %lld"
+            "value" : "它的登录已过期：退出登录后请重新登录 %@。"
+          }
+        }
+      }
+    },
+    "Log out and switch all chats" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退出登录，所有聊天都切换"
+          }
+        }
+      }
+    },
+    "Log out, keep chats here" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退出登录，聊天留在原处"
+          }
+        }
+      }
+    },
+    "Make %@ the default?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将 %@ 设为默认？"
+          }
+        }
+      }
+    },
+    "Make default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设为默认"
+          }
+        }
+      }
+    },
+    "New chats use %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新聊天使用 %@。"
+          }
+        }
+      }
+    },
+    "On %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %@ 上"
+          }
+        }
+      }
+    },
+    "Only new chats" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只用于新聊天"
+          }
+        }
+      }
+    },
+    "Rome credits become the default." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 额度会成为默认。"
+          }
+        }
+      }
+    },
+    "Set as default" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设为默认"
+          }
+        }
+      }
+    },
+    "Switch all chats" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有聊天都切换"
+          }
+        }
+      }
+    },
+    "Switch this chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只切换这个聊天"
+          }
+        }
+      }
+    },
+    "Used %@ for this reply" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这次回复用了 %@"
+          }
+        }
+      }
+    },
+    "You picked %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你选了 %@"
           }
         }
       }

@@ -48,6 +48,9 @@ struct ChatScreen: View {
         .pageBackground()
         // The task links in its messages draw the task chats' live status.
         .environment(\.taskLinks, workspace.taskLinks(forChat: store.sessionId))
+        .providerFailurePrompts(store, workspace: workspace)
+        // Whether the chat follows the default, read each time it opens.
+        .task(id: "\(store.sessionId)|\(visible)") { if visible { await store.readChatSession() } }
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
         .background { ChatLeaveWatch(store: store) }
@@ -146,13 +149,18 @@ struct ChatScreen: View {
                         .foregroundStyle(Palette.sub)
                     Spacer()
                     Spacer()
+                    // A pinned chat always says so, an empty one too: its
+                    // last row, as the transcript would have it.
+                    if let hint = PinnedHintLine.footer(store, visitor: workspace.isVisitor) {
+                        hint
+                    }
                 }
                 .padding(.horizontal, 32)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture { composerFocused = false }
             } else {
-                TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
+                TranscriptList(store: store, composerFocused: composerFocused, footer: PinnedHintLine.footer(store, visitor: workspace.isVisitor), latestRequest: workspace.latestRequest) { row, previous in
                     ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                         .equatable()
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
@@ -362,8 +370,10 @@ struct ConciergeRow: View, Equatable {
             }
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
-        case .approval, .question, .webOnly, .routineDraft, .tools, .connect, .widgetUI:
+        case .approval, .question, .webOnly, .aiTools, .providerFailure, .routineDraft, .tools, .connect, .widgetUI:
             InteractionRow(row: row, store: store)
+        case .providerOutage(_, let part):
+            ProviderOutageNotice(part: part)
         case .error(_, let error):
             ErrorLine(error: error)
         case .notice(_, let text):

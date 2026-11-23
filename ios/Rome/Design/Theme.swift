@@ -30,6 +30,8 @@ enum Palette {
 
     static let fg = dynamic(0x1A130F, 0xF4F3EF)
     static let sub = dynamic(0x7A6857, 0xB0A294)
+    /// A step fainter than `sub`: a recessive note, such as a pinned chat's hint.
+    static let faint = dynamic(0xA3968A, 0x80756B)
     static let hair = dynamic(rgba: (0x1A130F, 0.09), (0xFFFFFF, 0.08))
     static let glass = dynamic(rgba: (0xFFFFFF, 0.78), (0x1E1A17, 0.8))
     static let grabber = dynamic(rgba: (0x1A130F, 0.18), (0xFFFFFF, 0.22))

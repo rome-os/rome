@@ -829,6 +829,10 @@ final class TranscriptStore {
             repeat {
                 resyncAgain = false
                 await reload()
+                // A reconnect or a return may follow a change of the default
+                // made elsewhere: whether the chat is pinned is read again too,
+                // inside the loop, so a resync asked meanwhile is not lost.
+                await readChatSession()
             } while resyncAgain
             resyncWork = nil
         }
@@ -1246,6 +1250,123 @@ final class TranscriptStore {
         // ended before this chat saw it run.
         defer { resync() }
         return try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
+    }
+
+    /// What a provider failure card asks the chat's screen to show.
+    enum FailurePrompt: Identifiable, Equatable {
+        /// A move to another provider, asked first.
+        case confirm(messageId: String, action: ProviderFailureAction)
+        /// The login of the card's account.
+        case logIn(AIAccount)
+
+        var id: String {
+            switch self {
+            case .confirm(let messageId, _): return "confirm-\(messageId)"
+            case .logIn(let account): return "login-\(account.rawValue)"
+            }
+        }
+    }
+
+    var failurePrompt: FailurePrompt?
+    /// Failure cards whose button the server is acting on, by message id. The
+    /// card waits for the server's settled part; nothing settles it here.
+    private(set) var failurePending: Set<String> = []
+    /// The button that failed on each card, until the next press.
+    private(set) var failureErrors: [String: ProviderFailureAction] = [:]
+    /// How long a pressed card waits for the server to settle it before its
+    /// buttons come back.
+    static var failurePendingLimit: Duration = .seconds(60)
+
+    /// A failure card's button: asks first where the web asks, opens the
+    /// login, or sends it.
+    func press(_ action: ProviderFailureAction, part: ProviderFailurePart, messageId: String) {
+        switch action {
+        case .logIn:
+            if let account = part.provider.account { failurePrompt = .logIn(account) }
+        case _ where action.confirms:
+            failurePrompt = .confirm(messageId: messageId, action: action)
+        default:
+            Task { await send(action, messageId: messageId) }
+        }
+    }
+
+    /// Runs a failure card's button on the server, then reads the chat: the
+    /// card settles once its turn runs again.
+    func send(_ action: ProviderFailureAction, messageId: String) async {
+        guard !failurePending.contains(messageId) else { return }
+        failurePending.insert(messageId)
+        failureErrors[messageId] = nil
+        do {
+            if let change = action.switchBody {
+                // An option that no longer worked wrote a fresh card in its
+                // place: the chat is read again and shows it, with no error.
+                if try await backend.switchProviderFailure(messageId: messageId, change: change) {
+                    failurePending.remove(messageId)
+                    resync()
+                    return
+                }
+            } else {
+                try await backend.continueProviderFailure(messageId: messageId)
+            }
+        } catch {
+            failurePending.remove(messageId)
+            failureErrors[messageId] = action
+            return
+        }
+        // A switch pins this chat, or lets it follow a new default: the
+        // resync reads that too.
+        resync()
+        let limit = Self.failurePendingLimit
+        Task { [weak self] in
+            try? await Task.sleep(for: limit)
+            self?.failurePending.remove(messageId)
+        }
+    }
+
+    /// The chat as the server shows it, for whether it follows the default.
+    private(set) var chatSession: ChatSession?
+    /// "Back to default" is on its way.
+    private(set) var followingDefault = false
+    /// The pinned hint's Back to default asks first; the chat's screen shows the confirm.
+    var confirmsFollowDefault = false
+
+    /// Reads whether the chat follows the default. A failed read keeps what shows.
+    func readChatSession() async {
+        if let read = try? await backend.chatSession(sessionId) { chatSession = read }
+    }
+
+    /// "Back to default": the chat follows the default from its next turn.
+    func followDefault() async {
+        guard !followingDefault else { return }
+        followingDefault = true
+        defer { followingDefault = false }
+        do {
+            chatSession = try await backend.followDefault(sessionId: sessionId)
+        } catch {
+            // The hint stays, and the error bar says why.
+            say(String(localized: "Could not go back to the default. Try again."))
+        }
+    }
+
+    /// Cards whose answer is on its way, by tool-use id: each is sent once.
+    private(set) var answeringCards: Set<String> = []
+    /// Cards whose answer did not go through, by tool-use id: they offer Retry.
+    private(set) var failedCards: Set<String> = []
+
+    /// Answers a card the turn waits on, such as Chat's connect-AI card once
+    /// an account is logged in; the chat is read again so the answer shows.
+    func answerCard(toolUseId: String, sessionId: String, output: JSONValue) async {
+        guard !answeringCards.contains(toolUseId) else { return }
+        answeringCards.insert(toolUseId)
+        failedCards.remove(toolUseId)
+        defer { resync() }
+        do {
+            try await backend.answerInteraction(sessionId: sessionId, toolUseId: toolUseId, output: output)
+        } catch {
+            // The card offers Retry: nothing else would send it again.
+            answeringCards.remove(toolUseId)
+            failedCards.insert(toolUseId)
+        }
     }
 
     /// A widget's read of its own app, with this chat's backend.
