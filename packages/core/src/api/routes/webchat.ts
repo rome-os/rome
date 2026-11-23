@@ -146,7 +146,8 @@ import { isTransientDelta } from "../../agent/index.js";
 import { MessageWriting, messageWritingModeOf } from "../../core/message-writing.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { EMPTY_WORKSPACE_CONTEXT } from "../../core/sticky-headers.js";
-import { SPOKEN_TURN_NOTE } from "../../voice-conversation/conversation.js";
+import { type ReplyTurn, SPOKEN_TURN_NOTE } from "../../voice-conversation/conversation.js";
+import { gatherDelivered } from "../../voice-conversation/delivered-reply.js";
 import type {
   BackendEmitOptions,
   BackendSessionTask,
@@ -1121,12 +1122,13 @@ export interface WebchatRuntime {
   sendAsGuardian(chatId: string, text: string): Promise<void>;
   /**
    * Sends what the guardian said aloud in a voice conversation as their message,
-   * marked spoken, ending any turn the chat is running. Resolves with the turn
-   * that answers it. Throws the route's error, and also for a chat the guardian
-   * may not open, an agent whose text is private, or a send that started no turn.
+   * marked spoken, ending any turn the chat is running. Resolves with the reply:
+   * the turn that answers it, or, for an agent whose text is private, the
+   * messages that turn adds to the chat. Throws the route's error, and also for
+   * a chat the guardian may not open or a send that started no turn.
    */
-  sendSpoken(chatId: string, text: string): Promise<AgentTurnHandle>;
-  /** Whether `sendSpoken` would take a turn for `chatId`: one the guardian may open, whose agent answers in text. */
+  sendSpoken(chatId: string, text: string): Promise<ReplyTurn>;
+  /** Whether `sendSpoken` would take a turn for `chatId`: one the guardian may open. */
   canSendSpoken(chatId: string): Promise<boolean>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
@@ -5721,21 +5723,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   // Why a spoken turn may not go into `chatId`, or null when it may.
-  const spokenRefusal = async (chatId: string): Promise<string | null> => {
-    // The guardian's socket reaches the chats the guardian's dashboard opens, as the routes' gate allows.
-    const session = await deps.webchatRepo.getSession(chatId);
-    if (
-      !session ||
-      !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, "guardian"))
-    ) {
-      return "Session not found";
-    }
-    // An agent whose text is private answers through its tools, which a voice conversation does not read yet.
-    const policy = resolveAgentPolicy(
-      agentPolicySource(deps.agentLoader, session.agentName ?? "main"),
-    );
-    return policy.finalText === "private" ? "The chat's agent does not answer in text" : null;
-  };
+  // The guardian's socket reaches the chats the guardian's dashboard opens, as the routes' gate allows.
+  const spokenRefusal = async (chatId: string): Promise<string | null> =>
+    (await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, "guardian"))
+      ? null
+      : "Session not found";
 
   const runtime: WebchatRuntime = {
     activeStreams,
@@ -5861,16 +5853,39 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     async sendSpoken(chatId, text) {
       const refusal = await spokenRefusal(chatId);
       if (refusal) throw new Error(refusal);
-      const started: { turn?: Promise<AgentTurnHandle> } = {};
-      const sent = await handleChatSend(
-        chatId,
-        { inputId: randomUUID(), text, spoken: true, priority: "now" },
-        { onTurn: (turn) => (started.turn = turn) },
+      // An agent whose text is private answers with the messages its tools add,
+      // so they are gathered from before the send, to miss none.
+      const session = await deps.webchatRepo.getSession(chatId);
+      const policy = resolveAgentPolicy(
+        agentPolicySource(deps.agentLoader, session?.agentName ?? "main"),
       );
-      if (sent.status >= 400) throw new Error(routeError(sent));
-      // A send whose agent could not be opened records a failed turn and submits none.
-      if (!started.turn) throw new Error("No turn started");
-      return started.turn;
+      const delivered =
+        policy.finalText === "private"
+          ? gatherDelivered((listener) => deps.webchatRepo.onMessageInserted(listener))
+          : null;
+      const started: { turn?: Promise<AgentTurnHandle> } = {};
+      try {
+        const sent = await handleChatSend(
+          chatId,
+          { inputId: randomUUID(), text, spoken: true, priority: "now" },
+          { onTurn: (turn) => (started.turn = turn) },
+        );
+        if (sent.status >= 400) throw new Error(routeError(sent));
+        // A send whose agent could not be opened records a failed turn and submits none.
+        if (!started.turn) throw new Error("No turn started");
+      } catch (err) {
+        delivered?.stop();
+        throw err;
+      }
+      return delivered
+        ? started.turn.then(
+            (turn) => delivered.of(turn),
+            (err: unknown) => {
+              delivered.stop();
+              throw err;
+            },
+          )
+        : started.turn;
     },
     async sendAsGuardian(chatId, text) {
       const inputId = randomUUID();

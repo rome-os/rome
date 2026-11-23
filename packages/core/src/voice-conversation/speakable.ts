@@ -18,6 +18,8 @@ export interface SpeakableFilter {
   push(markdown: string): string;
   /** Returns what is left at the end of the reply. */
   end(): string;
+  /** Points to the chat for something not said, such as a card: once a reply, as for code. */
+  point(): string;
 }
 
 export function createSpeakableFilter(language: ReplyLanguage): SpeakableFilter {
@@ -84,6 +86,7 @@ export function createSpeakableFilter(language: ReplyLanguage): SpeakableFilter 
     end() {
       return take("", true);
     },
+    point,
   };
 }
 

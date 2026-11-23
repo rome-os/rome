@@ -2,7 +2,12 @@ import { describe, expect, it } from "@rstest/core";
 import type { VoiceConversationServerMessage } from "@rome/api-types/voice-conversation";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { SpeakerError, type SpeakerSession } from "../voice-output/speaker.js";
-import { createConversation, LOOKING_AFTER_MS, type ReplyTurn } from "./conversation.js";
+import {
+  createConversation,
+  LOOKING_AFTER_MS,
+  type ReplyEvent,
+  type ReplyTurn,
+} from "./conversation.js";
 
 const RATE = 24_000;
 /** `ms` of audio at the speaker's rate. */
@@ -10,7 +15,7 @@ const audio = (ms: number) => new Uint8Array((RATE * 2 * ms) / 1000);
 
 /** A turn whose events the test pushes. */
 function scriptedTurn() {
-  const events: StreamAgentEvent[] = [];
+  const events: ReplyEvent[] = [];
   let ended = false;
   let wake = () => {};
   const turn: ReplyTurn = {
@@ -18,7 +23,7 @@ function scriptedTurn() {
       async *[Symbol.asyncIterator]() {
         let next = 0;
         while (true) {
-          while (next < events.length) yield events[next++] as StreamAgentEvent;
+          while (next < events.length) yield events[next++] as ReplyEvent;
           if (ended) return;
           await new Promise<void>((resolve) => {
             wake = resolve;
@@ -29,7 +34,7 @@ function scriptedTurn() {
   };
   return {
     turn,
-    push(...more: StreamAgentEvent[]) {
+    push(...more: ReplyEvent[]) {
       events.push(...more);
       wake();
     },
@@ -311,6 +316,26 @@ describe("voice conversation", () => {
     // Rome's first sentence still plays, and comes back through the microphone.
     t.conversation.heard("", "很久很久以前的一座山");
     expect(t.messages.filter((m) => m.type === "clear")).toEqual([]);
+  });
+
+  it("speaks the messages a private-text agent delivers, and points to the chat once for cards", async () => {
+    const t = setup();
+    t.conversation.heard("订机票", "");
+    t.conversation.endpoint();
+    await settled();
+    t.turns[0]?.push(
+      { type: "said", text: "好的，订好了。" },
+      { type: "shown" },
+      { type: "said", text: "**航班** 是下午三点" },
+      { type: "shown" },
+    );
+    t.turns[0]?.end();
+    await settled();
+    expect(t.said.map((s) => s.text)).toEqual([
+      "好的，订好了。",
+      "详细内容在聊天里。",
+      "航班 是下午三点",
+    ]);
   });
 
   it("says once that it is looking when the agent works quietly for 2 s", async () => {
