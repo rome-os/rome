@@ -735,7 +735,10 @@ export class ConciergeService {
         storedChatId(mainChatIdOf(owner)),
         owner,
       )) ?? [];
-    const rows = (await this.deps.tasks.repo.listForConciergeChat(chatId, owner, new Date())).map(
+    // Every row since the start, ended or not: a row's ended mark can be
+    // stale, and the read keeps activity to the second, so the status below
+    // is what tells an open task from an ended one.
+    const rows = (await this.deps.tasks.repo.listForConciergeChat(chatId, owner, new Date(0))).map(
       (task) => task.row,
     );
     const status = await this.deps.tasks.statusOf(rows);
