@@ -1075,16 +1075,6 @@
         }
       }
     },
-    "Archived · %lld" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已归档 · %lld"
-          }
-        }
-      }
-    },
     "Ask the owner of this Rome to turn it on." : {
       "localizations" : {
         "zh-Hans" : {

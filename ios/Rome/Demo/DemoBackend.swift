@@ -1352,7 +1352,7 @@ final class DemoBackend: RomeBackend {
         let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900, "topic-reply-links": 1000, "topic-ai": 1100, "topic-provider": 1200]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
-        // Archived topic chats, out of the drawer's list: the Archived row's
+        // Archived topic chats, out of the drawer's list: the Archived button's
         // sheet lists them, and each opens read only. The car's archive moved
         // a follow to the main chat, so its Restore asks about it. Their last
         // activity spans weeks, months and a year, for the sheet's groups.
