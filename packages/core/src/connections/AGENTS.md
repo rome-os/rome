@@ -12,4 +12,4 @@ The words come from [`docs/domains/connections.md`](../../../../docs/domains/con
 
 ## Playbook
 
-- Before adding an export to `index.ts`, or importing a file in this folder from outside it, check the change against the promises above. A use no promise covers is the guardian's decision, so ask before adding it.
+- Before adding an export to `index.ts`, or importing a file in this folder from outside it, check the change against the promises above. A use no promise covers needs a maintainer's decision, so ask before adding it.
