@@ -1,10 +1,12 @@
 // Opens speaking sessions for voice conversation mode. It is the one place
 // that decides whether Rome may speak: with the `voice_mode` gate off it makes
-// no speaker, asks for no credential and opens no connection.
+// no speaker, asks for no credential and opens no connection. A session lasts
+// longer than its credential: it moves to a new one when the provider refuses
+// the old.
 
 import { createLogger } from "../logger.js";
 import { speakerFor } from "./create-speaker.js";
-import type { SpeakerListener, SpeakerSession } from "./speaker.js";
+import type { SpeakerError, SpeakerListener, SpeakerSession } from "./speaker.js";
 import type { SpeechCredentialSource, SpeechUsage } from "./speech-credentials.js";
 import { resolveVoiceModeEnabled } from "./voice-mode-gate.js";
 
@@ -44,58 +46,254 @@ export interface SpeakerSourceDeps {
 
 export function createSpeakerSource(deps: SpeakerSourceDeps): SpeakerSource {
   const enabled = deps.enabled ?? resolveVoiceModeEnabled;
+  const retire = deps.credentials.retire?.bind(deps.credentials);
   return {
     async open(listener) {
       if (!(await enabled())) return { ok: false, reason: "disabled" };
-      const outcome = await deps.credentials.get();
-      switch (outcome.kind) {
-        case "not-configured":
-          return { ok: false, reason: "not-configured" };
-        case "refused":
-          log.warn("speech credential refused", { code: outcome.code });
-          return { ok: false, reason: "refused", detail: outcome.code };
-        case "signed-out":
-          return { ok: false, reason: "signed-out" };
-        case "unavailable":
-          log.warn("speech credential unavailable", { detail: outcome.detail });
-          return { ok: false, reason: "unavailable" };
-        case "granted": {
-          const { credentials } = outcome;
-          try {
-            const speaker = speakerFor(credentials.provider, {
-              token: credentials.token,
-              url: credentials.url,
-              model: credentials.model,
-              voice: credentials.voice,
-            });
-            if (!speaker) {
-              log.warn("speech provider has no adapter", { provider: credentials.provider });
-              return { ok: false, reason: "unknown-provider", detail: credentials.provider };
-            }
-            const { sessionId } = credentials;
-            const record = deps.credentials.recordUsage?.bind(deps.credentials);
-            return {
-              ok: true,
-              session:
-                sessionId && record
-                  ? metered(speaker.open.bind(speaker), listener, (usage) =>
-                      record(sessionId, usage),
-                    )
-                  : speaker.open(listener),
-              provider: credentials.provider,
-              credentialSessionId: credentials.sessionId,
-            };
-          } catch (err) {
-            // A bad address makes the socket throw as it opens.
-            log.warn("speaker could not be opened", {
-              error: err instanceof Error ? err.message : String(err),
-            });
-            return { ok: false, reason: "unavailable" };
-          }
-        }
-      }
+      return renewing(listener, (inner) => openOnCredential(deps.credentials, inner), retire);
     },
   };
+}
+
+/** Opens one session on one credential from `credentials`. */
+async function openOnCredential(
+  credentials: SpeechCredentialSource,
+  listener: SpeakerListener,
+): Promise<SpeakerOpenOutcome> {
+  const outcome = await credentials.get();
+  switch (outcome.kind) {
+    case "not-configured":
+      return { ok: false, reason: "not-configured" };
+    case "refused":
+      log.warn("speech credential refused", { code: outcome.code });
+      return { ok: false, reason: "refused", detail: outcome.code };
+    case "signed-out":
+      return { ok: false, reason: "signed-out" };
+    case "unavailable":
+      log.warn("speech credential unavailable", { detail: outcome.detail });
+      return { ok: false, reason: "unavailable" };
+    case "granted": {
+      const granted = outcome.credentials;
+      try {
+        const speaker = speakerFor(granted.provider, {
+          token: granted.token,
+          url: granted.url,
+          model: granted.model,
+          voice: granted.voice,
+        });
+        if (!speaker) {
+          log.warn("speech provider has no adapter", { provider: granted.provider });
+          return { ok: false, reason: "unknown-provider", detail: granted.provider };
+        }
+        const { sessionId } = granted;
+        const record = credentials.recordUsage?.bind(credentials);
+        return {
+          ok: true,
+          session:
+            sessionId && record
+              ? metered(speaker.open.bind(speaker), listener, (usage) => record(sessionId, usage))
+              : speaker.open(listener),
+          provider: granted.provider,
+          credentialSessionId: granted.sessionId,
+        };
+      } catch (err) {
+        // A bad address makes the socket throw as it opens.
+        log.warn("speaker could not be opened", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return { ok: false, reason: "unavailable" };
+      }
+    }
+  }
+}
+
+/** One session on one credential, within a session that renews its credential. */
+interface Leg {
+  session: SpeakerSession | null;
+  credentialSessionId?: string;
+  /** Sentences said on this leg and not over yet. */
+  live: Set<string>;
+}
+
+/**
+ * Opens a session that outlives its credential. When the provider refuses
+ * the credential, as Soniox does for a new stream once a temporary key has
+ * expired or been revoked, the session retires the credential, opens a new
+ * session on a fresh one, and says again on it each refused sentence none of
+ * whose audio came. Sentences already speaking on the old credential finish
+ * there. It renews at most once until audio comes again, and says a sentence
+ * again at most once, so a credential refused from the start fails as before.
+ */
+async function renewing(
+  listener: SpeakerListener,
+  openOn: (listener: SpeakerListener) => Promise<SpeakerOpenOutcome>,
+  retire: ((sessionId: string) => void) | undefined,
+): Promise<SpeakerOpenOutcome> {
+  // The text and place in order of each sentence said and not over yet.
+  const said = new Map<string, { text: string; order: number }>();
+  let order = 0;
+  const heard = new Set<string>();
+  const retried = new Set<string>();
+  // Sentences waiting for the new credential.
+  const waiting: string[] = [];
+  const legs = new Set<Leg>();
+  let current: Leg = { session: null, live: new Set() };
+  let renewal: Promise<void> | null = null;
+  let mayRenew = true;
+  let closed = false;
+
+  const forget = (id: string) => {
+    said.delete(id);
+    heard.delete(id);
+    retried.delete(id);
+  };
+  const sayOn = (leg: Leg, id: string) => {
+    const sentence = said.get(id);
+    if (!sentence || !leg.session) return;
+    leg.live.add(id);
+    leg.session.say(id, sentence.text);
+  };
+  // A leg the session has moved on from closes once nothing runs on it.
+  const tidy = (leg: Leg) => {
+    if (leg === current || leg.live.size > 0 || !legs.has(leg)) return;
+    legs.delete(leg);
+    leg.session?.close();
+  };
+
+  // The session is over: every sentence not over yet fails with `error` first.
+  const end = (error: SpeakerError) => {
+    closed = true;
+    const ids = [...waiting.splice(0)];
+    for (const leg of legs) {
+      ids.push(...leg.live);
+      leg.session?.close();
+    }
+    legs.clear();
+    for (const id of ids) {
+      forget(id);
+      listener.onSentenceError(id, error);
+    }
+    listener.onClosed(error);
+  };
+
+  const renew = (from: Leg, error: SpeakerError) => {
+    mayRenew = false;
+    if (from.credentialSessionId) retire?.(from.credentialSessionId);
+    const next: Leg = { session: null, live: new Set() };
+    const opening = openOn(legListener(next)).catch(
+      (): SpeakerOpenOutcome => ({ ok: false, reason: "unavailable" }),
+    );
+    renewal = opening.then((outcome) => {
+      renewal = null;
+      if (closed) {
+        if (outcome.ok) outcome.session.close();
+        return;
+      }
+      const ids = waiting
+        .splice(0)
+        .sort((a, b) => (said.get(a)?.order ?? 0) - (said.get(b)?.order ?? 0));
+      if (!outcome.ok) {
+        log.warn("speech credential not renewed", { reason: outcome.reason });
+        for (const id of ids) {
+          forget(id);
+          listener.onSentenceError(id, error);
+        }
+        if (!legs.has(current)) end(error);
+        return;
+      }
+      log.info("speech credential renewed");
+      next.session = outcome.session;
+      next.credentialSessionId = outcome.credentialSessionId;
+      legs.add(next);
+      const old = current;
+      current = next;
+      for (const id of ids) sayOn(next, id);
+      tidy(old);
+    });
+  };
+
+  function legListener(leg: Leg): SpeakerListener {
+    return {
+      onAudio(frame) {
+        if (closed) return;
+        heard.add(frame.sentenceId);
+        // Only the newest credential speaking shows that renewing worked.
+        if (leg === current && !renewal) mayRenew = true;
+        listener.onAudio(frame);
+      },
+      onSentenceEnd(id) {
+        if (closed) return;
+        leg.live.delete(id);
+        forget(id);
+        listener.onSentenceEnd(id);
+        tidy(leg);
+      },
+      onSentenceError(id, error) {
+        if (closed) return;
+        leg.live.delete(id);
+        const again =
+          error.kind === "unauthorized" &&
+          said.has(id) &&
+          !heard.has(id) &&
+          !retried.has(id) &&
+          (renewal !== null || leg !== current || mayRenew);
+        if (again) {
+          retried.add(id);
+          if (renewal || leg === current) {
+            waiting.push(id);
+            if (!renewal) renew(leg, error);
+          } else sayOn(current, id);
+        } else {
+          forget(id);
+          listener.onSentenceError(id, error);
+        }
+        tidy(leg);
+      },
+      onClosed(error) {
+        legs.delete(leg);
+        if (leg !== current || closed || renewal) return;
+        if (error.kind === "unauthorized" && mayRenew) return renew(leg, error);
+        end(error);
+      },
+    };
+  }
+
+  const first = await openOn(legListener(current));
+  if (!first.ok) return first;
+  current.session = first.session;
+  current.credentialSessionId = first.credentialSessionId;
+  legs.add(current);
+
+  const session: SpeakerSession = {
+    get format() {
+      return (current.session ?? first.session).format;
+    },
+    say(sentenceId, text) {
+      if (closed) return;
+      said.set(sentenceId, { text, order: order++ });
+      if (renewal) waiting.push(sentenceId);
+      else sayOn(current, sentenceId);
+    },
+    stop() {
+      const stopped = waiting.splice(0);
+      for (const leg of legs) {
+        const ids = leg.session?.stop() ?? [];
+        for (const id of ids) leg.live.delete(id);
+        stopped.push(...ids);
+      }
+      for (const id of stopped) forget(id);
+      for (const leg of [...legs]) tidy(leg);
+      return stopped;
+    },
+    close() {
+      closed = true;
+      for (const leg of legs) leg.session?.close();
+      legs.clear();
+      waiting.length = 0;
+      said.clear();
+    },
+  };
+  return { ...first, session };
 }
 
 /**

@@ -27,6 +27,8 @@ import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { loadConfig } from "./config.js";
 import { createVoiceInputSource } from "./voice-input/index.js";
+import { createRomeCloudSpeechCredentials } from "./voice-output/rome-cloud-speech-credentials.js";
+import { createSpeakerSource } from "./voice-output/speaker-source.js";
 import { resolveCloudAuthEnabled } from "./access/cloud-auth-gate.js";
 import { createLogger } from "./logger.js";
 import {
@@ -1326,6 +1328,15 @@ async function main() {
       return access ? credentialFingerprint(access.credentialId) : null;
     },
   });
+  // Speech credentials for voice conversation mode. Only the speaker source
+  // asks for one, and only while `voice_mode` is on. At boot this reports the
+  // usage of speech sessions an earlier run left, if any.
+  const speechCredentials = createRomeCloudSpeechCredentials({
+    romeCloud: romeCloudAccess,
+    settings: settingsRepo,
+    usage: usageRecorder,
+  });
+  void speechCredentials.report();
   // Real push sender in the main process (holds the durable instance token);
   // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
   // `notify.send` back to this same instance. The Concierge pushes through it too.
@@ -2875,6 +2886,7 @@ async function main() {
         romeCloud: romeCloudAccess,
       }),
       transcriptionUsage: usageRecorder,
+      speaker: createSpeakerSource({ credentials: speechCredentials }),
       dashboardAccessStore,
       visitorAllowListSync,
       phoneWatching,
@@ -3201,6 +3213,7 @@ async function main() {
     await computerUse.stop();
     shutdownLog.info("instance identity heartbeat stopped");
 
+    speechCredentials.stop();
     try {
       await usageRecorder.flush();
       await usageReporter.stop();

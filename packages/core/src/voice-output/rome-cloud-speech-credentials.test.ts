@@ -301,6 +301,51 @@ describe("speech sessions from Rome Cloud", () => {
     expect(cloud.requests).toHaveLength(2);
   });
 
+  it("asks for a new session once the provider refused the old one, and reports the old one after", async () => {
+    const { cloud, make, clock, reported } = setup();
+    const source = make();
+    await source.get();
+    source.recordUsage("speech-1", { characters: 12, seconds: 1 });
+    clock.advance(10 * MINUTE);
+    source.retire("speech-1");
+    // Retiring an unknown or already retired session changes nothing.
+    source.retire("speech-1");
+    source.retire("speech-9");
+    const outcome = await source.get();
+    expect(outcome.kind === "granted" && outcome.credentials.sessionId).toBe("speech-2");
+    expect(cloud.requests).toHaveLength(2);
+
+    // A stream opened just before the refusal may still be speaking.
+    clock.advance(5 * MINUTE);
+    await source.report();
+    expect(reported).toEqual([]);
+    clock.advance(MINUTE);
+    await source.report();
+    expect(reported).toEqual([
+      expect.objectContaining({ sessionId: "speech-1", characters: 12, seconds: 1 }),
+    ]);
+  });
+
+  it("keeps a due session while signed out, and reports it once signed in again", async () => {
+    const { make, clock, reported, signAs, settings } = setup();
+    const source = make();
+    await source.get();
+    source.recordUsage("speech-1", { characters: 7, seconds: 1 });
+    await settled();
+    signAs(() => null);
+    clock.advance(70 * MINUTE);
+    await source.report();
+    expect(reported).toEqual([]);
+    expect(settings.data.get(SPEECH_SESSIONS_SETTING_KEY)).toEqual([
+      expect.objectContaining({ sessionId: "speech-1", characters: 7 }),
+    ]);
+
+    signAs(() => signedIn());
+    clock.advance(MINUTE);
+    await source.report();
+    expect(reported).toEqual([expect.objectContaining({ sessionId: "speech-1", characters: 7 })]);
+  });
+
   it("passes Rome Cloud's refusals on, and keeps nothing", async () => {
     const { cloud, make, settings } = setup();
     const source = make();
