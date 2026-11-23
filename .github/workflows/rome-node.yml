@@ -135,11 +135,13 @@ jobs:
           core_tgz="$(ls "$pkg_dir"/rome-os-node-core-[0-9]*.tgz)"
           cli_tgz="$(ls "$pkg_dir"/rome-os-node-[0-9]*.tgz)"
 
-          if tar -tzf "$core_tgz" | grep -Fq 'Rome Computer Use.app'; then
+          core_entries="$(tar -tzf "$core_tgz")"
+          if grep -Fq 'Rome Computer Use.app' <<< "$core_entries"; then
             echo "::error::@rome-os/node-core tarball must not contain Rome Computer Use.app"
             exit 1
           fi
-          tar -tzf "$darwin_tgz" | grep -Fq 'package/dist/native/Rome Computer Use.app/Contents/MacOS/RomeComputerUse'
+          darwin_entries="$(tar -tzf "$darwin_tgz")"
+          grep -Fq 'package/dist/native/Rome Computer Use.app/Contents/MacOS/RomeComputerUse' <<< "$darwin_entries"
 
           core_install="$RUNNER_TEMP/rome-node-core-install"
           mkdir -p "$core_install"
