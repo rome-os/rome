@@ -8,11 +8,12 @@ import { RELAY_DRAINED_HEADER, stripInternalHeaders, type ServerFrame } from "./
 // whatever the local handler does, so the relay needs no budget of its own. Handlers are untrusted: one may fail, answer anything, throw or
 // never return, and none of that holds the mailbox past the budget. Within the
 // budget it delivers in seq order and acks only after a 2xx, a terminal 4xx, or
-// giving up, so delivery is at-least-once and a handler must be idempotent. An
-// attempt that outlasts its timeout is aborted through its signal; a handler
-// that ignores the signal keeps running while the next attempt starts, so it
-// may also see the same event twice at once. The budget lives in memory, so a
-// restart starts it again for the event the relay replays.
+// giving up, so delivery is at-least-once and a handler must be idempotent. When
+// an attempt outlasts its timeout the drain stops waiting and aborts the
+// attempt's signal. A handler is not cancelled: one that ignores the signal
+// (today every production handler does) keeps running while the next attempt
+// starts, so it may see the same event more than once at a time. The budget
+// lives in memory, so a restart starts it again for the event the relay replays.
 
 const log = createLogger("relay-drainer");
 
@@ -98,7 +99,8 @@ export interface DrainEvent {
 export type DeliverFn = (
   drain: RelayDrain,
   event: DrainEvent,
-  /** Aborted when the attempt times out; the drain stops waiting either way. */
+  /** Aborted when the attempt times out, for a handler that can stop early.
+   *  The drain stops waiting either way. */
   signal: AbortSignal,
 ) => Promise<{ status: number; retryAfter?: string | null }>;
 
@@ -686,5 +688,8 @@ function withTimeout<T>(work: (signal: AbortSignal) => Promise<T>, ms: number): 
       reject(error);
     }, ms);
   });
-  return Promise.race([work(controller.signal), timeout]).finally(() => clearTimeout(timer));
+  // Started inside a promise so a synchronous throw still settles the race and
+  // clears the timer.
+  const attempt = Promise.resolve().then(() => work(controller.signal));
+  return Promise.race([attempt, timeout]).finally(() => clearTimeout(timer));
 }

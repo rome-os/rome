@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import {
   RelayDrainer,
   buildRelayReplayRequest,
+  type DeliverFn,
   type DrainEvent,
   type RelayDrain,
 } from "./drainer.js";
@@ -342,6 +343,25 @@ describe("RelayDrainer", () => {
     expect(delivered).toEqual([1, 1, 1, 1, 1, 2]);
     expect(aborted).toBe(5);
     expect(drainer.getStatus()[0]?.lastDeliveryFailure?.error).toMatch(/timed out/);
+  });
+
+  it("retries a handler that throws before returning a promise", async () => {
+    speedUpDeliveryRetryTimers();
+    relay = startFakeRelay([{ seq: 1, body: "{}" }]);
+    let attempts = 0;
+    drainer = new RelayDrainer(
+      [relay.drain()],
+      ((_drain: RelayDrain) => {
+        attempts++;
+        if (attempts === 1) throw new Error("sync failure");
+        return Promise.resolve({ status: 200 });
+      }) as DeliverFn,
+      DEFAULT_TEST_TIMING,
+    );
+    drainer.start();
+
+    await waitFor(() => relay!.ackedUpTo() === 1);
+    expect(attempts).toBe(2);
   });
 
   it("follows the relay when it moves past an event the drain is still retrying", async () => {
