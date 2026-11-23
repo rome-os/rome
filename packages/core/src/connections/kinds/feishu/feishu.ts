@@ -299,20 +299,17 @@ export class FeishuAdapter {
     // content and are dropped until attachment support lands. The SDK strips
     // the bot mention, so a text or rich-text post that was only the mention
     // is restored as the visible mention instead of being dropped.
-    const commandText = stripMentionPlaceholders(m.content ?? "", m.mentions);
-    const resolvedText = resolveMentions(m.content ?? "", m.mentions);
-    const text =
-      m.mentionedBot && isStopCommand(commandText)
-        ? "/stop"
-        : preserveMentionOnlyText(
-            resolvedText,
-            m.mentionedBot && TEXT_BEARING_CONTENT_TYPES.has(m.rawContentType),
-            this.channel.botIdentity?.name,
-          );
+    const text = preserveMentionOnlyText(
+      resolveMentions(m.content ?? "", m.mentions),
+      m.mentionedBot && TEXT_BEARING_CONTENT_TYPES.has(m.rawContentType),
+      this.channel.botIdentity?.name,
+    );
     if (!text) return;
     const threadType = m.chatType === "p2p" ? "private" : "group";
     // A stop said to the bot still reaches a group switched off below.
-    const directedStop = (threadType === "private" || m.mentionedBot) && isStopCommand(text);
+    const directedStop =
+      (threadType === "private" || m.mentionedBot) &&
+      isStopCommand(stripMentionPlaceholders(m.content ?? "", m.mentions));
     // Only a delivered message waits on the name; a dropped one starts the lookup.
     const chatName = threadType === "group" ? this.observeGroup(m.chatId) : undefined;
 
@@ -681,8 +678,8 @@ export class FeishuAdapter {
 
 /**
  * Replace `@_user_N` / `@_all` mention placeholders the SDK leaves in `content`
- * with the resolved display name from its structured `mentions`, so the agent
- * sees clean prose. A no-op when there are no mentions.
+ * with `@` and the display name from its structured `mentions`, as Feishu
+ * shows them. A no-op when there are no mentions.
  */
 export function resolveMentions(
   content: string,
@@ -690,7 +687,7 @@ export function resolveMentions(
 ): string {
   let text = content;
   for (const mention of mentions) {
-    if (mention.key && mention.name) text = text.split(mention.key).join(mention.name);
+    if (mention.key && mention.name) text = text.split(mention.key).join(`@${mention.name}`);
   }
   return text.trim();
 }

@@ -286,7 +286,7 @@ describe("feishu inbound delivery", () => {
         chatId: "oc_chat",
         senderId: "ou_alice",
         senderDisplayName: "Alice",
-        text: "Rome see this",
+        text: "@Rome see this",
         attachments: [],
         timestamp: new Date(1700000000000),
         replyTo: { messageId: "om_6" },

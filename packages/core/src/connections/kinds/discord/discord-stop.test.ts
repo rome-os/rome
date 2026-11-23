@@ -39,9 +39,9 @@ describe("Discord stop command", () => {
     expect(discordInboundText("", () => undefined)).toBe("");
   });
 
-  it("reads a /stop after mentions alone as /stop, whoever is mentioned", () => {
-    expect(discordInboundText("<@123> /stop", () => "Rome")).toBe("/stop");
-    expect(discordInboundText("<@123> <@456> /STOP", () => "Rome")).toBe("/stop");
+  it("reports a /stop after mentions as typed", () => {
+    expect(discordInboundText("<@123> /stop", () => "Rome")).toBe("@Rome /stop");
+    expect(discordInboundText("<@123> <@456> /STOP", () => "Rome")).toBe("@Rome @Rome /STOP");
     expect(discordInboundText("/stop", () => undefined)).toBe("/stop");
   });
 

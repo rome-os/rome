@@ -209,6 +209,16 @@ describe("ChannelMessageHook", () => {
     expect(harness.run).not.toHaveBeenCalled();
   });
 
+  it("accepts a /stop typed after mentions of Rome", async () => {
+    await harness.emit(
+      TELEGRAM_ID,
+      message({ text: "@Rome /stop", addressing: "mention", thread: { kind: "group" } }),
+    );
+
+    expect(harness.stop).toHaveBeenCalledTimes(1);
+    expect(harness.run).not.toHaveBeenCalled();
+  });
+
   it("accepts an addressed group /stop even when the conversation is disabled", async () => {
     harness.get.mockImplementation(async ({ connectionId, chatId }) =>
       snapshot(connectionId, chatId, { enabled: false }),

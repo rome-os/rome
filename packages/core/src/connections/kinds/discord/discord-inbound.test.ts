@@ -351,11 +351,11 @@ describe("DiscordAdapter gateway filters", () => {
 
     expect(captured.map((m) => [m.messageId, m.text])).toStrictEqual([
       ["m1", "ROME-7KQ2M9XA"],
-      ["m4", "/stop"],
+      ["m4", "@Rome /stop"],
       // A code said to Rome is still the bare code admission voids.
       ["m5", "ROME-7KQ2M9XB"],
       // A stop said to Rome and someone else is still a stop said to Rome.
-      ["m6", "/stop"],
+      ["m6", "@Rome @ann /stop"],
     ]);
     expect(captured[0].thread?.kind).toBe("group");
   });

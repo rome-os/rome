@@ -393,7 +393,7 @@ describe("FeishuAdapter", () => {
     expect(captured[0]).not.toHaveProperty("replyTo");
   });
 
-  it("normalizes an addressed group /stop without leaving the bot mention in the command", async () => {
+  it("reports an addressed group /stop as typed", async () => {
     await channel.emit({
       chatType: "group",
       mentionedBot: true,
@@ -402,7 +402,7 @@ describe("FeishuAdapter", () => {
     });
 
     expect(captured).toHaveLength(1);
-    expect(captured[0]).toMatchObject({ text: "/stop", addressing: "mention" });
+    expect(captured[0]).toMatchObject({ text: "@Rome /stop", addressing: "mention" });
   });
 
   it("preserves an @-only group message as the visible bot mention", async () => {
@@ -594,7 +594,7 @@ describe("FeishuAdapter", () => {
     });
 
     expect(captured).toHaveLength(1);
-    expect(captured[0]).toMatchObject({ text: "/stop", addressing: "mention" });
+    expect(captured[0]).toMatchObject({ text: "@Rome /stop", addressing: "mention" });
   });
 
   it("renders current group settings as select field defaults", async () => {
@@ -769,7 +769,7 @@ describe("FeishuAdapter", () => {
       content: "@_user_1 please review",
       mentions: [{ key: "@_user_1", name: "Rome" }],
     });
-    expect(captured[0].text).toBe("Rome please review");
+    expect(captured[0].text).toBe("@Rome please review");
   });
 
   it("ignores the bot's own messages to avoid loops", async () => {
@@ -1136,7 +1136,7 @@ describe("FeishuAdapter fault surfacing", () => {
 
 describe("resolveMentions", () => {
   it("replaces placeholders with names", () => {
-    expect(resolveMentions("@_user_1 hi", [{ key: "@_user_1", name: "Bob" }])).toBe("Bob hi");
+    expect(resolveMentions("@_user_1 hi", [{ key: "@_user_1", name: "Bob" }])).toBe("@Bob hi");
   });
 
   it("is a no-op without mentions", () => {

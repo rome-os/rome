@@ -1,9 +1,5 @@
-import {
-  chatStopReceipt,
-  createAppLogger,
-  isSendRefused,
-  isStopCommand,
-} from "@rome-os/app-runtime";
+import { chatStopReceipt, createAppLogger, isSendRefused } from "@rome-os/app-runtime";
+
 import type {
   ActionEngineLike,
   Channel,
@@ -18,6 +14,7 @@ import type {
 } from "@rome-os/app-runtime";
 
 import type { WakeGateFor } from "../../actions/message-handler/index.js";
+import { isStopRequest } from "./stop-request.js";
 
 const log = createAppLogger("channel-message-hook");
 
@@ -167,7 +164,7 @@ export class ChannelMessageHook implements ChannelMessageHookInterface {
 
     // A program sends on `agents`, not a person, so `/stop` there is text for
     // the model, and `inbox:message_handler` decides whether Rome answers it.
-    if (service !== AGENTS_CHANNEL && isStopCommand(message.text)) {
+    if (service !== AGENTS_CHANNEL && isStopRequest(message.text)) {
       const addressing =
         message.addressing ?? (message.thread?.kind === "dm" ? "direct" : "ambient");
       // Another bot cannot stop a turn, however the chat takes bots.
