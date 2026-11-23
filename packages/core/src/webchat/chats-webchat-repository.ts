@@ -714,7 +714,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     this.say(standing, id, role as "user" | "assistant", partsOf(content), turnId);
   }
 
-  protected override async writeBackendMessage(
+  protected override async insertBackendMessage(
     sessionId: string,
     turnId: string | null,
     role: string,
@@ -724,7 +724,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
   ): Promise<StoredWebchatMessage> {
     assertWidgetAlone(parts);
     const standing = role === "assistant" ? this.standingOf(sessionId) : null;
-    if (!standing) return super.writeBackendMessage(sessionId, turnId, role, parts, id);
+    if (!standing) return super.insertBackendMessage(sessionId, turnId, role, parts, id);
     const key = id ?? randomUUID();
     const { at, thread } = this.say(
       standing,

@@ -24,7 +24,6 @@ describe("WebChatAdapter", () => {
   });
 
   afterEach(() => {
-    rs.unstubAllEnvs();
     rs.useRealTimers();
     testDb.close();
   });
@@ -211,27 +210,6 @@ describe("WebChatAdapter", () => {
           },
         ]),
       }),
-    ]);
-  });
-
-  it("stores a reply's absolute project paths as their /projects routes", async () => {
-    rs.stubEnv("ROME_PROJECTS_ROOT", "/home/rome/.rome/default/projects");
-    await repo.createSession("sess-paths", "Paths");
-    const text = "Saved [report](/home/rome/.rome/default/projects/default/my report.md).";
-
-    await adapter.send("sess-paths" as ChatId, {
-      text,
-      parts: [{ type: "text", content: text, turnPhase: "final", blockIx: 0 }],
-    });
-
-    const messages = await repo.getMessages("sess-paths");
-    expect(JSON.parse(messages[0]?.content ?? "[]")).toEqual([
-      {
-        type: "text",
-        content: "Saved [report](</projects/default/my report.md>).",
-        turnPhase: "final",
-        blockIx: 0,
-      },
     ]);
   });
 

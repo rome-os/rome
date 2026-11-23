@@ -1,7 +1,6 @@
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type { ChatOutputKind } from "@rome/api-types/chat-outputs";
 import { describeFile } from "../../lib/file-browser-server.js";
-import { marked, type Token } from "marked";
 import { shellWrites } from "./shell-writes.js";
 
 /** An output found in a trace or a message, before it is stored. */
@@ -359,104 +358,6 @@ const MARKDOWN_LINK = new RegExp(
     String.raw`([ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*\)`,
   "g",
 );
-
-/** A `file://` URL in prose, outside any link and its label. */
-const BARE_FILE_URL = /(?<![(<["'])file:\/\/[^\s<>()[\]"'*]+/g;
-
-/** What ends a sentence or closes emphasis after a bare URL, never part of it. */
-const URL_TRAIL = /[.,;:!?'"*_~`。，；：！？、」』）]+$/u;
-
-/** A code span: its text is code, never a link. */
-const CODE_SPAN = /(`+)(?!`)[\s\S]*?[^`]\1(?!`)/g;
-
-/**
- * The reply with each link to a file under `projectsRoot`, written as an
- * absolute path or a `file://` URL, pointed at its `/projects/<path>` route,
- * which every client opens. A bare `file://` URL becomes a link named after
- * its file. Code is left as written: a code span, and every top-level block
- * that holds a code block or HTML, as Markdown reads them. So is every other
- * link.
- */
-export function routeProjectLinks(markdown: string, projectsRoot: string): string {
-  if (!markdown.includes("/")) return markdown;
-  const source = markdown.replace(/\r\n?/g, "\n");
-  const blocks = marked.lexer(source);
-  // The blocks are cut from the text in order; when they are not, nothing is changed.
-  if (blocks.map((block) => block.raw).join("") !== source) return markdown;
-  let changed = false;
-  const routed = blocks
-    .map((block) => {
-      if (holdsCode(block)) return block.raw;
-      const text = routeInProse(block.raw, projectsRoot);
-      if (text !== block.raw) changed = true;
-      return text;
-    })
-    .join("");
-  return changed ? routed : markdown;
-}
-
-/** Whether `token` is, or holds, a code block or HTML. */
-function holdsCode(token: Token): boolean {
-  if (token.type === "code" || token.type === "html") return true;
-  const children: Token[] = [
-    ...("tokens" in token && Array.isArray(token.tokens) ? token.tokens : []),
-    ...("items" in token && Array.isArray(token.items) ? (token.items as Token[]) : []),
-  ];
-  return children.some(holdsCode);
-}
-
-function routeInProse(text: string, projectsRoot: string): string {
-  let out = "";
-  let at = 0;
-  for (const span of text.matchAll(CODE_SPAN)) {
-    out += routeLinks(text.slice(at, span.index), projectsRoot) + span[0];
-    at = span.index + span[0].length;
-  }
-  return out + routeLinks(text.slice(at), projectsRoot);
-}
-
-function routeLinks(text: string, projectsRoot: string): string {
-  const linked = text.replace(
-    MARKDOWN_LINK,
-    (whole, label: string, bracketed?: string, bare?: string, title?: string) => {
-      const route = projectRoute(bracketed ?? bare ?? "", projectsRoot);
-      return route ? `${label}(${linkTarget(route)}${title ?? ""})` : whole;
-    },
-  );
-  return linked.replace(BARE_FILE_URL, (found) => {
-    const trail = URL_TRAIL.exec(found)?.[0] ?? "";
-    const url = found.slice(0, found.length - trail.length);
-    const route = projectRoute(url, projectsRoot);
-    if (!route) return found;
-    const name = route.slice(route.lastIndexOf("/") + 1);
-    return `[${name.replace(/([[\]\\*_`])/g, "\\$1")}](${linkTarget(route)})${trail}`;
-  });
-}
-
-/** The `/projects/<path>` route of an absolute path or `file://` URL under `projectsRoot`. */
-function projectRoute(href: string, projectsRoot: string): string | null {
-  const written = href.trim();
-  if (!written.startsWith("file://") && !(written.startsWith("/") && !written.startsWith("//")))
-    return null;
-  if (written.startsWith("/projects/")) return null;
-  // `?` and `#` may be a query or a part of the file's name: either way the
-  // route could not keep them, so the link stays as written.
-  if (/[?#]|%23|%3f/i.test(written)) return null;
-  const file = localPath(written, projectsRoot);
-  const root = resolve(projectsRoot);
-  if (!file?.startsWith(root + sep) || /[?#]/.test(file)) return null;
-  return `/projects/${file
-    .slice(root.length + 1)
-    .split(sep)
-    .join("/")}`;
-}
-
-/** A link target, in angle brackets when a bare one would end early. */
-function linkTarget(route: string): string {
-  return /[\s()<>]/.test(route)
-    ? `<${route.replace(/[<>]/g, (mark) => encodeURIComponent(mark))}>`
-    : route;
-}
 
 /** The file a link's `href` points at on this machine, or null for anything else. */
 function localPath(href: string, projectsRoot: string): string | null {

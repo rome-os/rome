@@ -1,10 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import {
-  outputsInMessage,
-  outputsInReply,
-  outputsInTrace,
-  routeProjectLinks,
-} from "./trace-outputs.js";
+import { outputsInMessage, outputsInReply, outputsInTrace } from "./trace-outputs.js";
 
 const FILES = new Set([
   "/home/p/test/hello.txt",
@@ -259,6 +254,13 @@ describe("outputsInTrace, for shell commands and replies", () => {
     ]);
   });
 
+  it("reads a link with a long run of blanks and no end in linear time", () => {
+    const reply = `[a](${" ".repeat(20_000)}x`;
+    const started = performance.now();
+    expect(outputsInReply("tr1", reply, SCOPE)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it("leaves out a file the reply only cites, unchanged since the turn began", () => {
     const reply =
       "I wrote [hello.txt](/projects/test/hello.txt) after reading [old.md](/projects/test/old.md).";
@@ -290,103 +292,5 @@ describe("outputsInMessage", () => {
   it("names an asset by its stored name when the label is prose", () => {
     const content = JSON.stringify([{ type: "text", content: `[the chart](${ASSET})` }]);
     expect(outputsInMessage("m1", content)[0]?.name).toBe("0123456789abcdef0123456789abcdef.png");
-  });
-});
-
-describe("routeProjectLinks", () => {
-  const ROOT = "/home/p";
-
-  it("points an absolute path or file URL under the projects folder at its route", () => {
-    expect(routeProjectLinks("Done: [report](/home/p/test/report.md).", ROOT)).toBe(
-      "Done: [report](/projects/test/report.md).",
-    );
-    expect(routeProjectLinks("[a](</home/p/test/my notes.md>)", ROOT)).toBe(
-      "[a](</projects/test/my notes.md>)",
-    );
-    expect(routeProjectLinks("[a](/home/p/test/my notes.md)", ROOT)).toBe(
-      "[a](</projects/test/my notes.md>)",
-    );
-    expect(routeProjectLinks("[a](file:///home/p/test/%E6%8A%A5%E5%91%8A.md)", ROOT)).toBe(
-      "[a](/projects/test/报告.md)",
-    );
-    expect(routeProjectLinks('![chart](/home/p/test/c.png "Chart")', ROOT)).toBe(
-      '![chart](/projects/test/c.png "Chart")',
-    );
-  });
-
-  it("makes a bare file URL under the projects folder a link named after its file", () => {
-    expect(routeProjectLinks("Saved to file:///home/p/test/out.csv now", ROOT)).toBe(
-      "Saved to [out.csv](/projects/test/out.csv) now",
-    );
-  });
-
-  it("keeps punctuation and emphasis around a bare file URL outside its link", () => {
-    const at = "file:///home/p/test/out.csv";
-    const link = "[out.csv](/projects/test/out.csv)";
-    expect(routeProjectLinks(`Saved to ${at}.`, ROOT)).toBe(`Saved to ${link}.`);
-    expect(routeProjectLinks(`见 ${at}。`, ROOT)).toBe(`见 ${link}。`);
-    expect(routeProjectLinks(`${at}, ${at}`, ROOT)).toBe(`${link}, ${link}`);
-    expect(routeProjectLinks(`**${at}**`, ROOT)).toBe(`**${link}**`);
-    // A file URL that labels a link stays its label.
-    expect(routeProjectLinks(`[${at}](${at})`, ROOT)).toBe(`[${at}](/projects/test/out.csv)`);
-  });
-
-  it("reads a link's title and the parentheses in its path", () => {
-    expect(routeProjectLinks("[a](/home/p/x.md 'Title')", ROOT)).toBe(
-      "[a](/projects/x.md 'Title')",
-    );
-    expect(routeProjectLinks("[a](/home/p/x.md (Title))", ROOT)).toBe(
-      "[a](/projects/x.md (Title))",
-    );
-    expect(routeProjectLinks("[r](/home/p/test/report(final).pdf)", ROOT)).toBe(
-      "[r](</projects/test/report(final).pdf>)",
-    );
-  });
-
-  it("leaves a path with ? or # as written, and HTML and quoted URLs too", () => {
-    const kept = [
-      "[a](/home/p/test/issue#3.md)",
-      "[a](/home/p/a.md#L10)",
-      "[n](/home/p/t/Issue #3 notes.md)",
-      "[q](/home/p/a.md?raw=1)",
-      "[e](/home/p/a%23b.md)",
-      'Open <a href="file:///home/p/x.md">it</a>.',
-      "Set url to 'file:///home/p/x.md' or \"file:///home/p/y.md\"",
-    ];
-    for (const text of kept) expect(routeProjectLinks(text, ROOT)).toBe(text);
-  });
-
-  it("reads a link with a long run of blanks and no end in linear time", () => {
-    const text = `[a](${" ".repeat(20_000)}x`;
-    const started = performance.now();
-    expect(routeProjectLinks(text, ROOT)).toBe(text);
-    expect(outputsInReply("tr1", text, SCOPE)).toEqual([]);
-    expect(performance.now() - started).toBeLessThan(500);
-  });
-
-  it("leaves indented code and code inside quotes and lists as written", () => {
-    const kept = [
-      'Config:\n\n    url = "file:///home/p/test/report.csv"\n    [r](/home/p/r.pdf)\n',
-      "> Run:\n> ```\n> cat file:///home/p/a.md\n> ```\n",
-      "- Step\n\n      [r](/home/p/r.pdf)\n",
-      "<div>[r](/home/p/r.pdf)</div>\n",
-    ];
-    for (const text of kept) expect(routeProjectLinks(text, ROOT)).toBe(text);
-    expect(routeProjectLinks("    code\n\nSee [r](/home/p/r.pdf).", ROOT)).toBe(
-      "    code\n\nSee [r](/projects/r.pdf).",
-    );
-  });
-
-  it("leaves code, routes, web links and paths outside the projects folder as written", () => {
-    const kept = [
-      "Run `cat /home/p/test/a.md` or `[x](/home/p/a.md)`.",
-      "```\n[x](/home/p/a.md) file:///home/p/a.md\n```",
-      "[a](/projects/test/a.md) [b](https://example.com/home/p/a.md) [c](/apps/notes)",
-      "[log](/tmp/out.csv) file:///etc/passwd [up](/home/p/../etc/passwd) [api](/api/assets/x.png)",
-    ];
-    for (const text of kept) expect(routeProjectLinks(text, ROOT)).toBe(text);
-    expect(routeProjectLinks("`a` then [b](/home/p/b.md)", ROOT)).toBe(
-      "`a` then [b](/projects/b.md)",
-    );
   });
 });
