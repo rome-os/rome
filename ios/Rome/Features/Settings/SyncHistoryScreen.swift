@@ -166,7 +166,6 @@ struct SyncHistoryScreen: View {
         .floatingTopBar { PageHeader(title: "Sync history", inSheet: true) }
         .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .background(SwipeBackEnabler())
         .task { await sync?.reloadHistory() }
         .alert(isHealth ? "Delete all Apple Health data this \(model.node.device.name) sent to your Rome?" : "Delete all calendar data this \(model.node.device.name) sent to your Rome?", isPresented: $confirmDelete) {
             Button("Delete", role: .destructive) { delete() }

@@ -278,10 +278,6 @@ struct MainShell: View {
                 .frame(width: geometry.size.width - column, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
             }
         }
-        // The Archived sheet stops at half height and floats on iOS 26, and
-        // the system dims nothing behind a sheet there: the drawer and the
-        // chat would read clearly around it.
-        .overlay { archivedScrim }
         .fullScreenCover(item: $agentPage, onDismiss: {
             // Settings is a sheet of this view, so it waits for the cover to be gone.
             guard openUsageAfterCover else { return }
@@ -325,6 +321,10 @@ struct MainShell: View {
             closeDrawer()
         }) {
             archivedSheet
+                // It stops at half height and floats on iOS 26, where the
+                // system dims nothing behind it: the drawer and the chat
+                // would read clearly around it.
+                .background(SheetDim())
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Palette.sheet)
@@ -659,15 +659,6 @@ struct MainShell: View {
         current == .topic(retired) ? .chat : nil
     }
 
-    /// The scrim behind the Archived sheet while it is up. Kept out of `body`,
-    /// whose modifier chain is already near the type checker's limit.
-    private var archivedScrim: some View {
-        ZStack {
-            if showArchived { SheetScrim().transition(.opacity) }
-        }
-        .animation(.easeOut(duration: 0.25), value: showArchived)
-    }
-
     /// The Archived sheet: a tapped row closes it, and its chat opens after.
     private var archivedSheet: some View {
         ArchivedTopicsSheet(workspace: workspace, onOpen: { id in
@@ -733,31 +724,36 @@ struct MainShell: View {
                 onClose: { showSettings = false }
             )
             .navigationDestination(for: SettingsRoute.self) { route in
-                switch route {
-                case .instances:
-                    InstancesScreen(onSwitched: {
-                        showSettings = false
-                        show(.chat)
-                    })
-                case .connections:
-                    ConnectionsScreen(
-                        isVisitor: workspace.isVisitor,
-                        onConnection: { settingsPath.append(.connection($0)) },
-                        onWeb: { if let web = model.webURL { settingsPage = InstancePages.connections(origin: web) } }
-                    )
-                case .connection(let id):
-                    ConnectionScreen(
-                        id: id,
-                        onActivity: { settingsPath.append(.liveReads(id)) },
-                        onHistory: { source in settingsPath.append(.syncHistory(source)) }
-                    )
-                case .liveReads(let id):
-                    NodeRequestsScreen(capability: id)
-                case .syncHistory(let source):
-                    SyncHistoryScreen(source: source)
-                case .aiModel:
-                    AIModelScreen(store: workspace.aiModel, backend: workspace.backend)
+                // Every page here hides the bar, which turns the edge swipe
+                // off; it comes back once for all of them, so no page misses it.
+                Group {
+                    switch route {
+                    case .instances:
+                        InstancesScreen(onSwitched: {
+                            showSettings = false
+                            show(.chat)
+                        })
+                    case .connections:
+                        ConnectionsScreen(
+                            isVisitor: workspace.isVisitor,
+                            onConnection: { settingsPath.append(.connection($0)) },
+                            onWeb: { if let web = model.webURL { settingsPage = InstancePages.connections(origin: web) } }
+                        )
+                    case .connection(let id):
+                        ConnectionScreen(
+                            id: id,
+                            onActivity: { settingsPath.append(.liveReads(id)) },
+                            onHistory: { source in settingsPath.append(.syncHistory(source)) }
+                        )
+                    case .liveReads(let id):
+                        NodeRequestsScreen(capability: id)
+                    case .syncHistory(let source):
+                        SyncHistoryScreen(source: source)
+                    case .aiModel:
+                        AIModelScreen(store: workspace.aiModel, backend: workspace.backend)
+                    }
                 }
+                .background(SwipeBackEnabler())
             }
         }
         .environment(\.pageBackground, Palette.secondaryPage)
