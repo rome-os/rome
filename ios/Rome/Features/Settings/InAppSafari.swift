@@ -1,8 +1,9 @@
 import SafariServices
 import SwiftUI
 
-/// A web page in Safari inside the app: the guardian's Safari sign-ins and
-/// passwords, with Rome kept in front. Done closes it.
+/// A web page in Safari inside the app, with Rome kept in front. It keeps
+/// its own cookies, not Safari's: the guardian signs in there, with saved
+/// passwords offered by AutoFill. Done closes it.
 struct InAppSafari: UIViewControllerRepresentable {
     struct Page: Identifiable {
         let url: URL

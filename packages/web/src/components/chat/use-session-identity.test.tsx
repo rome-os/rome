@@ -232,3 +232,40 @@ describe("the model the selector shows", () => {
     await waitFor(() => expect(result.current.largeModelSelection).toBe("claude-haiku"));
   });
 });
+
+describe("a write that answers after the guardian moved on", () => {
+  it("does not land on the chat open now", async () => {
+    rs.mocked(listChatAgents).mockResolvedValue(groups);
+    rs.mocked(getSession).mockImplementation(async (id: string) => ({
+      ...session,
+      id,
+      largeModelSelection: null,
+      followsDefault: true,
+      pinnedModel: null,
+    }));
+    const { result, rerender } = renderHook(({ id }) => useSessionIdentity(id), {
+      initialProps: { id: "a" },
+    });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    // The callback chat A handed to its model pick.
+    const applyFromA = result.current.applySession;
+    rerender({ id: "b" });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() =>
+      applyFromA({
+        ...session,
+        id: "a",
+        largeModelSelection: "claude-haiku",
+        followsDefault: false,
+        pinnedModel: {
+          by: "owner",
+          providerId: "anthropic",
+          selection: "claude-haiku",
+          model: null,
+        },
+      }),
+    );
+    expect(result.current.largeModelSelection).toBeNull();
+    expect(result.current.pinnedModel).toBeNull();
+  });
+});

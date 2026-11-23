@@ -29,9 +29,8 @@ enum SettingsRoute: Hashable {
     case liveReads(String)
     /// A synced connection's Sync history, by its personal-data source.
     case syncHistory(String)
-    /// The default model and the AI accounts; `login` opens that account's
-    /// login sheet over it.
-    case aiModel(login: AIAccount?)
+    /// The default model and the AI accounts.
+    case aiModel
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
@@ -730,7 +729,7 @@ struct MainShell: View {
                 workspace: workspace,
                 onInstances: { settingsPath.append(.instances) },
                 onConnections: { settingsPath.append(.connections) },
-                onAIModel: { settingsPath.append(.aiModel(login: nil)) },
+                onAIModel: { settingsPath.append(.aiModel) },
                 onClose: { showSettings = false }
             )
             .navigationDestination(for: SettingsRoute.self) { route in
@@ -756,8 +755,8 @@ struct MainShell: View {
                     NodeRequestsScreen(capability: id)
                 case .syncHistory(let source):
                     SyncHistoryScreen(source: source)
-                case .aiModel(let login):
-                    AIModelScreen(store: workspace.aiModel, backend: workspace.backend, opening: login)
+                case .aiModel:
+                    AIModelScreen(store: workspace.aiModel, backend: workspace.backend)
                 }
             }
         }

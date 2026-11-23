@@ -123,8 +123,10 @@ struct AIToolsCard: View {
     let store: TranscriptStore
     @Environment(AppModel.self) private var model
 
-    private var connected: Bool { model.workspace?.aiModel.hasLoggedInAccount == true }
+    /// An account is logged in, or Rome credits were chosen: Chat can run.
+    private var connected: Bool { model.workspace?.aiModel.runsChats == true }
     private var answering: Bool { store.answeringCards.contains(toolUseId) }
+    private var failed: Bool { store.failedCards.contains(toolUseId) }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -137,14 +139,27 @@ struct AIToolsCard: View {
                 Text("Connect Claude or ChatGPT")
                     .romeFont(CardScale.body)
                     .fixedSize(horizontal: false, vertical: true)
-                if done || answering || connected {
+                if failed, !done, !answering {
+                    Text("Could not continue")
+                        .romeFont(CardScale.caption)
+                        .foregroundStyle(Palette.destructive)
+                } else if done || answering || connected {
                     Text(done ? "Done" : "Connected")
                         .romeFont(CardScale.caption)
                         .foregroundStyle(Palette.sub)
                 }
             }
             Spacer(minLength: 0)
-            if !done, !answering, !connected {
+            if failed, !done, !answering, connected {
+                // The answer did not go through: nothing else sends it again.
+                Button("Retry") { answerIfConnected() }
+                    .romeFont(CardScale.actionFont, .semibold)
+                    .foregroundStyle(Palette.fg)
+                    .padding(.horizontal, 14)
+                    .frame(height: CardScale.actionHeight)
+                    .background(Palette.fill, in: Capsule())
+                    .buttonStyle(PressScaleStyle())
+            } else if !done, !answering, !connected {
                 Button("Connect") { model.openAIModel() }
                     .romeFont(CardScale.actionFont, .semibold)
                     .foregroundStyle(.white)
@@ -167,6 +182,15 @@ struct AIToolsCard: View {
 
     private func answerIfConnected() {
         guard !done, connected else { return }
-        Task { await store.answerCard(toolUseId: toolUseId, sessionId: sessionId, output: .object(["connected": .bool(true)])) }
+        let output = Self.answer(credits: model.workspace?.aiModel.hasLoggedInAccount != true)
+        Task { await store.answerCard(toolUseId: toolUseId, sessionId: sessionId, output: output) }
+    }
+
+    /// The card's answer, as the web card writes it: credits run Rome as a
+    /// sign-in does, and say so.
+    static func answer(credits: Bool) -> JSONValue {
+        var output: [String: JSONValue] = ["connected": .bool(true)]
+        if credits { output["credits"] = .bool(true) }
+        return .object(output)
     }
 }

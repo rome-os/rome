@@ -336,6 +336,8 @@ final class FakeBackend: RomeBackend {
     var deviceCode = DeviceLoginCode(userCode: "ABCD-1234", verificationUrl: "https://auth.example/device")
     var deviceLoginCancels = 0
     var answeredCards: [(sessionId: String, toolUseId: String, output: JSONValue)] = []
+    /// Set, a card's answer fails.
+    var answerFails = false
     func aiTools() async throws -> AIToolsStatus {
         aiReads += 1
         guard let aiStatus else { throw APIError.network }
@@ -345,6 +347,7 @@ final class FakeBackend: RomeBackend {
     func startChatGPTDeviceLogin() async throws -> DeviceLoginCode { deviceCode }
     func cancelChatGPTDeviceLogin() async { deviceLoginCancels += 1 }
     func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws {
+        if answerFails { throw APIError.network }
         answeredCards.append((sessionId, toolUseId, output))
     }
     /// The provider failure buttons sent, as (message id, switch body or nil for continue).
@@ -362,8 +365,11 @@ final class FakeBackend: RomeBackend {
     var chatSessionRead: ChatSession?
     var sessionReads = 0
     var followDefaultCalls: [String] = []
+    /// Set, the chat read waits here until the test lets it go.
+    var sessionReadGate: (() async -> Void)?
     func chatSession(_ id: String) async throws -> ChatSession {
         sessionReads += 1
+        await sessionReadGate?()
         guard let chatSessionRead else { throw APIError.notFound }
         return chatSessionRead
     }

@@ -181,14 +181,16 @@ struct ProviderOutageNotice: View {
 /// of a move to another provider, and an account's login sheet. The pinned
 /// hint's Back to default confirm too, since a transcript row presents nothing.
 struct ProviderFailurePrompts: ViewModifier {
-    let store: TranscriptStore
+    /// Nil for a blank topic chat, which has no store yet and no cards:
+    /// the modifier stays, so the screen keeps its identity when one comes.
+    let store: TranscriptStore?
     let workspace: Workspace
 
     func body(content: Content) -> some View {
         content
             .alert(
                 Text(verbatim: confirmTitle),
-                isPresented: Binding(get: { confirming != nil }, set: { if !$0 { store.failurePrompt = nil } }),
+                isPresented: Binding(get: { confirming != nil }, set: { if !$0 { store?.failurePrompt = nil } }),
                 presenting: confirming
             ) { prompt in
                 // A move to an account asks whether it becomes the default too;
@@ -199,11 +201,11 @@ struct ProviderFailurePrompts: ViewModifier {
                 } else {
                     Button("Switch") { confirm(prompt.action, prompt.messageId) }
                 }
-                Button("Cancel", role: .cancel) { store.failurePrompt = nil }
+                Button("Cancel", role: .cancel) { store?.failurePrompt = nil }
             } message: { prompt in
                 Text(verbatim: Self.body(prompt.action))
             }
-            .sheet(item: Binding(get: { loggingIn }, set: { if $0 == nil { store.failurePrompt = nil } })) { account in
+            .sheet(item: Binding(get: { loggingIn }, set: { if $0 == nil { store?.failurePrompt = nil } })) { account in
                 AILoginSheet(account: account, backend: workspace.backend) { read in
                     workspace.aiModel.update(read)
                 }
@@ -211,34 +213,34 @@ struct ProviderFailurePrompts: ViewModifier {
             // The pinned hint's Back to default: where the chat goes, asked first.
             .alert(
                 "Back to the default?",
-                isPresented: Binding(get: { store.confirmsFollowDefault }, set: { store.confirmsFollowDefault = $0 })
+                isPresented: Binding(get: { store?.confirmsFollowDefault == true }, set: { store?.confirmsFollowDefault = $0 })
             ) {
                 Button("Back to default") {
-                    store.confirmsFollowDefault = false
-                    Task { await store.followDefault() }
+                    store?.confirmsFollowDefault = false
+                    Task { await store?.followDefault() }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text(verbatim: PinnedHint.confirmBody(store.chatSession, default: workspace.aiModel.defaultProvider))
+                Text(verbatim: PinnedHint.confirmBody(store?.chatSession, default: workspace.aiModel.defaultProvider))
             }
             // The default the confirm names, read as it opens.
-            .task(id: store.confirmsFollowDefault) {
-                if store.confirmsFollowDefault { await workspace.aiModel.refresh() }
+            .task(id: store?.confirmsFollowDefault == true) {
+                if store?.confirmsFollowDefault == true { await workspace.aiModel.refresh() }
             }
     }
 
     private func confirm(_ action: ProviderFailureAction, _ messageId: String) {
-        store.failurePrompt = nil
-        Task { await store.send(action, messageId: messageId) }
+        store?.failurePrompt = nil
+        Task { await store?.send(action, messageId: messageId) }
     }
 
     private var confirming: (messageId: String, action: ProviderFailureAction)? {
-        if case .confirm(let messageId, let action)? = store.failurePrompt { return (messageId, action) }
+        if case .confirm(let messageId, let action)? = store?.failurePrompt { return (messageId, action) }
         return nil
     }
 
     private var loggingIn: AIAccount? {
-        if case .logIn(let account)? = store.failurePrompt { return account }
+        if case .logIn(let account)? = store?.failurePrompt { return account }
         return nil
     }
 
@@ -263,14 +265,9 @@ struct ProviderFailurePrompts: ViewModifier {
 }
 
 extension View {
-    /// The confirms and login sheets a chat's failure cards open.
-    func providerFailurePrompts(_ store: TranscriptStore, workspace: Workspace) -> some View {
-        modifier(ProviderFailurePrompts(store: store, workspace: workspace))
-    }
-
-    /// A blank topic chat has no store yet, and no cards.
-    @ViewBuilder
+    /// The confirms and login sheets a chat's failure cards open. A blank
+    /// topic chat passes nil: it has no store yet, and no cards.
     func providerFailurePrompts(_ store: TranscriptStore?, workspace: Workspace) -> some View {
-        if let store { providerFailurePrompts(store, workspace: workspace) } else { self }
+        modifier(ProviderFailurePrompts(store: store, workspace: workspace))
     }
 }

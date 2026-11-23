@@ -224,15 +224,16 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     })();
   });
 
-  const applySession = useCallback(
-    (session: ChatSession) => {
-      if (session.id !== sessionId) return;
-      setModel(session.model ?? null);
-      setLargeModelSelection(shownSelection(session));
-      setPinnedModel(pinnedModelOf(session));
-    },
-    [sessionId],
-  );
+  // The chat open now, read when a write answers: a write made in chat A
+  // that answers after the guardian moved to B must not land on B.
+  const openSessionId = useRef(sessionId);
+  openSessionId.current = sessionId;
+  const applySession = useCallback((session: ChatSession) => {
+    if (session.id !== openSessionId.current) return;
+    setModel(session.model ?? null);
+    setLargeModelSelection(shownSelection(session));
+    setPinnedModel(pinnedModelOf(session));
+  }, []);
 
   return {
     loading: !!sessionId && settledSessionId !== sessionId,

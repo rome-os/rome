@@ -332,6 +332,41 @@ import Testing
         #expect(backend.answeredCards.first?.output == .object(["connected": .bool(true)]))
     }
 
+    @Test func romeCreditsChosenWithNoAccountCompleteTheConnectCard() async {
+        // Connect → Use Rome credits, then back to the card: credits run Chat.
+        let backend = FakeBackend()
+        backend.aiStatus = AIToolsStatus(claude: Provider(loggedIn: false), codex: Provider(loggedIn: false), defaultProvider: .init(provider: .romeCredits, romeCreditsUsable: true))
+        let store = AIModelStore(backend: backend)
+        await store.refresh()
+        #expect(!store.hasLoggedInAccount)
+        #expect(store.runsChats)
+        #expect(AIToolsCard.answer(credits: true) == .object(["connected": .bool(true), "credits": .bool(true)]))
+        #expect(AIToolsCard.answer(credits: false) == .object(["connected": .bool(true)]))
+    }
+
+    @Test func creditsAreOfferedOnlyAsTheServerAllows() {
+        typealias State = AIToolsStatus.DefaultState
+        // An expired login still counts as signed in: no credits.
+        #expect(!AIModelStore.creditsEligible(State(provider: nil, signedIn: .init(anthropic: true, openai: false, romeCredits: false), romeCreditsUsable: true)))
+        #expect(AIModelStore.creditsEligible(State(provider: nil, signedIn: .init(anthropic: false, openai: false, romeCredits: true), romeCreditsUsable: true)))
+        // No balance, or the server says no.
+        #expect(!AIModelStore.creditsEligible(State(provider: nil, signedIn: .init(anthropic: false, openai: false, romeCredits: false), romeCreditsUsable: true)))
+        #expect(!AIModelStore.creditsEligible(State(provider: nil, signedIn: .init(anthropic: false, openai: false), romeCreditsUsable: false)))
+    }
+
+    @Test func aFailedCardAnswerOffersRetry() async {
+        let backend = FakeBackend()
+        backend.answerFails = true
+        let store = TranscriptStore(sessionId: "s", kind: .concierge, backend: backend)
+        await store.answerCard(toolUseId: "tu", sessionId: "s", output: AIToolsCard.answer(credits: false))
+        #expect(store.failedCards.contains("tu"))
+        #expect(!store.answeringCards.contains("tu"))
+        backend.answerFails = false
+        await store.answerCard(toolUseId: "tu", sessionId: "s", output: AIToolsCard.answer(credits: false))
+        #expect(!store.failedCards.contains("tu"))
+        #expect(backend.answeredCards.count == 1)
+    }
+
     /// Waits up to ten seconds for `condition`: a loaded CI runner is slow.
     private func until(seconds: Int = 10, _ condition: () -> Bool) async throws {
         for _ in 0..<(seconds * 100) {

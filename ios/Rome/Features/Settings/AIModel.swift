@@ -278,13 +278,27 @@ final class AIModelStore {
         }
     }
 
-    /// Rome credits have a row: while they are the default, or while no
-    /// account is logged in and they could run chats.
+    /// Rome credits have a row: while they are the default, or while the
+    /// server says they could be (usable, and no account signed in, an
+    /// expired one included).
     var showsCredits: Bool {
         let state = status?.defaultProvider
         if state?.provider == .romeCredits { return true }
-        return state?.romeCreditsUsable == true && !hasLoggedInAccount
+        return Self.creditsEligible(state)
     }
+
+    /// Whether Rome credits can become the default, as the server decides:
+    /// usable, and signed in as a provider, which they are only while no
+    /// account is (an expired login still counts as one).
+    nonisolated static func creditsEligible(_ state: AIToolsStatus.DefaultState?) -> Bool {
+        guard let state, state.romeCreditsUsable == true else { return false }
+        if let credits = state.signedIn?.romeCredits { return credits }
+        // A server that does not say: no account signed in, expired or not.
+        return state.signedIn?.anthropic != true && state.signedIn?.openai != true
+    }
+
+    /// Something runs Chat: an account is logged in, or Rome credits are the default.
+    var runsChats: Bool { hasLoggedInAccount || defaultProvider == .romeCredits }
 
     /// The default as the server reads it; nil before it has one.
     var defaultProvider: DefaultModelProvider? { status?.defaultProvider?.provider }
@@ -408,8 +422,6 @@ struct AIModelRow: View {
 struct AIModelScreen: View {
     let store: AIModelStore
     let backend: RomeBackend
-    /// A login sheet to open as the page shows, for a card's Log in.
-    var opening: AIAccount? = nil
     @State private var login: AIAccount?
     @State private var dialog: AIDefaultDialog?
     #if DEBUG
@@ -490,7 +502,6 @@ struct AIModelScreen: View {
         .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
         .task { await store.refresh() }
-        .onAppear { if let opening, login == nil { login = opening } }
         #if DEBUG
         // Snapshot runs only: Mac Catalyst cannot capture an alert, so the
         // dialog shows in a stand-in with the same title, message and actions.

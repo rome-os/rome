@@ -355,13 +355,13 @@ enum SnapshotRunner {
                 }
             }
             DemoBackend.aiModelPreview = .ready
-            await capture("11h-ai-model", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.aiModel(login: nil)]) }
+            await capture("11h-ai-model", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.aiModel]) }
             await capture("11i-ai-model-login", style: styleName, in: directory, wait: 1.5) {
                 DemoBackend.aiModelPreview = .needsLogin
                 model.debugCommand = .settings(nil)
                 Task {
                     try? await Task.sleep(for: .seconds(0.4))
-                    model.debugCommand = .settings([.aiModel(login: nil)])
+                    model.debugCommand = .settings([.aiModel])
                 }
             }
             // The page with no default, and with Rome credits as the default.
@@ -371,7 +371,7 @@ enum SnapshotRunner {
                     model.debugCommand = .settings(nil)
                     Task {
                         try? await Task.sleep(for: .seconds(0.4))
-                        model.debugCommand = .settings([.aiModel(login: nil)])
+                        model.debugCommand = .settings([.aiModel])
                     }
                 }
             }
@@ -381,7 +381,7 @@ enum SnapshotRunner {
                 model.debugCommand = .settings(nil)
                 Task {
                     try? await Task.sleep(for: .seconds(0.4))
-                    model.debugCommand = .settings([.aiModel(login: nil)])
+                    model.debugCommand = .settings([.aiModel])
                 }
             }
             // The default's dialogs over the page: Set as default, a logout
@@ -398,7 +398,7 @@ enum SnapshotRunner {
                     model.debugCommand = .settings(nil)
                     Task {
                         try? await Task.sleep(for: .seconds(0.4))
-                        model.debugCommand = .settings([.aiModel(login: nil)])
+                        model.debugCommand = .settings([.aiModel])
                     }
                 }
             }

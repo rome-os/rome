@@ -315,6 +315,22 @@ import Testing
         try await until { PinnedHint.text(store.chatSession) == "On Claude" }
     }
 
+    @Test func aResyncAskedDuringThePinReadIsNotLost() async throws {
+        let backend = FakeBackend()
+        backend.chatSessionRead = ChatSession(id: "s", name: "", followsDefault: true)
+        let store = TranscriptStore(sessionId: "s", kind: .concierge, backend: backend)
+        var release: CheckedContinuation<Void, Never>?
+        backend.sessionReadGate = { await withCheckedContinuation { release = $0 } }
+        store.resync()
+        try await until { release != nil }
+        let reloads = backend.pageLimits.count
+        // A second resync while the first one's pin read waits.
+        store.resync()
+        backend.sessionReadGate = nil
+        release?.resume()
+        try await until { backend.pageLimits.count > reloads && backend.sessionReads >= 2 }
+    }
+
     @Test func backToDefaultSaysWhereTheChatGoes() {
         let kept = ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "kept", providerId: "anthropic"))
         #expect(PinnedHint.confirmBody(kept, default: .openai) == "This chat moves from Claude to ChatGPT, your default, from its next reply.")

@@ -829,10 +829,11 @@ final class TranscriptStore {
             repeat {
                 resyncAgain = false
                 await reload()
+                // A reconnect or a return may follow a change of the default
+                // made elsewhere: whether the chat is pinned is read again too,
+                // inside the loop, so a resync asked meanwhile is not lost.
+                await readChatSession()
             } while resyncAgain
-            // A reconnect or a return may follow a change of the default made
-            // elsewhere: whether the chat is pinned is read again too.
-            await readChatSession()
             resyncWork = nil
         }
     }
@@ -1349,18 +1350,22 @@ final class TranscriptStore {
 
     /// Cards whose answer is on its way, by tool-use id: each is sent once.
     private(set) var answeringCards: Set<String> = []
+    /// Cards whose answer did not go through, by tool-use id: they offer Retry.
+    private(set) var failedCards: Set<String> = []
 
     /// Answers a card the turn waits on, such as Chat's connect-AI card once
     /// an account is logged in; the chat is read again so the answer shows.
     func answerCard(toolUseId: String, sessionId: String, output: JSONValue) async {
         guard !answeringCards.contains(toolUseId) else { return }
         answeringCards.insert(toolUseId)
+        failedCards.remove(toolUseId)
         defer { resync() }
         do {
             try await backend.answerInteraction(sessionId: sessionId, toolUseId: toolUseId, output: output)
         } catch {
-            // Sent again the next time the card shows.
+            // The card offers Retry: nothing else would send it again.
             answeringCards.remove(toolUseId)
+            failedCards.insert(toolUseId)
         }
     }
 

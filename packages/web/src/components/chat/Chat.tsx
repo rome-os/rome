@@ -643,10 +643,20 @@ export function Chat({
       const previous = chatModelValue;
       setPickedModel({ sessionId, value: next });
       // The saved chat says whether the pick pinned it, or Auto let it follow.
-      updateSessionModel(sessionId, next).then(applySession, () => {
-        setPickedModel({ sessionId, value: previous });
-        setStreamError(t("modelSelector.saveFailed"));
-      });
+      // Once it is applied, the pick stops overriding it, so a later change,
+      // such as a failure card's switch, shows; a newer pick stays.
+      updateSessionModel(sessionId, next).then(
+        (saved) => {
+          applySession(saved);
+          setPickedModel((current) =>
+            current?.sessionId === sessionId && current.value === next ? null : current,
+          );
+        },
+        () => {
+          setPickedModel({ sessionId, value: previous });
+          setStreamError(t("modelSelector.saveFailed"));
+        },
+      );
     },
     [mainSessionId, chatModelValue, t, applySession],
   );

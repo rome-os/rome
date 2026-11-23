@@ -1660,9 +1660,9 @@ final class AppModel {
         settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.connections, .connection(HealthCapability.id), .syncHistory(HealthSettings.sourceId)])
     }
 
-    /// Settings, at the AI Tools page; with `login`, that account's login sheet over it.
-    func openAIModel(login: AIAccount? = nil) {
-        settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.aiModel(login: login)])
+    /// Settings, at the AI Tools page.
+    func openAIModel() {
+        settingsRequest = SettingsRequest(serial: settingsRequest.serial + 1, routes: [.aiModel])
     }
 
     /// The pages to open, once: the shell takes them when it shows.
