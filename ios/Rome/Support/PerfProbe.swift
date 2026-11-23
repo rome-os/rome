@@ -148,6 +148,20 @@ extension PerfProbe {
                 model.debugCommand = .settings(index.isMultiple(of: 2) ? [] : nil)
                 try? await Task.sleep(for: .milliseconds(900))
             }
+        case "threadfocus":
+            guard let chat = model.workspace?.concierge,
+                  let row = chat.rows.last(where: { chat.info(for: $0).quote != nil }),
+                  let from = row.ownMessageId,
+                  let quote = chat.info(for: row).quote else { return }
+            chat.jump(to: from)
+            try? await Task.sleep(for: .seconds(1))
+            measureFromHere()
+            for _ in 0..<8 {
+                await chat.openThread(from: from, row: row.id, original: quote.messageId)
+                try? await Task.sleep(for: .milliseconds(500))
+                chat.closeThread()
+                try? await Task.sleep(for: .milliseconds(500))
+            }
         case "scroll":
             for _ in 0..<80 {
                 if let scroll = transcriptScroll() {

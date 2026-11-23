@@ -213,6 +213,13 @@ const TURN_FEEDBACK_QUOTE_MAX_LENGTH = 4000;
 /** Turns per message page when a request pages without naming `limit`. */
 const MESSAGE_PAGE_DEFAULT_LIMIT = 20;
 const MESSAGE_PAGE_MAX_LIMIT = 100;
+const PAGE_LIMIT_ERROR = `limit must be an integer from 1 to ${MESSAGE_PAGE_MAX_LIMIT}`;
+
+/** A page's `limit` query, the default when absent, null when out of range. */
+function parsePageLimit(raw: string | undefined): number | null {
+  const limit = raw === undefined ? MESSAGE_PAGE_DEFAULT_LIMIT : Number.parseInt(raw, 10);
+  return Number.isInteger(limit) && limit >= 1 && limit <= MESSAGE_PAGE_MAX_LIMIT ? limit : null;
+}
 
 /** Flatten the ambient session actor into audit-log attributes so the
  * session-lifecycle events answer "who did this" the same way
@@ -1916,11 +1923,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const messages = await deps.webchatRepo.getMessages(sessionId);
       return c.json(await enrichStoredMessages(sessionId, messages));
     }
-    const limit =
-      limitParam === undefined ? MESSAGE_PAGE_DEFAULT_LIMIT : Number.parseInt(limitParam, 10);
-    if (!Number.isInteger(limit) || limit < 1 || limit > MESSAGE_PAGE_MAX_LIMIT) {
-      return c.json({ error: `limit must be an integer from 1 to ${MESSAGE_PAGE_MAX_LIMIT}` }, 400);
-    }
+    const limit = parsePageLimit(limitParam);
+    if (limit === null) return c.json({ error: PAGE_LIMIT_ERROR }, 400);
     const before = beforeParam === undefined ? null : decodeMessageCursor(beforeParam);
     if (beforeParam !== undefined && !before)
       return c.json({ error: "Invalid before cursor" }, 400);
@@ -3615,6 +3619,37 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // Only a top-level session has a layout; GET /layout 404s for the rest.
     return respondWithSessionMessages(c, sessionId, {
       withLayout: lookup.session.type === "webchat",
+    });
+  });
+
+  // A reply chain around a message, or before or after one of its messages
+  // (docs/domains/chats.md#chat-thread). Under /chat/sessions/:id, so
+  // privateChatGate applies.
+  app.get("/chat/sessions/:id/messages/:messageId/thread", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getStoredWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const before = c.req.query("before");
+    const after = c.req.query("after");
+    if (before !== undefined && after !== undefined) {
+      return c.json({ error: "before and after cannot be given together" }, 400);
+    }
+    const limit = parsePageLimit(c.req.query("limit"));
+    if (limit === null) return c.json({ error: PAGE_LIMIT_ERROR }, 400);
+    const page = await deps.webchatRepo.getThreadPage(sessionId, c.req.param("messageId"), {
+      limit,
+      ...(before === undefined ? {} : { before }),
+      ...(after === undefined ? {} : { after }),
+    });
+    if ("error" in page) {
+      return page.error === "not_in_thread"
+        ? c.json({ error: "The cursor is in another thread", code: page.error }, 400)
+        : c.json({ error: "Message not found", code: page.error }, 404);
+    }
+    return c.json({
+      messages: await enrichStoredMessages(sessionId, page.rows),
+      hasOlder: page.hasOlder,
+      hasNewer: page.hasNewer,
     });
   });
 

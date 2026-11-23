@@ -123,15 +123,18 @@ function renderComposer(props: Partial<ChatComposerProps>, options: RenderCompos
 
   const fetchSpy = mockComposerFetch(options);
 
+  const tree = (next: Partial<ChatComposerProps>) => (
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <ChatComposer onSend={rs.fn()} {...next} ref={options.composerRef} />
+      </QueryClientProvider>
+    </MemoryRouter>
+  );
+  const view = render(tree(props));
   return {
     fetchSpy,
-    ...render(
-      <MemoryRouter>
-        <QueryClientProvider client={queryClient}>
-          <ChatComposer onSend={rs.fn()} {...props} ref={options.composerRef} />
-        </QueryClientProvider>
-      </MemoryRouter>,
-    ),
+    ...view,
+    rerenderWith: (next: Partial<ChatComposerProps>) => view.rerender(tree(next)),
   };
 }
 
@@ -160,6 +163,21 @@ describe("text-only composer", () => {
 });
 
 describe("placeholder hints", () => {
+  it("restores its original placeholder without replacing the input or changing its draft", () => {
+    const { rerenderWith } = renderComposer({});
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    const original = box.placeholder;
+    fireEvent.input(box, { target: { value: "Saved normal draft" } });
+    rerenderWith({ placeholder: "Message in thread" });
+    expect(screen.getByPlaceholderText("Message in thread")).toBe(box);
+    expect(box.value).toBe("Saved normal draft");
+    expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+    rerenderWith({});
+    expect(screen.getByRole("textbox")).toBe(box);
+    expect(box.placeholder).toBe(original);
+    expect(box.value).toBe("Saved normal draft");
+  });
+
   it("shows a different hint after each send", async () => {
     stubCoarsePointer(false);
     rs.spyOn(Math, "random").mockReturnValue(0);

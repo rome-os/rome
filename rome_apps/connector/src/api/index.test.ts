@@ -563,6 +563,13 @@ describe("connector API Composio project pin", () => {
     expect(stored.get("webhookEndpointId")).toBe("ws_a");
   });
 
+  it("drops a webhook it cannot verify without a Composio account", async () => {
+    const response = await createApiHandler(context()).handle(request("webhook", "POST", {}));
+
+    expect(response.status).toBe(202);
+    expect(mocks.client.ping).not.toHaveBeenCalled();
+  });
+
   describe("while the project cannot be confirmed", () => {
     beforeEach(() => {
       mocks.client.defaultProject.mockRejectedValue(new Error("fetch failed"));

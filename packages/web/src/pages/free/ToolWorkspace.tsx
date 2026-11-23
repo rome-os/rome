@@ -2,6 +2,7 @@ import {
   ChevronDown,
   ExternalLink,
   FileOutput,
+  FileText,
   LayoutGrid,
   ListChecks,
   ListTree,
@@ -42,9 +43,16 @@ import { SlotContent, useSlotOutlet } from "@/components/slot";
 import { TITLEBAR_END_SLOT } from "@/shell/DesktopTitlebar";
 import { fitTabs } from "./tool-tab-fit";
 import { TaskList } from "@/components/concierge/TaskList";
+import { TaskGlyph } from "@/components/concierge/TaskGlyph";
+import { TaskLinksProvider, useTaskLink } from "@/components/chat/task-link/task-links";
 import { type LeaveGuard, leaveEditor } from "@/components/chat/outputs/OutputEditor";
-import { OutputsPanel } from "@/components/chat/outputs/OutputsPanel";
-import { type OutputsTabOptions, ToolOutputsContext, type ToolOutputsHost } from "./tool-outputs";
+import { OutputFile, OutputsPanel, outputTitle } from "@/components/chat/outputs/OutputsPanel";
+import {
+  type OutputsTabFile,
+  type OutputsTabOptions,
+  ToolOutputsContext,
+  type ToolOutputsHost,
+} from "./tool-outputs";
 import { TaskChatInPaneContext, ToolTasksContext, type ToolTasksHost } from "./tool-tasks";
 import { ToolTraceContext, type ToolTraceHost, type ToolTraceTab } from "./tool-trace";
 import { useSessionNames } from "./use-session-names";
@@ -84,7 +92,18 @@ const TASKS_TAB_ID = "__tasks__";
 const CHAT_TAB_ID = "__task_chat__";
 // Tab value of the Outputs tab, likewise.
 const OUTPUTS_TAB_ID = "__outputs__";
-type BuiltinTab = "trace" | "tasks" | "chat" | "outputs";
+// Tab values of the file tabs: the prefix, then the file's key.
+const FILE_TAB_PREFIX = "__file__:";
+type BuiltinTab = "trace" | "tasks" | "chat" | "outputs" | "file";
+
+/** A file open in a tab of its own: one of chat `chatId`'s outputs. */
+interface FileTab {
+  key: string;
+  chatId: string;
+  file: OutputsTabFile;
+}
+
+const fileKey = (chatId: string, id: string) => `${chatId}/${id}`;
 
 function readRatio() {
   const value = Number(readStored(WIDTH_KEY));
@@ -94,6 +113,8 @@ function readRatio() {
 interface ToolTabProps {
   id: string;
   label: string;
+  /** Drawn before the name, as a task chat's status mark. */
+  mark?: ReactNode;
   active: boolean;
   unread?: boolean;
   /** Shown as a pulsing dot with this accessible name. */
@@ -105,15 +126,17 @@ interface ToolTabProps {
  * One tab of the strip: its name and, right after it, its close button, with
  * no icon. A tab is as wide as its name, up to `max-w-48` for the name, so
  * several fit before the strip drops some into its menu, which keeps the
- * icons.
+ * icons. The close button shows on the chosen tab, and on another while the
+ * pointer or focus is on it; it keeps its room either way, so the strip's
+ * fit does not move.
  */
-function ToolTab({ id, label, active, unread = false, liveLabel, onClose }: ToolTabProps) {
+function ToolTab({ id, label, mark, active, unread = false, liveLabel, onClose }: ToolTabProps) {
   const { t } = useTranslation("common");
 
   return (
     <div
       data-tool-tab={id}
-      className={`relative flex h-9 min-w-0 shrink items-center rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
+      className={`group/tab relative flex h-9 min-w-0 shrink items-center rounded-12 pr-1 transition-colors ${active ? "bg-surface-muted" : ""}`}
     >
       <TabsTrigger
         value={id}
@@ -128,6 +151,7 @@ function ToolTab({ id, label, active, unread = false, liveLabel, onClose }: Tool
           }
         }}
       >
+        {mark}
         <span data-tool-tab-label className="truncate">
           {label}
         </span>
@@ -150,10 +174,31 @@ function ToolTab({ id, label, active, unread = false, liveLabel, onClose }: Tool
         label={t("chat.closeTool", { name: label })}
         onClick={onClose}
         // Its glyph sits inside a 24 px box; pulled in, it follows the name closely.
-        className="-ml-1 text-subtle-foreground"
+        className={`-ml-1 text-subtle-foreground ${active ? "" : "touch-show opacity-0 focus-visible:opacity-100 group-focus-within/tab:opacity-100 group-hover/tab:opacity-100"}`}
       />
     </div>
   );
+}
+
+/**
+ * Task chat `taskChatId`'s status mark for its tab, the one its task link
+ * draws, read through Concierge chat `chatId`'s task links so it moves as the
+ * task chat runs.
+ */
+function TaskChatMark({ chatId, taskChatId }: { chatId: string; taskChatId: string }) {
+  return (
+    <TaskLinksProvider chatId={chatId}>
+      <TaskChatGlyph id={taskChatId} />
+    </TaskLinksProvider>
+  );
+}
+
+function TaskChatGlyph({ id }: { id: string }) {
+  const link = useTaskLink(id);
+  // Nothing while it is read, or for a chat that is no task: the name alone.
+  return link.state === "found" ? (
+    <TaskGlyph status={link.task} tone="muted" className="size-3.5" />
+  ) : null;
 }
 
 interface ToolWorkspaceProps {
@@ -227,9 +272,10 @@ export function ToolWorkspace({
   //   redundant and clears, so the app stays visible after the trace closes.
   //
   // The Tasks tab, and the Chat tab beside it, are the same kind of tab: view
-  // state, never saved, at most one each. At most one built-in tab is selected, and a built-in tab opened over a
-  // collapsed pane holds it open with the same flag, until the last of them
-  // closes.
+  // state, never saved, at most one each. So are the Outputs tab and the file
+  // tabs opened from it, one per file. At most one built-in tab is selected,
+  // and a built-in tab opened over a collapsed pane holds it open with the
+  // same flag, until the last of them closes.
   const [trace, setTrace] = useState<{ owner: string; streaming: boolean } | null>(null);
   const [selected, setSelected] = useState<BuiltinTab | null>(null);
   // The Concierge chat whose task list the tab shows; null while it is not open.
@@ -248,15 +294,22 @@ export function ToolWorkspace({
     (taskChatId ? taskChatNames.get(taskChatId) : undefined) ||
     openedName.trim() ||
     t("chat.taskChatTab");
-  // The chat whose outputs the tab shows, and the output it was opened on.
+  // The chat whose outputs the tab lists.
   const [outputsTarget, setOutputsTarget] = useState<{
     chatId: string;
-    outputId: string | null;
-    /** Counts each opening, so opening the same output again chooses it again. */
-    seq: number;
     taskChats: boolean;
   } | null>(null);
   const outputsOpen = outputsTarget !== null;
+  // The files open in tabs of their own, in the order they were opened, and
+  // the one chosen while `selected` is "file". View state, like the Outputs tab.
+  const [files, setFiles] = useState<FileTab[]>([]);
+  const [activeFile, setActiveFile] = useState<string | null>(null);
+  const activeFileRef = useRef(activeFile);
+  activeFileRef.current = activeFile;
+  // Each file tab's check before it closes, which settles a file being edited.
+  const fileGuards = useRef(new Map<string, LeaveGuard>());
+  // The tab row's place for the chosen tab's own buttons: the tab is its header.
+  const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [holdsOpen, setHoldsOpen] = useState(false);
   const traceOwnerRef = useRef<string | null>(null);
   const traceCloseRef = useRef<(() => void) | null>(null);
@@ -312,7 +365,7 @@ export function ToolWorkspace({
     if (!view.collapsed) setHoldsOpen(false);
   }, [view.collapsed]);
 
-  const builtinOpen = trace !== null || tasksOpen || chatOpen || outputsOpen;
+  const builtinOpen = trace !== null || tasksOpen || chatOpen || outputsOpen || files.length > 0;
   // The hold ends with the last built-in tab: the pane falls back to the
   // session's stored state.
   useEffect(() => {
@@ -328,10 +381,21 @@ export function ToolWorkspace({
   const tasksActive = tasksOpen && selected === "tasks";
   const chatActive = chatOpen && selected === "chat";
   const outputsActive = outputsOpen && selected === "outputs";
-  const builtinActive = traceActive || tasksActive || chatActive || outputsActive;
+  const fileActiveKey =
+    selected === "file" && files.some((tab) => tab.key === activeFile) ? activeFile : null;
+  const builtinActive =
+    traceActive || tasksActive || chatActive || outputsActive || fileActiveKey !== null;
+  const traceActions = traceActive && open ? actions : null;
   const traceHost = useMemo<ToolTraceHost>(
-    () => ({ outlet, paneOpen: open, setPaneCollapsed, reveal, set: setTraceTab }),
-    [outlet, open, setPaneCollapsed, reveal, setTraceTab],
+    () => ({
+      outlet,
+      actions: traceActions,
+      paneOpen: open,
+      setPaneCollapsed,
+      reveal,
+      set: setTraceTab,
+    }),
+    [outlet, traceActions, open, setPaneCollapsed, reveal, setTraceTab],
   );
   const sorted = [...placements].sort((a, b) => a.order - b.order);
   const hasTabs = sorted.length > 0 || builtinOpen;
@@ -364,9 +428,10 @@ export function ToolWorkspace({
     setOpenedName(name);
     setSelected("chat");
   }, []);
+  const chatActions = chatActive && open ? actions : null;
   const taskChatInPane = useMemo(
-    () => ({ active: chatActive && open, onClose: closeTaskChat }),
-    [chatActive, open, closeTaskChat],
+    () => ({ active: chatActive && open, onClose: closeTaskChat, actions: chatActions }),
+    [chatActive, open, closeTaskChat, chatActions],
   );
   // A pane that takes the whole width covers the chat, so there a task chat
   // opens as its own page, however the list was opened.
@@ -381,29 +446,61 @@ export function ToolWorkspace({
     }),
     [tasksActive, open, compact, showTasks, hideTasks, canOpenTask, openTask],
   );
+  // A file opens in a tab of its own, after the others, or chooses its tab
+  // when it is already open.
+  const openFile = useCallback((chatId: string, file: OutputsTabFile) => {
+    if (latest.current.view.collapsed) setHoldsOpen(true);
+    const key = fileKey(chatId, file.id);
+    setFiles((prev) =>
+      prev.some((tab) => tab.key === key) ? prev : [...prev, { key, chatId, file }],
+    );
+    setActiveFile(key);
+    setSelected("file");
+  }, []);
   const showOutputs = useCallback(
-    (chatId: string, outputId?: string, options?: OutputsTabOptions) => {
+    (chatId: string, file?: OutputsTabFile, options?: OutputsTabOptions) => {
+      if (file) return openFile(chatId, file);
       if (latest.current.view.collapsed) setHoldsOpen(true);
-      setOutputsTarget((prev) => ({
-        chatId,
-        outputId: outputId ?? null,
-        seq: (prev?.seq ?? 0) + 1,
-        taskChats: options?.taskChats === true,
-      }));
+      setOutputsTarget({ chatId, taskChats: options?.taskChats === true });
       setSelected("outputs");
     },
-    [],
+    [openFile],
   );
-  const hideOutputs = useCallback(() => {
+  // The Outputs tab's own close leaves the files opened from it.
+  const closeOutputsTab = useCallback(() => {
     setOutputsTarget(null);
     setSelected((current) => (current === "outputs" ? null : current));
   }, []);
-  // The tab's own close settles a file being edited in it first.
-  const outputsLeaveGuard: LeaveGuard = useRef(null);
-  const closeOutputsTab = useCallback(
-    () => leaveEditor(outputsLeaveGuard, hideOutputs),
-    [hideOutputs],
-  );
+  const guardFor = (key: string): LeaveGuard => {
+    let guard = fileGuards.current.get(key);
+    if (!guard) {
+      guard = { current: null };
+      fileGuards.current.set(key, guard);
+    }
+    return guard;
+  };
+  // A file tab's close settles a file being edited in it first.
+  const closeFile = useCallback((key: string) => {
+    const remove = () => {
+      fileGuards.current.delete(key);
+      setFiles((prev) => prev.filter((tab) => tab.key !== key));
+      if (activeFileRef.current === key) {
+        setActiveFile(null);
+        setSelected((current) => (current === "file" ? null : current));
+      }
+    };
+    const guard = fileGuards.current.get(key);
+    if (guard) leaveEditor(guard, remove);
+    else remove();
+  }, []);
+  // The chat going takes the Outputs tab and every file tab with it.
+  const hideOutputs = useCallback(() => {
+    closeOutputsTab();
+    fileGuards.current.clear();
+    setFiles([]);
+    setActiveFile(null);
+    setSelected((current) => (current === "file" ? null : current));
+  }, [closeOutputsTab]);
   const outputsHost = useMemo<ToolOutputsHost>(
     () => ({ active: outputsActive && open, compact, show: showOutputs, hide: hideOutputs }),
     [outputsActive, open, compact, showOutputs, hideOutputs],
@@ -478,6 +575,7 @@ export function ToolWorkspace({
     ...(tasksOpen ? [TASKS_TAB_ID] : []),
     ...(chatOpen ? [CHAT_TAB_ID] : []),
     ...(outputsOpen ? [OUTPUTS_TAB_ID] : []),
+    ...files.map((tab) => FILE_TAB_PREFIX + tab.key),
     ...sorted.map((widget) => widget.id),
   ];
   const builtinTabId = traceActive
@@ -488,7 +586,9 @@ export function ToolWorkspace({
         ? CHAT_TAB_ID
         : outputsActive
           ? OUTPUTS_TAB_ID
-          : null;
+          : fileActiveKey !== null
+            ? FILE_TAB_PREFIX + fileActiveKey
+            : null;
   const activeTabId = builtinTabId ?? view.activeId ?? null;
   // Each tab's name, which the measuring row below draws for every tab, the
   // ones in the menu too, so the strip knows each tab's own width.
@@ -503,6 +603,9 @@ export function ToolWorkspace({
     ...(tasksOpen ? { [TASKS_TAB_ID]: t("chat.tasksTab") } : {}),
     ...(chatOpen ? { [CHAT_TAB_ID]: taskChatLabel } : {}),
     ...(outputsOpen ? { [OUTPUTS_TAB_ID]: tChat("outputs.title") } : {}),
+    ...Object.fromEntries(
+      files.map((tab) => [FILE_TAB_PREFIX + tab.key, outputTitle(tab.file.name)]),
+    ),
     ...Object.fromEntries(sorted.map((widget) => [widget.id, label(widget)])),
   };
   const shownIds = new Set(
@@ -544,6 +647,11 @@ export function ToolWorkspace({
             <ToolTab
               id={CHAT_TAB_ID}
               label={taskChatLabel}
+              mark={
+                tasksChatId && taskChatId ? (
+                  <TaskChatMark chatId={tasksChatId} taskChatId={taskChatId} />
+                ) : undefined
+              }
               active={chatActive}
               onClose={closeTaskChat}
             />
@@ -556,6 +664,17 @@ export function ToolWorkspace({
               onClose={closeOutputsTab}
             />
           )}
+          {files
+            .filter((tab) => shownIds.has(FILE_TAB_PREFIX + tab.key))
+            .map((tab) => (
+              <ToolTab
+                key={tab.key}
+                id={FILE_TAB_PREFIX + tab.key}
+                label={outputTitle(tab.file.name)}
+                active={fileActiveKey === tab.key}
+                onClose={() => closeFile(tab.key)}
+              />
+            ))}
           {sorted
             .filter((widget) => shownIds.has(widget.id))
             .map((widget) => (
@@ -591,6 +710,27 @@ export function ToolWorkspace({
           </a>
         </Button>
       )}
+      {chatActive && taskChatId && (
+        // The task chat as its own page, in a new browser tab, as an app's opens.
+        <Button asChild variant="ghost" size="icon-sm">
+          <a
+            href={`/chat/${encodeURIComponent(taskChatId)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={t("chat.openToolNewTab", { name: taskChatLabel })}
+            title={t("chat.openToolNewTab", { name: taskChatLabel })}
+          >
+            <ExternalLink />
+          </a>
+        </Button>
+      )}
+      {/* The chosen tab's own buttons, which its body portals here, set off
+          from the pane's own by a rule while there are any. */}
+      <div
+        ref={setActions}
+        data-tool-tab-actions
+        className="flex shrink-0 items-center gap-1 empty:hidden after:mx-1 after:h-4 after:w-px after:bg-border"
+      />
       {hasTabs && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -634,6 +774,12 @@ export function ToolWorkspace({
                 {tChat("outputs.title")}
               </DropdownMenuItem>
             )}
+            {files.map((tab) => (
+              <DropdownMenuItem key={tab.key} onSelect={() => pickTab(FILE_TAB_PREFIX + tab.key)}>
+                <FileText className="size-3.5" />
+                {outputTitle(tab.file.name)}
+              </DropdownMenuItem>
+            ))}
             {sorted.map((widget) => (
               <DropdownMenuItem key={widget.id} onSelect={() => pickTab(widget.id)}>
                 {icon(widget)}
@@ -669,6 +815,10 @@ export function ToolWorkspace({
     if (id === TASKS_TAB_ID) return setSelected("tasks");
     if (id === CHAT_TAB_ID) return setSelected("chat");
     if (id === OUTPUTS_TAB_ID) return setSelected("outputs");
+    if (id.startsWith(FILE_TAB_PREFIX)) {
+      setActiveFile(id.slice(FILE_TAB_PREFIX.length));
+      return setSelected("file");
+    }
     setSelected(null);
     selectTool(id);
   }
@@ -721,6 +871,7 @@ export function ToolWorkspace({
           {Object.entries(tabLabels).map(([id, name]) => (
             // As a tab's trigger holds it: the name, then its dot.
             <span key={id} data-measure-tab={id} className="flex gap-1 text-ui whitespace-nowrap">
+              {id === CHAT_TAB_ID ? <span className="size-3.5 shrink-0" /> : null}
               <span data-measure-label>{name}</span>
               {tabDots.has(id) ? <span className="size-1.5 shrink-0" /> : null}
             </span>
@@ -864,6 +1015,9 @@ export function ToolWorkspace({
                   key={taskChatId}
                   data-task-chat-pane={taskChatId}
                   className="flex h-full min-h-0 flex-col"
+                  // The tab is the task chat's header, so what clears a chat's
+                  // floating header clears only a step here.
+                  style={{ "--rome-concierge-header-offset": "0.75rem" } as CSSProperties}
                 >
                   <TaskChatInPaneContext.Provider value={taskChatInPane}>
                     {taskChat(taskChatId, closeTaskChat)}
@@ -883,10 +1037,14 @@ export function ToolWorkspace({
                 <OutputsPanel
                   key={outputsTarget.chatId}
                   chatId={outputsTarget.chatId}
-                  selectedId={outputsTarget.outputId}
-                  selectionSeq={outputsTarget.seq}
-                  leaveGuard={outputsLeaveGuard}
                   taskChats={outputsTarget.taskChats}
+                  onOpenOutput={(output) =>
+                    openFile(outputsTarget.chatId, {
+                      id: output.id,
+                      name: output.name,
+                      link: output.link,
+                    })
+                  }
                   onOpenTaskChat={
                     outputsTarget.taskChats && canOpenTask
                       ? (id, name) => openTask(outputsTarget.chatId, id, name)
@@ -895,6 +1053,29 @@ export function ToolWorkspace({
                 />
               </TabsContent>
             )}
+            {/* Each file stays mounted while another tab shows, so an edit
+                under way survives switching away. */}
+            {files.map((tab) => {
+              const active = fileActiveKey === tab.key;
+              return (
+                <TabsContent
+                  key={tab.key}
+                  value={FILE_TAB_PREFIX + tab.key}
+                  forceMount
+                  inert={!active}
+                  aria-hidden={!active}
+                  style={{ display: active ? undefined : "none" }}
+                  className="absolute inset-0 overflow-hidden"
+                >
+                  <OutputFile
+                    chatId={tab.chatId}
+                    opened={tab.file}
+                    actions={active && open ? actions : null}
+                    leaveGuard={guardFor(tab.key)}
+                  />
+                </TabsContent>
+              );
+            })}
           </div>
         </Tabs>
         {resizing && <div className="absolute inset-0 z-30 cursor-col-resize" />}

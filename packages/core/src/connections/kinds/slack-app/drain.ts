@@ -1,7 +1,8 @@
 // Frames the Slack gateway Worker deposits into the instance's own relay
 // mailbox, picked out of that mailbox's drain. The mailbox also serves an app's
 // webhooks and Rome's Discord bot, and it holds every later frame behind one it
-// is asked to deliver again. So a Slack frame is delivered again only while its
+// is asked to deliver again, for up to the drain's 2-minute budget per frame.
+// So a Slack frame is delivered again only while its
 // connection is starting and will take it, or while a Slack setup waits for the
 // guardian to approve the app: with no Slack connection, or one that is
 // broken, waiting for the guardian or locked, it is dropped and logged
@@ -25,15 +26,14 @@ export class SlackSetupHolds {
     return this.open > 0;
   }
 
-  /** A hold for one setup. `released` runs once, on the first release. */
-  hold(released: () => void): () => void {
+  /** A hold for one setup, released once by the function it returns. */
+  hold(): () => void {
     let done = false;
     this.open++;
     return () => {
       if (done) return;
       done = true;
       this.open--;
-      released();
     };
   }
 }
@@ -72,8 +72,8 @@ export async function deliverSlackFrame(
     }
     if (status !== 400) return { status };
   }
-  // Ingress opens when the connection starts, and its start resumes the drain.
-  // A setup's end resumes it too.
+  // The drain's retries reach the connection once it has started, or once the
+  // setup has made it, within the drain's budget.
   if (starting || setups?.any) return { status: 503 };
   if (notRunning.length > 0) {
     log.warn("slack frame dropped: the connection is not running", {

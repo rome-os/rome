@@ -1555,6 +1555,16 @@
         }
       }
     },
+    "Close reply chain" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭回复串"
+          }
+        }
+      }
+    },
     "Closed: the task ended" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3489,6 +3499,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在标记完成…"
+          }
+        }
+      }
+    },
+    "Message in thread" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在回复串中发送消息"
           }
         }
       }

@@ -198,6 +198,7 @@ struct UserBubble: View {
                 .opacity(pending == .sending ? 0.55 : 1)
                 // Behind the photos and the bubble, not the row.
                 .tinted(tinted)
+                .threadFocusHitArea()
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -452,6 +453,7 @@ struct AgentBubble: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Palette.bubble, in: shape)
+        .threadFocusHitArea()
         .contentShape(.contextMenuPreview, shape)
         .bubbleMenu(text: text, menu: menu, selects: MarkdownText.hasSelectableText(text))
         .bubbleWidth()

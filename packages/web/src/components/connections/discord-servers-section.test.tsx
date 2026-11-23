@@ -57,11 +57,7 @@ describe("the servers Rome's Discord bot was added to", () => {
     });
     section();
     expect(await screen.findByText("Ray's Lab")).toBeTruthy();
-    expect(
-      screen.getByText(
-        "Direct messages enabled for Ray · @Rome in a channel. Run /rome there to enable direct messages.",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByText("Direct messages enabled for Ray · @Rome in a channel.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add to server" })).toBeTruthy();
   });
 

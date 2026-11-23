@@ -51,6 +51,7 @@ protocol RomeBackend: AnyObject, Sendable {
     func deleteChat(_ id: String, stoppingWork: Bool) async throws
     /// The follows and open tasks that archiving or deleting topic chat `chatId` would move.
     func chatWork(chatId: String) async throws -> ConciergeChatWork
+    func threadPage(sessionId: String, anchor: String, before: String?, after: String?, limit: Int) async throws -> ThreadPage
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     /// The newest page, reaching down to `through` and two turns past it.
     func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage
@@ -274,6 +275,13 @@ final class LiveBackend: RomeBackend {
         try await client.get("/concierge/chats/\(escape(chatId))/follows-and-tasks", reportsUnauthorized: false)
     }
 
+
+    func threadPage(sessionId: String, anchor: String, before: String?, after: String?, limit: Int) async throws -> ThreadPage {
+        var query = [URLQueryItem(name: "limit", value: String(limit))]
+        if let before { query.append(URLQueryItem(name: "before", value: before)) }
+        if let after { query.append(URLQueryItem(name: "after", value: after)) }
+        return try await client.get("/chat/sessions/\(escape(sessionId))/messages/\(escape(anchor))/thread", query: query)
+    }
 
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         var query = [URLQueryItem(name: "limit", value: String(limit))]
@@ -657,6 +665,10 @@ enum ToolCallExtractor {
 }
 
 extension RomeBackend {
+    func threadPage(sessionId: String, anchor: String, before: String?, after: String?, limit: Int) async throws -> ThreadPage {
+        throw APIError.notFound
+    }
+
     /// Demo data and test doubles move a chat's work, as an older instance does.
     func archiveChat(_ id: String, stoppingWork: Bool) async throws { try await archiveChat(id) }
     func deleteChat(_ id: String, stoppingWork: Bool) async throws { try await deleteChat(id) }
