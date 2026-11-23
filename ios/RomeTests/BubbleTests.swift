@@ -17,17 +17,17 @@ import UIKit
 
     @Test func aShortReplyDoesNotFold() {
         #expect(!folds("Got it."))
-        #expect(!folds(Array(repeating: "line", count: 12).joined(separator: "\n")))
+        #expect(!folds(Array(repeating: "line", count: 22).joined(separator: "\n")))
     }
 
     @Test func aLongReplyFolds() {
-        #expect(folds(Array(repeating: "line", count: 20).joined(separator: "\n")))
+        #expect(folds(Array(repeating: "line", count: 30).joined(separator: "\n")))
     }
 
-    /// Ten lines of thirty Chinese characters wrap to about twice as many lines.
+    /// Fifteen lines of thirty Chinese characters wrap to about twice as many lines.
     @Test func aLongChineseReplyFoldsToo() {
         let line = String(repeating: "这是一段比较长的中文回复内容", count: 2)
-        #expect(folds(Array(repeating: line, count: 10).joined(separator: "\n")))
+        #expect(folds(Array(repeating: line, count: 15).joined(separator: "\n")))
     }
 
     @Test func theFoldGrowsWithTheTextSize() {

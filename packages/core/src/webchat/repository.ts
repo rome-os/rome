@@ -118,6 +118,14 @@ export interface StoredSharedChatSummary {
   createdAt: Date;
 }
 
+/** A live share with the chat it was made from, for the owner's list of all their links. */
+export interface StoredOwnerSharedChat extends StoredSharedChatSummary {
+  sessionId: string;
+  chatName: string;
+  chatAgentName: string | null;
+  chatOwnerKey: string | null;
+}
+
 export interface StoredWebchatHistoryMessage extends StoredWebchatMessage {
   sessionName: string;
   sessionAgentName: string | null;
@@ -3358,6 +3366,35 @@ export class WebChatRepository {
       .from(sharedChats)
       .where(and(eq(sharedChats.sessionId, sessionId), isNull(sharedChats.revokedAt)))
       .orderBy(desc(sharedChats.createdAt));
+  }
+
+  /**
+   * Every live share of the chats `ownerKey` owns, newest first. A chat with
+   * no owner is the guardian's; a null owner (no one signed in) owns none.
+   */
+  async listSharedChatsByOwner(ownerKey: string | null): Promise<StoredOwnerSharedChat[]> {
+    if (ownerKey === null) return [];
+    return this.db
+      .select({
+        id: sharedChats.id,
+        title: sharedChats.title,
+        createdAt: sharedChats.createdAt,
+        sessionId: sharedChats.sessionId,
+        chatName: romeSessions.name,
+        chatAgentName: romeSessions.agentName,
+        chatOwnerKey: romeSessions.ownerKey,
+      })
+      .from(sharedChats)
+      .innerJoin(romeSessions, eq(romeSessions.id, sharedChats.sessionId))
+      .where(
+        and(
+          isNull(sharedChats.revokedAt),
+          ownerKey === "guardian"
+            ? or(eq(romeSessions.ownerKey, ownerKey), isNull(romeSessions.ownerKey))
+            : eq(romeSessions.ownerKey, ownerKey),
+        ),
+      )
+      .orderBy(desc(sharedChats.createdAt), desc(sharedChats.id));
   }
 
   /** Soft-delete (revoke) a share. Returns true if a live row was revoked. */

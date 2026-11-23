@@ -2675,12 +2675,12 @@
         }
       }
     },
-    "Links you create in this chat show here." : {
+    "Links you share from a chat show here." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在这个对话中创建的链接会显示在这里。"
+            "value" : "你在对话中分享的链接会显示在这里。"
           }
         }
       }

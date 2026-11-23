@@ -305,15 +305,15 @@ final class DemoBackend: RomeBackend {
     func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink {
         try await pause(0.4)
         guard !turnIds.isEmpty else { throw APIError.server(status: 400, message: nil) }
-        let title = topicChats.first { $0.id == sessionId }?.name ?? String(localized: "Chat")
-        let link = ChatShareLink(id: "share-\(nextID())", url: "/share/demo\(nextID())", title: title, createdAt: RomeDate.string(.now))
+        let chatName = topicChats.first { $0.id == sessionId }?.name ?? String(localized: "Chat")
+        let link = ChatShareLink(id: "share-\(nextID())", url: "/share/demo\(nextID())", title: chatName, createdAt: RomeDate.string(.now), chatId: sessionId, chatName: chatName)
         shares[sessionId, default: []].insert(link, at: 0)
         return link
     }
 
-    func chatShares(sessionId: String) async throws -> [ChatShareLink] {
+    func allShares() async throws -> [ChatShareLink] {
         try await pause(0.25)
-        return shares[sessionId] ?? []
+        return shares.values.flatMap { $0 }.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
     }
 
     func revokeShare(id: String) async throws {
@@ -1102,10 +1102,18 @@ final class DemoBackend: RomeBackend {
             "chat-login": ChatSession(id: "chat-login", name: "修复登录页样式", triggerKind: "concierge", running: false, lastTurnFailed: false, awaitingGuardian: false),
         ]
         running = ["chat-site": "turn-site", "chat-notes": "turn-notes"]
-        shares = ["topic-trip": [
-            ChatShareLink(id: "share-trip", url: "/share/demo-trip", title: "京都旅行计划", createdAt: RomeDate.string(.now.addingTimeInterval(-2 * 3600))),
-            ChatShareLink(id: "share-weather", url: "/share/demo-weather", title: "四月京都天气", createdAt: RomeDate.string(at(21, 5, daysAgo: 3))),
-        ]]
+        shares = [
+            "topic-trip": [
+                ChatShareLink(id: "share-trip", url: "/share/demo-trip", title: "京都旅行计划", createdAt: RomeDate.string(.now.addingTimeInterval(-2 * 3600)), chatId: "topic-trip", chatName: "京都旅行计划"),
+                ChatShareLink(id: "share-weather", url: "/share/demo-weather", title: "四月京都天气", createdAt: RomeDate.string(at(21, 5, daysAgo: 3)), chatId: "topic-trip", chatName: "京都旅行计划"),
+            ],
+            conciergeChatID: [
+                ChatShareLink(id: "share-digest", url: "/share/demo-digest", title: "本周日程摘要", createdAt: RomeDate.string(at(9, 30, daysAgo: 1)), chatId: conciergeChatID, chatName: "Chat"),
+            ],
+            "topic-meals": [
+                ChatShareLink(id: "share-meals", url: "/share/demo-meals", title: "一周晚餐菜单", createdAt: RomeDate.string(at(19, 12, daysAgo: 6)), chatId: "topic-meals", chatName: "今天吃了什么"),
+            ],
+        ]
 
         topicChats = [
             ConciergeChat(id: "topic-trip", name: "京都旅行计划", main: false, unread: 2),
