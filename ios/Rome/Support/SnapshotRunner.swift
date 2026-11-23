@@ -577,6 +577,7 @@ enum SnapshotRunner {
             await capture("57-agent-itinerary", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-itinerary")) }
             // Task links in each status: running, needs you, done, failed, stopped, no response, later.
             await capture("65-task-links", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-task-links")) }
+            await capture("66-reply-links", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-reply-links")) }
             // Chat's connect-AI card with no account logged in: Connect opens the AI Tools page.
             DemoBackend.aiModelPreview = .notSetUp
             await capture("66-ai-tools-card", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-ai")) }

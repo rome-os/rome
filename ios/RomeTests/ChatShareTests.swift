@@ -209,6 +209,19 @@ private let twoTurns = [
         #expect(MainShell.visibleChat(section: .topic("topic-1"), path: [], covered: workspace.sharingCoversChat) == nil)
     }
 
+    /// A linked file open over a chat covers it too: replies arriving behind
+    /// Quick Look are not marked read, and its pushes show.
+    @Test func aLinkedFileCoversTheChat() {
+        let workspace = Workspace(backend: FakeBackend(), instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-file-cover-\(UUID().uuidString)/Drafts"), instance: "t"))
+        defer { workspace.stop() }
+        #expect(MainShell.visibleChat(section: .chat, path: [], covered: workspace.sheetCoversChat) == conciergeChatID)
+        workspace.linkedFileShown = true
+        #expect(MainShell.visibleChat(section: .chat, path: [], covered: workspace.sheetCoversChat) == nil)
+        #expect(MainShell.visibleChat(agentPath: [.taskChat(chatId: "t1", title: "T")], covered: workspace.sheetCoversChat) == nil)
+        workspace.linkedFileShown = false
+        #expect(MainShell.visibleChat(section: .topic("c1"), path: [], covered: workspace.sheetCoversChat) == "c1")
+    }
+
     /// A refused share is an error, never a text share in its place.
     @Test func aRefusedShareIsAnError() async {
         let backend = FakeBackend()
