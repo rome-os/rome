@@ -13,6 +13,9 @@ files:
   # needs only its loader and the macOS binaries.
   - "!**/node_modules/koffi/{doc,lib,src,vendor}/**"
   - "!**/node_modules/koffi/build/koffi/!(darwin_*)/**"
+  # The pre-signed computer-use helper ships once under Resources/native via
+  # extraResources so it is never unpacked or re-signed with Electron's entitlements.
+  - "!**/node_modules/@rome-os/node-core-darwin-arm64/**"
 extraMetadata:
   main: dist/main/index.js
 asar: true

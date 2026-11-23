@@ -10,9 +10,24 @@ Apple signing identity:
 ```sh
 pnpm --filter @rome-os/node build
 pnpm --filter @rome-os/node-core build:native --identity "Apple Development: Your Name (TEAMID)"
+pnpm --filter @rome-os/node-core-darwin-arm64 pack --pack-destination /tmp
 pnpm --filter @rome-os/node-core pack --pack-destination /tmp
 pnpm --filter @rome-os/node pack --pack-destination /tmp
-npm install -g /tmp/rome-os-node-core-0.1.0.tgz /tmp/rome-os-node-0.1.0.tgz
+mkdir -p /tmp/rome-node-local
+cat > /tmp/rome-node-local/package.json <<'EOF'
+{
+  "private": true,
+  "dependencies": {
+    "@rome-os/node": "file:/tmp/rome-os-node-0.1.11.tgz"
+  },
+  "overrides": {
+    "@rome-os/node-core": "file:/tmp/rome-os-node-core-0.1.8.tgz",
+    "@rome-os/node-core-darwin-arm64": "file:/tmp/rome-os-node-core-darwin-arm64-0.1.8.tgz"
+  }
+}
+EOF
+npm install --prefix /tmp/rome-node-local
+/tmp/rome-node-local/node_modules/.bin/rome-node --help
 ```
 
 On the target computer:

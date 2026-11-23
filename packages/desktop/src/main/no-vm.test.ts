@@ -25,6 +25,7 @@ describe("the Mac app without a VM", () => {
         .split("\n")
         .map((line) => line.trim()),
     ).toEqual(["- '/Contents/Resources/native/Rome Computer Use\\.app(?:/|$)'"]);
+    expect(config).toContain('"!**/node_modules/@rome-os/node-core-darwin-arm64/**"');
   });
 
   it("has no build script for a VM image", () => {

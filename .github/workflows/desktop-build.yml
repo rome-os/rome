@@ -223,6 +223,15 @@ jobs:
           test -x "$helper/Contents/MacOS/RomeComputerUse"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$helper/Contents/Info.plist")" = com.rome.computer-use
           test "$(lipo -archs "$helper/Contents/MacOS/RomeComputerUse")" = arm64
+          helper_copies="$(find "$app" -name 'Rome Computer Use.app')"
+          if [ "$helper_copies" != "$helper" ]; then
+            echo "::error::Expected exactly one Rome Computer Use.app inside Rome.app, found: $helper_copies"
+            exit 1
+          fi
+          if [ -e "$app/Contents/Resources/app.asar.unpacked/node_modules/@rome-os/node-core-darwin-arm64" ]; then
+            echo "::error::Unexpected duplicate @rome-os/node-core-darwin-arm64 in app.asar.unpacked"
+            exit 1
+          fi
 
           if [ "${SIGNING_ENABLED}" = "true" ]; then
             codesign --verify --strict --verbose=2 "$helper"

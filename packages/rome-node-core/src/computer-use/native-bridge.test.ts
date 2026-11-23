@@ -554,6 +554,7 @@ describe("native computer-use transport", () => {
   it("hands off an idle older Rome helper via shutdown and stages the new version", async () => {
     const source = {
       path: "/bundled/app",
+      version: "0.1.9",
       requirement: "stable",
       implementationSha256: "a".repeat(64),
       executableSha256: "b".repeat(64),
@@ -562,6 +563,7 @@ describe("native computer-use transport", () => {
     const installed = { ...source, path: "/stable/app" };
     const oldHello = {
       protocolVersion: 1,
+      version: "0.1.8",
       bundleId: "com.rome.computer-use",
       permissions: { accessibility: true, screenCapture: true },
       capabilities: { actions: [] },
@@ -572,6 +574,7 @@ describe("native computer-use transport", () => {
     };
     const newHello = {
       ...oldHello,
+      version: source.version,
       implementationSha256: source.implementationSha256,
     };
     let phase: "old" | "down" | "new" = "old";
@@ -618,9 +621,56 @@ describe("native computer-use transport", () => {
     expect(assets.launch).toHaveBeenCalledTimes(1);
   });
 
+  it("refuses to downgrade or replace an idle newer, same-version, or unversioned Rome helper", async () => {
+    for (const scenario of [
+      { bundledVersion: "0.1.9", runningVersion: "0.1.10" },
+      { bundledVersion: "0.1.9", runningVersion: "0.1.9" },
+      { bundledVersion: "0.1.9", runningVersion: undefined },
+      { bundledVersion: undefined, runningVersion: "0.1.8" },
+    ]) {
+      const source = {
+        path: "/bundled/app",
+        ...(scenario.bundledVersion ? { version: scenario.bundledVersion } : {}),
+        requirement: "stable",
+        implementationSha256: "a".repeat(64),
+        executableSha256: "b".repeat(64),
+        architecture: "arm64" as const,
+      };
+      const runningHello = {
+        protocolVersion: 1,
+        ...(scenario.runningVersion ? { version: scenario.runningVersion } : {}),
+        bundleId: "com.rome.computer-use",
+        permissions: { accessibility: true, screenCapture: true },
+        capabilities: { actions: [] },
+        architecture: "arm64",
+        implementationSha256: "9".repeat(64),
+        activeSessions: 0,
+        execution: { busy: false },
+      };
+      const f = await server((request, send) => {
+        if (request.method === "hello") send(runningHello);
+        else send({ stopping: true });
+      });
+      assets.inspect.mockResolvedValue(source);
+      const bridge = createComputerUseNativeBridge({
+        bundledAppPath: source.path,
+        stateDir: f.stateDir,
+        startupTimeoutMs: 500,
+      });
+      await expect(bridge.call("hello", {})).rejects.toMatchObject({
+        code: "helper_update_required",
+        details: { effectStatus: "not_dispatched" },
+      });
+      expect(f.calls.some((call) => call.method === "shutdown")).toBe(false);
+      expect(assets.prepare).not.toHaveBeenCalled();
+      expect(assets.launch).not.toHaveBeenCalled();
+    }
+  });
+
   it("refuses shutdown and fails closed when a mismatched helper is busy or gains a session", async () => {
     const source = {
       path: "/bundled/app",
+      version: "0.1.9",
       requirement: "stable",
       implementationSha256: "a".repeat(64),
       executableSha256: "b".repeat(64),
@@ -628,6 +678,7 @@ describe("native computer-use transport", () => {
     };
     const oldHello = {
       protocolVersion: 1,
+      version: "0.1.8",
       bundleId: "com.rome.computer-use",
       permissions: { accessibility: true, screenCapture: true },
       capabilities: { actions: [] },
@@ -673,6 +724,7 @@ describe("native computer-use transport", () => {
   ])("fails closed when a concurrent bind lands after the verification hello (%s)", async (rejectionCode) => {
     const source = {
       path: "/bundled/app",
+      version: "0.1.9",
       requirement: "stable",
       implementationSha256: "a".repeat(64),
       executableSha256: "b".repeat(64),
@@ -680,6 +732,7 @@ describe("native computer-use transport", () => {
     };
     const oldHello = {
       protocolVersion: 1,
+      version: "0.1.8",
       bundleId: "com.rome.computer-use",
       permissions: { accessibility: true, screenCapture: true },
       capabilities: { actions: [] },

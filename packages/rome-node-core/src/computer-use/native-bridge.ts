@@ -375,6 +375,24 @@ function assertComputerUseImplementation(value: unknown, asset: ComputerUseApp):
     );
 }
 
+function parseNumericVersion(value: unknown): number[] | null {
+  if (typeof value !== "string" || !/^\d+(?:\.\d+)*$/.test(value)) return null;
+  return value.split(".").map((part) => Number(part));
+}
+
+function isNewerVersion(candidate: unknown, running: unknown): boolean {
+  const left = parseNumericVersion(candidate);
+  const right = parseNumericVersion(running);
+  if (!left || !right) return false;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    const a = left[index] ?? 0;
+    const b = right[index] ?? 0;
+    if (a !== b) return a > b;
+  }
+  return false;
+}
+
 function isIdleMismatchedHelper(value: unknown, asset: ComputerUseApp): boolean {
   const hello = parseComputerUseHello(value);
   return (
@@ -382,6 +400,7 @@ function isIdleMismatchedHelper(value: unknown, asset: ComputerUseApp): boolean 
     typeof hello.implementationSha256 === "string" &&
     (hello.implementationSha256 !== asset.implementationSha256 ||
       hello.architecture !== asset.architecture) &&
+    isNewerVersion(asset.version, hello.version) &&
     hello.activeSessions === 0 &&
     isRecord(hello.execution) &&
     hello.execution.busy === false
