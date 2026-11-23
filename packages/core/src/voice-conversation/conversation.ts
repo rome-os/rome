@@ -45,9 +45,16 @@ const FAILED = {
 // Rome's own last words may be heard this long after they were sent.
 const ECHO_TAIL_MS = 2_000;
 
+/**
+ * What a reply is made of: the turn's events, or, for an agent whose text is
+ * private, the messages it delivers. `said` is a message's text. `shown` is
+ * something in the chat that is not said, such as a card.
+ */
+export type ReplyEvent = StreamAgentEvent | { type: "said"; text: string } | { type: "shown" };
+
 /** A turn of the chat's agent, as far as the conversation reads it. */
 export interface ReplyTurn {
-  events(): AsyncIterable<StreamAgentEvent>;
+  events(): AsyncIterable<ReplyEvent>;
 }
 
 export interface ConversationDeps {
@@ -242,6 +249,16 @@ export function createConversation(deps: ConversationDeps): Conversation {
     let saidAny = false;
     for await (const event of turn.events()) {
       if (reply !== to) return;
+      if (event.type === "said") {
+        saidAny ||= event.text.trim() !== "";
+        // A message ends its sentence.
+        feed(to, `${event.text}\n`);
+        continue;
+      }
+      if (event.type === "shown") {
+        speakAll(to, to.splitter.push(to.filter.point()));
+        continue;
+      }
       if (event.type === "turn_start") agent ??= event.agent;
       const own = !event.agent || !agent || event.agent === agent;
       if (event.type === "text_delta" && own) {

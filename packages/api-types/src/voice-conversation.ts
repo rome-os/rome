@@ -38,7 +38,7 @@ export const voiceConversationStopReasonSchema = z.enum([
   "listening-failed",
   /** Rome could not speak: the speech provider or its credential failed. */
   "speaking-failed",
-  /** The chat could not take the turn: one the guardian may not open, whose agent does not answer in text, or whose agent could not start. */
+  /** The chat could not take the turn: one the guardian may not open, or whose agent could not start. */
   "chat-refused",
   /** The listening session reached its time limit. */
   "time-limit",

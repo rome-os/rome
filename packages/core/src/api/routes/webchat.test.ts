@@ -3136,8 +3136,8 @@ describe("Webchat API", () => {
     const { runtime } = createWebchatRuntime(deps);
     const id = await runtime.startChat({}, "guardian");
     expect(await runtime.canSendSpoken(id)).toBe(true);
-    const turn = await runtime.sendSpoken(id, "你好");
-    expect(turn.id).toEqual(expect.any(String));
+    const reply = await runtime.sendSpoken(id, "你好");
+    expect(reply.events).toEqual(expect.any(Function));
 
     await deps.webchatRepo.createSession(
       "visitor-task",
@@ -3161,15 +3161,24 @@ describe("Webchat API", () => {
     expect(await deps.webchatRepo.getMessages("visitor-task")).toEqual([]);
   });
 
-  it("refuses a spoken input for an agent whose text is private", async () => {
+  it("answers a spoken input to an agent whose text is private with the messages its turn adds", async () => {
     rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
       buildAgent(name, { name: "main", policy: { finalText: "private" } }),
     );
     const { runtime } = createWebchatRuntime(deps);
     const id = await runtime.startChat({}, "guardian");
-    expect(await runtime.canSendSpoken(id)).toBe(false);
-    await expect(runtime.sendSpoken(id, "你好")).rejects.toThrow("does not answer in text");
-    expect(await deps.webchatRepo.getMessages(id)).toEqual([]);
+    expect(await runtime.canSendSpoken(id)).toBe(true);
+    const reply = await runtime.sendSpoken(id, "订好了吗");
+    const turnId = (await deps.webchatRepo.getMessages(id)).find((m) => m.role === "user")?.turnId;
+    if (!turnId) throw new Error("expected the spoken input's turn");
+    await deps.webchatRepo.addBackendMessage(id, "another-turn", [
+      { type: "text", content: "别的" },
+    ]);
+    await deps.webchatRepo.addBackendMessage(id, turnId, [{ type: "text", content: "已订好。" }]);
+    for await (const event of reply.events()) {
+      expect(event).toEqual({ type: "said", text: "已订好。" });
+      break;
+    }
   });
 
   it("rejects a spoken input whose agent cannot be opened, rather than waiting for a turn", async () => {
