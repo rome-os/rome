@@ -2349,16 +2349,10 @@ async function main() {
         return typeof relay?.depositUrl === "string" && relay.depositUrl ? relay.depositUrl : null;
       },
       deliveryAttempts: DELIVERY_ATTEMPTS,
-      // A frame the drain gave up on while the connection was down waits at
-      // the head of the mailbox; a connection starting retries it at once.
-      claimMailbox: () => {
-        const release = mailboxClaims.claim();
-        relayDrainer.resumeBlocked();
-        return release;
-      },
+      claimMailbox: () => mailboxClaims.claim(),
       // A setup's hold ends with the setup; frames held behind it then reach
       // its connection or are dropped.
-      holdSlackFrames: () => slackSetupHolds.hold(() => relayDrainer.resumeBlocked()),
+      holdSlackFrames: () => slackSetupHolds.hold(),
       listens: (connectionId) => accountListening.listens(connectionId),
     },
     settingsRepo,

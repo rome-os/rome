@@ -91,8 +91,7 @@ describe("Slack frames in the instance's mailbox", () => {
 
   it("holds a frame no connection takes while a setup waits for approval", async () => {
     const holds = new SlackSetupHolds();
-    const released: string[] = [];
-    const release = holds.hold(() => released.push("resumed"));
+    const release = holds.hold();
     expect(await deliverSlackFrame(registry({}), frame, holds)).toEqual({ status: 503 });
     expect(
       await deliverSlackFrame(
@@ -104,9 +103,11 @@ describe("Slack frames in the instance's mailbox", () => {
         holds,
       ),
     ).toEqual({ status: 503 });
+    const second = holds.hold();
     release();
     release();
-    expect(released).toEqual(["resumed"]);
+    expect(holds.any).toBe(true);
+    second();
     expect(holds.any).toBe(false);
     expect(await deliverSlackFrame(registry({}), frame, holds)).toEqual({ status: 200 });
   });

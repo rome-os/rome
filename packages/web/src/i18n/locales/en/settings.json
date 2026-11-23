@@ -848,8 +848,7 @@
         "notConnected": "Not connected",
         "notConfigured": "Not configured",
         "reconnecting": "Reconnecting",
-        "retrying": "Retrying delivery",
-        "blocked": "Delivery blocked"
+        "retrying": "Retrying delivery"
       },
       "notConfiguredHint": "No relay credential is stored, so incoming webhooks are not delivered to this instance.",
       "depositUrl": "Deposit URL",
@@ -859,10 +858,6 @@
       "backlog": "Backlog",
       "nextAttempt": "Next attempt",
       "failure": "Last failure",
-      "resume": "Retry now",
-      "resuming": "Retrying…",
-      "resumed": "Delivery retry resumed.",
-      "resumeFailed": "Could not resume delivery retry.",
       "copy": "Copy",
       "copied": "Copied"
     },
