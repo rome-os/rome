@@ -12,8 +12,11 @@ import { RELAY_DRAINED_HEADER, stripInternalHeaders, type ServerFrame } from "./
 // an attempt outlasts its timeout the drain stops waiting and aborts the
 // attempt's signal. A handler is not cancelled: one that ignores the signal
 // (today every production handler does) keeps running while the next attempt
-// starts, so it may see the same event more than once at a time. The budget
-// lives in memory, so a restart starts it again for the event the relay replays.
+// starts, so it may see the same event more than once at a time. A connection
+// handler that waits longer than one attempt for Chats to record a message
+// (DELIVERY_ACCEPT_TIMEOUT_MS) is timed out first, and Chats records the
+// message once. The budget lives in memory, so a restart starts it again for
+// the event the relay replays.
 
 const log = createLogger("relay-drainer");
 
@@ -434,17 +437,9 @@ class DrainConnection {
       body: frame.body != null ? Buffer.from(frame.body, "base64") : null,
       path: frame.path,
     };
-    if (this.delivery && event.seq < this.delivery.seq) return;
-    if (this.delivery && event.seq > this.delivery.seq) {
-      // The relay replays from the lowest un-acked event, so this should not
-      // happen. If it does, follow rather than wait for an event that is gone.
-      log.warn("relay skipped past an event the drain was delivering", {
-        target: this.drain.targetAppId,
-        seq: this.delivery.seq,
-        next: event.seq,
-      });
-      this.delivery = null;
-    }
+    // A later frame queued behind a delivery on a closing socket waits for the
+    // replay; the relay resends from the lowest un-acked event.
+    if (this.delivery && this.delivery.seq !== event.seq) return;
     await this.deliverWithRetries(event, source);
   }
 

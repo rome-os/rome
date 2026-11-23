@@ -19,7 +19,6 @@ function startFakeRelay(
   events: Array<{ seq: number; body: string; headers?: Record<string, string> }>,
 ) {
   let ackedUpTo = 0;
-  let skippedTo = 0;
   let connections = 0;
   let protocolPings = 0;
   let lastConnectUrl: string | undefined;
@@ -29,7 +28,7 @@ function startFakeRelay(
     connections++;
     lastConnectUrl = req.url;
     lastAuthHeader = req.headers.authorization;
-    const pending = events.filter((e) => e.seq > Math.max(ackedUpTo, skippedTo));
+    const pending = events.filter((e) => e.seq > ackedUpTo);
     ws.send(JSON.stringify({ type: "ready", backlog: pending.length }));
     for (const e of pending) {
       ws.send(
@@ -68,10 +67,6 @@ function startFakeRelay(
       targetPath: ["webhook"],
     }),
     ackedUpTo: () => ackedUpTo,
-    /** Moves the mailbox past `seq` without an ack, as a relay giving up on it would. */
-    skipTo: (seq: number) => {
-      skippedTo = seq;
-    },
     connections: () => connections,
     protocolPings: () => protocolPings,
     lastConnectUrl: () => lastConnectUrl,
@@ -362,31 +357,6 @@ describe("RelayDrainer", () => {
 
     await waitFor(() => relay!.ackedUpTo() === 1);
     expect(attempts).toBe(2);
-  });
-
-  it("follows the relay when it moves past an event the drain is still retrying", async () => {
-    relay = startFakeRelay([
-      { seq: 1, body: "{}" },
-      { seq: 2, body: "{}" },
-    ]);
-    const delivered: number[] = [];
-    drainer = new RelayDrainer(
-      [relay.drain()],
-      async (_drain, event) => {
-        delivered.push(event.seq);
-        return event.seq === 1 ? { status: 503, retryAfter: "60" } : { status: 200 };
-      },
-      DEFAULT_TEST_TIMING,
-    );
-    drainer.start();
-
-    await waitFor(() => drainer!.getStatus()[0]?.retry?.seq === 1);
-    relay.skipTo(1);
-    for (const socket of relay.wss.clients) socket.close(1001, "transport reset");
-
-    await waitFor(() => relay!.ackedUpTo() === 2);
-    expect(delivered).toEqual([1, 2]);
-    expect(drainer.getStatus()[0]?.retry).toBeNull();
   });
 
   it("reports connected status once the socket opens and clears it after stop", async () => {
