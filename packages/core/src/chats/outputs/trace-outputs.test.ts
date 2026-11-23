@@ -343,6 +343,27 @@ describe("routeProjectLinks", () => {
     );
   });
 
+  it("leaves a path with ? or # as written, and HTML and quoted URLs too", () => {
+    const kept = [
+      "[a](/home/p/test/issue#3.md)",
+      "[a](/home/p/a.md#L10)",
+      "[n](/home/p/t/Issue #3 notes.md)",
+      "[q](/home/p/a.md?raw=1)",
+      "[e](/home/p/a%23b.md)",
+      'Open <a href="file:///home/p/x.md">it</a>.',
+      "Set url to 'file:///home/p/x.md' or \"file:///home/p/y.md\"",
+    ];
+    for (const text of kept) expect(routeProjectLinks(text, ROOT)).toBe(text);
+  });
+
+  it("reads a link with a long run of blanks and no end in linear time", () => {
+    const text = `[a](${" ".repeat(20_000)}x`;
+    const started = performance.now();
+    expect(routeProjectLinks(text, ROOT)).toBe(text);
+    expect(outputsInReply("tr1", text, SCOPE)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it("leaves indented code and code inside quotes and lists as written", () => {
     const kept = [
       'Config:\n\n    url = "file:///home/p/test/report.csv"\n    [r](/home/p/r.pdf)\n',

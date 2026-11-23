@@ -350,11 +350,18 @@ export function outputsInReply(
  * balanced parentheses. Groups: the label with its brackets, the bracketed
  * href, the bare href, the title.
  */
-const MARKDOWN_LINK =
-  /(!?\[(?:\\.|[^\]\\])*\])\(\s*(?:<([^>\n]+)>|((?:[^()\n]|\([^()\n]*\))*?))(\s+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?\s*\)/g;
+const MARKDOWN_LINK = new RegExp(
+  // The label, then `(` and any blanks.
+  String.raw`(!?\[(?:\\.|[^\]\\])*\])\([ \t]*` +
+    // A bracketed href, or a bare one that starts and ends with a non-blank,
+    // so no run of blanks can be split between its parts.
+    String.raw`(?:<([^>\n]+)>|((?:[^()\s]|\([^()\n]*\))(?:(?:[^()\n]|\([^()\n]*\))*?(?:[^()\s]|\([^()\n]*\)))?))` +
+    String.raw`([ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*\)`,
+  "g",
+);
 
 /** A `file://` URL in prose, outside any link and its label. */
-const BARE_FILE_URL = /(?<![(<[])file:\/\/[^\s<>()[\]]+/g;
+const BARE_FILE_URL = /(?<![(<["'])file:\/\/[^\s<>()[\]"'*]+/g;
 
 /** What ends a sentence or closes emphasis after a bare URL, never part of it. */
 const URL_TRAIL = /[.,;:!?'"*_~`。，；：！？、」』）]+$/u;
@@ -432,9 +439,12 @@ function projectRoute(href: string, projectsRoot: string): string | null {
   if (!written.startsWith("file://") && !(written.startsWith("/") && !written.startsWith("//")))
     return null;
   if (written.startsWith("/projects/")) return null;
+  // `?` and `#` may be a query or a part of the file's name: either way the
+  // route could not keep them, so the link stays as written.
+  if (/[?#]|%23|%3f/i.test(written)) return null;
   const file = localPath(written, projectsRoot);
   const root = resolve(projectsRoot);
-  if (!file?.startsWith(root + sep)) return null;
+  if (!file?.startsWith(root + sep) || /[?#]/.test(file)) return null;
   return `/projects/${file
     .slice(root.length + 1)
     .split(sep)
