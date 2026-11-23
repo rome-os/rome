@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The archived topic chats, in the sheet the drawer's "Archived · N" row
+/// The archived topic chats, in the sheet the drawer's Archived button
 /// opens: latest activity first, grouped by week and month, a page at a time
 /// as in the drawer. A row opens its chat, read only; a swipe or a press and
 /// hold restores or deletes it.
@@ -165,33 +165,6 @@ private struct ArchivedTopicRow: View {
         }
         .buttonStyle(RowPressStyle())
         .accessibilityIdentifier("archived-topic-chat")
-    }
-}
-
-/// The drawer's last row under the topic chats: how many are archived. It
-/// opens the Archived sheet.
-struct ArchivedTopicsEntry: View {
-    let count: Int
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: "archivebox")
-                    .romeFont(14)
-                    .accessibilityHidden(true)
-                Text("Archived · \(count)")
-                    .romeFont(15)
-                Spacer(minLength: 0)
-            }
-            // Quieter than the topic rows above it.
-            .foregroundStyle(Palette.sub)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 44)
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .buttonStyle(PressScaleStyle(scale: 0.98))
-        .accessibilityIdentifier("archived-topic-chats")
     }
 }
 

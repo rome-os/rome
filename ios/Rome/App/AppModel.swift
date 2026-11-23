@@ -117,7 +117,7 @@ final class Workspace {
     private(set) var concierge: TranscriptStore
     /// The topic chats, for the drawer.
     let topics: TopicChatsStore
-    /// The archived topic chats, for the drawer's Archived row and its sheet.
+    /// The archived topic chats, for the drawer's Archived button and its sheet.
     let archivedTopics: ArchivedTopicsStore
     /// Every share link of the signed-in person, for Settings' Shared links.
     let sharedLinks: SharedLinksStore

@@ -247,7 +247,7 @@ enum SnapshotRunner {
                 model.debugCommand = .section(.chat)
                 try? await Task.sleep(for: .seconds(0.4))
             }
-            if only.isEmpty || !only.isDisjoint(with: ["05f-drawer-older-collapsed", "05g-drawer-older-expanded", "05h-drawer-older-open"]) {
+            if only.isEmpty || !only.isDisjoint(with: ["05f-drawer-older-collapsed", "05g-drawer-older-expanded", "05g2-drawer-older-folded", "05h-drawer-older-open"]) {
                 model.openDemo(.olderTopics)
                 try? await Task.sleep(for: .seconds(2))
                 model.workspace?.topics.setFolded(false)
@@ -258,6 +258,11 @@ enum SnapshotRunner {
                 await capture("05g-drawer-older-expanded", style: styleName, in: directory) {
                     model.workspace?.topics.setOlderExpanded(true)
                 }
+                // Topic chats folded: the Archived button stays in the header.
+                await capture("05g2-drawer-older-folded", style: styleName, in: directory) {
+                    model.workspace?.topics.setFolded(true)
+                }
+                model.workspace?.topics.setFolded(false)
                 model.workspace?.topics.setOlderExpanded(false)
                 model.debugCommand = .section(.topic("topic-meals"))
                 try? await Task.sleep(for: .seconds(1))
@@ -285,11 +290,11 @@ enum SnapshotRunner {
                 model.openDemo()
                 try? await Task.sleep(for: .seconds(2))
             }
-            // Archived topic chats: the drawer's row under a short list, its
+            // Archived topic chats: the drawer's header button, its
             // sheet, and an archived chat, read only with its Restore banner.
             let archivedShots = ["05h-drawer-archived", "05i-archived-sheet", "24b-topic-archived"]
             if only.isEmpty || !only.isDisjoint(with: archivedShots), let workspace = model.workspace {
-                // Ten more archived, so the row shows under the five left.
+                // Ten more archived.
                 let moved = workspace.topics.chats.suffix(10).map(\.id)
                 for id in moved { await workspace.archiveTopic(id) }
                 workspace.archivedTopics.refresh()

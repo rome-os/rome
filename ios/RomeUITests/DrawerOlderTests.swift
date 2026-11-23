@@ -75,4 +75,28 @@ final class DrawerOlderTests: XCTestCase {
         openDrawer(app)
         XCTAssertEqual(header.value as? String, "Collapsed")
     }
+
+    /// The Archived button sits in the Topic chats header, folded or not,
+    /// and opens the sheet.
+    @MainActor
+    func testArchivedButtonStaysInTheHeaderWhenFolded() {
+        let app = XCUIApplication.forUITests()
+        app.launchEnvironment["ROME_DEMO"] = "older-topics"
+        app.launchArguments += ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 30))
+        openDrawer(app)
+        let archived = app.buttons["archived-topic-chats"].firstMatch
+        XCTAssertTrue(archived.waitForExistence(timeout: 10))
+        waitOnScreen(app, archived)
+        XCTAssertEqual(archived.label, "Archived")
+        let fold = app.buttons["topic-chats-header"].firstMatch
+        fold.tap()
+        waitOnScreen(app, archived)
+        // The fold persists: unfold again for the next test.
+        fold.tap()
+        XCTAssertTrue(app.buttons["older-topic-chats-header"].firstMatch.waitForExistence(timeout: 5))
+        archived.tap()
+        XCTAssertTrue(app.buttons["archived-topic-chat"].firstMatch.waitForExistence(timeout: 5))
+    }
 }

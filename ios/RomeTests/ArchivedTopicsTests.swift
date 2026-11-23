@@ -46,16 +46,6 @@ import Testing
         #expect(sessions.map(\.isArchivedTopicChat) == [true, false])
     }
 
-    /// The row under the topic chats: hidden with none archived, folded, or
-    /// while more topic chats are still to page in.
-    @Test func theEntryShowsOnlyWithArchivedChatsAtTheEnd() {
-        #expect(ArchivedTopicsStore.showsEntry(archived: 3, folded: false, shownTopics: 5, topics: 5))
-        #expect(ArchivedTopicsStore.showsEntry(archived: 1, folded: false, shownTopics: 0, topics: 0))
-        #expect(!ArchivedTopicsStore.showsEntry(archived: 0, folded: false, shownTopics: 5, topics: 5))
-        #expect(!ArchivedTopicsStore.showsEntry(archived: 3, folded: true, shownTopics: 0, topics: 5))
-        #expect(!ArchivedTopicsStore.showsEntry(archived: 3, folded: false, shownTopics: 30, topics: 45))
-    }
-
     /// The sheet pages as the drawer does: the first page, then a page more each time.
     @Test func theSheetShowsAPageAtATime() async {
         let backend = FakeBackend()

@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// The guardian's archived topic chats, for the drawer's "Archived · N" row
+/// The guardian's archived topic chats, for the drawer's Archived button
 /// and the sheet it opens: latest activity first. It reads the list when the
 /// workspace starts, when the drawer or the sheet opens, and after a chat is
 /// archived here; a restore or a delete here takes the chat out at once.
@@ -27,13 +27,6 @@ final class ArchivedTopicsStore {
 
     /// How many archived topic chats there are.
     var count: Int { chats.count }
-
-    /// Whether the drawer shows its Archived row: some are archived, the
-    /// topic chats are not folded, and every one of them shows, so the row
-    /// is their last.
-    nonisolated static func showsEntry(archived: Int, folded: Bool, shownTopics: Int, topics: Int) -> Bool {
-        archived > 0 && !folded && shownTopics >= topics
-    }
 
     /// Refetches the list. Requests that come while one runs share one more.
     func refresh() {
