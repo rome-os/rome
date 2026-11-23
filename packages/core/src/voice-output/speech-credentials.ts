@@ -40,6 +40,12 @@ export interface SpeechCredentialSource {
   get(): Promise<SpeechCredentialOutcome>;
   /** Adds what a speaking session used on the credential with this `sessionId`. Never throws. */
   recordUsage?(sessionId: string, usage: SpeechUsage): void;
+  /**
+   * The provider refused the credential with this `sessionId`, as it does
+   * once the credential expires or is revoked: it is never handed out again.
+   * Never throws.
+   */
+  retire?(sessionId: string): void;
 }
 
 /** No source at all: speaking is not set up on this instance. */

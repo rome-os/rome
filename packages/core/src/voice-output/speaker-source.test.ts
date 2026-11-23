@@ -10,6 +10,7 @@ import {
 } from "./speech-credentials.js";
 import {
   audioMessage,
+  errorMessage,
   type FakeTts,
   startFakeTts,
   terminatedMessage,
@@ -237,5 +238,128 @@ describe("speaker source", () => {
       { sessionId: "speech-1", characters: 9, seconds: 1 },
       { sessionId: "speech-1", characters: 4, seconds: 0.5 },
     ]);
+  });
+});
+
+describe("a speaking session whose credential is refused", () => {
+  /** Hands out `temp-1`, `temp-2`, … in turn, each once the one before is retired. */
+  function rotating(next: (n: number) => SpeechCredentialOutcome | null = () => null) {
+    let n = 1;
+    const source = {
+      asked: 0,
+      retired: [] as string[],
+      get: async (): Promise<SpeechCredentialOutcome> => {
+        source.asked++;
+        return (
+          (source.asked > 1 ? next(n) : null) ?? {
+            kind: "granted",
+            credentials: {
+              provider: "soniox",
+              url: fake.url,
+              model: "tts-rt-v2",
+              voice: "Iris",
+              token: `temp-${n}`,
+              sessionId: `speech-${n}`,
+            },
+          }
+        );
+      },
+      retire: (sessionId: string) => {
+        source.retired.push(sessionId);
+        n++;
+      },
+    };
+    return source;
+  }
+
+  /** Speaks every sentence, except on a connection whose key is in `refused`. */
+  function speakUnless(refused: Set<string>) {
+    const keyOf = new Map<unknown, string | undefined>();
+    const spoken: { key: string | undefined; text: string }[] = [];
+    fake.onMessage = (message, reply, socket) => {
+      if (!keyOf.has(socket)) keyOf.set(socket, fake.authorization()[keyOf.size]);
+      if (message.text === undefined || message.text_end !== true) return;
+      const id = message.stream_id as string;
+      const key = keyOf.get(socket);
+      if (key && refused.has(key)) {
+        reply(errorMessage(id, 401, "unauthenticated", "Invalid or expired temporary API key."));
+      } else {
+        spoken.push({ key, text: message.text as string });
+        reply(audioMessage(id, Buffer.alloc(480), true));
+      }
+      reply(terminatedMessage(id));
+    };
+    return spoken;
+  }
+
+  async function openWith(credentials: SpeechCredentialSource) {
+    const events: string[] = [];
+    const source = createSpeakerSource({ credentials, enabled: async () => true });
+    const outcome = await source.open({
+      onAudio: () => {},
+      onSentenceEnd: (id) => events.push(`end ${id}`),
+      onSentenceError: (id, error) => events.push(`error ${id} ${error.kind}`),
+      onClosed: (error) => events.push(`closed ${error.kind}`),
+    });
+    if (!outcome.ok) throw new Error(`expected a session, got ${outcome.reason}`);
+    opened.push(outcome.session);
+    return { session: outcome.session, events };
+  }
+
+  it("retires it, moves to a fresh one and says the refused sentences again, in order", async () => {
+    const refused = new Set<string>();
+    const spoken = speakUnless(refused);
+    const credentials = rotating();
+    const { session, events } = await openWith(credentials);
+
+    session.say("a", "钥匙还有效。");
+    await until(() => events.length === 1);
+    // The key expires, or is revoked, while the conversation goes on.
+    refused.add("Bearer temp-1");
+    session.say("b", "第二句。");
+    session.say("c", "第三句。");
+    await until(() => events.length === 3, "the sentences on the new key");
+
+    expect(events).toEqual(["end a", "end b", "end c"]);
+    expect(credentials.retired).toEqual(["speech-1"]);
+    expect(credentials.asked).toBe(2);
+    expect(fake.authorization()).toEqual(["Bearer temp-1", "Bearer temp-2"]);
+    expect(spoken).toEqual([
+      { key: "Bearer temp-1", text: "钥匙还有效。" },
+      { key: "Bearer temp-2", text: "第二句。" },
+      { key: "Bearer temp-2", text: "第三句。" },
+    ]);
+
+    // Later sentences go on the new key.
+    session.say("d", "第四句。");
+    await until(() => events.length === 4);
+    expect(spoken.at(-1)).toEqual({ key: "Bearer temp-2", text: "第四句。" });
+  });
+
+  it("renews once, and fails as before when the fresh credential is refused too", async () => {
+    const spoken = speakUnless(new Set(["Bearer temp-1", "Bearer temp-2"]));
+    const credentials = rotating();
+    const { session, events } = await openWith(credentials);
+
+    session.say("a", "第一句。");
+    await until(() => events.length === 1);
+    expect(events).toEqual(["error a unauthorized"]);
+    session.say("b", "第二句。");
+    await until(() => events.length === 2);
+    expect(events).toEqual(["error a unauthorized", "error b unauthorized"]);
+    expect(credentials.asked).toBe(2);
+    expect(spoken).toEqual([]);
+  });
+
+  it("fails the refused sentence when no fresh credential is given", async () => {
+    speakUnless(new Set(["Bearer temp-1"]));
+    const credentials = rotating(() => ({ kind: "refused", code: "speech_rate_limited" }));
+    const { session, events } = await openWith(credentials);
+
+    session.say("a", "第一句。");
+    await until(() => events.length === 1);
+    expect(events).toEqual(["error a unauthorized"]);
+    expect(credentials.retired).toEqual(["speech-1"]);
+    expect(fake.connections()).toBe(1);
   });
 });
