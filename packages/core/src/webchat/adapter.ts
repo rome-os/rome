@@ -8,8 +8,6 @@ import { SendRefused } from "@rome-os/app-runtime";
 import { withoutHostOnlyParts } from "../chats/host-only-parts.js";
 import { artifactLocalName, isCoreMainAgentId } from "../apps/artifact-id.js";
 import { DEFAULT_BOT_DISPLAY_NAME } from "../participation/mention-only.js";
-import { routeProjectLinks } from "../chats/outputs/trace-outputs.js";
-import { getProjectsRoot } from "../paths.js";
 
 const log = createLogger("webchat");
 export const WEBCHAT_GUARDIAN_USER_ID = "guardian";
@@ -62,11 +60,7 @@ function contentToText(content: string): string {
 export class WebChatAdapter {
   private messageHandler: ((msg: ChannelMessage) => Promise<void>) | null = null;
 
-  /** `projectsRoot` answers where `/projects/<path>` links point, read at each send. */
-  constructor(
-    private webchatRepo: WebChatRepository,
-    private projectsRoot: () => string = getProjectsRoot,
-  ) {}
+  constructor(private webchatRepo: WebChatRepository) {}
 
   async start(): Promise<void> {
     log.info("webchat adapter started");
@@ -103,13 +97,6 @@ export class WebChatAdapter {
             { type: "text" as const, content: said },
             ...shown.filter((part) => part.type !== "text"),
           ];
-    // A file the agent named by its path on this machine opens on every client
-    // by its `/projects/` route.
-    const root = this.projectsRoot();
-    for (const [index, part] of parts.entries()) {
-      if (part.type === "text")
-        parts[index] = { ...part, content: routeProjectLinks(part.content, root) };
-    }
 
     for (const att of message.attachments ?? []) {
       const label = att.caption ? `${att.caption}: ${att.source}` : att.source;

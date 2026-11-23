@@ -66,6 +66,8 @@ import type { MessagePart } from "../types.js";
 import { sessionTaskEnded } from "./chat-read-model.js";
 import { agentMessageOutbound } from "../chats/history/messages-agent.js";
 import { sessionOwnerKey, type SessionActor } from "../access/session-actor.js";
+import { routeProjectLinks } from "../chats/outputs/trace-outputs.js";
+import { getProjectsRoot } from "../paths.js";
 import {
   advanceSessionActivitySet,
   type EnsureRomeSessionInput,
@@ -809,6 +811,15 @@ function decodeProjectSessionCursor(cursor: string | undefined): ProjectSessionC
   }
 
   return null;
+}
+
+/** `parts` with each text part's file paths under `projectsRoot` routed. */
+function routedTextParts(parts: TranscriptPart[], projectsRoot: string): TranscriptPart[] {
+  return parts.map((part) =>
+    part.type === "text" && typeof part.content === "string"
+      ? { ...part, content: routeProjectLinks(part.content, projectsRoot) }
+      : part,
+  );
 }
 
 export class WebChatRepository {
@@ -2273,9 +2284,25 @@ export class WebChatRepository {
    * pushed row) — that's why `addMessage` stays silent and this is separate.
    *
    * Callers own how the message is constructed (the parts); this owns the
-   * shared persist-and-notify tail.
+   * shared persist-and-notify tail. Every agent text reply a chat stores
+   * passes here, so an assistant text part that names a file under the
+   * projects folder by its path on this machine is stored with the
+   * `/projects/` route every client opens (`routeProjectLinks`).
    */
   protected async insertBackendMessage(
+    sessionId: string,
+    turnId: string | null,
+    role: string,
+    parts: TranscriptPart[],
+    id?: string,
+    replyTo?: string,
+  ): Promise<StoredWebchatMessage> {
+    const stored = role === "assistant" ? routedTextParts(parts, getProjectsRoot()) : parts;
+    return this.writeBackendMessage(sessionId, turnId, role, stored, id, replyTo);
+  }
+
+  /** Writes a message {@link insertBackendMessage} prepared, and notifies subscribers. */
+  protected async writeBackendMessage(
     sessionId: string,
     turnId: string | null,
     role: string,

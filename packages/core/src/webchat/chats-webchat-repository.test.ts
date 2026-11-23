@@ -886,6 +886,26 @@ describe("ChatsWebChatRepository", () => {
       expect(row("m4")).toMatchObject({ replyTo: null, root: null });
     });
 
+    // The Concierge's say tool writes its message this way.
+    it("stores an agent message's absolute project paths as their /projects routes", async () => {
+      rs.stubEnv("ROME_PROJECTS_ROOT", "/rome-home/.rome/default/projects");
+      try {
+        const id = await said(
+          "[csv](/rome-home/.rome/default/projects/default/t/data.csv) and " +
+            "[doc](file:///rome-home/.rome/default/projects/default/t/a%20b.md), not `/rome-home/x`.",
+        );
+        expect(JSON.parse(row(id).parts)).toEqual([
+          {
+            type: "text",
+            content:
+              "[csv](/projects/default/t/data.csv) and [doc](</projects/default/t/a b.md>), not `/rome-home/x`.",
+          },
+        ]);
+      } finally {
+        rs.unstubAllEnvs();
+      }
+    });
+
     it("sets a backend message's reply and root, and adds no reply_to part", async () => {
       await repo.recordUserInput("m1", "chat-1", text("Weather?"));
       const answer = await said("Sunny", "m1");
