@@ -123,6 +123,11 @@ interface Leg {
  * whose audio came. Sentences already speaking on the old credential finish
  * there. It renews at most once until audio comes again, and says a sentence
  * again at most once, so a credential refused from the start fails as before.
+ *
+ * Across a renewal, sentences may start out of the order they were said: one
+ * whose refusal comes late, or after the new credential is in use, starts
+ * after a later one. Audio still names its sentence, and the caller plays
+ * sentences in its own order.
  */
 async function renewing(
   listener: SpeakerListener,
