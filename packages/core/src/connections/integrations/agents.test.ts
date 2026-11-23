@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { channelMessageOf } from "../../chats/connected-accounts/channel-message.js";
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
@@ -88,8 +91,28 @@ describe("agents channel", () => {
       thread: { kind: "dm" },
       replyTo: { messageId: "msg_0" },
     });
-    expect(inbound.text).toContain("Refund requested on order #41");
-    expect(inbound.text).toContain('"order": 41');
+    expect(inbound.text).toBe("Refund requested on order #41");
+    expect(inbound.attachments).toEqual([{ type: "document", mimeType: "application/json" }]);
+  });
+
+  it("carries no attachment when the message has no data", () => {
+    expect(asApp(envelope({ data: null }))!.attachments).toEqual([]);
+  });
+
+  it("saves a message's data as a JSON file the agent can read", async () => {
+    const home = await mkdtemp(join(tmpdir(), "rome-agents-"));
+    rs.stubEnv("HOME", home);
+    rs.stubEnv("ROME_PROFILE", "agents-test");
+    try {
+      const talker = createAgentsTalker(fakeClient([]));
+      const message = asApp(envelope({ data: { order: 41 } }))!;
+      const [saved] = await talker.inboundMedia!.materialize(message);
+      expect(saved?.localPath).toMatch(/\.json$/);
+      expect(JSON.parse(await readFile(saved!.localPath!, "utf8"))).toEqual({ order: 41 });
+    } finally {
+      rs.unstubAllEnvs();
+      await rm(home, { recursive: true, force: true });
+    }
   });
 
   it("names another account's agent with its account, and keys it by agent id alone", () => {
