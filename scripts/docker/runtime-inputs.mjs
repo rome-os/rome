@@ -63,7 +63,6 @@ export const excludedDocsPaths = [
   "docs/screenshots",
   "docs/ui",
   "docs/AGENTS.md",
-  "docs/CLAUDE.md",
   "docs/dashboard-mock-mode.md",
   "docs/design-system.md",
   "docs/midscene-e2e-cases.md",
