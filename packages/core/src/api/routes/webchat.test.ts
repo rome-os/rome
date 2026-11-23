@@ -1,3 +1,4 @@
+import { SPOKEN_TURN_NOTE } from "../../voice-conversation/conversation.js";
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
 import { askQuestionToolOutput, type Question, questionCardUi } from "../../agent/index.js";
 import { connectCardUiFromProps } from "../../connections/connect-card.js";
@@ -9994,6 +9995,15 @@ describe("Webchat API", () => {
       expect(prompts[1].startsWith("<workspace_context/>\n\n")).toBe(true);
       expect(prompts[2]).not.toContain("workspace_context");
       expect(prompts[3]).toContain("surfaces open in their workspace");
+    });
+
+    it("opens a spoken turn's prompt with the voice note, for that turn only, and stores only the words", async () => {
+      const { send, lastUser } = await setup();
+      await send({ text: "明天几点开会", spoken: true });
+      expect(prompts[0]).toBe(`${SPOKEN_TURN_NOTE}\n\n明天几点开会`);
+      expect(await lastUser()).toEqual([{ type: "text", content: "明天几点开会" }]);
+      await send({ text: "typed" });
+      expect(prompts[1]).toBe("typed");
     });
 
     it("rejects an id that is not a message of this chat", async () => {

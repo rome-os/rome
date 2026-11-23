@@ -146,6 +146,7 @@ import { isTransientDelta } from "../../agent/index.js";
 import { MessageWriting, messageWritingModeOf } from "../../core/message-writing.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { EMPTY_WORKSPACE_CONTEXT } from "../../core/sticky-headers.js";
+import { SPOKEN_TURN_NOTE } from "../../voice-conversation/conversation.js";
 import type {
   BackendEmitOptions,
   BackendSessionTask,
@@ -1118,6 +1119,12 @@ export interface WebchatRuntime {
   openSession(chatId: string): Promise<string>;
   /** Sends `text` into the chat as the guardian's own message, as their composer does. Throws the route's error. */
   sendAsGuardian(chatId: string, text: string): Promise<void>;
+  /**
+   * Sends what the guardian said aloud in a voice conversation as their message,
+   * marked spoken, ending any turn the chat is running. Resolves with the turn
+   * that answers it. Throws the route's error.
+   */
+  sendSpoken(chatId: string, text: string): Promise<AgentTurnHandle>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
   /**
@@ -4105,6 +4112,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
      * turn only; never persisted.
      */
     workspace?: WorkspaceContextSnapshot;
+    /**
+     * The guardian said this aloud in a voice conversation. Adds a line to the
+     * model's prompt for this turn only, asking for a short spoken answer. It
+     * is never persisted. Rome's voice conversation sets it.
+     */
+    spoken?: boolean;
     /** How the input treats a running turn. See `InputPriority`. */
     priority?: unknown;
     /**
@@ -4186,6 +4199,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       askingDeviceId?: string;
       taskActor?: SessionActor;
       taskInput?: TaskInputClaim;
+      /** Gets the turn this input starts or joins, once it has one. */
+      onTurn?: (turn: AgentTurnHandle) => void;
     } = {},
   ): Promise<RouteAnswer> => {
     // A Concierge turn's timing starts when the owner's send reaches Rome.
@@ -4534,7 +4549,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : modelPrompt;
     // The quote rides this input's own prompt, so a steered or queued input
     // keeps it.
-    const repliedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
+    const quotedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
+    const repliedPrompt =
+      body.spoken === true ? `${SPOKEN_TURN_NOTE}\n\n${quotedPrompt}` : quotedPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
     // user message so the cached fixed part of the system prompt stays stable.
     // The session leaves out a block that did not change, so the input after
@@ -5399,6 +5416,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       : agentSess.submit(input, options);
     // The turn this input started gets its stream here, and so does one a
     // queued input starts later. A turn it was folded or steered into has one.
+    if (said.onTurn) receipt.turn.then(said.onTurn, () => {});
     const attached = receipt.turn.then((handle) => {
       if (attachedTurns.has(handle.id)) return undefined;
       attachedTurns.add(handle.id);
@@ -5818,6 +5836,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       } finally {
         opened.release();
       }
+    },
+    async sendSpoken(chatId, text) {
+      let resolveTurn!: (turn: AgentTurnHandle) => void;
+      const turn = new Promise<AgentTurnHandle>((resolve) => {
+        resolveTurn = resolve;
+      });
+      const sent = await handleChatSend(
+        chatId,
+        { inputId: randomUUID(), text, spoken: true, priority: "now" },
+        { onTurn: resolveTurn },
+      );
+      if (sent.status >= 400) throw new Error(routeError(sent));
+      return turn;
     },
     async sendAsGuardian(chatId, text) {
       const inputId = randomUUID();

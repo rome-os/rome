@@ -1,0 +1,262 @@
+// The voice conversation socket. The client streams microphone audio up and
+// plays what comes down. Rome listens on a transcription stream with endpoint
+// detection, and `conversation.ts` sends each turn to the chat and speaks the
+// reply. Messages are in `@rome/api-types/voice-conversation`. Only the
+// guardian may connect, and only while `voice_mode` is on. Rome keeps no
+// audio: frames go straight to the provider.
+
+import type { IncomingMessage, Server } from "node:http";
+import type { Duplex } from "node:stream";
+import { type RawData, WebSocket, WebSocketServer } from "ws";
+import {
+  VOICE_CONVERSATION_ALIVE_INTERVAL_MS,
+  VOICE_CONVERSATION_SOCKET_PATH,
+  type VoiceConversationServerMessage,
+  type VoiceConversationStopReason,
+  voiceConversationClientMessageSchema,
+} from "@rome/api-types/voice-conversation";
+import { gateGuardianUpgrade } from "../access/ws-guardian-gate.js";
+import type { DrizzleDb } from "../db/index.js";
+import { rejectUpgrade } from "../lib/ws-upgrade.js";
+import { createLogger } from "../logger.js";
+import type { TranscriptionUsageSink } from "../usage/recorder.js";
+import type { TranscriptionStream } from "../voice-input/transcriber.js";
+import type { ListeningSource, VoiceInputSource } from "../voice-input/voice-input-source.js";
+import { readVoiceTerms } from "../voice-input/voice-terms.js";
+import type { SpeakerSource } from "../voice-output/speaker-source.js";
+import { resolveVoiceModeEnabled } from "../voice-output/voice-mode-gate.js";
+import { createConversation, type ReplyTurn } from "./conversation.js";
+
+const log = createLogger("voice-conversation");
+
+// A 16 kHz mono frame of a few hundred milliseconds is about 10 KB.
+const MAX_FRAME_BYTES = 256 * 1024;
+// Bounds what one forgotten conversation costs. Rome Cloud's listening session lasts no longer.
+const MAX_CONVERSATION_MS = 30 * 60 * 1000;
+// A microphone delivers audio no faster than real time. The slack covers
+// frames that arrive in a burst after a network stall.
+const AUDIO_SLACK_MS = 5_000;
+
+export interface VoiceConversationDeps {
+  /** Where listening sessions come from: the same Rome Cloud sessions dictation uses. */
+  listening: Pick<VoiceInputSource, "open">;
+  speaker: SpeakerSource;
+  /** Sends the guardian's turn into `chatId`, and resolves with the turn that answers it. */
+  send(chatId: string, text: string): Promise<ReplyTurn>;
+  usage?: TranscriptionUsageSink | null;
+  voiceTerms?: () => Promise<string[]>;
+  maxConversationMs?: number;
+}
+
+/**
+ * Serves `/ws/voice-conversation` to the guardian while `voice_mode` is on. With
+ * it off the path answers 404, as no client should offer the conversation.
+ */
+export function attachVoiceConversationServer(
+  httpServer: Server,
+  db: DrizzleDb,
+  deps: VoiceConversationDeps,
+  enabled: () => Promise<boolean> = resolveVoiceModeEnabled,
+): { close(): void } {
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
+
+  httpServer.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    if (url.pathname !== VOICE_CONVERSATION_SOCKET_PATH) return;
+    socket.on("error", () => socket.destroy());
+    void enabled()
+      .then(async (on) => {
+        if (!on) return rejectUpgrade(socket, 404, "Not Found");
+        if (!(await gateGuardianUpgrade(req, socket, db)) || socket.destroyed) return;
+        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, deps));
+      })
+      .catch((err) => {
+        log.error("voice conversation upgrade failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        rejectUpgrade(socket, 500, "Internal Server Error");
+      });
+  });
+
+  return {
+    close() {
+      for (const client of wss.clients) client.terminate();
+      wss.close();
+    },
+  };
+}
+
+/** Runs one conversation over `ws`. Exported for tests. */
+export function serve(ws: WebSocket, deps: VoiceConversationDeps): void {
+  let closed = false;
+  let starting = false;
+  let stream: TranscriptionStream | null = null;
+  let listening: { source: ListeningSource; sampleRate: number; startedAt: number } | null = null;
+  // Audio that came while listening opened, in order.
+  const early: Uint8Array[] = [];
+  let pace: { since: number; sampleRate: number } | null = null;
+  let bytes = 0;
+  let alive: ReturnType<typeof setInterval> | null = null;
+  let limit: ReturnType<typeof setTimeout> | null = null;
+  let chatId: string | null = null;
+
+  const reply = (message: VoiceConversationServerMessage) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
+  };
+
+  const conversation = createConversation({
+    send: (text) => {
+      if (!chatId) return Promise.reject(new Error("no chat"));
+      return deps.send(chatId, text);
+    },
+    message: (message) => {
+      if (!closed) reply(message);
+    },
+    audio: (pcm) => {
+      if (!closed && ws.readyState === WebSocket.OPEN) ws.send(pcm, { binary: true });
+    },
+    fail: (reason) => close({ type: "error", reason }),
+  });
+
+  // Every listening session is a Rome Cloud session, so each one reports.
+  const reportUsage = (status: string) => {
+    if (!listening || !deps.usage) return;
+    const { transcriber, romeCloudSessionId } = listening.source;
+    deps.usage.recordTranscription({
+      sessionId: romeCloudSessionId,
+      provider: transcriber.providerId,
+      model: transcriber.model,
+      // PCM s16le mono: two bytes a sample. Only what reached the provider.
+      seconds: Math.round(((stream?.sentBytes ?? 0) / 2 / listening.sampleRate) * 10) / 10,
+      status,
+      durationMs: Date.now() - listening.startedAt,
+    });
+  };
+
+  const settle = (outcome: string) => {
+    if (alive) clearInterval(alive);
+    if (limit) clearTimeout(limit);
+    conversation.close();
+    stream?.abort();
+    log.info("voice conversation ended", { outcome, bytes });
+    reportUsage(outcome);
+  };
+
+  function close(last: VoiceConversationServerMessage) {
+    if (closed) return;
+    closed = true;
+    reply(last);
+    ws.close(1000);
+    settle(last.type === "error" ? last.reason : last.type);
+  }
+  const fail = (reason: VoiceConversationStopReason) => close({ type: "error", reason });
+
+  // Counts one frame, or ends the conversation when the client sends audio
+  // faster than a microphone records it.
+  const accept = (chunk: Uint8Array): boolean => {
+    if (!pace) return false;
+    const allowed = (pace.sampleRate * 2 * (Date.now() - pace.since + AUDIO_SLACK_MS)) / 1000;
+    if (bytes + chunk.byteLength > allowed) {
+      fail("bad-request");
+      return false;
+    }
+    bytes += chunk.byteLength;
+    return true;
+  };
+
+  async function begin(sampleRate: number) {
+    starting = true;
+    const spoken = await deps.speaker.open(conversation.speakerListener);
+    if (closed) {
+      if (spoken.ok) spoken.session.close();
+      return;
+    }
+    if (!spoken.ok) {
+      log.warn("voice conversation cannot speak", { reason: spoken.reason });
+      return fail(
+        spoken.reason === "disabled" || spoken.reason === "not-configured"
+          ? "unavailable"
+          : "speaking-failed",
+      );
+    }
+    conversation.attach(spoken.session);
+    const [opened, terms] = await Promise.all([
+      deps.listening.open(),
+      Promise.resolve()
+        .then(() => (deps.voiceTerms ?? readVoiceTerms)())
+        .catch(() => [] as string[]),
+    ]);
+    starting = false;
+    if (closed) return;
+    if (!opened.ok) {
+      log.warn("voice conversation cannot listen", { reason: opened.reason });
+      return fail("listening-failed");
+    }
+    listening = { source: opened.source, sampleRate, startedAt: Date.now() };
+    stream = opened.source.transcriber.open(
+      { sampleRate, mode: "conversation", ...(terms.length ? { terms } : {}) },
+      {
+        onText: (settled, pending) => conversation.heard(settled, pending),
+        onEndpoint: () => conversation.endpoint(),
+        onEnd: () => close({ type: "ended" }),
+        onFailure: (failure, detail) => {
+          log.warn("voice conversation provider failed", { failure, detail });
+          fail(failure === "expired" ? "time-limit" : "listening-failed");
+        },
+      },
+    );
+    for (const chunk of early.splice(0)) stream.sendAudio(chunk);
+    limit = setTimeout(() => fail("time-limit"), deps.maxConversationMs ?? MAX_CONVERSATION_MS);
+    log.info("voice conversation started", {
+      sessionId: opened.source.romeCloudSessionId,
+      sampleRate,
+      termCount: terms.length,
+    });
+    reply({ type: "ready", sampleRate: spoken.session.format.sampleRate });
+    reply({ type: "state", state: "listening" });
+  }
+
+  ws.on("message", (data: RawData, isBinary) => {
+    if (closed) return;
+    if (isBinary) {
+      if (!starting && !stream) return fail("bad-request");
+      const chunk = toBytes(data);
+      if (!accept(chunk)) return;
+      if (stream) stream.sendAudio(chunk);
+      else early.push(chunk);
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(data.toString());
+    } catch {
+      return fail("bad-request");
+    }
+    const message = voiceConversationClientMessageSchema.safeParse(parsed);
+    if (!message.success) return fail("bad-request");
+    if (message.data.type === "stop") return close({ type: "ended" });
+    if (starting || stream) return fail("bad-request");
+    chatId = message.data.chatId;
+    pace = { since: Date.now(), sampleRate: message.data.sampleRate };
+    alive = setInterval(() => reply({ type: "alive" }), VOICE_CONVERSATION_ALIVE_INTERVAL_MS);
+    void begin(message.data.sampleRate).catch((err: unknown) => {
+      log.error("voice conversation could not start", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      fail("listening-failed");
+    });
+  });
+
+  ws.on("close", () => {
+    if (closed) return;
+    closed = true;
+    settle("client-closed");
+  });
+  ws.on("error", () => ws.terminate());
+}
+
+function toBytes(data: RawData): Uint8Array {
+  if (Array.isArray(data)) return Buffer.concat(data);
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  return data;
+}

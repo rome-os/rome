@@ -101,7 +101,7 @@ Rome Cloud provides the transcription service behind dictation in message fields
 
 ## Voice conversation
 
-Voice conversation mode lets Rome speak its replies. The speaking module in [`packages/core/src/voice-output/`](../../packages/core/src/voice-output/) turns text into audio through a speech provider, on a credential from Rome Cloud. It is behind the `voice_mode` feature gate. No chat uses the module yet.
+Voice conversation mode lets the guardian talk with a chat's agent hands-free. The conversation in [`packages/core/src/voice-conversation/`](../../packages/core/src/voice-conversation/) runs on the instance: a client streams microphone audio to `/ws/voice-conversation` and plays the audio that comes back. The instance listens on a Rome Cloud transcription session, as [voice input](#voice-input) does, and sends each turn the guardian finishes to the chat as their message. The speaking module in [`packages/core/src/voice-output/`](../../packages/core/src/voice-output/) turns the reply into audio through a speech provider, on a credential from Rome Cloud. It is behind the `voice_mode` feature gate. No client offers it yet.
 
 **Contracts:**
 
@@ -116,6 +116,10 @@ Voice conversation mode lets Rome speak its replies. The speaking module in [`pa
 - Stopping speech drops the audio of every running and waiting sentence at once, without waiting for the provider to confirm.
 - A speaking session outlives its credential. When the provider refuses it, as it does for a new stream once the credential has expired or been revoked, the session asks for a new one, moves to it, and says again each refused sentence none of whose audio came. Sentences already speaking finish on the old credential. It does this once until audio comes again, so a credential refused from the start still fails. Across a renewal, sentences may start out of the order they were said. The caller plays them in its own order.
 - Errors and logs never carry the credential.
+- Only the guardian may open `/ws/voice-conversation`, and only while `voice_mode` is on: with it off the path answers 404. The messages are in `@rome/api-types/voice-conversation`.
+- The listening stream asks the provider where each turn ends. A finished turn goes to the chat as the guardian's message and ends any turn the chat is running. Its prompt opens, for that turn only, with a line saying it was spoken. The stored message has only the words.
+- The reply is spoken sentence by sentence as it streams. Markdown marks and addresses are not read. The first code block or table becomes one sentence saying the details are in the chat, and the rest are skipped. Text before a tool call is spoken before the call. When the agent works for 2 s with nothing said, Rome says once that it is looking.
+- The guardian speaking over the reply stops it at once: Rome stops the speech streams, tells the client to drop audio not yet played, and listens. It counts as speaking over the reply at three Chinese characters or two English words that are not Rome's own words coming back through the microphone. A turn made only of Rome's own words is dropped.
 
 ## Usage reporting
 
