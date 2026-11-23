@@ -4,11 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Span, Tracer } from "@opentelemetry/api";
 import { context, propagation, SpanStatusCode } from "@opentelemetry/api";
 import { v4 as uuid } from "uuid";
-import type {
-  ActionDispatchReceipt,
-  ActionExecutionContext,
-  ActionEvent,
-} from "@rome-os/app-runtime";
+import type { ActionDispatchReceipt, ActionRun, ActionEvent } from "@rome-os/app-runtime";
 import type {
   Action,
   ActionRegistry,
@@ -24,7 +20,11 @@ import type { ApprovalsRepository } from "../repositories/approvals.js";
 import type { ExecutionJournalRepository } from "../repositories/execution-journal.js";
 import { didYouMean } from "./registry.js";
 import { isPersonalDataAction, PERSONAL_DATA_PRIVATE_ONLY } from "./personal-data.js";
-import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
+import {
+  actionExecutionContext,
+  type ActionExecutionStore,
+  currentActionContextOf,
+} from "./context.js";
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
 import { createLogger } from "../../logger.js";
 import { currentSessionId } from "../../telemetry-context.js";
@@ -1210,31 +1210,28 @@ export class ActionEngine {
       runtimeObserver: observer,
     };
     let acceptingEvents = true;
-    const executionContext: ActionExecutionContext = {
-      emitActionEvent: (event) => {
-        if (!acceptingEvents) {
-          log.warn("action emitted an event after its handler settled", {
-            action: invocation.name,
-            executionId: invocation.executionId,
-            eventType: event.type,
-          });
-          return;
-        }
-        const normalized = normalizeActionEvent(event);
-        this.emitRuntimeEvent(observer, {
-          type: "action_event",
-          event: normalized,
-          sourceExecutionId: invocation.executionId,
+    const emit = (event: ActionEvent) => {
+      if (!acceptingEvents) {
+        log.warn("action emitted an event after its handler settled", {
+          action: invocation.name,
+          executionId: invocation.executionId,
+          eventType: event.type,
         });
-        this.emitActionInvocationEvent(actionEventObserver, normalized);
-      },
+        return;
+      }
+      const normalized = normalizeActionEvent(event);
+      this.emitRuntimeEvent(observer, {
+        type: "action_event",
+        event: normalized,
+        sourceExecutionId: invocation.executionId,
+      });
+      this.emitActionInvocationEvent(actionEventObserver, normalized);
     };
+    const run: ActionRun = { ...currentActionContextOf(store), emit, emitActionEvent: emit };
     try {
       onRootAccepted?.();
       return await runWithHookInvocationContext(invocation.context?.hookInvocationContext, () =>
-        actionExecutionContext.run(store, () =>
-          invocation.action.execute(invocation.args, executionContext),
-        ),
+        actionExecutionContext.run(store, () => invocation.action.execute(invocation.args, run)),
       );
     } finally {
       acceptingEvents = false;

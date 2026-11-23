@@ -20,7 +20,7 @@ import {
   type SubscriberHandler,
 } from "../apps/state.js";
 import type { ArtifactMetadata } from "../apps/types.js";
-import { createRomeAppContext, type RomeAppContext } from "../apps/context.js";
+import { createRomeAppContext, type RomeAppContext, withHostDeps } from "../apps/context.js";
 import {
   importModuleWithCacheBuster,
   instantiateActionFromDirectory,
@@ -60,9 +60,10 @@ export function assertNoAppActionLoadFailures(
   );
 }
 
-export type AppActionRuntimeDeps<TShared = Record<string, unknown>> = TShared & {
-  appContext: RomeAppContext;
-};
+export type AppActionRuntimeDeps<TShared = Record<string, unknown>> = TShared &
+  RomeAppContext & {
+    appContext: RomeAppContext;
+  };
 
 type AppActionRecord = {
   config: ActionConfig;
@@ -119,14 +120,23 @@ function createAppActionRuntimeDeps(
   catalog: AppCatalog,
   deps: Record<string, unknown>,
   services: AppActionServices,
-): AppActionRuntimeDeps<Record<string, unknown>> {
+): AppActionRuntimeDeps<object> {
   const app = makeAppLookup(catalog)(record.metadata.ownerId);
   if (!app) {
     throw new Error(`App "${record.metadata.ownerId}" is not resolved in the catalog`);
   }
 
+  const ctx = createRomeAppContext(app, {
+    catalog,
+    db: services.db,
+    actionEngine: services.actionEngine,
+    routinesRepo: services.routinesRepo,
+    repositories: services.repositories,
+    favorService: services.favorService,
+    appConnections: services.appConnections,
+  });
   return withRemovedMembers(
-    {
+    withHostDeps(ctx, {
       ...deps,
       ...(record.metadata.ownerId === "system" && services.hostExecution
         ? { hostExecution: services.hostExecution }
@@ -140,16 +150,7 @@ function createAppActionRuntimeDeps(
       ...(record.metadata.ownerId === "system" && services.agentNames
         ? { agentNames: services.agentNames }
         : {}),
-      appContext: createRomeAppContext(app, {
-        catalog,
-        db: services.db,
-        actionEngine: services.actionEngine,
-        routinesRepo: services.routinesRepo,
-        repositories: services.repositories,
-        favorService: services.favorService,
-        appConnections: services.appConnections,
-      }),
-    } satisfies AppActionRuntimeDeps<Record<string, unknown>>,
+    }) satisfies AppActionRuntimeDeps<object>,
     REMOVED_ACTION_DEPS,
   );
 }

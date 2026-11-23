@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import {
   setCurrentActionContextResolver,
   setCurrentActionContextRunner,
+  type CurrentActionContext,
   type CurrentActionContextPatch,
 } from "@rome-os/app-runtime";
 import type { ActionEngine } from "./engine.js";
@@ -40,10 +41,11 @@ export const actionExecutionContext = new AsyncLocalStorage<ActionExecutionStore
 
 setCurrentActionContextResolver(() => {
   const store = actionExecutionContext.getStore();
-  if (!store) {
-    return undefined;
-  }
+  return store ? currentActionContextOf(store) : undefined;
+});
 
+/** What a run's store says about the run, as apps read it. */
+export function currentActionContextOf(store: ActionExecutionStore): CurrentActionContext {
   return {
     initiator: store.initiator,
     actorKind: store.actor?.kind,
@@ -60,7 +62,7 @@ setCurrentActionContextResolver(() => {
     channelThreadKey: store.channelThreadKey,
     sharedContext: store.sharedContext,
   };
-});
+}
 
 function mergeSharedContext(
   store: ActionExecutionStore,

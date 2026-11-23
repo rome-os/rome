@@ -8,6 +8,7 @@ import { ChannelMessageHooks } from "./channel-message-hooks.js";
 import { bumpModuleEnvEpoch } from "../apps/actions/module-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ArtifactRef } from "../apps/state.js";
+import type { RomeAppContext } from "../apps/context.js";
 
 const TEST_KEY = "CHANNEL_MESSAGE_RELOAD_PROBE";
 
@@ -78,7 +79,13 @@ function messagesSaid() {
   };
 }
 
-function setup(hooks: ArtifactRef[], options: { mayLoad?: (appId: string) => boolean } = {}) {
+function setup(
+  hooks: ArtifactRef[],
+  options: {
+    mayLoad?: (appId: string) => boolean;
+    contextFor?: (appId: string) => RomeAppContext | undefined;
+  } = {},
+) {
   const heard: Heard = [];
   (globalThis as { heard?: Heard }).heard = heard;
   const said = messagesSaid();
@@ -373,6 +380,31 @@ export function createHook() {
       "channel-message hook defines the removed registerConnection; subscribe through deps.channels in register()",
       { owner: "inbox" },
     );
+  });
+
+  it("hands each hook its own app's context, with the shared deps on it", async () => {
+    const seen: Array<{ app: string; said: boolean }> = [];
+    (globalThis as { seen?: typeof seen }).seen = seen;
+    const dir = await hookModule(`
+export function createHook(ctx) {
+  return {
+    async register() {
+      globalThis.seen.push({ app: ctx.app.id, said: typeof ctx.messagesSaid.subscribe === "function" });
+    },
+  };
+}
+`);
+    const t = setup([artifact("alpha", dir), artifact("beta", dir)], {
+      contextFor: (appId) => ({ app: { id: appId } }) as unknown as RomeAppContext,
+    });
+
+    await t.hooks.start();
+
+    expect(seen.sort((a, b) => a.app.localeCompare(b.app))).toEqual([
+      { app: "alpha", said: true },
+      { app: "beta", said: true },
+    ]);
+    delete (globalThis as { seen?: unknown }).seen;
   });
 
   it("tells a hook built against SDK 0.6 that deps.talkRouter is gone", async () => {

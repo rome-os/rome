@@ -388,6 +388,29 @@ export function createRomeAppContext(
   };
 }
 
+/**
+ * `ctx` with the host's other deps on it, for a factory that takes one object:
+ * an action's `createAction(config, ctx)` or a hook's `createHook(ctx)`. A dep
+ * never replaces a member of `ctx`. `appContext` names `ctx` itself, for apps
+ * that read the context there.
+ */
+export function withHostDeps<T extends object>(
+  ctx: RomeAppContext,
+  deps: T,
+): RomeAppContext & T & { appContext: RomeAppContext } {
+  for (const [name, value] of Object.entries(deps)) {
+    if (name in ctx) continue;
+    Object.defineProperty(ctx, name, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  Object.defineProperty(ctx, "appContext", { value: ctx, enumerable: true, configurable: true });
+  return ctx as RomeAppContext & T & { appContext: RomeAppContext };
+}
+
 function toRomeAppDefinition(app: ResolvedApp): SdkRomeAppDefinition {
   return {
     id: app.manifest.id,
