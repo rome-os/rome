@@ -116,6 +116,7 @@ struct SettingsScreen: View {
     let onInstances: () -> Void
     let onConnections: () -> Void
     var onAIModel: () -> Void = {}
+    var onSharedLinks: () -> Void = {}
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var model
@@ -212,9 +213,7 @@ struct SettingsScreen: View {
                 SettingsGroup {
                     // Every link of the signed-in person, from all their
                     // chats: no chat screen lists them.
-                    Button {
-                        Task { await workspace.sharedLinks.open() }
-                    } label: {
+                    Button(action: onSharedLinks) {
                         SettingsRow(systemImage: "link", title: "Shared links") {
                             Image(systemName: "chevron.right")
                                 .romeFont(13, .semibold)
@@ -307,9 +306,6 @@ struct SettingsScreen: View {
                 .presentationBackground(Palette.sheet)
                 .presentationCornerRadius(22)
         }
-        .sharedLinksSheet(workspace.sharedLinks)
-        // Closed with Settings, so it never comes back with it.
-        .onDisappear { workspace.sharedLinks.shows = false }
     }
 
     private var accountCard: some View {

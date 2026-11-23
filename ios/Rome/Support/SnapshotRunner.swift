@@ -356,11 +356,9 @@ enum SnapshotRunner {
                 model.debugCommand = .route([.taskChat(chatId: "chat-notion", title: "同步 Notion 数据库")])
             }
             await capture("11-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([]) }
-            await capture("11b-settings-shared-links", style: styleName, in: directory, wait: 1.2) {
-                Task { await model.workspace?.sharedLinks.open() }
+            await capture("11b-settings-shared-links", style: styleName, in: directory, wait: 1.5) {
+                model.debugCommand = .settings([.sharedLinks])
             }
-            model.workspace?.sharedLinks.shows = false
-            try? await Task.sleep(for: .seconds(0.6))
             // The AI Tools row in each state, then its page and the two logins.
             for (name, preview) in [("11c-settings-ai-ready", DemoBackend.AIModelPreview.ready), ("11d-settings-ai-paused", .paused), ("11e-settings-ai-login", .needsLogin), ("11f-settings-ai-not-set-up", .notSetUp), ("11g-settings-ai-credits", .credits)] {
                 await capture(name, style: styleName, in: directory, wait: 1.2) {

@@ -255,8 +255,7 @@ private let twoTurns = [
         ]
         let workspace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-share-settings-\(UUID().uuidString)/Drafts"), instance: "t"))
         defer { workspace.stop() }
-        await workspace.sharedLinks.open()
-        #expect(workspace.sharedLinks.shows)
+        await workspace.sharedLinks.load()
         #expect(backend.sharesListed == 1)
         #expect(workspace.sharedLinks.links?.map(\.id) == ["b", "a"])
         #expect(workspace.sharedLinks.links?.map(\.chatName) == ["Chat", "Kyoto"])

@@ -5253,12 +5253,12 @@
         }
       }
     },
-    "Select text" : {
+    "Select" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选择文本"
+            "value" : "选择"
           }
         }
       }
