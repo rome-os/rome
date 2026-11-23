@@ -95,6 +95,13 @@ import Testing
     }
 
     private func exercise(y: CGFloat, count: Int, width: CGFloat, reduced: Bool = false, agent: Bool = false, interrupted: Bool = false, longRows: Bool = false, expandSource: Bool = true, pinned: Bool = false) async throws {
+        let scenario = "y=\(y),count=\(count),width=\(width),agent=\(agent),pinned=\(pinned),reduced=\(reduced),interrupted=\(interrupted)"
+        let started = ContinuousClock.now
+        func checkpoint(_ phase: String) {
+            print("THREAD_FOCUS \(scenario) \(phase) elapsed=\(started.duration(to: .now))")
+        }
+        checkpoint("start")
+        defer { checkpoint("finished") }
         let backend = FakeBackend()
         backend.mainChat = ConciergeSessionInfo(id: "concierge", unread: 0)
         if pinned {
@@ -151,6 +158,7 @@ import Testing
         window.isHidden = false
         defer { window.isHidden = true; window.rootViewController = nil; window.windowScene = nil }
         try await Task.sleep(for: .milliseconds(450))
+        checkpoint("main-layout")
         let mainList = try #require(list(host.view, "transcript"))
         if pinned {
             #expect(descendants(mainList).contains { $0.accessibilityIdentifier == "transcript.footer" }, "Require a real main footer cell before testing its visibility")
@@ -193,6 +201,7 @@ import Testing
         // taking its pointer anchor, as the actual quote action does.
         store.focusPosition.pause()
         let pressedY = try bubbleY(mainList, store: store, row: row.id)
+        checkpoint("pressed=\(pressedY) offset=\(mainList.contentOffset) input=\(inputFrame)")
 
         #expect(abs(pressedY - y) < 1, "The actual pointer test must start at the requested Y")
         if longRows {
@@ -232,6 +241,7 @@ import Testing
         var sawPictures = false
         var fadingMain = Set<String>()
         func sample(_ phase: String) throws {
+            checkpoint("\(phase) sample=\(samples) handoffs=\(store.focusPosition.handoffs) transitioning=\(store.focusPosition.transitioning) mainAlpha=\(mainList.alpha)/\(String(describing: mainList.layer.presentation()?.opacity))")
             let focusList = list(host.view, "reply-chain-transcript")
             if pinned {
                 #expect(!descendants(focusList ?? UIView()).contains { $0.accessibilityIdentifier == "transcript.footer" }, "The focused collection never owns the main pinned hint")
@@ -321,6 +331,7 @@ import Testing
             #expect(store.threadFocus == nil, "Late response cannot reopen an interrupted focus")
             return
         }
+        checkpoint("entry-complete")
         let focus = try #require(store.threadFocus)
         let focused = try #require(list(host.view, "reply-chain-transcript"))
         #expect(focus.initial == .loading && focused.alpha == 1)
@@ -358,9 +369,11 @@ import Testing
             readingRow = try #require(readingCell?.accessibilityIdentifier)
         }
         let readingY = try bubbleY(focused, store: focus.transcript, row: readingRow)
+        checkpoint("release-http")
         release?.resume()
         await opening.value
         try await Task.sleep(for: .milliseconds(150))
+        checkpoint("hydrated")
         #expect(focus.initial == nil && focus.transcript.message(missing) != nil)
         let hydratedY = try bubbleY(focused, store: focus.transcript, row: readingRow)
         #expect(abs(hydratedY - readingY) < 1, "Hydration preserves CURRENT reading row \(readingRow): \(readingY) → \(hydratedY)")
@@ -381,6 +394,7 @@ import Testing
         focused.delegate?.scrollViewWillBeginDragging?(focused)
         focused.contentOffset.y += try bubbleY(focused, store: focus.transcript, row: row.id) - pressedY
         focused.delegate?.scrollViewDidEndDragging?(focused, willDecelerate: false)
+        checkpoint("close-requested")
         store.closeThread()
         for _ in 0..<22 {
             try sample("close")
@@ -393,6 +407,7 @@ import Testing
         #expect(input.placeholder == String(localized: "Message"))
         #expect(input.convert(input.bounds, to: nil) == inputFrame)
         #expect(descendants(host.view).compactMap { $0 as? PastingTextView }.first === input)
+        checkpoint("closed fading=\(fadingMain) directions=\(directions)")
         #expect(sawPictures, "The same hosted content must actually travel through the common layer")
         if pinned {
             #expect(fadingMain == ["open", "close"], "The main footer fades with its own list in both directions, never hard-pops at handoff")
