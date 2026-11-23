@@ -18,7 +18,6 @@ import { ComputerUseError, parseComputerUseHello } from "./protocol.js";
 
 const MAX_RPC_BYTES = 8 * 1024 * 1024;
 const runFile = promisify(execFile);
-const require = createRequire(import.meta.url);
 const DARWIN_ARM64_PACKAGE = "@rome-os/node-core-darwin-arm64";
 
 export interface ComputerUseNative {
@@ -39,12 +38,20 @@ export function defaultComputerUseStateDir(): string {
 }
 
 function packagedComputerUseAppPath(): string {
-  try {
-    const manifestPath = require.resolve(`${DARWIN_ARM64_PACKAGE}/package.json`);
-    return join(dirname(manifestPath), "dist", "native", "Rome Computer Use.app");
-  } catch {
+  // Desktop bundles this module to CJS with esbuild (where import.meta is {}),
+  // and always supplies bundledAppPath. Resolve lazily so CJS module load never throws.
+  if (typeof import.meta.url === "string") {
+    try {
+      const manifestPath = createRequire(import.meta.url).resolve(
+        `${DARWIN_ARM64_PACKAGE}/package.json`,
+      );
+      return join(dirname(manifestPath), "dist", "native", "Rome Computer Use.app");
+    } catch {
+      // Fall back when the optional darwin-arm64 package is not installed.
+    }
     return fileURLToPath(new URL("../native/Rome Computer Use.app", import.meta.url));
   }
+  return join("native", "Rome Computer Use.app");
 }
 
 export function computerUseAppPath(options: NativeBridgeOptions): string {

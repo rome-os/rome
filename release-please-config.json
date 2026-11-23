@@ -10,9 +10,13 @@
     {
       "type": "linked-versions",
       "groupName": "node-core",
-      "components": ["node-core", "node-core-darwin-arm64"]
+      "components": ["node-core", "node-core-darwin-arm64"],
+      "merge": false
     },
-    "node-workspace"
+    {
+      "type": "node-workspace",
+      "merge": false
+    }
   ],
   "packages": {
     "packages/app-runtime-sdk": {
