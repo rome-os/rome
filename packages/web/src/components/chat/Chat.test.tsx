@@ -555,6 +555,7 @@ rs.mock("@/lib/chat-api", () => {
 function pane(children: ReactNode) {
   const host: ToolTraceHost = {
     outlet: null,
+    actions: null,
     paneOpen: !appsPanel.collapsed,
     setPaneCollapsed: appsPanel.setCollapsed,
     reveal: rs.fn(),
@@ -726,6 +727,7 @@ describe("Chat trace in the tool pane", () => {
   function host(outlet: HTMLElement | null = null) {
     return {
       outlet,
+      actions: null,
       paneOpen: true,
       setPaneCollapsed: rs.fn(),
       reveal: rs.fn(),
@@ -2846,6 +2848,7 @@ describe("Chat Concierge empty state", () => {
           <ToolTraceContext.Provider
             value={{
               outlet: null,
+              actions: null,
               paneOpen,
               setPaneCollapsed: rs.fn(),
               reveal: rs.fn(),
@@ -3030,6 +3033,7 @@ describe("Chat Concierge empty state", () => {
             <ToolTraceContext.Provider
               value={{
                 outlet: null,
+                actions: null,
                 paneOpen,
                 setPaneCollapsed: rs.fn(),
                 reveal: rs.fn(),
@@ -3342,6 +3346,7 @@ describe("Chat Concierge empty state", () => {
           <ToolTraceContext.Provider
             value={{
               outlet: null,
+              actions: null,
               paneOpen,
               setPaneCollapsed: rs.fn(),
               reveal: rs.fn(),
@@ -3371,7 +3376,7 @@ describe("Chat Concierge empty state", () => {
     const at = (active: boolean) => (
       <MemoryRouter>
         {pane(
-          <TaskChatInPaneContext.Provider value={{ active, onClose: rs.fn() }}>
+          <TaskChatInPaneContext.Provider value={{ active, onClose: rs.fn(), actions: null }}>
             <Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />
           </TaskChatInPaneContext.Provider>,
         )}
@@ -3385,6 +3390,31 @@ describe("Chat Concierge empty state", () => {
     expect(conciergeStopVoiceInput).not.toHaveBeenCalled();
     view.rerender(at(false));
     await waitFor(() => expect(conciergeStopVoiceInput).toHaveBeenCalledOnce());
+  });
+
+  it("draws no header in the side pane's tab, and puts its ⋯ in the tab row while it shows", async () => {
+    const actions = document.createElement("div");
+    document.body.append(actions);
+    const at = (shown: boolean) => (
+      <MemoryRouter>
+        {pane(
+          <TaskChatInPaneContext.Provider
+            value={{ active: shown, onClose: rs.fn(), actions: shown ? actions : null }}
+          >
+            <Chat sessionId="session-1" />
+          </TaskChatInPaneContext.Provider>,
+        )}
+      </MemoryRouter>
+    );
+    twoTurns();
+    const view = render(at(true), { wrapper: withQueries() });
+    await screen.findAllByTestId("user-row");
+    // The tab names the chat: no badge, no name tag, no header to clear.
+    expect(document.querySelector("[data-concierge-header]")).toBeNull();
+    expect(actions.querySelector("[data-chat-header-actions]")).not.toBeNull();
+    view.rerender(at(false));
+    expect(actions.querySelector("[data-chat-header-actions]")).toBeNull();
+    actions.remove();
   });
 
   it("stops listening when the task list's sheet covers the composer", async () => {
