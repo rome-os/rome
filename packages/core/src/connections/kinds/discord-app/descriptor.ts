@@ -108,7 +108,7 @@ export function makeDiscordAppSetup(deps: DiscordAppDescriptorDeps): SetupFn {
       }),
       summary: {
         title: "Discord connected",
-        body: ["Add Rome to a server you manage, then message it there or in a direct message."],
+        body: ["Add Rome to a server you manage, then mention it there."],
       },
     };
   };
