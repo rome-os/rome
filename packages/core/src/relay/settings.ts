@@ -186,12 +186,7 @@ export function redactRelaySetting(value: unknown): unknown {
   return out;
 }
 
-export type RelayRuntimeState =
-  | "connected"
-  | "notConnected"
-  | "reconnecting"
-  | "retrying"
-  | "blocked";
+export type RelayRuntimeState = "connected" | "notConnected" | "reconnecting" | "retrying";
 
 /** Guardian-facing relay status for the Integrations tab. Never includes the drainKey. */
 export interface RelayStatus {
@@ -217,9 +212,8 @@ export async function buildRelayStatus(
   const configured = isCompleteRelaySetting(setting);
   // v1 is single-mailbox, so the first connection's health is the relay's health.
   const conn = drainer?.getStatus()[0];
-  const state: RelayRuntimeState = conn?.blocked
-    ? "blocked"
-    : conn?.nextReconnectAt != null
+  const state: RelayRuntimeState =
+    conn?.nextReconnectAt != null
       ? "reconnecting"
       : conn?.retry
         ? "retrying"

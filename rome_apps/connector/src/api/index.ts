@@ -903,13 +903,11 @@ class ComposioApiHandler implements RomeAppApiHandler {
 
     const webhookSecret = await this.settings.get("webhookSecret");
     if (!webhookSecret) {
-      // Not-yet-configured is a transient state, not a rejected request: the
-      // relay drainer ACKs a terminal 4xx (permanently dropping the event), so
-      // answer 503 to keep buffered deliveries queued until the guardian
-      // finishes connecting Composio. Signature failures below stay 401 — those
-      // are genuinely terminal.
-      this.ctx.log.warn("webhook hit before connect", {});
-      return new Response(null, { status: 503 });
+      // Without a Composio account no webhook can be verified, and none will
+      // become verifiable within the drain's retries. Answer 2xx so the drain
+      // drops it at once instead of holding the mailbox through its retries.
+      this.ctx.log.warn("webhook dropped: Composio is not connected", {});
+      return new Response(null, { status: 202 });
     }
 
     const rawBytes = request.body ?? new Uint8Array(0);

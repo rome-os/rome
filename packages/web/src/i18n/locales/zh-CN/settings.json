@@ -848,8 +848,7 @@
         "notConnected": "未连接",
         "notConfigured": "未配置",
         "reconnecting": "正在重连",
-        "retrying": "正在重试投递",
-        "blocked": "投递已阻塞"
+        "retrying": "正在重试投递"
       },
       "notConfiguredHint": "未存储中继凭据，因此传入的 Webhook 不会送达本实例。",
       "depositUrl": "投递 URL",
@@ -859,10 +858,6 @@
       "backlog": "积压事件",
       "nextAttempt": "下次尝试",
       "failure": "最近失败",
-      "resume": "立即重试",
-      "resuming": "正在重试…",
-      "resumed": "已恢复投递重试。",
-      "resumeFailed": "无法恢复投递重试。",
       "copy": "复制",
       "copied": "已复制"
     },

@@ -25,15 +25,14 @@ export class SlackSetupHolds {
     return this.open > 0;
   }
 
-  /** A hold for one setup. `released` runs once, on the first release. */
-  hold(released: () => void): () => void {
+  /** A hold for one setup, released once by the function it returns. */
+  hold(): () => void {
     let done = false;
     this.open++;
     return () => {
       if (done) return;
       done = true;
       this.open--;
-      released();
     };
   }
 }

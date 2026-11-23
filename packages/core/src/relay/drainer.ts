@@ -3,6 +3,17 @@ import { createLogger } from "../logger.js";
 import type { RomeAppCaller } from "@rome-os/app-runtime";
 import { RELAY_DRAINED_HEADER, stripInternalHeaders, type ServerFrame } from "./protocol.js";
 
+// The drainer is the relay's trusted client. Its contract: it acknowledges
+// every event it receives within DELIVERY_BUDGET_MS of its first attempt,
+// whatever the local handler does, so the relay needs no budget of its own. Handlers are untrusted: one may fail, answer anything, throw or
+// never return, and none of that holds the mailbox past the budget. Within the
+// budget it delivers in seq order and acks only after a 2xx, a terminal 4xx, or
+// giving up, so delivery is at-least-once and a handler must be idempotent. An
+// attempt that outlasts its timeout is aborted through its signal; a handler
+// that ignores the signal keeps running while the next attempt starts, so it
+// may also see the same event twice at once. The budget lives in memory, so a
+// restart starts it again for the event the relay replays.
+
 const log = createLogger("relay-drainer");
 
 // A socket that misses one pong is terminated at the next ping, so a stalled
@@ -11,12 +22,16 @@ const log = createLogger("relay-drainer");
 // and bills Durable Object duration.
 const PING_INTERVAL_MS = 30_000;
 const HANDSHAKE_TIMEOUT_MS = 10_000;
-const DELIVERY_RETRY_DELAYS_MS = [1_000, 5_000, 30_000] as const;
-/** How many times a drain delivers one event before it holds it until resumed. */
+const DELIVERY_RETRY_DELAYS_MS = [1_000, 5_000, 30_000, 60_000] as const;
+/** The most times a drain delivers one event before it drops it. */
 export const DELIVERY_ATTEMPTS = 1 + DELIVERY_RETRY_DELAYS_MS.length;
-// Node clamps larger setTimeout values to 1ms. Keep status and the scheduled
-// timer aligned instead of turning a large Retry-After into an immediate retry.
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
+/**
+ * How long a drain keeps delivering one event, from its first attempt, before
+ * it acks and drops it.
+ */
+export const DELIVERY_BUDGET_MS = 120_000;
+/** How long one attempt may take before it counts as failed. */
+const DELIVERY_ATTEMPT_TIMEOUT_MS = 30_000;
 
 /** Reconnect timing. Injectable so reconnect tests can compress the schedule. */
 export interface DrainTiming {
@@ -45,7 +60,7 @@ export const DEFAULT_DRAIN_TIMING: DrainTiming = {
 
 // 4xx statuses that are commonly transient — the consumer may accept the same
 // payload on a later replay (timeout, lock conflict, rate limit). Treat these
-// like a 5xx (bounded retry, then block un-acked) instead of dropping. Every
+// like a 5xx (bounded retry, then drop) instead of dropping at once. Every
 // other 4xx is a terminal client error (e.g. 401 bad signature) and is acked so
 // it doesn't poison-loop and head-of-line block every later seq.
 const RETRYABLE_4XX = new Set([408, 409, 425, 429]);
@@ -75,14 +90,16 @@ export interface DrainEvent {
  * semantics: only 2xx counts as handled (ack); a terminal 4xx is permanently
  * rejected (ack to drop and avoid a poison-redelivery loop); everything else —
  * 5xx, a transient 4xx (see RETRYABLE_4XX: 408/409/425/429), a non-2xx like a
- * 3xx that no app code handled, or a thrown error — is retried a bounded number
- * of times on the same socket. It then blocks, still un-acked, until a guardian
- * explicitly resumes it. A transport reconnect preserves the current delivery
- * retry budget and deadline.
+ * 3xx that no app code handled, a thrown error, or an attempt that outlasts its
+ * timeout — is retried within DELIVERY_BUDGET_MS, then acked and dropped, so
+ * one event never holds the mailbox. A transport reconnect preserves the
+ * current delivery's attempts and deadline.
  */
 export type DeliverFn = (
   drain: RelayDrain,
   event: DrainEvent,
+  /** Aborted when the attempt times out; the drain stops waiting either way. */
+  signal: AbortSignal,
 ) => Promise<{ status: number; retryAfter?: string | null }>;
 
 /** App-api request shape (structurally `RomeAppApiRequest`) the replay dispatches. */
@@ -153,10 +170,6 @@ export interface RelayDrainStatus {
     seq: number;
     nextAttemptAt: number;
   } | null;
-  /** Retry budget exhausted; the event remains un-acked until it is resumed. */
-  blocked: {
-    seq: number;
-  } | null;
   /** Latest non-2xx or thrown delivery, including terminal drops. */
   lastDeliveryFailure: RelayFailure | null;
 }
@@ -211,14 +224,6 @@ export class RelayDrainer {
     return this.connections.map((conn) => conn.status());
   }
 
-  /**
-   * Re-arm any delivery whose short retry budget was exhausted. This is a
-   * guardian-controlled recovery action: it never discards the un-acked event.
-   */
-  resumeBlocked(): boolean {
-    return this.connections.some((conn) => conn.resumeBlocked());
-  }
-
   async stop(): Promise<void> {
     await Promise.all(this.connections.map((conn) => conn.stop()));
     this.connections.length = 0;
@@ -234,12 +239,11 @@ class DrainConnection {
   // Arms on open, fires after timing.stableResetMs: only then has the
   // connection proven stable enough to earn a backoff reset.
   private stableTimer: ReturnType<typeof setTimeout> | null = null;
-  // A retry or blocked event deliberately holds this queue. The relay prunes
-  // every row <= the acked seq, so no later event may overtake a failed one.
+  // A retrying event deliberately holds this queue. The relay prunes every
+  // row <= the acked seq, so no later event may overtake a failed one.
   private queue: Promise<void> = Promise.resolve();
   private deliveryRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private deliveryRetryWaiter: ((completed: boolean) => void) | null = null;
-  private blockedWaiter: ((resumed: boolean) => void) | null = null;
   // Surfaced to the dashboard via RelayDrainer.getStatus().
   private connected = false;
   private lastTransportError: string | null = null;
@@ -250,8 +254,12 @@ class DrainConnection {
   private deliveredCount = 0;
   // One un-acked event owns the queue. Keeping its retry budget independent of
   // the WebSocket makes a transport flap unable to reset bounded retries.
-  private delivery: { seq: number; attempts: number; retryAt: number | null } | null = null;
-  private blocked: RelayDrainStatus["blocked"] = null;
+  private delivery: {
+    seq: number;
+    attempts: number;
+    retryAt: number | null;
+    deadline: number;
+  } | null = null;
   private lastDeliveryFailure: RelayDrainStatus["lastDeliveryFailure"] = null;
 
   constructor(
@@ -270,8 +278,8 @@ class DrainConnection {
     this.stopped = true;
     this.clearTimers();
     // Let a delivery that is already in flight finish and ack on the still-open
-    // socket. Retry waits and blocked gates are cancelled above, so shutdown
-    // never waits through a retry budget or for a guardian to press Resume.
+    // socket. Retry waits are cancelled above, so shutdown never waits through
+    // a retry budget.
     await this.queue.catch(() => {});
     this.connected = false;
     this.connectedSince = null;
@@ -281,13 +289,6 @@ class DrainConnection {
       // already closing
     }
     this.ws = null;
-  }
-
-  resumeBlocked(): boolean {
-    if (this.stopped || !this.blocked) return false;
-    this.blocked = null;
-    this.blockedWaiter?.(true);
-    return true;
   }
 
   status(): RelayDrainStatus {
@@ -305,7 +306,6 @@ class DrainConnection {
         this.delivery?.retryAt != null
           ? { seq: this.delivery.seq, nextAttemptAt: this.delivery.retryAt }
           : null,
-      blocked: this.blocked,
       lastDeliveryFailure: this.lastDeliveryFailure,
     };
   }
@@ -432,15 +432,16 @@ class DrainConnection {
       body: frame.body != null ? Buffer.from(frame.body, "base64") : null,
       path: frame.path,
     };
-    if (this.delivery && this.delivery.seq !== event.seq) return;
-    // The previous socket may have closed after the retry budget was exhausted.
-    // Keep the poison event blocked across that transport reconnect — otherwise
-    // a flapping relay could silently turn bounded delivery retries into an
-    // unbounded loop. Later frames remain behind this lowest un-acked seq.
-    if (this.blocked) {
-      if (event.seq !== this.blocked.seq) return;
-      const resumed = await this.waitForResume();
-      if (!resumed || this.stopped || !this.isCurrentSocket(source)) return;
+    if (this.delivery && event.seq < this.delivery.seq) return;
+    if (this.delivery && event.seq > this.delivery.seq) {
+      // The relay replays from the lowest un-acked event, so this should not
+      // happen. If it does, follow rather than wait for an event that is gone.
+      log.warn("relay skipped past an event the drain was delivering", {
+        target: this.drain.targetAppId,
+        seq: this.delivery.seq,
+        next: event.seq,
+      });
+      this.delivery = null;
     }
     await this.deliverWithRetries(event, source);
   }
@@ -449,7 +450,7 @@ class DrainConnection {
     const delivery =
       this.delivery?.seq === event.seq
         ? this.delivery
-        : { seq: event.seq, attempts: 0, retryAt: null };
+        : { seq: event.seq, attempts: 0, retryAt: null, deadline: Date.now() + DELIVERY_BUDGET_MS };
     this.delivery = delivery;
 
     if (delivery.retryAt != null) {
@@ -462,13 +463,25 @@ class DrainConnection {
     }
 
     while (!this.stopped && this.isCurrentSocket(source)) {
+      // A reconnect can outlast the budget; the replayed event is then dropped.
+      if (delivery.attempts > 0 && Date.now() >= delivery.deadline) {
+        this.drop(event.seq, delivery.attempts, source);
+        return;
+      }
       delivery.attempts += 1;
       let status: number | null = null;
       let error: string | null = null;
       let retryAfter: string | null | undefined;
 
       try {
-        const result = await this.deliver(this.drain, event);
+        const timeoutMs = Math.max(
+          0,
+          Math.min(DELIVERY_ATTEMPT_TIMEOUT_MS, delivery.deadline - Date.now()),
+        );
+        const result = await withTimeout(
+          (signal) => this.deliver(this.drain, event, signal),
+          timeoutMs,
+        );
         status = result.status;
         retryAfter = result.retryAfter;
       } catch (err) {
@@ -479,7 +492,6 @@ class DrainConnection {
         this.deliveredCount += 1;
         this.lastEventAt = Date.now();
         this.delivery = null;
-        this.blocked = null;
         this.ack(event.seq, source);
         return;
       }
@@ -506,27 +518,14 @@ class DrainConnection {
 
       const retryIndex = delivery.attempts - 1;
       const retryDelay = DELIVERY_RETRY_DELAYS_MS[retryIndex];
-      if (retryDelay === undefined) {
-        this.delivery = null;
-        this.blocked = {
-          seq: event.seq,
-        };
-        log.error("relay drain delivery blocked after bounded retries", {
-          target: this.drain.targetAppId,
-          seq: event.seq,
-          attempts: delivery.attempts,
-          status,
-          error,
-        });
-        const resumed = await this.waitForResume();
-        if (!resumed || this.stopped || !this.isCurrentSocket(source)) return;
-        delivery.attempts = 0;
-        delivery.retryAt = null;
-        this.delivery = delivery;
-        continue;
+      const delayMs =
+        retryDelay === undefined ? null : Math.max(retryDelay, retryAfterMs(retryAfter));
+      // A wait that reaches the deadline could only end in a drop, so drop now.
+      if (delayMs === null || now + delayMs >= delivery.deadline) {
+        this.drop(event.seq, delivery.attempts, source, { status, error });
+        return;
       }
 
-      const delayMs = Math.max(retryDelay, retryAfterMs(retryAfter));
       delivery.retryAt = now + delayMs;
       log.warn("relay drain delivery retry scheduled", {
         target: this.drain.targetAppId,
@@ -540,6 +539,23 @@ class DrainConnection {
       if (!completed || this.stopped || !this.isCurrentSocket(source)) return;
       delivery.retryAt = null;
     }
+  }
+
+  /** The budget is spent: ack to drop the event so later events keep flowing. */
+  private drop(
+    seq: number,
+    attempts: number,
+    source: WebSocket,
+    last: { status: number | null; error: string | null } = { status: null, error: null },
+  ): void {
+    this.delivery = null;
+    log.error("relay drain delivery dropped after its retries", {
+      target: this.drain.targetAppId,
+      seq,
+      attempts,
+      ...last,
+    });
+    this.ack(seq, source);
   }
 
   private isCurrentSocket(source: WebSocket): boolean {
@@ -570,23 +586,9 @@ class DrainConnection {
     });
   }
 
-  private waitForResume(): Promise<boolean> {
-    return new Promise((resolve) => {
-      const finish = (resumed: boolean) => {
-        if (this.blockedWaiter === finish) this.blockedWaiter = null;
-        resolve(resumed);
-      };
-      this.blockedWaiter = finish;
-    });
-  }
-
   private cancelDeliveryWaits(preserveDeliveryState = false): void {
     this.deliveryRetryWaiter?.(false);
-    this.blockedWaiter?.(false);
-    if (!preserveDeliveryState) {
-      this.delivery = null;
-      this.blocked = null;
-    }
+    if (!preserveDeliveryState) this.delivery = null;
   }
 
   private scheduleReconnect(minDelayMs?: number): void {
@@ -666,11 +668,23 @@ class DrainConnection {
 function retryAfterMs(value: string | null | undefined): number {
   if (!value) return 0;
   const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return Math.min(MAX_TIMER_DELAY_MS, Math.ceil(seconds * 1_000));
-  }
+  // The budget bounds every wait, so a Retry-After past it just ends the
+  // delivery; no clamp to Node's timer maximum is needed.
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1_000);
   const retryAt = Date.parse(value);
-  return Number.isFinite(retryAt)
-    ? Math.min(MAX_TIMER_DELAY_MS, Math.max(0, retryAt - Date.now()))
-    : 0;
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : 0;
+}
+
+/** Rejects and aborts `work`'s signal when it takes longer than `ms`. */
+function withTimeout<T>(work: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`delivery timed out after ${ms} ms`);
+      controller.abort(error);
+      reject(error);
+    }, ms);
+  });
+  return Promise.race([work(controller.signal), timeout]).finally(() => clearTimeout(timer));
 }

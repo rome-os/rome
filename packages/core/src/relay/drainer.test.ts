@@ -18,6 +18,7 @@ function startFakeRelay(
   events: Array<{ seq: number; body: string; headers?: Record<string, string> }>,
 ) {
   let ackedUpTo = 0;
+  let skippedTo = 0;
   let connections = 0;
   let protocolPings = 0;
   let lastConnectUrl: string | undefined;
@@ -27,7 +28,7 @@ function startFakeRelay(
     connections++;
     lastConnectUrl = req.url;
     lastAuthHeader = req.headers.authorization;
-    const pending = events.filter((e) => e.seq > ackedUpTo);
+    const pending = events.filter((e) => e.seq > Math.max(ackedUpTo, skippedTo));
     ws.send(JSON.stringify({ type: "ready", backlog: pending.length }));
     for (const e of pending) {
       ws.send(
@@ -66,6 +67,10 @@ function startFakeRelay(
       targetPath: ["webhook"],
     }),
     ackedUpTo: () => ackedUpTo,
+    /** Moves the mailbox past `seq` without an ack, as a relay giving up on it would. */
+    skipTo: (seq: number) => {
+      skippedTo = seq;
+    },
     connections: () => connections,
     protocolPings: () => protocolPings,
     lastConnectUrl: () => lastConnectUrl,
@@ -87,8 +92,8 @@ const DEFAULT_TEST_TIMING = {
   stableResetMs: 60_000,
 } as const;
 
-const FIXED_DELIVERY_RETRY_DELAYS_MS = new Set([1_000, 5_000, 30_000]);
-const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647;
+// 30 s is also the attempt timeout, so sped-up tests time out a handler at once.
+const FIXED_DELIVERY_RETRY_DELAYS_MS = new Set([1_000, 5_000, 30_000, 60_000]);
 
 /** Keep the production retry schedule fixed while making black-box WS tests fast. */
 function speedUpDeliveryRetryTimers(): void {
@@ -199,7 +204,7 @@ describe("RelayDrainer", () => {
     expect(relay.connections()).toBe(1);
   });
 
-  it("preserves a delivery retry budget and deadline across a transport reconnect", async () => {
+  it("preserves a delivery's attempts and next attempt across a transport reconnect", async () => {
     speedUpDeliveryRetryTimers();
     relay = startFakeRelay([{ seq: 1, body: "{}" }]);
     let attempts = 0;
@@ -225,31 +230,29 @@ describe("RelayDrainer", () => {
       nextAttemptAt: firstDeadline,
     });
 
-    await waitFor(() => drainer!.getStatus()[0]?.blocked?.seq === 1);
-    expect(attempts).toBe(4);
+    await waitFor(() => relay!.ackedUpTo() === 1);
+    expect(attempts).toBe(5);
   });
 
-  it("caps a delivery Retry-After at Node's timer maximum", async () => {
-    relay = startFakeRelay([{ seq: 1, body: "{}" }]);
-    const realSetTimeout = globalThis.setTimeout;
-    const scheduledDelays: number[] = [];
-    rs.spyOn(globalThis, "setTimeout").mockImplementation((callback, delay, ...args) => {
-      const delayMs = Number(delay);
-      scheduledDelays.push(delayMs);
-      return realSetTimeout(callback, delayMs > 100_000 ? 60_000 : delay, ...args);
-    });
+  it("drops an event at once when its Retry-After outlasts the delivery budget", async () => {
+    relay = startFakeRelay([
+      { seq: 1, body: "{}" },
+      { seq: 2, body: "{}" },
+    ]);
+    const delivered: number[] = [];
     drainer = new RelayDrainer(
       [relay.drain()],
-      async () => ({ status: 429, retryAfter: "2147484" }),
+      async (_drain, event) => {
+        delivered.push(event.seq);
+        return event.seq === 1 ? { status: 429, retryAfter: "600" } : { status: 200 };
+      },
       DEFAULT_TEST_TIMING,
     );
     drainer.start();
 
-    await waitFor(() => drainer!.getStatus()[0]?.retry?.nextAttemptAt != null);
-    expect(scheduledDelays).toContain(MAX_NODE_TIMER_DELAY_MS);
-    expect(drainer.getStatus()[0]!.retry!.nextAttemptAt - Date.now()).toBeLessThanOrEqual(
-      MAX_NODE_TIMER_DELAY_MS,
-    );
+    await waitFor(() => relay!.ackedUpTo() === 2);
+    expect(delivered).toEqual([1, 2]);
+    expect(drainer.getStatus()[0]?.lastDeliveryFailure).toMatchObject({ seq: 1, status: 429 });
   });
 
   it("retries a non-2xx (3xx redirect) on the same socket", async () => {
@@ -290,67 +293,80 @@ describe("RelayDrainer", () => {
     expect(relay.connections()).toBe(1);
   });
 
-  it("blocks after the bounded retry budget, preserving the event until a guardian resumes it", async () => {
+  it("drops an event after its retries, acking it so the next one flows", async () => {
     speedUpDeliveryRetryTimers();
     relay = startFakeRelay([
       { seq: 1, body: "{}" },
       { seq: 2, body: "{}" },
     ]);
     const delivered: number[] = [];
-    let recovered = false;
     drainer = new RelayDrainer(
       [relay.drain()],
       async (_drain, event) => {
         delivered.push(event.seq);
-        return event.seq === 1 && !recovered ? { status: 503 } : { status: 200 };
+        return event.seq === 1 ? { status: 503 } : { status: 200 };
       },
       DEFAULT_TEST_TIMING,
     );
     drainer.start();
 
-    await waitFor(() => drainer!.getStatus()[0]?.blocked?.seq === 1);
-    const blocked = drainer.getStatus()[0]!;
-    expect(blocked.blocked).toMatchObject({ seq: 1 });
-    expect(blocked.lastDeliveryFailure).toMatchObject({ seq: 1, status: 503 });
-    expect(relay.ackedUpTo()).toBe(0);
-    expect(relay.connections()).toBe(1);
-    expect(delivered).toEqual([1, 1, 1, 1]);
-
-    recovered = true;
-    expect(drainer.resumeBlocked()).toBe(true);
     await waitFor(() => relay!.ackedUpTo() === 2);
     expect(delivered).toEqual([1, 1, 1, 1, 1, 2]);
-    expect(drainer.getStatus()[0]?.blocked).toBeNull();
-    expect(drainer.getStatus()[0]?.deliveredCount).toBe(2);
+    expect(relay.connections()).toBe(1);
+    const status = drainer.getStatus()[0]!;
+    expect(status.lastDeliveryFailure).toMatchObject({ seq: 1, status: 503 });
+    expect(status.deliveredCount).toBe(1);
   });
 
-  it("keeps a blocked event blocked across a transport reconnect", async () => {
+  it("drops an event whose handler never returns, aborting each attempt", async () => {
     speedUpDeliveryRetryTimers();
-    relay = startFakeRelay([{ seq: 1, body: "{}" }]);
-    let attempts = 0;
-    let recovered = false;
+    relay = startFakeRelay([
+      { seq: 1, body: "{}" },
+      { seq: 2, body: "{}" },
+    ]);
+    const delivered: number[] = [];
+    let aborted = 0;
     drainer = new RelayDrainer(
       [relay.drain()],
-      async () => {
-        attempts++;
-        return recovered ? { status: 200 } : { status: 503 };
+      async (_drain, event, signal) => {
+        delivered.push(event.seq);
+        signal.addEventListener("abort", () => aborted++);
+        if (event.seq === 1) return new Promise<never>(() => {});
+        return { status: 200 };
       },
       DEFAULT_TEST_TIMING,
     );
     drainer.start();
 
-    await waitFor(() => drainer!.getStatus()[0]?.blocked?.seq === 1);
+    await waitFor(() => relay!.ackedUpTo() === 2);
+    expect(delivered).toEqual([1, 1, 1, 1, 1, 2]);
+    expect(aborted).toBe(5);
+    expect(drainer.getStatus()[0]?.lastDeliveryFailure?.error).toMatch(/timed out/);
+  });
+
+  it("follows the relay when it moves past an event the drain is still retrying", async () => {
+    relay = startFakeRelay([
+      { seq: 1, body: "{}" },
+      { seq: 2, body: "{}" },
+    ]);
+    const delivered: number[] = [];
+    drainer = new RelayDrainer(
+      [relay.drain()],
+      async (_drain, event) => {
+        delivered.push(event.seq);
+        return event.seq === 1 ? { status: 503, retryAfter: "60" } : { status: 200 };
+      },
+      DEFAULT_TEST_TIMING,
+    );
+    drainer.start();
+
+    await waitFor(() => drainer!.getStatus()[0]?.retry?.seq === 1);
+    relay.skipTo(1);
     for (const socket of relay.wss.clients) socket.close(1001, "transport reset");
-    await waitFor(() => relay!.connections() === 2);
-    await new Promise((resolve) => setTimeout(resolve, 50));
 
-    expect(attempts).toBe(4);
-    expect(drainer.getStatus()[0]?.blocked).toMatchObject({ seq: 1 });
-
-    recovered = true;
-    expect(drainer.resumeBlocked()).toBe(true);
-    await waitFor(() => relay!.ackedUpTo() === 1);
-    expect(attempts).toBe(5);
+    await waitFor(() => relay!.ackedUpTo() === 2);
+    expect(delivered).toEqual([1, 2]);
+    expect(drainer.getStatus()[0]?.retry).toBeNull();
   });
 
   it("reports connected status once the socket opens and clears it after stop", async () => {
