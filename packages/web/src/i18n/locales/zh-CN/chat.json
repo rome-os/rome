@@ -900,5 +900,12 @@
     "untitled": "任务",
     "mainChat": "主对话",
     "backTo": "返回{{name}}"
+  },
+  "pinnedHint": {
+    "kept": "在 {{provider}} 上",
+    "owner": "你选了 {{model}}",
+    "backToDefault": "改回默认",
+    "romeCredits": "Rome 额度",
+    "failed": "没能改回，请重试。"
   }
 }

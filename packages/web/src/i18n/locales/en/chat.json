@@ -900,5 +900,12 @@
     "untitled": "Task",
     "mainChat": "Main chat",
     "backTo": "Back to {{name}}"
+  },
+  "pinnedHint": {
+    "kept": "On {{provider}}",
+    "owner": "You picked {{model}}",
+    "backToDefault": "Back to default",
+    "romeCredits": "Rome credits",
+    "failed": "Could not change it. Try again."
   }
 }

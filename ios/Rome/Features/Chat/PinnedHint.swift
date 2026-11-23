@@ -29,25 +29,28 @@ struct PinnedHintLine: View {
     var body: some View {
         if !isVisitor, let text = PinnedHint.text(store.chatSession) {
             HStack(spacing: 4) {
-                Text(verbatim: text)
-                    .foregroundStyle(Palette.sub)
+                Text(verbatim: "\(text) ·")
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text(verbatim: "·").foregroundStyle(Palette.sub)
                 Button {
                     Task { await store.followDefault() }
                 } label: {
                     Text("Back to default")
-                        .foregroundStyle(Palette.primary)
-                        .frame(minHeight: 32)
+                        .underline(true, color: Palette.faint)
+                        // A 44 pt tap target that takes no more room than the text.
+                        .padding(.vertical, 14)
                         .contentShape(Rectangle())
+                        .padding(.vertical, -14)
                 }
                 .buttonStyle(.plain)
                 .disabled(store.followingDefault)
                 .layoutPriority(1)
             }
-            .romeFont(13)
+            .romeFont(12)
+            .foregroundStyle(Palette.faint)
             .frame(maxWidth: .infinity)
+            // Close to the composer it describes.
+            .padding(.bottom, -4)
             .transition(.opacity)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("pinned-hint")

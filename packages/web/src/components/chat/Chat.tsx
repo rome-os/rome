@@ -54,6 +54,7 @@ import { TraceDrawer, type TraceDrawerTarget } from "@/components/agent-trace/Tr
 import { modelDisplayName } from "@/lib/model-display";
 import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
+import { PinnedModelHint } from "@/components/chat/PinnedModelHint";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { TaskChatContext } from "@/components/chat/task-chat";
 import { TaskLinksScope } from "@/components/chat/task-link/task-links";
@@ -170,6 +171,7 @@ import type {
   ChatErrorProvider,
   ChatErrorReason,
   ChatMessage,
+  ChatSession,
   CreateTurnResponse,
   DoneEventData,
 } from "@/lib/chat-types";
@@ -622,6 +624,8 @@ export function Chat({
     taskOf,
     projectPath,
     isConciergeSession,
+    pinnedModel,
+    applySession,
   } = useSessionIdentity(mainSessionId);
   // The main chat is never archived or deleted, so its menu offers neither.
   const isMainChat = concierge && mainSessionId === conciergeMainChatId;
@@ -638,12 +642,22 @@ export function Chat({
       const sessionId = mainSessionId;
       const previous = chatModelValue;
       setPickedModel({ sessionId, value: next });
-      updateSessionModel(sessionId, next).catch(() => {
+      // The saved chat says whether the pick pinned it, or Auto let it follow.
+      updateSessionModel(sessionId, next).then(applySession, () => {
         setPickedModel({ sessionId, value: previous });
         setStreamError(t("modelSelector.saveFailed"));
       });
     },
-    [mainSessionId, chatModelValue, t],
+    [mainSessionId, chatModelValue, t, applySession],
+  );
+  // "Back to default": the chat follows the default again, so the model
+  // selector reads Auto and the hint goes.
+  const followedDefault = useCallback(
+    (session: ChatSession) => {
+      applySession(session);
+      setPickedModel(null);
+    },
+    [applySession],
   );
   // The agent a draft's first send picked stands in until the new session's
   // identity loads, so its chip does not drop out when the composer locks.
@@ -2957,6 +2971,15 @@ export function Chat({
                     {/* Share mode hides the composer rather than unmounting it,
                       so a draft is still there when share mode ends. */}
                     <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
+                      {/* A pinned chat says so, with one way back. The default
+                        is the guardian's, so a visitor never sees it. */}
+                      {mainSessionId && pinnedModel && !isArchived && viewer?.kind !== "visitor" ? (
+                        <PinnedModelHint
+                          sessionId={mainSessionId}
+                          pinnedModel={pinnedModel}
+                          onFollowed={followedDefault}
+                        />
+                      ) : null}
                       {isArchived ? (
                         <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
                           <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>

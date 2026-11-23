@@ -1280,7 +1280,12 @@ const chatSessions: ChatSession[] = [
   // Topic chats, which the Concierge section lists under the main chat.
   session("mock-topic-travel", "Travel planning", "default", CONCIERGE_AGENT_ID),
   session("mock-topic-news", "Weekly news digest", "default", CONCIERGE_AGENT_ID),
-  session(PROVIDER_CARDS_CHAT_ID, "Provider failure cards", "default", CONCIERGE_AGENT_ID),
+  // Kept on ChatGPT by a card's switch: it shows the pinned hint.
+  {
+    ...session(PROVIDER_CARDS_CHAT_ID, "Provider failure cards", "default", CONCIERGE_AGENT_ID),
+    followsDefault: false,
+    pinnedModel: { by: "kept", providerId: "openai", selection: null, model: "gpt-6-luna" },
+  },
   session(CARD_WIDTHS_CHAT_ID, "Card widths", "default", CONCIERGE_AGENT_ID),
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
@@ -1911,6 +1916,15 @@ export const handlers = [
     if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
     const { pinned } = (await request.json()) as { pinned: boolean };
     found.pinnedAt = pinned ? new Date().toISOString() : null;
+    return HttpResponse.json(found);
+  }),
+  // "Back to default": the chat follows the default again. Kept in memory like the pin.
+  http.post("/api/chat/sessions/:sessionId/model/follow-default", ({ params }) => {
+    const found = chatSessions.find((s) => s.id === params.sessionId);
+    if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    found.followsDefault = true;
+    found.pinnedModel = null;
+    found.largeModelSelection = null;
     return HttpResponse.json(found);
   }),
   // The open chat's model picker. Kept in memory like the pin.
