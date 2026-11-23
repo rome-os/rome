@@ -21,6 +21,7 @@ struct TopicChatScreen: View {
 
     @Environment(\.visibleChat) private var visibleChat
     @State private var draft = ""
+    @State private var transcriptScroll = TranscriptScroll()
     @State private var starting: String?
     @State private var startFailed = false
     @State private var startFailure: SendFailure = .unknown
@@ -161,14 +162,13 @@ struct TopicChatScreen: View {
     @ViewBuilder
     private var content: some View {
         if let store, store.loaded {
-            TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
-                ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
-                    .equatable()
-                    .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
+            TranscriptList(store: store, sharedContent: true, showsBackToBottom: false, scrollState: transcriptScroll, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
+                SharedConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, top: TranscriptSpacing.top(row, after: previous), tinted: store.tinted != nil && row.ownMessageId == store.tinted)
             }
-            .onTapGesture { composerFocused = false }
-            .overlay(alignment: .top) { if store.threadFocus == nil { UnreadPillButton(store: store) } }
+                        .overlay(alignment: .top) { if store.threadFocus == nil { UnreadPillButton(store: store) } }
             .threadFocus(store: store, tasks: workspace.taskChats, composerFocused: composerFocused)
+                .onTapGesture { composerFocused = false }
+            .overlay(alignment: .bottom) { TranscriptBackToBottom(scroll: transcriptScroll, hidden: store.threadFocus != nil) }
             .onAppear { markRead(store) }
             .onChange(of: store.arrivals) { markRead(store) }
             // Back from under a sheet: what arrived meanwhile is read now.

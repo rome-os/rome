@@ -16,6 +16,7 @@ struct ChatScreen: View {
     @Environment(AppModel.self) private var model
     #endif
     @State private var draft = ""
+    @State private var transcriptScroll = TranscriptScroll()
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
 
@@ -152,14 +153,13 @@ struct ChatScreen: View {
                 .contentShape(Rectangle())
                 .onTapGesture { composerFocused = false }
             } else {
-                TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
-                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
-                        .equatable()
-                        .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
+                TranscriptList(store: store, sharedContent: true, showsBackToBottom: false, scrollState: transcriptScroll, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
+                    SharedConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, top: TranscriptSpacing.top(row, after: previous), tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                 }
-                .onTapGesture { composerFocused = false }
                 .overlay(alignment: .top) { if store.threadFocus == nil { UnreadPillButton(store: store) } }
                 .threadFocus(store: store, tasks: workspace.taskChats, composerFocused: composerFocused)
+                .onTapGesture { composerFocused = false }
+                .overlay(alignment: .bottom) { TranscriptBackToBottom(scroll: transcriptScroll, hidden: store.threadFocus != nil) }
                 .onAppear { store.arrived() }
                 .onChange(of: store.arrivals) { store.arrived() }
             }
@@ -278,6 +278,24 @@ private struct ChatBanners: View {
         .readableColumn()
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.accessNotice)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: offersPush)
+    }
+}
+
+/// The same concrete content tree in both layout owners. Scope changes may
+/// update metadata and actions, but never replace a bubble's SwiftUI identity.
+struct SharedConciergeRow: View {
+    let row: TranscriptRow
+    let info: RowInfo
+    let store: TranscriptStore
+    let tasks: TaskChatsStore
+    var top: CGFloat = 0
+    var tinted = false
+    var quotesInteractive = true
+    var body: some View {
+        ConciergeRow(row: row, info: info, store: store, tasks: tasks, tinted: tinted, quotesInteractive: quotesInteractive)
+            .equatable()
+            .shareSelectable(row, share: store.share, top: top)
+            .padding(.top, -top)
     }
 }
 

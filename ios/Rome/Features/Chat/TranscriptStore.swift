@@ -169,6 +169,13 @@ final class TranscriptStore {
 
     func info(for row: TranscriptRow) -> RowInfo { rowInfo[row.id] ?? RowInfo() }
 
+    /// A shared bubble keeps the quote it already displayed in the main list.
+    /// A backfilled row absent there takes its metadata from the focused page.
+    func sharedInfo(for row: TranscriptRow, fallback: TranscriptStore) -> RowInfo {
+        rowInfo[row.id] ?? fallback.info(for: row)
+    }
+
+
     /// A merge changes the messages and the sends together: one rebuild after both.
     @ObservationIgnored private var rowsHeld = false
 

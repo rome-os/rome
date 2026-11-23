@@ -65,11 +65,32 @@ import Testing
         try await exercise(y: 440, count: 25, width: 834)
     }
 
-    @Test func reducedMotionCrossfadesWithoutMovingPictures() async throws {
+    @Test func expandedAgentStateSurvivesTheActualTwoCollectionHandoff() async throws {
+        try await exercise(y: 440, count: 25, width: 390, agent: true, longRows: true)
+    }
+
+    @Test func foldedAgentStateSurvivesTheActualTwoCollectionHandoff() async throws {
+        try await exercise(y: 440, count: 25, width: 390, agent: true, longRows: true, expandSource: false)
+    }
+
+    @Test func wideAgentRoleKeepsItsOwnLiveBubble() async throws {
+        try await exercise(y: 440, count: 25, width: 834, agent: true)
+    }
+
+    @Test func reducedMotionKeepsOneLivePresentationWithoutGeometricMotion() async throws {
         try await exercise(y: 440, count: 8, width: 390, reduced: true)
     }
 
-    private func exercise(y: CGFloat, count: Int, width: CGFloat, reduced: Bool = false) async throws {
+    @Test(arguments: [CGFloat(180), CGFloat(440), CGFloat(660)], [8, 25])
+    func agentRoleSharesTheSameContentAtBothEdges(y: CGFloat, count: Int) async throws {
+        try await exercise(y: y, count: count, width: 390, agent: true)
+    }
+
+    @Test func closingDuringEntryReversesLiveContentWhileTheReadIsPending() async throws {
+        try await exercise(y: 440, count: 8, width: 390, interrupted: true)
+    }
+
+    private func exercise(y: CGFloat, count: Int, width: CGFloat, reduced: Bool = false, agent: Bool = false, interrupted: Bool = false, longRows: Bool = false, expandSource: Bool = true) async throws {
         let backend = FakeBackend()
         backend.mainChat = ConciergeSessionInfo(id: "concierge", unread: 0)
         struct Fixture: Decodable {
@@ -80,14 +101,25 @@ import Testing
         let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appending(path: "Fixtures/reply-chain-seeded.json")
         let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixtureURL))
         func key(_ number: Int) -> String { String(format: "5eedc4a1-0000-4000-8000-%012d", number) }
-        let target = key(count == 8 ? 29 : 47)
+        let target = key((count == 8 ? 29 : 47) + (agent ? 1 : 0))
         let missing = key(count == 8 ? 12 : 36)
-        let page = count == 8 ? fixture.short : fixture.long
+        var page = count == 8 ? fixture.short : fixture.long
+        var messages = fixture.messages
+        if longRows, let at = messages.firstIndex(where: { $0.id == target }) {
+            var parts = messages[at].parts.compactMap { part -> [String: String]? in
+                guard let quote = part.replyQuote else { return nil }
+                return ["type": "reply_to", "messageId": quote.messageId, "author": "guardian", "text": quote.text]
+            }
+            parts.append(["type": "text", "content": (0..<40).map { "Long shared line \($0), kept expanded across both collections." }.joined(separator: "\n\n")])
+            messages[at].content = String(decoding: try JSONEncoder().encode(parts), as: UTF8.self)
+            let replacement = messages[at]
+            page = ThreadPage(messages: page.messages.map { $0.id == target ? replacement : $0 }, hasOlder: page.hasOlder, hasNewer: page.hasNewer)
+        }
         let root = try #require(page.messages.first?.chatThreadId)
         let chainIDs = Set(fixture.messages.filter { $0.chatThreadId == root }.map(\.id))
         let allIDs = Set(fixture.messages.map(\.id))
         #expect(chainIDs.count == count)
-        backend.stored = fixture.messages.filter { $0.id != missing }
+        backend.stored = messages.filter { $0.id != missing }
         // Exact API fixtures from the disposable seeded backend: B7 and C24,
         // including the original anchor±10 flags and a real missing chain row.
         backend.threadPages["open"] = page
@@ -99,6 +131,8 @@ import Testing
         while workspace.concierge.hasOlder { await workspace.concierge.loadOlder() }
         let store = workspace.concierge
         store.focusPosition.reduceMotion = { reduced }
+        if longRows { AgentBubble.startsExpanded = expandSource }
+        defer { if longRows { AgentBubble.startsExpanded = false } }
         let model = AppModel()
         let host = UIHostingController(rootView: ChatScreen(workspace: workspace, shell: ShellActions()).environment(model))
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -117,20 +151,44 @@ import Testing
         let row = try #require(store.rows.first { $0.ownMessageId == target })
         store.jump(to: target)
         try await Task.sleep(for: .milliseconds(450))
+        store.focusPosition.pause()
         // Allow the same top/middle/bottom positions as a real reader's scroll.
         mainList.contentInset.top = 1000
         mainList.contentInset.bottom = 1000
         let beforeY = try bubbleY(mainList, store: store, row: row.id)
         mainList.contentOffset.y += beforeY - y
         mainList.layoutIfNeeded()
+        // A real pointer lands on a displayed frame, not a model-only scroll.
+        try await Task.sleep(for: .milliseconds(32))
         // A quote tap stops a pending reveal correction or glide before
         // taking its pointer anchor, as the actual quote action does.
         store.focusPosition.pause()
         let pressedY = try bubbleY(mainList, store: store, row: row.id)
+
+        #expect(abs(pressedY - y) < 1, "The actual pointer test must start at the requested Y")
+        if longRows {
+            let source = try #require(mainList.visibleCells.first { $0.accessibilityIdentifier == row.id })
+            #expect(expandSource ? source.bounds.height > AgentBubble.foldHeight(for: .large) + 100 : source.bounds.height < AgentBubble.foldHeight(for: .large) + 100, "Require the actual mounted source fold state before testing reuse")
+            AgentBubble.startsExpanded = false
+        }
         let originalOffset = mainList.contentOffset
         var release: CheckedContinuation<Void, Never>?
         backend.duringThreadFetch = { await withCheckedContinuation { release = $0 } }
         let opening = Task { await store.openThread(from: target, row: row.id, original: root) }
+        let originals = Dictionary(descendants(mainList).compactMap { view -> (String, UIView)? in
+            guard let slot = view as? TranscriptContentSlot, slot.isCurrent,
+                  slot.held.view.window != nil, slot.held.view.alpha > 0.01,
+                  let surface = store.focusPosition.surface,
+                  slot.held.view.frame.intersects(surface.bounds) else { return nil }
+            return (slot.held.id, slot.held.view)
+        }, uniquingKeysWith: { first, _ in first })
+        #expect(originals[row.id] != nil)
+        func markers(_ root: UIView) -> [UIView] {
+            descendants(root).filter { String(describing: type(of: $0)) == "ThreadFocusBubbleMarker" }
+        }
+        let originalMarkers = originals.mapValues(markers)
+        let pressedMarkers = try #require(originalMarkers[row.id])
+        #expect(pressedMarkers.count == 1 && pressedMarkers[0].window != nil, "Require a genuinely mounted live source bubble")
         var samples = 0
         var movingRows = Set<String>()
         var directions: [String: Set<Int>] = [:]
@@ -139,21 +197,57 @@ import Testing
             let focusList = list(host.view, "reply-chain-transcript")
             let surface = store.focusPosition.surface
             let pictures = surface?.subviews ?? []
-            let visiblePictures = pictures.filter { ($0.layer.presentation()?.opacity ?? Float($0.alpha)) > 0.01 }
-            #expect(mainList.alpha > 0 || (focusList?.alpha ?? 0) > 0 || !visiblePictures.isEmpty, "No blank handoff frame: \(phase)")
-            for picture in pictures {
-                if let shown = picture.layer.presentation(), abs(shown.frame.minY - picture.frame.minY) > 0.5 {
+            func shownFrame(_ view: UIView) -> CGRect {
+                // A live layer can still have its PREVIOUS parent in the
+                // presentation tree until this transaction is displayed.
+                // Convert between presentation trees, not their local frames.
+                if let shown = view.layer.presentation(), let root = surface?.layer.presentation() {
+                    return shown.convert(shown.bounds, to: root)
+                }
+                return view.frame
+            }
+            let slots = descendants(host.view).compactMap { $0 as? TranscriptContentSlot }
+            for slot in slots {
+                if slot.isCurrent {
+                    var parent: UIView? = slot
+                    while let view = parent {
+                        if let cell = view as? UICollectionViewCell {
+                            #expect(cell.accessibilityIdentifier == slot.held.id, "Stable message/part identity, never positional neighbor pairing")
+                            break
+                        }
+                        parent = view.superview
+                    }
+                }
+                if let original = originals[slot.held.id] {
+                    #expect(slot.held.view === original, "Same live hosted object across both collections, never a screenshot or replacement")
+                    let before = originalMarkers[slot.held.id] ?? []
+                    let after = markers(slot.held.view)
+                    #expect(before.count == after.count && zip(before, after).allSatisfy { $0 === $1 }, "The actual rendered bubble \(slot.held.id) subtree remains mounted (\(before.count)→\(after.count)), not just the outer hosting view")
+                }
+            }
+            let liveViews = slots.map(\.held.view)
+            for id in Set(slots.map(\.held.id)) {
+                #expect(Set(liveViews.filter { $0.accessibilityIdentifier == "shared-content/\(id)" }.map(ObjectIdentifier.init)).count == 1, "One presentation per stable message/part identity")
+            }
+            if store.threadFocus != nil {
+                #expect(!descendants(host.view).contains { $0.accessibilityIdentifier == "transcript-back-to-bottom" && $0.window != nil }, "No button during entry/focused/inverse, not only after settling")
+            }
+            let visiblePictures = pictures.filter { ($0.layer.presentation()?.opacity ?? Float($0.alpha)) > 0.01 && shownFrame($0).intersects(surface?.bounds ?? .zero) }
+            #expect(!visiblePictures.isEmpty, "Actual live content, not an empty retained list: \(phase)")
+            for picture in visiblePictures {
+                #expect(slots.contains { $0.held.view === picture }, "Surface shows the actual hosted content, never a bitmap/snapshot or replacement copy")
+                if abs(shownFrame(picture).minY - picture.frame.minY) > 0.5 {
                     movingRows.insert(picture.accessibilityIdentifier ?? "")
-                    directions[phase, default: []].insert(picture.frame.minY > shown.frame.minY ? 1 : -1)
+                    directions[phase, default: []].insert(picture.frame.minY > shownFrame(picture).minY ? 1 : -1)
                 }
-                if let id = picture.accessibilityIdentifier?.split(separator: ":").first.map(String.init),
+                if let id = picture.accessibilityIdentifier?.replacingOccurrences(of: "shared-content/", with: "").split(separator: ":").first.map(String.init),
                    allIDs.contains(id), !chainIDs.contains(id) {
-                    #expect(abs((picture.layer.presentation()?.frame ?? picture.frame).minY - picture.frame.minY) < 0.5, "Unmatched rows fade at their own position")
+                    #expect(abs(shownFrame(picture).minY - picture.frame.minY) < 0.5, "Unmatched rows fade at their own position")
                 }
-                if picture.accessibilityIdentifier == "\(row.id)/0" {
-                    let frame = picture.layer.presentation()?.frame ?? picture.frame
+                if picture.accessibilityIdentifier == "shared-content/\(row.id)" {
+                    let frame = shownFrame(picture)
                     let actual = surface!.convert(frame, to: nil).minY
-                    #expect(abs(actual - pressedY) < 1, "Pinned picture \(phase): \(actual) vs \(pressedY)")
+                    #expect(abs(actual - pressedY) < 1, "Pinned live content \(phase): \(actual) vs \(pressedY)")
                 }
             }
             if !pictures.isEmpty { sawPictures = true }
@@ -165,10 +259,20 @@ import Testing
             }
             samples += 1
         }
-        for _ in 0..<22 {
+        for tick in 0..<22 {
             await Task.yield()
+            if interrupted && tick == 4 { store.closeThread(); store.closeThread() }
             try sample("open")
             try await Task.sleep(for: .milliseconds(16))
+        }
+        if interrupted {
+            #expect(store.threadFocus == nil && mainList.alpha == 1)
+            #expect(mainList.contentOffset == originalOffset)
+            #expect(abs(try bubbleY(mainList, store: store, row: row.id) - pressedY) < 1)
+            release?.resume()
+            await opening.value
+            #expect(store.threadFocus == nil, "Late response cannot reopen an interrupted focus")
+            return
         }
         let focus = try #require(store.threadFocus)
         let focused = try #require(list(host.view, "reply-chain-transcript"))
@@ -176,8 +280,12 @@ import Testing
         let surface = try #require(store.focusPosition.surface)
         let surfaceRect = surface.convert(surface.bounds, to: nil)
         let listRect = focused.convert(focused.bounds, to: nil)
-        #expect(abs(surfaceRect.minY - listRect.minY) < 0.001 && abs(surfaceRect.maxY - listRect.maxY) < 0.001 && abs(surfaceRect.width - listRect.width) < 0.001, "Snapshot clipping matches only the transcript viewport")
+        #expect(abs(surfaceRect.minY - listRect.minY) < 0.001 && abs(surfaceRect.maxY - listRect.maxY) < 0.001 && abs(surfaceRect.width - listRect.width) < 0.001, "Live presentation clipping matches only the transcript viewport")
         #expect(backend.threadReads.count == 1 && focus.transcript.message(missing) == nil)
+        if longRows {
+            let cell = try #require(focused.visibleCells.first { $0.accessibilityIdentifier == row.id })
+            #expect(expandSource ? cell.bounds.height > AgentBubble.foldHeight(for: .large) + 100 : cell.bounds.height < AgentBubble.foldHeight(for: .large) + 100, "The real AgentBubble fold state did not reset when its hosting context changed")
+        }
         let focusedY = try bubbleY(focused, store: focus.transcript, row: row.id)
         #expect(abs(focusedY - pressedY) < 1, "Focused \(focusedY), pressed \(pressedY), wanted \(String(describing: focus.bubbleY))")
         #expect(!store.showsQuoteBar && store.quote == nil)
@@ -205,7 +313,7 @@ import Testing
         #expect(focus.initial == nil && focus.transcript.message(missing) != nil)
         let hydratedY = try bubbleY(focused, store: focus.transcript, row: readingRow)
         #expect(abs(hydratedY - readingY) < 1, "Hydration preserves CURRENT reading row \(readingRow): \(readingY) → \(hydratedY)")
-        #expect(store.focusPosition.surface?.subviews.isEmpty == true, "Hydration starts no second animation")
+        #expect(store.focusPosition.handoffs == 1 && !store.focusPosition.transitioning, "Hydration starts no second animation")
         // Return to the entry reading position before testing the inverse pin.
         focused.delegate?.scrollViewWillBeginDragging?(focused)
         focused.contentOffset.y += try bubbleY(focused, store: focus.transcript, row: row.id) - pressedY
@@ -222,7 +330,7 @@ import Testing
         #expect(input.placeholder == String(localized: "Message"))
         #expect(input.convert(input.bounds, to: nil) == inputFrame)
         #expect(descendants(host.view).compactMap { $0 as? PastingTextView }.first === input)
-        #expect(sawPictures, "An atomic list-local handoff must actually run")
+        #expect(sawPictures, "The same hosted content must actually travel through the common layer")
         if reduced {
             #expect(movingRows.isEmpty, "Reduce Motion changes opacity, not message geometry")
         } else if !UIAccessibility.isReduceMotionEnabled {
@@ -233,6 +341,8 @@ import Testing
             }
         }
     }
+
+
 }
 
 /// Read-only native proof against the disposable seeded stack. Unlike the
@@ -306,7 +416,7 @@ struct SeededThreadFocusHTTPTests {
         #expect(focus.initial == nil, "The actual HTTP response must succeed, not time out")
         try await Task.sleep(for: .milliseconds(150))
         #expect(abs(try y(list, transcript: focus.transcript) - before) < 1)
-        #expect(store.focusPosition.surface?.subviews.isEmpty == true)
+        #expect(store.focusPosition.handoffs == 1 && !store.focusPosition.transitioning)
         capture("hydrated")
         store.closeThread()
         for index in 0..<24 {

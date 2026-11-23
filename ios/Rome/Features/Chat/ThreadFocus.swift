@@ -181,143 +181,314 @@ final class ThreadFocus {
     }
 }
 
-/// Owns only the two transcript collections and their list-local picture.
-/// The main collection never moves: closing is the same handoff in reverse.
+/// One live hosted content view per stable message/part id. The collections
+/// own layout slots, not competing renderings of the same message.
+@MainActor
+final class TranscriptSharedContent {
+    let id: String
+    let view: UIView
+    let measure: (CGFloat) -> CGSize
+    let adopt: (TranscriptContentSlot) -> Void
+    weak var owner: TranscriptContentSlot?
+    let slots = NSHashTable<TranscriptContentSlot>.weakObjects()
+    init(id: String, view: UIView, measure: @escaping (CGFloat) -> CGSize, adopt: @escaping (TranscriptContentSlot) -> Void) {
+        self.id = id; self.view = view; self.measure = measure; self.adopt = adopt
+    }
+}
+
+@MainActor
+private final class WeakTranscriptContent {
+    weak var value: TranscriptSharedContent?
+    init(_ value: TranscriptSharedContent) { self.value = value }
+}
+
 @MainActor
 final class TranscriptFocusPosition {
     var frame: (String) -> CGRect? = { _ in nil }
     var pause: () -> Void = {}
+    var mainGeometry: (String) -> CGRect? = { _ in nil }
+    var focusedGeometry: (String) -> CGRect? = { _ in nil }
     weak var main: UICollectionView?
     weak var focused: UICollectionView?
-    weak var surface: UIView?
+    weak var surface: TranscriptLiveSurface?
     var reduceMotion: () -> Bool = { UIAccessibility.isReduceMotionEnabled }
     private var animator: UIViewPropertyAnimator?
     private weak var active: ThreadFocus?
+    private var contents: [String: WeakTranscriptContent] = [:]
+    private var presentations: [TranscriptSharedContent] { contents.values.compactMap(\.value) }
+    private var travelling: [TranscriptSharedContent] = []
+    private(set) var handoffs = 0
+    private var closing = false
+    private var layingOut = false
+    private var mainInput: [UIGestureRecognizer] = []
+    private var focusInput: [UIGestureRecognizer] = []
+    private weak var focusInputList: UICollectionView?
+    var transitioning: Bool { animator != nil || !travelling.isEmpty }
+    private var activeList: UICollectionView? { closing ? main : (focused ?? main) }
 
-    func begin(_ focus: ThreadFocus) {
-        finish()
-        active = focus
+    func content(id: String, make: () -> TranscriptSharedContent) -> TranscriptSharedContent {
+        prune()
+        if let held = contents[id]?.value { return held }
+        let held = make()
+        held.view.accessibilityIdentifier = "shared-content/\(id)"
+        contents[id] = WeakTranscriptContent(held)
+        return held
     }
 
-    func ready(_ list: UICollectionView, for focus: ThreadFocus) {
-        guard active === focus, focused !== list else { return }
-        focused = list
-        guard let main else { list.alpha = 1; return }
-        swap(from: main, to: list) {}
+    func mount(_ slot: TranscriptContentSlot) {
+        guard !transitioning, slot.isCurrent, slot.list === activeList, let surface else { return }
+        slot.mount(on: surface)
     }
 
-    func close(animated: Bool = true, _ completion: @escaping () -> Void) {
-        active = nil
-        finish()
-        guard let focused, let main else {
-            main?.alpha = 1
-            completion()
-            return
+    func layout() {
+        guard !layingOut, !transitioning, let list = activeList, list.window != nil, let surface else { return }
+        layingOut = true
+        defer { layingOut = false }
+        installInput(on: list)
+        UIView.performWithoutAnimation {
+            for held in presentations {
+                if let slot = held.slots.allObjects.first(where: { $0.list === list && $0.isCurrent }) {
+                    slot.mount(on: surface)
+                } else {
+                    held.view.alpha = 0
+                    held.view.accessibilityElementsHidden = true
+                }
+            }
         }
-        self.focused = nil
-        if animated { swap(from: focused, to: main, completion: completion) }
-        else { focused.alpha = 0; main.alpha = 1; completion() }
+        surface.accessibilityElements = presentations.filter { $0.owner?.list === list && $0.view.alpha > 0 }.sorted { $0.view.frame.minY < $1.view.frame.minY }.map(\.view)
+        surface.accessibilityIdentifier = list === main ? "main-transcript-content" : "reply-chain-content"
+        surface.prune()
     }
 
-    private func finish() {
+    func registerInput(_ view: UICollectionView, gestures: [UIGestureRecognizer]) {
+        if view === main { mainInput = gestures }
+        else { focusInputList = view; focusInput = gestures }
+        if let list = activeList { installInput(on: list) }
+    }
+
+    private func restoreInput(_ gestures: [UIGestureRecognizer], to list: UICollectionView?) {
+        guard let list else { return }
+        for gesture in gestures where gesture.view === surface { list.addGestureRecognizer(gesture) }
+    }
+
+    // UIKit owns the existing scroll physics; only the recognizer's touch
+    // scope moves to the stable content layer (WWDC14, session235).
+    private func installInput(on list: UICollectionView) {
+        guard let surface else { return }
+        if list !== main { restoreInput(mainInput, to: main) }
+        if list !== focusInputList { restoreInput(focusInput, to: focusInputList) }
+        let input = list === main ? mainInput : focusInput
+        for gesture in input where gesture.view !== surface { surface.addGestureRecognizer(gesture) }
+    }
+
+    func scrollAccessible(_ direction: UIAccessibilityScrollDirection) -> Bool { activeList?.accessibilityScroll(direction) ?? false }
+
+    func finishForDrag() {
         guard let animator else { return }
         animator.stopAnimation(false)
         animator.finishAnimation(at: .end)
     }
 
-    private struct Picture {
-        let id: String
-        let view: UIView
-        let frame: CGRect
+    func removeSurface() {
+        interrupt()
+        travelling.removeAll()
+        restoreInput(mainInput, to: main)
+        restoreInput(focusInput, to: focusInputList)
+        surface?.clear()
+        surface?.removeFromSuperview()
+        surface = nil
     }
 
-    private func pictures(_ list: UICollectionView, in surface: UIView) -> [Picture] {
-        list.visibleCells.flatMap { cell -> [Picture] in
-            guard let row = cell.accessibilityIdentifier else { return [] }
-            func markers(_ view: UIView) -> [UIView] {
-                if view is ThreadFocusBubbleMarker { return [view] }
-                return view.subviews.flatMap(markers)
-            }
-            let bubbles = markers(cell)
-            return (bubbles.isEmpty ? [cell] : bubbles).enumerated().compactMap { index, bubble in
-                let bounds = bubble.convert(bubble.bounds, to: cell)
-                let frame = cell.convert(bounds, to: surface)
-                guard frame.intersects(surface.bounds), !bounds.isEmpty,
-                      let snapshot = cell.resizableSnapshotView(from: bounds, afterScreenUpdates: true, withCapInsets: .zero) else { return nil }
-                let id = "\(row)/\(index)"
-                snapshot.frame = frame
-                snapshot.accessibilityIdentifier = id
-                return Picture(id: id, view: snapshot, frame: frame)
-            }
-        }
+    func changed(_ id: String, size: CGSize) {
+        guard let held = contents[id]?.value else { return }
+        for slot in held.slots.allObjects { slot.measured(size) }
     }
 
-    private func swap(from source: UICollectionView, to target: UICollectionView, completion: @escaping () -> Void) {
-        finish()
-        target.layoutIfNeeded()
-        guard let surface, surface.window != nil, !surface.bounds.isEmpty else {
-            target.alpha = 1
-            source.alpha = 0
-            completion()
-            return
+    private func prune() {
+        guard travelling.isEmpty else { return }
+        contents = contents.filter { $0.value.value != nil }
+    }
+
+    func detach(_ list: UICollectionView) {
+        if list === main { restoreInput(mainInput, to: list); mainInput.removeAll() }
+        if list === focusInputList { restoreInput(focusInput, to: list); focusInput.removeAll(); focusInputList = nil }
+        if main === list || focused === list {
+            interrupt()
+            travelling.removeAll()
         }
-        // Both lists have finished nonzero layout. No display frame can see
-        // neither list: the old one is hidden only after the pictures exist.
-        target.alpha = 1
-        let old = pictures(source, in: surface)
-        let new = pictures(target, in: surface)
-        let destinations = Dictionary(new.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let oldIDs = Set(old.map(\.id))
-        for picture in old { surface.addSubview(picture.view) }
-        let reduced = reduceMotion()
-        for picture in new where reduced || !oldIDs.contains(picture.id) {
-            picture.view.alpha = 0
-            surface.addSubview(picture.view)
-        }
-        guard !old.isEmpty, !new.isEmpty else {
-            surface.subviews.forEach { $0.removeFromSuperview() }
-            source.alpha = 0
-            completion()
-            return
-        }
-        source.alpha = 0
-        target.alpha = 0
-        PerfProbe.count("threadHandoff")
-        PerfProbe.sample("threadMatched", Double(old.filter { destinations[$0.id] != nil }.count))
-        let animator = UIViewPropertyAnimator(duration: reduced ? 0.15 : 0.25, curve: .easeInOut) {
-            for picture in old {
-                if let destination = destinations[picture.id], !reduced {
-                    picture.view.frame = destination.frame
-                } else {
-                    picture.view.alpha = 0
+        for held in presentations {
+            for slot in held.slots.allObjects where slot.list === list {
+                held.slots.remove(slot)
+                if held.owner === slot {
+                    held.view.removeFromSuperview()
+                    held.owner = nil
                 }
             }
-            for picture in new where reduced || !oldIDs.contains(picture.id) {
-                picture.view.alpha = 1
-            }
         }
-        self.animator = animator
-        animator.addCompletion { [weak self, weak surface, weak target] _ in
-            target?.alpha = 1
-            surface?.subviews.forEach { $0.removeFromSuperview() }
-            self?.animator = nil
+        if main === list { main = nil }
+        if focused === list { focused = nil }
+        surface?.prune()
+        prune()
+    }
+
+    func begin(_ focus: ThreadFocus) { active = focus; closing = false }
+
+    func ready(_ list: UICollectionView, for focus: ThreadFocus) {
+        guard active === focus, focused !== list else { return }
+        focused = list
+        guard let main else { list.alpha = 1; return }
+        move(from: main, to: list) {}
+    }
+
+    func close(animated: Bool = true, _ completion: @escaping () -> Void) {
+        guard !closing || !animated else { return }
+        active = nil
+        guard let focused, let main else { main?.alpha = 1; completion(); return }
+        closing = true
+        move(from: focused, to: main, animated: animated) { [weak self] in
+            self?.focused = nil
+            self?.closing = false
             completion()
         }
+    }
+
+    private func interrupt() {
+        guard let animator else { return }
+        let frames = travelling.map { ($0.view, $0.view.layer.presentation()?.frame ?? $0.view.frame, $0.view.layer.presentation()?.opacity ?? Float($0.view.alpha)) }
+        animator.stopAnimation(true)
+        self.animator = nil
+        for (view, frame, opacity) in frames { view.frame = frame; view.alpha = CGFloat(opacity) }
+    }
+
+    private func move(from source: UICollectionView, to target: UICollectionView, animated: Bool = true, completion: @escaping () -> Void) {
+        interrupt()
+        target.layoutIfNeeded()
+        guard let surface, surface.window != nil, !surface.bounds.isEmpty else {
+            target.alpha = 1; source.alpha = 0
+            for held in presentations {
+                held.slots.allObjects.first { $0.list === target }.map { if let surface = self.surface { $0.mount(on: surface) } }
+            }
+            completion(); return
+        }
+        target.alpha = 1
+        installInput(on: target)
+        surface.accessibilityIdentifier = target === main ? "main-transcript-content" : "reply-chain-content"
+        let wasTravelling = Set(travelling.map(\.id))
+        let rows = presentations.filter { held in
+            wasTravelling.contains(held.id) || held.slots.allObjects.contains { slot in
+                (slot.list === source || slot.list === target) && slot.isCurrent && slot.window != nil && slot.convert(slot.bounds, to: surface).intersects(surface.bounds)
+            }
+        }
+        travelling = Array(rows)
+        let foreground = (rows.map { $0.view.layer.zPosition }.max() ?? 0) + 1
+        struct Move { let held: TranscriptSharedContent; let destination: TranscriptContentSlot?; let frame: CGRect; let belongs: Bool }
+        let moves: [Move] = rows.map { held in
+            let destination = held.slots.allObjects.first { $0.list === target && $0.isCurrent && $0.window != nil }
+            let oldSlot = held.slots.allObjects.first { $0.list === source && $0.isCurrent && $0.window != nil }
+            let view = held.view
+            let oldFrame = view.superview === surface ? view.frame : view.convert(view.bounds, to: surface)
+            let isOld = wasTravelling.contains(held.id) || (oldSlot != nil && view.superview === surface && view.alpha > 0.01 && view.frame.intersects(surface.bounds))
+            let geometry = target === main ? mainGeometry(held.id) : focusedGeometry(held.id)
+            let targetFrame = destination?.contentFrame(in: surface) ?? geometry.map { surface.convert($0, from: nil) }
+            let end = targetFrame ?? oldFrame
+            if view.superview !== surface { surface.keep(held) }
+            if !isOld {
+                UIView.performWithoutAnimation { view.frame = end; view.alpha = 0 }
+            }
+            UIView.performWithoutAnimation {
+                view.layer.zPosition = targetFrame == nil ? view.layer.zPosition : foreground + (destination?.zOrder ?? 0)
+            }
+            view.accessibilityElementsHidden = false
+            return Move(held: held, destination: destination, frame: end, belongs: targetFrame != nil)
+        }
+        // The same live views stay on the common list-local surface.
+        // Both collections keep their geometry; no screenshot or replacement
+        // rendering is made at either end of the handoff.
+        source.alpha = 1
+        target.alpha = 1
+        // Commit prepared geometry before UIKit reads the animation start.
+        handoffs += 1
+        PerfProbe.count("threadHandoff")
+        PerfProbe.sample("threadMatched", Double(moves.filter { move in move.destination != nil && move.held.slots.allObjects.contains { $0.list === source } }.count))
+        let reduced = reduceMotion()
+        if reduced { for move in moves { move.held.view.frame = move.frame } }
+        CATransaction.flush()
+        let changes = {
+            for move in moves {
+                if !reduced { move.held.view.frame = move.frame }
+                move.held.view.alpha = move.belongs ? 1 : 0
+            }
+        }
+        let finish = { [weak self] in
+            guard let self else { return }
+            source.alpha = 0
+            target.alpha = 1
+            self.animator = nil
+            self.travelling.removeAll()
+            self.layout()
+            completion()
+            self.prune()
+        }
+        if !animated { changes(); finish(); return }
+        let animator = UIViewPropertyAnimator(duration: reduced ? 0.15 : 0.25, curve: .easeInOut, animations: changes)
+        self.animator = animator
+        animator.addCompletion { _ in finish() }
         animator.startAnimation()
     }
+
+    func containsBubble(_ point: CGPoint) -> Bool {
+        func contains(_ view: UIView) -> Bool {
+            if view is ThreadFocusBubbleMarker { return view.convert(view.bounds, to: nil).contains(point) }
+            return view.subviews.contains(where: contains)
+        }
+        return presentations.contains { held in
+            (held.owner?.list === (focused ?? main) || travelling.contains { $0 === held }) && held.view.window != nil && held.view.alpha > 0 && contains(held.view)
+        }
+    }
+}
+
+@MainActor
+final class TranscriptLiveSurface: UIView {
+    private var held: [String: TranscriptSharedContent] = [:]
+    func keep(_ content: TranscriptSharedContent) {
+        held[content.id] = content
+        if content.view.superview !== self { addSubview(content.view) }
+    }
+    func prune() {
+        for (id, content) in held where !content.slots.allObjects.contains(where: \.isCurrent) {
+            content.view.removeFromSuperview()
+            held[id] = nil
+        }
+    }
+    func clear() {
+        subviews.forEach { $0.removeFromSuperview() }
+        held.removeAll()
+    }
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard self.point(inside: point, with: event) else { return nil }
+        for view in subviews.sorted(by: { $0.layer.zPosition > $1.layer.zPosition }) {
+            if let hit = view.hitTest(convert(point, to: view), with: event) { return hit }
+        }
+        return self
+    }
+    weak var position: TranscriptFocusPosition?
+    override func layoutSubviews() { super.layoutSubviews(); position?.layout() }
+    override func didMoveToWindow() { super.didMoveToWindow(); if window != nil { position?.layout() } }
+    override func accessibilityScroll(_ direction: UIAccessibilityScrollDirection) -> Bool { position?.scrollAccessible(direction) ?? false }
 }
 
 private struct ThreadTransitionSurface: UIViewRepresentable {
     let position: TranscriptFocusPosition
     func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        view.isUserInteractionEnabled = false
+        let view = TranscriptLiveSurface()
         view.clipsToBounds = true
-        view.accessibilityElementsHidden = true
+        view.position = position
+        view.accessibilityContainerType = .list
         position.surface = view
         return view
     }
-    func updateUIView(_ view: UIView, context: Context) {}
+    func updateUIView(_ view: UIView, context: Context) { position.layout() }
+    static func dismantleUIView(_ view: UIView, coordinator: ()) { (view as? TranscriptLiveSurface)?.position?.removeSurface() }
 }
 
 private struct ThreadFocusModifier: ViewModifier {
@@ -331,15 +502,13 @@ private struct ThreadFocusModifier: ViewModifier {
             .accessibilityHidden(store.threadFocus != nil)
             .overlay {
                 if let focus = store.threadFocus {
-                    TranscriptList(store: focus.transcript, composerFocused: composerFocused, alignTop: true, thread: focus, focusPosition: store.focusPosition, onBlankTap: { store.closeThread() }) { row, previous in
-                        ConciergeRow(row: row, info: focus.transcript.info(for: row), store: store, tasks: tasks, quotesInteractive: false)
-                            .equatable()
-                            .padding(.top, TranscriptSpacing.top(row, after: previous))
+                    TranscriptList(store: focus.transcript, sharedContent: true, showsBackToBottom: false, composerFocused: composerFocused, alignTop: true, thread: focus, focusPosition: store.focusPosition, onBlankTap: { store.closeThread() }) { row, previous in
+                        SharedConciergeRow(row: row, info: store.sharedInfo(for: row, fallback: focus.transcript), store: store, tasks: tasks, top: TranscriptSpacing.top(row, after: previous), quotesInteractive: false)
                     }
                     .environment(\.threadFocusHitAreas, focus.hitAreas)
                 }
             }
-            .overlay { ThreadTransitionSurface(position: store.focusPosition).ignoresSafeArea().allowsHitTesting(false) }
+            .overlay { ThreadTransitionSurface(position: store.focusPosition).ignoresSafeArea() }
             .overlay(alignment: .top) {
                 if let focus = store.threadFocus, focus.initial == .failed {
                     TopBanner(kind: .error, text: String(localized: "Couldn't load this chat"), actionTitle: String(localized: "Retry")) { store.retryThread() }
