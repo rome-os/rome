@@ -104,6 +104,9 @@ protocol RomeBackend: AnyObject, Sendable {
     func chatOutputs(chatId: String) async throws -> ChatOutputsResponse
     /// An output's bytes, from its `contentUrl` (the path after `/api`).
     func chatOutputFile(path: String) async throws -> Data
+    /// A file a chat links to (`/projects/download`, `/memory/download` or an
+    /// asset), as large as an output may be.
+    func linkedFile(_ file: LinkedFile) async throws -> Data
     func approval(id: String) async throws -> ApprovalRecord
     /// Every pending approval; the guardian's only (a visitor gets an error).
     func pendingApprovals() async throws -> [PendingApproval]
@@ -354,6 +357,10 @@ final class LiveBackend: RomeBackend {
         try await client.getFile(apiPath: path, percentEncodedQuery: nil, limit: APIClient.outputLimit, accept: "*/*")
     }
 
+    func linkedFile(_ file: LinkedFile) async throws -> Data {
+        try await client.getFile(apiPath: file.apiPath, percentEncodedQuery: file.query, limit: APIClient.outputLimit, accept: "*/*")
+    }
+
     func pendingApprovals() async throws -> [PendingApproval] {
         let rows: JSONValue = try await client.get("/approvals", query: [URLQueryItem(name: "status", value: "pending")], reportsUnauthorized: false)
         return (rows.array ?? []).compactMap(PendingApproval.init(json:))
@@ -543,6 +550,8 @@ extension RomeBackend {
     func archiveChat(_ id: String, stoppingWork: Bool) async throws { try await archiveChat(id) }
     func deleteChat(_ id: String, stoppingWork: Bool) async throws { try await deleteChat(id) }
     func chatWork(chatId: String) async throws -> ConciergeChatWork { throw APIError.notFound }
+    /// Test doubles hold no linked files.
+    func linkedFile(_ file: LinkedFile) async throws -> Data { throw APIError.notFound }
     /// Test doubles archive nothing for good.
     func archivedTopicChats() async throws -> [ChatSession] { [] }
     func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws { throw APIError.notFound }

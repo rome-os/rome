@@ -518,6 +518,7 @@ enum SnapshotRunner {
             await capture("57-agent-itinerary", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-itinerary")) }
             // Task links in each status: running, needs you, done, failed, stopped, no response, later.
             await capture("65-task-links", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-task-links")) }
+            await capture("66-reply-links", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-reply-links")) }
             // Share-location cards: shared, not shared, and one still open.
             await capture("57-location-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-location")) }
             // The drawer over a topic chat: its row selected.

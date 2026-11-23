@@ -9,6 +9,8 @@ struct AppWebScreen: View {
     let app: InstalledApp
     /// A page of the instance a chat linked to, shown in place of the app's own.
     var pageURL: URL? = nil
+    /// A page of the app itself a chat linked to, opened in place of its first.
+    var startURL: URL? = nil
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -25,7 +27,7 @@ struct AppWebScreen: View {
             header
             ZStack(alignment: .top) {
                 AppWebView(
-                    url: origin.flatMap { pageURL ?? AppLinks.fullURL(origin: $0, app: app) },
+                    url: origin.flatMap { pageURL ?? startURL ?? AppLinks.fullURL(origin: $0, app: app) },
                     demoHTML: pageURL == nil ? DemoApp.html : DemoApp.dashboardHTML,
                     origin: origin,
                     cookie: workspace.backend.webSessionCookie(),
@@ -139,10 +141,11 @@ private struct InstancePageSheet: ViewModifier {
 private struct AppSheet: ViewModifier {
     let workspace: Workspace
     @Binding var app: InstalledApp?
+    let start: URL?
 
     func body(content: Content) -> some View {
         content.sheet(item: $app) { app in
-            AppWebScreen(workspace: workspace, app: app)
+            AppWebScreen(workspace: workspace, app: app, startURL: start)
                 .id(app.id)
                 .modifier(WebSheetPresentation(dragToClose: false))
         }
@@ -182,8 +185,9 @@ extension View {
     }
 
     /// The app set in `app` rises in a sheet over this view.
-    func appSheet(workspace: Workspace, app: Binding<InstalledApp?>) -> some View {
-        modifier(AppSheet(workspace: workspace, app: app))
+    /// `start` is a page of the app to open in place of its first.
+    func appSheet(workspace: Workspace, app: Binding<InstalledApp?>, start: URL? = nil) -> some View {
+        modifier(AppSheet(workspace: workspace, app: app, start: start))
     }
 }
 

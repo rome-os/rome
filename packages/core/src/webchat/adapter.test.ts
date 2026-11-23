@@ -213,6 +213,27 @@ describe("WebChatAdapter", () => {
     ]);
   });
 
+  it("stores a reply's absolute project paths as their /projects routes", async () => {
+    await repo.createSession("sess-paths", "Paths");
+    const linked = new WebChatAdapter(repo, () => "/home/rome/.rome/default/projects");
+    const text = "Saved [report](/home/rome/.rome/default/projects/default/my report.md).";
+
+    await linked.send("sess-paths" as ChatId, {
+      text,
+      parts: [{ type: "text", content: text, turnPhase: "final", blockIx: 0 }],
+    });
+
+    const messages = await repo.getMessages("sess-paths");
+    expect(JSON.parse(messages[0]?.content ?? "[]")).toEqual([
+      {
+        type: "text",
+        content: "Saved [report](</projects/default/my report.md>).",
+        turnPhase: "final",
+        blockIx: 0,
+      },
+    ]);
+  });
+
   // Routine cards carry routine controls, so only the webchat drain writes them.
   it("refuses routine_draft_card parts a sender supplies, and persists nothing", async () => {
     await repo.createSession("sess-forged", "Forged card");

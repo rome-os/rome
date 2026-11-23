@@ -333,15 +333,84 @@ export function outputsInReply(
   startedAt?: Date,
 ): OutputFound[] {
   const found = new Map<string, OutputFound>();
-  // `[label](href)` or `[label](<href>)`, an image's `![label](href)` too.
-  const link = /\[(?:\\.|[^\]\\])*\]\(\s*(?:<([^>\n]+)>|([^)\s]+))/g;
-  for (const match of reply.matchAll(link)) {
-    const path = localPath(match[1] ?? match[2], scope.projectsRoot);
+  for (const match of reply.matchAll(MARKDOWN_LINK)) {
+    const path = localPath(match[2] ?? match[3], scope.projectsRoot);
     if (path && !found.has(path) && producible(path, scope, startedAt)) {
       found.set(path, writtenFile(`reply:${traceId}:${path}`, path));
     }
   }
   return [...found.values()];
+}
+
+/**
+ * A Markdown link: `[label](href)`, `[label](<href>)`, or `[label](href with
+ * spaces)` as an agent writes it against the rule, with an optional title, an
+ * image's `![label](href)` too. Groups: the label with its brackets, the
+ * bracketed href, the bare href, the title.
+ */
+const MARKDOWN_LINK =
+  /(!?\[(?:\\.|[^\]\\])*\])\(\s*(?:<([^>\n]+)>|([^)\n]*?))(\s+"[^"\n]*")?\s*\)/g;
+
+/** A `file://` URL in prose, outside any link. */
+const BARE_FILE_URL = /(?<![(<])file:\/\/[^\s<>()[\]]+/g;
+
+/** A fenced code block, or a code span: their text is code, never a link. */
+const CODE =
+  /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[ \t]*$|(?![\s\S]))|(`+)(?!`)[\s\S]*?[^`]\2(?!`)/gm;
+
+/**
+ * The reply with each link to a file under `projectsRoot`, written as an
+ * absolute path or a `file://` URL, pointed at its `/projects/<path>` route,
+ * which every client opens. A bare `file://` URL becomes a link named after
+ * its file. Code is left as written, and so is every other link.
+ */
+export function routeProjectLinks(markdown: string, projectsRoot: string): string {
+  if (!markdown.includes("/")) return markdown;
+  let out = "";
+  let at = 0;
+  for (const code of markdown.matchAll(CODE)) {
+    out += routeInProse(markdown.slice(at, code.index), projectsRoot) + code[0];
+    at = code.index + code[0].length;
+  }
+  return out + routeInProse(markdown.slice(at), projectsRoot);
+}
+
+function routeInProse(text: string, projectsRoot: string): string {
+  const linked = text.replace(
+    MARKDOWN_LINK,
+    (whole, label: string, bracketed?: string, bare?: string, title?: string) => {
+      const route = projectRoute(bracketed ?? bare ?? "", projectsRoot);
+      return route ? `${label}(${linkTarget(route)}${title ?? ""})` : whole;
+    },
+  );
+  return linked.replace(BARE_FILE_URL, (url) => {
+    const route = projectRoute(url, projectsRoot);
+    if (!route) return url;
+    const name = route.slice(route.lastIndexOf("/") + 1);
+    return `[${name.replace(/([[\]\\])/g, "\\$1")}](${linkTarget(route)})`;
+  });
+}
+
+/** The `/projects/<path>` route of an absolute path or `file://` URL under `projectsRoot`. */
+function projectRoute(href: string, projectsRoot: string): string | null {
+  const written = href.trim();
+  if (!written.startsWith("file://") && !(written.startsWith("/") && !written.startsWith("//")))
+    return null;
+  if (written.startsWith("/projects/")) return null;
+  const file = localPath(written, projectsRoot);
+  const root = resolve(projectsRoot);
+  if (!file?.startsWith(root + sep)) return null;
+  return `/projects/${file
+    .slice(root.length + 1)
+    .split(sep)
+    .join("/")}`;
+}
+
+/** A link target, in angle brackets when a bare one would end early. */
+function linkTarget(route: string): string {
+  return /[\s()<>]/.test(route)
+    ? `<${route.replace(/[<>]/g, (mark) => encodeURIComponent(mark))}>`
+    : route;
 }
 
 /** The file a link's `href` points at on this machine, or null for anything else. */

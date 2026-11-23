@@ -423,6 +423,30 @@ final class Workspace {
         return .taskChat(session.id, title: session.name)
     }
 
+    /// Where a link to chat `id` opens: the main Chat, a topic chat or a task
+    /// chat, from the lists already read, else from the chat list read again
+    /// (a topic chat just started is in neither yet). Nil for a chat the app
+    /// does not open, such as another agent's, or one it cannot find.
+    func chatLinkTarget(_ id: String) async -> SearchHitTarget? {
+        if isMainChat(id) { return .main }
+        if topics.chat(id) != nil || archivedTopics.contains(id) { return .topic(id) }
+        if let known = taskChats.chats[id], let target = Self.chatLinkTarget(known) { return target }
+        guard let session = try? await backend.sessions().first(where: { $0.id == id }),
+              let target = Self.chatLinkTarget(session) else { return nil }
+        if case .topic = target {
+            if archivedTopics.note(session) { topics.remove(id) } else { topics.refresh() }
+        }
+        return target
+    }
+
+    /// What kind of chat `session` is, for a link to it: a task chat, a
+    /// Concierge topic chat, or nil for any other agent's chat.
+    nonisolated static func chatLinkTarget(_ session: ChatSession) -> SearchHitTarget? {
+        if session.triggerKind == ChatSession.taskChatTrigger { return .taskChat(session.id, title: session.name) }
+        if session.agentName == ChatSession.conciergeAgent { return .topic(session.id) }
+        return nil
+    }
+
     /// Whether topic chat `chatId` is archived: it opens read only.
     func isArchivedTopic(_ chatId: String?) -> Bool {
         chatId.map(archivedTopics.contains) ?? false
