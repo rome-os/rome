@@ -204,28 +204,33 @@ struct SheetDim: UIViewControllerRepresentable {
                 dim.alpha = 0
                 container.insertSubview(dim, at: 0)
             }
-            fade(to: 1, with: presented.transitionCoordinator)
+            fade(to: 1, of: presented)
         }
 
         override func viewWillDisappear(_ animated: Bool) {
             super.viewWillDisappear(animated)
             // Something presented over the sheet leaves it, and its dim, up.
             guard let presented, presented.isBeingDismissed else { return }
-            fade(to: 0, with: presented.transitionCoordinator)
+            fade(to: 0, of: presented)
         }
 
-        private func fade(to alpha: CGFloat, with coordinator: UIViewControllerTransitionCoordinator?) {
-            guard let coordinator else {
+        private func fade(to alpha: CGFloat, of presented: UIViewController) {
+            guard let coordinator = presented.transitionCoordinator else {
                 UIView.animate(withDuration: 0.25) { self.dim.alpha = alpha }
                 return
             }
-            let from = dim.alpha
             coordinator.animate(alongsideTransition: { _ in
                 self.dim.alpha = alpha
-            }, completion: { context in
-                // A swipe down let go early: the sheet stays, and so does the dim.
-                if context.isCancelled { self.dim.alpha = from }
-            })
+            }, completion: { context in self.settle(after: context, of: presented) })
+        }
+
+        /// Where the dim ends once a transition is over: on while the sheet
+        /// is up, off once it is gone. Read from the transition, not from the
+        /// fade that asked, because a swipe down let go early runs two fades
+        /// on it, the one out and then the one back in.
+        private func settle(after context: UIViewControllerTransitionCoordinatorContext, of presented: UIViewController) {
+            let dismissal = context.viewController(forKey: .from) === presented
+            dim.alpha = dismissal == context.isCancelled ? 1 : 0
         }
     }
 }
