@@ -250,6 +250,42 @@ describe("voice conversation", () => {
     expect(t.sent).toEqual(["查一下天气", "我查一下"]);
   });
 
+  it("sends a short answer right after Rome's question, even when Rome said those words", async () => {
+    const t = setup();
+    t.conversation.heard("水果", "");
+    t.conversation.endpoint();
+    await settled();
+    t.turns[0]?.push({ type: "text_delta", content: "你要苹果还是香蕉？Or no fruit now?" });
+    t.turns[0]?.end();
+    await settled();
+    t.speak(0, 1000);
+    t.speak(1, 1000);
+    t.clock.advance(2500);
+    t.conversation.heard("香蕉", "");
+    t.conversation.endpoint();
+    t.conversation.heard("No", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["水果", "香蕉", "No"]);
+  });
+
+  it("knows Rome's own words for as long as their audio may still be heard, however long the reply", async () => {
+    const t = setup();
+    t.conversation.heard("讲个长故事", "");
+    t.conversation.endpoint();
+    await settled();
+    const first = "第一句话说的是很久很久以前的一座山。";
+    const filler = "后面还有很多很多很多很多很多很多很多很多的话要说。";
+    t.turns[0]?.push({ type: "text_delta", content: first + filler.repeat(40) });
+    await settled();
+    // Speech runs far ahead of playback: every sentence is generated at once.
+    for (let i = 0; i < t.said.length; i++) t.speak(i, 3000);
+    expect(t.said.map((s) => s.text).join("").length).toBeGreaterThan(600);
+    // Rome's first sentence still plays, and comes back through the microphone.
+    t.conversation.heard("", "很久很久以前的一座山");
+    expect(t.messages.filter((m) => m.type === "clear")).toEqual([]);
+  });
+
   it("says once that it is looking when the agent works quietly for 2 s", async () => {
     const t = setup();
     t.conversation.heard("查一下天气", "");

@@ -92,8 +92,9 @@ export function plainSentence(sentence: string): string {
   const plain = sentence
     .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/<\/?[a-z][^>]*>/gi, "")
-    // Not a sanitizer, only what is said: with no angle bracket left, no tag can remain.
+    // Not a sanitizer, only what is said. A tag becomes a space, so the pieces
+    // around it never join, and with no angle bracket left no tag can remain.
+    .replace(/<\/?[a-z][^>]*>/gi, " ")
     .replace(/[<>]/g, "")
     .replace(/https?:\/\/\S+/g, "")
     .replace(/`([^`]*)`/g, "$1")

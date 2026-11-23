@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { WebSocket, WebSocketServer } from "ws";
 import type { VoiceConversationServerMessage } from "@rome/api-types/voice-conversation";
+import { currentSessionActor, type SessionActor } from "../access/session-actor.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { Transcriber, TranscriptionListener } from "../voice-input/transcriber.js";
 import type { SpeakerListener } from "../voice-output/speaker.js";
@@ -99,10 +100,10 @@ const replyOf = (text: string): ReplyTurn => ({
   }),
 });
 
-async function connect(deps: VoiceConversationDeps) {
+async function connect(deps: VoiceConversationDeps, actor?: SessionActor) {
   const http: Server = createServer();
   const wss = new WebSocketServer({ server: http });
-  wss.on("connection", (ws) => serve(ws, deps));
+  wss.on("connection", (ws) => serve(ws, deps, actor));
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
   servers.push({
     close: () => {
@@ -131,23 +132,28 @@ describe("voice conversation socket", () => {
   it("listens for turns, sends each to the chat and streams the spoken reply down", async () => {
     const ear = standInTranscriber();
     const mouth = standInSpeaker();
-    const sent: { chatId: string; text: string }[] = [];
+    const sent: { chatId: string; text: string; actor?: SessionActor }[] = [];
+    const guardian: SessionActor = { kind: "guardian", userId: "seat", via: "cookie" };
     const usage: { status: string; seconds: number }[] = [];
-    const { client, messages, audio, closed } = await connect({
-      listening: {
-        open: async () => ({
-          ok: true,
-          source: { transcriber: ear.transcriber, romeCloudSessionId: "session-1" },
-        }),
+    const { client, messages, audio, closed } = await connect(
+      {
+        listening: {
+          open: async () => ({
+            ok: true,
+            source: { transcriber: ear.transcriber, romeCloudSessionId: "session-1" },
+          }),
+        },
+        speaker: mouth.source,
+        canTalkIn: async () => true,
+        send: async (chatId, text) => {
+          sent.push({ chatId, text, actor: await currentSessionActor() });
+          return replyOf("好的，已经合并了。");
+        },
+        usage: { recordTranscription: (event) => usage.push(event) },
+        voiceTerms: async () => ["Rome"],
       },
-      speaker: mouth.source,
-      send: async (chatId, text) => {
-        sent.push({ chatId, text });
-        return replyOf("好的，已经合并了。");
-      },
-      usage: { recordTranscription: (event) => usage.push(event) },
-      voiceTerms: async () => ["Rome"],
-    });
+      guardian,
+    );
 
     client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
     client.send(Buffer.from([1, 2, 3, 4]));
@@ -162,7 +168,8 @@ describe("voice conversation socket", () => {
     ear.listener().onText("合并了吗？", "");
     ear.listener().onEndpoint?.();
     await until(() => audio.length === 1, "reply audio");
-    expect(sent).toEqual([{ chatId: "chat-1", text: "合并了吗？" }]);
+    // The turn is the guardian's, as a typed one is.
+    expect(sent).toEqual([{ chatId: "chat-1", text: "合并了吗？", actor: guardian }]);
     expect(mouth.said).toEqual(["好的，已经合并了。"]);
     expect(audio).toEqual([4800]);
     expect(messages).toContainEqual({ type: "turn", text: "合并了吗？" });
@@ -188,6 +195,7 @@ describe("voice conversation socket", () => {
         },
       },
       speaker: standInSpeaker("disabled").source,
+      canTalkIn: async () => true,
       send: async () => replyOf(""),
     });
     client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
@@ -196,11 +204,42 @@ describe("voice conversation socket", () => {
     expect(listened).toBe(0);
   });
 
+  it("refuses a chat that cannot take spoken turns before opening any session", async () => {
+    let listened = 0;
+    let spoke = 0;
+    const checked: string[] = [];
+    const { client, messages, closed } = await connect({
+      listening: {
+        open: async () => {
+          listened++;
+          return { ok: false, reason: "service-unavailable" };
+        },
+      },
+      speaker: {
+        open: async () => {
+          spoke++;
+          return { ok: false, reason: "disabled" };
+        },
+      },
+      canTalkIn: async (chatId) => {
+        checked.push(chatId);
+        return false;
+      },
+      send: async () => replyOf(""),
+    });
+    client.send(JSON.stringify({ type: "start", chatId: "concierge", sampleRate: 16_000 }));
+    await closed;
+    expect(messages).toEqual([{ type: "error", reason: "chat-refused" }]);
+    expect(checked).toEqual(["concierge"]);
+    expect([listened, spoke]).toEqual([0, 0]);
+  });
+
   it("ends when Rome cannot listen, and lets go of the speaker", async () => {
     const mouth = standInSpeaker();
     const { client, messages, closed } = await connect({
       listening: { open: async () => ({ ok: false, reason: "service-refused" }) },
       speaker: mouth.source,
+      canTalkIn: async () => true,
       send: async () => replyOf(""),
     });
     client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
@@ -213,6 +252,7 @@ describe("voice conversation socket", () => {
     const first = await connect({
       listening: { open: async () => ({ ok: false, reason: "service-refused" }) },
       speaker: standInSpeaker().source,
+      canTalkIn: async () => true,
       send: async () => replyOf(""),
     });
     first.client.send(Buffer.from([1, 2]));
@@ -228,6 +268,7 @@ describe("voice conversation socket", () => {
       {
         listening: { open: async () => ({ ok: false, reason: "service-refused" }) },
         speaker: standInSpeaker().source,
+        canTalkIn: async () => true,
         send: async () => replyOf(""),
       },
       async () => false,

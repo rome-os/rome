@@ -3135,6 +3135,7 @@ describe("Webchat API", () => {
     rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
     const { runtime } = createWebchatRuntime(deps);
     const id = await runtime.startChat({}, "guardian");
+    expect(await runtime.canSendSpoken(id)).toBe(true);
     const turn = await runtime.sendSpoken(id, "你好");
     expect(turn.id).toEqual(expect.any(String));
 
@@ -3154,6 +3155,7 @@ describe("Webchat API", () => {
       triggerKind: "concierge",
       triggerName: "Task",
     });
+    expect(await runtime.canSendSpoken("visitor-task")).toBe(false);
     await expect(runtime.sendSpoken("visitor-task", "你好")).rejects.toThrow("Session not found");
     await expect(runtime.sendSpoken("no-such-chat", "你好")).rejects.toThrow("Session not found");
     expect(await deps.webchatRepo.getMessages("visitor-task")).toEqual([]);
@@ -3165,6 +3167,7 @@ describe("Webchat API", () => {
     );
     const { runtime } = createWebchatRuntime(deps);
     const id = await runtime.startChat({}, "guardian");
+    expect(await runtime.canSendSpoken(id)).toBe(false);
     await expect(runtime.sendSpoken(id, "你好")).rejects.toThrow("does not answer in text");
     expect(await deps.webchatRepo.getMessages(id)).toEqual([]);
   });

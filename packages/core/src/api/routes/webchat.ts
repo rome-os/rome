@@ -1126,6 +1126,8 @@ export interface WebchatRuntime {
    * may not open, an agent whose text is private, or a send that started no turn.
    */
   sendSpoken(chatId: string, text: string): Promise<AgentTurnHandle>;
+  /** Whether `sendSpoken` would take a turn for `chatId`: one the guardian may open, whose agent answers in text. */
+  canSendSpoken(chatId: string): Promise<boolean>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
   /**
@@ -5718,6 +5720,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
   };
 
+  // Why a spoken turn may not go into `chatId`, or null when it may.
+  const spokenRefusal = async (chatId: string): Promise<string | null> => {
+    // The guardian's socket reaches the chats the guardian's dashboard opens, as the routes' gate allows.
+    const session = await deps.webchatRepo.getSession(chatId);
+    if (
+      !session ||
+      !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, "guardian"))
+    ) {
+      return "Session not found";
+    }
+    // An agent whose text is private answers through its tools, which a voice conversation does not read yet.
+    const policy = resolveAgentPolicy(
+      agentPolicySource(deps.agentLoader, session.agentName ?? "main"),
+    );
+    return policy.finalText === "private" ? "The chat's agent does not answer in text" : null;
+  };
+
   const runtime: WebchatRuntime = {
     activeStreams,
     async flushAll(): Promise<void> {
@@ -5838,21 +5857,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         opened.release();
       }
     },
+    canSendSpoken: async (chatId) => (await spokenRefusal(chatId)) === null,
     async sendSpoken(chatId, text) {
-      // The guardian's socket reaches the chats the guardian's dashboard opens, as the routes' gate allows.
-      const session = await deps.webchatRepo.getSession(chatId);
-      if (
-        !session ||
-        !(await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, "guardian"))
-      ) {
-        throw new Error("Session not found");
-      }
-      // An agent whose text is private answers through its tools, which a voice conversation does not read yet.
-      const policy = resolveAgentPolicy(
-        agentPolicySource(deps.agentLoader, session.agentName ?? "main"),
-      );
-      if (policy.finalText === "private")
-        throw new Error("The chat's agent does not answer in text");
+      const refusal = await spokenRefusal(chatId);
+      if (refusal) throw new Error(refusal);
       const started: { turn?: Promise<AgentTurnHandle> } = {};
       const sent = await handleChatSend(
         chatId,

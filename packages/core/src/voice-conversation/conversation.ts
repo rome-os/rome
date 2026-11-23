@@ -41,8 +41,6 @@ const FAILED = {
   zh: "出了点问题，详细内容在聊天里。",
   en: "Something went wrong. The details are in the chat.",
 };
-// What Rome said lately, to tell its own voice from the guardian's.
-const ECHO_MEMORY_CHARS = 600;
 // Recognition lags the audio, and the client still plays what it holds, so
 // Rome's own last words may be heard this long after they were sent.
 const ECHO_TAIL_MS = 2_000;
@@ -182,7 +180,9 @@ export function createConversation(deps: ConversationDeps): Conversation {
       if (!head.started) {
         head.started = true;
         deps.message({ type: "caption", text: head.text });
-        echo = `${echo} ${head.text}`.slice(-ECHO_MEMORY_CHARS);
+        // Rome's words are kept while any of its audio may still be heard, however far
+        // the speech runs ahead of playback, and forgotten after.
+        echo = now() < echoUntil ? `${echo} ${head.text}` : head.text;
       }
       for (const pcm of head.waiting.splice(0)) play(pcm);
       if (!head.done) break;
@@ -316,8 +316,9 @@ export function createConversation(deps: ConversationDeps): Conversation {
       settled = "";
       pending = "";
       maybeEcho = false;
-      // Rome's own words coming back are not a turn.
-      if (!text || (suspect && isEcho(text, echo))) {
+      // Rome's own words coming back are not a turn. A short answer is always
+      // the guardian's: "No" or "香蕉" is likely to be part of what Rome just said.
+      if (!text || (suspect && enoughWords(text) && isEcho(text, echo))) {
         if (text) deps.message({ type: "heard", settled: "", pending: "" });
         return;
       }

@@ -15,7 +15,12 @@ import {
   type VoiceConversationStopReason,
   voiceConversationClientMessageSchema,
 } from "@rome/api-types/voice-conversation";
-import { gateGuardianUpgrade } from "../access/ws-guardian-gate.js";
+import {
+  enrichGuardianActor,
+  runWithSessionActor,
+  type SessionActor,
+} from "../access/session-actor.js";
+import { gateUpgrade } from "../access/ws-guardian-gate.js";
 import type { DrizzleDb } from "../db/index.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
@@ -41,6 +46,8 @@ export interface VoiceConversationDeps {
   /** Where listening sessions come from: the same Rome Cloud sessions dictation uses. */
   listening: Pick<VoiceInputSource, "open">;
   speaker: SpeakerSource;
+  /** Whether `chatId` can take spoken turns, asked before any session opens. */
+  canTalkIn(chatId: string): Promise<boolean>;
   /** Sends the guardian's turn into `chatId`, and resolves with the turn that answers it. */
   send(chatId: string, text: string): Promise<ReplyTurn>;
   usage?: TranscriptionUsageSink | null;
@@ -67,8 +74,12 @@ export function attachVoiceConversationServer(
     void enabled()
       .then(async (on) => {
         if (!on) return rejectUpgrade(socket, 404, "Not Found");
-        if (!(await gateGuardianUpgrade(req, socket, db)) || socket.destroyed) return;
-        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, deps));
+        const caller = await gateUpgrade(req, socket, db);
+        if (!caller || socket.destroyed) return;
+        if (caller.kind !== "guardian") return rejectUpgrade(socket, 403, "Forbidden");
+        // The guardian the upgrade proved, so each spoken turn is theirs, as a typed one is.
+        const actor = await enrichGuardianActor(db, caller);
+        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, deps, actor));
       })
       .catch((err) => {
         log.error("voice conversation upgrade failed", {
@@ -86,8 +97,8 @@ export function attachVoiceConversationServer(
   };
 }
 
-/** Runs one conversation over `ws`. Exported for tests. */
-export function serve(ws: WebSocket, deps: VoiceConversationDeps): void {
+/** Runs one conversation over `ws`, for `actor`. Exported for tests. */
+export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: SessionActor): void {
   let closed = false;
   let starting = false;
   let stream: TranscriptionStream | null = null;
@@ -106,8 +117,9 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps): void {
 
   const conversation = createConversation({
     send: (text) => {
-      if (!chatId) return Promise.reject(new Error("no chat"));
-      return deps.send(chatId, text);
+      const to = chatId;
+      if (!to) return Promise.reject(new Error("no chat"));
+      return actor ? runWithSessionActor(actor, () => deps.send(to, text)) : deps.send(to, text);
     },
     message: (message) => {
       if (!closed) reply(message);
@@ -166,6 +178,9 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps): void {
 
   async function begin(sampleRate: number) {
     starting = true;
+    // A chat that cannot take spoken turns is refused before any paid session opens.
+    if (!chatId || !(await deps.canTalkIn(chatId))) return fail("chat-refused");
+    if (closed) return;
     const spoken = await deps.speaker.open(conversation.speakerListener);
     if (closed) {
       if (spoken.ok) spoken.session.close();
