@@ -14,24 +14,18 @@
 // grant) critical section. `grant` resolves the ADDRESSED connection (never
 // blindly `find()[0]`, which could clobber a different connection of the same
 // connection kind), mints the placeholder for the offerable flow, persists the
-// credential + profile, and runs the guardian channel mapping — ALL in one DB
-// transaction. A mapping failure rolls the credential and the mint back with it,
-// so a failed grant leaves zero residual state instead of a credential
-// authorized while the setup reports `failed`.
+// credential + profile, and runs the write a `ConnectParticipant` joins — ALL in
+// one DB transaction. A failed joined write rolls the credential and the mint
+// back with it, so a failed grant leaves zero residual state instead of a
+// credential authorized while the setup reports `failed`.
 
 import { randomUUID } from "node:crypto";
-import type { DrizzleTx } from "../../db/index.js";
 import { platformOf } from "@rome/api-types/platform";
 import { KeyedMutex } from "../../lib/keyed-mutex.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
-import {
-  applyGuardianMappingWithinTx,
-  planGuardianMapping,
-} from "../../people/guardian-mapping.js";
 import type { GiveGrantOptions } from "../registry.js";
 import type { Connection, ConnectionDescriptor, Credential, ProfileRecord } from "../types.js";
 import { SetupAbortError, SetupSession, type SetupInputOutcome } from "./session.js";
-import type { SetupCommitted, SetupGrant, SetupState } from "./types.js";
+import type { ConnectParticipant, SetupCommitted, SetupGrant, SetupState } from "./types.js";
 
 /** The narrow registry surface the manager drives — every real
  *  `ConnectionRegistry` satisfies it structurally, and tests fake it directly. */
@@ -39,7 +33,7 @@ export interface SetupRegistry {
   getDescriptor(connectionKind: string): ConnectionDescriptor | null;
   withGrantSection<T>(connectionKind: string, grant: string, fn: () => Promise<T>): Promise<T>;
   /** The atomic terminal grant: resolve/mint the addressed connection,
-   *  persist the credential + profile, and run `opts.inTx` (the guardian mapping)
+   *  persist the credential + profile, and run `opts.inTx` (a joined write)
    *  in ONE transaction, then start the adapter. See `ConnectionRegistry.giveGrant`. */
   giveGrant(
     connectionKind: string,
@@ -53,7 +47,8 @@ export interface SetupRegistry {
 
 export interface SetupManagerDeps {
   registry: SetupRegistry;
-  peopleRepo: PeopleRepository;
+  /** Joins each connect whose grant reports who gave the access. */
+  participant?: ConnectParticipant;
 }
 
 /** What a setup addresses: the connection kind, plus the connection id when the route
@@ -309,12 +304,12 @@ export class SetupManager {
 
   /** The terminal write: hand the setup's grant to `registry.giveGrant`, which mints
    *  the addressed placeholder if needed, persists the credential + profile, and
-   *  runs the guardian mapping — ALL in one transaction, so a mapping failure
-   *  rolls the credential (and the mint) back with it rather than leaving a
+   *  runs the participant's write — ALL in one transaction, so a failed joined
+   *  write rolls the credential (and the mint) back with it rather than leaving a
    *  credential authorized while the setup reports `failed`. Wrapped in the
    *  per-(connection kind, grant) critical section so a competing setup or teardown
-   *  cannot interleave; the guardian mapping is decided from async reads BEFORE
-   *  the transaction, then applied as a synchronous participant inside it. */
+   *  cannot interleave; the participant prepares from async reads BEFORE the
+   *  transaction, and its write runs as a synchronous participant inside it. */
   async #commit(
     target: SetupTarget,
     grant: string,
@@ -325,36 +320,15 @@ export class SetupManager {
       // A cancel that landed while the write waited for the section wins, so
       // an abandoned setup leaves nothing behind.
       if (signal.aborted) throw new SetupAbortError();
-      const channelUserId = given.guardianChannelUserId;
-      // The kinds that report the guardian's own address have no domain to
-      // tell a platform apart by, so the kind names it.
-      const platform = platformOf(target.connectionKind);
-      const plan = channelUserId
-        ? await planGuardianMapping(this.#deps.peopleRepo, platform, channelUserId, {
-            addOnly: given.addsGuardianAccount,
-          })
-        : null;
+      const joined =
+        given.connectedBy && this.#deps.participant
+          ? await this.#deps.participant.prepare({
+              platform: platformOf(target.connectionKind),
+              connectedBy: given.connectedBy,
+            })
+          : undefined;
       const opts = {
-        ...(plan && channelUserId
-          ? {
-              // A grant that reaches another account leaves the guardian's
-              // first account theirs, so its People link stays and the new
-              // account is added beside it.
-              inTx: (
-                tx: DrizzleTx,
-                { reachesAnotherAccount }: { reachesAnotherAccount: boolean },
-              ) =>
-                applyGuardianMappingWithinTx(
-                  tx,
-                  this.#deps.peopleRepo,
-                  platform,
-                  channelUserId,
-                  reachesAnotherAccount && plan.op === "update"
-                    ? { op: "add", guardianId: plan.guardianId }
-                    : plan,
-                ),
-            }
-          : {}),
+        ...(joined ? { inTx: joined } : {}),
         ...(target.another ? { another: true } : {}),
       };
       let ended: string | undefined;

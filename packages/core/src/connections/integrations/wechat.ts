@@ -243,7 +243,7 @@ export function makeWechatSetup(deps: {
       return {
         credential: { material, expiresAt: "never" },
         profile: wechatProfileFromSettings(account) ?? undefined,
-        guardianChannelUserId: account.userId ?? undefined,
+        ...(account.userId ? { connectedBy: { id: account.userId } } : {}),
         summary: {
           title: "WeChat connected",
           body: [`Account ${account.accountId} is live and receiving WeChat messages.`],

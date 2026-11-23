@@ -16,7 +16,6 @@
 //      setup through the generic SetupManager surface.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
 import {
   TelegramUserAuthError,
   type TelegramUserLoginHandle,
@@ -121,8 +120,7 @@ describe("makeTelegramUserSetup", () => {
     expect(commit.mock.calls[0][0]).toEqual({
       credential: { material: telegramUserMaterialFromSettings(ACCOUNT), expiresAt: "never" },
       profile: telegramUserProfileFromSettings(ACCOUNT),
-      guardianChannelUserId: "42",
-      addsGuardianAccount: true,
+      connectedBy: { id: "42", stableId: true },
       summary: {
         title: "Telegram account connected",
         body: ["Guardian is connected and can send and read messages as you."],
@@ -265,7 +263,6 @@ describe("Telegram-user setup discovery", () => {
   it("reports an in-flight login as the session grant's active setup", async () => {
     const manager = new SetupManager({
       registry: makeRegistry(),
-      peopleRepo: {} as PeopleRepository,
     });
 
     const started = await manager.start({ connectionKind: "telegram_user" }, "session");

@@ -9,3 +9,4 @@ export * from "./events.js";
 export * from "./repository.js";
 export { DrizzleConnectionsRepository } from "./repository-db.js";
 export { ConnectionRegistry, type ConnectionRegistryDeps } from "./registry.js";
+export type { ConnectParticipant } from "./setup/types.js";

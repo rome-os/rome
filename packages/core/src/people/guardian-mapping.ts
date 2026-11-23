@@ -1,4 +1,5 @@
 import type { Account } from "@rome-os/app-runtime";
+import type { ConnectParticipant } from "../connections/index.js";
 import type { DrizzleTx } from "../db/index.js";
 import type { PeopleRepository } from "./model/people-repository.js";
 import { createLogger } from "../logger.js";
@@ -176,4 +177,36 @@ export function applyGuardianMappingWithinTx(
   } else {
     repo.linkStated({ platform, id: accountId }, plan.guardianId, tx);
   }
+}
+
+/**
+ * Joins each connect to link the account that gave the access to the guardian,
+ * in the same transaction as the credential. The guardian is the one who
+ * connects accounts to Rome, so the account that connected is theirs.
+ *
+ * A kind whose ids are stable reports one more of the guardian's accounts, so
+ * the link is added beside the others. Otherwise a single link the guardian
+ * holds on the platform may be an older id for this account, and is re-pointed.
+ * A fix that reached another account leaves the first account the guardian's,
+ * so its link stays and the new account is added beside it.
+ */
+export function linkGuardianOnConnect(repo: PeopleRepository): ConnectParticipant {
+  return {
+    async prepare({ platform, connectedBy }) {
+      const plan = await planGuardianMapping(repo, platform, connectedBy.id, {
+        addOnly: connectedBy.stableId,
+      });
+      if (plan.op === "noop") return undefined;
+      return (tx, { reachesAnotherAccount }) =>
+        applyGuardianMappingWithinTx(
+          tx,
+          repo,
+          platform,
+          connectedBy.id,
+          reachesAnotherAccount && plan.op === "update"
+            ? { op: "add", guardianId: plan.guardianId }
+            : plan,
+        );
+    },
+  };
 }

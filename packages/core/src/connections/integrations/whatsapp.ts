@@ -54,9 +54,9 @@ export interface WhatsAppDescriptorDeps {
   /** The address-book store mirror (waContacts/waChats/history), fed every
    *  Baileys sync event. `WhatsAppStoreRepository` is the production sink. */
   syncSink: WhatsAppSyncSink;
-  /** Auto-map the guardian onto their own WhatsApp identity on connect. Called
-   *  with the canonical self JID the adapter derives on `connection: "open"`. */
-  onGuardianConnected: (selfJid: string) => void;
+  /** Called with the canonical self JID the adapter derives on
+   *  `connection: "open"`, each time the account connects. */
+  onAccountConnected: (selfJid: string) => void;
   /** Injectable socket factory (tests). Defaults to the real WhatsAppAdapter. */
   createAdapter?: (authProvider: WhatsAppAuthProvider) => WhatsAppAdapter;
   /** Injectable transient pairing-socket factory for the setup (tests).
@@ -259,12 +259,10 @@ export function makeWhatsAppSetup(deps: {
       return {
         credential: { material, expiresAt: "never" },
         profile,
-        guardianChannelUserId: selfJid,
+        connectedBy: { id: selfJid },
         summary: {
           title: "WhatsApp connected",
-          body: [
-            `${profile ? `+${profile.phoneNumber}` : "Your WhatsApp"} is linked and your account is mapped as guardian.`,
-          ],
+          body: [`${profile ? `+${profile.phoneNumber}` : "Your WhatsApp"} is linked.`],
         },
       };
     } finally {
@@ -326,7 +324,7 @@ export function createWhatsAppDescriptor(deps: WhatsAppDescriptorDeps): Connecti
             saveCreds: auth.saveCreds,
           }));
           adapter.onSync(deps.syncSink);
-          adapter.onConnected(deps.onGuardianConnected);
+          adapter.onConnected(deps.onAccountConnected);
 
           let faultSink: ((err: CredentialRejected | Disconnected) => void) | null = null;
           adapter.onFault((fault) => {

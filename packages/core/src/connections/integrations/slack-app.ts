@@ -238,8 +238,10 @@ export function makeSlackAppSetup(deps: SlackAppSetupDeps): SetupFn {
       profile,
       ...(workspace.installerUserId
         ? {
-            guardianChannelUserId: `${workspace.teamId}/${workspace.installerUserId}`,
-            addsGuardianAccount: true,
+            connectedBy: {
+              id: `${workspace.teamId}/${workspace.installerUserId}`,
+              stableId: true,
+            },
           }
         : {}),
       summary: {
