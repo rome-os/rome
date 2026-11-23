@@ -475,6 +475,12 @@ describe("the Slack app's channels in chat settings", () => {
     );
   }
 
+  it("offers no reactions, which the Slack gateway Worker does not make", () => {
+    const talker = channelTalker(async () => ({ channels: [] }));
+    expect(talker).toBeDefined();
+    expect(talker?.reactions).toBeUndefined();
+  });
+
   it("lists the channels the app is a member of by name, and finds one by part of it", async () => {
     const talker = channelTalker(async () => ({
       channels: [

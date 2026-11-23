@@ -502,28 +502,8 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
               },
             },
             // Slack offers a bot no typing indicator, so the app shows none.
-            reactions: {
-              async add(chatId, messageId, emoji) {
-                try {
-                  await adapter.react(chatId, messageId, emoji);
-                } catch (error) {
-                  if (isSlackCredentialError(error)) {
-                    throw new CredentialRejected({ grant: "bot", cause: error });
-                  }
-                  throw error;
-                }
-              },
-              async remove(chatId, messageId, emoji) {
-                try {
-                  await adapter.unreact(chatId, messageId, emoji);
-                } catch (error) {
-                  if (isSlackCredentialError(error)) {
-                    throw new CredentialRejected({ grant: "bot", cause: error });
-                  }
-                  throw error;
-                }
-              },
-            },
+            // Nor does it react yet: the Slack gateway Worker does not make
+            // Slack's reaction calls (ZHA-234).
             directMessaging: {
               async chatFor(senderId) {
                 try {
