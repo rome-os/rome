@@ -11,17 +11,16 @@ import type { SlackWireMessage } from "../connections/kinds/slack-app/message.js
 import { SlackReadGate } from "../connections/kinds/slack-app/read-gate.js";
 import { type MailboxFrame, SlackAppAdapter } from "../connections/kinds/slack-app/slack-app.js";
 import {
-  FORWARD_SIGNATURE_HEADER,
-  FORWARD_TEAM_HEADER,
-  FORWARD_TIMESTAMP_HEADER,
-  forwardSignature,
-} from "../connections/kinds/slack-app/forward.js";
+  depositSignature,
+  SLACK_DEPOSIT_HEADER,
+  SLACK_SIGNATURE_HEADER,
+} from "../connections/kinds/slack-app/deposit.js";
 import { chatPromptFacts } from "../core/chat-prompt-facts.js";
 import { channelMessageOf } from "../chats/connected-accounts/channel-message.js";
 
 const TEAM = "T_A";
 const BOT = "U_BOT";
-const SECRET = "forward-secret-a";
+const DEPOSIT_KEY = "deposit-key-a";
 const MEMBER = "U_GUARDIAN";
 const CHAT = "D_GUARDIAN";
 
@@ -32,7 +31,7 @@ const tsOf = (i: number) => `1700000000.${String(i).padStart(6, "0")}`;
 function slackSide() {
   const said: SlackWireMessage[] = [];
   const conversationHistory = rs.fn(
-    async (_token: string, input: { channel: string; latest?: string; limit: number }) => {
+    async (_teamId: string, input: { channel: string; latest?: string; limit: number }) => {
       const older = said
         .filter((m) => input.latest === undefined || Number(m.ts) < Number(input.latest))
         .sort((a, b) => Number(b.ts) - Number(a.ts));
@@ -62,17 +61,10 @@ function heard(i: number, ts = tsOf(i)): MailboxFrame {
       },
     }),
   );
-  const timestamp = "1700000000";
   return {
     headers: {
-      [FORWARD_TEAM_HEADER]: TEAM,
-      [FORWARD_TIMESTAMP_HEADER]: timestamp,
-      [FORWARD_SIGNATURE_HEADER]: forwardSignature({
-        forwardSecret: SECRET,
-        timestamp,
-        teamId: TEAM,
-        body,
-      }),
+      [SLACK_DEPOSIT_HEADER]: "1",
+      [SLACK_SIGNATURE_HEADER]: depositSignature(body, DEPOSIT_KEY),
     },
     body,
   };
@@ -100,29 +92,24 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
     const connect = () => {
       const adapter = new SlackAppAdapter({
         channel: "slack_app",
-        botToken: "xoxb-a",
         teamId: TEAM,
         botUserId: BOT,
-        forwardSecret: SECRET,
-        mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+        depositKey: DEPOSIT_KEY,
+        bound: async () => true,
+        deliveryAttempts: 4,
         api: {
-          authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
           postMessage: async () => ({ ts: "9.0" }),
           openDirectMessage: async () => "D_NEW",
-          addReaction: async () => {},
-          removeReaction: async () => {},
           userName: async () => ({ displayName: "Ouou", username: "ouou" }),
           conversationHistory: slack.conversationHistory,
           conversationReplies: async () => ({ messages: [] }),
           memberChannels: async () => ({ channels: [] }),
-          revoke: async () => {},
-        },
-        openMailbox: (_mailbox, handler) => {
-          onFrame = handler;
-          return { stop: () => {}, attempts: 4 };
+          addReaction: async () => {},
+          removeReaction: async () => {},
         },
         readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
       });
+      onFrame = (frame) => adapter.handleFrame(frame);
       adapter.onInbound(() => {});
       return adapter;
     };
@@ -191,24 +178,21 @@ describe("a new session in a Slack app chat (R13, option b)", () => {
     }
     const adapter = new SlackAppAdapter({
       channel: "slack_app",
-      botToken: "xoxb-a",
       teamId: TEAM,
       botUserId: BOT,
-      forwardSecret: SECRET,
-      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      depositKey: DEPOSIT_KEY,
+      bound: async () => true,
+      deliveryAttempts: 4,
       api: {
-        authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
         postMessage: async () => ({ ts: "9.0" }),
         openDirectMessage: async () => "D_NEW",
-        addReaction: async () => {},
-        removeReaction: async () => {},
         userName: async () => ({ displayName: "Ouou", username: "ouou" }),
         conversationHistory: slack.conversationHistory,
         conversationReplies: async () => ({ messages: [] }),
         memberChannels: async () => ({ channels: [] }),
-        revoke: async () => {},
+        addReaction: async () => {},
+        removeReaction: async () => {},
       },
-      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
     adapter.onInbound(() => {});
@@ -246,29 +230,24 @@ describe("a mention inside a Slack thread (R14)", () => {
     let onFrame: ((frame: MailboxFrame) => Promise<{ status: number }>) | null = null;
     const adapter = new SlackAppAdapter({
       channel: "slack_app",
-      botToken: "xoxb-a",
       teamId: TEAM,
       botUserId: BOT,
-      forwardSecret: SECRET,
-      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      depositKey: DEPOSIT_KEY,
+      bound: async () => true,
+      deliveryAttempts: 4,
       api: {
-        authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
         postMessage: async () => ({ ts: "9.0" }),
         openDirectMessage: async () => "D_NEW",
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
         conversationReplies,
         memberChannels: async () => ({ channels: [] }),
-        revoke: async () => {},
         addReaction: async () => {},
         removeReaction: async () => {},
       },
-      openMailbox: (_mailbox, handler) => {
-        onFrame = handler;
-        return { stop: () => {}, attempts: 4 };
-      },
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
+    onFrame = (frame) => adapter.handleFrame(frame);
     adapter.onInbound((message) => void delivered.push(channelMessageOf(message, "slack_app")));
     await adapter.start();
 
@@ -316,7 +295,7 @@ describe("a mention inside a Slack thread (R14)", () => {
       thread_ts: root,
     }));
     const conversationReplies = rs.fn(
-      async (_token: string, input: { limit: number; oldest?: string }) => {
+      async (_teamId: string, input: { limit: number; oldest?: string }) => {
         const after = thread.filter((m) => !input.oldest || Number(m.ts) > Number(input.oldest));
         return {
           messages: after.slice(0, input.limit),
@@ -326,24 +305,21 @@ describe("a mention inside a Slack thread (R14)", () => {
     );
     const adapter = new SlackAppAdapter({
       channel: "slack_app",
-      botToken: "xoxb-a",
       teamId: TEAM,
       botUserId: BOT,
-      forwardSecret: SECRET,
-      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      depositKey: DEPOSIT_KEY,
+      bound: async () => true,
+      deliveryAttempts: 4,
       api: {
-        authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
         postMessage: async () => ({ ts: "9.0" }),
         openDirectMessage: async () => "D_NEW",
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
         conversationReplies: conversationReplies as never,
         memberChannels: async () => ({ channels: [] }),
-        revoke: async () => {},
         addReaction: async () => {},
         removeReaction: async () => {},
       },
-      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
     await adapter.start();
@@ -394,29 +370,26 @@ describe("a mention inside a Slack thread (R14)", () => {
         { ts: tsOf(201), user: "U_SAM", text: "It is in Lisbon", thread_ts: tsOf(200) },
       ],
     };
-    const conversationReplies = rs.fn(async (_token: string, input: { ts: string }) => ({
+    const conversationReplies = rs.fn(async (_teamId: string, input: { ts: string }) => ({
       messages: threads[input.ts] ?? [],
     }));
     const adapter = new SlackAppAdapter({
       channel: "slack_app",
-      botToken: "xoxb-a",
       teamId: TEAM,
       botUserId: BOT,
-      forwardSecret: SECRET,
-      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      depositKey: DEPOSIT_KEY,
+      bound: async () => true,
+      deliveryAttempts: 4,
       api: {
-        authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
         postMessage: async () => ({ ts: "9.0" }),
         openDirectMessage: async () => "D_NEW",
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
         conversationReplies: conversationReplies as never,
         memberChannels: async () => ({ channels: [] }),
-        revoke: async () => {},
         addReaction: async () => {},
         removeReaction: async () => {},
       },
-      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
       // Slack's pacing, scaled down: one thread read per 300 ms.
       repliesGate: new SlackReadGate({ intervalMs: 300, maxWaitMs: 300 }),
     });
@@ -456,29 +429,24 @@ describe("a mention inside a Slack thread (R14)", () => {
     let onFrame: ((frame: MailboxFrame) => Promise<{ status: number }>) | null = null;
     const adapter = new SlackAppAdapter({
       channel: "slack_app",
-      botToken: "xoxb-a",
       teamId: TEAM,
       botUserId: BOT,
-      forwardSecret: SECRET,
-      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      depositKey: DEPOSIT_KEY,
+      bound: async () => true,
+      deliveryAttempts: 4,
       api: {
-        authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
         postMessage: async () => ({ ts: "9.0" }),
         openDirectMessage: async () => "D_NEW",
         userName: async () => ({}),
         conversationHistory: async () => ({ messages: [], hasMore: false }),
         conversationReplies: async () => ({ messages: [] }),
         memberChannels: async () => ({ channels: [] }),
-        revoke: async () => {},
         addReaction: async () => {},
         removeReaction: async () => {},
       },
-      openMailbox: (_mailbox, handler) => {
-        onFrame = handler;
-        return { stop: () => {}, attempts: 4 };
-      },
       readGate: new SlackReadGate({ intervalMs: 0, maxWaitMs: 0 }),
     });
+    onFrame = (frame) => adapter.handleFrame(frame);
     adapter.onInbound((message) => void delivered.push(channelMessageOf(message, "slack_app")));
     await adapter.start();
 
@@ -532,17 +500,10 @@ describe("a mention inside a Slack thread (R14)", () => {
 /** `payload` as Rome Cloud deposits it, signed. */
 function signed(payload: unknown): MailboxFrame {
   const body = new TextEncoder().encode(JSON.stringify(payload));
-  const timestamp = "1700000000";
   return {
     headers: {
-      [FORWARD_TEAM_HEADER]: TEAM,
-      [FORWARD_TIMESTAMP_HEADER]: timestamp,
-      [FORWARD_SIGNATURE_HEADER]: forwardSignature({
-        forwardSecret: SECRET,
-        timestamp,
-        teamId: TEAM,
-        body,
-      }),
+      [SLACK_DEPOSIT_HEADER]: "1",
+      [SLACK_SIGNATURE_HEADER]: depositSignature(body, DEPOSIT_KEY),
     },
     body,
   };

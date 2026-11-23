@@ -5,6 +5,7 @@ import {
   RELAY_SETTING_KEY,
   deriveDepositUrl,
   resolveRelayDrains,
+  type MailboxClaimed,
   sanitizeDrainUrl,
   type RelayDrainSetting,
 } from "./settings.js";
@@ -26,6 +27,8 @@ export interface EnsureRelayMailboxDeps {
   settingsRepo: SettingsRepository;
   appCatalog: Pick<AppCatalog, "listResolved">;
   relayDrainer: Pick<RelayDrainer, "reload">;
+  /** Connections running on the mailbox, so a reload keeps draining it for them. */
+  mailboxClaims?: MailboxClaimed;
   /** Override fetch (tests). Defaults to global `fetch`. */
   fetch?: typeof fetch;
 }
@@ -125,7 +128,9 @@ export async function ensureRelayMailbox(
   // reload() stops any existing connection first, so this both starts a brand-new
   // drain and re-arms an existing one with the new key.
   try {
-    await deps.relayDrainer.reload(await resolveRelayDrains(deps.settingsRepo, deps.appCatalog));
+    await deps.relayDrainer.reload(
+      await resolveRelayDrains(deps.settingsRepo, deps.appCatalog, deps.mailboxClaims),
+    );
   } catch (err) {
     // The setting is persisted; a later catalog change or restart picks it up.
     log.warn("relay mailbox provisioned but drainer reload failed", {

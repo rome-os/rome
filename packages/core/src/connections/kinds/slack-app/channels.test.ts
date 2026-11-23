@@ -11,7 +11,7 @@ describe("SlackMemberChannels", () => {
     const memberChannels = rs.fn(async () => ({ channels }));
     const listing = new SlackMemberChannels({
       api: { memberChannels },
-      botToken: "xoxb",
+      teamId: "T_A",
       now: () => now,
     });
     await listing.list();
@@ -35,7 +35,7 @@ describe("SlackMemberChannels", () => {
     const memberChannels = rs.fn(async () => ({ channels }));
     const listing = new SlackMemberChannels({
       api: { memberChannels },
-      botToken: "xoxb",
+      teamId: "T_A",
       now: () => now,
     });
     expect(await listing.resolve("#news")).toBe("C_NEWS");
@@ -59,7 +59,7 @@ describe("SlackMemberChannels", () => {
 
   it("refuses a listing longer than it reads, rather than taking a part of it as whole", async () => {
     const memberChannels = rs.fn(async () => ({ channels: [NEWS], nextCursor: "more" }));
-    const listing = new SlackMemberChannels({ api: { memberChannels }, botToken: "xoxb" });
+    const listing = new SlackMemberChannels({ api: { memberChannels }, teamId: "T_A" });
 
     await expect(listing.list()).rejects.toThrow(/too many to list: name a channel by its id/);
     await expect(listing.resolve("#ops")).rejects.toThrow(/too many to list/);
@@ -83,8 +83,8 @@ describe("SlackMemberChannels", () => {
         };
       });
 
-    const whole = new SlackMemberChannels({ api: { memberChannels: listed(50) }, botToken: "x" });
-    const over = new SlackMemberChannels({ api: { memberChannels: listed(51) }, botToken: "x" });
+    const whole = new SlackMemberChannels({ api: { memberChannels: listed(50) }, teamId: "T_A" });
+    const over = new SlackMemberChannels({ api: { memberChannels: listed(51) }, teamId: "T_A" });
 
     expect(await whole.list()).toHaveLength(10_000);
     await expect(over.list()).rejects.toThrow(/more than 10000 channels/);

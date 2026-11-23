@@ -12,11 +12,10 @@ import { platformOf } from "@rome/api-types/platform";
 import { messagingAudience } from "../agent/index.js";
 import { SLACK_APP_KIND } from "../connections/integrations/slack-app.js";
 import {
-  FORWARD_SIGNATURE_HEADER,
-  FORWARD_TEAM_HEADER,
-  FORWARD_TIMESTAMP_HEADER,
-  forwardSignature,
-} from "../connections/kinds/slack-app/forward.js";
+  depositSignature,
+  SLACK_DEPOSIT_HEADER,
+  SLACK_SIGNATURE_HEADER,
+} from "../connections/kinds/slack-app/deposit.js";
 import { type MailboxFrame, SlackAppAdapter } from "../connections/kinds/slack-app/slack-app.js";
 import { appPersonMapping } from "../people/app-person-mapping.js";
 import { applyGuardianMappingWithinTx, planGuardianMapping } from "../people/guardian-mapping.js";
@@ -26,7 +25,7 @@ import { channelMessageOf } from "../chats/connected-accounts/channel-message.js
 
 const TEAM = "T_A";
 const BOT = "U_BOT";
-const SECRET = "forward-secret-a";
+const DEPOSIT_KEY = "deposit-key-a";
 const INSTALLER = "U_GUARDIAN";
 
 function dm(i: number, channel: string, user: string): MailboxFrame {
@@ -46,17 +45,10 @@ function dm(i: number, channel: string, user: string): MailboxFrame {
       },
     }),
   );
-  const timestamp = "1700000000";
   return {
     headers: {
-      [FORWARD_TEAM_HEADER]: TEAM,
-      [FORWARD_TIMESTAMP_HEADER]: timestamp,
-      [FORWARD_SIGNATURE_HEADER]: forwardSignature({
-        forwardSecret: SECRET,
-        timestamp,
-        teamId: TEAM,
-        body,
-      }),
+      [SLACK_DEPOSIT_HEADER]: "1",
+      [SLACK_SIGNATURE_HEADER]: depositSignature(body, DEPOSIT_KEY),
     },
     body,
   };
@@ -84,13 +76,12 @@ describe("Slack app members who did not sign in (R12)", () => {
     let onFrame: ((frame: MailboxFrame) => Promise<{ status: number }>) | null = null;
     const adapter = new SlackAppAdapter({
       channel: SLACK_APP_KIND,
-      botToken: "xoxb-a",
       teamId: TEAM,
       botUserId: BOT,
-      forwardSecret: SECRET,
-      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      depositKey: DEPOSIT_KEY,
+      bound: async () => true,
+      deliveryAttempts: 4,
       api: {
-        authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
         postMessage: async () => ({ ts: "9.0" }),
         openDirectMessage: async () => "D_NEW",
         addReaction: async () => {},
@@ -99,13 +90,9 @@ describe("Slack app members who did not sign in (R12)", () => {
         conversationHistory: async () => ({ messages: [], hasMore: false }),
         conversationReplies: async () => ({ messages: [] }),
         memberChannels: async () => ({ channels: [] }),
-        revoke: async () => {},
-      },
-      openMailbox: (_mailbox, handler) => {
-        onFrame = handler;
-        return { stop: () => {}, attempts: 4 };
       },
     });
+    onFrame = (frame) => adapter.handleFrame(frame);
     const heard: ChannelMessage[] = [];
     adapter.onInbound((message) => void heard.push(channelMessageOf(message, "slack_app")));
     await adapter.start();
