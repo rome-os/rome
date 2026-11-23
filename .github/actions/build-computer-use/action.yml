@@ -29,7 +29,7 @@ runs:
     - name: Build explicit unsigned CI helper
       if: inputs.sign == 'false'
       shell: bash
-      run: node packages/rome-node-core/scripts/build-computer-use.ts --output "packages/rome-node-core/dist/native/Rome Computer Use.app" --unsigned
+      run: node packages/rome-node-core/scripts/build-computer-use.ts --output "packages/rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app" --unsigned
     - name: Build and sign release helper
       if: inputs.sign == 'true'
       shell: bash
@@ -73,7 +73,7 @@ runs:
           echo "::error::The certificate must be a Developer ID Application identity."
           exit 1
         }
-        helper="packages/rome-node-core/dist/native/Rome Computer Use.app"
+        helper="packages/rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app"
         node packages/rome-node-core/scripts/build-computer-use.ts --output "$helper" --identity "$signing_identity"
         codesign --verify --strict --verbose=2 "$helper"
         if [ "$NOTARIZE" = true ]; then

@@ -42,7 +42,8 @@ nativeEnvironment.DEVELOPER_DIR = run("/usr/bin/xcode-select", ["-p"]).trim();
 const sdkPath = run("/usr/bin/xcrun", ["--sdk", "macosx", "--show-sdk-path"]).trim();
 nativeEnvironment.SDKROOT = sdkPath;
 const requestedOutput = resolve(
-  option("--output") ?? resolve(root, "dist/native/Rome Computer Use.app"),
+  option("--output") ??
+    resolve(root, "../rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app"),
 );
 mkdirSync(dirname(requestedOutput), { recursive: true });
 const canonicalParent = realpathSync(dirname(requestedOutput));

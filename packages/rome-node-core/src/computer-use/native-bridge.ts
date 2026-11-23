@@ -2,9 +2,10 @@ import { execFile } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { link, lstat, mkdir, open, realpath, unlink } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { connect } from "node:net";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { isRecord } from "../actions.js";
@@ -17,6 +18,8 @@ import { ComputerUseError, parseComputerUseHello } from "./protocol.js";
 
 const MAX_RPC_BYTES = 8 * 1024 * 1024;
 const runFile = promisify(execFile);
+const require = createRequire(import.meta.url);
+const DARWIN_ARM64_PACKAGE = "@rome-os/node-core-darwin-arm64";
 
 export interface ComputerUseNative {
   call(method: string, params: Record<string, unknown>): Promise<unknown>;
@@ -35,12 +38,21 @@ export function defaultComputerUseStateDir(): string {
   return join(homedir(), "Library", "Application Support", "Rome", "ComputerUse");
 }
 
+function packagedComputerUseAppPath(): string {
+  try {
+    const manifestPath = require.resolve(`${DARWIN_ARM64_PACKAGE}/package.json`);
+    return join(dirname(manifestPath), "dist", "native", "Rome Computer Use.app");
+  } catch {
+    return fileURLToPath(new URL("../native/Rome Computer Use.app", import.meta.url));
+  }
+}
+
 export function computerUseAppPath(options: NativeBridgeOptions): string {
   return (
     options.appPath ??
     process.env.ROME_COMPUTER_USE_APP ??
     options.bundledAppPath ??
-    fileURLToPath(new URL("../native/Rome Computer Use.app", import.meta.url))
+    packagedComputerUseAppPath()
   );
 }
 

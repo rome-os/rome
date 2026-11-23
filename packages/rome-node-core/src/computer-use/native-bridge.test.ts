@@ -3,7 +3,11 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { ComputerUseError } from "./protocol.js";
-import { createComputerUseNativeBridge, createNativeRpcTransport } from "./native-bridge.js";
+import {
+  computerUseAppPath,
+  createComputerUseNativeBridge,
+  createNativeRpcTransport,
+} from "./native-bridge.js";
 
 const assets = rs.hoisted(() => ({ inspect: rs.fn(), prepare: rs.fn(), launch: rs.fn() }));
 rs.mock("./native-assets.js", () => ({
@@ -708,5 +712,27 @@ describe("native computer-use transport", () => {
     expect(f.calls.find((call) => call.method === "shutdown")?.params).toEqual({ idleOnly: true });
     expect(assets.prepare).not.toHaveBeenCalled();
     expect(assets.launch).not.toHaveBeenCalled();
+  });
+
+  it("resolves the helper path by precedence and discovers @rome-os/node-core-darwin-arm64 on Apple Silicon", () => {
+    rs.stubEnv("ROME_COMPUTER_USE_APP", undefined);
+    const defaultPath = computerUseAppPath({});
+    expect(defaultPath.endsWith(join("native", "Rome Computer Use.app"))).toBe(true);
+    if (process.platform === "darwin" && process.arch === "arm64") {
+      expect(defaultPath).toContain("rome-node-core-darwin-arm64");
+    }
+    expect(computerUseAppPath({ bundledAppPath: "/bundled/Rome Computer Use.app" })).toBe(
+      "/bundled/Rome Computer Use.app",
+    );
+    rs.stubEnv("ROME_COMPUTER_USE_APP", "/env/Rome Computer Use.app");
+    expect(computerUseAppPath({ bundledAppPath: "/bundled/Rome Computer Use.app" })).toBe(
+      "/env/Rome Computer Use.app",
+    );
+    expect(
+      computerUseAppPath({
+        appPath: "/explicit/Rome Computer Use.app",
+        bundledAppPath: "/bundled/Rome Computer Use.app",
+      }),
+    ).toBe("/explicit/Rome Computer Use.app");
   });
 });

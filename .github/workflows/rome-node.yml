@@ -11,6 +11,7 @@ on:
       - infra/rome-node/**
       - packages/rome-node-cli/**
       - packages/rome-node-core/**
+      - packages/rome-node-core-darwin-arm64/**
       - packages/rome-node-ui/**
       - packages/rome-node-web/**
       - packages/ui/**
@@ -29,6 +30,7 @@ on:
       - infra/rome-node/**
       - packages/rome-node-cli/**
       - packages/rome-node-core/**
+      - packages/rome-node-core-darwin-arm64/**
       - packages/rome-node-ui/**
       - packages/rome-node-web/**
       - packages/ui/**
@@ -79,9 +81,9 @@ jobs:
       - name: Check locked native installation without privacy access
         run: node --test packages/rome-node-core/native/check-install.ts
         env:
-          ROME_COMPUTER_USE_TEST_APP: ${{ github.workspace }}/packages/rome-node-core/dist/native/Rome Computer Use.app
+          ROME_COMPUTER_USE_TEST_APP: ${{ github.workspace }}/packages/rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app
       - name: Preserve the native app's executable permissions
-        run: tar -czf "$RUNNER_TEMP/computer-use-native.tgz" -C packages/rome-node-core/dist "native/Rome Computer Use.app"
+        run: tar -czf "$RUNNER_TEMP/computer-use-native.tgz" -C packages/rome-node-core-darwin-arm64/dist "native/Rome Computer Use.app"
       - uses: actions/upload-artifact@v7
         with:
           name: computer-use-native-package-test
@@ -107,8 +109,10 @@ jobs:
         with:
           name: computer-use-native-package-test
           path: ${{ runner.temp }}/computer-use-package-test
-      - name: Include the native helper in both package checks
-        run: tar -xzf "$RUNNER_TEMP/computer-use-package-test/computer-use-native.tgz" -C packages/rome-node-core/dist
+      - name: Stage the native helper into the darwin-arm64 package
+        run: |
+          mkdir -p packages/rome-node-core-darwin-arm64/dist
+          tar -xzf "$RUNNER_TEMP/computer-use-package-test/computer-use-native.tgz" -C packages/rome-node-core-darwin-arm64/dist
       - name: Refuse the unsigned fixture as a release
         run: |
           if node packages/rome-node-core/scripts/verify-native-package.ts --release; then
@@ -120,14 +124,54 @@ jobs:
       - run: node packages/rome-node-cli/bin/rome-node.js --help
       - name: Install the standalone archive
         run: |
-          mkdir -p "$RUNNER_TEMP/rome-node-package"
-          pnpm --filter @rome-os/node-core pack --pack-destination "$RUNNER_TEMP/rome-node-package"
-          pnpm --filter @rome-os/node pack --pack-destination "$RUNNER_TEMP/rome-node-package"
-          npm install --prefix "$RUNNER_TEMP/rome-node-core-install" "$RUNNER_TEMP"/rome-node-package/rome-os-node-core-*.tgz
-          node packages/rome-node-cli/scripts/package-smoke.mjs "$RUNNER_TEMP/rome-node-core-install"
-          npm install --prefix "$RUNNER_TEMP/rome-node-install" "$RUNNER_TEMP"/rome-node-package/*.tgz
-          node "$RUNNER_TEMP/rome-node-install/node_modules/@rome-os/node/bin/rome-node.js" --help
-          node "$RUNNER_TEMP/rome-node-install/node_modules/@rome-os/node/bin/rome-node.js" help computer
+          set -euo pipefail
+          pkg_dir="$RUNNER_TEMP/rome-node-package"
+          mkdir -p "$pkg_dir"
+          pnpm --filter @rome-os/node-core-darwin-arm64 pack --pack-destination "$pkg_dir"
+          pnpm --filter @rome-os/node-core pack --pack-destination "$pkg_dir"
+          pnpm --filter @rome-os/node pack --pack-destination "$pkg_dir"
+
+          darwin_tgz="$(ls "$pkg_dir"/rome-os-node-core-darwin-arm64-*.tgz)"
+          core_tgz="$(ls "$pkg_dir"/rome-os-node-core-[0-9]*.tgz)"
+          cli_tgz="$(ls "$pkg_dir"/rome-os-node-[0-9]*.tgz)"
+
+          if tar -tzf "$core_tgz" | grep -Fq 'Rome Computer Use.app'; then
+            echo "::error::@rome-os/node-core tarball must not contain Rome Computer Use.app"
+            exit 1
+          fi
+          tar -tzf "$darwin_tgz" | grep -Fq 'package/dist/native/Rome Computer Use.app/Contents/MacOS/RomeComputerUse'
+
+          core_install="$RUNNER_TEMP/rome-node-core-install"
+          mkdir -p "$core_install"
+          node --input-type=module -e '
+            import { writeFileSync } from "node:fs";
+            const [dir, coreTgz, darwinTgz] = process.argv.slice(1);
+            writeFileSync(`${dir}/package.json`, JSON.stringify({
+              private: true,
+              dependencies: { "@rome-os/node-core": `file:${coreTgz}` },
+              overrides: { "@rome-os/node-core-darwin-arm64": `file:${darwinTgz}` },
+            }, null, 2));
+          ' "$core_install" "$core_tgz" "$darwin_tgz"
+          npm install --prefix "$core_install"
+          node packages/rome-node-cli/scripts/package-smoke.mjs "$core_install"
+
+          cli_install="$RUNNER_TEMP/rome-node-install"
+          mkdir -p "$cli_install"
+          node --input-type=module -e '
+            import { writeFileSync } from "node:fs";
+            const [dir, cliTgz, coreTgz, darwinTgz] = process.argv.slice(1);
+            writeFileSync(`${dir}/package.json`, JSON.stringify({
+              private: true,
+              dependencies: { "@rome-os/node": `file:${cliTgz}` },
+              overrides: {
+                "@rome-os/node-core": `file:${coreTgz}`,
+                "@rome-os/node-core-darwin-arm64": `file:${darwinTgz}`,
+              },
+            }, null, 2));
+          ' "$cli_install" "$cli_tgz" "$core_tgz" "$darwin_tgz"
+          npm install --prefix "$cli_install"
+          node "$cli_install/node_modules/@rome-os/node/bin/rome-node.js" --help
+          node "$cli_install/node_modules/@rome-os/node/bin/rome-node.js" help computer
 
   image:
     runs-on: ${{ matrix.runner }}

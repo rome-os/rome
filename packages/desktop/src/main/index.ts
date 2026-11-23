@@ -110,7 +110,10 @@ async function bootstrap() {
         ? createComputerUseHost({
             bundledAppPath: app.isPackaged
               ? join(process.resourcesPath, "native/Rome Computer Use.app")
-              : join(__dirname, "../../../rome-node-core/dist/native/Rome Computer Use.app"),
+              : join(
+                  __dirname,
+                  "../../../rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app",
+                ),
           })
         : undefined;
     if (audit.state.state === "unavailable")

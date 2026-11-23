@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 if (process.platform === "darwin") {
   const helper = fileURLToPath(
-    new URL("../../rome-node-core/dist/native/Rome Computer Use.app", import.meta.url),
+    new URL("../../rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app", import.meta.url),
   );
   const executable = `${helper}/Contents/MacOS/RomeComputerUse`;
   if (!statSync(executable, { throwIfNoEntry: false })?.isFile()) {

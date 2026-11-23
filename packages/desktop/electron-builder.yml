@@ -23,7 +23,7 @@ npmRebuild: false
 asarUnpack:
   - "native/**/*.node"
 extraResources:
-  - from: ../rome-node-core/dist/native/Rome Computer Use.app
+  - from: ../rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app
     to: native/Rome Computer Use.app
   - from: native/
     to: native/
