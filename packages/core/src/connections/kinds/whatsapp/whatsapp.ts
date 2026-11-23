@@ -186,11 +186,10 @@ export class WhatsAppAdapter {
 
         this.seedSelfContact();
 
-        // Hand the guardian auto-mapper our *canonical* self address, not the raw
-        // socket id. `user.id` carries a `:device` suffix (`<pn>:8@s.whatsapp.net`)
-        // that never matches the device-stripped JIDs we persist contacts under, so
-        // mapping the guardian onto it leaves the self contact unlinked in the People
-        // tab and duplicated under "WhatsApp contacts".
+        // Report our *canonical* self address, not the raw socket id. `user.id`
+        // carries a `:device` suffix (`<pn>:8@s.whatsapp.net`) that never matches
+        // the device-stripped JIDs we persist contacts under, so it would name a
+        // different account from the self contact.
         const selfJid = this.selfPnJid();
         if (this.connectedCallback && selfJid) {
           try {

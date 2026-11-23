@@ -89,7 +89,7 @@ function makeDeps(fake: FakeWhatsAppAdapter) {
   const mapped: string[] = [];
   const deps = {
     syncSink: sync,
-    onGuardianConnected: (jid: string) => mapped.push(jid),
+    onAccountConnected: (jid: string) => mapped.push(jid),
     createAdapter: (authProvider: WhatsAppAuthProvider) => {
       fake.authProvider = authProvider;
       return fake as unknown as WhatsAppAdapter;
@@ -308,7 +308,7 @@ describe("whatsapp inbound delivery", () => {
         async upsertChats() {},
         async upsertMessages() {},
       },
-      onGuardianConnected: () => {},
+      onAccountConnected: () => {},
       createAdapter: (authProvider) => new WhatsAppAdapter({ authProvider }, socketFactory),
     }).capabilities.talker!.build(sessionCred(), runtimeKit());
     return { talker, handlers };

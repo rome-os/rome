@@ -111,7 +111,7 @@ describe("SetupSession", () => {
     const grant: SetupGrant = {
       credential: CRED,
       profile: { botUsername: "rome" },
-      guardianChannelUserId: "guardian-123",
+      connectedBy: { id: "guardian-123" },
       summary: { title: "Connected" },
     };
     const fn: SetupFn = async (interact) => {

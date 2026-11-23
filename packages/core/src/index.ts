@@ -317,7 +317,7 @@ import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./instance/timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
-import { linkGuardianToAccount } from "./people/guardian-mapping.js";
+import { linkGuardianOnConnect, linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
 import { ReleaseNotes } from "./instance/system-upgrade/release-notes.js";
@@ -800,12 +800,12 @@ async function main() {
   });
   const agentNameResolver = createAgentNames(listedAgents);
   // Grant setups: in-memory session store keyed per grant,
-  // sharing the registry (descriptor lookup + terminal write) and the person
-  // mapping repo (guardian-link auto-mapping). Drives the generic setup
+  // sharing the registry (descriptor lookup + terminal write). People joins each
+  // connect to link the account that connected to the guardian. Drives the generic setup
   // routes; created here so descriptors registered later expose their setup.
   const setupManager = new SetupManager({
     registry: connectionRegistry,
-    peopleRepo,
+    participant: linkGuardianOnConnect(peopleRepo),
   });
   // Descriptors are registered LATER (before registry.load(), just above the
   // Talk runtime) so their factories can be threaded the runtime
@@ -2373,8 +2373,8 @@ async function main() {
     listAgents: () => agentLoader.list().map((agent) => agent.name),
     hasAgent: (name) => agentLoader.find(name) !== undefined,
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
-    // Auto-map the guardian onto their own WhatsApp account on connect.
-    onWhatsAppGuardianConnected: (selfJid) => {
+    // The account that connected is the guardian's own, so People links it.
+    onWhatsAppAccountConnected: (selfJid) => {
       linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {
         log.error("failed to auto-map guardian on WhatsApp connect", {
           error: err instanceof Error ? err.message : String(err),

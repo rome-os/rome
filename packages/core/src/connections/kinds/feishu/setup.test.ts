@@ -26,7 +26,7 @@ describe("Feishu credential setup", () => {
       expect.anything(),
     );
     expect(commit).toHaveBeenCalledTimes(1);
-    expect(commit.mock.calls[0][0]).not.toHaveProperty("guardianChannelUserId");
+    expect(commit.mock.calls[0][0]).not.toHaveProperty("connectedBy");
   });
 
   it("renews an account by its own app's credentials, never by registering a new app", async () => {
