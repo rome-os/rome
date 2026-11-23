@@ -530,10 +530,11 @@ export function describeAdapterConformance(
       async () => {
         const second = peer.second!;
         const raised = await raisedFor(() => second.alone!.mentions("/stop"));
-        expect(raised.map((event) => [event.via.account, event.message.body.text])).toEqual([
-          [peer.account, "/stop"],
-          [second.account, "/stop"],
-        ]);
+        // The text is as typed, mentions included, and the same for both.
+        const [first, other] = raised.map((event) => event.message.body.text);
+        expect(raised.map((event) => event.via.account)).toEqual([peer.account, second.account]);
+        expect(first).toMatch(/(^|\s)\/stop$/);
+        expect(other).toBe(first);
         expect(raised.map((event) => addressed.get(event))).toEqual(["ambient", "mention"]);
       },
     );
