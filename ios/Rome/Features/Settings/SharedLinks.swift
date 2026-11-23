@@ -11,19 +11,11 @@ final class SharedLinksStore {
     private(set) var links: [ChatShareLink]?
     private(set) var failed = false
     private(set) var revokeFailed = false
-    /// The sheet is up over Settings.
-    var shows = false
 
     @ObservationIgnored private let backend: RomeBackend
 
     init(backend: RomeBackend) {
         self.backend = backend
-    }
-
-    /// Settings' Shared links: the sheet, then the links.
-    func open() async {
-        shows = true
-        await load()
     }
 
     func load() async {
@@ -65,86 +57,15 @@ final class SharedLinksStore {
     }
 }
 
-extension View {
-    /// The Shared links sheet over Settings, up while `store.shows`.
-    func sharedLinksSheet(_ store: SharedLinksStore) -> some View {
-        modifier(SharedLinksPresenter(store: store))
-    }
-}
-
-/// The Shared links sheet; on a snapshot run, its content in a sheet's frame.
-private struct SharedLinksPresenter: ViewModifier {
-    @Bindable var store: SharedLinksStore
-
-    func body(content: Content) -> some View {
-        #if DEBUG
-        if SnapshotRunner.directory != nil {
-            // A system sheet cannot be captured on Mac Catalyst: its content
-            // in a large sheet's frame, over the whole window.
-            content.overlay {
-                if store.shows, let window = Self.window {
-                    ZStack(alignment: .bottom) {
-                        Color.black
-                        SharedLinksSheet(store: store)
-                            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
-                            .padding(.top, 64)
-                    }
-                    .frame(width: window.width, height: window.height)
-                    .ignoresSafeArea()
-                }
-            }
-        } else {
-            sheet(content)
-        }
-        #else
-        sheet(content)
-        #endif
-    }
-
-    #if DEBUG
-    private static var window: CGSize? {
-        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).first?.bounds.size
-    }
-    #endif
-
-    private func sheet(_ content: Content) -> some View {
-        content.sheet(isPresented: $store.shows) {
-            SharedLinksSheet(store: store)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(22)
-                .presentationBackground(Palette.sheet)
-        }
-    }
-}
-
-/// Every share link: tap one to send it again, swipe to stop sharing.
-struct SharedLinksSheet: View {
+/// Settings' Shared links page: tap a link to send it again, swipe to stop
+/// sharing. A page pushed in Settings, not a sheet over it, so nothing of
+/// Settings shows around it.
+struct SharedLinksScreen: View {
     let store: SharedLinksStore
-    @Environment(\.dismiss) private var dismiss
     @State private var outgoing: ShareOutgoing?
 
     var body: some View {
         VStack(spacing: 0) {
-            Capsule()
-                .fill(Palette.grabber)
-                .frame(width: 36, height: 5)
-                .padding(.top, 7)
-            HStack {
-                Text("Shared links")
-                    .romeFont(24, .bold)
-                    .tracking(-0.6)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-                SheetCloseButton {
-                    dismiss()
-                    store.shows = false
-                }
-            }
-            .padding(.leading, 20)
-            .padding(.trailing, 12)
-            .frame(height: 54)
-
             if let links = store.links {
                 if links.isEmpty {
                     empty
@@ -160,7 +81,11 @@ struct SharedLinksSheet: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Palette.sheet.ignoresSafeArea())
+        .softTopScrollEdge()
+        .floatingTopBar { PageHeader(title: "Shared links", inSheet: true) }
+        .secondaryPageBackground()
+        .toolbar(.hidden, for: .navigationBar)
+        .task { await store.load() }
         .sheet(item: $outgoing) { outgoing in
             ActivitySheet(items: outgoing.items)
                 .presentationDetents([.medium, .large])
@@ -207,8 +132,8 @@ struct SharedLinksSheet: View {
             }
         }
         .listStyle(.insetGrouped)
-        // Right under the title, as the Tasks sheet's list sits: the grouped
-        // list's own top margin is far taller.
+        // Right under the header: the grouped list's own top margin is far
+        // taller.
         .contentMargins(.top, 4, for: .scrollContent)
         .listSectionSpacing(.compact)
         .scrollContentBackground(.hidden)

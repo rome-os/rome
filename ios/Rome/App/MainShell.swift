@@ -31,6 +31,8 @@ enum SettingsRoute: Hashable {
     case syncHistory(String)
     /// The default model and the AI accounts.
     case aiModel
+    /// Every share link of the signed-in person.
+    case sharedLinks
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
@@ -713,7 +715,7 @@ struct MainShell: View {
     }
 
     /// Settings slides up with its own stack, so its pages (instances,
-    /// Connections) push inside the sheet and the X closes all of it.
+    /// Connections, Shared links) push inside the sheet and the X closes all of it.
     private var settingsSheet: some View {
         NavigationStack(path: $settingsPath) {
             SettingsScreen(
@@ -721,6 +723,7 @@ struct MainShell: View {
                 onInstances: { settingsPath.append(.instances) },
                 onConnections: { settingsPath.append(.connections) },
                 onAIModel: { settingsPath.append(.aiModel) },
+                onSharedLinks: { settingsPath.append(.sharedLinks) },
                 onClose: { showSettings = false }
             )
             .navigationDestination(for: SettingsRoute.self) { route in
@@ -751,6 +754,8 @@ struct MainShell: View {
                         SyncHistoryScreen(source: source)
                     case .aiModel:
                         AIModelScreen(store: workspace.aiModel, backend: workspace.backend)
+                    case .sharedLinks:
+                        SharedLinksScreen(store: workspace.sharedLinks)
                     }
                 }
                 .background(SwipeBackEnabler())
