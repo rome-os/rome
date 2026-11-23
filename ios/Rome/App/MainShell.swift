@@ -83,6 +83,14 @@ struct MainShell: View {
     @State private var page: URL?
     /// An app of the instance, in a sheet over the main stack.
     @State private var openApp: InstalledApp?
+    /// The page of `openApp` a chat linked to, in place of its first.
+    @State private var openAppStart: URL?
+    /// The same for `agentApp`.
+    @State private var agentAppStart: URL?
+    /// A file linked in a chat, opened over the main stack.
+    @State private var linkedFile: LinkedFileRequest?
+    /// A file linked in a chat inside the Agent page, opened over it.
+    @State private var agentLinkedFile: LinkedFileRequest?
     /// A page opened from Settings, in a sheet over that sheet.
     @State private var settingsPage: URL?
     #if DEBUG
@@ -124,7 +132,9 @@ struct MainShell: View {
         }
         .onChange(of: showSettings) { _, shown in if shown { Keyboard.dismiss() } }
         .onChange(of: page) { _, shown in if shown != nil { Keyboard.dismiss() } }
-        .onChange(of: openApp) { _, shown in if shown != nil { Keyboard.dismiss() } }
+        .onChange(of: openApp) { _, shown in
+            if shown != nil { Keyboard.dismiss() } else { openAppStart = nil }
+        }
         // A tap on the widget: its app, Apps or Chat in front, nothing over it.
         // Taken on appear too: a link routed while this shell was being
         // built (a sign-in, a switch) waits for it.
@@ -253,7 +263,8 @@ struct MainShell: View {
                 .environment(\.agentZoom, agentZoom)
                 .environment(\.visibleChat, visibleChat)
                 .instancePageSheet(workspace: workspace, url: $page)
-                .appSheet(workspace: workspace, app: $openApp)
+                .appSheet(workspace: workspace, app: $openApp, start: openAppStart)
+                .linkedFileViewer(backend: workspace.backend, request: $linkedFile, top: geometry.safeAreaInsets.top + 58, shown: { workspace.linkedFileShown = $0 }) { page = $0 }
                 .environment(\.isVisitor, workspace.isVisitor)
                 .environment(\.shareAgentName, AgentName.display(workspace.agentName))
                 // Over the page, so beside a pinned drawer they sit above the chat.
@@ -293,7 +304,8 @@ struct MainShell: View {
             .environment(\.isVisitor, workspace.isVisitor)
             .environment(\.shareAgentName, AgentName.display(workspace.agentName))
             .instancePageSheet(workspace: workspace, url: $agentLinkPage)
-            .appSheet(workspace: workspace, app: $agentApp)
+            .appSheet(workspace: workspace, app: $agentApp, start: agentAppStart)
+            .linkedFileViewer(backend: workspace.backend, request: $agentLinkedFile, shown: { workspace.linkedFileShown = $0 }) { agentLinkPage = $0 }
             .presentationBackground(Palette.bg)
             .agentZoomTransition(route.zoomSource, in: agentZoom)
         }
@@ -491,35 +503,76 @@ struct MainShell: View {
         }
     }
 
-    /// A link tapped in chat text: an app or a page of the instance opens in
-    /// the app's web view in a sheet, anything else as the system
-    /// opens it.
+    /// A link tapped in chat text: an app in its sheet, a chat in place, a
+    /// file in Quick Look, a page of the instance in the app's web view in a
+    /// sheet, anything else as the system opens it.
     private func openChatLink(_ url: URL) -> OpenURLAction.Result {
         switch AppLinks.chatLink(url, origin: workspace.backend.origin, apps: workspace.apps) {
-        case .app(let id, let page):
-            Task { await openLinkedApp(id, page: page) }
-            return .handled
+        case .app(let id, let page, let start):
+            Task { await openLinkedApp(id, page: page, start: start) }
+        case .chat(let id, let page):
+            Task { await openLinkedChat(id, page: page) }
+        case .file(let file):
+            openLinkedFile(LinkedFileRequest(file: file))
+        case .unopenableFile:
+            openLinkedFile(LinkedFileRequest(file: nil))
         case .page(let url):
-            // Over whatever is in front: the Agent page covers the main stack.
-            if agentPage != nil { agentLinkPage = url } else { page = url }
-            return .handled
+            openLinkedPage(url)
         case .external, .system:
             return .systemAction
         }
+        return .handled
+    }
+
+    /// Over whatever is in front: the Agent page covers the main stack.
+    private func openLinkedPage(_ url: URL) {
+        if agentPage != nil { agentLinkPage = url } else { page = url }
+    }
+
+    private func openLinkedFile(_ request: LinkedFileRequest) {
+        if agentPage != nil { agentLinkedFile = request } else { linkedFile = request }
     }
 
     /// An app just built may not be in the list yet: it is read again first.
     /// Still missing, the link opens as a page.
-    private func openLinkedApp(_ id: String, page: URL?) async {
+    private func openLinkedApp(_ id: String, page: URL?, start: URL?) async {
         var app = workspace.apps.first { $0.id == id }
         if app == nil, let all = try? await workspace.backend.apps() {
             await workspace.shelve(AppLinks.mine(all))
             app = all.first { $0.id == id }
         }
         if let app {
-            if agentPage != nil { agentApp = app } else { openApp = app }
+            if agentPage != nil {
+                agentAppStart = start
+                agentApp = app
+            } else {
+                openAppStart = start
+                openApp = app
+            }
         } else if let page {
-            if agentPage != nil { agentLinkPage = page } else { self.page = page }
+            openLinkedPage(page)
+        }
+    }
+
+    /// A topic chat or the main Chat shows in place of the page, the Agent
+    /// page closing first; a task chat is pushed where the link was. A chat
+    /// the app does not open stays a page of the instance.
+    private func openLinkedChat(_ id: String, page: URL?) async {
+        switch await workspace.chatLinkTarget(id) {
+        case .main?:
+            agentPage = nil
+            show(.chat)
+        case .topic(let id)?:
+            agentPage = nil
+            show(.topic(id))
+        case .taskChat(let id, let title)?:
+            if agentPage != nil {
+                agentPath.append(.taskChat(chatId: id, title: title))
+            } else {
+                path.append(.taskChat(chatId: id, title: title))
+            }
+        case nil:
+            if let page { openLinkedPage(page) }
         }
     }
 
@@ -604,7 +657,7 @@ struct MainShell: View {
     /// A pushed page, the Agent page's cover or a large sheet (an app, a
     /// dashboard page, Settings) hides the stack's root. A sheet leaves the
     /// root on screen, so its animations would keep running under it.
-    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil || page != nil || showSettings || showArchived }
+    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil || page != nil || showSettings || showArchived || workspace.linkedFileShown }
 
     private func topicScreen(chatId: String?, key: UUID? = nil, draftKey: String) -> some View {
         TopicChatScreen(
@@ -695,11 +748,11 @@ struct MainShell: View {
     /// The chat on screen, by its store's id.
     private var visibleChat: String? {
         if agentPage != nil {
-            return Self.visibleChat(agentPath: agentPath, covered: agentLinkPage != nil || agentApp != nil || workspace.sharingCoversChat)
+            return Self.visibleChat(agentPath: agentPath, covered: agentLinkPage != nil || agentApp != nil || workspace.sheetCoversChat)
         }
         // The Archived sheet covers it too: beside a pinned drawer (iPad)
         // the drawer is not open while the sheet shows.
-        return Self.visibleChat(section: section, path: path, covered: drawerOpen || showSettings || showArchived || page != nil || openApp != nil || workspace.sharingCoversChat)
+        return Self.visibleChat(section: section, path: path, covered: drawerOpen || showSettings || showArchived || page != nil || openApp != nil || workspace.sheetCoversChat)
     }
 
     /// The chat on screen while the Agent page is up: a task chat pushed
@@ -711,7 +764,7 @@ struct MainShell: View {
 
     /// The chat on screen: none while something covers the page (the drawer,
     /// the Settings sheet, an app's or an instance page's sheet, a chat's
-    /// share sheets); a pushed task chat; else the section's chat. Chat's read marks, the
+    /// share sheets, a linked file); a pushed task chat; else the section's chat. Chat's read marks, the
     /// server's watch and push banners all go by this one answer, with
     /// `visibleChat(agentPath:covered:)` while the Agent page is up.
     static func visibleChat(section: MainSection, path: [Route], covered: Bool) -> String? {

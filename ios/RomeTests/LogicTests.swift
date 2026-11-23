@@ -4,6 +4,54 @@ import Testing
 import UIKit
 @testable import Rome
 
+@Suite struct LinkTargetTests {
+    /// A link whose target has a space is a link, not raw Markdown.
+    @Test func spacedTargetsBecomeLinks() {
+        #expect(LinkTargets.bracketed("[f](/projects/my report.md)") == "[f](</projects/my report.md>)")
+        #expect(LinkTargets.bracketed(#"see [f](/a b.md "Plan") now"#) == #"see [f](</a b.md> "Plan") now"#)
+        #expect(LinkTargets.bracketed("[f](/a b.md 'Plan')") == "[f](</a b.md> 'Plan')")
+        #expect(LinkTargets.bracketed("[f](/a b.md (Plan))") == "[f](</a b.md> (Plan))")
+        #expect(LinkTargets.bracketed("[f](/a.md 'Plan')") == "[f](/a.md 'Plan')")
+        #expect(LinkTargets.bracketed("[f](/my report(final).pdf)") == "[f](</my report(final).pdf>)")
+        #expect(LinkTargets.bracketed(#"[f](/a b.md "Click ) here")"#) == #"[f](</a b.md> "Click ) here")"#)
+        #expect(LinkTargets.bracketed("![p](/x/my pic.png)") == "![p](</x/my pic.png>)")
+        let line = MarkdownParser.inline("Open [the plan](/projects/my report.md).")
+        #expect(String(line.characters) == "Open the plan.")
+        #expect(line.runs.compactMap(\.link).map(\.relativeString) == ["/projects/my%20report.md"])
+    }
+
+    /// Code spans, bracketed targets and targets without spaces stay as written.
+    @Test func everythingElseStays() {
+        for text in [
+            "Run `[f](/a b.md)` first",
+            "``x ` [f](/a b.md)``",
+            "[f](</a b.md>)",
+            #"[f](/projects/a.md "Click ) here")"#,
+            "[f](/projects/a.md 'it ( is')",
+            "[f](/a.md) and [g](https://example.com/q?a=1)",
+            "[f](/a b.md\nnext)",
+            "no link (a b)",
+            "\\](/a b)",
+        ] {
+            #expect(LinkTargets.bracketed(text) == text, "\(text)")
+        }
+        #expect(LinkTargets.bracketed("`code` then [f](/a b.md)") == "`code` then [f](</a b.md>)")
+    }
+}
+
+@Suite struct ChatLinkTargetTests {
+    /// A link's chat opens as a task chat or a topic chat by what the chat
+    /// list says it is; another agent's chat is not opened in place.
+    @Test func kindFromTheChatList() {
+        let task = ChatSession(id: "t1", name: "Translate", agentName: ChatSession.conciergeAgent, triggerKind: ChatSession.taskChatTrigger)
+        let topic = ChatSession(id: "c1", name: "Trip", agentName: ChatSession.conciergeAgent)
+        let other = ChatSession(id: "o1", name: "Coder", agentName: "coding:dev")
+        #expect(Workspace.chatLinkTarget(task) == .taskChat("t1", title: "Translate"))
+        #expect(Workspace.chatLinkTarget(topic) == .topic("c1"))
+        #expect(Workspace.chatLinkTarget(other) == nil)
+    }
+}
+
 @Suite struct MarkdownTests {
     // A chat card's Markdown opens and loads nothing.
     @Test func textOnlyDropsLinksAndImages() {
@@ -968,15 +1016,81 @@ final class StubBackend: RomeBackend {
     @Test func instancePagesStayInTheApp() throws {
         #expect(try link("/settings/models") == .page(URL(string: "https://me.romeos.cc/settings/models")!))
         #expect(try link("/apps") == .page(URL(string: "https://me.romeos.cc/apps")!))
-        #expect(try link("/apps/a/b") == .page(URL(string: "https://me.romeos.cc/apps/a/b")!))
-        #expect(try link("https://me.romeos.cc/chat/123") == .page(URL(string: "https://me.romeos.cc/chat/123")!))
-        // A stored file (a pdf, a video) opens in the same web view, which has the session.
-        let stored = "/api/assets/0123456789abcdef0123456789abcdef.pdf"
-        #expect(try link(stored) == .page(URL(string: "https://me.romeos.cc" + stored)!))
-        #expect(try link("https://me.romeos.cc" + stored) == .page(URL(string: "https://me.romeos.cc" + stored)!))
+        #expect(try link("/chat") == .page(URL(string: "https://me.romeos.cc/chat")!))
+        #expect(try link("/projects") == .page(URL(string: "https://me.romeos.cc/projects")!))
         // No origin (demo data): a page has nowhere to resolve.
         #expect(try link("/settings", origin: nil) == .system)
         #expect(try link("/apps/habit-tracker", origin: nil) == .app(id: "habit-tracker", page: nil))
+    }
+
+    /// A page of an app past its first opens the app's sheet at that page,
+    /// standalone, with the link's query and fragment.
+    @Test func appDeepLinksOpenTheAppAtThatPage() throws {
+        #expect(try link("/apps/a/b") == .app(id: "a", page: URL(string: "https://me.romeos.cc/apps/a/b"), start: URL(string: "https://me.romeos.cc/full/apps/a/b")))
+        #expect(try link("/apps/habit-tracker/log/2026?week=1#today") == .app(
+            id: "habit-tracker",
+            page: URL(string: "https://me.romeos.cc/apps/habit-tracker/log/2026?week=1#today"),
+            start: URL(string: "https://me.romeos.cc/full/apps/habit-tracker/log/2026?week=1#today")))
+        #expect(try link("https://me.romeos.cc/full/apps/habit-tracker/settings") == .app(
+            id: "habit-tracker",
+            page: URL(string: "https://me.romeos.cc/full/apps/habit-tracker/settings"),
+            start: URL(string: "https://me.romeos.cc/full/apps/habit-tracker/settings")))
+        #expect(try link("/apps/habit-tracker/x", origin: nil) == .app(id: "habit-tracker", page: nil))
+    }
+
+    /// `/chat/<id>`, relative or on the origin, names a chat; the shell
+    /// decides which kind it is.
+    @Test func chatLinksNameTheChat() throws {
+        #expect(try link("/chat/topic-1") == .chat(id: "topic-1", page: URL(string: "https://me.romeos.cc/chat/topic-1")))
+        #expect(try link("https://me.romeos.cc/chat/123") == .chat(id: "123", page: URL(string: "https://me.romeos.cc/chat/123")))
+        #expect(try link("/chat/concierge", origin: nil) == .chat(id: "concierge", page: nil))
+        #expect(try link("https://example.com/chat/123") == .external)
+    }
+
+    /// A project or memory path is a file to resolve and download through
+    /// the routes the web uses, with its name and the page a folder opens;
+    /// a stored asset downloads as it is.
+    @Test func filesOpenOnThePhone() throws {
+        #expect(try link("/projects/default/my%20report.md") == .file(LinkedFile(
+            apiPath: "/projects/download", query: "path=projects/default/my%20report.md", name: "my report.md",
+            logicalPath: "projects/default/my report.md", page: URL(string: "https://me.romeos.cc/projects/default/my%20report.md"))))
+        #expect(try link("https://me.romeos.cc/projects/a/%E6%8A%A5%E5%91%8A.pdf") == .file(LinkedFile(
+            apiPath: "/projects/download", query: "path=projects/a/%E6%8A%A5%E5%91%8A.pdf", name: "报告.pdf",
+            logicalPath: "projects/a/报告.pdf", page: URL(string: "https://me.romeos.cc/projects/a/%E6%8A%A5%E5%91%8A.pdf"))))
+        // A name without an extension, or a folder, is for /resolve to tell.
+        #expect(try link("/memory/journal/") == .file(LinkedFile(
+            apiPath: "/memory/download", query: "path=memory/journal", name: "journal",
+            logicalPath: "memory/journal", page: URL(string: "https://me.romeos.cc/memory/journal"))))
+        // A `+` is encoded, never sent as a space.
+        #expect(try link("/projects/demo/C%2B%2B%20notes.md") == .file(LinkedFile(
+            apiPath: "/projects/download", query: "path=projects/demo/C%2B%2B%20notes.md", name: "C++ notes.md",
+            logicalPath: "projects/demo/C++ notes.md", page: URL(string: "https://me.romeos.cc/projects/demo/C++%20notes.md"))))
+        #expect(APIClient.strictQueryValue("projects/C++/a+b.md") == "projects/C%2B%2B/a%2Bb.md")
+        let stored = "0123456789abcdef0123456789abcdef.pdf"
+        #expect(try link("/api/assets/" + stored) == .file(LinkedFile(apiPath: "/assets/" + stored, query: nil, name: stored)))
+        #expect(try link("/projects/a/b.csv", origin: nil) == .file(LinkedFile(
+            apiPath: "/projects/download", query: "path=projects/a/b.csv", name: "b.csv", logicalPath: "projects/a/b.csv")))
+    }
+
+    /// A path on the instance's disk is the project or memory path it names,
+    /// whatever folder holds `.rome`, else a file no route serves; `file://`
+    /// the same.
+    @Test func diskPathsMapToTheirRoute() throws {
+        let budget = LinkedFile(
+            apiPath: "/projects/download", query: "path=projects/demo/budget.csv", name: "budget.csv",
+            logicalPath: "projects/demo/budget.csv", page: URL(string: "https://me.romeos.cc/projects/demo/budget.csv"))
+        #expect(try link("/home/rome/.rome/default/projects/demo/budget.csv") == .file(budget))
+        #expect(try link("file:///home/rome/.rome/default/projects/demo/budget.csv") == .file(budget))
+        // Whatever the first folder, as the container's own home is.
+        #expect(try link("/rome-home/.rome/default/projects/demo/budget.csv") == .file(budget))
+        #expect(try link("https://me.romeos.cc/rome-home/.rome/default/projects/demo/budget.csv") == .file(budget))
+        #expect(try link("file:///Users/lin/.rome/work/memory/notes.md") == .file(LinkedFile(
+            apiPath: "/memory/download", query: "path=memory/notes.md", name: "notes.md",
+            logicalPath: "memory/notes.md", page: URL(string: "https://me.romeos.cc/memory/notes.md"))))
+        #expect(try link("/tmp/run.log") == .unopenableFile)
+        #expect(try link("/Users/lin/Desktop/a.csv") == .unopenableFile)
+        #expect(try link("file:///etc/hosts") == .unopenableFile)
+        #expect(try link("/home/rome/.rome/default/projects") == .unopenableFile)
     }
 
     /// Other sites go to Safari, other schemes to the system.

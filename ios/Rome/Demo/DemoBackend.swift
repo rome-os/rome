@@ -229,6 +229,15 @@ final class DemoBackend: RomeBackend {
         return data
     }
 
+    /// A stored picture by its logical path, else a short trip plan as text.
+    func linkedFile(_ file: LinkedFile) async throws -> Data {
+        try await pause(0.2)
+        var components = URLComponents()
+        components.percentEncodedQuery = file.query
+        if let logical = components.queryItems?.first(where: { $0.name == "path" })?.value, let data = assets[logical] { return data }
+        return Data("# 京都行程\n\n周六：伏见稻荷、清水寺；周日：岚山、金阁寺。\n".utf8)
+    }
+
     func renameChat(_ id: String, to name: String) async throws {
         try await pause(0.2)
         if let index = topicChats.firstIndex(where: { $0.id == id }) { topicChats[index].name = name }
@@ -1131,10 +1140,11 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-cards", name: "周末安排", main: false, unread: 0),
             ConciergeChat(id: "topic-itinerary", name: "东京一日", main: false, unread: 0),
             ConciergeChat(id: "topic-task-links", name: "任务进度", main: false, unread: 0),
+            ConciergeChat(id: "topic-reply-links", name: "资料都放哪了", main: false, unread: 0),
         ]
         // Latest first in the drawer: the trip, then the errors, and so on.
         // The cafés come eighth, past the first five, for the drawer over it.
-        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900]
+        let minutesAgo = ["topic-trip": 2, "topic-errors": 5, "topic-home": 30, "topic-books": 60, "topic-meals": 90, "topic-mail": 120, "topic-table": 180, "topic-location": 240, "topic-health": 300, "topic-routine": 400, "topic-mail-setup": 500, "topic-lists": 600, "topic-cards": 700, "topic-itinerary": 800, "topic-task-links": 900, "topic-reply-links": 1000]
         topicActivity = minutesAgo.mapValues { Date.now.addingTimeInterval(Double(-$0 * 60)) }
 
         // Archived topic chats, out of the drawer's list: the Archived row's
@@ -1442,6 +1452,13 @@ final class DemoBackend: RomeBackend {
             TaskLinkInfo(id: "chat-blur", name: "iOS 退出 task chat 后头部模糊变实心", status: "active"),
             TaskLinkInfo(id: "chat-reload", name: "iOS 长气泡展开和折叠时图片重新加载，先在 Mac mini 上复现", status: "needs_you"),
         ].map { ($0.id, $0) })
+        // Every kind of link a reply holds: a project file whose name has a
+        // space, one by its path on the instance's disk, a file no route
+        // serves, a topic chat and a task chat.
+        messages["topic-reply-links"] = [
+            user("rl1", "行程和预算放哪了？", at: at(9, 40), session: "topic-reply-links"),
+            agent("都放好了：\n\n- 行程：[京都行程](/projects/demo/trip/kyoto plan.md)\n- 预算：[budget.csv](/home/rome/.rome/default/projects/demo/trip/budget.csv)\n- 运行日志：[run.log](/tmp/run.log)\n\n要改行程就回 [京都旅行计划](/chat/topic-trip)，翻译进度在 [官网首页双语文案](/chat/chat-site)。", at: at(9, 41), session: "topic-reply-links"),
+        ]
         messages["topic-task-links"] = [
             user("tl1", "我的任务都怎么样了？", at: at(9, 30), session: "topic-task-links"),
             agent("[官网首页双语文案](#rome-task=chat-site) 还在逐段翻译，好了告诉你。其余的：\n\n- [价格追踪：发提醒邮件](#rome-task=chat-price) 等你批准\n- [修复登录页样式](#rome-task=chat-login) 改好了\n- [导出季度报表](#rome-task=chat-export) 没导出来，表格权限不够\n- [抓取供应商报价](#rome-task=chat-quotes) 你停掉了\n- [竞品定价调研](#rome-task=chat-research) 没等到你的回答\n- [每周一整理周报](#rome-task=chat-weekly) 下周一开始", at: at(9, 31), session: "topic-task-links"),

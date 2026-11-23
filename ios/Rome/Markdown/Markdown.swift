@@ -489,7 +489,7 @@ enum MarkdownParser {
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
             failurePolicy: .returnPartiallyParsedIfPossible
         )
-        let marked = CJKEmphasis.mark(text)
+        let marked = CJKEmphasis.mark(LinkTargets.bracketed(text))
         var result = (try? AttributedString(markdown: marked, options: options)) ?? AttributedString(marked)
         CJKEmphasis.apply(&result)
         for run in result.runs {
@@ -508,6 +508,101 @@ enum MarkdownParser {
         String(inline(text).characters)
             .replacingOccurrences(of: "#", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Link targets with spaces. CommonMark ends a bare link target at its first
+/// space, so `[f](/projects/my report.md)` is no link and shows as written,
+/// and agents write them anyway. Each such target is wrapped in `<…>`, the
+/// form that may hold spaces, before the text is parsed. A code span keeps
+/// what it holds; code blocks never reach inline parsing.
+enum LinkTargets {
+    static func bracketed(_ text: String) -> String {
+        guard text.contains("](") else { return text }
+        let chars = Array(text)
+        var out: [Character] = []
+        out.reserveCapacity(chars.count + 8)
+        var index = 0
+        while index < chars.count {
+            let character = chars[index]
+            if character == "\\" {
+                out.append(contentsOf: chars[index..<min(index + 2, chars.count)])
+                index += 2
+            } else if character == "`" {
+                let end = codeSpanEnd(chars, at: index)
+                out.append(contentsOf: chars[index..<end])
+                index = end
+            } else if character == "]", index + 1 < chars.count, chars[index + 1] == "(",
+                      let found = spacedTarget(chars, from: index + 2) {
+                out.append(contentsOf: "](" + found.target + ")")
+                index = found.close + 1
+            } else {
+                out.append(character)
+                index += 1
+            }
+        }
+        return String(out)
+    }
+
+    /// Where the code span opening at `index` ends: past its closing run of
+    /// as many backticks, or past the opening run when none closes it.
+    private static func codeSpanEnd(_ chars: [Character], at index: Int) -> Int {
+        var ticks = 0
+        while index + ticks < chars.count, chars[index + ticks] == "`" { ticks += 1 }
+        var close = index + ticks
+        while close < chars.count {
+            guard chars[close] == "`" else {
+                close += 1
+                continue
+            }
+            var count = 0
+            while close + count < chars.count, chars[close + count] == "`" { count += 1 }
+            if count == ticks { return close + count }
+            close += count
+        }
+        return index + ticks
+    }
+
+    /// The link destination starting at `start`, rewritten as `<target>` and
+    /// its title, when its target holds a space and no angle brackets; and the
+    /// index of its closing parenthesis. Nil leaves it as written.
+    private static func spacedTarget(_ chars: [Character], from start: Int) -> (target: String, close: Int)? {
+        var depth = 0
+        var end = start
+        while end < chars.count {
+            let character = chars[end]
+            if character == "\n" { return nil }
+            if character == "\\" {
+                end += 2
+                continue
+            }
+            // A quoted title after a blank may hold parentheses of its own.
+            if character == "\"" || character == "'", end > start, chars[end - 1].isWhitespace,
+               let close = chars[(end + 1)...].firstIndex(where: { $0 == character || $0 == "\n" }), chars[close] == character {
+                end = close + 1
+                continue
+            }
+            if character == "(" { depth += 1 }
+            if character == ")" {
+                if depth == 0 { break }
+                depth -= 1
+            }
+            end += 1
+        }
+        guard end < chars.count else { return nil }
+        let destination = String(chars[start..<end]).trimmingCharacters(in: .whitespaces)
+        guard !destination.hasPrefix("<"), destination.contains(where: \.isWhitespace) else { return nil }
+        var target = destination
+        var title = ""
+        // A title: `"…"`, `'…'` or `(…)` after the target.
+        for (open, close) in [("\"", "\""), ("'", "'"), ("(", ")")] where destination.hasSuffix(close) {
+            guard let start = destination.dropLast().range(of: " " + open, options: .backwards) else { continue }
+            target = String(destination[..<start.lowerBound]).trimmingCharacters(in: .whitespaces)
+            title = String(destination[start.lowerBound...])
+            break
+        }
+        guard !target.isEmpty, target.contains(where: \.isWhitespace), !target.contains("<"), !target.contains(">") else { return nil }
+        return ("<" + target + ">" + title, end)
     }
 }
 

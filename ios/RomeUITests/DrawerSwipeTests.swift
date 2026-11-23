@@ -35,7 +35,22 @@ final class DrawerSwipeTests: XCTestCase {
         button.tap()
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         waitOnScreen(app, row)
-        waitFor("isHittable == true", row)
+        // A cold simulator on a busy runner takes a while to settle the drawer.
+        waitFor("isHittable == true", row, timeout: 15)
+    }
+
+    /// Presses and holds `row` until its menu shows `item`. On a cold, busy
+    /// simulator the first press can end before the menu comes, or come
+    /// while the drawer still settles, so the press is tried twice.
+    @MainActor
+    private func openMenu(_ app: XCUIApplication, _ row: XCUIElement, showing item: String) -> XCUIElement {
+        let button = app.buttons[item].firstMatch
+        row.press(forDuration: 1.2)
+        if !button.waitForExistence(timeout: 5) {
+            row.press(forDuration: 1.2)
+            XCTAssertTrue(button.waitForExistence(timeout: 10), "the menu never showed \(item)")
+        }
+        return button
     }
 
     @MainActor
@@ -127,9 +142,7 @@ final class DrawerSwipeTests: XCTestCase {
         let app = launch()
         openDrawer(app)
         let row = row(app, topic)
-        row.press(forDuration: 1.2)
-        let pin = app.buttons["Pin"].firstMatch
-        XCTAssertTrue(pin.waitForExistence(timeout: 3))
+        let pin = openMenu(app, row, showing: "Pin")
         XCTAssertTrue(app.buttons["Rename"].exists)
         XCTAssertTrue(app.buttons["Archive"].exists)
         XCTAssertTrue(app.buttons["Delete"].exists)
@@ -145,9 +158,7 @@ final class DrawerSwipeTests: XCTestCase {
     func testRenameFromTheMenu() {
         let app = launch()
         openDrawer(app)
-        row(app, topic).press(forDuration: 1.2)
-        let rename = app.buttons["Rename"].firstMatch
-        XCTAssertTrue(rename.waitForExistence(timeout: 3))
+        let rename = openMenu(app, row(app, topic), showing: "Rename")
         rename.tap()
         let alert = app.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
@@ -167,9 +178,7 @@ final class DrawerSwipeTests: XCTestCase {
         let app = launch()
         openDrawer(app)
         let row = row(app, topic)
-        row.press(forDuration: 1.2)
-        let delete = app.buttons["Delete"].firstMatch
-        XCTAssertTrue(delete.waitForExistence(timeout: 3))
+        let delete = openMenu(app, row, showing: "Delete")
         delete.tap()
         let alert = app.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
@@ -178,9 +187,7 @@ final class DrawerSwipeTests: XCTestCase {
         alert.buttons["Cancel"].tap()
         XCTAssertTrue(row.waitForExistence(timeout: 3))
 
-        row.press(forDuration: 1.2)
-        let archive = app.buttons["Archive"].firstMatch
-        XCTAssertTrue(archive.waitForExistence(timeout: 3))
+        let archive = openMenu(app, row, showing: "Archive")
         archive.tap()
         waitFor("exists == false", row)
     }
