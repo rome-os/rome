@@ -290,6 +290,24 @@ import Testing
         #expect(session.pinnedModel == .init(by: "owner", providerId: "anthropic", selection: "claude-haiku", model: nil))
     }
 
+    @Test func backToDefaultSaysWhereTheChatGoes() {
+        let kept = ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "kept", providerId: "anthropic"))
+        #expect(PinnedHint.confirmBody(kept, default: .openai) == "This chat moves from Claude to ChatGPT, your default, from its next reply.")
+        let owner = ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "owner", providerId: "anthropic", selection: "claude-haiku", model: "claude-haiku-5-5"))
+        #expect(PinnedHint.confirmBody(owner, default: .openai) == "This chat stops using Haiku 5.5 and follows your default, ChatGPT, from its next reply.")
+        #expect(PinnedHint.confirmBody(kept, default: nil) == "This chat follows your default from its next reply.")
+    }
+
+    @Test func theHintIsTheTranscriptsLastRowForTheGuardianOnly() async {
+        let backend = FakeBackend()
+        backend.chatSessionRead = ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "kept", providerId: "openai"))
+        let store = TranscriptStore(sessionId: "s", kind: .concierge, backend: backend)
+        #expect(PinnedHintLine.footer(store, visitor: false) == nil)
+        await store.readChatSession()
+        #expect(PinnedHintLine.footer(store, visitor: false) != nil)
+        #expect(PinnedHintLine.footer(store, visitor: true) == nil)
+    }
+
     @Test func backToDefaultHidesTheHint() async {
         let backend = FakeBackend()
         backend.chatSessionRead = ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "kept", providerId: "openai"))

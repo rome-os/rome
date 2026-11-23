@@ -178,7 +178,8 @@ struct ProviderOutageNotice: View {
 }
 
 /// What a chat's provider failure cards ask its screen to show: the confirm
-/// of a move to another provider, and an account's login sheet.
+/// of a move to another provider, and an account's login sheet. The pinned
+/// hint's Back to default confirm too, since a transcript row presents nothing.
 private struct ProviderFailurePrompts: ViewModifier {
     let store: TranscriptStore
     let workspace: Workspace
@@ -206,6 +207,23 @@ private struct ProviderFailurePrompts: ViewModifier {
                 AILoginSheet(account: account, backend: workspace.backend) { read in
                     workspace.aiModel.update(read)
                 }
+            }
+            // The pinned hint's Back to default: where the chat goes, asked first.
+            .alert(
+                "Back to the default?",
+                isPresented: Binding(get: { store.confirmsFollowDefault }, set: { store.confirmsFollowDefault = $0 })
+            ) {
+                Button("Back to default") {
+                    store.confirmsFollowDefault = false
+                    Task { await store.followDefault() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(verbatim: PinnedHint.confirmBody(store.chatSession, default: workspace.aiModel.defaultProvider))
+            }
+            // The default the confirm names, read as it opens.
+            .task(id: store.confirmsFollowDefault) {
+                if store.confirmsFollowDefault { await workspace.aiModel.refresh() }
             }
     }
 
@@ -235,7 +253,8 @@ private struct ProviderFailurePrompts: ViewModifier {
     static func body(_ action: ProviderFailureAction) -> String {
         switch action {
         case .useCredits: return String(localized: "Every chat runs on Rome credits, and the stopped turn picks up again.")
-        case .switchTo(let provider): return String(localized: "This chat continues on \(provider.name), and the stopped turn picks up again.")
+        // Switch and make default moves the other chats too, but not an owner's pick.
+        case .switchTo(let provider): return String(localized: "This chat continues on \(provider.name), and the stopped turn picks up again.") + "\n\n" + AIDefaultDialog.ownerPicksKeep
         default: return ""
         }
     }

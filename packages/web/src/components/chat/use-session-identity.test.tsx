@@ -181,3 +181,54 @@ it("ignores an old session's pending model refresh after navigation", async () =
   await act(async () => finishRefresh({ ...session, model: "gpt-5.5" }));
   expect(result.current.model).toBe("claude-opus-4-6");
 });
+
+describe("the model the selector shows", () => {
+  it("is Auto while the chat follows the default, whatever Rome stored", async () => {
+    rs.mocked(getSession).mockResolvedValue({
+      ...session,
+      largeModelSelection: "gpt-6-1-sol",
+      followsDefault: true,
+      pinnedModel: null,
+    });
+    rs.mocked(listChatAgents).mockResolvedValue(groups);
+    const { result } = renderHook(() => useSessionIdentity("s1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.largeModelSelection).toBeNull();
+    expect(result.current.pinnedModel).toBeNull();
+  });
+
+  it("is the pick while the chat is pinned, and Auto again after Back to default", async () => {
+    rs.mocked(getSession).mockResolvedValue({
+      ...session,
+      largeModelSelection: "claude-haiku",
+      followsDefault: false,
+      pinnedModel: {
+        by: "owner",
+        providerId: "anthropic",
+        selection: "claude-haiku",
+        model: "claude-haiku-5-5",
+      },
+    });
+    rs.mocked(listChatAgents).mockResolvedValue(groups);
+    const { result } = renderHook(() => useSessionIdentity("s1"));
+    await waitFor(() => expect(result.current.largeModelSelection).toBe("claude-haiku"));
+    // Back to default keeps a model Rome chose, at the same strength.
+    act(() =>
+      result.current.applySession({
+        ...session,
+        largeModelSelection: "claude-sonnet",
+        followsDefault: true,
+        pinnedModel: null,
+      }),
+    );
+    expect(result.current.largeModelSelection).toBeNull();
+    expect(result.current.pinnedModel).toBeNull();
+  });
+
+  it("is what was stored when an older server does not say", async () => {
+    rs.mocked(getSession).mockResolvedValue({ ...session, largeModelSelection: "claude-haiku" });
+    rs.mocked(listChatAgents).mockResolvedValue(groups);
+    const { result } = renderHook(() => useSessionIdentity("s1"));
+    await waitFor(() => expect(result.current.largeModelSelection).toBe("claude-haiku"));
+  });
+});

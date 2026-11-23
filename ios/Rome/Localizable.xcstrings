@@ -1145,6 +1145,16 @@
         }
       }
     },
+    "Back to the default?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "改回默认？"
+          }
+        }
+      }
+    },
     "BMI" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1451,6 +1461,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "找不到该聊天"
+          }
+        }
+      }
+    },
+    "Chats where you picked a model keep it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你指定了模型的聊天会保留它。"
           }
         }
       }
@@ -6223,12 +6243,42 @@
         }
       }
     },
+    "This chat follows your default from its next reply." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个聊天从下一次回复起改用你的默认。"
+          }
+        }
+      }
+    },
     "This chat is archived" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个对话已归档"
+          }
+        }
+      }
+    },
+    "This chat moves from %@ to %@, your default, from its next reply." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个聊天从下一次回复起，从 %@ 改用你的默认 %@。"
+          }
+        }
+      }
+    },
+    "This chat stops using %@ and follows your default, %@, from its next reply." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个聊天从下一次回复起不再用 %@，改用你的默认 %@。"
           }
         }
       }

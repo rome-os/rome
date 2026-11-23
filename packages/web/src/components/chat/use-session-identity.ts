@@ -53,6 +53,18 @@ export interface SessionIdentity {
   applySession: (session: ChatSession) => void;
 }
 
+/**
+ * The model the chat's selector shows: null (Auto) while the chat follows the
+ * default, even when Rome stored a model for it, such as a Concierge chat's
+ * strength or the one Back to default keeps. Only a pinned chat shows its
+ * model. An older server that says neither shows what it stored.
+ * docs/domains/agents.md#pinned-chat
+ */
+export function shownSelection(session: ChatSession | null | undefined): string | null {
+  if (session?.followsDefault === true) return null;
+  return session?.largeModelSelection ?? null;
+}
+
 /** The pin a session reports, or null while it follows the default. */
 function pinnedModelOf(session: ChatSession | null | undefined) {
   return session?.followsDefault === false ? (session.pinnedModel ?? null) : null;
@@ -127,7 +139,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setSettledSessionId(sessionId);
         setSessionName(session?.name ?? null);
         setModel(session?.model ?? null);
-        setLargeModelSelection(session?.largeModelSelection ?? null);
+        setLargeModelSelection(shownSelection(session));
         setIsForkChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
@@ -195,7 +207,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         if (generation !== sessionGeneration.current) return;
         setSessionName(session?.name ?? null);
         setModel(session?.model ?? null);
-        setLargeModelSelection(session?.largeModelSelection ?? null);
+        setLargeModelSelection(shownSelection(session));
         setIsForkChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
@@ -216,7 +228,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     (session: ChatSession) => {
       if (session.id !== sessionId) return;
       setModel(session.model ?? null);
-      setLargeModelSelection(session.largeModelSelection ?? null);
+      setLargeModelSelection(shownSelection(session));
       setPinnedModel(pinnedModelOf(session));
     },
     [sessionId],

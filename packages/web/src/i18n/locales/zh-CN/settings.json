@@ -781,7 +781,8 @@
       "confirm": "设为默认",
       "saveFailed": "未能更改默认提供方",
       "removedNote": "你已退出 {{from}}，{{to}} 现在是默认。",
-      "dismissNote": "关闭"
+      "dismissNote": "关闭",
+      "ownerPicksKeep": "你指定了模型的聊天会保留它。"
     },
     "logoutOutcome": {
       "otherBecomesDefault": "{{provider}} 会成为默认，聊天在下一次回复时切换过去。",

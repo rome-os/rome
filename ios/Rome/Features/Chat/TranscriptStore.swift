@@ -1323,6 +1323,8 @@ final class TranscriptStore {
     private(set) var chatSession: ChatSession?
     /// "Back to default" is on its way.
     private(set) var followingDefault = false
+    /// The pinned hint's Back to default asks first; the chat's screen shows the confirm.
+    var confirmsFollowDefault = false
 
     /// Reads whether the chat follows the default. A failed read keeps what shows.
     func readChatSession() async {

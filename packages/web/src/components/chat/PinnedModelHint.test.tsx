@@ -1,10 +1,11 @@
 // @rstest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import type { ChatSession } from "@/lib/chat-types";
-import { PinnedModelHint, pinnedHintText } from "./PinnedModelHint";
+import { PinnedModelHint, backToDefaultBody, pinnedHintText } from "./PinnedModelHint";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -53,8 +54,61 @@ describe("pinnedHintText", () => {
   });
 });
 
+describe("backToDefaultBody", () => {
+  it("says where a kept chat moves", () => {
+    expect(
+      backToDefaultBody(
+        { by: "kept", providerId: "anthropic", selection: null, model: null },
+        "openai",
+        t,
+      ),
+    ).toBe("This chat moves from Claude to ChatGPT, your default, from its next reply.");
+  });
+
+  it("says an owner's pick stops", () => {
+    expect(
+      backToDefaultBody(
+        {
+          by: "owner",
+          providerId: "anthropic",
+          selection: "claude-haiku",
+          model: "claude-haiku-5-5",
+        },
+        "openai",
+        t,
+      ),
+    ).toBe(
+      "This chat stops using Haiku 5.5 and follows your default, ChatGPT, from its next reply.",
+    );
+  });
+});
+
+/** Answers the default read with ChatGPT, and follow-default with `followed`. */
+function mockApi(followed: Response) {
+  return rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+    if (String(input).endsWith("/api/ai-tools/default")) {
+      return Response.json({
+        defaultProvider: {
+          provider: "openai",
+          signedIn: { anthropic: true, openai: true, rome_credits: false },
+        },
+      });
+    }
+    return followed.clone();
+  }) as typeof fetch);
+}
+
+function renderHint(pinnedModel: NonNullable<ChatSession["pinnedModel"]>, onFollowed: () => void) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <PinnedModelHint sessionId="s1" pinnedModel={pinnedModel} onFollowed={onFollowed} />
+    </QueryClientProvider>,
+  );
+}
+
 describe("PinnedModelHint", () => {
-  it("follows the default on Back to default and hands back the chat", async () => {
+  it("asks first, then follows the default and hands back the chat", async () => {
     const followed: ChatSession = {
       id: "s1",
       name: "Trip",
@@ -63,19 +117,19 @@ describe("PinnedModelHint", () => {
       followsDefault: true,
       pinnedModel: null,
     };
-    const fetchMock = rs
-      .spyOn(globalThis, "fetch")
-      .mockImplementation((async () => Response.json(followed)) as typeof fetch);
+    const fetchMock = mockApi(Response.json(followed));
     const onFollowed = rs.fn();
-    render(
-      <PinnedModelHint
-        sessionId="s1"
-        pinnedModel={{ by: "kept", providerId: "openai", selection: null, model: null }}
-        onFollowed={onFollowed}
-      />,
-    );
-    expect(screen.getByTestId("pinned-model-hint").textContent).toContain("On ChatGPT ·");
+    renderHint({ by: "kept", providerId: "anthropic", selection: null, model: null }, onFollowed);
+    expect(screen.getByTestId("pinned-model-hint").textContent).toContain("On Claude ·");
     await userEvent.click(screen.getByRole("button", { name: "Back to default" }));
+    const dialog = await screen.findByRole("dialog", { name: "Back to the default?" });
+    await waitFor(() =>
+      expect(dialog.textContent).toContain(
+        "This chat moves from Claude to ChatGPT, your default, from its next reply.",
+      ),
+    );
+    expect(onFollowed).not.toHaveBeenCalled();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Back to default" }));
     await waitFor(() => expect(onFollowed).toHaveBeenCalledWith(followed));
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/chat/sessions/s1/model/follow-default",
@@ -83,23 +137,29 @@ describe("PinnedModelHint", () => {
     );
   });
 
-  it("says so when the server refuses", async () => {
-    rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
-      Response.json({ error: "Not available" }, { status: 404 })) as typeof fetch);
+  it("does nothing on Cancel", async () => {
+    const fetchMock = mockApi(Response.json({}));
     const onFollowed = rs.fn();
-    render(
-      <PinnedModelHint
-        sessionId="s1"
-        pinnedModel={{
-          by: "owner",
-          providerId: "anthropic",
-          selection: "claude-haiku",
-          model: null,
-        }}
-        onFollowed={onFollowed}
-      />,
+    renderHint({ by: "kept", providerId: "anthropic", selection: null, model: null }, onFollowed);
+    await userEvent.click(screen.getByRole("button", { name: "Back to default" }));
+    const dialog = await screen.findByRole("dialog", { name: "Back to the default?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(onFollowed).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("follow-default"))).toBe(
+      false,
+    );
+  });
+
+  it("says so when the server refuses", async () => {
+    mockApi(Response.json({ error: "Not available" }, { status: 404 }));
+    const onFollowed = rs.fn();
+    renderHint(
+      { by: "owner", providerId: "anthropic", selection: "claude-haiku", model: null },
+      onFollowed,
     );
     await userEvent.click(screen.getByRole("button", { name: "Back to default" }));
+    const dialog = await screen.findByRole("dialog", { name: "Back to the default?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Back to default" }));
     expect(await screen.findByText("Could not change it. Try again.")).toBeTruthy();
     expect(onFollowed).not.toHaveBeenCalled();
   });

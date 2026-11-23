@@ -781,7 +781,8 @@
       "confirm": "Make default",
       "saveFailed": "Failed to change the default provider",
       "removedNote": "{{to}} is now the default, because you logged out of {{from}}.",
-      "dismissNote": "Dismiss"
+      "dismissNote": "Dismiss",
+      "ownerPicksKeep": "Chats where you picked a model keep it."
     },
     "logoutOutcome": {
       "otherBecomesDefault": "{{provider}} becomes the default. Chats move to it on their next reply.",

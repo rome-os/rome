@@ -247,7 +247,7 @@ import Testing
     @Test func settingTheDefaultAsksWhetherChatsMoveWhileAnyFollow() {
         let dialog = AIDefaultDialog.setDefault(.anthropic, state: state(.openai, claude: true, chatgpt: true))
         #expect(dialog.title == "Make Claude the default?")
-        #expect(dialog.message == "New chats use Claude.")
+        #expect(dialog.message == "New chats use Claude." + "\n\nChats where you picked a model keep it.")
         #expect(dialog.choices == [.moveAll, .keepChats])
         #expect(dialog.label(.moveAll) == "Switch all chats")
         #expect(dialog.label(.keepChats) == "Only new chats")
@@ -261,20 +261,20 @@ import Testing
     @Test func loggingOutOfTheDefaultNamesTheNextOne() {
         let dialog = AIDefaultDialog.logOut(.chatgpt, state: state(.openai, claude: true, chatgpt: true), otherExpired: false)
         #expect(dialog.title == "Log out of ChatGPT?")
-        #expect(dialog.message == "Claude becomes the default.")
+        #expect(dialog.message == "Claude becomes the default." + "\n\nChats where you picked a model keep it.")
         #expect(dialog.choices == [.moveAll, .keepChats])
         #expect(dialog.label(.moveAll) == "Log out and switch all chats")
         #expect(dialog.label(.keepChats) == "Log out, keep chats here")
         // An expired login still takes it, and the dialog warns.
         let expired = AIDefaultDialog.logOut(.chatgpt, state: state(.openai, claude: true, chatgpt: true), otherExpired: true)
-        #expect(expired.message == "Claude becomes the default. Its login has expired: log in to Claude again after you log out.")
+        #expect(expired.message == "Claude becomes the default. Its login has expired: log in to Claude again after you log out." + "\n\nChats where you picked a model keep it.")
         // No chat follows it: one Log out.
         #expect(AIDefaultDialog.logOut(.chatgpt, state: state(.openai, claude: true, chatgpt: true, following: 0), otherExpired: false).choices == [.only(destructive: false)])
     }
 
     @Test func theLastLogoutHandsTheDefaultToCreditsOrPauses() {
         let credits = AIDefaultDialog.logOut(.chatgpt, state: state(.openai, claude: false, chatgpt: true, credits: true), otherExpired: false)
-        #expect(credits.message == "Rome credits become the default.")
+        #expect(credits.message == "Rome credits become the default." + "\n\nChats where you picked a model keep it.")
         #expect(credits.choices == [.moveAll, .keepChats])
         let pause = AIDefaultDialog.logOut(.chatgpt, state: state(.openai, claude: false, chatgpt: true), otherExpired: false)
         #expect(pause.message == "Chats pause until you log in again.")

@@ -165,8 +165,20 @@ struct AIDefaultDialog: Equatable, Identifiable {
 
     let subject: Subject
     let title: String
-    let message: String
     let choices: [Choice]
+    /// What the change does; with a choice to move chats, it adds that a
+    /// checked move never takes a model its owner picked.
+    let message: String
+
+    init(subject: Subject, title: String, message: String, choices: [Choice]) {
+        self.subject = subject
+        self.title = title
+        self.choices = choices
+        self.message = choices.contains(.moveAll) ? message + "\n\n" + Self.ownerPicksKeep : message
+    }
+
+    /// Under a choice to move chats: owner picks stay (docs/domains/agents.md#pinned-chat).
+    static var ownerPicksKeep: String { String(localized: "Chats where you picked a model keep it.") }
 
     var id: String {
         switch subject {

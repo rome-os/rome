@@ -132,7 +132,7 @@ How Rome is let in to a model provider. A login has one of three kinds, named by
 The provider every chat that follows the default runs on: Claude, Codex on the guardian's ChatGPT login, or Rome credits. Three rules decide it, and the cases below follow from them.
 
 1. **One default.** Each chat either follows it or is [pinned to a model](#pinned-chat). A pinned chat always says so, and one tap brings it back to the default.
-2. **The default changes in three cases only:** the guardian sets it, a login when no usable account existed, and a logout of the default. Every change that moves chats asks with one "Move existing chats too" checkbox, checked.
+2. **The default changes in three cases only:** the guardian sets it, a login when no usable account existed, and a logout of the default. Every change that moves chats asks with one "Move existing chats too" checkbox, checked, and says under it that chats where the guardian picked a model keep it.
 3. **A failure changes nothing by itself.** A usage limit, an expired login or a model overload never moves the default or a chat's model. It writes a [card](#provider-failure), and the guardian clicks Retry or Switch. An overload swap lasts one turn.
 
 The cases:
@@ -150,7 +150,8 @@ The cases:
 
 A chat that does not follow the default: its owner picked its model, or it was kept on another provider, by a card's switch or by a change of the default that left existing chats where they were. A chat whose model Rome chose (a Concierge chat's, a task chat's strength) is not pinned. Being pinned to a model has nothing to do with pinning a topic chat in the chat list, nor with the session's [model pin](../concepts/sessions.md#model-pin).
 
-- A pinned chat always shows a hint with one tap "Back to default": "On ChatGPT · Back to default" for a kept chat, "You picked Haiku 5.5 · Back to default" for an owner's pick. It is one quiet line above the composer, on the web and in the app, and visitors never see it. Back to default makes it follow the default again from its next turn, at the strength it runs now.
+- A pinned chat always shows a hint with one tap "Back to default": "On ChatGPT · Back to default" for a kept chat, "You picked Haiku 5.5 · Back to default" for an owner's pick. It is the transcript's last row, on the web and in the app: it scrolls with the chat, and new messages land above it. Visitors never see it. Back to default asks first, naming where the chat goes ("This chat moves from Claude to ChatGPT, your default, from its next reply."), then makes it follow the default again from its next turn, at the strength it runs now.
+- A chat that follows the default shows Auto in its model menu, even when Rome stored a model for it, such as a Concierge chat's strength or the one Back to default keeps. Only a pinned chat shows its model.
 - A kept chat stays on the model it last ran, or on its strength on the other provider. One that never ran a model takes its agent's tier. A fork, a channel's chat and the subagents under any chat stay with the conversation they belong to.
 - A kept chat runs on the guardian's own account, never on Rome credits. While credits are the default it shows its account's card instead. A model its owner picked runs on Rome credits at its strength while they are the default, unless the chat stayed on its provider when the default changed.
 - An unchecked change holds every conversation active in the last 30 days on the old default, whatever provider its last turn ran on, since that is where it would run next. Older ones follow the new default when they run again.

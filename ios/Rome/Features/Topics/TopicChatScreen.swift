@@ -122,9 +122,6 @@ struct TopicChatScreen: View {
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
                 }
-                if !archived, let store {
-                    PinnedHintLine(store: store)
-                }
                 if !archived {
                     TopicComposer(workspace: workspace, chatId: chatId, draft: $draft, focused: $composerFocused, attachments: attachments, sharing: store?.share.isSelecting ?? false) { send() }
                 }
@@ -166,7 +163,7 @@ struct TopicChatScreen: View {
     @ViewBuilder
     private var content: some View {
         if let store, store.loaded {
-            TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
+            TranscriptList(store: store, composerFocused: composerFocused, footer: archived ? nil : PinnedHintLine.footer(store, visitor: workspace.isVisitor), latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
                 ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                     .equatable()
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))

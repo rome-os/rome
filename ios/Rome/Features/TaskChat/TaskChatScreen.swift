@@ -47,7 +47,6 @@ struct TaskChatScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 10) {
-                PinnedHintLine(store: store)
                 Composer(
                     text: $draft,
                     placeholder: String(localized: "Reply to this task"),
@@ -144,7 +143,7 @@ struct TaskChatScreen: View {
             store: store,
             composerFocused: composerFocused,
             alignTop: true,
-            footer: store.running && store.loaded ? AnyView(runningLine(store)) : nil
+            footer: footer(store)
         ) { row, previous in
             // A row that draws nothing takes no space either: a row view of
             // its own would still take the spacing above it.
@@ -155,6 +154,18 @@ struct TaskChatScreen: View {
             }
         }
         .onTapGesture { composerFocused = false }
+    }
+
+    /// After the last row: "Running…" while a turn runs, then the pinned
+    /// hint while the chat does not follow the default.
+    private func footer(_ store: TranscriptStore) -> AnyView? {
+        let running = store.running && store.loaded
+        let hint = PinnedHintLine.footer(store, visitor: workspace.isVisitor)
+        guard running || hint != nil else { return nil }
+        return AnyView(VStack(spacing: 0) {
+            if running { runningLine(store) }
+            if let hint { hint }
+        })
     }
 
     private func runningLine(_ store: TranscriptStore) -> some View {

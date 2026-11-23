@@ -76,7 +76,6 @@ struct ChatScreen: View {
                     if ConciergeStarters.visible(loaded: store.readOnce, empty: store.rowsEmpty) {
                         ConciergeStarters { store.send($0.text) }
                     }
-                    PinnedHintLine(store: store)
                     Composer(text: $draft, placeholder: String(localized: "Message"), focused: $composerFocused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: workspace.concierge.sessionId, voiceField: .chat, onScreen: visible && !store.share.isSelecting) {
                         // A photo still being made small would land in the next message.
                         guard !attachments.isPreparing else { return }
@@ -156,7 +155,7 @@ struct ChatScreen: View {
                 .contentShape(Rectangle())
                 .onTapGesture { composerFocused = false }
             } else {
-                TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
+                TranscriptList(store: store, composerFocused: composerFocused, footer: PinnedHintLine.footer(store, visitor: workspace.isVisitor), latestRequest: workspace.latestRequest) { row, previous in
                     ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                         .equatable()
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))

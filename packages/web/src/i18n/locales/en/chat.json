@@ -914,6 +914,13 @@
     "owner": "You picked {{model}}",
     "backToDefault": "Back to default",
     "romeCredits": "Rome credits",
-    "failed": "Could not change it. Try again."
+    "failed": "Could not change it. Try again.",
+    "confirm": {
+      "title": "Back to the default?",
+      "bodyKept": "This chat moves from {{from}} to {{to}}, your default, from its next reply.",
+      "bodyOwner": "This chat stops using {{model}} and follows your default, {{to}}, from its next reply.",
+      "bodyNoDefault": "This chat follows your default from its next reply.",
+      "cancel": "Cancel"
+    }
   }
 }

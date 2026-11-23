@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { ConciergeGroup } from "@/components/chat/ConciergeGroup";
@@ -51,6 +51,7 @@ export function ConciergeTranscript({
   contentRef,
   feedback = false,
   unreadFrom,
+  tail,
 }: {
   rows: ChatRow[];
   live: LivePreview;
@@ -62,6 +63,8 @@ export function ConciergeTranscript({
   feedback?: boolean;
   /** The id of the first message that was unread when the chat opened; a divider goes above it. */
   unreadFrom?: string | null;
+  /** The transcript's last row, after the newest message, such as the pinned-chat hint. */
+  tail?: ReactNode;
 }) {
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
   const simulated = useSimulatedTyping(allRows, live);
@@ -135,6 +138,7 @@ export function ConciergeTranscript({
               />
             );
           })}
+          {tail}
         </div>
       </div>
     </LatestTaskChatsContext.Provider>

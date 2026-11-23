@@ -2865,6 +2865,21 @@ export function Chat({
                           fork={forkable}
                           variant={variant}
                           unreadFrom={unread?.firstId ?? null}
+                          // A pinned chat says so in its last row, with one way
+                          // back. The default is the guardian's: a visitor never
+                          // sees it.
+                          tail={
+                            mainSessionId &&
+                            pinnedModel &&
+                            !isArchived &&
+                            viewer?.kind !== "visitor" ? (
+                              <PinnedModelHint
+                                sessionId={mainSessionId}
+                                pinnedModel={pinnedModel}
+                                onFollowed={followedDefault}
+                              />
+                            ) : null
+                          }
                         />
                       </TaskChatContext.Provider>
                     </TaskLinksScope>
@@ -2971,15 +2986,6 @@ export function Chat({
                     {/* Share mode hides the composer rather than unmounting it,
                       so a draft is still there when share mode ends. */}
                     <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
-                      {/* A pinned chat says so, with one way back. The default
-                        is the guardian's, so a visitor never sees it. */}
-                      {mainSessionId && pinnedModel && !isArchived && viewer?.kind !== "visitor" ? (
-                        <PinnedModelHint
-                          sessionId={mainSessionId}
-                          pinnedModel={pinnedModel}
-                          onFollowed={followedDefault}
-                        />
-                      ) : null}
                       {isArchived ? (
                         <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
                           <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>

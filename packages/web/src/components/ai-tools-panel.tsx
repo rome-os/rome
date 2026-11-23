@@ -22,6 +22,7 @@ import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import {
   LabeledCheckbox,
   MakeDefaultProviderButton,
+  OwnerPicksNote,
   useProviderName,
 } from "@/components/default-provider";
 import { Badge } from "@/components/ui/badge";
@@ -1092,13 +1093,16 @@ export function AiToolsPanel({
     : "";
   const moveCheckbox = (outcome: ReturnType<typeof logoutOutcome>, disabled: boolean) =>
     outcome?.asksToMove ? (
-      <LabeledCheckbox
-        checked={logoutMovesExisting}
-        disabled={disabled}
-        onCheckedChange={setLogoutMovesExisting}
-      >
-        {t("aiTools.defaultProvider.moveExisting")}
-      </LabeledCheckbox>
+      <>
+        <LabeledCheckbox
+          checked={logoutMovesExisting}
+          disabled={disabled}
+          onCheckedChange={setLogoutMovesExisting}
+        >
+          {t("aiTools.defaultProvider.moveExisting")}
+        </LabeledCheckbox>
+        <OwnerPicksNote />
+      </>
     ) : null;
 
   useEffect(() => {

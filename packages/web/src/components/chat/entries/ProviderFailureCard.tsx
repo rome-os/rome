@@ -9,7 +9,7 @@ import type {
   ProviderFailureReason,
   ProviderFailureResolution,
 } from "@rome/api-types/chat";
-import { LabeledCheckbox, useProviderName } from "@/components/default-provider";
+import { LabeledCheckbox, OwnerPicksNote, useProviderName } from "@/components/default-provider";
 import { ChatNotice } from "@/components/chat/ChatNotice";
 import { ProviderSignIn } from "@/components/chat/ProviderSignIn";
 import { Button } from "@/components/ui/button";
@@ -564,6 +564,7 @@ function OpenSwitchConfirmDialog({
                 >
                   {t("providerFailure.confirm.moveExisting")}
                 </LabeledCheckbox>
+                <OwnerPicksNote />
                 {moveExisting && (
                   <p className="pl-6 text-aux text-muted-foreground">
                     {t("providerFailure.confirm.moveExistingHelp", { provider: name })}

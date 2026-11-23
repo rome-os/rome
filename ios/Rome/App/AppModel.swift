@@ -1245,7 +1245,8 @@ final class AppModel {
         } catch {
             guard account.isCurrent else { return }
             if error as? AuthError == .cloudUnauthorized {
-                phase = .signedOut
+                // A local Rome stays open: Rome Cloud signs out only its own.
+                if !opensLocal { phase = .signedOut }
                 return
             }
             guard workspace == nil else { return }
@@ -1374,9 +1375,25 @@ final class AppModel {
     /// Rome Cloud's list of the account's instances. Drafts of an instance
     /// that is gone go with it.
     private func take(_ list: [CloudInstance]) {
-        instances = list
-        DraftStore.removeInstances(keeping: Set(list.map(\.host)))
-        TranscriptCache.removeInstances(keeping: Set(list.map(\.host)))
+        // Rome Cloud's list never holds a local Rome (DEBUG): while one is
+        // open it stays in the list, and its kept chats stay on the phone.
+        let local = opensLocal ? instances.filter { $0.id == Self.localInstanceID } : []
+        instances = list + local
+        DraftStore.removeInstances(keeping: Set(instances.map(\.host)))
+        TranscriptCache.removeInstances(keeping: Set(instances.map(\.host)))
+    }
+
+    /// The id a local Rome opens under (DEBUG, `ROME_LOCAL_*`).
+    static let localInstanceID = "local"
+
+    /// A local Rome is open: nothing of Rome Cloud signs it out or replaces
+    /// it. Cloud features stay off or fail quietly. Never true in Release.
+    var opensLocal: Bool {
+        #if DEBUG
+        currentInstanceID == Self.localInstanceID
+        #else
+        false
+        #endif
     }
 
     func retry() async {
@@ -1474,6 +1491,9 @@ final class AppModel {
     /// Rome Cloud does, and no device connects until the next sign-in.
     private func nodeCredentialRejected() {
         node.accountEnded()
+        // A local Rome (DEBUG) is no Cloud workspace: it stays open, and only
+        // the device connection, which rides the Cloud credential, stops.
+        guard !opensLocal else { return }
         leaveAccount()
         pendingPush = nil
         browserSignIn = nil
@@ -1625,6 +1645,15 @@ final class AppModel {
 
     func reauthenticate() async {
         sessionExpired = false
+        #if DEBUG
+        // A local Rome signs in again with its own test guardian, never with Rome Cloud.
+        if opensLocal, let login = localLogin {
+            workspace?.stop()
+            workspace = nil
+            await openLocal(origin: login.origin, user: login.user, password: login.password)
+            return
+        }
+        #endif
         workspace?.stop()
         workspace = nil
         await openInstance(preferring: currentInstanceID)
@@ -1994,10 +2023,12 @@ final class AppModel {
         }
     }
 
-    /// Signs in to a Rome running on this Mac with a local test guardian.
-    private func openLocal(origin: String, user: String, password: String) async {
-        guard let url = URL(string: origin) else { return }
-        phase = .connecting(host: url.host() ?? origin)
+    /// The local Rome's login, kept so a 401 or Sign in runs it again.
+    private var localLogin: (origin: String, user: String, password: String)?
+
+    /// Signs in to a local Rome as its test guardian: the session token; nil
+    /// when the Rome did not answer, `.some(nil)` when it refused.
+    nonisolated private static func localSession(_ url: URL, user: String, password: String) async -> String?? {
         var request = URLRequest(url: url.appending(path: "api/auth/login"))
         DevAccess.stamp(&request)
         request.httpMethod = "POST"
@@ -2005,13 +2036,34 @@ final class AppModel {
         request.httpBody = try? JSONEncoder().encode(["userId": user, "password": password])
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpShouldSetCookies = false
-        let reply = try? await URLSession(configuration: configuration).data(for: request)
+        guard let reply = try? await URLSession(configuration: configuration).data(for: request) else { return nil }
+        guard let http = reply.1 as? HTTPURLResponse,
+              let cookie = http.value(forHTTPHeaderField: "Set-Cookie"),
+              let value = cookie.components(separatedBy: ";").first?.components(separatedBy: "rome_session=").last
+        else { return .some(nil) }
+        return .some(value)
+    }
+
+    /// Tests: a local Rome open on `workspace`, as `ROME_LOCAL_*` opens one.
+    func debugOpenLocal(_ workspace: Workspace) {
+        let local = CloudInstance(id: Self.localInstanceID, name: "Local Rome", slug: "local", origin: "http://local.test:3000", status: "running")
+        instances = [local]
+        currentInstanceID = local.id
+        tokenBox = TokenBox()
+        self.workspace = workspace
+        phase = .ready
+    }
+
+    /// Signs in to a Rome running on this Mac with a local test guardian.
+    private func openLocal(origin: String, user: String, password: String) async {
+        guard let url = URL(string: origin) else { return }
+        localLogin = (origin, user, password)
+        phase = .connecting(host: url.host() ?? origin)
+        let reply = await Self.localSession(url, user: user, password: password)
         let drafts = DraftStore(instance: DraftStore.localInstance(url.host() ?? origin))
         let box = TokenBox()
-        if let http = reply?.1 as? HTTPURLResponse,
-           let cookie = http.value(forHTTPHeaderField: "Set-Cookie"),
-           let value = cookie.components(separatedBy: ";").first?.components(separatedBy: "rome_session=").last {
-            box.token = value
+        if case .some(.some(let token)) = reply {
+            box.token = token
         } else if reply == nil, TranscriptCache(instance: drafts.instance).mainChat() != nil {
             // Unreachable, as the cloud path is offline: open on the kept chats.
             box.token = nil
@@ -2020,11 +2072,17 @@ final class AppModel {
             phase = .signedOut
             return
         }
-        let local = CloudInstance(id: "local", name: String(localized: "Local Rome"), slug: "local", origin: origin, status: "running")
+        let local = CloudInstance(id: Self.localInstanceID, name: String(localized: "Local Rome"), slug: "local", origin: origin, status: "running")
         instances = [local]
         currentInstanceID = local.id
         tokenBox = box
-        let client = APIClient(origin: url, token: { box.token })
+        // A 401 from the local Rome signs in again with the same test
+        // guardian, and the request goes again: never Rome Cloud's sign-in.
+        let client = APIClient(origin: url, token: { box.token }, renew: {
+            guard case .some(.some(let token)) = await Self.localSession(url, user: user, password: password) else { return false }
+            box.token = token
+            return true
+        })
         await open(Workspace(backend: LiveBackend(client: client), instanceName: String(localized: "Local Rome"), host: url.host() ?? origin, accountLabel: user, drafts: drafts))
     }
     #endif
