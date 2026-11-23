@@ -2,8 +2,8 @@ import SwiftUI
 
 /// The archived topic chats, in the sheet the drawer's Archived button
 /// opens: latest activity first, grouped by week and month, a page at a time
-/// as in the drawer. A row opens its chat, read only; a swipe or a press and
-/// hold restores or deletes it.
+/// as in the drawer. A row opens its chat, read only; a swipe restores it,
+/// and a press and hold restores or deletes it.
 struct ArchivedTopicsSheet: View {
     let workspace: Workspace
     /// A row was tapped: the sheet closes, then the chat opens.
@@ -98,15 +98,11 @@ struct ArchivedTopicsSheet: View {
             .listRowInsets(EdgeInsets())
             .listRowBackground(Palette.elevated)
             .listRowSeparatorTint(Palette.hair)
-            // Unarchive, which a full swipe takes, then Delete, which
-            // only a tap takes and which always asks. Not the
-            // destructive role, which drops the row before the
-            // guardian has answered.
+            // The swipe only unarchives, and a full swipe does it. Delete
+            // is in the press-and-hold menu alone, and always asks.
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                 Button { restore(chat) } label: { Label("Unarchive", systemImage: "tray.and.arrow.up") }
                     .tint(Palette.primary)
-                Button { delete(chat) } label: { Label("Delete", systemImage: "trash") }
-                    .tint(Palette.destructive)
             }
             .contextMenu {
                 Button { restore(chat) } label: { Label("Unarchive", systemImage: "tray.and.arrow.up") }
