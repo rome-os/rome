@@ -36,6 +36,9 @@ function fakeChats() {
 const TEAM = "T_A";
 const BOT = "U_BOT";
 const DEPOSIT_KEY = "deposit-key-a";
+/** How short a real wait may measure: Node's timers and `Date.now()` count
+ *  whole milliseconds, so a 300 ms sleep can read as 299. */
+const TIMER_SLACK_MS = 5;
 
 function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
   return {
@@ -990,10 +993,10 @@ describe("Slack app reads Slack refused as too soon", () => {
     expect(second.messages).toHaveLength(1);
     expect(asked).toHaveLength(3);
     // Retry-After held the first read a second before it asked again.
-    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(1_000);
+    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(1_000 - TIMER_SLACK_MS);
     // The second thread's turn began when Slack answered, not when the
     // first read started.
-    expect(asked[2] - asked[1]).toBeGreaterThanOrEqual(300);
+    expect(asked[2] - asked[1]).toBeGreaterThanOrEqual(300 - TIMER_SLACK_MS);
   });
 
   it("answers a read that waited its full turn behind one still in flight", async () => {
@@ -1011,7 +1014,7 @@ describe("Slack app reads Slack refused as too soon", () => {
 
     await expect(Promise.all([first, second])).resolves.toEqual(["page", "page"]);
     // The second asked a full turn after Slack answered the first.
-    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(400);
+    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(400 - TIMER_SLACK_MS);
   });
 
   it("refuses a read whose Retry-After would take it past its limit, without asking Slack again", async () => {

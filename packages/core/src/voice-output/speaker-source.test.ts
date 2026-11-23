@@ -8,7 +8,13 @@ import {
   type SpeechCredentialOutcome,
   type SpeechCredentialSource,
 } from "./speech-credentials.js";
-import { type FakeTts, startFakeTts, until } from "./test-helpers.js";
+import {
+  audioMessage,
+  type FakeTts,
+  startFakeTts,
+  terminatedMessage,
+  until,
+} from "./test-helpers.js";
 import { VOICE_MODE_GATE_NAME, resolveVoiceModeEnabled } from "./voice-mode-gate.js";
 
 const listener: SpeakerListener = {
@@ -176,5 +182,60 @@ describe("speaker source", () => {
       enabled: async () => true,
     });
     expect(await source.open(listener)).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("counts what each session speaks on its credential, as sentences finish and when it closes", async () => {
+    // One second of 24 kHz audio, in two frames.
+    const half = Buffer.alloc(24_000);
+    fake.onMessage = (message, reply) => {
+      if (message.text === undefined || message.text_end !== true) return;
+      const id = message.stream_id as string;
+      reply(audioMessage(id, half));
+      reply(audioMessage(id, half, true));
+      reply(terminatedMessage(id));
+    };
+    const usage: { sessionId: string; characters: number; seconds: number }[] = [];
+    const credentials = {
+      ...granted(),
+      recordUsage: (sessionId: string, used: { characters: number; seconds: number }) =>
+        usage.push({ sessionId, ...used }),
+    };
+    const ended: string[] = [];
+    const source = createSpeakerSource({ credentials, enabled: async () => true });
+    let frames = 0;
+    const outcome = await source.open({
+      ...listener,
+      onAudio: () => frames++,
+      onSentenceEnd: (id) => ended.push(id),
+    });
+    if (!outcome.ok) throw new Error(`expected a session, got ${outcome.reason}`);
+    opened.push(outcome.session);
+
+    outcome.session.say("a", "你好，Rome😀。");
+    await until(() => ended.length === 1);
+    expect(usage).toEqual([{ sessionId: "speech-1", characters: 9, seconds: 1 }]);
+
+    // Sentences stopped before any of their audio came, sent or still
+    // queued, are not counted.
+    fake.onMessage = () => {};
+    outcome.session.say("b", "再见。");
+    outcome.session.say("c", "还有。");
+    outcome.session.say("d", "never spoken");
+    await until(() => fake.received.some((m) => m.text === "还有。"));
+    outcome.session.stop();
+    expect(usage).toHaveLength(1);
+
+    // A sentence cut off part-way counts its text and the audio that came.
+    fake.onMessage = (message, reply) => {
+      if (message.text === undefined) return;
+      reply(audioMessage(message.stream_id as string, half));
+    };
+    outcome.session.say("e", "说了一半");
+    await until(() => frames === 3);
+    outcome.session.close();
+    expect(usage).toEqual([
+      { sessionId: "speech-1", characters: 9, seconds: 1 },
+      { sessionId: "speech-1", characters: 4, seconds: 0.5 },
+    ]);
   });
 });

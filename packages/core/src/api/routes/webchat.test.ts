@@ -7610,6 +7610,36 @@ describe("Webchat API", () => {
       expect((await app.request(`/chat/sessions/${LEGACY_FORK_ID}`)).status).toBe(404);
     });
 
+    it("Back to default lets a held fork chat follow the default again", async () => {
+      rs.spyOn(deps.sessionRepository, "current").mockImplementation(async (key) =>
+        key === `webchat:${FORK_ID}` ? withThread(FORK_ID) : null,
+      );
+      const held = new Set([`webchat:${FORK_ID}`, `webchat:${PROMOTED_ID}`]);
+      deps.chatProviders = {
+        heldProvider: (key) => (held.has(key) ? "anthropic" : undefined),
+        follow: async (chatId) => {
+          held.delete(`webchat:${chatId}`);
+          return null;
+        },
+        release: async () => {},
+        pick: async () => {},
+        followingCount: async () => 0,
+      };
+      const app = createWebchatRuntime(deps).routes;
+      for (const id of [FORK_ID, PROMOTED_ID]) {
+        const before = (await (await app.request(`/chat/sessions/${id}`)).json()) as {
+          followsDefault?: boolean;
+        };
+        expect(before.followsDefault).toBe(false);
+        const res = await app.request(`/chat/sessions/${id}/model/follow-default`, {
+          method: "POST",
+        });
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({ followsDefault: true, pinnedModel: null });
+      }
+      deps.chatProviders = undefined;
+    });
+
     it("leaves every other fork-facing route closed", async () => {
       // Legacy fork-typed rows keep the narrow surface. A branch that ships
       // today is born type "webchat" and deliberately gets every ordinary
@@ -7675,6 +7705,40 @@ describe("Webchat API", () => {
       expect(recordSessionInChat).toHaveBeenCalledWith("fork-agent-session", PROMOTED_ID, {
         replace: true,
       });
+    });
+
+    it("runs a branch's own stored selection on its next send, not the first message's", async () => {
+      await deps.settingsRepo.set("enableModelSelector", true);
+      await deps.webchatRepo.updateSessionLargeModelSelection(PROMOTED_ID, "gpt-6-luna", "kept");
+      rs.spyOn(deps.sessionRepository, "current").mockResolvedValue(withThread(PROMOTED_ID));
+      let selectionId: unknown = "unset";
+      deps.agentSessionManager = fakeSessionManager(async (_key, init) => {
+        selectionId = init?.selectionId;
+        return {
+          key: { agentName: "main", channelThreadKey: `webchat:${PROMOTED_ID}` },
+          sessionId: "fork-agent-session",
+          status: "idle",
+          startTurn() {
+            return testTurnHandle({
+              turnId: "follow-up-turn",
+              events: (async function* () {
+                yield { type: "result", content: "ok" };
+              })(),
+              turnContext: otelContext.active(),
+            });
+          },
+          onStatusChange: () => () => undefined,
+          stop: async () => undefined,
+          close: async () => undefined,
+        } satisfies FakeSession;
+      });
+      const app = createWebchatRuntime(deps).routes;
+      await app.request(`/chat/sessions/${PROMOTED_ID}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "and then?", largeModelSelection: "claude-opus" }),
+      });
+      expect(selectionId).toBe("gpt-6-luna");
     });
 
     it("resumes a branch under its persisted key even when a selection is sent", async () => {

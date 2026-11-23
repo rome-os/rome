@@ -560,13 +560,13 @@
       "loadFailed": "无法加载你的服务器。",
       "addFailed": "无法打开 Discord，请重试。",
       "removeFailed": "无法移除 {{name}}，请重试。",
-      "howTo": "私信 Rome，或在频道里 @Rome。",
-      "blurbDetail": "私信它，或把它加到你的服务器。",
+      "howTo": "在频道中 @Rome；在该服务器运行 /rome 可启用私聊。",
+      "blurbDetail": "添加到服务器后，可 @Rome，或通过 /rome 启用私聊。",
       "servers": "服务器",
       "empty": "加到服务器后，就能在频道里 @Rome。",
       "manage": "更多",
       "disconnect": "断开 Discord",
-      "linkedAs": "以 {{name}} 的身份链接"
+      "linkedAs": "已为 {{name}} 启用私聊"
     },
     "telegramUser": {
       "fallbackName": "Telegram 用户",
@@ -785,6 +785,10 @@
     },
     "logoutOutcome": {
       "otherBecomesDefault": "{{provider}} 会成为默认，聊天在下一次回复时切换过去。",
+      "otherBecomesDefaultStay": "新聊天默认使用 {{provider}}。已有聊天留在 {{leaving}}，等你重新登录。",
+      "otherExpired": "它的登录已过期：登出后请重新登录 {{provider}}。",
+      "creditsBecomeDefault": "Rome 额度会成为默认，聊天在下一次回复时切换过去。",
+      "creditsBecomeDefaultStay": "新聊天默认使用 Rome 额度。已有聊天留在 {{leaving}}，等你重新登录。",
       "pause": "聊天会暂停，直到你重新登录。",
       "pauseOrCredits": "聊天会暂停，直到你重新登录，或让所有聊天改用 Rome 额度。"
     }

@@ -6,7 +6,8 @@ import type { ConnectionRegistry } from "../connections/index.js";
 import type { WebhookInvocationRecord } from "../apps/repositories/webhook-invocations.js";
 import type { ApiDeps } from "./deps.js";
 import { isValidAppId } from "../apps/packaging/app-id.js";
-import type { TransientDeltaType } from "../agent/index.js";
+import type { AccountedProviderId, TransientDeltaType } from "../agent/index.js";
+import { pinnedModelOf } from "../webchat/chat-providers.js";
 
 /** Connections and channels are owned by the ConnectionRegistry. The
  *  daemon always injects `connectionRegistry`; a missing one is a wiring bug,
@@ -104,6 +105,7 @@ export function toWebchatSessionResponse(
     name: string;
     personaId: string | null;
     largeModelSelection?: string | null;
+    largeModelSelectionBy?: string | null;
     projectName: string;
     projectPath?: string | null;
     deviceFolder?: DeviceFolder | null;
@@ -118,8 +120,11 @@ export function toWebchatSessionResponse(
     unread?: boolean;
   },
   messageCount: number,
+  /** The provider the chat's conversation is held on, when it is. */
+  held?: AccountedProviderId,
 ) {
   const activityAt = timestampToIso(session.activityAt);
+  const pinnedModel = pinnedModelOf(session, held);
   const lastSeenActivityAt = session.lastSeenActivityAt
     ? timestampToIso(session.lastSeenActivityAt)
     : null;
@@ -128,6 +133,11 @@ export function toWebchatSessionResponse(
     name: session.name,
     personaId: session.personaId ?? null,
     largeModelSelection: session.largeModelSelection ?? null,
+    // Whether the chat follows the default provider, and when it does not, the
+    // model it is pinned to: its owner's pick, or one a card or a change of the
+    // default kept. docs/domains/agents.md#pinned-chat
+    followsDefault: pinnedModel === null,
+    pinnedModel,
     projectName: session.projectName,
     projectPath: session.projectPath ?? session.projectName,
     deviceFolder: session.deviceFolder ?? null,

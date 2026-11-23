@@ -190,7 +190,7 @@ export function createModelResolver(options: CreateModelResolverOptions): ModelR
       tierModels,
       // Before any default is set, as on the first boot after an upgrade
       // before the accounts are read, the old order decides.
-      ...(options.defaults?.current() ? { defaultProvider: options.defaults.current() } : {}),
+      defaultProvider: options.defaults?.current() ?? undefined,
     });
     if (!outcome.ok) {
       refreshAfterFailure(refreshScope(outcome.failure));

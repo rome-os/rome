@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { decodeAppIdPathSegment, toTraceEvent } from "./helpers.js";
+import { decodeAppIdPathSegment, toTraceEvent, toWebchatSessionResponse } from "./helpers.js";
 
 describe("decodeAppIdPathSegment", () => {
   it("decodes a complete scoped app id from one route segment", () => {
@@ -81,5 +81,67 @@ describe("toTraceEvent", () => {
       },
       agent: undefined,
     });
+  });
+});
+
+describe("a pinned chat always reports it is pinned, in the chat API", () => {
+  const chat = {
+    id: "c1",
+    name: "Chat",
+    personaId: null,
+    projectName: "default",
+    createdAt: new Date("2026-11-22T00:00:00.000Z"),
+    activityAt: new Date("2026-11-22T00:00:00.000Z"),
+  };
+
+  it("adds followsDefault and pinnedModel beside the fields the iOS app reads", () => {
+    expect(
+      toWebchatSessionResponse(
+        { ...chat, largeModelSelection: "claude-haiku", largeModelSelectionBy: "owner" },
+        0,
+      ),
+    ).toMatchObject({
+      largeModelSelection: "claude-haiku",
+      followsDefault: false,
+      pinnedModel: { by: "owner", providerId: "anthropic", selection: "claude-haiku" },
+    });
+  });
+
+  it("reports a chat held on a provider with no model of its own, such as a fork", () => {
+    // As a fork chat reads: top level, with its parent chat, and no stored model.
+    const fork = {
+      ...chat,
+      parentSessionId: "parent-chat",
+      triggerKind: "fork",
+      agentName: null,
+      largeModelSelection: null,
+      largeModelSelectionBy: null,
+    };
+    expect(toWebchatSessionResponse(fork, 3, "openai")).toMatchObject({
+      followsDefault: false,
+      pinnedModel: { by: "kept", providerId: "openai", selection: null, model: null },
+    });
+  });
+
+  it("reports a model Rome chose as pinned while its conversation is held", () => {
+    expect(
+      toWebchatSessionResponse(
+        { ...chat, largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "auto" },
+        0,
+        "anthropic",
+      ),
+    ).toMatchObject({
+      followsDefault: false,
+      pinnedModel: { by: "kept", providerId: "anthropic", selection: "claude-opus-5-5" },
+    });
+  });
+
+  it("reports nothing pinned for a model Rome chose", () => {
+    expect(
+      toWebchatSessionResponse(
+        { ...chat, largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "auto" },
+        0,
+      ),
+    ).toMatchObject({ followsDefault: true, pinnedModel: null });
   });
 });

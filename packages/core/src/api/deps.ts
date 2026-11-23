@@ -246,8 +246,14 @@ export interface ApiDeps {
   defaultProviders?: DefaultProviders;
   /** What a chat shows when its provider cannot run, and the actions on it. */
   providerFailures?: ProviderFailures;
-  /** How many chats follow the default, for the default-change dialog. */
-  chatProviders?: Pick<ChatProviders, "followingCount">;
+  /**
+   * How many chats follow the default, for the default-change dialog; which
+   * conversations are held on a provider; and a chat's "Back to default".
+   */
+  chatProviders?: Pick<
+    ChatProviders,
+    "followingCount" | "heldProvider" | "follow" | "release" | "pick"
+  >;
   /** Rome credits can be spent now: linked, enabled and with a balance. */
   romeCreditsUsable?: () => boolean;
   /** Codex's loopback route to Rome credits, built by the composition root. */

@@ -877,6 +877,16 @@
         }
       }
     },
+    "Audio" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音频"
+          }
+        }
+      }
+    },
     "Automatic" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6217,6 +6227,16 @@
         }
       }
     },
+    "Video" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "视频"
+          }
+        }
+      }
+    },
     "Voice input" : {
       "localizations" : {
         "zh-Hans" : {
@@ -6975,6 +6995,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "每天早上 9 点，我会把睡眠、步数和静息心率发给你，有异常会特别提醒。"
+          }
+        }
+      }
+    },
+    "Older · %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更早 · %lld"
           }
         }
       }

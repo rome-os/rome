@@ -207,6 +207,11 @@ export interface QuotaSwitchPart {
   from: "openai" | "anthropic";
   to: "openai" | "anthropic";
   model: string;
+  /**
+   * The move lasts one turn: the chat's next turn tries `fromModel` again. Set
+   * on a model-limit move; absent on older notes, which moved for good.
+   */
+  oneTurn?: boolean;
 }
 
 /** A provider the guardian can make the default. Rome credits run Codex. */

@@ -4,6 +4,7 @@
 - **Date**: 2026-11-16, amended 2026-11-21
 - **Concept**: [agents — default provider](../domains/agents.md#default-provider)
 - **Supersedes**: [Concierge provider failover](concierge-provider-failover.md), and amends [pinned session model](pinned-session-model-fails-closed.md)
+- **Amended by**: [Provider switching follows three rules](provider-switching-three-rules.md), which moves the default to Rome credits on the last logout, makes an overload swap last one turn, and holds every kind of chat on an unchecked move
 
 ## Context
 
