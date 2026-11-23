@@ -513,7 +513,7 @@ private struct ComposerDraft: ViewModifier {
             .onChange(of: text) { save() }
             .onChange(of: attachments.images.map(\.id)) { save() }
             // Picking or dropping a reply changes what the draft is for.
-            .onChange(of: transcript?.composerReply) { save() }
+            .onChange(of: transcript?.quote) { save() }
             .onDisappear {
                 save()
                 Task { await store.flush() }
@@ -529,7 +529,7 @@ private struct ComposerDraft: ViewModifier {
 
     private func save() {
         guard restored else { return }
-        store.save(chat: chat, text: text, photos: attachments.images, reply: transcript?.composerReply)
+        store.save(chat: chat, text: text, photos: attachments.images, reply: transcript?.quote)
     }
 }
 

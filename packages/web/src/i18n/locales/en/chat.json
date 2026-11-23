@@ -218,7 +218,11 @@
   "reply": {
     "action": "Reply",
     "dismiss": "Cancel reply",
-    "jump": "Go to the original message"
+    "jump": "Go to the original message",
+    "closeChain": "Close reply chain",
+    "loadingChain": "Loading reply chain",
+    "loadFailed": "Could not load the reply chain",
+    "retry": "Retry"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -451,6 +455,7 @@
   "composer": {
     "placeholderDefault": "How can I help you today?",
     "lockedByCard": "Answer the card above to continue.",
+    "placeholderInThread": "Message in thread",
     "placeholderWithUploads": "Add a message or send the uploaded files...",
     "hints": {
       "skill": "Type / to use a skill",

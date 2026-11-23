@@ -199,6 +199,8 @@ export interface ChatMessage {
   /** Rome's status on a guardian message of a Concierge chat, shown over its
    *  reaction. Absent when it has none, and from servers before it. */
   status?: import("@rome/api-types/concierge").ConciergeMessageStatus | null;
+  /** The id of the root of the message's reply chain (its own id for a root). Absent from servers before it. */
+  chatThreadId?: string | null;
 }
 
 export interface ProjectOption {

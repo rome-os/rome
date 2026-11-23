@@ -23,6 +23,12 @@
       "reason": "global Shared links: Settings lists every share link of the signed-in person with GET /chat/shares; an older server lacks the route, so the sheet shows its load error.",
       "pr": 2593,
       "server": "#2593"
+    },
+    {
+      "tier": "background",
+      "reason": "Reply-chain focus reads the message thread endpoint.",
+      "pr": 2574,
+      "server": "#2574"
     }
   ]
 }

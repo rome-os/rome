@@ -34,7 +34,7 @@ export function ReplyBar() {
         size="xs"
         label={t("reply.dismiss")}
         icon={<X />}
-        onClick={draft.clear}
+        onClick={draft.dismiss ?? draft.clear}
         className="shrink-0 text-muted-foreground hover:text-foreground"
       />
     </div>

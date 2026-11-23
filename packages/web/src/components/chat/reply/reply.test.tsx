@@ -75,6 +75,7 @@ describe("ReplyBar", () => {
     unmount();
     render(
       <QuotedReply
+        from="m2"
         part={{
           type: "reply_to",
           messageId: "m1",
@@ -224,11 +225,11 @@ describe("QuotedReply", () => {
 
   it("goes to the original when pressed, which the chat loads when it must", () => {
     const draft = draftOf();
-    render(withDraft(draft, <QuotedReply part={part} />));
+    render(withDraft(draft, <QuotedReply part={part} from="m2" />));
 
     fireEvent.click(screen.getByRole("button", { name: "Go to the original message" }));
 
-    expect(draft.jump).toHaveBeenCalledWith("m1");
+    expect(draft.jump).toHaveBeenCalledWith("m1", "m2");
     expect(screen.getByText("Fly to Lisbon.")).toBeTruthy();
     expect(screen.queryByText("Rome")).toBeNull();
   });
@@ -237,7 +238,10 @@ describe("QuotedReply", () => {
     render(
       withDraft(
         draftOf(),
-        <QuotedReply part={{ ...part, text: "**Day 1: Alfama**\n\n- Morning: the `Sé`" }} />,
+        <QuotedReply
+          from="m2"
+          part={{ ...part, text: "**Day 1: Alfama**\n\n- Morning: the `Sé`" }}
+        />,
       ),
     );
 
@@ -247,7 +251,7 @@ describe("QuotedReply", () => {
   });
 
   it("is a reply arrow and one muted line, with no bar and no box", () => {
-    render(withDraft(draftOf(), <QuotedReply part={part} />));
+    render(withDraft(draftOf(), <QuotedReply part={part} from="m2" />));
 
     const quote = screen.getByRole("button", { name: "Go to the original message" });
     expect(quote.className).toContain("text-muted-foreground");
@@ -256,8 +260,15 @@ describe("QuotedReply", () => {
     expect(quote.getAttribute("title")).toBe("Fly to Lisbon.");
   });
 
+  it("is plain text where the chat has reply state but no way to follow a quote, as in a chain in focus", () => {
+    render(withDraft(draftOf({ jump: undefined }), <QuotedReply part={part} from="m2" />));
+
+    expect(screen.queryByRole("button", { name: "Go to the original message" })).toBeNull();
+    expect(screen.getByText("Fly to Lisbon.")).toBeTruthy();
+  });
+
   it("shows the snapshot without a button where the chat has no reply state", () => {
-    render(<QuotedReply part={{ ...part, author: "guardian", name: "Ray" }} />);
+    render(<QuotedReply from="m2" part={{ ...part, author: "guardian", name: "Ray" }} />);
 
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.getByText("Fly to Lisbon.")).toBeTruthy();
