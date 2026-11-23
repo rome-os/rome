@@ -230,6 +230,13 @@ final class Workspace {
         ([concierge] + Array(topicStores.values) + Array(taskStores.values)).contains { $0.share.coversChat }
     }
 
+    /// A file linked in a chat is open over it, in Quick Look or the share sheet.
+    var linkedFileShown = false
+
+    /// Something a chat opened covers it: its share sheet or a linked file.
+    /// Replies behind it are not read, and its pushes show.
+    var sheetCoversChat: Bool { sharingCoversChat || linkedFileShown }
+
     func topicStore(_ chatId: String) -> TranscriptStore {
         Self.used(chatId, in: &recentTopics)
         if let store = topicStores[chatId] { return store }

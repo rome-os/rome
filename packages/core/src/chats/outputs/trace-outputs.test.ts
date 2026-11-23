@@ -254,6 +254,14 @@ describe("outputsInTrace, for shell commands and replies", () => {
     ]);
   });
 
+  it("finds a linked file whose title holds escaped quotes", () => {
+    const reply = String.raw`[f](/projects/test/hello.txt "Say \"hi\"") and [g](/home/p/test/my notes.md 'it\'s')`;
+    expect(outputsInReply("tr1", reply, SCOPE).map((output) => output.path)).toEqual([
+      "/home/p/test/hello.txt",
+      "/home/p/test/my notes.md",
+    ]);
+  });
+
   it("reads a link with a long run of blanks and no end in linear time", () => {
     const reply = `[a](${" ".repeat(20_000)}x`;
     const started = performance.now();

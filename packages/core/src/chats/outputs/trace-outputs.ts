@@ -355,7 +355,8 @@ const MARKDOWN_LINK = new RegExp(
     // A bracketed href, or a bare one that starts and ends with a non-blank,
     // so no run of blanks can be split between its parts.
     String.raw`(?:<([^>\n]+)>|((?:[^()\s]|\([^()\n]*\))(?:(?:[^()\n]|\([^()\n]*\))*?(?:[^()\s]|\([^()\n]*\)))?))` +
-    String.raw`([ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*\)`,
+    // A title, whose quotes or parentheses may hold escaped ones.
+    String.raw`([ \t]+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\((?:\\.|[^()\\\n])*\)))?[ \t]*\)`,
   "g",
 );
 

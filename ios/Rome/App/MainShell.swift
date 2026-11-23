@@ -264,7 +264,7 @@ struct MainShell: View {
                 .environment(\.visibleChat, visibleChat)
                 .instancePageSheet(workspace: workspace, url: $page)
                 .appSheet(workspace: workspace, app: $openApp, start: openAppStart)
-                .linkedFileViewer(backend: workspace.backend, request: $linkedFile, top: geometry.safeAreaInsets.top + 58) { page = $0 }
+                .linkedFileViewer(backend: workspace.backend, request: $linkedFile, top: geometry.safeAreaInsets.top + 58, shown: { workspace.linkedFileShown = $0 }) { page = $0 }
                 .environment(\.isVisitor, workspace.isVisitor)
                 .environment(\.shareAgentName, AgentName.display(workspace.agentName))
                 // Over the page, so beside a pinned drawer they sit above the chat.
@@ -305,7 +305,7 @@ struct MainShell: View {
             .environment(\.shareAgentName, AgentName.display(workspace.agentName))
             .instancePageSheet(workspace: workspace, url: $agentLinkPage)
             .appSheet(workspace: workspace, app: $agentApp, start: agentAppStart)
-            .linkedFileViewer(backend: workspace.backend, request: $agentLinkedFile) { agentLinkPage = $0 }
+            .linkedFileViewer(backend: workspace.backend, request: $agentLinkedFile, shown: { workspace.linkedFileShown = $0 }) { agentLinkPage = $0 }
             .presentationBackground(Palette.bg)
             .agentZoomTransition(route.zoomSource, in: agentZoom)
         }
@@ -657,7 +657,7 @@ struct MainShell: View {
     /// A pushed page, the Agent page's cover or a large sheet (an app, a
     /// dashboard page, Settings) hides the stack's root. A sheet leaves the
     /// root on screen, so its animations would keep running under it.
-    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil || page != nil || showSettings || showArchived }
+    private var covered: Bool { !path.isEmpty || agentPage != nil || openApp != nil || page != nil || showSettings || showArchived || workspace.linkedFileShown }
 
     private func topicScreen(chatId: String?, key: UUID? = nil, draftKey: String) -> some View {
         TopicChatScreen(
@@ -748,11 +748,11 @@ struct MainShell: View {
     /// The chat on screen, by its store's id.
     private var visibleChat: String? {
         if agentPage != nil {
-            return Self.visibleChat(agentPath: agentPath, covered: agentLinkPage != nil || agentApp != nil || workspace.sharingCoversChat)
+            return Self.visibleChat(agentPath: agentPath, covered: agentLinkPage != nil || agentApp != nil || workspace.sheetCoversChat)
         }
         // The Archived sheet covers it too: beside a pinned drawer (iPad)
         // the drawer is not open while the sheet shows.
-        return Self.visibleChat(section: section, path: path, covered: drawerOpen || showSettings || showArchived || page != nil || openApp != nil || workspace.sharingCoversChat)
+        return Self.visibleChat(section: section, path: path, covered: drawerOpen || showSettings || showArchived || page != nil || openApp != nil || workspace.sheetCoversChat)
     }
 
     /// The chat on screen while the Agent page is up: a task chat pushed
@@ -764,7 +764,7 @@ struct MainShell: View {
 
     /// The chat on screen: none while something covers the page (the drawer,
     /// the Settings sheet, an app's or an instance page's sheet, a chat's
-    /// share sheets); a pushed task chat; else the section's chat. Chat's read marks, the
+    /// share sheets, a linked file); a pushed task chat; else the section's chat. Chat's read marks, the
     /// server's watch and push banners all go by this one answer, with
     /// `visibleChat(agentPath:covered:)` while the Agent page is up.
     static func visibleChat(section: MainSection, path: [Route], covered: Bool) -> String? {

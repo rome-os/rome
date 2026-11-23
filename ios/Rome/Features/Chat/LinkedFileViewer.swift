@@ -16,8 +16,12 @@ extension View {
     /// A project or memory path that names a folder goes to `openPage` with
     /// the dashboard's page for it. `top` is how far below the view's top
     /// edge the notice sits.
-    func linkedFileViewer(backend: RomeBackend, request: Binding<LinkedFileRequest?>, top: CGFloat = 58, openPage: @escaping (URL) -> Void) -> some View {
-        modifier(LinkedFileViewer(backend: backend, request: request, top: top, openPage: openPage))
+    /// `shown` hears whether Quick Look or the share sheet covers the view.
+    func linkedFileViewer(
+        backend: RomeBackend, request: Binding<LinkedFileRequest?>, top: CGFloat = 58,
+        shown: @escaping (Bool) -> Void, openPage: @escaping (URL) -> Void
+    ) -> some View {
+        modifier(LinkedFileViewer(backend: backend, request: request, top: top, shown: shown, openPage: openPage))
     }
 }
 
@@ -25,6 +29,7 @@ private struct LinkedFileViewer: ViewModifier {
     let backend: RomeBackend
     @Binding var request: LinkedFileRequest?
     let top: CGFloat
+    let shown: (Bool) -> Void
     let openPage: (URL) -> Void
 
     @State private var preview: URL?
@@ -62,6 +67,8 @@ private struct LinkedFileViewer: ViewModifier {
                 ActivitySheet(items: [shared.url])
                     .presentationDetents([.medium, .large])
             }
+            .onChange(of: preview != nil || sharing != nil) { _, covers in shown(covers) }
+            .onDisappear { if preview != nil || sharing != nil { shown(false) } }
             .onChange(of: request) { _, asked in
                 guard let asked else { return }
                 request = nil
