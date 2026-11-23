@@ -878,6 +878,34 @@ describe.each(["chat", "concierge"] as const)("the %s draft while voice input li
     expect(field().value).toBe("second");
   });
 
+  it("does not restore a failed send's skill while voice input listens", async () => {
+    const { onSend, field, handle } = renderComposer(kind, SONIOX, "chat-a");
+    let fail: (error: Error) => void = () => {};
+    onSend.mockImplementation(
+      () =>
+        new Promise<void>((_, reject) => {
+          fail = reject;
+        }),
+    );
+    const box = await waitFor(() => {
+      expect(field()).toBeTruthy();
+      return field();
+    });
+    act(() => handle.current?.setSkillSelection({ name: "skill-old" }));
+    fireEvent.change(box, { target: { value: "first" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(field().value).toBe(""));
+    expect(screen.queryByText("skill-old")).toBeNull();
+
+    const socket = await startListening();
+    socket.say({ type: "text", settled: "second", pending: "" });
+    await act(async () => fail(new Error("send failed")));
+
+    expect(screen.queryByText("skill-old")).toBeNull();
+    expect(field().value).toBe("");
+    expect(loadChatDraft("chat-a")?.text).toBe("second");
+  });
+
   it("saves the words heard to the chat a first send makes while voice input listens", async () => {
     mockFetch(SONIOX);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

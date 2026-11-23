@@ -1240,12 +1240,13 @@ describe("New chat draft", () => {
     expect(loadNewChatDraft()?.text).toBe("newer");
   });
 
-  it("keeps a newer skill in storage when a skill-only new-chat send fails", async () => {
+  it("keeps newer skill and project context in storage when a skill-only new-chat send fails", async () => {
     let reject!: (error: Error) => void;
     const composerRef = createRef<ChatComposerHandle>();
     renderComposer(
       {
         persistNewChatDraft: true,
+        showProjectSelector: true,
         onSend: () =>
           new Promise<void>((_resolve, fail) => {
             reject = fail;
@@ -1256,11 +1257,16 @@ describe("New chat draft", () => {
     act(() => composerRef.current?.setSkillSelection({ name: "skill-old" }));
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     act(() => composerRef.current?.setSkillSelection({ name: "skill-new" }));
+    fireEvent.click(screen.getByRole("button", { name: "Project" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Rome Cloud/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /alpha/ }));
+    expect(loadNewChatDraft()?.projectPath).toBe("alpha");
     await act(async () => reject(new Error("create failed")));
 
     expect(screen.getByText("skill-new")).toBeTruthy();
     expect(screen.queryByText("skill-old")).toBeNull();
     expect(loadNewChatDraft()?.skill?.name).toBe("skill-new");
+    expect(loadNewChatDraft()?.projectPath).toBe("alpha");
   });
 
   it("keeps newer text when an existing-session send fails", async () => {

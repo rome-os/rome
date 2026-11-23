@@ -324,8 +324,6 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   const [draftSkill, setDraftSkill] = useState<SkillSelection | null>(
     () => storedDraft?.skill ?? null,
   );
-  const draftSkillRef = useRef(draftSkill);
-  draftSkillRef.current = draftSkill;
 
   const { data: settings } = useSettings();
   const signedInProviders = useSignedInProviders();
@@ -415,6 +413,8 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     }),
     [draftProjectName, draftDeviceFolder, draftAgentMention, draftSkill, selectedPersonId],
   );
+  const newChatDraftRef = useRef(newChatDraft);
+  newChatDraftRef.current = newChatDraft;
   const { keep: keepChatDraft } = draft;
   const keepDraft = useCallback(
     (text: string, stop?: DictationStop) => {
@@ -786,22 +786,18 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
       if (persistNewChatDraft && (!textareaRef.current || (clearsOptimistically && newer))) return;
       // A failed turn in an adopted session belongs there, not in New chat.
       if (persistNewChatDraft && !sessionCreatedRef.current) {
+        const currentDraft = newChatDraftRef.current(rawText);
         saveNewChatDraft(
           {
-            version: 1,
-            text: rawText,
-            projectPath: draftProjectName,
-            agentMention: draftAgentMention,
-            skill: draftSkillRef.current ?? skill,
-            personaId: selectedPersonId,
-            ...(draftDeviceFolder ? { deviceFolder: draftDeviceFolder } : {}),
+            ...currentDraft,
+            skill: currentDraft.skill ?? skill,
           },
           authEpoch,
         );
       }
-      if (clearsOptimistically && textareaRef.current?.value === "") {
-        // Text typed while the send was pending survives a failure; only an
-        // empty field takes the failed text and its context back.
+      if (clearsOptimistically && textareaRef.current?.value === "" && !voiceActiveRef.current) {
+        // Text typed or dictated while the send was pending survives a failure;
+        // only an empty field takes the failed text and its context back.
         setInputText((current) =>
           current === "" && !voiceActiveRef.current
             ? persistNewChatDraft
