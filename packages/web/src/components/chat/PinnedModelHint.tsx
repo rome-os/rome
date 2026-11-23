@@ -60,7 +60,10 @@ export function PinnedModelHint({
     }
   };
   return (
-    <p data-testid="pinned-model-hint" className="mb-1.5 px-1 text-aux text-subtle-foreground">
+    <p
+      data-testid="pinned-model-hint"
+      className="mb-1.5 px-1 text-center text-aux text-subtle-foreground"
+    >
       {pinnedHintText(pinnedModel, t)} ·{" "}
       <button
         type="button"
