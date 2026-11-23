@@ -572,6 +572,16 @@ enum LinkTargets {
         while end < chars.count {
             let character = chars[end]
             if character == "\n" { return nil }
+            if character == "\\" {
+                end += 2
+                continue
+            }
+            // A quoted title after a blank may hold parentheses of its own.
+            if character == "\"" || character == "'", end > start, chars[end - 1].isWhitespace,
+               let close = chars[(end + 1)...].firstIndex(where: { $0 == character || $0 == "\n" }), chars[close] == character {
+                end = close + 1
+                continue
+            }
             if character == "(" { depth += 1 }
             if character == ")" {
                 if depth == 0 { break }

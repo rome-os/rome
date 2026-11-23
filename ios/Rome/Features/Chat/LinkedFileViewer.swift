@@ -35,7 +35,13 @@ private struct LinkedFileViewer: ViewModifier {
     func body(content: Content) -> some View {
         content
             .overlay(alignment: .top) {
-                if let notice {
+                if loading {
+                    // From the tap until Quick Look shows: a large file takes a while.
+                    TopBanner(kind: .info, text: String(localized: "Loading…"))
+                        .readableColumn()
+                        .padding(.top, top)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                } else if let notice {
                     TopBanner(kind: .error, text: notice)
                         .readableColumn()
                         .padding(.top, top)
@@ -47,6 +53,7 @@ private struct LinkedFileViewer: ViewModifier {
                 }
             }
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: notice)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: loading)
             .quickLookPreview($preview)
             .onChange(of: preview) { old, new in
                 if new == nil, let old { try? FileManager.default.removeItem(at: old.deletingLastPathComponent()) }

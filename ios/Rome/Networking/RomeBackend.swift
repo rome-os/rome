@@ -366,7 +366,9 @@ final class LiveBackend: RomeBackend {
 
     func linkedFileKind(_ file: LinkedFile) async throws -> LinkedFileKind {
         guard let logical = file.logicalPath, let folder = logical.split(separator: "/").first else { return .file }
-        let answer: JSONValue = try await client.get("/\(folder)/resolve", query: [URLQueryItem(name: "path", value: logical)])
+        // Encoded strictly, as the download is: a `+` would reach the server as a space.
+        let data = try await client.getData("/\(folder)/resolve", query: [URLQueryItem(name: "path", value: logical)])
+        let answer = try JSONDecoder().decode(JSONValue.self, from: data)
         switch answer["type"]?.string {
         case "directory": return .folder
         case "missing": return .missing

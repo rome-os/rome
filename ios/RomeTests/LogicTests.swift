@@ -13,6 +13,7 @@ import UIKit
         #expect(LinkTargets.bracketed("[f](/a b.md (Plan))") == "[f](</a b.md> (Plan))")
         #expect(LinkTargets.bracketed("[f](/a.md 'Plan')") == "[f](/a.md 'Plan')")
         #expect(LinkTargets.bracketed("[f](/my report(final).pdf)") == "[f](</my report(final).pdf>)")
+        #expect(LinkTargets.bracketed(#"[f](/a b.md "Click ) here")"#) == #"[f](</a b.md> "Click ) here")"#)
         #expect(LinkTargets.bracketed("![p](/x/my pic.png)") == "![p](</x/my pic.png>)")
         let line = MarkdownParser.inline("Open [the plan](/projects/my report.md).")
         #expect(String(line.characters) == "Open the plan.")
@@ -25,6 +26,8 @@ import UIKit
             "Run `[f](/a b.md)` first",
             "``x ` [f](/a b.md)``",
             "[f](</a b.md>)",
+            #"[f](/projects/a.md "Click ) here")"#,
+            "[f](/projects/a.md 'it ( is')",
             "[f](/a.md) and [g](https://example.com/q?a=1)",
             "[f](/a b.md\nnext)",
             "no link (a b)",
@@ -1058,6 +1061,11 @@ final class StubBackend: RomeBackend {
         #expect(try link("/memory/journal/") == .file(LinkedFile(
             apiPath: "/memory/download", query: "path=memory/journal", name: "journal",
             logicalPath: "memory/journal", page: URL(string: "https://me.romeos.cc/memory/journal"))))
+        // A `+` is encoded, never sent as a space.
+        #expect(try link("/projects/demo/C%2B%2B%20notes.md") == .file(LinkedFile(
+            apiPath: "/projects/download", query: "path=projects/demo/C%2B%2B%20notes.md", name: "C++ notes.md",
+            logicalPath: "projects/demo/C++ notes.md", page: URL(string: "https://me.romeos.cc/projects/demo/C++%20notes.md"))))
+        #expect(APIClient.strictQueryValue("projects/C++/a+b.md") == "projects/C%2B%2B/a%2Bb.md")
         let stored = "0123456789abcdef0123456789abcdef.pdf"
         #expect(try link("/api/assets/" + stored) == .file(LinkedFile(apiPath: "/assets/" + stored, query: nil, name: stored)))
         #expect(try link("/projects/a/b.csv", origin: nil) == .file(LinkedFile(
