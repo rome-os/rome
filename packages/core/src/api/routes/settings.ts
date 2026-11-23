@@ -15,6 +15,7 @@ import { parseTimeZone } from "../../lib/timezone.js";
 import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { CONCIERGE_FOLLOWING_SETTING_KEY } from "../../concierge/following.js";
+import { SPEECH_SESSIONS_SETTING_KEY } from "../../voice-output/rome-cloud-speech-credentials.js";
 
 // Keys enforced from an in-memory snapshot that only their dedicated route
 // refreshes. Persisting one here would leave the stored and enforced policies
@@ -29,9 +30,13 @@ const DEDICATED_ROUTE_KEYS: Record<string, string> = {
 // another's here.
 const CONCIERGE_PRIVATE_KEYS = [CONCIERGE_FOLLOWING_SETTING_KEY];
 
+// The speech sessions Rome holds, each with a provider credential. Only the
+// speaking module reads or writes them.
+const VOICE_PRIVATE_KEYS = [SPEECH_SESSIONS_SETTING_KEY];
+
 function redactSettingsForResponse(settings: Record<string, unknown>): Record<string, unknown> {
   const redacted = { ...settings };
-  for (const key of CONCIERGE_PRIVATE_KEYS) delete redacted[key];
+  for (const key of [...CONCIERGE_PRIVATE_KEYS, ...VOICE_PRIVATE_KEYS]) delete redacted[key];
   if (ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING in redacted) {
     redacted[ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING] =
       redactAnthropicCompatibleCredentialsSetting(
@@ -76,6 +81,11 @@ export function settingsRoutes(deps: ApiDeps): Hono {
     for (const key of CONCIERGE_PRIVATE_KEYS) {
       if (key in body) {
         return c.json({ error: `${key} is managed by the Concierge, not /api/settings.` }, 400);
+      }
+    }
+    for (const key of VOICE_PRIVATE_KEYS) {
+      if (key in body) {
+        return c.json({ error: `${key} is managed by voice mode, not /api/settings.` }, 400);
       }
     }
 

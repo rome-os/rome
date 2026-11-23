@@ -1,7 +1,12 @@
 // Soniox real-time adapter. Protocol: https://docs.soniox.com/stt/api-reference/websocket-api
 
 import WebSocket from "ws";
-import type { Transcriber, TranscriptionListener, TranscriptionStream } from "./transcriber.js";
+import type {
+  Transcriber,
+  TranscriptionListener,
+  TranscriptionMode,
+  TranscriptionStream,
+} from "./transcriber.js";
 
 export const SONIOX_DEFAULT_URL = "wss://stt-rt.soniox.com/transcribe-websocket";
 export const SONIOX_DEFAULT_MODEL = "stt-rt-v6";
@@ -29,22 +34,42 @@ export const SONIOX_CONNECT_TIMEOUT_MS = 10_000;
 
 // Control tokens such as `<end>` and `<fin>` mark endpoints, not speech.
 const CONTROL_TOKEN = /^<[a-z]+>$/;
+// Where endpoint detection says a turn ends.
+const END_TOKEN = "<end>";
+
+// Soniox's starting point for voice agents: an endpoint at most 1.5 s after
+// speech ends. https://docs.soniox.com/stt/rt/endpoint-detection
+const CONVERSATION_ENDPOINTS = {
+  enable_endpoint_detection: true,
+  endpoint_latency_adjustment_level: 2,
+  endpoint_sensitivity: 0.3,
+  max_endpoint_delay_ms: 1500,
+};
+
+// Soniox ends a stream that hears nothing for 20 s. In conversation mode a
+// keepalive goes out after this long without audio.
+export const SONIOX_KEEPALIVE_MS = 10_000;
 
 export function createSonioxTranscriber(options: {
   apiKey: string;
   url?: string;
   model?: string;
   connectTimeoutMs?: number;
+  keepaliveMs?: number;
 }): Transcriber {
   const url = options.url ?? SONIOX_DEFAULT_URL;
   const model = options.model ?? SONIOX_DEFAULT_MODEL;
   const connectTimeoutMs = options.connectTimeoutMs ?? SONIOX_CONNECT_TIMEOUT_MS;
+  const keepaliveMs = options.keepaliveMs ?? SONIOX_KEEPALIVE_MS;
   return {
     place: { provider: "Soniox", host: new URL(url).host },
     model,
     providerId: "soniox",
-    open: ({ sampleRate, terms }, listener) =>
-      openSonioxStream(url, options.apiKey, model, sampleRate, listener, connectTimeoutMs, terms),
+    open: ({ sampleRate, terms, mode }, listener) =>
+      openSonioxStream(url, options.apiKey, model, sampleRate, listener, connectTimeoutMs, terms, {
+        mode: mode ?? "dictation",
+        keepaliveMs,
+      }),
   };
 }
 
@@ -55,8 +80,10 @@ function openSonioxStream(
   sampleRate: number,
   listener: TranscriptionListener,
   connectTimeoutMs: number,
-  terms?: readonly string[],
+  terms: readonly string[] | undefined,
+  { mode, keepaliveMs }: { mode: TranscriptionMode; keepaliveMs: number },
 ): TranscriptionStream {
+  const conversation = mode === "conversation";
   // A long-lived key and a temporary one both go in the header. Soniox
   // refuses the old `api_key` field of the start request from January 2027.
   const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${apiKey}` } });
@@ -67,6 +94,7 @@ function openSonioxStream(
   let sentBytes = 0;
   // Whether the client is showing unsettled text that a later response may clear.
   let shown = false;
+  let keepalive: ReturnType<typeof setTimeout> | null = null;
 
   const connecting = setTimeout(
     () => stop(() => listener.onFailure("unavailable", "connect timed out")),
@@ -77,15 +105,28 @@ function openSonioxStream(
     if (done) return;
     done = true;
     clearTimeout(connecting);
+    if (keepalive) clearTimeout(keepalive);
     outcome();
     ws.removeAllListeners();
     ws.on("error", () => {});
     if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.terminate();
   };
 
+  // Restarted by every frame, so a keepalive goes out only while no audio flows.
+  const armKeepalive = () => {
+    if (!conversation || done || finishing) return;
+    if (keepalive) clearTimeout(keepalive);
+    keepalive = setTimeout(() => {
+      keepalive = null;
+      if (done || finishing || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: "keepalive" }));
+      armKeepalive();
+    }, keepaliveMs);
+  };
   const deliver = (frame: Uint8Array | string) => {
     ws.send(frame);
     if (typeof frame !== "string") sentBytes += frame.byteLength;
+    armKeepalive();
   };
   const send = (frame: Uint8Array | string) => {
     if (ws.readyState === WebSocket.OPEN) deliver(frame);
@@ -102,9 +143,11 @@ function openSonioxStream(
         num_channels: 1,
         language_hints: ["en", "zh"],
         ...(terms?.length ? { context: { terms } } : {}),
+        ...(conversation ? CONVERSATION_ENDPOINTS : {}),
       }),
     );
     for (const frame of queued.splice(0)) deliver(frame);
+    armKeepalive();
   });
 
   ws.on("message", (data, isBinary) => {
@@ -134,7 +177,9 @@ function openSonioxStream(
     let settled = "";
     let pending = "";
     let spokeUntilMs: number | undefined;
+    let endpoint = false;
     for (const token of response.tokens ?? []) {
+      if (token.text === END_TOKEN) endpoint = true;
       if (CONTROL_TOKEN.test(token.text)) continue;
       if (token.is_final) settled += token.text;
       else pending += token.text;
@@ -147,6 +192,8 @@ function openSonioxStream(
       listener.onText(settled, pending, spokeUntilMs);
       shown = pending !== "";
     }
+    // After the turn's text, so the listener already holds every word of it.
+    if (endpoint && conversation && !done) listener.onEndpoint?.();
     if (response.finished) stop(() => listener.onEnd());
   });
 
@@ -177,6 +224,7 @@ function openSonioxStream(
     finish() {
       if (done || finishing) return;
       finishing = true;
+      if (keepalive) clearTimeout(keepalive);
       // An empty text frame ends the stream; an empty binary frame does not.
       send("");
     },

@@ -8192,6 +8192,116 @@ describe("AgentRunner", () => {
     const claudeProvider = (opens: ModelSessionParams[]): ModelProvider =>
       recordingProvider("anthropic", "claude-thread", opens);
 
+    it.each([
+      ["no pin", "none"],
+      ["a pin on the same provider", "same"],
+      ["a pin on another provider", "other"],
+    ] as const)("an overload swap lasts one turn, with %s, and through a restart", async (_label, pin) => {
+      const state = { openai: reportOf("available"), anthropic: reportOf("available") };
+      let current: "anthropic" | "openai" = pin === "other" ? "openai" : "anthropic";
+      const opens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [codexProvider(opens), claudeProvider(opens)],
+        accounts: fakeAccounts(() => state),
+        defaults: { ready: async () => {}, current: () => current },
+      });
+      const key = { agentName: "test-main", channelThreadKey: `webchat:swap-table-${pin}` };
+      const ran = async (session: AgentSession, prompt: string) =>
+        (
+          (await collectMessages((await startAfter(session, { prompt })).events())).find(
+            (message) => message.type === "result",
+          ) as { content: string }
+        ).content;
+      const first = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      const session = await first.open(key);
+      // The turn before the swap: none, or one that pins a model.
+      if (pin !== "none") await ran(session, "before");
+      current = "anthropic";
+      const before = await sessionRepository.session(session.sessionId);
+      session.selectModelForOneTurn?.("claude-sonnet");
+      expect(await ran(session, "swapped")).toBe("claude-sonnet-5-5");
+      // The swap writes nothing: the row names what it named before, on its provider.
+      const after = await sessionRepository.session(session.sessionId);
+      expect(after?.model).toBe(before?.provider === "anthropic" ? before.model : null);
+      // The next turn runs exactly what it would have without the swap.
+      const own = await ran(session, "next");
+      expect(own).not.toBe("claude-sonnet-5-5");
+      expect(own).toMatch(/claude/);
+      await first.shutdown();
+      const again = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      expect(await ran(await again.open(key), "after restart")).toBe(own);
+      await again.shutdown();
+    });
+
+    it("an overload swap lasts one turn: the next turn runs the session's own model again", async () => {
+      const state = { openai: reportOf("unauthorized"), anthropic: reportOf("available") };
+      const opens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [claudeProvider(opens)],
+        accounts: fakeAccounts(() => state),
+      });
+      const manager = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      const session = await manager.open({
+        agentName: "test-main",
+        channelThreadKey: "webchat:one-turn-swap",
+      });
+      const ran = async (prompt: string) =>
+        (await collectMessages((await startAfter(session, { prompt })).events())).find(
+          (message) => message.type === "result",
+        );
+      const own = (await ran("first")) as { content: string };
+      session.selectModelForOneTurn?.("claude-sonnet");
+      expect(await ran("swapped")).toMatchObject({ content: "claude-sonnet-5-5" });
+      expect(await ran("after")).toMatchObject({ content: own.content });
+      await manager.shutdown();
+    });
+
+    it("an overload swap lasts one turn: a restart after it resumes the session's own model", async () => {
+      const state = { openai: reportOf("unauthorized"), anthropic: reportOf("available") };
+      const opens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [claudeProvider(opens)],
+        accounts: fakeAccounts(() => state),
+      });
+      const first = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      const key = { agentName: "test-main", channelThreadKey: "webchat:one-turn-restart" };
+      const session = await first.open(key);
+      await collectMessages((await startAfter(session, { prompt: "first" })).events());
+      const own = (await sessionRepository.session(session.sessionId))!.model;
+      session.selectModelForOneTurn?.("claude-sonnet");
+      await collectMessages((await startAfter(session, { prompt: "swapped" })).events());
+      // The row still names the session's own model, not the one the swap lent it.
+      expect((await sessionRepository.session(session.sessionId))!.model).toBe(own);
+      await first.shutdown();
+      const again = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      const resumed = await again.open(key);
+      const after = (
+        await collectMessages((await startAfter(resumed, { prompt: "after" })).events())
+      ).find((message) => message.type === "result");
+      expect(after).toMatchObject({ content: own });
+      await again.shutdown();
+    });
+
+    it("an unchecked move keeps every existing chat: a held session runs where it was held", async () => {
+      const state = { openai: reportOf("available"), anthropic: reportOf("available") };
+      const opens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [codexProvider(opens), claudeProvider(opens)],
+        accounts: fakeAccounts(() => state),
+      });
+      const manager = createSessions(
+        {
+          ...managerDeps(modelResolver),
+          heldProvider: (key: string) => (key.startsWith("telegram:") ? "anthropic" : undefined),
+        },
+        { keepAliveAcrossTurns: true },
+      );
+      const held = await manager.open({ agentName: "test-main", channelThreadKey: "telegram:42" });
+      await collectMessages((await startAfter(held, { prompt: "hi" })).events());
+      expect(opens.at(-1)?.config.model).toMatch(/claude/);
+      await manager.shutdown();
+    });
+
     it("a pinned session keeps its model across an entitlement upgrade (no backend reopen)", async () => {
       const state = {
         openai: reportOf("available", { ...RESTRICTED_PLAN }),

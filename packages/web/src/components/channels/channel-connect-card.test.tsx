@@ -279,7 +279,7 @@ describe("ChannelConnectCard — shared frame", () => {
 // ── Per-service config variations ───────────────────────────────────────────
 
 describe("ChannelConnectCard — config variations", () => {
-  it("uses the same Connect label for every channel", () => {
+  it("uses the same Connect label for every channel but one that names its own", () => {
     stubFetch();
     for (const cfg of Object.values(CHANNEL_CONFIGS)) {
       const { unmount } = renderCard(
@@ -290,7 +290,8 @@ describe("ChannelConnectCard — config variations", () => {
           onRefresh={() => {}}
         />,
       );
-      expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy();
+      const label = cfg.connectLabelKey ? "Link Discord" : "Connect";
+      expect(screen.getByRole("button", { name: label })).toBeTruthy();
       unmount();
     }
   });
@@ -370,5 +371,89 @@ describe("ChannelConnectCard — custom components", () => {
     );
     const img = (await screen.findByAltText("Feishu QR")) as HTMLImageElement;
     expect(img.src).toBe("data:image/png;base64,QQ==");
+  });
+});
+
+describe("Link Discord: one click connects and opens Discord's page", () => {
+  const INSTALL = "https://discord.com/oauth2/authorize?x=1";
+  const ended = (status: "done" | "failed") =>
+    new Response(
+      JSON.stringify({
+        cid: `cid-${status}`,
+        reattached: false,
+        state:
+          status === "done"
+            ? { status, grant: {} }
+            : { status, reason: "Not linked to Rome Cloud." },
+      }),
+      { status: 200 },
+    );
+  /** Answers the setup start with each of `starts` in turn, and the install link with `link`. */
+  function stubLink(starts: Array<"done" | "failed">, link: () => Response) {
+    const queue = [...starts];
+    return stubFetch((url) => {
+      if (url.endsWith("/setup")) return ended(queue.shift() ?? "done");
+      if (url === "/api/connections/discord-app/install-link") return link();
+      return null;
+    });
+  }
+  const tabStub = () => ({ opener: {}, location: { href: "" }, close: rs.fn() });
+  const card = (onRefresh = () => {}) =>
+    renderCard(
+      <ChannelConnectCard
+        config={CHANNEL_CONFIGS.discord_app}
+        slot={unconnected("bot")}
+        role="primary"
+        onRefresh={onRefresh}
+      />,
+    );
+
+  afterEach(() => {
+    delete window.rome;
+  });
+
+  it("sends the tab opened in the click to Discord once connected", async () => {
+    stubLink(["done"], () => Response.json({ url: INSTALL }));
+    const tab = tabStub();
+    const open = rs.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    card();
+    fireEvent.click(screen.getByRole("button", { name: "Link Discord" }));
+    expect(open).toHaveBeenCalledWith("", "_blank");
+    await waitFor(() => expect(tab.location.href).toBe(INSTALL));
+    expect(tab.opener).toBeNull();
+  });
+
+  it("hands Discord's page to the system browser in the Mac app, which gives no tab", async () => {
+    window.rome = {};
+    stubLink(["done"], () => Response.json({ url: INSTALL }));
+    const open = rs.spyOn(window, "open").mockReturnValue(null);
+    card();
+    fireEvent.click(screen.getByRole("button", { name: "Link Discord" }));
+    await waitFor(() => expect(open).toHaveBeenCalledWith(INSTALL));
+    expect(open).not.toHaveBeenCalledWith("", "_blank");
+  });
+
+  it("closes the tab when connecting fails, and opens Discord after a Retry that works", async () => {
+    stubLink(["failed", "done"], () => Response.json({ url: INSTALL }));
+    const first = tabStub();
+    const second = tabStub();
+    rs.spyOn(window, "open")
+      .mockReturnValueOnce(first as unknown as Window)
+      .mockReturnValueOnce(second as unknown as Window);
+    card();
+    fireEvent.click(screen.getByRole("button", { name: "Link Discord" }));
+    await waitFor(() => expect(first.close).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(second.location.href).toBe(INSTALL));
+  });
+
+  it("says so when there is no link to open, and closes the tab", async () => {
+    stubLink(["done"], () => new Response(null, { status: 502 }));
+    const tab = tabStub();
+    rs.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    card();
+    fireEvent.click(screen.getByRole("button", { name: "Link Discord" }));
+    expect(await screen.findByText("Couldn't open Discord. Try again.")).toBeTruthy();
+    expect(tab.close).toHaveBeenCalled();
   });
 });

@@ -78,8 +78,10 @@ export interface SpeakerSession {
   /**
    * Speaks one sentence as its own stream, so its audio starts without
    * waiting for any later text. Sentences start in the order they were said,
-   * as the provider has room. A sentence too long for one stream is split and
-   * its parts follow one another.
+   * as the provider has room, except across a credential renewal (see
+   * `speaker-source.ts`), so audio names its sentence and the caller plays
+   * sentences in its own order. A sentence too long for one stream is split
+   * and its parts follow one another.
    */
   say(sentenceId: string, text: string): void;
   /**

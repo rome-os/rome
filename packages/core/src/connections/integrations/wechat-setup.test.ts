@@ -109,7 +109,7 @@ describe("makeWechatSetup", () => {
       expiresAt: "never",
     });
     expect(grant.profile).toEqual({ accountId: "acct-1", userId: "user-9" });
-    expect(grant.guardianChannelUserId).toBe("user-9");
+    expect(grant.connectedBy).toEqual({ id: "user-9" });
     expect(grant.summary?.title).toBe("WeChat connected");
     // The confirmed attempt is discarded once its account is in the grant.
     expect(auth.completeLogin).toHaveBeenCalledExactlyOnceWith("attempt-1");
@@ -133,7 +133,7 @@ describe("makeWechatSetup", () => {
       accountId: "acct-1",
     });
     expect(grant.profile).toEqual({ accountId: "acct-1" });
-    expect(grant.guardianChannelUserId).toBeUndefined();
+    expect(grant.connectedBy).toBeUndefined();
   });
 
   it("marks the scan step done once the provider reports the QR scanned", async () => {

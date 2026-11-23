@@ -51,7 +51,7 @@ import Testing
     }
 
     private func bubbleY(_ list: UICollectionView, store: TranscriptStore, row: String) throws -> CGFloat {
-        let cell = try #require(list.visibleCells.first { $0.accessibilityIdentifier == row })
+        let cell = try #require(list.visibleCells.first { $0.accessibilityIdentifier == row }, "Require visible row \(row), offset \(list.contentOffset), visible \(list.visibleCells.compactMap(\.accessibilityIdentifier))")
         let at = try #require(store.rows.firstIndex { $0.id == row })
         return cell.convert(cell.bounds, to: nil).minY + TranscriptSpacing.top(store.rows[at], after: at > 0 ? store.rows[at - 1] : nil)
     }
@@ -90,9 +90,16 @@ import Testing
         try await exercise(y: 440, count: 8, width: 390, interrupted: true)
     }
 
-    private func exercise(y: CGFloat, count: Int, width: CGFloat, reduced: Bool = false, agent: Bool = false, interrupted: Bool = false, longRows: Bool = false, expandSource: Bool = true) async throws {
+    @Test func pinnedFooterBelongsOnlyToMainAndFadesWithItsCollection() async throws {
+        try await exercise(y: 440, count: 8, width: 390, pinned: true)
+    }
+
+    private func exercise(y: CGFloat, count: Int, width: CGFloat, reduced: Bool = false, agent: Bool = false, interrupted: Bool = false, longRows: Bool = false, expandSource: Bool = true, pinned: Bool = false) async throws {
         let backend = FakeBackend()
         backend.mainChat = ConciergeSessionInfo(id: "concierge", unread: 0)
+        if pinned {
+            backend.chatSessionRead = ChatSession(id: "concierge", name: "", followsDefault: false, pinnedModel: .init(by: "kept", providerId: "openai"))
+        }
         struct Fixture: Decodable {
             let messages: [ChatMessage]
             let short: ThreadPage
@@ -119,6 +126,7 @@ import Testing
         let chainIDs = Set(fixture.messages.filter { $0.chatThreadId == root }.map(\.id))
         let allIDs = Set(fixture.messages.map(\.id))
         #expect(chainIDs.count == count)
+        if pinned { messages = messages.filter { $0.chatThreadId == root } }
         backend.stored = messages.filter { $0.id != missing }
         // Exact API fixtures from the disposable seeded backend: B7 and C24,
         // including the original anchor±10 flags and a real missing chain row.
@@ -130,6 +138,7 @@ import Testing
         await workspace.concierge.reload()
         while workspace.concierge.hasOlder { await workspace.concierge.loadOlder() }
         let store = workspace.concierge
+        if pinned { await store.readChatSession() }
         store.focusPosition.reduceMotion = { reduced }
         if longRows { AgentBubble.startsExpanded = expandSource }
         defer { if longRows { AgentBubble.startsExpanded = false } }
@@ -143,12 +152,32 @@ import Testing
         defer { window.isHidden = true; window.rootViewController = nil; window.windowScene = nil }
         try await Task.sleep(for: .milliseconds(450))
         let mainList = try #require(list(host.view, "transcript"))
+        if pinned {
+            #expect(descendants(mainList).contains { $0.accessibilityIdentifier == "transcript.footer" }, "Require a real main footer cell before testing its visibility")
+            let footer = try #require(mainList.visibleCells.first { $0.accessibilityIdentifier == "transcript.footer" })
+            let surface = try #require(store.focusPosition.surface)
+            let point = footer.convert(CGPoint(x: footer.bounds.midX, y: footer.bounds.midY), to: surface)
+            let hit = try #require(surface.hitTest(point, with: nil))
+            #expect(hit === footer || hit.isDescendant(of: footer), "The common bubble surface must not swallow the incoming main footer's button")
+            #expect(mainList.panGestureRecognizer.view === mainList, "The footer keeps the same native collection pan, not a dead drag region")
+            store.focusPosition.layout()
+            #expect(mainList.panGestureRecognizer.view === mainList, "Layout while dragging the footer must not move its recognizer away")
+            _ = surface.hitTest(CGPoint(x: 3, y: 3), with: nil)
+            #expect(mainList.panGestureRecognizer.view === surface, "A subsequent list-surface touch restores the existing native input scope")
+        }
         let input = try #require(descendants(host.view).compactMap { $0 as? PastingTextView }.first)
         input.text = "Unsent thread draft"
         input.delegate?.textViewDidChange?(input)
         try await Task.sleep(for: .milliseconds(100))
         let inputFrame = input.convert(input.bounds, to: nil)
         let row = try #require(store.rows.first { $0.ownMessageId == target })
+        if pinned {
+            // This short fixture keeps its footer on screen. Install the
+            // test's scroll budget before revealing the actual source row.
+            mainList.contentInset.top = 1000
+            mainList.contentInset.bottom = 1000
+            mainList.layoutIfNeeded()
+        }
         store.jump(to: target)
         try await Task.sleep(for: .milliseconds(450))
         store.focusPosition.pause()
@@ -171,6 +200,14 @@ import Testing
             #expect(expandSource ? source.bounds.height > AgentBubble.foldHeight(for: .large) + 100 : source.bounds.height < AgentBubble.foldHeight(for: .large) + 100, "Require the actual mounted source fold state before testing reuse")
             AgentBubble.startsExpanded = false
         }
+        let footerFrame: CGRect?
+        if pinned {
+            let footer = try #require(mainList.visibleCells.first { $0.accessibilityIdentifier == "transcript.footer" })
+            let frame = footer.convert(footer.bounds, to: nil)
+            let viewport = mainList.convert(mainList.bounds, to: nil)
+            #expect(frame.minY > viewport.minY && frame.maxY < inputFrame.minY, "Require the actual main footer visibly above the composer at the tapped bubble's position")
+            footerFrame = frame
+        } else { footerFrame = nil }
         let originalOffset = mainList.contentOffset
         var release: CheckedContinuation<Void, Never>?
         backend.duringThreadFetch = { await withCheckedContinuation { release = $0 } }
@@ -193,8 +230,18 @@ import Testing
         var movingRows = Set<String>()
         var directions: [String: Set<Int>] = [:]
         var sawPictures = false
+        var fadingMain = Set<String>()
         func sample(_ phase: String) throws {
             let focusList = list(host.view, "reply-chain-transcript")
+            if pinned {
+                #expect(!descendants(focusList ?? UIView()).contains { $0.accessibilityIdentifier == "transcript.footer" }, "The focused collection never owns the main pinned hint")
+                let opacity = mainList.layer.presentation()?.opacity ?? Float(mainList.alpha)
+                if opacity > 0.01 && opacity < 0.99 { fadingMain.insert(phase) }
+                let footer = try #require(mainList.visibleCells.first { $0.accessibilityIdentifier == "transcript.footer" })
+                let actualFooter = footer.convert(footer.bounds, to: nil)
+                let expectedFooter = try #require(footerFrame)
+                #expect(abs(actualFooter.minY - expectedFooter.minY) < 0.000001 && actualFooter.minX == expectedFooter.minX && actualFooter.size == expectedFooter.size, "The visible main footer fades at its own position, never jumps into a focused row")
+            }
             let surface = store.focusPosition.surface
             let pictures = surface?.subviews ?? []
             func shownFrame(_ view: UIView) -> CGRect {
@@ -251,7 +298,7 @@ import Testing
                 }
             }
             if !pictures.isEmpty { sawPictures = true }
-            if width == 390 && y == 440 && count == 25 && samples.isMultiple(of: 4) {
+            if width == 390 && y == 440 && (count == 25 || pinned) && samples.isMultiple(of: 4) {
                 let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
                     window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
                 }
@@ -277,6 +324,10 @@ import Testing
         let focus = try #require(store.threadFocus)
         let focused = try #require(list(host.view, "reply-chain-transcript"))
         #expect(focus.initial == .loading && focused.alpha == 1)
+        if pinned {
+            #expect(PinnedHint.text(store.chatSession) == "On ChatGPT")
+            #expect(mainList.alpha == 0, "Collection-owned main footer stays hidden throughout focus")
+        }
         let surface = try #require(store.focusPosition.surface)
         let surfaceRect = surface.convert(surface.bounds, to: nil)
         let listRect = focused.convert(focused.bounds, to: nil)
@@ -314,6 +365,18 @@ import Testing
         let hydratedY = try bubbleY(focused, store: focus.transcript, row: readingRow)
         #expect(abs(hydratedY - readingY) < 1, "Hydration preserves CURRENT reading row \(readingRow): \(readingY) → \(hydratedY)")
         #expect(store.focusPosition.handoffs == 1 && !store.focusPosition.transitioning, "Hydration starts no second animation")
+        if pinned {
+            for follows in [true, false] {
+                backend.chatSessionRead = ChatSession(id: "concierge", name: "", followsDefault: follows, pinnedModel: follows ? nil : .init(by: "kept", providerId: "openai"))
+                await store.readChatSession()
+                try await Task.sleep(for: .milliseconds(100))
+                #expect(mainList.alpha == 0 && focused.alpha == 1, "A footer update belongs to the hidden main collection, never to focus")
+                #expect(abs(try bubbleY(focused, store: focus.transcript, row: readingRow) - readingY) < 1, "Changing the main footer cannot move the current focused reading anchor")
+                #expect(mainList.contentOffset == originalOffset)
+                #expect(input.convert(input.bounds, to: nil) == inputFrame)
+                #expect(store.focusPosition.handoffs == 1)
+            }
+        }
         // Return to the entry reading position before testing the inverse pin.
         focused.delegate?.scrollViewWillBeginDragging?(focused)
         focused.contentOffset.y += try bubbleY(focused, store: focus.transcript, row: row.id) - pressedY
@@ -331,6 +394,9 @@ import Testing
         #expect(input.convert(input.bounds, to: nil) == inputFrame)
         #expect(descendants(host.view).compactMap { $0 as? PastingTextView }.first === input)
         #expect(sawPictures, "The same hosted content must actually travel through the common layer")
+        if pinned {
+            #expect(fadingMain == ["open", "close"], "The main footer fades with its own list in both directions, never hard-pops at handoff")
+        }
         if reduced {
             #expect(movingRows.isEmpty, "Reduce Motion changes opacity, not message geometry")
         } else if !UIAccessibility.isReduceMotionEnabled {

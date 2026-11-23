@@ -227,12 +227,12 @@ export function makeLinkedInSetup(deps: {
     return {
       credential: browserSessionCredential(),
       profile,
-      // The guardian's own account, under the id `accountIdOf` records on the
+      // The signed-in account, under the id `accountIdOf` records on the
       // channel, so the two name one account.
       ...(identity.plainId
-        ? { guardianChannelUserId: identity.plainId }
+        ? { connectedBy: { id: identity.plainId } }
         : identity.publicId
-          ? { guardianChannelUserId: `https://www.linkedin.com/in/${identity.publicId}/` }
+          ? { connectedBy: { id: `https://www.linkedin.com/in/${identity.publicId}/` } }
           : {}),
       summary: {
         title: "LinkedIn connected",

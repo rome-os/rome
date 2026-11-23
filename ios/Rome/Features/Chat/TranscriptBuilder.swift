@@ -60,6 +60,9 @@ enum TranscriptRow: Identifiable, Hashable {
     case question(id: String, part: MessagePart.QuestionPart, sessionId: String, answered: JSONValue?)
     /// `done`: an interactive card the guardian already answered.
     case webOnly(id: String, kind: MessagePart.WebOnlyKind, done: Bool = false)
+    /// Chat's card to connect Claude or ChatGPT (`ai-tools-card`), which the
+    /// turn waits on. `done`: answered already.
+    case aiTools(id: String, toolUseId: String, sessionId: String, done: Bool)
     case routineDraft(id: String, part: MessagePart.RoutineDraftPart)
     case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
     /// `answered`: what answered the card, when the agent waits on it and it was.
@@ -67,6 +70,11 @@ enum TranscriptRow: Identifiable, Hashable {
     case error(id: String, error: TurnError)
     /// A quiet line between messages, such as the chat moving to another model.
     case notice(id: String, text: String)
+    /// An open provider failure card; `messageId` is the stored message its
+    /// buttons name. A settled one is a `notice`.
+    case providerFailure(id: String, part: ProviderFailurePart, messageId: String)
+    /// The main Chat's notice of unattended chats a failure stopped.
+    case providerOutage(id: String, part: ProviderOutagePart)
     case tools(id: String, traceMessageId: String, count: Int)
     /// A task's question or approval shown on its own (`show: "ask"`).
     /// `latest`: the newest card for that task chat, the only one that may
@@ -94,7 +102,7 @@ enum TranscriptRow: Identifiable, Hashable {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _, _, _), .taskAsk(let id, _, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
-             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _, _, _), .error(let id, _), .notice(let id, _), .tools(let id, _, _),
+             .webOnly(let id, _, _), .aiTools(let id, _, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _, _, _), .error(let id, _), .notice(let id, _), .providerFailure(let id, _, _), .providerOutage(let id, _), .tools(let id, _, _),
              .sourceLabel(let id, _), .sessionRenewal(let id, _, _):
             return id
         case .unreadDivider:
@@ -183,10 +191,17 @@ enum TranscriptBuilder {
         // The turns that answer a message the guardian wrote: one a routine,
         // an app or an agent sent in does not make its turn the guardian's.
         var guardianTurns = Set<String>()
+        // The turns a provider failure card stands for.
+        var cardedTurns = Set<String>()
         for (message, parts) in zip(messages, parsed) {
             guard let turn = message.turnId else { continue }
             if message.isUser, !Self.isAutomated(message) { guardianTurns.insert(turn) }
             if !message.isTrace, parts.contains(where: { if case .error = $0 { true } else { false } }) { storedErrors.insert(turn) }
+            // A provider failure card says why the turn did not run: no failed line, no failed send.
+            if !message.isTrace, parts.contains(where: \.isProviderFailure) {
+                storedErrors.insert(turn)
+                cardedTurns.insert(turn)
+            }
         }
         // Whether an agent message of a later turn says something a guardian
         // reads: the Chat recovered from the failure (a switch of model, a retry).
@@ -267,6 +282,8 @@ enum TranscriptBuilder {
             }
             var rows: [TranscriptRow] = []
             var bubbles: [Int] = []
+            // A provider failure card takes the place of the error written beside it.
+            let carded = parsed[position].contains(where: \.isProviderFailure)
             for (index, part) in parsed[position].enumerated() {
                 let id = "\(message.id):\(index)"
                 switch part {
@@ -274,7 +291,8 @@ enum TranscriptBuilder {
                     guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                     if message.isUser {
                         let (body, uploads) = UploadLines.split(text)
-                        rows.append(.userText(id: id, text: body, images: uploads.map(UserImage.stored), pending: PendingSend.State.stored(inputState: message.inputState)))
+                        let state = message.turnId.map(cardedTurns.contains) == true ? nil : PendingSend.State.stored(inputState: message.inputState)
+                        rows.append(.userText(id: id, text: body, images: uploads.map(UserImage.stored), pending: state))
                     } else {
                         bubbles.append(rows.count)
                         rows.append(.agentText(id: id, text: text, long: long, forwardedFrom: forwarded, position: .single))
@@ -289,6 +307,8 @@ enum TranscriptBuilder {
                     var question = question
                     question.ui?.widgetId = message.id
                     rows.append(.question(id: id, part: question, sessionId: message.sessionId, answered: answers[message.id]))
+                case .webOnly(.aiTools, let toolUseId?) where !message.isUser:
+                    rows.append(.aiTools(id: id, toolUseId: toolUseId, sessionId: message.sessionId, done: answers[message.id] != nil))
                 case .webOnly(let kind, let toolUseId):
                     rows.append(.webOnly(id: id, kind: kind, done: toolUseId != nil && answers[message.id] != nil))
                 case .routineDraft(let draft):
@@ -299,10 +319,27 @@ enum TranscriptBuilder {
                     var card = card
                     card.widgetId = message.id
                     rows.append(.widgetUI(id: id, part: card, sessionId: message.sessionId, answered: card.waits ? answers[message.id] : nil))
+                case .error where carded:
+                    continue
                 case .error(let error):
                     rows.append(.error(id: id, error: error))
                 case .notice(let text):
                     rows.append(.notice(id: id, text: text))
+                case .providerFailure(let failure) where failure.drawsNothing:
+                    continue
+                case .providerFailure(let failure):
+                    if let resolved = failure.resolved {
+                        rows.append(.notice(id: id, text: ProviderFailureCopy.resolved(resolved)))
+                    } else {
+                        rows.append(.providerFailure(id: id, part: failure, messageId: message.id))
+                    }
+                case .providerOutage(let outage):
+                    if let settled = outage.settled {
+                        // The notice's tasks ran again: whether each continued is theirs to say.
+                        rows.append(.notice(id: id, text: ProviderFailureCopy.resolved(.init(by: settled.by, provider: settled.provider, model: settled.model, continued: false))))
+                    } else {
+                        rows.append(.providerOutage(id: id, part: outage))
+                    }
                 case .interactionResult, .replyTo, .other:
                     continue
                 }
@@ -397,7 +434,7 @@ enum TranscriptBuilder {
         guard !message.isUser, !message.isTrace else { return false }
         return parts.contains { part in
             switch part {
-            case .error, .notice, .replyTo, .other, .interactionResult: return false
+            case .error, .notice, .replyTo, .other, .interactionResult, .providerFailure, .providerOutage: return false
             default: return part.isVisible
             }
         }

@@ -57,6 +57,7 @@ import { TraceDrawer, type TraceDrawerTarget } from "@/components/agent-trace/Tr
 import { modelDisplayName } from "@/lib/model-display";
 import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
+import { PinnedModelHint } from "@/components/chat/PinnedModelHint";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
 import { TaskChatContext } from "@/components/chat/task-chat";
 import { TaskLinksScope } from "@/components/chat/task-link/task-links";
@@ -175,6 +176,7 @@ import type {
   ChatErrorProvider,
   ChatErrorReason,
   ChatMessage,
+  ChatSession,
   CreateTurnResponse,
   DoneEventData,
 } from "@/lib/chat-types";
@@ -628,6 +630,8 @@ export function Chat({
     taskOf,
     projectPath,
     isConciergeSession,
+    pinnedModel,
+    applySession,
   } = useSessionIdentity(mainSessionId);
   // The main chat is never archived or deleted, so its menu offers neither.
   const isMainChat = concierge && mainSessionId === conciergeMainChatId;
@@ -638,18 +642,45 @@ export function Chat({
     (pickedModel && pickedModel.sessionId === mainSessionId ? pickedModel.value : null) ??
     storedModelSelection ??
     DEFAULT_LARGE_MODEL_SELECTION;
+  // Counts model picks, so an answer to one a newer pick replaced is ignored.
+  const pickGeneration = useRef(0);
   const pickChatModel = useCallback(
     (next: string) => {
       if (!mainSessionId) return;
       const sessionId = mainSessionId;
       const previous = chatModelValue;
       setPickedModel({ sessionId, value: next });
-      updateSessionModel(sessionId, next).catch(() => {
-        setPickedModel({ sessionId, value: previous });
-        setStreamError(t("modelSelector.saveFailed"));
-      });
+      // The saved chat says whether the pick pinned it, or Auto let it follow.
+      // Once it is applied, the pick stops overriding it, so a later change,
+      // such as a failure card's switch, shows; a newer pick stays.
+      // Only the latest pick's answer counts: an earlier pick's that lands
+      // last would put back what the server has since replaced.
+      const pick = ++pickGeneration.current;
+      updateSessionModel(sessionId, next).then(
+        (saved) => {
+          if (pick !== pickGeneration.current) return;
+          applySession(saved);
+          setPickedModel((current) =>
+            current?.sessionId === sessionId && current.value === next ? null : current,
+          );
+        },
+        () => {
+          if (pick !== pickGeneration.current) return;
+          setPickedModel({ sessionId, value: previous });
+          setStreamError(t("modelSelector.saveFailed"));
+        },
+      );
     },
-    [mainSessionId, chatModelValue, t],
+    [mainSessionId, chatModelValue, t, applySession],
+  );
+  // "Back to default": the chat follows the default again, so the model
+  // selector reads Auto and the hint goes.
+  const followedDefault = useCallback(
+    (session: ChatSession) => {
+      applySession(session);
+      setPickedModel(null);
+    },
+    [applySession],
   );
   // The agent a draft's first send picked stands in until the new session's
   // identity loads, so its chip does not drop out when the composer locks.
@@ -2352,6 +2383,16 @@ export function Chat({
     concierge &&
     (!mainSessionId || (messages.has(mainSessionId) && rows.length === 0)) &&
     !displayedStreaming;
+  // A pinned chat always says so in its last row, with one way back, an empty
+  // one too. The default is the guardian's: a visitor never sees it.
+  const pinnedHint =
+    mainSessionId && pinnedModel && !isArchived && viewer?.kind !== "visitor" ? (
+      <PinnedModelHint
+        sessionId={mainSessionId}
+        pinnedModel={pinnedModel}
+        onFollowed={followedDefault}
+      />
+    ) : null;
 
   // The composer is memoized so a streaming turn does not render it, which only
   // holds while what it is handed keeps its identity.
@@ -2849,11 +2890,14 @@ export function Chat({
   );
 
   const blankTranscript = conciergeEmpty ? (
-    mainSessionId === conciergeMainChatId ? (
-      <ConciergeEmptyState onPick={(prompt) => composerRef.current?.insertText(prompt)} />
-    ) : (
-      <ConciergeTopicEmptyState onStart={(prompt) => composerRef.current?.insertText(prompt)} />
-    )
+    <>
+      {mainSessionId === conciergeMainChatId ? (
+        <ConciergeEmptyState onPick={(prompt) => composerRef.current?.insertText(prompt)} />
+      ) : (
+        <ConciergeTopicEmptyState onStart={(prompt) => composerRef.current?.insertText(prompt)} />
+      )}
+      {pinnedHint ? <div className="px-3 md:px-6">{pinnedHint}</div> : null}
+    </>
   ) : (
     emptyState
   );
@@ -2983,6 +3027,7 @@ export function Chat({
                               fork={forkable}
                               variant={variant}
                               unreadFrom={unread?.firstId ?? null}
+                              tail={pinnedHint}
                             />
                           </TaskChatContext.Provider>
                         </TaskLinksScope>

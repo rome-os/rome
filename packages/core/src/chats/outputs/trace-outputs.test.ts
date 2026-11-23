@@ -244,6 +244,31 @@ describe("outputsInTrace, for shell commands and replies", () => {
     ).toHaveLength(1);
   });
 
+  it("finds a linked file whose path has spaces and no angle brackets", () => {
+    const reply =
+      'See [notes](/projects/test/my notes.md) and [hi](/home/p/test/hello.txt "Hello").';
+    const found = outputsInTrace([{ type: "result", content: reply }], CTX);
+    expect(found.map((output) => output.path)).toEqual([
+      "/home/p/test/my notes.md",
+      "/home/p/test/hello.txt",
+    ]);
+  });
+
+  it("finds a linked file whose title holds escaped quotes", () => {
+    const reply = String.raw`[f](/projects/test/hello.txt "Say \"hi\"") and [g](/home/p/test/my notes.md 'it\'s')`;
+    expect(outputsInReply("tr1", reply, SCOPE).map((output) => output.path)).toEqual([
+      "/home/p/test/hello.txt",
+      "/home/p/test/my notes.md",
+    ]);
+  });
+
+  it("reads a link with a long run of blanks and no end in linear time", () => {
+    const reply = `[a](${" ".repeat(20_000)}x`;
+    const started = performance.now();
+    expect(outputsInReply("tr1", reply, SCOPE)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it("leaves out a file the reply only cites, unchanged since the turn began", () => {
     const reply =
       "I wrote [hello.txt](/projects/test/hello.txt) after reading [old.md](/projects/test/old.md).";

@@ -8,6 +8,11 @@ import Testing
         for _ in 0..<20 { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
+    /// Waits up to ten seconds for `condition`.
+    private func until(_ condition: () -> Bool) async {
+        for _ in 0..<1000 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
     private func workspace(_ backend: FakeBackend) -> Workspace {
         Workspace(backend: backend, instanceName: "Test", host: "test", accountLabel: "test", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-tests-\(UUID().uuidString)/Drafts"), instance: "test"))
     }
@@ -261,14 +266,81 @@ import Testing
         #expect(store.chats.map(\.id) == ["a", "b", "c"])
     }
 
-    /// A page at a time; the open chat stays in view even past the page.
-    @Test func theDrawerShowsAPageAndTheOpenChat() {
-        let page = TopicChatsStore.pageSize
-        #expect(page == 30)
-        #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: nil) == 30)
-        #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: 2) == 30)
-        #expect(TopicChatsStore.shownCount(70, limit: page, openIndex: 44) == 45)
-        #expect(TopicChatsStore.shownCount(12, limit: page, openIndex: nil) == 12)
+    @Test func theDrawerPagesWithoutRevealingRowsBeforeTheOpenChat() {
+        let chats = (0..<70).map { ConciergeChat(id: "c-\($0)", name: "Chat", main: false, unread: $0 == 65 ? 1 : 0) }
+        let page = TopicChatsStore.page(chats, limit: 30, pinnedAt: [:], openId: "c-69")
+        #expect(TopicChatsStore.pageSize == 30)
+        #expect(page.count == 32)
+        #expect(!page.contains { $0.id == "c-44" })
+        #expect(page.suffix(2).map(\.id) == ["c-65", "c-69"])
+        #expect(TopicChatsStore.page(chats, limit: 90, pinnedAt: [:], openId: nil).count == 70)
+    }
+
+    @Test func olderTopicsStartCollapsedAndRememberBothStatesPerInstance() {
+        let defaults = UserDefaults(suiteName: "older-topics-\(UUID())")!
+        let fold = TopicChatsFold(host: "me.romeos.cc", defaults: defaults)
+        let store = TopicChatsStore(backend: FakeBackend(), fold: fold)
+        #expect(!store.olderExpanded)
+        store.setOlderExpanded(true)
+        #expect(TopicChatsStore(backend: FakeBackend(), fold: fold).olderExpanded)
+        #expect(!TopicChatsStore(backend: FakeBackend(), fold: TopicChatsFold(host: "other", defaults: defaults)).olderExpanded)
+        store.setOlderExpanded(false)
+        #expect(!fold.loadOlderExpanded())
+        fold.saveOlderExpanded(true)
+        TopicChatsFold.removeAll(defaults: defaults)
+        #expect(!fold.loadOlderExpanded())
+    }
+
+    @Test func olderTopicsUseSevenDaysNotCalendarWeeks() {
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let cutoff = now.addingTimeInterval(-7 * 86400)
+        let chats = ["new", "boundary", "old", "unknown"].map { ConciergeChat(id: $0, name: $0, main: false) }
+        let groups = TopicChatsStore.groups(chats, lastActive: ["new": cutoff.addingTimeInterval(0.001), "boundary": cutoff, "old": cutoff.addingTimeInterval(-1)], pinnedAt: [:], openId: nil, now: now)
+        #expect(groups.current.map(\.id) == ["new", "unknown"])
+        #expect(groups.older.map(\.id) == ["boundary", "old"])
+    }
+
+    @Test func pinsUnreadAndOnlyTheOpenOldTopicStayOutside() {
+        let now = Date.now
+        let chats = ["pin", "unread", "open", "old"].map { ConciergeChat(id: $0, name: $0, main: false, unread: $0 == "unread" ? 2 : 0) }
+        let times = Dictionary(uniqueKeysWithValues: chats.map { ($0.id, now.addingTimeInterval(-30 * 86400)) })
+        let groups = TopicChatsStore.groups(chats, lastActive: times, pinnedAt: ["pin": now], openId: "open", now: now)
+        #expect(groups.current.map(\.id) == ["pin", "unread", "open"])
+        #expect(groups.older.map(\.id) == ["old"])
+    }
+
+    @Test func olderCountsComeBeforePaging() {
+        let now = Date.now
+        let chats = (0..<130).map { ConciergeChat(id: "old-\($0)", name: "Old", main: false) }
+        let times = Dictionary(uniqueKeysWithValues: chats.map { ($0.id, now.addingTimeInterval(-8 * 86400)) })
+        let groups = TopicChatsStore.groups(chats, lastActive: times, pinnedAt: [:], openId: "old-129", now: now)
+        #expect(groups.current.map(\.id) == ["old-129"])
+        #expect(groups.older.count == 129)
+        #expect(groups.older.prefix(TopicChatsStore.pageSize).count == 30)
+    }
+
+    @Test func onlyAFreshTopicMessageMovesItOutOfOlder() async {
+        let backend = FakeBackend()
+        let now = Date.now
+        backend.topicChats = [ConciergeChat(id: "old", name: "Old", main: false, unread: 0)]
+        backend.sessionRows = [ChatSession(id: "old", name: "Old", activityAt: RomeDate.string(now.addingTimeInterval(-8 * 86400)))]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        func groups() -> (current: [ConciergeChat], older: [ConciergeChat]) {
+            TopicChatsStore.groups(store.chats, lastActive: store.lastActive, pinnedAt: store.pinnedAt, openId: nil, now: now)
+        }
+        #expect(groups().older.count == 1)
+        backend.sessionRows.append(ChatSession(id: "task", name: "Background task", activityAt: RomeDate.string(now)))
+        backend.bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: "task", running: true))
+        store.setActivity(.working, for: "old")
+        await settle()
+        #expect(groups().older.count == 1)
+        backend.sessionRows[0].activityAt = RomeDate.string(now)
+        backend.bus.emit(LiveTopic.chatStatus, .sessionRunning(sessionId: "old", running: false))
+        await settle()
+        #expect(groups().current.map(\.id) == ["old"])
+        #expect(groups().older.isEmpty)
     }
 
     /// As on the web: the pinned chats first, the latest pinned on top, then
@@ -304,7 +376,8 @@ import Testing
         ]
         let workspace = workspace(backend)
         workspace.topics.start()
-        await settle()
+        // Waits on the list, not a fixed time: a loaded CI clone is slow.
+        await until { workspace.topics.chats.count == 3 }
         #expect(await workspace.pinTopic("c", pinned: true))
         // At once, before the refetch.
         #expect(workspace.topics.chats.map(\.id) == ["c", "a", "b"])
@@ -313,7 +386,7 @@ import Testing
         #expect(await workspace.pinTopic("b", pinned: true))
         #expect(workspace.topics.chats.map(\.id) == ["b", "c", "a"])
         #expect(await workspace.pinTopic("c", pinned: false))
-        await settle()
+        await until { workspace.topics.chats.map(\.id) == ["b", "a", "c"] }
         #expect(workspace.topics.chats.map(\.id) == ["b", "a", "c"])
         #expect(backend.calls == ["pin c", "pin b", "unpin c"])
     }

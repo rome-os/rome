@@ -505,7 +505,8 @@ describe("buildConnectionCards — several accounts per service", () => {
       conn({ connectionKind: "discord", id: null, channel: null, grants: { bot: "unauthorized" } }),
     ]);
     expect(cards[0].route).toBe("discord");
-    expect(cards[0].label).toBe("Discord");
+    // The bot the guardian makes; Rome's own Discord bot is "Discord".
+    expect(cards[0].label).toBe("Discord bot");
   });
 
   it("renders as before when the server omits the account fields", () => {

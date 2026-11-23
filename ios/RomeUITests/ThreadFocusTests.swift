@@ -177,14 +177,16 @@ final class ThreadFocusUITests: XCTestCase {
         let cancel = app.buttons["Cancel reply"]
         XCTAssertTrue(cancel.waitForExistence(timeout: 3))
         let input = app.textViews["Message in thread"]
+        let previousDraft = input.value as? String ?? ""
+        let expectedDraft = (previousDraft == "Message in thread" ? "" : previousDraft) + "Unsent thread draft"
         input.typeText("Unsent thread draft")
         cancel.tap()
         XCTAssertTrue(close.exists && focused.exists, "Cancel an explicit reply, not the thread")
         XCTAssertFalse(cancel.exists)
-        XCTAssertEqual(input.value as? String, "Unsent thread draft")
+        XCTAssertEqual(input.value as? String, expectedDraft)
         keep("seeded-reply-chain-manual-cancel")
         close.tap()
         XCTAssertTrue(app.textViews["Message"].waitForExistence(timeout: 3))
-        XCTAssertEqual(app.textViews["Message"].value as? String, "Unsent thread draft")
+        XCTAssertEqual(app.textViews["Message"].value as? String, expectedDraft)
     }
 }

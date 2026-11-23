@@ -2,6 +2,30 @@
   "entries": [
     {
       "tier": "background",
+      "reason": "AI Tools in Settings: the row and the AI Tools page read defaultProvider from GET /ai-tools/status (the default model and which accounts count as logged in); an older server sends none, so the row cannot say which provider chats run on.",
+      "pr": 2560,
+      "server": "#2303"
+    },
+    {
+      "tier": "background",
+      "reason": "provider failure cards in chats: their Switch, Continue and Retry buttons call POST /ai-tools/provider-failures/:messageId/switch and /continue; an older server has no such routes and writes no provider_failure or provider_outage parts.",
+      "pr": 2560,
+      "server": "#2303"
+    },
+    {
+      "tier": "background",
+      "reason": "default switching: the pinned-chat hint reads followsDefault and pinnedModel on GET /chat/sessions/:id and calls POST /chat/sessions/:id/model/follow-default; the logout dialogs send moveExisting to the logout routes; account cards offer Retry and a switch reads refreshed. An older server sends none of the fields, ignores moveExisting and refuses Retry on an account card.",
+      "pr": 2560,
+      "server": "#2572"
+    },
+    {
+      "tier": "background",
+      "reason": "global Shared links: Settings lists every share link of the signed-in person with GET /chat/shares; an older server lacks the route, so the sheet shows its load error.",
+      "pr": 2593,
+      "server": "#2593"
+    },
+    {
+      "tier": "background",
       "reason": "Reply-chain focus reads the message thread endpoint.",
       "pr": 2574,
       "server": "#2574"

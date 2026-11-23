@@ -1,6 +1,6 @@
 # Architecture Docs
 
-An **architecture doc** covers one surface: it names the surface's components, the flow between them, and the [structural contracts](../CLAUDE.md#traps) a diff must not break. The family lives in [`architecture/`](../architecture/index.md). This file is the rulebook for that family.
+An **architecture doc** covers one surface: it names the surface's components, the flow between them, and the [structural contracts](../AGENTS.md#traps) a diff must not break. The family lives in [`architecture/`](../architecture/index.md). This file is the rulebook for that family.
 
 Tier tags and the bar a rulebook clears come from [authoring.md](authoring.md). Prose rules come from [WRITING.md](WRITING.md). This file adds only what the architecture family needs on top. The misses that earned it: the index omits two docs that exist in the directory, and five docs cite file paths that structural contracts ban.
 

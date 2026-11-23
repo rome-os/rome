@@ -5,7 +5,7 @@ import type { DrizzleDb } from "../db/index.js";
 import { createLogger } from "../logger.js";
 import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "./auth.js";
 import type { DashboardAccessState } from "./dashboard-access-state.js";
-import { resolveGuardianSessionFromMaterial } from "./guardian-session.js";
+import { type GuardianSession, resolveGuardianSessionFromMaterial } from "./guardian-session.js";
 import { isSameOriginMutationRequest } from "../lib/mutation-origin.js";
 import { readCookie, rejectUpgrade, toOriginRequest } from "../lib/ws-upgrade.js";
 
@@ -13,7 +13,7 @@ const log = createLogger("ws-guardian-gate");
 
 /** Who an accepted upgrade belongs to. */
 export type UpgradeCaller =
-  | { kind: "guardian" }
+  | { kind: "guardian"; userId: string; via: GuardianSession["via"] }
   | { kind: "dashboard-admin"; accountId: string; email: string };
 
 function hasLoopbackHostname(origin: string): boolean {
@@ -75,7 +75,7 @@ export async function gateUpgrade(
         rejectUpgrade(socket, 403, "Forbidden");
         return null;
       }
-      return { kind: "guardian" };
+      return { kind: "guardian", userId: guardian.userId, via: guardian.via };
     }
     const visitorToken = dashboardAccess
       ? readCookie(req.headers.cookie, VISITOR_COOKIE_NAME)

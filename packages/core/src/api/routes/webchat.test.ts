@@ -1,3 +1,4 @@
+import { SPOKEN_TURN_NOTE } from "../../voice-conversation/conversation.js";
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
 import { askQuestionToolOutput, type Question, questionCardUi } from "../../agent/index.js";
 import { connectCardUiFromProps } from "../../connections/connect-card.js";
@@ -3128,6 +3129,64 @@ describe("Webchat API", () => {
       }),
       error: "Selected model provider is unavailable: Claude",
     });
+  });
+
+  it("hands a spoken input the turn that answers it, in the guardian's chats only", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+    const { runtime } = createWebchatRuntime(deps);
+    const id = await runtime.startChat({}, "guardian");
+    expect(await runtime.canSendSpoken(id)).toBe(true);
+    const turn = await runtime.sendSpoken(id, "你好");
+    expect(turn.id).toEqual(expect.any(String));
+
+    await deps.webchatRepo.createSession(
+      "visitor-task",
+      "Task",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "visitor:a" },
+    );
+    await deps.webchatRepo.setSessionTrigger("visitor-task", {
+      triggerKind: "concierge",
+      triggerName: "Task",
+    });
+    expect(await runtime.canSendSpoken("visitor-task")).toBe(false);
+    await expect(runtime.sendSpoken("visitor-task", "你好")).rejects.toThrow("Session not found");
+    await expect(runtime.sendSpoken("no-such-chat", "你好")).rejects.toThrow("Session not found");
+    expect(await deps.webchatRepo.getMessages("visitor-task")).toEqual([]);
+  });
+
+  it("refuses a spoken input for an agent whose text is private", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      buildAgent(name, { name: "main", policy: { finalText: "private" } }),
+    );
+    const { runtime } = createWebchatRuntime(deps);
+    const id = await runtime.startChat({}, "guardian");
+    expect(await runtime.canSendSpoken(id)).toBe(false);
+    await expect(runtime.sendSpoken(id, "你好")).rejects.toThrow("does not answer in text");
+    expect(await deps.webchatRepo.getMessages(id)).toEqual([]);
+  });
+
+  it("rejects a spoken input whose agent cannot be opened, rather than waiting for a turn", async () => {
+    deps.agentSessionManager = {
+      open: rs.fn(async () => {
+        throw new ModelResolutionError("Selected model provider is unavailable: Codex", {
+          code: "model_provider_unavailable",
+          provider: "openai",
+          reason: "not_logged_in",
+        });
+      }),
+      find: () => undefined,
+      shutdown: async () => undefined,
+    } as unknown as typeof deps.agentSessionManager;
+    const { runtime } = createWebchatRuntime(deps);
+    const id = await runtime.startChat({}, "guardian");
+    await expect(runtime.sendSpoken(id, "你好")).rejects.toThrow("No turn started");
   });
 
   it("accepts a logged-out provider as a persisted failed turn", async () => {
@@ -7610,6 +7669,36 @@ describe("Webchat API", () => {
       expect((await app.request(`/chat/sessions/${LEGACY_FORK_ID}`)).status).toBe(404);
     });
 
+    it("Back to default lets a held fork chat follow the default again", async () => {
+      rs.spyOn(deps.sessionRepository, "current").mockImplementation(async (key) =>
+        key === `webchat:${FORK_ID}` ? withThread(FORK_ID) : null,
+      );
+      const held = new Set([`webchat:${FORK_ID}`, `webchat:${PROMOTED_ID}`]);
+      deps.chatProviders = {
+        heldProvider: (key) => (held.has(key) ? "anthropic" : undefined),
+        follow: async (chatId) => {
+          held.delete(`webchat:${chatId}`);
+          return null;
+        },
+        release: async () => {},
+        pick: async () => {},
+        followingCount: async () => 0,
+      };
+      const app = createWebchatRuntime(deps).routes;
+      for (const id of [FORK_ID, PROMOTED_ID]) {
+        const before = (await (await app.request(`/chat/sessions/${id}`)).json()) as {
+          followsDefault?: boolean;
+        };
+        expect(before.followsDefault).toBe(false);
+        const res = await app.request(`/chat/sessions/${id}/model/follow-default`, {
+          method: "POST",
+        });
+        expect(res.status).toBe(200);
+        expect(await res.json()).toMatchObject({ followsDefault: true, pinnedModel: null });
+      }
+      deps.chatProviders = undefined;
+    });
+
     it("leaves every other fork-facing route closed", async () => {
       // Legacy fork-typed rows keep the narrow surface. A branch that ships
       // today is born type "webchat" and deliberately gets every ordinary
@@ -7675,6 +7764,40 @@ describe("Webchat API", () => {
       expect(recordSessionInChat).toHaveBeenCalledWith("fork-agent-session", PROMOTED_ID, {
         replace: true,
       });
+    });
+
+    it("runs a branch's own stored selection on its next send, not the first message's", async () => {
+      await deps.settingsRepo.set("enableModelSelector", true);
+      await deps.webchatRepo.updateSessionLargeModelSelection(PROMOTED_ID, "gpt-6-luna", "kept");
+      rs.spyOn(deps.sessionRepository, "current").mockResolvedValue(withThread(PROMOTED_ID));
+      let selectionId: unknown = "unset";
+      deps.agentSessionManager = fakeSessionManager(async (_key, init) => {
+        selectionId = init?.selectionId;
+        return {
+          key: { agentName: "main", channelThreadKey: `webchat:${PROMOTED_ID}` },
+          sessionId: "fork-agent-session",
+          status: "idle",
+          startTurn() {
+            return testTurnHandle({
+              turnId: "follow-up-turn",
+              events: (async function* () {
+                yield { type: "result", content: "ok" };
+              })(),
+              turnContext: otelContext.active(),
+            });
+          },
+          onStatusChange: () => () => undefined,
+          stop: async () => undefined,
+          close: async () => undefined,
+        } satisfies FakeSession;
+      });
+      const app = createWebchatRuntime(deps).routes;
+      await app.request(`/chat/sessions/${PROMOTED_ID}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "and then?", largeModelSelection: "claude-opus" }),
+      });
+      expect(selectionId).toBe("gpt-6-luna");
     });
 
     it("resumes a branch under its persisted key even when a selection is sent", async () => {
@@ -10025,6 +10148,15 @@ describe("Webchat API", () => {
       expect(prompts[1].startsWith("<workspace_context/>\n\n")).toBe(true);
       expect(prompts[2]).not.toContain("workspace_context");
       expect(prompts[3]).toContain("surfaces open in their workspace");
+    });
+
+    it("opens a spoken turn's prompt with the voice note, for that turn only, and stores only the words", async () => {
+      const { send, lastUser } = await setup();
+      await send({ text: "明天几点开会", spoken: true });
+      expect(prompts[0]).toBe(`${SPOKEN_TURN_NOTE}\n\n明天几点开会`);
+      expect(await lastUser()).toEqual([{ type: "text", content: "明天几点开会" }]);
+      await send({ text: "typed" });
+      expect(prompts[1]).toBe("typed");
     });
 
     it("rejects an id that is not a message of this chat", async () => {

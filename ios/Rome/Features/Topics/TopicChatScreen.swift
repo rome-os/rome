@@ -98,6 +98,13 @@ struct TopicChatScreen: View {
         .topicRestore($restoring, workspace: workspace)
         .pageBackground()
         .environment(\.taskLinks, chatId.flatMap { workspace.taskLinks(forChat: $0) })
+        .providerFailurePrompts(store, workspace: workspace)
+        // Whether the chat follows the default, read each time it opens.
+        // Read again each time it comes back into view, as after Settings
+        // changed the default with the topic still mounted beneath it.
+        .task(id: "\(store?.sessionId ?? "")|\(chatId.map { visibleChat == $0 } ?? inFront)") {
+            if chatId.map({ visibleChat == $0 }) ?? inFront { await store?.readChatSession() }
+        }
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onReply: { store?.restoreReply($0) }, prefill: Binding(
             get: { workspace.composerPrefills[chatId ?? draftKey] },
             set: { workspace.composerPrefills[chatId ?? draftKey] = $0 }
@@ -162,7 +169,7 @@ struct TopicChatScreen: View {
     @ViewBuilder
     private var content: some View {
         if let store, store.loaded {
-            TranscriptList(store: store, sharedContent: true, showsBackToBottom: false, scrollState: transcriptScroll, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
+            TranscriptList(store: store, sharedContent: true, showsBackToBottom: false, scrollState: transcriptScroll, composerFocused: composerFocused, footer: archived ? nil : PinnedHintLine.footer(store, visitor: workspace.isVisitor), latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
                 SharedConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, top: TranscriptSpacing.top(row, after: previous), tinted: store.tinted != nil && row.ownMessageId == store.tinted)
             }
                         .overlay(alignment: .top) { if store.threadFocus == nil { UnreadPillButton(store: store) } }
@@ -342,8 +349,8 @@ private struct TopicChatHeader: View {
     }
 }
 
-/// What a topic chat's header "…" offers for the chat itself, besides Share
-/// and Shared links: a blank chat nothing yet; an archived one, as on the web,
+/// What a topic chat's header "…" offers for the chat itself, besides Share:
+/// a blank chat nothing yet; an archived one, as on the web,
 /// only Unarchive and Delete, since it is renamed and pinned once it is back.
 struct TopicHeaderMenu: Equatable {
     enum Item: Equatable, CaseIterable { case rename, pin, archive, unarchive, delete }

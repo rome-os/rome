@@ -223,6 +223,7 @@ final class TranscriptFocusPosition {
     private var mainInput: [UIGestureRecognizer] = []
     private var focusInput: [UIGestureRecognizer] = []
     private weak var focusInputList: UICollectionView?
+    private weak var collectionInput: UICollectionView?
     var transitioning: Bool { animator != nil || !travelling.isEmpty }
     private var activeList: UICollectionView? { closing ? main : (focused ?? main) }
 
@@ -278,7 +279,8 @@ final class TranscriptFocusPosition {
         if list !== main { restoreInput(mainInput, to: main) }
         if list !== focusInputList { restoreInput(focusInput, to: focusInputList) }
         let input = list === main ? mainInput : focusInput
-        for gesture in input where gesture.view !== surface { surface.addGestureRecognizer(gesture) }
+        let host: UIView = collectionInput === list ? list : surface
+        for gesture in input where gesture.view !== host { host.addGestureRecognizer(gesture) }
     }
 
     func scrollAccessible(_ direction: UIAccessibilityScrollDirection) -> Bool { activeList?.accessibilityScroll(direction) ?? false }
@@ -310,6 +312,7 @@ final class TranscriptFocusPosition {
     }
 
     func detach(_ list: UICollectionView) {
+        if collectionInput === list { collectionInput = nil }
         if list === main { restoreInput(mainInput, to: list); mainInput.removeAll() }
         if list === focusInputList { restoreInput(focusInput, to: list); focusInput.removeAll(); focusInputList = nil }
         if main === list || focused === list {
@@ -355,8 +358,10 @@ final class TranscriptFocusPosition {
     private func interrupt() {
         guard let animator else { return }
         let frames = travelling.map { ($0.view, $0.view.layer.presentation()?.frame ?? $0.view.frame, $0.view.layer.presentation()?.opacity ?? Float($0.view.alpha)) }
+        let lists = [main, focused].compactMap { $0 }.map { ($0, $0.layer.presentation()?.opacity ?? Float($0.alpha)) }
         animator.stopAnimation(true)
         self.animator = nil
+        for (list, opacity) in lists { list.alpha = CGFloat(opacity) }
         for (view, frame, opacity) in frames { view.frame = frame; view.alpha = CGFloat(opacity) }
     }
 
@@ -370,7 +375,7 @@ final class TranscriptFocusPosition {
             }
             completion(); return
         }
-        target.alpha = 1
+        collectionInput = nil
         installInput(on: target)
         surface.accessibilityIdentifier = target === main ? "main-transcript-content" : "reply-chain-content"
         let wasTravelling = Set(travelling.map(\.id))
@@ -404,8 +409,8 @@ final class TranscriptFocusPosition {
         // The same live views stay on the common list-local surface.
         // Both collections keep their geometry; no screenshot or replacement
         // rendering is made at either end of the handoff.
-        source.alpha = 1
-        target.alpha = 1
+        // Collection-owned content, such as the main pinned-model footer,
+        // fades with its own list. Live bubbles stay on the common surface.
         // Commit prepared geometry before UIKit reads the animation start.
         handoffs += 1
         PerfProbe.count("threadHandoff")
@@ -414,6 +419,8 @@ final class TranscriptFocusPosition {
         if reduced { for move in moves { move.held.view.frame = move.frame } }
         CATransaction.flush()
         let changes = {
+            source.alpha = 0
+            target.alpha = 1
             for move in moves {
                 if !reduced { move.held.view.frame = move.frame }
                 move.held.view.alpha = move.belongs ? 1 : 0
@@ -434,6 +441,21 @@ final class TranscriptFocusPosition {
         self.animator = animator
         animator.addCompletion { _ in finish() }
         animator.startAnimation()
+    }
+
+    func footerHit(at point: CGPoint, in surface: UIView, event: UIEvent?) -> UIView? {
+        guard !transitioning, let list = activeList, list.alpha > 0.99 else { return nil }
+        let footer = list.visibleCells.first {
+            $0.accessibilityIdentifier == "transcript.footer" && $0.convert($0.bounds, to: surface).contains(point)
+        }
+        // The same native pan follows the touch's content owner, including
+        // the footer, which remains in its collection rather than the surface.
+        if list.panGestureRecognizer.state != .began && list.panGestureRecognizer.state != .changed {
+            collectionInput = footer == nil ? nil : list
+            installInput(on: list)
+        }
+        guard let footer else { return nil }
+        return footer.hitTest(footer.convert(point, from: surface), with: event)
     }
 
     func containsBubble(_ point: CGPoint) -> Bool {
@@ -466,6 +488,7 @@ final class TranscriptLiveSurface: UIView {
     }
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard self.point(inside: point, with: event) else { return nil }
+        if let hit = position?.footerHit(at: point, in: self, event: event) { return hit }
         for view in subviews.sorted(by: { $0.layer.zPosition > $1.layer.zPosition }) {
             if let hit = view.hitTest(convert(point, to: view), with: event) { return hit }
         }

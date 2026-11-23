@@ -55,6 +55,7 @@ import {
 import { ConciergeTasks } from "./tasks.js";
 import { WORKING_GRACE_MS } from "./message-status.js";
 import { buildConciergeTools } from "./tools.js";
+import { CONNECTION_TOOLS } from "./on-connection.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import {
   reportOf,
@@ -453,7 +454,9 @@ function setup(
       },
     },
     sessionRepository: { current: async () => ({ id: "runtime-1" }) },
-    agentSessionManager: { find: rs.fn(() => ({ selectModel: rs.fn() })) },
+    agentSessionManager: {
+      find: rs.fn(() => ({ selectModel: rs.fn(), selectModelForOneTurn: rs.fn() })),
+    },
     accounts: fakeAccounts({
       anthropic: reportOf("available"),
       openai: reportOf("unauthorized"),
@@ -527,6 +530,8 @@ function setup(
     startedAt?: string;
     /** A newer input cut the turn short and took its work on. */
     handedOn?: boolean;
+    /** Where the turn ran, when not the dashboard chat `chatId`. */
+    threadContext?: { channel: string; threadId: string; senderBondLevel?: string };
   }) => {
     if (!isConciergeChatId(event.chatId) && !event.handedOn) runningTaskChats.delete(event.chatId);
     for (const listener of listeners) {
@@ -538,7 +543,7 @@ function setup(
           sessionId: "runtime-x",
           turnId: event.turnId,
           agentName: event.agentName,
-          threadContext: { channel: "webchat", threadId: event.chatId },
+          threadContext: event.threadContext ?? { channel: "webchat", threadId: event.chatId },
         },
         status: event.status ?? "completed",
         timing: { startedAt: event.startedAt ?? "", finishedAt: "", durationMs: 0 },
@@ -750,13 +755,408 @@ describe("Concierge tools", () => {
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
   });
 
-  it("register none for the Concierge in a chat on a connection, where it answers in plain text", async () => {
+  it("register say, react and the task tools for the Concierge in a chat on a connection", async () => {
     const on = setup();
     const telegram = {
       ...on.context(),
       getThreadContext: () => ({ channel: "telegram", threadId: "123", channelUserId: "456" }),
     };
-    expect(await buildConciergeTools(on.service, telegram)).toEqual([]);
+    expect((await buildConciergeTools(on.service, telegram)).map((t) => t.name)).toEqual([
+      ...CONNECTION_TOOLS,
+    ]);
+  });
+
+  describe("in a chat on a connection", () => {
+    /** A Discord channel where the Concierge answers, as Chats keeps it. */
+    const connectionChat = async (s: ReturnType<typeof setup>) => {
+      const { id } = await s.storedChats.ensureChannelChat({
+        channel: "discord_app",
+        threadId: "900",
+        threadType: "group",
+        agentName: CONCIERGE_AGENT_ID,
+      });
+      const stored = await s.storedChats.getSession(id);
+      if (stored) s.sessions.set(id, stored);
+      return id;
+    };
+    const there = (
+      s: ReturnType<typeof setup>,
+      chatId: string,
+      senderBondLevel: string | undefined,
+    ): SessionToolContext => ({
+      ...s.context(),
+      channelThreadKey: "discord_app:900",
+      getThreadContext: () => ({
+        channel: "discord_app",
+        threadId: "900",
+        romeSessionId: chatId,
+        threadType: "group",
+        ...(senderBondLevel ? { senderBondLevel } : {}),
+      }),
+    });
+    const run = async (
+      context: SessionToolContext,
+      s: ReturnType<typeof setup>,
+      name: string,
+      input: Record<string, unknown>,
+    ) => {
+      const found = (await buildConciergeTools(s.service, context)).find((t) => t.name === name);
+      if (!found) throw new Error(`no tool ${name}`);
+      return found.handler(input);
+    };
+
+    it("starts a task that reports to that chat, and links it by the dashboard's public address", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const before = process.env.PANTHEON_INSTANCE_ORIGIN;
+      process.env.PANTHEON_INSTANCE_ORIGIN = "https://ray.romeos.test";
+      let result: Awaited<ReturnType<typeof run>>;
+      try {
+        result = await run(there(s, chatId, "guardian"), s, "chat_start", {
+          title: "Flights",
+          brief: "Find flights to Tokyo",
+        });
+      } finally {
+        if (before === undefined) delete process.env.PANTHEON_INSTANCE_ORIGIN;
+        else process.env.PANTHEON_INSTANCE_ORIGIN = before;
+      }
+      expect(result.isError).toBeFalsy();
+      const started = JSON.parse(result.content[0]!.text) as { chatId: string; link: string };
+      expect(started.link).toBe(`[Flights](https://ray.romeos.test/chat/${started.chatId})`);
+      const found = await s.taskRepo.getWithChat(started.chatId);
+      expect(found?.conciergeChat).toMatchObject({ id: chatId, main: false, onConnection: true });
+      // Its news goes to that chat while it is live, not to the main chat.
+      expect(await s.service.deliveryChat(chatId, "guardian")).toBe(chatId);
+    });
+
+    it("names the task by its title alone where the dashboard has no public address", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const saved = { ...process.env };
+      for (const key of ["PANTHEON_INSTANCE_ORIGIN", "PANTHEON_DOMAIN", "ROME_INSTANCE_SLUG"]) {
+        delete process.env[key];
+      }
+      try {
+        const result = await run(there(s, chatId, "guardian"), s, "chat_start", {
+          title: "Flights",
+          brief: "Find flights to Tokyo",
+        });
+        expect((JSON.parse(result.content[0]!.text) as { link: string }).link).toBe("Flights");
+      } finally {
+        process.env = saved;
+      }
+    });
+
+    it("reacts to the guardian's message of the turn through the chat's account", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const reacted: unknown[] = [];
+      s.deps.reactInChat = async (chat, messageId, emoji) => {
+        reacted.push([chat.channel, chat.threadId, messageId, emoji]);
+      };
+      s.deps.webchatRepo.getTurnChatMessages = (async () => [
+        { id: "800000000000000001", role: "user" },
+      ]) as never;
+      const result = await run(there(s, chatId, "guardian"), s, "react", { emoji: "👍" });
+      expect(result.isError).toBeFalsy();
+      expect(reacted).toEqual([["discord_app", "900", "800000000000000001", "👍"]]);
+      // The model sees no message ids there: an id it guessed, such as the
+      // channel's, reacts to the turn's message all the same.
+      await run(there(s, chatId, "guardian"), s, "react", { emoji: "❤️", message_id: "900" });
+      expect(reacted[1]).toEqual(["discord_app", "900", "800000000000000001", "❤️"]);
+      reacted.splice(1);
+      // Anyone else's turn gets no reaction, and one cannot be taken back here.
+      expect((await run(there(s, chatId, "other"), s, "react", { emoji: "👍" })).isError).toBe(
+        true,
+      );
+      expect((await run(there(s, chatId, "guardian"), s, "react", { emoji: null })).isError).toBe(
+        true,
+      );
+      expect(reacted).toHaveLength(1);
+    });
+
+    it("says through the chat's account, past its send gate, never into a dashboard chat", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const said: unknown[] = [];
+      s.deps.sayInChat = async (chat, message) => {
+        said.push({ chat, message });
+        return { sent: "800000000000000009" };
+      };
+      s.deps.webchatRepo.getTurnChatMessages = (async () => [
+        {
+          id: "800000000000000001",
+          role: "user",
+          content: JSON.stringify([{ type: "text", content: "@Rome hi" }]),
+        },
+      ]) as never;
+      const result = await run(there(s, chatId, "guardian"), s, "say", { text: "Hey!" });
+      expect(result.isError).toBeFalsy();
+      expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+        messageId: "800000000000000009",
+      });
+      expect(said).toEqual([
+        {
+          chat: { id: chatId, channel: "discord_app", threadId: "900" },
+          message: {
+            text: "Hey!",
+            // The turn's first message quotes the one it answers, as the inbox did.
+            replyTo: "800000000000000001",
+            turnId: expect.any(String),
+            place: "group",
+            recipient: { bondLevel: "guardian", shownName: expect.any(String), said: "@Rome hi" },
+          },
+        },
+      ]);
+      // Nothing went into a dashboard chat.
+      expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
+      // A second message of the turn quotes nothing, and an id the model
+      // guessed, such as the channel's, quotes nothing either.
+      await run(there(s, chatId, "guardian"), s, "say", { text: "Anything else?" });
+      expect((said[1] as { message: { replyTo?: string } }).message.replyTo).toBeUndefined();
+      await run(there(s, chatId, "guardian"), s, "say", { text: "Sure", replyTo: "900" });
+      expect((said[2] as { message: { replyTo?: string } }).message.replyTo).toBeUndefined();
+    });
+
+    it("lets anyone's turn say something, and tells the gate whom it answers", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const recipients: unknown[] = [];
+      s.deps.sayInChat = async (_chat, message) => {
+        recipients.push(message.recipient.bondLevel);
+        return { sent: "1" };
+      };
+      s.deps.webchatRepo.getTurnChatMessages = (async () => []) as never;
+      expect(
+        (await run(there(s, chatId, "acquaintance"), s, "say", { text: "Hi" })).isError,
+      ).toBeFalsy();
+      // A turn with no sender that Rome does not run is anyone's: Envoy checks it.
+      expect(
+        (await run(there(s, chatId, undefined), s, "say", { text: "Hm" })).isError,
+      ).toBeFalsy();
+      // A task's report, which Rome runs, answers the guardian who started the task.
+      s.service.runsSystemTurnIn = (id: string) => id === chatId;
+      expect(
+        (await run(there(s, chatId, undefined), s, "say", { text: "Done" })).isError,
+      ).toBeFalsy();
+      expect(recipients).toEqual(["acquaintance", "other", "guardian"]);
+    });
+
+    it("refuses private there, and tells the model what the send gate held back", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      s.deps.sayInChat = async () => ({
+        notSent: "This message waits for the guardian's approval.",
+      });
+      s.deps.webchatRepo.getTurnChatMessages = (async () => []) as never;
+      const secret = await run(there(s, chatId, "guardian"), s, "say", {
+        text: "1234",
+        private: true,
+      });
+      expect(secret.isError).toBe(true);
+      expect(secret.content[0]!.text).toContain("Nothing here is private");
+      const held = await run(there(s, chatId, "other"), s, "say", { text: "Hi" });
+      expect(held.isError).toBeFalsy();
+      expect(JSON.parse(held.content[0]!.text)).toEqual({
+        sent: false,
+        note: "This message waits for the guardian's approval.",
+      });
+    });
+
+    it("reminds a turn there that ended on text outside say, once, and not one that ended on done", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      // The turn's session stands in that chat.
+      s.deps.webchatRepo.chatOfSession = (async () => ({ id: chatId })) as never;
+      const where = { channel: "discord_app", threadId: "900" };
+      await s.finish({
+        turnId: "c-1",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId,
+        text: "不客气～",
+        threadContext: where,
+      });
+      expect(s.backendTurns.map((turn) => [turn.channel, turn.threadId])).toEqual([
+        ["discord_app", "900"],
+      ]);
+      expect(s.backendTurns[0]?.prompt).toContain(NUDGE_PROMPT);
+      await s.finish({
+        turnId: "c-2",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId,
+        text: "done",
+        threadContext: where,
+      });
+      expect(s.backendTurns).toHaveLength(1);
+      // A reminder runs with no sender, so only the guardian's turn, or a
+      // report, gets one: never another person's.
+      await s.finish({
+        turnId: "c-3",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId,
+        text: "hi",
+        threadContext: { ...where, senderBondLevel: "acquaintance" },
+      });
+      expect(s.backendTurns).toHaveLength(1);
+    });
+
+    it("shows the guardian's message working while the turn works, and settles it when the turn ends", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      s.deps.webchatRepo.chatOfSession = (async () => ({ id: chatId })) as never;
+      const reacted: unknown[] = [];
+      s.deps.reactInChat = async (_chat, messageId, emoji) => {
+        reacted.push([messageId, emoji]);
+      };
+      const turn = {
+        agentName: CONCIERGE_AGENT_ID,
+        turnId: "c-work",
+        channel: "discord_app",
+        chatId,
+        messageKey: "800000000000000001",
+        senderBondLevel: "guardian",
+      };
+      // Anyone else's message, and a dashboard turn, are not watched here.
+      expect(s.service.observeConnectionTurn({ ...turn, senderBondLevel: "other" })).toBeNull();
+      expect(s.service.observeConnectionTurn({ ...turn, channel: "webchat" })).toBeNull();
+      const watch = s.service.observeConnectionTurn(turn);
+      expect(watch).not.toBeNull();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Two working tool calls show it working, as on the dashboard.
+      watch?.event({ type: "tool_use", tool: "web_search", id: "t1" });
+      watch?.event({ type: "tool_use", tool: "web_search", id: "t2" });
+      await rs.waitFor(async () =>
+        expect(
+          (await s.service.deps.tasks.messageStatusesOf(chatId, ["800000000000000001"])).get(
+            "800000000000000001",
+          ),
+        ).toBe("working"),
+      );
+      // The turn ends having said nothing: its message settles, and showed working, so no ✅.
+      await s.finish({
+        turnId: "c-work",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId,
+        text: "done",
+        threadContext: { channel: "discord_app", threadId: "900", senderBondLevel: "guardian" },
+      });
+      expect(
+        (await s.service.deps.tasks.messageStatusesOf(chatId, ["800000000000000001"])).get(
+          "800000000000000001",
+        ),
+      ).toBeUndefined();
+      expect(reacted).toEqual([]);
+    });
+
+    it("reacts ✅ on the platform to a message a turn there left without any sign", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      s.deps.webchatRepo.chatOfSession = (async () => ({ id: chatId })) as never;
+      const reacted: unknown[] = [];
+      s.deps.reactInChat = async (chat, messageId, emoji) => {
+        reacted.push([chat.threadId, messageId, emoji]);
+      };
+      s.service.observeConnectionTurn({
+        agentName: CONCIERGE_AGENT_ID,
+        turnId: "c-quiet",
+        channel: "discord_app",
+        chatId,
+        messageKey: "800000000000000002",
+        senderBondLevel: "guardian",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await s.finish({
+        turnId: "c-quiet",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId,
+        text: "done",
+        threadContext: { channel: "discord_app", threadId: "900", senderBondLevel: "guardian" },
+      });
+      await rs.waitFor(() => expect(reacted).toEqual([["900", "800000000000000002", "✅"]]));
+    });
+
+    it("refuses the task tools to anyone but the guardian", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      const result = await run(there(s, chatId, "other"), s, "chat_start", {
+        title: "Flights",
+        brief: "Find flights",
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain("Only the guardian");
+    });
+
+    it("counts a turn it runs there, such as a report, as Rome's own only while it runs", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      let during = false;
+      s.onBackendTurn(() => {
+        during = s.service.runsSystemTurnIn(chatId);
+        return "completed";
+      });
+      expect(await s.service.runSystemTurn(chatId, "report")).toBe(true);
+      expect(during).toBe(true);
+      expect(s.service.runsSystemTurnIn(chatId)).toBe(false);
+    });
+
+    it("lets a task's report, which Rome runs, read the chat's tasks, and no other turn without a sender", async () => {
+      const s = setup();
+      const chatId = await connectionChat(s);
+      // A turn with no sender that Rome does not run is anyone's.
+      const stray = await run(there(s, chatId, undefined), s, "chat_list", { here: true });
+      expect(stray.isError).toBe(true);
+      s.service.runsSystemTurnIn = (id: string) => id === chatId;
+      const report = await run(there(s, chatId, undefined), s, "chat_list", { here: true });
+      expect(report.isError).toBeFalsy();
+    });
+
+    it("never takes a dashboard chat, also a channel row, for a chat on a connection", async () => {
+      const s = setup();
+      await s.storedChats.createSession(
+        "topic-x",
+        "Trips",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        CONCIERGE_AGENT_ID,
+      );
+      const topic = await s.storedChats.getSession("topic-x");
+      if (topic) s.sessions.set("topic-x", topic);
+      expect(await s.service.connectionChat("topic-x")).toBeNull();
+      expect(await s.service.connectionChat(await connectionChat(s))).not.toBeNull();
+    });
+
+    it("reports to a chat the recorder opened, which stores no agent, when the Concierge answers its account", async () => {
+      const s = setup();
+      // Recording opens an inbound chat as main's, which is stored as no agent.
+      const { id } = await s.storedChats.ensureChannelChat({
+        channel: "discord_app",
+        threadId: "901",
+        threadType: "group",
+        agentName: "main",
+      });
+      const stored = await s.storedChats.getSession(id);
+      if (stored) s.sessions.set(id, stored);
+      expect(stored?.agentName ?? null).toBeNull();
+      // The account's agent decides, as the inbox routes the chat's messages.
+      let answering: string | null = CONCIERGE_AGENT_ID;
+      s.deps.channelAgentOf = (channel) => (channel === "discord_app" ? answering : null);
+      expect(await s.service.connectionChat(id)).toMatchObject({
+        channel: "discord_app",
+        threadId: "901",
+      });
+      expect(await s.service.deliveryChat(id, "guardian")).toBe(id);
+      // An account main answers is no Concierge chat: its tasks report to the main chat.
+      answering = "core:main";
+      expect(await s.service.connectionChat(id)).toBeNull();
+      expect(await s.service.deliveryChat(id, "guardian")).not.toBe(id);
+    });
+
+    it("sends a task's report to the main chat once that chat is gone", async () => {
+      const s = setup();
+      expect(await s.service.deliveryChat("gone-chat", "guardian")).not.toBe("gone-chat");
+    });
   });
 
   it("say posts one message under the running turn", async () => {
@@ -4262,18 +4662,23 @@ describe("Concierge provider recovery", () => {
   it.each([
     ["anthropic", "claude-sonnet", "You've hit your Sonnet limit", "claude-opus-5-5", "kept"],
     ["openai", "gpt-6-luna", "Selected model is at capacity.", "gpt-5-6-terra", "auto"],
-  ] as const)("moves %s from %s on %s to the same provider's other model, keeping who chose it", async (provider, selection, message, target, by) => {
+  ] as const)("an overload swap lasts one turn: %s from %s on %s runs the other model once, and the chat keeps its own", async (provider, selection, message, target, by) => {
     const { s } = await prepared({ startEvents: false });
     await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, selection, by);
+    const session = { selectModel: rs.fn(), selectModelForOneTurn: rs.fn() };
+    (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue(session);
+    (s.deps.webchatRepo.updateSessionLargeModelSelection as ReturnType<typeof rs.fn>).mockClear();
     expect(
       await s.service.switchForModelLimit(CONCIERGE_CHAT, failure(message, provider)),
     ).toMatchObject({ from: provider, to: provider, selectionId: target });
-    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenLastCalledWith(
-      CONCIERGE_CHAT,
-      target,
-      by,
-    );
-    expect(s.deps.agentSessionManager.find).toHaveBeenCalled();
+    // The weaker model is never stored: the next turn tries the chat's own again.
+    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).not.toHaveBeenCalled();
+    expect(s.sessions.get(CONCIERGE_CHAT)).toMatchObject({
+      largeModelSelection: selection,
+      largeModelSelectionBy: by,
+    });
+    expect(session.selectModelForOneTurn).toHaveBeenCalledWith(target);
+    expect(session.selectModel).not.toHaveBeenCalled();
     expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenLastCalledWith(
       CONCIERGE_CHAT,
       expect.any(String),
@@ -4283,23 +4688,71 @@ describe("Concierge provider recovery", () => {
           from: provider,
           to: provider,
           reason: "model_limit",
+          oneTurn: true,
         }),
       ],
     );
+  });
+  it("an overload swap lasts one turn: a chat that follows by its tier stores nothing", async () => {
+    const { s } = await prepared({ startEvents: false });
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(CONCIERGE_CHAT, null, "auto");
+    s.deps.sessionRepository.current = rs.fn(
+      async () => ({ provider: "anthropic", model: "claude-opus-5-5[1m]" }) as never,
+    );
+    const session = { selectModel: rs.fn(), selectModelForOneTurn: rs.fn() };
+    (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue(session);
+    (s.deps.webchatRepo.updateSessionLargeModelSelection as ReturnType<typeof rs.fn>).mockClear();
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Opus limit")),
+    ).toMatchObject({ selectionId: "claude-sonnet" });
+    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).not.toHaveBeenCalled();
+    expect(session.selectModel).not.toHaveBeenCalled();
+    expect(session.selectModelForOneTurn).toHaveBeenCalledWith("claude-sonnet");
+  });
+  it("an overload swap needs the chat's live session, and moves nothing without one", async () => {
+    const { s } = await prepared({ startEvents: false });
+    (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue(undefined);
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Opus limit")),
+    ).toBeNull();
+    expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
   });
   it("keeps a chat on Rome credits there when Codex's model hits its limit", async () => {
     const { s } = await prepared({ startEvents: false });
     // An owner-free chat on a Claude model, while every chat runs on Rome credits: it runs on Codex.
     s.service.deps.defaults = { current: () => "rome_credits" };
-    const selectModel = rs.fn();
-    (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue({ selectModel });
+    const selectModelForOneTurn = rs.fn();
+    (s.deps.agentSessionManager.find as ReturnType<typeof rs.fn>).mockReturnValue({
+      selectModel: rs.fn(),
+      selectModelForOneTurn,
+    });
     expect(
       await s.service.switchForModelLimit(
         CONCIERGE_CHAT,
         failure("Selected model is at capacity.", "openai"),
       ),
     ).toMatchObject({ from: "openai", to: "openai", selectionId: "gpt-6-luna" });
-    expect(selectModel).toHaveBeenCalledWith("gpt-6-luna");
+    expect(selectModelForOneTurn).toHaveBeenCalledWith("gpt-6-luna");
+  });
+  it("a chat held on its own account is not on Rome credits when its model hits its limit", async () => {
+    const { s } = await prepared({ startEvents: false });
+    s.service.deps.defaults = { current: () => "rome_credits" };
+    s.service.deps.held = () => true;
+    // Held on Claude: the swap stays on Claude, not on Codex through the credits.
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Opus limit")),
+    ).toMatchObject({ from: "anthropic", to: "anthropic", selectionId: "claude-sonnet" });
+  });
+  it("counts Rome credits only while no account is logged in, as every chat does", async () => {
+    const { s } = await prepared({ startEvents: false });
+    // A stale default of Rome credits beside a Claude login runs nothing on them.
+    s.service.deps.defaults = {
+      current: () => "rome_credits",
+      signedIn: () => ({ anthropic: true, openai: false, rome_credits: false }),
+    };
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Opus limit")),
+    ).toMatchObject({ from: "anthropic", selectionId: "claude-sonnet" });
   });
   it("moves a chat whose turns never ran off the provider's strong model", async () => {
     const { s } = await prepared({ startEvents: false });
@@ -4338,22 +4791,45 @@ describe("Concierge provider recovery", () => {
     ).toBeNull();
     expect(s.deps.webchatRepo.addBackendMessage).not.toHaveBeenCalled();
   });
-  it("blocks a return for ten minutes but permits it after the interval", async () => {
+  it("an overload swap lasts one turn: the chat's own model, still overloaded, swaps again", async () => {
     const { s } = await prepared({ startEvents: false });
     await s.deps.webchatRepo.updateSessionLargeModelSelection(
       CONCIERGE_CHAT,
       "claude-sonnet",
       "auto",
     );
-    const now = rs.spyOn(Date, "now").mockReturnValue(1_000_000);
     expect(
       await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Sonnet limit")),
     ).toMatchObject({ selectionId: "claude-opus-5-5" });
+    // The next turn ran Sonnet again, and it is still at its limit.
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Sonnet limit")),
+    ).toMatchObject({ selectionId: "claude-opus-5-5" });
+    expect(s.sessions.get(CONCIERGE_CHAT)).toMatchObject({ largeModelSelection: "claude-sonnet" });
+  });
+  it("blocks a swap to a model the chat left for ten minutes, and permits it after", async () => {
+    const { s } = await prepared({ startEvents: false });
+    const now = rs.spyOn(Date, "now").mockReturnValue(1_000_000);
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(
+      CONCIERGE_CHAT,
+      "claude-sonnet",
+      "auto",
+    );
+    expect(
+      await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Sonnet limit")),
+    ).toMatchObject({ selectionId: "claude-opus-5-5" });
+    // The chat's own model is now Opus: a swap back to Sonnet waits ten minutes.
+    await s.deps.webchatRepo.updateSessionLargeModelSelection(
+      CONCIERGE_CHAT,
+      "claude-opus-5-5",
+      "auto",
+    );
     expect(await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Opus limit"))).toBeNull();
     now.mockReturnValue(1_600_001);
     expect(
       await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("Opus limit")),
     ).toMatchObject({ selectionId: "claude-sonnet" });
+    now.mockRestore();
   });
   it("drops a pending retry when the failed subscription stops paying during the wait", async () => {
     let release!: () => void;
@@ -4433,8 +4909,9 @@ describe("Concierge provider recovery", () => {
     expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenCalledTimes(
       reason === "temporary" ? 0 : 1,
     );
+    // Neither stores another model: a model-limit swap lasts its one turn.
     expect(s.sessions.get(CONCIERGE_CHAT)).toMatchObject({
-      largeModelSelection: reason === "temporary" ? "claude-opus-5-5" : "claude-sonnet",
+      largeModelSelection: "claude-opus-5-5",
     });
   });
   it.each([
@@ -4502,11 +4979,12 @@ describe("Concierge provider recovery", () => {
       ...fields,
     });
     await s.settle();
-    expect(s.deps.webchatRepo.updateSessionLargeModelSelection).toHaveBeenLastCalledWith(
+    expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenLastCalledWith(
       CONCIERGE_CHAT,
-      "gpt-5-6-terra",
-      "auto",
+      expect.any(String),
+      [expect.objectContaining({ type: "quota_switch", model: "gpt-5.6-terra", oneTurn: true })],
     );
+    expect(s.sessions.get(CONCIERGE_CHAT)).toMatchObject({ largeModelSelection: "gpt-6-luna" });
     expect(s.backendTurns).toHaveLength(1);
     expect(s.deps.webchatRepo.addBackendMessage).toHaveBeenCalledTimes(1);
   });
@@ -4568,7 +5046,7 @@ describe("Concierge provider recovery", () => {
     });
     await s.settle();
     expect(s.backendTurns.at(-1)).toMatchObject({ threadId: TOPIC_CHAT });
-    expect(s.sessions.get(TOPIC_CHAT)).toMatchObject({ largeModelSelection: "claude-opus-5-5" });
+    expect(s.sessions.get(TOPIC_CHAT)).toMatchObject({ largeModelSelection: "claude-sonnet" });
     // The topic chat left Sonnet; the main chat may still move to it.
     expect(
       await s.service.switchForModelLimit(CONCIERGE_CHAT, failure("You've hit your Opus limit")),

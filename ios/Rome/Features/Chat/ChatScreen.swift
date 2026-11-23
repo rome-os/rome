@@ -49,6 +49,9 @@ struct ChatScreen: View {
         .pageBackground()
         // The task links in its messages draw the task chats' live status.
         .environment(\.taskLinks, workspace.taskLinks(forChat: store.sessionId))
+        .providerFailurePrompts(store, workspace: workspace)
+        // Whether the chat follows the default, read each time it opens.
+        .task(id: "\(store.sessionId)|\(visible)") { if visible { await store.readChatSession() } }
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
         .background { ChatLeaveWatch(store: store) }
@@ -147,13 +150,18 @@ struct ChatScreen: View {
                         .foregroundStyle(Palette.sub)
                     Spacer()
                     Spacer()
+                    // A pinned chat always says so, an empty one too: its
+                    // last row, as the transcript would have it.
+                    if let hint = PinnedHintLine.footer(store, visitor: workspace.isVisitor) {
+                        hint
+                    }
                 }
                 .padding(.horizontal, 32)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture { composerFocused = false }
             } else {
-                TranscriptList(store: store, sharedContent: true, showsBackToBottom: false, scrollState: transcriptScroll, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
+                TranscriptList(store: store, sharedContent: true, showsBackToBottom: false, scrollState: transcriptScroll, composerFocused: composerFocused, footer: PinnedHintLine.footer(store, visitor: workspace.isVisitor), latestRequest: workspace.latestRequest) { row, previous in
                     SharedConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, top: TranscriptSpacing.top(row, after: previous), tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                 }
                 .overlay(alignment: .top) { if store.threadFocus == nil { UnreadPillButton(store: store) } }
@@ -386,8 +394,10 @@ struct ConciergeRow: View, Equatable {
             }
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
-        case .approval, .question, .webOnly, .routineDraft, .tools, .connect, .widgetUI:
+        case .approval, .question, .webOnly, .aiTools, .providerFailure, .routineDraft, .tools, .connect, .widgetUI:
             InteractionRow(row: row, store: store)
+        case .providerOutage(_, let part):
+            ProviderOutageNotice(part: part)
         case .error(_, let error):
             ErrorLine(error: error)
         case .notice(_, let text):
@@ -692,9 +702,9 @@ enum MenuTitle {
 /// the guardian; a chat with no task list yet (a blank topic chat) has "…"
 /// alone, as the web does. "…" holds what else the Agent page shows (Outputs),
 /// then what is done to the chat: a topic chat's Rename and Pin
-/// or Unpin, then Share and Shared links, then Archive and Delete. An archived
-/// topic chat has Share, Shared links, Unarchive and Delete. The main Chat is only
-/// shared. Each button keeps a 44 pt target; the targets overlap so the
+/// or Unpin, then Share, then Archive and Delete. An archived topic chat has
+/// Share, Unarchive and Delete. The main Chat is only shared. Every link is
+/// listed in Settings, never here. Each button keeps a 44 pt target; the targets overlap so the
 /// icons sit as close as iOS's own paired toolbar buttons.
 struct ChatHeaderButtons: View {
     /// Two 44 pt targets overlapping by 10.
@@ -710,10 +720,6 @@ struct ChatHeaderButtons: View {
     var onUnarchive: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     @Environment(\.chatShare) private var share
-
-    /// A topic chat, archived or not: it lists its shared links. The main
-    /// Chat's are in Settings.
-    private var topic: Bool { onRename != nil || onUnarchive != nil }
 
     var body: some View {
         let needsYou = tasks?.needsYou ?? false
@@ -751,7 +757,6 @@ struct ChatHeaderButtons: View {
                         // Share mode with nothing picked yet, as the web's Share chat.
                         Button { share.begin(turn: nil) } label: { Label("Share", systemImage: "square.and.arrow.up") }
                     }
-                    ChatShareMenuItems(share: topic ? share : nil)
                     if let onArchive {
                         // Not red: an archived chat can come back.
                         Button(action: onArchive) { Label("Archive", systemImage: "archivebox") }

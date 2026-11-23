@@ -582,6 +582,9 @@ export interface LifecycleThreadContext {
   threadType?: "private" | "group";
   projectName?: string;
   projectPath?: string;
+  /** The bond level of the person whose message started the turn, as the
+   *  inbox passed it; absent for a turn no person started. */
+  senderBondLevel?: string;
 }
 
 export interface AgentTurnRef {

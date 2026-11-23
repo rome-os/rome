@@ -211,7 +211,17 @@
         "bot": {
           "title": "Rome in your Slack",
           "bullets": {
-            "reply": "Answer direct messages in your Slack workspace as your Concierge"
+            "reply": "Answer your direct messages and mentions in your Slack workspace",
+            "tasks": "Run tasks you ask for there and reply with the result"
+          }
+        }
+      },
+      "discord_app": {
+        "bot": {
+          "title": "Rome in your Discord",
+          "bullets": {
+            "reply": "Answer your direct messages, and your @mentions in your servers",
+            "tasks": "Run tasks you ask for there and reply with the result"
           }
         }
       },
@@ -540,6 +550,24 @@
       "botTokenLabel": "Bot token",
       "botTokenPlaceholder": "Bot token from @BotFather"
     },
+    "discordApp": {
+      "link": "Link Discord",
+      "blurb": "Talk to Rome on Discord",
+      "add": "Add to server",
+      "remove": "Remove",
+      "removing": "Removing…",
+      "retry": "Retry",
+      "loadFailed": "Couldn't load your servers.",
+      "addFailed": "Couldn't open Discord. Try again.",
+      "removeFailed": "Couldn't remove {{name}}. Try again.",
+      "howTo": "@Rome in a channel. Run /rome there to enable direct messages.",
+      "blurbDetail": "Add it to a server, then @mention it or enable direct messages with /rome.",
+      "servers": "Servers",
+      "empty": "Add Rome to a server to @mention it in channels.",
+      "manage": "More",
+      "disconnect": "Disconnect Discord",
+      "linkedAs": "Direct messages enabled for {{name}}"
+    },
     "telegramUser": {
       "fallbackName": "Telegram user",
       "disconnectFailedFallback": "Failed to disconnect Telegram user account."
@@ -753,10 +781,15 @@
       "confirm": "Make default",
       "saveFailed": "Failed to change the default provider",
       "removedNote": "{{to}} is now the default, because you logged out of {{from}}.",
-      "dismissNote": "Dismiss"
+      "dismissNote": "Dismiss",
+      "ownerPicksKeep": "Chats where you picked a model keep it."
     },
     "logoutOutcome": {
       "otherBecomesDefault": "{{provider}} becomes the default. Chats move to it on their next reply.",
+      "otherBecomesDefaultStay": "{{provider}} becomes the default for new chats. Existing chats stay on {{leaving}} and wait until you log in again.",
+      "otherExpired": "Its login has expired: log in to {{provider}} again after you log out.",
+      "creditsBecomeDefault": "Rome credits become the default. Chats move to them on their next reply.",
+      "creditsBecomeDefaultStay": "Rome credits become the default for new chats. Existing chats stay on {{leaving}} and wait until you log in again.",
       "pause": "Chats pause until you log in again.",
       "pauseOrCredits": "Chats pause until you log in again, or until you switch every chat to Rome credits."
     }

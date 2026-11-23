@@ -45,6 +45,11 @@ beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 
+beforeEach(() => {
+  // Keep the dated fixtures inside the week shown by the topic list.
+  rs.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-07T12:00:00Z"));
+});
+
 afterEach(() => {
   cleanup();
   rs.useRealTimers();
@@ -2102,6 +2107,7 @@ describe("RecentChats", () => {
       projectName: "default",
       projectPath: "default",
     }));
+    topics[0].activityAt = "2026-06-01T00:00:00Z";
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.startsWith("/api/chat/sessions")) return Response.json(topics);
@@ -2123,7 +2129,9 @@ describe("RecentChats", () => {
     }) as typeof fetch);
     FakeWebSocket.instances = [];
     renderRecentChats("/chat/open-chat", fakeSocketLiveEventsClient());
-    await screen.findByRole("link", { name: "Topic 1" });
+    await screen.findByRole("link", { name: "Topic 2" });
+    expect(screen.queryByRole("link", { name: "Topic 1" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Older · 1" })).toBeTruthy();
     let socket!: FakeWebSocket;
     act(() => {
       socket = acceptLatestSocket();
@@ -2135,6 +2143,7 @@ describe("RecentChats", () => {
       ),
     ).toEqual([]);
 
+    topics[0].activityAt = new Date(Date.now()).toISOString();
     unread["topic-1"] = 2;
     act(() =>
       socket.receive({
@@ -2145,6 +2154,7 @@ describe("RecentChats", () => {
       }),
     );
     expect(await screen.findByRole("link", { name: "Topic 1, 2 unread messages" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Older/ })).toBeNull();
   });
 
   it("keeps the open topic chat in view when it is past the first page", async () => {

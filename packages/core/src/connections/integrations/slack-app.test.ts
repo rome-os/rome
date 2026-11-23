@@ -1,27 +1,29 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { CredentialRejected } from "../errors.js";
+import { CredentialRejected, Disconnected } from "../errors.js";
 import { SlackApiError } from "../kinds/slack/slack.js";
-import type { SlackAppCloud, SlackAppInstall } from "../kinds/slack-app/rome-cloud.js";
+import { depositSignature, SLACK_SIGNATURE_HEADER } from "../kinds/slack-app/deposit.js";
+import type { SlackAppCloud, SlackAppWorkspace } from "../kinds/slack-app/rome-cloud.js";
 import { SlackAppRefused } from "../kinds/slack-app/rome-cloud.js";
-import { createSlackAppWebApi } from "../kinds/slack-app/web-api.js";
-import type { SetupForm, SetupInteraction } from "../setup/types.js";
+import { ROME_CLOUD_UNAVAILABLE, type SlackAppWebApi } from "../kinds/slack-app/web-api.js";
+import type { SetupForm, SetupInteraction, SetupView } from "../setup/types.js";
+import type { RuntimeKit } from "../types.js";
 import {
-  fencedCloud,
   makeSlackAppDescriptor,
   makeSlackAppSetup,
+  REAPPROVE_FOR_GATEWAY,
+  type SlackAppDescriptorDeps,
   slackAppAccountId,
 } from "./slack-app.js";
 
-const INSTALL: SlackAppInstall = {
+const DEPOSIT_URL = "https://ingest.test/h/mbx.sig";
+const INSTALL_URL = "https://slack.com/oauth/v2/authorize?state=s";
+
+const WORKSPACE: SlackAppWorkspace = {
   teamId: "T_A",
   teamName: "Acme",
   botUserId: "U_BOT",
-  botToken: "xoxb-a",
-  appId: "A_ROME",
   installerUserId: "U_GUARDIAN",
-  scopes: ["chat:write"],
-  mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
-  forwardSecret: "secret",
+  boundAt: 2_000,
 };
 
 const ctx = {
@@ -30,218 +32,454 @@ const ctx = {
   signal: new AbortController().signal,
 };
 
-function cloud(overrides: Partial<SlackAppCloud> = {}): SlackAppCloud {
+/** The Worker and Rome Cloud: `held` is what the Worker holds for this Rome,
+ *  listed in turn by each call to `workspaces`, the last one from then on. */
+function cloud(
+  overrides: Partial<SlackAppCloud> = {},
+  held: SlackAppWorkspace[][] = [[], [WORKSPACE]],
+): SlackAppCloud {
+  let listed = 0;
   return {
-    start: rs.fn(async () => "https://fake-slack.test/oauth/v2/authorize?state=s"),
-    redeem: rs.fn(async () => INSTALL),
-    refreshMailbox: rs.fn(async () => INSTALL.mailbox),
-    release: rs.fn(async () => {}),
+    connect: rs.fn(async () => ({ depositKey: "key-1", workspaces: held[0] ?? [] })),
+    disconnect: rs.fn(async () => {}),
+    workspaces: rs.fn(async () => held[Math.min(listed++, held.length - 1)] ?? []),
+    installUrl: rs.fn(async () => INSTALL_URL),
     ...overrides,
   };
 }
 
-function interaction(returned: Record<string, string>) {
+function interaction() {
   const prompts: SetupForm[] = [];
   const redirects: string[] = [];
+  const shown: SetupView[] = [];
   const interact: SetupInteraction = {
     prompt: async (form) => {
       prompts.push(form);
       return {};
     },
-    show: () => {},
+    show: (view) => {
+      shown.push(view);
+    },
     redirect: async (url) => {
       redirects.push(url);
-      return returned;
+      return {};
     },
   };
-  return { interact, prompts, redirects };
+  return { interact, prompts, redirects, shown };
 }
 
+const fast = { pollMs: 1, limitMs: 1_000 };
+
+function setup(c: SlackAppCloud, depositUrl: string | null = DEPOSIT_URL) {
+  return makeSlackAppSetup({ cloud: c, depositUrl: async () => depositUrl, approval: fast });
+}
+
+function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
+  return {
+    postMessage: async () => ({ ts: "3.0" }),
+    openDirectMessage: async () => "D1",
+    userName: async () => ({}),
+    conversationHistory: async () => ({ messages: [], hasMore: false }),
+    conversationReplies: async () => ({ messages: [] }),
+    memberChannels: async () => ({ channels: [] }),
+    addReaction: async () => {},
+    removeReaction: async () => {},
+    ...overrides,
+  };
+}
+
+function descriptor(overrides: Partial<SlackAppDescriptorDeps> = {}) {
+  return makeSlackAppDescriptor({
+    api: fakeApi(),
+    cloud: cloud({}, [[WORKSPACE]]),
+    depositUrl: async () => DEPOSIT_URL,
+    deliveryAttempts: 4,
+    listens: () => true,
+    approval: fast,
+    ...overrides,
+  });
+}
+
+const MATERIAL = { teamId: "T_A", botUserId: "U_BOT", depositKey: "key-1" };
+
+function kit(overrides: Partial<RuntimeKit> = {}) {
+  const persisted: Record<string, string>[] = [];
+  let ingress: ((input: unknown) => Promise<unknown>) | null = null;
+  const built: RuntimeKit = {
+    connectionId: "c1",
+    persist: async (material) => {
+      persisted.push(material);
+    },
+    registerIngress: (handler) => {
+      ingress = handler;
+      return () => {
+        ingress = null;
+      };
+    },
+    ...overrides,
+  };
+  return { kit: built, persisted, ingress: () => ingress };
+}
+
+const settle = async () => {
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
 describe("connecting Rome's Slack app (R1)", () => {
-  it("goes from Connect through Slack's approve screen to a grant with no form", async () => {
+  it("goes from Connect through Slack's approve screen to a grant with no form and no Slack token", async () => {
     const c = cloud();
-    const { interact, prompts, redirects } = interaction({ handoff: "h", state: "s" });
-    const grant = await makeSlackAppSetup({ cloud: c, instanceOrigin: () => "https://me.test" })(
-      interact,
-      ctx,
-    );
+    const { interact, prompts, shown } = interaction();
+    const grant = await setup(c)(interact, ctx);
 
     expect(prompts).toHaveLength(0);
-    expect(redirects).toEqual(["https://fake-slack.test/oauth/v2/authorize?state=s"]);
-    const started = (c.start as ReturnType<typeof rs.fn>).mock.calls[0][0] as {
-      callbackOrigin: string;
-      state: string;
-      codeChallenge: string;
-    };
-    expect(started.callbackOrigin).toBe("https://me.test");
-    expect(started.state).toMatch(/^[A-Za-z0-9_-]{32}$/);
-    expect(started.codeChallenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    const redeemed = (c.redeem as ReturnType<typeof rs.fn>).mock.calls[0][0] as {
-      handoff: string;
-      codeVerifier: string;
-    };
-    expect(redeemed.handoff).toBe("h");
-
+    expect(c.connect).toHaveBeenCalledWith(DEPOSIT_URL, expect.anything());
+    expect(shown.at(-1)?.links).toEqual([{ label: "Open Slack", url: INSTALL_URL }]);
     expect(grant.profile).toEqual({
       teamId: "T_A",
       workspaceName: "Acme",
       botUserId: "U_BOT",
-      appId: "A_ROME",
       installerUserId: "U_GUARDIAN",
     });
     expect(grant.credential.material).toEqual({
       teamId: "T_A",
       botUserId: "U_BOT",
-      botToken: "xoxb-a",
-      forwardSecret: "secret",
-      connectUrl: "wss://relay.test/c/mbx",
-      drainKey: "k",
+      depositKey: "key-1",
     });
     // The member who approved is the guardian there from their first message.
-    expect(grant.guardianChannelUserId).toBe("T_A/U_GUARDIAN");
+    expect(grant.connectedBy).toEqual({ id: "T_A/U_GUARDIAN", stableId: true });
     expect(slackAppAccountId(grant.profile ?? {})).toBe("T_A/U_BOT");
   });
 
-  it("names the account the way the Slack bot kind does, and holds one workspace", () => {
-    const descriptor = makeSlackAppDescriptor({
-      api: {} as never,
-      cloud: cloud(),
-      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
-      listens: () => true,
-    });
-    expect(descriptor.link).toBe("own_account");
-    expect(descriptor.severalAccounts).toBeUndefined();
-    expect(descriptor.accountIdOf?.({ teamId: "T_A", botUserId: "U_BOT" })).toBe("T_A/U_BOT");
+  it("takes a workspace approved again, which the Worker binds anew", async () => {
+    const before = { ...WORKSPACE, boundAt: 1_000 };
+    const grant = await setup(cloud({}, [[before], [before], [WORKSPACE]]))(
+      interaction().interact,
+      ctx,
+    );
+    expect(grant.profile?.teamId).toBe("T_A");
   });
 
-  it("tells the guardian when they declined on Slack", async () => {
-    const { interact } = interaction({ error: "access_denied", state: "s" });
-    await expect(makeSlackAppSetup({ cloud: cloud() })(interact, ctx)).rejects.toThrow(
-      /was not added/,
+  it("names the account the way the Slack bot kind does", () => {
+    const d = descriptor();
+    expect(d.link).toBe("own_account");
+    expect(d.severalAccounts).toBeUndefined();
+    expect(d.accountIdOf?.({ teamId: "T_A", botUserId: "U_BOT" })).toBe("T_A/U_BOT");
+  });
+
+  it("tells the guardian when Slack was not approved in time", async () => {
+    await expect(
+      makeSlackAppSetup({
+        cloud: cloud({}, [[]]),
+        depositUrl: async () => DEPOSIT_URL,
+        approval: { pollMs: 1, limitMs: 5 },
+      })(interaction().interact, ctx),
+    ).rejects.toThrow(/was not added/);
+  });
+
+  it("waits for a mailbox before asking Slack", async () => {
+    const c = cloud();
+    await expect(setup(c, null)(interaction().interact, ctx)).rejects.toThrow(
+      /can't receive Slack messages yet/,
+    );
+    expect(c.installUrl).not.toHaveBeenCalled();
+  });
+
+  it("holds Slack frames from the Worker's connect until its grant has had time to make the connection", async () => {
+    const realSetTimeout = globalThis.setTimeout;
+    let afterCommit: (() => void) | undefined;
+    const timers = rs.spyOn(globalThis, "setTimeout").mockImplementation(((
+      callback: () => void,
+      delay?: number,
+    ) => {
+      if (delay === 5_000) {
+        afterCommit = callback;
+        return { unref: () => {} } as never;
+      }
+      return realSetTimeout(callback, delay);
+    }) as never);
+    try {
+      const events: string[] = [];
+      const grant = await makeSlackAppSetup({
+        cloud: cloud(),
+        depositUrl: async () => DEPOSIT_URL,
+        approval: { pollMs: 0, limitMs: 1_000 },
+        holdSlackFrames: () => {
+          events.push("held");
+          return () => events.push("released");
+        },
+      })(interaction().interact, ctx);
+      expect(grant.profile?.teamId).toBe("T_A");
+      expect(events).toEqual(["held"]);
+      afterCommit?.();
+      expect(events).toEqual(["held", "released"]);
+    } finally {
+      timers.mockRestore();
+    }
+  });
+
+  it("lets go of its hold at once when the setup fails", async () => {
+    const events: string[] = [];
+    await expect(
+      makeSlackAppSetup({
+        cloud: cloud({}, [[]]),
+        depositUrl: async () => DEPOSIT_URL,
+        approval: { pollMs: 1, limitMs: 5 },
+        holdSlackFrames: () => {
+          events.push("held");
+          return () => events.push("released");
+        },
+      })(interaction().interact, ctx),
+    ).rejects.toThrow(/was not added/);
+    expect(events).toEqual(["held", "released"]);
+  });
+
+  it("fails the setup with the Worker's reason, in the guardian's words", async () => {
+    const c = cloud({
+      connect: rs.fn(async () => {
+        throw new SlackAppRefused("not_enrolled", "Link it in Settings, then connect again.", 0);
+      }),
+    });
+    await expect(setup(c)(interaction().interact, ctx)).rejects.toThrow(
+      "Link it in Settings, then connect again.",
     );
   });
 });
 
-describe("a workspace another Rome holds (R3)", () => {
-  it("fails the setup with Rome Cloud's reason", async () => {
-    const c = cloud({
-      redeem: rs.fn(async () => {
-        throw new SlackAppRefused(
-          "workspace_bound",
-          "This Slack workspace is already connected to another Rome.",
-        );
-      }),
-    });
-    const { interact } = interaction({ handoff: "h", state: "s" });
-    await expect(
-      makeSlackAppSetup({ cloud: c, instanceOrigin: () => "https://me.test" })(interact, ctx),
-    ).rejects.toThrow("This Slack workspace is already connected to another Rome.");
-  });
-});
-
 describe("the Slack app talker", () => {
-  it("drains the stored mailbox, keeps a refreshed drain key, and sends as the bot", async () => {
-    const opened: string[] = [];
-    const persisted: Record<string, string>[] = [];
-    const descriptor = makeSlackAppDescriptor({
-      api: {
-        authTest: async () => ({ teamId: "T_A", botUserId: "U_BOT" }),
-        postMessage: async () => ({ ts: "3.0" }),
-        openDirectMessage: async () => "D1",
-        userName: async () => ({}),
-        conversationHistory: async () => ({ messages: [], hasMore: false }),
-        conversationReplies: async () => ({ messages: [] }),
-        memberChannels: async () => ({ channels: [] }),
-        revoke: async () => {},
-      },
-      cloud: cloud({
-        refreshMailbox: async () => ({ connectUrl: "wss://relay.test/c/mbx", drainKey: "fresh" }),
+  it("connects on start, checks the deposits it is handed with the grant's key, and sends through the Worker", async () => {
+    const postMessage = rs.fn(async () => ({ ts: "3.0" }));
+    const c = cloud({}, [[WORKSPACE]]);
+    const d = descriptor({ api: fakeApi({ postMessage }), cloud: c });
+    const k = kit();
+    const talker = d.capabilities.talker?.build({ material: MATERIAL, expiresAt: "never" }, k.kit);
+    const faults: unknown[] = [];
+    const heard: string[] = [];
+    talker?.start(
+      (message) => void heard.push(message.content.text),
+      (fault) => faults.push(fault),
+    );
+    await settle();
+    expect(faults).toEqual([]);
+    expect(c.connect).toHaveBeenCalledWith(DEPOSIT_URL);
+    // The registry hands `deliver`'s acceptance only to a Talker that declares
+    // it waits, and the mailbox is answered only once Chats has the message.
+    expect(talker?.awaitsAcceptance).toBe(true);
+
+    const body = new TextEncoder().encode(
+      JSON.stringify({
+        type: "event_callback",
+        team_id: "T_A",
+        event_id: "Ev1",
+        event: {
+          type: "message",
+          channel_type: "im",
+          channel: "D1",
+          user: "U_GUARDIAN",
+          text: "hello",
+          ts: "1.0",
+        },
       }),
-      openMailbox: (mailbox) => {
-        opened.push(mailbox.drainKey);
-        return { stop: () => {}, attempts: 4 };
-      },
-      listens: () => true,
+    );
+    const ingest = k.ingress();
+    expect(
+      await ingest?.({
+        headers: { [SLACK_SIGNATURE_HEADER]: depositSignature(body, "key-1") },
+        body,
+      }),
+    ).toEqual({ status: 200 });
+    expect(
+      await ingest?.({
+        headers: { [SLACK_SIGNATURE_HEADER]: depositSignature(body, "another-rome") },
+        body,
+      }),
+    ).toEqual({ status: 401 });
+    expect(heard).toEqual(["hello"]);
+
+    expect(await talker?.send("D1" as never, { text: "hi" } as never)).toMatchObject({
+      messageId: "3.0",
     });
-    const talker = descriptor.capabilities.talker?.build(
-      {
-        material: {
-          teamId: "T_A",
-          botUserId: "U_BOT",
-          botToken: "xoxb-a",
-          forwardSecret: "secret",
-          connectUrl: "wss://relay.test/c/mbx",
-          drainKey: "old",
-          generation: "4",
-        },
-        expiresAt: "never",
+    expect(postMessage).toHaveBeenCalledWith(
+      "T_A",
+      { channel: "D1", markdown: "hi", threadTs: undefined },
+      expect.anything(),
+    );
+    await talker?.stop();
+    expect(k.ingress()).toBeNull();
+  });
+
+  it("has the instance's mailbox drained while it runs, claimed once its ingress takes frames", async () => {
+    let claims = 0;
+    const k = kit();
+    const ingressAtClaim: boolean[] = [];
+    const talker = descriptor({
+      claimMailbox: () => {
+        claims++;
+        // The claim resumes a frame the drain held, which must find the ingress.
+        ingressAtClaim.push(k.ingress() !== null);
+        return () => {
+          claims--;
+        };
       },
-      {
-        connectionId: "c1",
-        persist: async (material) => {
-          persisted.push(material);
-        },
-        registerIngress: () => () => {},
-      },
+    }).capabilities.talker?.build({ material: MATERIAL, expiresAt: "never" }, k.kit);
+    talker?.start(
+      () => {},
+      () => {},
+    );
+    expect(claims).toBe(1);
+    expect(ingressAtClaim).toEqual([true]);
+    await talker?.stop();
+    expect(claims).toBe(0);
+  });
+
+  it("keeps a new deposit key the Worker gives, and checks deposits with it", async () => {
+    const c = cloud({
+      connect: rs.fn(async () => ({ depositKey: "key-2", workspaces: [WORKSPACE] })),
+    });
+    const k = kit();
+    const talker = descriptor({ cloud: c }).capabilities.talker?.build(
+      { material: MATERIAL, expiresAt: "never" },
+      k.kit,
+    );
+    talker?.start(
+      () => {},
+      () => {},
+    );
+    await settle();
+    expect(k.persisted).toEqual([{ ...MATERIAL, depositKey: "key-2" }]);
+    const body = new TextEncoder().encode(
+      JSON.stringify({ type: "event_callback", team_id: "T_A", event_id: "Ev2", event: {} }),
+    );
+    expect(
+      await k.ingress()?.({
+        headers: { [SLACK_SIGNATURE_HEADER]: depositSignature(body, "key-2") },
+        body,
+      }),
+    ).toEqual({ status: 200 });
+  });
+
+  it("says the connection is broken when the Worker no longer holds its workspace for this Rome (R8)", async () => {
+    const talker = descriptor({ cloud: cloud({}, [[]]) }).capabilities.talker?.build(
+      { material: MATERIAL, expiresAt: "never" },
+      kit().kit,
     );
     const faults: unknown[] = [];
     talker?.start(
       () => {},
       (fault) => faults.push(fault),
     );
-    for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(faults).toEqual([]);
-    // The registry hands `deliver`'s acceptance only to a Talker that declares
-    // it waits, and the mailbox is answered only once Chats has the message.
-    expect(talker?.awaitsAcceptance).toBe(true);
-    expect(opened).toEqual(["fresh"]);
-    expect(persisted[0]?.drainKey).toBe("fresh");
-    // The release still names the connect's claim after a refresh.
-    expect(persisted[0]?.generation).toBe("4");
-    expect(await talker?.send("D1" as never, { text: "hi" } as never)).toMatchObject({
-      messageId: "3.0",
-    });
-    await talker?.stop();
+    await settle();
+    expect(faults).toHaveLength(1);
+    expect(faults[0]).toBeInstanceOf(CredentialRejected);
   });
-});
 
-describe("the Slack app's channels in chat settings", () => {
-  /** The talker of a connection whose channel listing Slack answers with
-   *  `memberChannels`. */
-  function channelTalker(
-    memberChannels: () => Promise<{ channels: { id: string; name: string; isPrivate: boolean }[] }>,
-  ) {
-    const descriptor = makeSlackAppDescriptor({
-      listens: () => true,
-      api: {
-        authTest: async () => ({ teamId: "T_A", botUserId: "U_BOT" }),
-        postMessage: async () => ({ ts: "3.0" }),
-        openDirectMessage: async () => "D1",
-        userName: async () => ({}),
-        conversationHistory: async () => ({ messages: [], hasMore: false }),
-        conversationReplies: async () => ({ messages: [] }),
-        memberChannels,
-        revoke: async () => {},
-      },
-      cloud: cloud(),
-      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
+  it("keeps the grant authorized when Rome Cloud refuses this Rome's own token, and retries", async () => {
+    for (const refusal of [
+      new SlackAppRefused("unauthorized", "Rome Cloud did not accept this Rome.", 401),
+      new SlackAppRefused("not_enrolled", "Link it in Settings, then connect again.", 0),
+    ]) {
+      const talker = descriptor({
+        cloud: cloud({
+          connect: rs.fn(async () => {
+            throw refusal;
+          }),
+        }),
+      }).capabilities.talker?.build({ material: MATERIAL, expiresAt: "never" }, kit().kit);
+      const faults: unknown[] = [];
+      talker?.start(
+        () => {},
+        (fault) => faults.push(fault),
+      );
+      await settle();
+      expect(faults).toHaveLength(1);
+      expect(faults[0]).toBeInstanceOf(Disconnected);
+      expect(faults[0]).not.toBeInstanceOf(CredentialRejected);
+      expect(String((faults[0] as Disconnected).cause)).toContain("can't reach Rome Cloud");
+    }
+  });
+
+  it("sends nothing as a refused credential while this Rome can't sign in to Rome Cloud", async () => {
+    const talker = descriptor({
+      api: fakeApi({
+        postMessage: async () => {
+          throw new SlackApiError(ROME_CLOUD_UNAVAILABLE, "Rome can't reach Rome Cloud.");
+        },
+      }),
+    }).capabilities.talker?.build({ material: MATERIAL, expiresAt: "never" }, kit().kit);
+    const failed = await talker
+      ?.send("D1" as never, { text: "hi" } as never)
+      .catch((error: unknown) => error);
+    expect(failed).toMatchObject({ code: ROME_CLOUD_UNAVAILABLE });
+    expect(failed).not.toBeInstanceOf(CredentialRejected);
+  });
+
+  it("keeps working on the stored key while the Worker is unreachable", async () => {
+    const c = cloud({
+      connect: rs.fn(async () => {
+        throw new SlackAppRefused("http_503", "unavailable", 503);
+      }),
     });
-    const talker = descriptor.capabilities.talker?.build(
+    const k = kit();
+    const talker = descriptor({ cloud: c }).capabilities.talker?.build(
+      { material: MATERIAL, expiresAt: "never" },
+      k.kit,
+    );
+    const faults: unknown[] = [];
+    talker?.start(
+      () => {},
+      (fault) => faults.push(fault),
+    );
+    await settle();
+    expect(faults).toEqual([]);
+    expect(k.persisted).toEqual([]);
+  });
+
+  it("says a grant that held a Slack token on this Rome needs approving again (R15)", async () => {
+    const c = cloud();
+    const k = kit();
+    const talker = descriptor({ cloud: c }).capabilities.talker?.build(
       {
         material: {
           teamId: "T_A",
           botUserId: "U_BOT",
-          botToken: "xoxb-a",
+          botToken: "xoxb-old",
           forwardSecret: "secret",
           connectUrl: "wss://relay.test/c/mbx",
           drainKey: "k",
         },
         expiresAt: "never",
       },
-      { connectionId: "c1", persist: async () => {}, registerIngress: () => () => {} },
+      k.kit,
     );
-    return talker;
+    const faults: unknown[] = [];
+    talker?.start(
+      () => {},
+      (fault) => faults.push(fault),
+    );
+    await settle();
+    expect(faults).toHaveLength(1);
+    expect(faults[0]).toBeInstanceOf(CredentialRejected);
+    expect(String((faults[0] as CredentialRejected).cause)).toContain(REAPPROVE_FOR_GATEWAY);
+    expect(c.connect).not.toHaveBeenCalled();
+    expect(k.ingress()).toBeNull();
+    await expect(talker?.send("D1" as never, { text: "hi" } as never)).rejects.toBeInstanceOf(
+      CredentialRejected,
+    );
+  });
+});
+
+describe("the Slack app's channels in chat settings", () => {
+  function channelTalker(memberChannels: SlackAppWebApi["memberChannels"]) {
+    return descriptor({ api: fakeApi({ memberChannels }) }).capabilities.talker?.build(
+      { material: MATERIAL, expiresAt: "never" },
+      kit().kit,
+    );
   }
+
+  it("offers no reactions, which the Slack gateway Worker does not make", () => {
+    const talker = channelTalker(async () => ({ channels: [] }));
+    expect(talker).toBeDefined();
+    expect(talker?.reactions).toBeUndefined();
+  });
 
   it("lists the channels the app is a member of by name, and finds one by part of it", async () => {
     const talker = channelTalker(async () => ({
@@ -266,9 +504,9 @@ describe("the Slack app's channels in chat settings", () => {
     ]);
   });
 
-  it("reports a token Slack refuses as a rejected credential", async () => {
+  it("reports a workspace the Worker no longer holds as a rejected credential", async () => {
     const talker = channelTalker(async () => {
-      throw new SlackApiError("token_revoked");
+      throw new SlackApiError("app_uninstalled");
     });
 
     await expect(talker?.directory?.listConversations({ limit: 10 })).rejects.toBeInstanceOf(
@@ -278,284 +516,58 @@ describe("the Slack app's channels in chat settings", () => {
 });
 
 describe("disconnecting the Slack app in Rome (R8)", () => {
-  const MATERIAL = {
-    teamId: "T_A",
-    botUserId: "U_BOT",
-    botToken: "xoxb-a",
-    forwardSecret: "secret",
-    connectUrl: "wss://relay.test/c/mbx",
-    drainKey: "k",
-  };
-  function descriptorWith(revoke: () => Promise<void>, c = cloud()) {
-    const steps: string[] = [];
-    const descriptor = makeSlackAppDescriptor({
-      listens: () => true,
-      api: {
-        authTest: async () => ({ teamId: "T_A", botUserId: "U_BOT" }),
-        postMessage: async () => ({ ts: "1.0" }),
-        openDirectMessage: async () => "D1",
-        userName: async () => ({}),
-        conversationHistory: async () => ({ messages: [], hasMore: false }),
-        conversationReplies: async () => ({ messages: [] }),
-        memberChannels: async () => ({ channels: [] }),
-        revoke: async (token) => {
-          steps.push(`revoke ${token}`);
-          await revoke();
+  const signal = new AbortController().signal;
+
+  it("asks the Worker to revoke the token at Slack and let go of the workspace", async () => {
+    const c = cloud();
+    await descriptor({ cloud: c }).onDisconnect?.(
+      { material: MATERIAL, expiresAt: "never" } as never,
+      { signal } as never,
+    );
+    expect(c.disconnect).toHaveBeenCalledWith(signal);
+  });
+
+  it("revokes at Slack a token a grant from before the Worker holds, and still disconnects when Slack refuses", async () => {
+    for (const answer of [null, "ratelimited"]) {
+      const c = cloud();
+      const revoked: string[] = [];
+      await descriptor({
+        cloud: c,
+        revokeLegacyToken: async (token) => {
+          revoked.push(token);
+          return answer;
         },
+      }).onDisconnect?.(
+        { material: { botToken: "xoxb-old", teamId: "T_A" }, expiresAt: "never" } as never,
+        { signal } as never,
+      );
+      expect(revoked).toEqual(["xoxb-old"]);
+      expect(c.disconnect).toHaveBeenCalledWith(signal);
+    }
+  });
+
+  it("makes no call to Slack for a grant with no token", async () => {
+    const revoked: string[] = [];
+    await descriptor({
+      revokeLegacyToken: async (token) => {
+        revoked.push(token);
+        return null;
       },
-      cloud: {
-        ...c,
-        release: async (teamId, signal, generation) => {
-          steps.push(`release ${teamId}`);
-          await c.release(teamId, signal, generation);
-        },
-      },
-      openMailbox: () => ({ stop: () => {}, attempts: 4 }),
-    });
-    return { descriptor, steps };
-  }
-
-  it("revokes the token at Slack, then releases the workspace at Rome Cloud", async () => {
-    const { descriptor, steps } = descriptorWith(async () => {});
-    await descriptor.onDisconnect?.(
-      { material: MATERIAL, profile: {} },
-      { signal: new AbortController().signal },
-    );
-    expect(steps).toEqual(["revoke xoxb-a", "release T_A"]);
+    }).onDisconnect?.({ material: MATERIAL, expiresAt: "never" } as never, { signal } as never);
+    expect(revoked).toEqual([]);
   });
 
-  it("says Slack kept the token, and releases nothing, when the revoke fails", async () => {
-    const { descriptor, steps } = descriptorWith(async () => {
-      throw new Error("Slack API returned HTTP 503");
-    });
-    await expect(
-      descriptor.onDisconnect?.(
-        { material: MATERIAL, profile: {} },
-        { signal: new AbortController().signal },
-      ),
-    ).rejects.toThrow("Slack did not revoke Rome's token (Slack API returned HTTP 503)");
-    expect(steps).toEqual(["revoke xoxb-a"]);
-  });
-
-  it("holds off a connect until a release Rome stopped waiting for has ended", async () => {
-    let finish = () => {};
-    const steps: string[] = [];
-    const fenced = fencedCloud(
-      cloud({
-        release: async () => {
-          await new Promise<void>((resolve) => {
-            finish = resolve;
-          });
-          steps.push("released");
-        },
-        redeem: async () => {
-          steps.push("redeemed");
-          return INSTALL;
-        },
-      }),
-    );
-    const stop = new AbortController();
-    const releasing = fenced.release("T_A", stop.signal);
-    stop.abort(new Error("no answer within 10s"));
-    await expect(releasing).rejects.toThrow("no answer within 10s");
-
-    const redeeming = fenced.redeem({ handoff: "h", codeVerifier: "v" });
-    await new Promise((resolve) => setTimeout(resolve, 5));
-    expect(steps).toEqual([]);
-    finish();
-    await redeeming;
-    expect(steps).toEqual(["released", "redeemed"]);
-  });
-
-  it("releases nothing once the disconnect has stopped waiting", async () => {
-    const stop = new AbortController();
-    const { descriptor, steps } = descriptorWith(async () => {
-      // Slack answers after the disconnect's limit.
-      stop.abort();
-    });
-    await expect(
-      descriptor.onDisconnect?.({ material: MATERIAL, profile: {} }, { signal: stop.signal }),
-    ).rejects.toThrow("Rome stopped waiting before releasing the workspace");
-    expect(steps).toEqual(["revoke xoxb-a"]);
-  });
-
-  it("names its connect's claim, so a release landing after a reconnect ends nothing", async () => {
-    // Rome Cloud's rule: each connect takes a higher generation than the last, and a release
-    // naming one ends that claim only.
-    let bound: number | null = null;
-    let claims = 0;
-    const late: Array<() => void> = [];
+  it("says the Worker kept the workspace when it could not let go", async () => {
     const c = cloud({
-      redeem: async () => {
-        bound = ++claims;
-        return { ...INSTALL, generation: claims };
-      },
-      // The release reaches Rome Cloud, but Rome stops waiting before it
-      // commits: it lands only later.
-      release: async (_teamId, _signal, generation) => {
-        late.push(() => {
-          if (generation === undefined || generation === bound) bound = null;
-        });
-        throw new Error("Rome Cloud did not answer within 60s");
-      },
-    });
-    const connect = async () =>
-      (
-        await makeSlackAppSetup({ cloud: c, instanceOrigin: () => "https://me.test" })(
-          interaction({ handoff: "h", state: "s" }).interact,
-          ctx,
-        )
-      ).credential.material as Record<string, string>;
-    const first = await connect();
-    const { descriptor } = descriptorWith(async () => {}, c);
-    await expect(
-      descriptor.onDisconnect?.(
-        { material: first, profile: {} },
-        { signal: new AbortController().signal },
-      ),
-    ).rejects.toThrow("Rome Cloud did not release the workspace");
-
-    const second = await connect();
-    for (const land of late) land();
-
-    expect(first).toMatchObject({ generation: "1" });
-    expect(second).toMatchObject({ generation: "2" });
-    expect(bound).toBe(2);
-  });
-
-  it("releases a claim a cancelled fix's redeem made while the disconnect ran", async () => {
-    let bound: number | null = 1;
-    let land = () => {};
-    const c = cloud({
-      // The fix's redeem is at Rome Cloud when the guardian disconnects: it
-      // claims the workspace again only after the disconnect began.
-      redeem: () =>
-        new Promise((resolve) => {
-          land = () => {
-            bound = 2;
-            resolve({ ...INSTALL, botToken: "xoxb-fix", generation: 2 });
-          };
-        }),
-      release: async (_teamId, _signal, generation) => {
-        if (generation === undefined || generation === bound) bound = null;
-      },
-    });
-    const { descriptor, steps } = descriptorWith(async () => {}, c);
-    const fixing = new AbortController();
-    const setup = descriptor.auth.setup;
-    if (!setup) throw new Error("no setup");
-    const fix = setup(interaction({ handoff: "h", state: "s" }).interact, {
-      ...ctx,
-      signal: fixing.signal,
-    });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    fixing.abort(new Error("cancelled by the disconnect"));
-
-    const disconnecting = descriptor.onDisconnect?.(
-      { material: { ...MATERIAL, generation: "1" }, profile: {} },
-      { signal: new AbortController().signal },
-    );
-    land();
-    await disconnecting;
-    await fix.catch(() => {});
-
-    expect(bound).toBeNull();
-    // The fix's token, which no grant holds, is revoked as well.
-    expect(steps).toEqual(["revoke xoxb-a", "revoke xoxb-fix", "release T_A"]);
-  });
-
-  it("revokes and releases another workspace a cancelled fix redeemed while the disconnect ran", async () => {
-    const bound = new Map<string, number>([["T_A", 1]]);
-    let land = () => {};
-    const c = cloud({
-      // The guardian picked another workspace on Slack's screen, and the
-      // fix's redeem lands only after the disconnect cancelled it.
-      redeem: () =>
-        new Promise((resolve) => {
-          land = () => {
-            bound.set("T_B", 1);
-            resolve({ ...INSTALL, teamId: "T_B", botToken: "xoxb-b", generation: 1 });
-          };
-        }),
-      release: async (teamId, _signal, generation) => {
-        if (generation === undefined || generation === bound.get(teamId)) bound.delete(teamId);
-      },
-    });
-    const { descriptor, steps } = descriptorWith(async () => {}, c);
-    const fixing = new AbortController();
-    const setup = descriptor.auth.setup;
-    if (!setup) throw new Error("no setup");
-    const fix = setup(interaction({ handoff: "h", state: "s" }).interact, {
-      ...ctx,
-      signal: fixing.signal,
-    });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    fixing.abort(new Error("cancelled by the disconnect"));
-
-    const disconnecting = descriptor.onDisconnect?.(
-      { material: { ...MATERIAL, generation: "1" }, profile: {} },
-      { signal: new AbortController().signal },
-    );
-    land();
-    await disconnecting;
-    await fix.catch(() => {});
-
-    expect([...bound.keys()]).toEqual([]);
-    expect(steps).toEqual(["revoke xoxb-a", "revoke xoxb-b", "release T_A", "release T_B"]);
-  });
-
-  it("leaves another workspace's install alone when its setup finished", async () => {
-    const c = cloud({
-      redeem: async () => ({ ...INSTALL, teamId: "T_B", botToken: "xoxb-b", generation: 1 }),
-    });
-    const { descriptor, steps } = descriptorWith(async () => {}, c);
-    const setup = descriptor.auth.setup;
-    if (!setup) throw new Error("no setup");
-    await setup(interaction({ handoff: "h", state: "s" }).interact, ctx);
-
-    await descriptor.onDisconnect?.(
-      { material: MATERIAL, profile: {} },
-      { signal: new AbortController().signal },
-    );
-
-    expect(steps).toEqual(["revoke xoxb-a", "release T_A"]);
-  });
-
-  it("releases with no generation a grant made before Rome Cloud counted claims", async () => {
-    const release = rs.fn(async () => {});
-    const { descriptor } = descriptorWith(async () => {}, cloud({ release }));
-    await descriptor.onDisconnect?.(
-      { material: MATERIAL, profile: {} },
-      { signal: new AbortController().signal },
-    );
-    expect(release).toHaveBeenCalledWith("T_A", expect.anything(), undefined);
-  });
-
-  it("says Rome Cloud kept the workspace when the release fails", async () => {
-    const c = cloud({
-      release: rs.fn(async () => {
-        throw new SlackAppRefused("unavailable", "Rome Cloud is unreachable");
+      disconnect: rs.fn(async () => {
+        throw new SlackAppRefused("http_503", "unavailable", 503);
       }),
     });
-    const { descriptor } = descriptorWith(async () => {}, c);
     await expect(
-      descriptor.onDisconnect?.(
-        { material: MATERIAL, profile: {} },
-        { signal: new AbortController().signal },
+      descriptor({ cloud: c }).onDisconnect?.(
+        { material: MATERIAL, expiresAt: "never" } as never,
+        { signal } as never,
       ),
-    ).rejects.toThrow("Rome Cloud did not release the workspace");
-  });
-
-  it("counts a token Slack already refuses as revoked", async () => {
-    const answers = ["invalid_auth", "token_revoked"];
-    const api = createSlackAppWebApi("https://slack.test", async () =>
-      Response.json({ ok: false, error: answers.shift() }),
-    );
-    await api.revoke("xoxb-dead");
-    await api.revoke("xoxb-dead");
-    const refusing = createSlackAppWebApi("https://slack.test", async () =>
-      Response.json({ ok: false, error: "ratelimited" }),
-    );
-    await expect(refusing.revoke("xoxb-a")).rejects.toThrow();
+    ).rejects.toThrow(/did not let go of this Rome/);
   });
 });

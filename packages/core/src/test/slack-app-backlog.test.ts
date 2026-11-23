@@ -27,17 +27,17 @@ import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import { makeSlackAppDescriptor } from "../connections/integrations/slack-app.js";
 import { SLACK_APP_KIND } from "../connections/integrations/slack-app.js";
 import {
-  FORWARD_SIGNATURE_HEADER,
-  FORWARD_TEAM_HEADER,
-  FORWARD_TIMESTAMP_HEADER,
-  forwardSignature,
-} from "../connections/kinds/slack-app/forward.js";
+  depositSignature,
+  SLACK_DEPOSIT_HEADER,
+  SLACK_SIGNATURE_HEADER,
+} from "../connections/kinds/slack-app/deposit.js";
+import { deliverSlackFrame } from "../connections/kinds/slack-app/drain.js";
 import { chatMessages } from "../db/schema.js";
-import type { MailboxFrame, OpenMailbox } from "../connections/kinds/slack-app/slack-app.js";
+import type { MailboxFrame } from "../connections/kinds/slack-app/slack-app.js";
 
 const TEAM = "T_A";
 const BOT = "U_BOT";
-const SECRET = "forward-secret-a";
+const DEPOSIT_KEY = "deposit-key-a";
 const ROME: Account = { platform: "slack", id: `${TEAM}/${BOT}` };
 
 function dm(i: number, channel: string, user: string) {
@@ -57,47 +57,37 @@ function dm(i: number, channel: string, user: string) {
       },
     }),
   );
-  const timestamp = "1700000000";
   return {
     headers: {
       "content-type": "application/json",
-      [FORWARD_TEAM_HEADER]: TEAM,
-      [FORWARD_TIMESTAMP_HEADER]: timestamp,
-      [FORWARD_SIGNATURE_HEADER]: forwardSignature({
-        forwardSecret: SECRET,
-        timestamp,
-        teamId: TEAM,
-        body,
-      }),
+      [SLACK_DEPOSIT_HEADER]: "1",
+      [SLACK_SIGNATURE_HEADER]: depositSignature(body, DEPOSIT_KEY),
     },
     body,
   } satisfies MailboxFrame;
 }
 
-/** A relay mailbox holding what arrived while Rome was stopped. Opening a
- *  drain replays it in order, one frame at a time, as the relay does. */
+/** The instance's relay mailbox holding what arrived while Rome was stopped.
+ *  Opening a drain replays it in order, one frame at a time, as the relay
+ *  does, delivering a frame again after a short wait while it is refused. */
 function heldMailbox(frames: MailboxFrame[]) {
   const queue = [...frames];
   let drained!: () => void;
   const empty = new Promise<void>((resolve) => {
     drained = resolve;
   });
-  const open: OpenMailbox = (_mailbox, onFrame) => {
-    let open = true;
+  const open = (onFrame: (frame: MailboxFrame) => Promise<{ status: number }>) => {
     void (async () => {
-      while (open && queue.length > 0) {
+      while (queue.length > 0) {
         const { status } = await onFrame(queue[0]);
-        if (status >= 500) return;
+        if (status >= 500) {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          continue;
+        }
         queue.shift();
       }
       drained();
     })();
-    return {
-      stop: () => {
-        open = false;
-      },
-      attempts: 4,
-    };
   };
   return { open, empty, left: () => queue.length };
 }
@@ -116,17 +106,18 @@ describe("a Slack app backlog, end to end", () => {
     registry.register(
       makeSlackAppDescriptor({
         api: {
-          authTest: async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" }),
           postMessage: async () => ({ ts: "9.0" }),
           openDirectMessage: async () => "D_NEW",
+          addReaction: async () => {},
+          removeReaction: async () => {},
           userName: async () => ({ displayName: "Member" }),
           conversationHistory: async () => ({ messages: [], hasMore: false }),
           conversationReplies: async () => ({ messages: [] }),
           memberChannels: async () => ({ channels: [] }),
-          revoke: async () => {},
         },
         cloud: {} as never,
-        openMailbox: mailbox.open,
+        depositUrl: async () => null,
+        deliveryAttempts: 4,
         listens: () => true,
       }),
     );
@@ -169,18 +160,14 @@ describe("a Slack app backlog, end to end", () => {
       wakes: wiring.links,
     });
     const connection = await registry.connect(SLACK_APP_KIND);
-    const grant = async () =>
-      registry.giveGrant(connection.connectionKind, connection.id, "bot", {
-        material: {
-          teamId: TEAM,
-          botUserId: BOT,
-          botToken: "xoxb-a",
-          forwardSecret: SECRET,
-          connectUrl: "wss://relay.test/c/mbx",
-          drainKey: "k",
-        },
+    const grant = async () => {
+      await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
+        material: { teamId: TEAM, botUserId: BOT, depositKey: DEPOSIT_KEY },
         expiresAt: "never",
       });
+      // The instance's drain hands every Slack frame to the connection.
+      mailbox.open((frame) => deliverSlackFrame(registry, frame));
+    };
     // Recorded, and every queued MessageSaid raised.
     return { said, grant, settled: () => recorder.settled() };
   }

@@ -34,7 +34,7 @@ export class SlackMemberChannels {
   constructor(
     private readonly deps: {
       api: Pick<SlackAppWebApi, "memberChannels">;
-      botToken: string;
+      teamId: string;
       now?: () => number;
     },
   ) {}
@@ -50,7 +50,7 @@ export class SlackMemberChannels {
     try {
       for (let page = 0; page < MAX_PAGES; page++) {
         const listed = await this.deps.api.memberChannels(
-          this.deps.botToken,
+          this.deps.teamId,
           { limit: PAGE, ...(cursor ? { cursor } : {}) },
           signal,
         );

@@ -41,6 +41,7 @@
     "title": "最近对话",
     "newChat": "新对话",
     "mainChat": "主对话",
+    "olderTopics": "更早 · {{count}}",
     "conciergeSection": "主对话和话题对话",
     "mainChatUnavailable": "无法加载主对话",
     "conciergeUnread_one": "{{name}}，{{label}} 条未读消息",
