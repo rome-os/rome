@@ -3161,6 +3161,30 @@ describe("Webchat API", () => {
     expect(await deps.webchatRepo.getMessages("visitor-task")).toEqual([]);
   });
 
+  it("lets go of the messages gathered for a spoken input the conversation no longer waits for", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      buildAgent(name, { name: "main", policy: { finalText: "private" } }),
+    );
+    const subscribe = deps.webchatRepo.onMessageInserted.bind(deps.webchatRepo);
+    let listening = 0;
+    rs.spyOn(deps.webchatRepo, "onMessageInserted").mockImplementation((listener) => {
+      listening++;
+      const unsubscribe = subscribe(listener);
+      return () => {
+        listening--;
+        unsubscribe();
+      };
+    });
+    const { runtime } = createWebchatRuntime(deps);
+    const id = await runtime.startChat({}, "guardian");
+    // Whatever else listens to the chat's messages.
+    const before = listening;
+    const left = new AbortController();
+    left.abort();
+    await expect(runtime.sendSpoken(id, "还在吗", left.signal)).rejects.toThrow("no longer waits");
+    expect(listening).toBe(before);
+  });
+
   it("answers a spoken input to an agent whose text is private with the messages its turn adds", async () => {
     rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
       buildAgent(name, { name: "main", policy: { finalText: "private" } }),

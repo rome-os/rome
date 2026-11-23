@@ -5,6 +5,7 @@ import { SpeakerError, type SpeakerSession } from "../voice-output/speaker.js";
 import {
   createConversation,
   LOOKING_AFTER_MS,
+  SPOKEN_TURN_NOTE,
   type ReplyEvent,
   type ReplyTurn,
 } from "./conversation.js";
@@ -72,6 +73,7 @@ function setup() {
   const messages: VoiceConversationServerMessage[] = [];
   const played: number[] = [];
   const sent: string[] = [];
+  const signals: AbortSignal[] = [];
   const turns: ReturnType<typeof scriptedTurn>[] = [];
   const said: { id: string; text: string }[] = [];
   let stops = 0;
@@ -86,8 +88,9 @@ function setup() {
     close: () => {},
   };
   const conversation = createConversation({
-    send: async (text) => {
+    send: async (text, signal) => {
       sent.push(text);
+      signals.push(signal);
       const turn = scriptedTurn();
       turns.push(turn);
       return turn.turn;
@@ -120,6 +123,7 @@ function setup() {
     messages,
     played,
     sent,
+    signals,
     turns,
     said,
     states,
@@ -338,6 +342,18 @@ describe("voice conversation", () => {
     ]);
   });
 
+  it("lets go of a turn it no longer waits for, when the guardian speaks again or hangs up", async () => {
+    const t = setup();
+    t.conversation.heard("第一句", "");
+    t.conversation.endpoint();
+    t.conversation.heard("第二句", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.signals.map((s) => s.aborted)).toEqual([true, false]);
+    t.conversation.close();
+    expect(t.signals.map((s) => s.aborted)).toEqual([true, true]);
+  });
+
   it("says once that it is looking when the agent works quietly for 2 s", async () => {
     const t = setup();
     t.conversation.heard("查一下天气", "");
@@ -411,5 +427,25 @@ describe("voice conversation", () => {
     refused.endpoint();
     await settled();
     expect(reasons).toEqual(["chat-refused"]);
+  });
+});
+
+describe("the spoken turn's note", () => {
+  it("asks for a secretary's answer on the phone, and no decision by voice on what needs its text", () => {
+    for (const rule of [
+      "Lead with the conclusion, in one or two",
+      "Do not repeat back what they said",
+      "do not ask follow-up questions",
+      "no headings, lists or other formatting",
+      "at most two options",
+      "If something went wrong",
+      "the details are in the chat",
+      "only mentioned on the call",
+      "may be made by voice",
+    ]) {
+      expect(SPOKEN_TURN_NOTE).toContain(rule);
+    }
+    expect(SPOKEN_TURN_NOTE.startsWith("<voice_context>")).toBe(true);
+    expect(SPOKEN_TURN_NOTE.endsWith("</voice_context>")).toBe(true);
   });
 });
