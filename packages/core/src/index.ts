@@ -773,8 +773,10 @@ async function main() {
     // Before the inbox resolves the sender, so the first message already
     // reads as the guardian's.
     if (connectionKind === AGENTS_KIND) await linkAgentToGuardian(message);
-    const platform = accounts.accountOf(connectionId)?.platform;
-    if (platform) await readBotsOfPeople(platform, message);
+    // A grant that recorded no account still names its platform by its channel.
+    const platform =
+      accounts.accountOf(connectionId)?.platform ?? platformOfChannel(message.channel);
+    await readBotsOfPeople(platform, message);
     return linkCodeAdmission(connectionId, connectionKind, message);
   };
   // How app actions — here and, over RPC, in workers — send and read on
