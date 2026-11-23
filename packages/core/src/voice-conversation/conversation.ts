@@ -115,8 +115,10 @@ export function createConversation(deps: ConversationDeps): Conversation {
   // The guardian's turn so far.
   let settled = "";
   let pending = "";
-  // Words came while Rome spoke and did not count as speaking over it.
+  // The turn began while Rome's audio still played, and did not count as
+  // speaking over it. A turn begun after Rome stopped is the guardian's.
   let maybeEcho = false;
+  let begun = false;
   let echo = "";
 
   let reply: Reply | null = null;
@@ -224,6 +226,8 @@ export function createConversation(deps: ConversationDeps): Conversation {
     const unplayed = now() < playsUntil || queue.some((q) => q.started);
     queue.length = 0;
     playsUntil = 0;
+    // The client drops the audio not played, so only the recognition tail can come back.
+    echoUntil = Math.min(echoUntil, now() + ECHO_TAIL_MS);
     stopPlayed();
     if (unplayed) deps.message({ type: "clear" });
     update();
@@ -300,12 +304,14 @@ export function createConversation(deps: ConversationDeps): Conversation {
       pending = newPending;
       deps.message({ type: "heard", settled, pending });
       const words = `${settled}${pending}`;
+      if (!begun && words.trim()) {
+        begun = true;
+        maybeEcho = now() < playsUntil;
+      }
       if (state === "speaking" && enoughWords(words) && !isEcho(words, echo)) {
         log.info("guardian spoke over the reply");
         maybeEcho = false;
         drop();
-      } else if (words.trim() && now() < echoUntil) {
-        maybeEcho = true;
       }
     },
 
@@ -316,6 +322,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
       settled = "";
       pending = "";
       maybeEcho = false;
+      begun = false;
       // Rome's own words coming back are not a turn. A short answer is always
       // the guardian's: "No" or "香蕉" is likely to be part of what Rome just said.
       if (!text || (suspect && enoughWords(text) && isEcho(text, echo))) {

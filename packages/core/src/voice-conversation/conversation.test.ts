@@ -228,26 +228,53 @@ describe("voice conversation", () => {
     expect(t.sent).toEqual(["你好"]);
   });
 
-  it("drops Rome's own words heard just after they played, but not the same words said later", async () => {
+  it("sends an answer begun after Rome stopped, even when it repeats Rome's words", async () => {
     const t = setup();
-    t.conversation.heard("查一下天气", "");
+    t.conversation.heard("订机票", "");
     t.conversation.endpoint();
     await settled();
-    t.clock.advance(LOOKING_AFTER_MS);
-    t.speak(0, 500);
-    // Recognition lags: the looking line comes back after its audio played.
-    t.clock.advance(1000);
-    expect(t.states().at(-1)).toBe("thinking");
-    t.conversation.heard("我查一下", "");
+    t.turns[0]?.push({
+      type: "text_delta",
+      content: "明天早上的航班还是下午的航班？Or the staging server or production?",
+    });
+    t.turns[0]?.end();
+    await settled();
+    t.speak(0, 1000);
+    t.speak(1, 1000);
+    // Half a second after the audio ends: an answer, not an echo.
+    t.clock.advance(2500);
+    t.conversation.heard("下午的航班", "");
+    t.conversation.endpoint();
+    t.conversation.heard("the staging server", "");
     t.conversation.endpoint();
     await settled();
-    expect(t.sent).toEqual(["查一下天气"]);
+    expect(t.sent).toEqual(["订机票", "下午的航班", "the staging server"]);
+  });
+
+  it("forgets the words it never played once the guardian speaks over them", async () => {
+    const t = setup();
+    t.conversation.heard("推荐餐厅", "");
+    t.conversation.endpoint();
+    await settled();
+    t.turns[0]?.push({
+      type: "text_delta",
+      content: "第一家是老王饭馆。第二家是江南小厨。第三家是海边餐厅。",
+    });
+    await settled();
+    // Speech runs far ahead of playback.
+    for (let i = 0; i < t.said.length; i++) t.speak(i, 10_000);
+    t.conversation.heard("停一下", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["推荐餐厅", "停一下"]);
 
     t.clock.advance(3000);
-    t.conversation.heard("我查一下", "");
-    t.conversation.endpoint();
+    t.turns[1]?.push({ type: "text_delta", content: "好的，我停下了。" });
     await settled();
-    expect(t.sent).toEqual(["查一下天气", "我查一下"]);
+    t.speak(3, 2000);
+    // A name from the list Rome never played is the guardian's, not an echo.
+    t.conversation.heard("", "海边餐厅");
+    expect(t.messages.filter((m) => m.type === "clear")).toHaveLength(2);
   });
 
   it("sends a short answer right after Rome's question, even when Rome said those words", async () => {
