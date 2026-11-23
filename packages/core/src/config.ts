@@ -120,13 +120,13 @@ const configSchema = z.object({
   // Observability
   otelExporterEndpoint: z.string().optional(),
 
-  // Slack's origin for Rome's own Slack app connection (`slack_app`): its Web
-  // API calls go to `<origin>/api/<method>`. A test environment points it at a
-  // stand-in Slack.
-  slackApiBaseUrl: z
+  // The Slack gateway Worker for Rome's own Slack app connection (`slack_app`):
+  // it holds the app and its tokens, and makes Slack's Web API calls for this
+  // instance. A test environment points it at its own Worker.
+  slackGatewayUrl: z
     .string()
     .url()
-    .default("https://slack.com")
+    .default("https://slack.romeos.io")
     .transform((value) => new URL(value).origin),
 
   // Webhook relay drainer. Absent unless explicitly configured. When present, a
@@ -244,7 +244,7 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
     raw.otelExporterEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT;
   }
 
-  if (env.SLACK_API_BASE_URL) raw.slackApiBaseUrl = env.SLACK_API_BASE_URL;
+  if (env.SLACK_GATEWAY_URL) raw.slackGatewayUrl = env.SLACK_GATEWAY_URL;
 
   // Webhook relay drainer. Build the object only when a RELAY_DRAIN_* var is
   // set, then let the schema enforce that BOTH fields are present — a partial

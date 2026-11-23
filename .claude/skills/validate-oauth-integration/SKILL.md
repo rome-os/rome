@@ -46,7 +46,7 @@ Most providers (Slack among them) **only accept `https` redirect URLs** — no `
 
 - The provider app registered, with **client id/secret** and a redirect URL you can point at the tunnel.
 - A tunnel that yields an https URL: `cloudflared` (free quick tunnels, no account) or `ngrok`.
-- Docker + the `dev:all` stack (see root `CLAUDE.md` dev-loop).
+- Docker + the `dev:all` stack (see root `AGENTS.md` dev-loop).
 
 ### Steps
 

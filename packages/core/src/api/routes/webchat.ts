@@ -3412,16 +3412,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "The model selector is turned off" }, 409);
     }
     const selection = resolveWebchatLargeModelSelection(requested);
-    await deps.webchatRepo.updateSessionLargeModelSelection(
-      sessionId,
-      selection?.id ?? null,
-      "owner",
-    );
-    // Auto follows the default: a conversation held on a provider is let go.
-    // A pick on another provider takes the hold there, so subagents follow it.
-    if (!selection) await deps.chatProviders?.release(sessionId);
-    else if (selection.providerId === "anthropic" || selection.providerId === "openai") {
-      await deps.chatProviders?.picked(sessionId, selection.providerId);
+    // One transition with the chat's hold: Auto lets a held conversation go,
+    // and a pick on another provider takes the hold there.
+    if (deps.chatProviders) await deps.chatProviders.pick(sessionId, selection?.id ?? null);
+    else {
+      await deps.webchatRepo.updateSessionLargeModelSelection(
+        sessionId,
+        selection?.id ?? null,
+        "owner",
+      );
     }
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
@@ -3563,6 +3562,31 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         title: s.title,
         url: `/share/${s.id}`,
         createdAt: s.createdAt.toISOString(),
+      })),
+    );
+  });
+
+  // Every live link of the signed-in person's chats, across all of them, for
+  // one list of their links. A visitor sees only their own; someone not
+  // signed in sees none.
+  app.get("/chat/shares", async (c) => {
+    const shares = await deps.webchatRepo.listSharedChatsByOwner(await callerOwner());
+    return c.json(
+      shares.map((s) => ({
+        id: s.id,
+        title: s.title,
+        url: `/share/${s.id}`,
+        createdAt: s.createdAt.toISOString(),
+        chatId: s.sessionId,
+        // The main Chat is labeled Chat, as every client shows it, not by
+        // the name it was created with.
+        chatName: isMainConciergeChat({
+          id: s.sessionId,
+          agentName: s.chatAgentName,
+          ownerKey: s.chatOwnerKey,
+        })
+          ? "Chat"
+          : s.chatName,
       })),
     );
   });
@@ -4595,11 +4619,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       largeModelSelection =
         (await deps.webchatRepo.getSession(sessionId))?.largeModelSelection ?? null;
     }
-    // A branch has no stored selection: it continues the model thread
-    // `persistForkThread` saved, on whatever model that thread pinned.
+    // A branch continues the model thread `persistForkThread` saved, on the
+    // model that thread pinned, unless it stores one of its own: kept by a
+    // change of the default, or Rome's strength after Back to default. A
+    // model the first message names does not apply to a branch.
     const modelSelection =
       session.parentSessionId !== null
-        ? null
+        ? resolveStoredModelSelection(largeModelSelection)
         : await resolveSessionModelSelectionForTurn(
             {
               id: sessionId,

@@ -71,7 +71,7 @@ function harness(
   const swaps: string[] = [];
   const kept: Array<{ chatId: string; provider: string }> = [];
   const followed: string[] = [];
-  const picked: Array<{ chatId: string; provider: string }> = [];
+  const picked: Array<{ chatId: string; selection: string | null }> = [];
   const chose: Array<{ provider: string; moveExisting?: boolean }> = [];
   const selected: Array<{ chatId: string; selection: string | null }> = [];
   const accountListeners = new Set<
@@ -110,8 +110,12 @@ function harness(
         followed.push(chatId);
         return null;
       },
-      picked: async (chatId, provider) => {
-        picked.push({ chatId, provider });
+      pick: async (chatId, selection) => {
+        picked.push({ chatId, selection });
+        if (chats[chatId]) {
+          chats[chatId].largeModelSelection = selection;
+          chats[chatId].largeModelSelectionBy = "owner";
+        }
       },
     },
     webchatRepo: {
@@ -181,6 +185,9 @@ function harness(
     actorOf: async (chatId) =>
       chatId === "visitors" ? ({ kind: "visitor", accountId: "acct-v" } as never) : undefined,
     ...(options.movedOnSince ? { movedOnSince: options.movedOnSince } : {}),
+    // As the chat reads: the last message written in it.
+    newestMessageId: async (chatId) =>
+      [...messages].filter(([, message]) => message.chatId === chatId).at(-1)?.[0] ?? null,
     ...(options.continuesAfterLimit ? { continuesAfterLimit: options.continuesAfterLimit } : {}),
     selectModel: (chatId, _agentName, selection) => {
       selected.push({ chatId, selection });
@@ -596,6 +603,52 @@ describe("the three cards", () => {
     expect(parts.map((part) => part.resolved?.by)).toEqual(["moved", undefined]);
   });
 
+  it("rewrites the open card in place while refusals repeat and it is the newest message", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("unauthorized") });
+    const refuse = () =>
+      h.failures.failed(
+        { chatId: "chat", agentName: "main", failure: refused("anthropic", "not_logged_in") },
+        { final: true },
+      );
+    await refuse();
+    const [first] = await h.failures.cards();
+    // A retry refused again and again adds no message, so nothing unread piles up.
+    await refuse();
+    await refuse();
+    expect(h.messages.size).toBe(1);
+    expect(h.shownCards("chat")).toHaveLength(1);
+    const [card] = await h.failures.cards();
+    expect(card?.messageId).toBe(first!.messageId);
+    expect(card?.since).toBe(first!.since);
+  });
+
+  it("writes a new card for a refusal once anything was said after the open card", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("unauthorized") });
+    const refuse = () =>
+      h.failures.failed(
+        { chatId: "chat", agentName: "main", failure: refused("anthropic", "not_logged_in") },
+        { final: true },
+      );
+    await refuse();
+    // A reply of the agent's, or someone's message, comes after the card.
+    h.messages.set("said", { chatId: "chat", parts: [{ type: "text", content: "Done." }] });
+    await refuse();
+    expect(h.shownCards("chat")).toHaveLength(1);
+    const parts = [...h.messages.values()]
+      .flatMap((m) => m.parts as ProviderFailurePart[])
+      .filter((part) => part.type === "provider_failure");
+    expect(parts.map((part) => part.resolved?.by)).toEqual(["moved", undefined]);
+  });
+
+  it("keeps a card for each turn that ran and failed, its newest message or not", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("usage_limit_reached") });
+    await h.fail("chat", quota);
+    await h.fail("chat", quota);
+    // Each turn's own card explains its error where the turn shows.
+    expect(h.messages.size).toBe(2);
+    expect(h.shownCards("chat")).toHaveLength(1);
+  });
+
   it("settles a card when a later turn in the chat runs", async () => {
     const h = harness({ chat: {} }, { anthropic: reportOf("usage_limit_reached") });
     await h.fail("chat", quota);
@@ -969,7 +1022,7 @@ describe("a card's options stay as written, and Retry is on every card", () => {
     await h.fail("chat", quota);
     const [card] = await h.failures.cards();
     await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
-    expect(h.picked).toEqual([{ chatId: "chat", provider: "openai" }]);
+    expect(h.picked).toEqual([{ chatId: "chat", selection: "gpt-6-1-sol" }]);
   });
 
   it("an error other than a logged-out provider stays an error, not a fresh card", async () => {

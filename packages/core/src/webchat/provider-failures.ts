@@ -140,7 +140,7 @@ export interface ProviderFailuresDeps {
   /** `refresh`, when given, reads a provider's account again, as for a reset time a card lacks. */
   accounts: Pick<ModelAccounts, "read" | "onChanged"> & Partial<Pick<ModelAccounts, "refresh">>;
   defaults: Pick<DefaultProviders, "current" | "signedIn" | "choose">;
-  chats: Pick<ChatProviders, "keep" | "follow" | "picked">;
+  chats: Pick<ChatProviders, "keep" | "follow" | "pick">;
   webchatRepo: Pick<
     WebChatRepository,
     "getSession" | "addBackendMessage" | "updateMessageContent" | "updateSessionLargeModelSelection"
@@ -163,6 +163,11 @@ export interface ProviderFailuresDeps {
    * Absent, nobody did.
    */
   movedOnSince?: (chatId: string, since: number) => boolean;
+  /**
+   * The id of the newest message the chat shows, or null when it has none.
+   * Absent, a card is never rewritten in place.
+   */
+  newestMessageId?: (chatId: string) => Promise<string | null>;
   /**
    * Whether the usage-limit continuation, sweeping once the limit ends at
    * `until`, would run the chat's stopped turn again. Absent, it would not.
@@ -588,17 +593,35 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
 
   /**
    * Writes a chat's open card with the turn that failed. A chat shows one open
-   * card: an older one leaves its message, which keeps what else it held.
+   * card: an older one leaves its message, which keeps what else it held. A
+   * turn refused before it started (`inPlace`) leaves nothing of its own in
+   * the chat, so while the open card is still the chat's newest message it is
+   * rewritten there: refusals that repeat add no message.
    */
   const writeCard = (
     turn: Pick<ChatTurnFailure, "chatId" | "agentName" | "turnId">,
     part: ProviderFailurePart,
     runsOn: AccountedProviderId,
     written?: { messageId: string; beside: unknown[] },
+    inPlace = false,
   ) =>
     serial(async () => {
       const cards = await readCards();
       const open = cards.find((card) => card.chatId === turn.chatId);
+      if (
+        open &&
+        inPlace &&
+        (await deps.newestMessageId?.(turn.chatId).catch(() => null)) === open.messageId
+      ) {
+        const rewritten: OpenProviderCard = { ...open, agentName: turn.agentName, runsOn, part };
+        const wrote = await deps.webchatRepo
+          .updateMessageContent(open.messageId, content(rewritten))
+          .catch(() => false);
+        if (wrote) {
+          await writeCards([...cards.filter((other) => other.chatId !== turn.chatId), rewritten]);
+          return rewritten;
+        }
+      }
       if (open) {
         // The older turn keeps its card, hidden, so it still reads as explained.
         const moved = {
@@ -803,12 +826,8 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
         MODEL_SELECTIONS[stored].providerId === provider
           ? stored
           : selectionOfStrength(provider, strengthOfSelection(stored, account), account);
-      if (selection !== stored) {
-        await deps.webchatRepo.updateSessionLargeModelSelection(chatId, selection, "owner");
-        deps.selectModel?.(chatId, agentName, selection);
-      }
-      // A held conversation moves its hold with the pick, so its subagents follow.
-      await deps.chats.picked(chatId, provider);
+      // Still the owner's, in one transition with its hold, so its subagents follow.
+      if (selection !== stored) await deps.chats.pick(chatId, selection);
       return;
     }
     if (change.makeDefault) await deps.chats.follow(chatId);
@@ -1057,7 +1076,13 @@ export function createProviderFailures(deps: ProviderFailuresDeps): ProviderFail
       const turn = canonical(raw);
       const decided = await decide(turn, options?.final === true, retried);
       if (!decided) return;
-      await writeCard(turn, decided.part, decided.runsOn);
+      await writeCard(
+        turn,
+        decided.part,
+        decided.runsOn,
+        undefined,
+        turn.failure.kind === "resolution",
+      );
       // The stopped turn is stored now: what the continuation will do with it is known.
       await repromise((card) => card.chatId === turn.chatId);
       if (decided.unattended) await groupIn(turn, decided.part);

@@ -560,13 +560,13 @@
       "loadFailed": "Couldn't load your servers.",
       "addFailed": "Couldn't open Discord. Try again.",
       "removeFailed": "Couldn't remove {{name}}. Try again.",
-      "howTo": "DM Rome, or @Rome in a channel.",
-      "blurbDetail": "DM it, or add it to your servers.",
+      "howTo": "@Rome in a channel. Run /rome there to enable direct messages.",
+      "blurbDetail": "Add it to a server, then @mention it or enable direct messages with /rome.",
       "servers": "Servers",
       "empty": "Add Rome to a server to @mention it in channels.",
       "manage": "More",
       "disconnect": "Disconnect Discord",
-      "linkedAs": "Linked as {{name}}"
+      "linkedAs": "Direct messages enabled for {{name}}"
     },
     "telegramUser": {
       "fallbackName": "Telegram user",

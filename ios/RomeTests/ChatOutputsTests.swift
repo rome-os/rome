@@ -40,6 +40,11 @@ private let outputsJSON = #"""
         #expect(ChatOutputType(name: "prices.csv", mimeType: "text/csv") == .spreadsheet)
         #expect(ChatOutputType(name: "index.html", mimeType: "text/html") == .page)
         #expect(ChatOutputType(name: "archive.zip", mimeType: nil) == .file)
+        #expect(ChatOutputType(name: "voice-note.wav", mimeType: "audio/wav") == .audio)
+        #expect(ChatOutputType(name: "clip.mp4", mimeType: "video/mp4") == .video)
+        #expect(ChatOutputType(name: "slides.pptx", mimeType: nil) == .document)
+        #expect(ChatOutputType(name: "fix.diff", mimeType: nil) == .code)
+        #expect(ChatOutputType(name: "build.cjs", mimeType: "text/javascript") == .code)
     }
 
     @Test func aRowSaysWhereTheFileCameFrom() throws {

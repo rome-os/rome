@@ -7,6 +7,9 @@ import { shareRoutes } from "./share.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import type { ChatShareSnapshot } from "../share-snapshot.js";
 import { readArchivePaths } from "../../test/file-browser.js";
+import { runWithSessionActor } from "../../access/session-actor.js";
+import { sharedChats } from "../../db/schema.js";
+import { eq } from "drizzle-orm";
 
 interface PublicSharePayload {
   id: string;
@@ -566,5 +569,91 @@ describe("Share chat", () => {
       method: "POST",
     });
     expect(oneMessage.status).toBe(404);
+  });
+  describe("every link of the signed-in person", () => {
+    interface OwnerShare {
+      id: string;
+      title: string;
+      url: string;
+      createdAt: string;
+      chatId: string;
+      chatName: string;
+    }
+    const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+
+    async function chat(id: string, name: string, ownerKey: string | null, agent?: string) {
+      await deps.webchatRepo.createSession(
+        id,
+        name,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        agent ?? null,
+        "webchat",
+        null,
+        { ownerKey },
+      );
+    }
+    async function share(id: string, sessionId: string, title: string, at: string) {
+      await deps.webchatRepo.createSharedChat({
+        id,
+        sessionId,
+        title,
+        snapshot: "{}",
+        layout: "[]",
+        projectPath: null,
+      });
+      await testDb.db
+        .update(sharedChats)
+        .set({ createdAt: new Date(at) })
+        .where(eq(sharedChats.id, id));
+    }
+
+    beforeEach(async () => {
+      await chat("concierge", "Main chat", "guardian", "core:concierge");
+      await chat("topic", "Trip to Lisbon", "guardian", "core:concierge");
+      await chat("common", "Budget", null);
+      await chat("visitor-chat", "Visitor notes", "visitor:acct-v");
+      await share("s-main", "concierge", "Plan my week", "2026-11-01T10:00:00Z");
+      await share("s-topic", "topic", "Day one", "2026-11-03T10:00:00Z");
+      await share("s-common", "common", "Budget", "2026-11-02T10:00:00Z");
+      await share("s-revoked", "common", "Old budget", "2026-11-04T10:00:00Z");
+      await deps.webchatRepo.revokeSharedChat("s-revoked");
+      await share("s-visitor", "visitor-chat", "Notes", "2026-11-05T10:00:00Z");
+    });
+
+    it("lists the guardian's live links across their chats, newest first, with each chat's name", async () => {
+      const manage = createWebchatRuntime(deps).routes;
+      const res = await manage.request("/chat/shares");
+      expect(res.status).toBe(200);
+      const shares = (await res.json()) as OwnerShare[];
+      expect(shares.map((s) => [s.id, s.chatId, s.chatName])).toEqual([
+        ["s-topic", "topic", "Trip to Lisbon"],
+        ["s-common", "common", "Budget"],
+        // The main Chat shows as Chat, not by the name it was made with.
+        ["s-main", "concierge", "Chat"],
+      ]);
+      expect(shares[0]).toMatchObject({
+        title: "Day one",
+        url: "/share/s-topic",
+        createdAt: "2026-11-03T10:00:00.000Z",
+      });
+    });
+
+    it("shows a visitor only their own links", async () => {
+      const manage = createWebchatRuntime(deps).routes;
+      const res = await runWithSessionActor(visitor, () => manage.request("/chat/shares"));
+      const shares = (await res.json()) as OwnerShare[];
+      expect(shares.map((s) => [s.id, s.chatName])).toEqual([["s-visitor", "Visitor notes"]]);
+    });
+
+    it("shows someone not signed in no links", async () => {
+      const manage = createWebchatRuntime(deps).routes;
+      const res = await runWithSessionActor({ kind: "anonymous" }, () =>
+        manage.request("/chat/shares"),
+      );
+      expect(await res.json()).toEqual([]);
+    });
   });
 });

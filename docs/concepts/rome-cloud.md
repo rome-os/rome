@@ -9,8 +9,8 @@ It plays seven roles:
 - **Third-party OAuth broker** — runs the start/callback flow for providers like Google or GitHub, then hands the access token to the requesting Rome instance via a PKCE-bound handoff ([OAuth handoff](#oauth-handoff)).
 - **App store backend** — hosts the publicly available [app](apps.md#rome-apps) listings (see [App store](apps.md#app-store)).
 - **Rome credits provider** — serves Codex through an inference gateway that bills the instance's Rome credits while the guardian is logged in to no AI account and the account has credits to spend ([Rome credits](#rome-credits)).
-- **Voice input provider** — hands a signed-in instance a short-lived credential for a transcription provider, one per listening session ([Voice input](#voice-input)).
-- **Usage collector** — receives the usage a signed-in instance reports about its own turns, action runs, guardian sign-ins, and listening sessions ([Usage reporting](#usage-reporting)).
+- **Voice input provider** — hands a signed-in instance a short-lived credential for a transcription provider, one per listening session ([Voice input](#voice-input)), and one for a speech provider, which the instance reuses until shortly before it expires ([Voice conversation](#voice-conversation)).
+- **Usage collector** — receives the usage a signed-in instance reports about its own turns, action runs, guardian sign-ins, listening sessions, and speech sessions ([Usage reporting](#usage-reporting)).
 
 **Contracts:**
 
@@ -101,21 +101,25 @@ Rome Cloud provides the transcription service behind dictation in message fields
 
 ## Voice conversation
 
-Voice conversation mode lets Rome speak its replies. The speaking module in [`packages/core/src/voice-output/`](../../packages/core/src/voice-output/) turns text into audio through a speech provider. It is behind the `voice_mode` feature gate. Rome Cloud does not yet hand out speech credentials, and no chat uses the module.
+Voice conversation mode lets Rome speak its replies. The speaking module in [`packages/core/src/voice-output/`](../../packages/core/src/voice-output/) turns text into audio through a speech provider, on a credential from Rome Cloud. It is behind the `voice_mode` feature gate. No chat uses the module yet.
 
 **Contracts:**
 
 - The `voice_mode` gate is off by default. `FEATURE_GATE_VOICE_MODE=on` turns it on for one instance, with no feature-flag backend.
 - With the gate off, Rome makes no speaker, asks for no credential and opens no connection to a speech provider.
 - With the gate on and no credential source, Rome says speaking is not set up. It does not fall back to a long-lived provider key.
+- The instance asks `POST /v1/speech/sessions`, as the instance. Rome Cloud answers the provider, its address, the model, the voice, a credential, when the credential expires, and a session id. The credential opens new streams for about an hour.
+- An account holds at most five unexpired speech sessions, and Rome Cloud cannot end one early. So the instance keeps one session and its credential in its settings, and uses it for every conversation, also after a restart. It asks for a new session only when the one it has expires within 5 minutes, or once the provider has refused its credential. A session another sign-in opened is never reused. `GET /api/settings` never shows it, and `PUT /api/settings` cannot write it.
+- Rome Cloud allows speech to the accounts it allows voice input. A refusal carries its reason code, such as `voice_input_not_allowed` or `speech_rate_limited`. `speech_not_configured` means speaking is not set up. `provider_unavailable` and `speech_unavailable` are passing failures.
 - The text Rome speaks goes from the instance to the speech provider. It is a new outbound flow that [voice input](#voice-input) does not have.
 - Each sentence is its own stream at the provider, so its audio starts without waiting for later text. A session runs two streams at once by default, and more sentences wait their turn in order. The provider allows three streams at once per account by default. When it has no room for a stream, the session puts that sentence back at the head of its queue, runs no more streams than are running then, and starts the sentence again when one ends. When none of its streams is running, it tries again after 250 ms, 500 ms, 1 s, then every 2 s. A sentence fails with a `busy` error only after those waits add up to 10 s, or when the provider refuses the connection itself as one too many.
 - Stopping speech drops the audio of every running and waiting sentence at once, without waiting for the provider to confirm.
+- A speaking session outlives its credential. When the provider refuses it, as it does for a new stream once the credential has expired or been revoked, the session asks for a new one, moves to it, and says again each refused sentence none of whose audio came. Sentences already speaking finish on the old credential. It does this once until audio comes again, so a credential refused from the start still fails. Across a renewal, sentences may start out of the order they were said. The caller plays them in its own order.
 - Errors and logs never carry the credential.
 
 ## Usage reporting
 
-A signed-in instance reports one usage event per [turn](sessions.md#turn), one per app or [routine](data.md#routines) action run, one per guardian sign-in, and one per listening session on a Rome Cloud transcription session to Rome Cloud. A turn event carries its token counts, the model, who paid the provider, where the work came from, and what set it off. Rome Cloud joins turn events to the Rome credit charges its inference gateway recorded. The two sources stay separate ([decision](../adrs/instance-reported-usage-beside-credits-ledger.md)).
+A signed-in instance reports one usage event per [turn](sessions.md#turn), one per app or [routine](data.md#routines) action run, one per guardian sign-in, one per listening session on a Rome Cloud transcription session, and one per Rome Cloud speech session to Rome Cloud. A turn event carries its token counts, the model, who paid the provider, where the work came from, and what set it off. Rome Cloud joins turn events to the Rome credit charges its inference gateway recorded. The two sources stay separate ([decision](../adrs/instance-reported-usage-beside-credits-ledger.md)).
 
 **Contracts:**
 
@@ -132,6 +136,7 @@ A signed-in instance reports one usage event per [turn](sessions.md#turn), one p
   A turn takes the trigger of its root session's chain. A routine run records what fired it. A run recorded before runs stored that takes its routine's current trigger. A retried fire has no run of its own, so it takes the trigger shared by the routines with its name, or `unknown` when they differ.
 - A login event records each time the guardian signs in to the instance. Its kind is the sign-in method: `password`, `onboard`, `oauth`, `rome_cloud`, or `rome_cloud_native` for the desktop and mobile apps. An OAuth redeem by a guardian who is already signed in connects a provider and is not a login.
 - A transcription event records each listening session. It carries Rome Cloud's session id, the provider, the model, the seconds of audio sent, and why listening stopped. The seconds are the instance's own count of the audio it forwarded, for analytics. What Rome Cloud pays the provider comes from the provider's records.
+- A speech event records each speech session, once, 6 minutes after it expired, when no stream opened on it can still be speaking. It carries Rome Cloud's session id, the provider, the model, the characters of text spoken, and the seconds of audio returned, added up over every conversation on the session and across restarts. A sentence's text counts once its first audio arrives, so a sentence stopped before it was spoken does not count. A session whose credential the provider refused counts as expired at the refusal. The instance reports at startup what an earlier run left. It keeps the counts with the session until the event is queued, and tries again a minute later when it cannot be, or while it is signed out. A session another sign-in opened is dropped, not reported.
 - A turn event carries the kind of [login](../domains/agents.md#model-provider-login) the turn ran on: `subscription`, `api_credential`, or `rome_credits`. It is left out when Rome cannot tell. Instances older than the field sent `funding` instead, which Rome Cloud still reads.
 - A Codex turn event carries Codex's own turn id. Codex sends the same id on every gateway request, which is the join key for credit charges.
 - Events carry no prompt, output, contact, or routine name. An app appears as its App Store listing id or `first-party:<app id>`. Any other app appears as `local`.

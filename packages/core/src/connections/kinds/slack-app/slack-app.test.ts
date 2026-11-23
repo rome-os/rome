@@ -1,16 +1,11 @@
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
-import {
-  FORWARD_SIGNATURE_HEADER,
-  FORWARD_TEAM_HEADER,
-  FORWARD_TIMESTAMP_HEADER,
-  forwardSignature,
-} from "./forward.js";
-import { type MailboxFrame, type OpenMailbox, SlackAppAdapter } from "./slack-app.js";
-import { createSlackAppWebApi, type SlackAppWebApi } from "./web-api.js";
+import { depositSignature, SLACK_DEPOSIT_HEADER, SLACK_SIGNATURE_HEADER } from "./deposit.js";
+import { type MailboxFrame, SlackAppAdapter } from "./slack-app.js";
+import { createSlackAppWebApi, ROME_CLOUD_UNAVAILABLE, type SlackAppWebApi } from "./web-api.js";
 import { slackMessage, type SlackWireMessage } from "./message.js";
-import { SlackApiError } from "../slack/slack.js";
+import { isSlackCredentialError, SlackApiError } from "../slack/slack.js";
 import { SlackReadGate } from "./read-gate.js";
 import { channelMessageOf } from "../../../chats/connected-accounts/channel-message.js";
 import type { Message } from "../../message.js";
@@ -40,11 +35,13 @@ function fakeChats() {
 
 const TEAM = "T_A";
 const BOT = "U_BOT";
-const SECRET = "forward-secret-a";
+const DEPOSIT_KEY = "deposit-key-a";
+/** How short a real wait may measure: Node's timers and `Date.now()` count
+ *  whole milliseconds, so a 300 ms sleep can read as 299. */
+const TIMER_SLACK_MS = 5;
 
 function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
   return {
-    authTest: rs.fn(async () => ({ teamId: TEAM, botUserId: BOT, appId: "A_ROME" })),
     postMessage: rs.fn(async () => ({ ts: "2.0" })),
     openDirectMessage: rs.fn(async () => "D_NEW"),
     addReaction: rs.fn(async () => {}),
@@ -53,7 +50,6 @@ function fakeApi(overrides: Partial<SlackAppWebApi> = {}): SlackAppWebApi {
     conversationHistory: rs.fn(async () => ({ messages: [], hasMore: false })),
     conversationReplies: rs.fn(async () => ({ messages: [] })),
     memberChannels: rs.fn(async () => ({ channels: [] })),
-    revoke: rs.fn(async () => {}),
     ...overrides,
   };
 }
@@ -76,25 +72,20 @@ function dmEvent(i: number, overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** A frame as Rome Cloud deposits it, signed with `secret` for `team`. */
-function frame(payload: unknown, secret = SECRET, team = TEAM): MailboxFrame {
+/** A frame as the Slack gateway Worker deposits it, signed with `depositKey`. */
+function frame(payload: unknown, depositKey = DEPOSIT_KEY): MailboxFrame {
   const body = new TextEncoder().encode(JSON.stringify(payload));
-  const timestamp = "1700000000";
   return {
     headers: {
       "content-type": "application/json",
-      [FORWARD_TEAM_HEADER]: team,
-      [FORWARD_TIMESTAMP_HEADER]: timestamp,
-      [FORWARD_SIGNATURE_HEADER]: forwardSignature({
-        forwardSecret: secret,
-        timestamp,
-        teamId: team,
-        body,
-      }),
+      [SLACK_DEPOSIT_HEADER]: "1",
+      [SLACK_SIGNATURE_HEADER]: depositSignature(body, depositKey),
     },
     body,
   };
 }
+
+type OnFrame = (frame: MailboxFrame) => Promise<{ status: number }>;
 
 /**
  * A relay mailbox: frames deposited while nothing drains it wait, and opening
@@ -103,7 +94,7 @@ function frame(payload: unknown, secret = SECRET, team = TEAM): MailboxFrame {
  */
 function fakeMailbox() {
   const queue: MailboxFrame[] = [];
-  let onFrame: ((frame: MailboxFrame) => Promise<{ status: number }>) | null = null;
+  let onFrame: OnFrame | null = null;
   const statuses: number[] = [];
   const pump = async () => {
     while (onFrame && queue.length > 0) {
@@ -113,7 +104,7 @@ function fakeMailbox() {
       queue.shift();
     }
   };
-  const open: OpenMailbox = (_mailbox, handler) => {
+  const open = (handler: OnFrame) => {
     onFrame = handler;
     void pump();
     return {
@@ -147,24 +138,37 @@ function adapter(
     chats?: ReturnType<typeof fakeChats>;
     listened?: () => boolean;
     readGate?: SlackReadGate;
+    bound?: () => Promise<boolean>;
   } = {},
 ) {
   const chats = options.chats ?? fakeChats();
   const faults: string[] = [];
   const a = new SlackAppAdapter({
     channel: "slack_app",
-    botToken: "xoxb-a",
     teamId: TEAM,
     botUserId: BOT,
-    forwardSecret: SECRET,
-    mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+    depositKey: DEPOSIT_KEY,
     api,
-    openMailbox: mailbox.open,
+    bound: options.bound ?? (async () => true),
+    deliveryAttempts: 4,
     onFault: ({ kind }) => faults.push(kind),
     ...(options.readGate ? { readGate: options.readGate } : {}),
     ...(options.listened ? { listened: options.listened } : {}),
   });
   a.onInbound(chats.accept);
+  // The instance's drain hands frames to the connection while it runs.
+  const start = a.start.bind(a);
+  const stop = a.stop.bind(a);
+  let drain: { stop(): void } | null = null;
+  a.start = () => {
+    start();
+    drain = mailbox.open((f) => a.handleFrame(f));
+  };
+  a.stop = () => {
+    drain?.stop();
+    drain = null;
+    stop();
+  };
   return { adapter: a, delivered: chats.delivered, faults, api, chats };
 }
 
@@ -197,7 +201,7 @@ describe("Slack app direct messages (R4)", () => {
     await a.start();
     await a.react("C_TEAM" as never, "1700000000.000100:1700000000.000200", "👍");
     expect(api.addReaction).toHaveBeenCalledWith(
-      "xoxb-a",
+      TEAM,
       { channel: "C_TEAM", timestamp: "1700000000.000200", name: "+1" },
       expect.anything(),
     );
@@ -213,7 +217,7 @@ describe("Slack app direct messages (R4)", () => {
     await a.start();
     const receipt = await a.send("D_GUARDIAN" as never, { text: "hello" } as never);
     expect(api.postMessage).toHaveBeenCalledWith(
-      "xoxb-a",
+      TEAM,
       { channel: "D_GUARDIAN", markdown: "hello", threadTs: undefined },
       expect.anything(),
     );
@@ -234,76 +238,29 @@ describe("Slack app direct messages (R4)", () => {
     expect(delivered).toHaveLength(0);
   });
 
-  it("refuses to start on a token that answers as another bot", async () => {
+  it("reports a removed app as a refused credential once Rome Cloud let go of the workspace", async () => {
     const mailbox = fakeMailbox();
-    const api = fakeApi({ authTest: rs.fn(async () => ({ teamId: "T_B", botUserId: BOT })) });
-    await expect(adapter(mailbox, api).adapter.start()).rejects.toThrow(/another Slack bot/);
-  });
-
-  it("reports a removed app as a refused credential", async () => {
-    const mailbox = fakeMailbox();
-    const api = fakeApi();
-    const { adapter: a, faults } = adapter(mailbox, api);
+    const { adapter: a, faults } = adapter(mailbox, fakeApi(), { bound: async () => false });
     await a.start();
-    api.authTest = rs.fn(async () => {
-      throw new SlackApiError("invalid_auth");
-    });
     await mailbox.deposit(frame({ ...dmEvent(1), event: { type: "app_uninstalled" } }));
     expect(faults).toEqual(["credential"]);
   });
 
-  describe("looks at the token again 30 s after a removal event it outlived", () => {
-    beforeEach(() => {
-      rs.useFakeTimers();
+  it("reports the connection down when Rome Cloud cannot say whether it still holds the workspace", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, faults } = adapter(mailbox, fakeApi(), {
+      bound: async () => {
+        throw new Error("unreachable");
+      },
     });
-    afterEach(() => {
-      rs.useRealTimers();
-    });
-
-    it("reports the removal once Slack refuses the token", async () => {
-      const mailbox = fakeMailbox();
-      const api = fakeApi();
-      const { adapter: a, faults } = adapter(mailbox, api);
-      await a.start();
-      // Slack reports the removal before it takes back the token.
-      await mailbox.deposit(frame({ ...dmEvent(1), event: { type: "app_uninstalled" } }));
-      expect(faults).toEqual([]);
-      api.authTest = rs.fn(async () => {
-        throw new SlackApiError("token_revoked");
-      });
-      await rs.advanceTimersByTimeAsync(30_000);
-      expect(faults).toEqual(["credential"]);
-    });
-
-    it("stays working while the token does", async () => {
-      const mailbox = fakeMailbox();
-      const api = fakeApi();
-      const { adapter: a, faults } = adapter(mailbox, api);
-      await a.start();
-      await mailbox.deposit(frame({ ...dmEvent(1), event: { type: "app_uninstalled" } }));
-      const checks = (api.authTest as ReturnType<typeof rs.fn>).mock.calls.length;
-      await rs.advanceTimersByTimeAsync(30_000);
-      expect((api.authTest as ReturnType<typeof rs.fn>).mock.calls.length).toBe(checks + 1);
-      expect(faults).toEqual([]);
-    });
-
-    it("looks no more once the connection stops", async () => {
-      const mailbox = fakeMailbox();
-      const api = fakeApi();
-      const { adapter: a, faults } = adapter(mailbox, api);
-      await a.start();
-      await mailbox.deposit(frame({ ...dmEvent(1), event: { type: "app_uninstalled" } }));
-      await a.stop();
-      api.authTest = rs.fn(async () => {
-        throw new SlackApiError("token_revoked");
-      });
-      await rs.advanceTimersByTimeAsync(30_000);
-      expect(api.authTest).not.toHaveBeenCalled();
-      expect(faults).toEqual([]);
-    });
+    await a.start();
+    await mailbox.deposit(
+      frame({ ...dmEvent(1), event: { type: "tokens_revoked", tokens: { bot: [BOT] } } }),
+    );
+    expect(faults).toEqual(["transport"]);
   });
 
-  it("keeps a connection whose new token outlived a removal that waited in the mailbox, and hears what follows", async () => {
+  it("keeps a connection whose workspace outlived a removal that waited in the mailbox, and hears what follows", async () => {
     const mailbox = fakeMailbox();
     const { adapter: a, faults, delivered } = adapter(mailbox);
     await a.start();
@@ -370,7 +327,7 @@ describe("Slack app mentions in a group (R5)", () => {
 
     await a.send(mention.chatId, { text: "answer", replyToMessageId: mention.messageId } as never);
     expect(api.postMessage).toHaveBeenCalledWith(
-      "xoxb-a",
+      TEAM,
       { channel: "C_TEAM", markdown: "answer", threadTs: "1700000100.000001" },
       expect.anything(),
     );
@@ -386,7 +343,7 @@ describe("Slack app mentions in a group (R5)", () => {
 
     await a.send(mention.chatId, { text: "answer", replyToMessageId: mention.messageId } as never);
     expect(api.postMessage).toHaveBeenCalledWith(
-      "xoxb-a",
+      TEAM,
       { channel: "C_TEAM", markdown: "answer", threadTs: "1700000050.000000" },
       expect.anything(),
     );
@@ -599,8 +556,8 @@ describe("Slack app acknowledging its mailbox", () => {
   });
 });
 
-describe("Slack app frames that did not come from Rome Cloud (R7)", () => {
-  it("drops 10 of 10 frames with a bad forward signature", async () => {
+describe("Slack app frames the Worker did not deposit for this Rome (R7)", () => {
+  it("drops 10 of 10 frames not signed with this Rome's deposit key", async () => {
     const mailbox = fakeMailbox();
     const { adapter: a, delivered } = adapter(mailbox);
     await a.start();
@@ -609,267 +566,119 @@ describe("Slack app frames that did not come from Rome Cloud (R7)", () => {
     expect(mailbox.statuses).toEqual(Array(10).fill(401));
   });
 
-  it("drops 20 of 20 frames forwarded for another workspace", async () => {
+  it("drops 20 of 20 frames of another workspace", async () => {
     const mailbox = fakeMailbox();
     const { adapter: a, delivered } = adapter(mailbox);
     await a.start();
     for (let i = 0; i < 10; i++) {
-      // Signed for B with B's secret: the header names another workspace.
-      await mailbox.deposit(frame({ ...dmEvent(i), team_id: "T_B" }, "secret-b", "T_B"));
-      // Signed for A, with a body from B.
+      // Signed with another Rome's key, for its workspace.
+      await mailbox.deposit(frame({ ...dmEvent(i), team_id: "T_B" }, "deposit-key-b"));
+      // Signed with this Rome's key, for a workspace this connection does not hold.
       await mailbox.deposit(frame({ ...dmEvent(100 + i), team_id: "T_B" }));
     }
+    expect(delivered).toHaveLength(0);
+    expect(mailbox.statuses).toEqual(Array(10).fill([401, 400]).flat());
+  });
+
+  it("drops a frame with no signature", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = adapter(mailbox);
+    await a.start();
+    const signed = frame(dmEvent(1));
+    await mailbox.deposit({ headers: { [SLACK_DEPOSIT_HEADER]: "1" }, body: signed.body });
+    expect(mailbox.statuses).toEqual([401]);
     expect(delivered).toHaveLength(0);
   });
 });
 
 describe("Slack app Web API", () => {
-  it("calls the configured Slack origin for every method", async () => {
-    const urls: string[] = [];
-    const fetchImpl = (async (input: string | URL | Request) => {
-      urls.push(String(input));
-      return Response.json({
-        ok: true,
-        team_id: TEAM,
-        user_id: BOT,
-        ts: "1.0",
-        channel: { id: "D1" },
-        user: { name: "n" },
+  it("sends every method to the Worker, naming the workspace, with the instance's token and no Slack token", async () => {
+    const calls: Array<{ url: string; headers: Headers; body: unknown }> = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(input),
+        headers: new Headers(init?.headers),
+        body: JSON.parse(String(init?.body)),
       });
+      return Response.json({ ok: true, ts: "1.0", channel: { id: "D1" }, user: { name: "n" } });
     }) as typeof fetch;
-    const api = createSlackAppWebApi("http://fake-slack.test:8080/ignored", fetchImpl);
-    await api.authTest("t");
-    await api.postMessage("t", { channel: "D1", markdown: "hi" });
-    await api.openDirectMessage("t", "U1");
-    await api.userName("t", "U1");
-    expect(urls.map((url) => new URL(url).origin)).toEqual(
-      Array(4).fill("http://fake-slack.test:8080"),
+    const api = createSlackAppWebApi(
+      "http://slack-gateway.test:8787/ignored",
+      fetchImpl,
+      async () => "instance-jwt",
     );
-    expect(urls.map((url) => new URL(url).pathname)).toEqual([
-      "/api/auth.test",
-      "/api/chat.postMessage",
-      "/api/conversations.open",
-      "/api/users.info",
-    ]);
-  });
-});
-
-describe("Slack app mailbox key", () => {
-  const DAY = 24 * 60 * 60 * 1000;
-  const NOW = Date.UTC(2026, 10, 19);
-  const keyExpiringAt = (ms: number, tag = "sig") => `${Math.floor(ms / 1000)}.${tag}`;
-
-  function renewing(
-    stored: string,
-    refresh: () => Promise<{ connectUrl: string; drainKey: string }>,
-    persist: (drainKey: string) => Promise<void> = async () => {},
-  ) {
-    const opened: string[] = [];
-    const stopped: string[] = [];
-    const faults: string[] = [];
-    const refreshed: string[] = [];
-    const open: OpenMailbox = (mailbox) => {
-      opened.push(mailbox.drainKey);
-      return { stop: () => void stopped.push(mailbox.drainKey), attempts: 4 };
-    };
-    const a = new SlackAppAdapter({
-      channel: "slack_app",
-      botToken: "xoxb-a",
-      teamId: TEAM,
-      botUserId: BOT,
-      forwardSecret: SECRET,
-      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: stored },
-      api: fakeApi(),
-      openMailbox: open,
-      refreshMailbox: rs.fn(refresh),
-      onMailboxRefreshed: async (mailbox) => {
-        refreshed.push(mailbox.drainKey);
-        await persist(mailbox.drainKey);
-      },
-      onFault: ({ kind }) => faults.push(kind),
-    });
-    return { adapter: a, opened, stopped, faults, refreshed };
-  }
-
-  async function withClock(run: () => Promise<void>) {
-    rs.useFakeTimers();
-    rs.setSystemTime(NOW);
-    try {
-      await run();
-    } finally {
-      rs.useRealTimers();
+    await api.postMessage(TEAM, { channel: "D1", markdown: "hi" });
+    await api.openDirectMessage(TEAM, "U1");
+    await api.userName(TEAM, "U1");
+    await api.conversationHistory(TEAM, { channel: "C1", limit: 15 });
+    await api.conversationReplies(TEAM, { channel: "C1", ts: "1.0", limit: 15 });
+    await api.memberChannels(TEAM, { limit: 200 });
+    expect(calls.map((call) => call.url)).toEqual(
+      [
+        "chat.postMessage",
+        "conversations.open",
+        "users.info",
+        "conversations.history",
+        "conversations.replies",
+        "users.conversations",
+      ].map((method) => `http://slack-gateway.test:8787/v1/slack/${method}`),
+    );
+    for (const call of calls) {
+      expect(call.headers.get("authorization")).toBe("Bearer instance-jwt");
+      expect(call.headers.get("x-slack-team")).toBe(TEAM);
     }
-  }
-
-  it("refuses to drain with an expired key it could not renew, and drains once Rome Cloud recovers", () =>
-    withClock(async () => {
-      const expired = keyExpiringAt(NOW - DAY);
-      const fresh = keyExpiringAt(NOW + 90 * DAY, "fresh");
-      let cloudUp = false;
-      const t = renewing(expired, async () => {
-        if (!cloudUp) throw new Error("Rome Cloud unreachable");
-        return { connectUrl: "wss://relay.test/c/mbx", drainKey: fresh };
-      });
-      await expect(t.adapter.start()).rejects.toThrow("expired");
-      expect(t.opened).toEqual([]);
-      // The runtime restarts the connection after a Disconnected fault.
-      cloudUp = true;
-      await t.adapter.start();
-      expect(t.opened).toEqual([fresh]);
-      expect(t.refreshed).toEqual([fresh]);
-      await t.adapter.stop();
-    }));
-
-  it("renews the key a week before it expires and reopens the drain with it", () =>
-    withClock(async () => {
-      const first = keyExpiringAt(NOW + 30 * DAY, "first");
-      const second = keyExpiringAt(NOW + 120 * DAY, "second");
-      let answer = first;
-      const t = renewing(first, async () => ({
-        connectUrl: "wss://relay.test/c/mbx",
-        drainKey: answer,
-      }));
-      await t.adapter.start();
-      expect(t.opened).toEqual([first]);
-      answer = second;
-      await rs.advanceTimersByTimeAsync(22 * DAY);
-      expect(t.opened).toEqual([first]);
-      await rs.advanceTimersByTimeAsync(1 * DAY + 1000);
-      expect(t.opened).toEqual([first, second]);
-      expect(t.stopped).toEqual([first]);
-      expect(t.refreshed).toEqual([second]);
-      expect(t.faults).toEqual([]);
-      await t.adapter.stop();
-    }));
-
-  it("lets the old drain finish its message before the renewed drain opens", () =>
-    withClock(async () => {
-      const first = keyExpiringAt(NOW + 8 * DAY, "first");
-      const second = keyExpiringAt(NOW + 98 * DAY, "second");
-      let releaseName!: () => void;
-      const nameHeld = new Promise<void>((resolve) => {
-        releaseName = resolve;
-      });
-      const order: string[] = [];
-      let inFlight: Promise<unknown> = Promise.resolve();
-      // Like the relay drainer, stopping waits for the delivery in flight.
-      const open: OpenMailbox = (mailbox, onFrame) => {
-        order.push(`open ${mailbox.drainKey.split(".")[1]}`);
-        if (mailbox.drainKey === first) inFlight = onFrame(frame(dmEvent(1)));
-        return {
-          stop: async () => {
-            await inFlight;
-            order.push(`stopped ${mailbox.drainKey.split(".")[1]}`);
-          },
-          attempts: 4,
-        };
-      };
-      let answer = first;
-      const a = new SlackAppAdapter({
-        channel: "slack_app",
-        botToken: "xoxb-a",
-        teamId: TEAM,
-        botUserId: BOT,
-        forwardSecret: SECRET,
-        mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: first },
-        api: fakeApi({
-          userName: rs.fn(async () => {
-            await nameHeld;
-            return { displayName: "Ouou" };
-          }),
-        }),
-        openMailbox: open,
-        refreshMailbox: async () => ({ connectUrl: "wss://relay.test/c/mbx", drainKey: answer }),
-      });
-      a.onInbound((message) => void order.push(`delivered ${message.content.text}`));
-      await a.start();
-      answer = second;
-      await rs.advanceTimersByTimeAsync(DAY + 1000);
-      expect(order).toEqual(["open first"]);
-      releaseName();
-      await rs.advanceTimersByTimeAsync(0);
-      expect(order).toEqual(["open first", "delivered message 1", "stopped first", "open second"]);
-      await a.stop();
-    }));
-
-  it("drops a refresh that answers after the adapter stopped, without persisting it", async () => {
-    const stored = "k-stored";
-    let answer!: (mailbox: { connectUrl: string; drainKey: string }) => void;
-    const t = renewing(
-      stored,
-      () =>
-        new Promise((resolve) => {
-          answer = resolve;
-        }),
-    );
-    const started = t.adapter.start();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    // A regrant replaces this adapter while Rome Cloud is still answering.
-    await t.adapter.stop();
-    answer({ connectUrl: "wss://relay.test/c/mbx", drainKey: "k-late" });
-    await started;
-    expect(t.refreshed).toEqual([]);
-    expect(t.opened).toEqual([]);
+    expect(calls[0]?.body).toEqual({ channel: "D1", markdown_text: "hi" });
   });
 
-  it("drains with the stored key when the fresh one could not be kept, and renews it later", () =>
-    withClock(async () => {
-      const stored = keyExpiringAt(NOW + 30 * DAY, "stored");
-      const fresh = keyExpiringAt(NOW + 120 * DAY, "fresh");
-      let keeps = false;
-      const t = renewing(
-        stored,
-        async () => ({ connectUrl: "wss://relay.test/c/mbx", drainKey: fresh }),
-        async () => {
-          if (!keeps) throw new Error("database is locked");
-        },
-      );
-      await t.adapter.start();
-      // The relay still takes the stored key, which a restart reads back.
-      expect(t.opened).toEqual([stored]);
-      keeps = true;
-      await rs.advanceTimersByTimeAsync(23 * DAY + 1000);
-      expect(t.opened).toEqual([stored, fresh]);
-      expect(t.faults).toEqual([]);
-      await t.adapter.stop();
-    }));
+  it("reads a workspace the Worker no longer holds for this Rome as a refused credential", async () => {
+    const api = createSlackAppWebApi(
+      "http://slack-gateway.test",
+      (async () =>
+        Response.json({ error: "not_bound" }, { status: 403 })) as unknown as typeof fetch,
+      async () => "instance-jwt",
+    );
+    const refused = await api
+      .postMessage(TEAM, { channel: "D1", markdown: "hi" })
+      .catch((error: unknown) => error);
+    expect(isSlackCredentialError(refused)).toBe(true);
+  });
 
-  it("waits for the hourly retry when Rome Cloud answers a key already due for renewal", () =>
-    withClock(async () => {
-      const key = keyExpiringAt(NOW + 3 * DAY);
-      let calls = 0;
-      const t = renewing(key, async () => {
-        calls++;
-        return { connectUrl: "wss://relay.test/c/mbx", drainKey: key };
-      });
-      await t.adapter.start();
-      await rs.advanceTimersByTimeAsync(1000);
-      expect(calls).toBe(2);
-      await rs.advanceTimersByTimeAsync(60 * 60 * 1000);
-      expect(calls).toBe(3);
-      expect(t.opened).toEqual([key]);
-      await t.adapter.stop();
-    }));
+  it("reads this Rome not signed in to Rome Cloud as a passing fault, never a refused Slack credential", async () => {
+    const send = (fetchImpl: typeof fetch, bearer: () => Promise<string | null>) =>
+      createSlackAppWebApi("http://slack-gateway.test", fetchImpl, bearer)
+        .postMessage(TEAM, { channel: "D1", markdown: "hi" })
+        .catch((error: unknown) => error);
+    const calls: unknown[] = [];
+    const noBearer = await send(
+      (async () => {
+        calls.push(1);
+        return Response.json({ ok: true });
+      }) as unknown as typeof fetch,
+      async () => null,
+    );
+    const workerRefused = await send(
+      (async () =>
+        Response.json({ error: "unauthorized" }, { status: 401 })) as unknown as typeof fetch,
+      async () => "instance-jwt",
+    );
+    for (const refused of [noBearer, workerRefused]) {
+      expect(refused).toMatchObject({ code: ROME_CLOUD_UNAVAILABLE });
+      expect(isSlackCredentialError(refused)).toBe(false);
+    }
+    expect(calls).toEqual([]);
+  });
 
-  it("retries a failed renewal hourly, and reports the connection down once the key expires", () =>
-    withClock(async () => {
-      const key = keyExpiringAt(NOW + 7 * DAY + 2 * 60 * 60 * 1000);
-      let calls = 0;
-      const t = renewing(key, async () => {
-        calls++;
-        if (calls === 1) return { connectUrl: "wss://relay.test/c/mbx", drainKey: key };
-        throw new Error("Rome Cloud unreachable");
-      });
-      await t.adapter.start();
-      await rs.advanceTimersByTimeAsync(2 * 60 * 60 * 1000 + 1000);
-      expect(calls).toBe(2);
-      await rs.advanceTimersByTimeAsync(3 * 60 * 60 * 1000);
-      expect(calls).toBe(5);
-      expect(t.faults).toEqual([]);
-      await rs.advanceTimersByTimeAsync(7 * DAY);
-      expect(t.faults).toEqual(["transport"]);
-      await t.adapter.stop();
-    }));
+  it("passes on Slack's own refusal", async () => {
+    const api = createSlackAppWebApi(
+      "http://slack-gateway.test",
+      (async () =>
+        Response.json({ ok: false, error: "channel_not_found" })) as unknown as typeof fetch,
+      async () => "instance-jwt",
+    );
+    await expect(
+      api.postMessage(TEAM, { channel: "C_GONE", markdown: "hi" }),
+    ).rejects.toMatchObject({ code: "channel_not_found" });
+  });
 });
 
 /**
@@ -881,7 +690,7 @@ function fakeSlackHistory() {
   const said: SlackWireMessage[] = [];
   const calls: Array<{ channel: string; latest?: string }> = [];
   const conversationHistory = rs.fn(
-    async (_token: string, input: { channel: string; latest?: string; limit: number }) => {
+    async (_teamId: string, input: { channel: string; latest?: string; limit: number }) => {
       calls.push({ channel: input.channel, ...(input.latest ? { latest: input.latest } : {}) });
       const older = said
         .filter((m) => input.latest === undefined || Number(m.ts) < Number(input.latest))
@@ -1168,7 +977,11 @@ describe("Slack app reads Slack refused as too soon", () => {
       }
       return Response.json({ ok: true, messages: [{ ts: "1.0", text: "root", user: "U1" }] });
     }) as unknown as typeof fetch;
-    const api = createSlackAppWebApi("http://fake-slack.test", fetchImpl);
+    const api = createSlackAppWebApi(
+      "http://fake-slack.test",
+      fetchImpl,
+      async () => "instance-jwt",
+    );
     const gate = new SlackReadGate({ intervalMs: 300, maxWaitMs: 60_000 });
     const replies = (ts: string) =>
       gate.run(`replies:C1:${ts}`, () =>
@@ -1180,10 +993,10 @@ describe("Slack app reads Slack refused as too soon", () => {
     expect(second.messages).toHaveLength(1);
     expect(asked).toHaveLength(3);
     // Retry-After held the first read a second before it asked again.
-    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(1_000);
+    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(1_000 - TIMER_SLACK_MS);
     // The second thread's turn began when Slack answered, not when the
     // first read started.
-    expect(asked[2] - asked[1]).toBeGreaterThanOrEqual(300);
+    expect(asked[2] - asked[1]).toBeGreaterThanOrEqual(300 - TIMER_SLACK_MS);
   });
 
   it("answers a read that waited its full turn behind one still in flight", async () => {
@@ -1201,7 +1014,7 @@ describe("Slack app reads Slack refused as too soon", () => {
 
     await expect(Promise.all([first, second])).resolves.toEqual(["page", "page"]);
     // The second asked a full turn after Slack answered the first.
-    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(400);
+    expect(asked[1] - asked[0]).toBeGreaterThanOrEqual(400 - TIMER_SLACK_MS);
   });
 
   it("refuses a read whose Retry-After would take it past its limit, without asking Slack again", async () => {
@@ -1210,7 +1023,11 @@ describe("Slack app reads Slack refused as too soon", () => {
       asked.push(Date.now());
       return new Response(null, { status: 429, headers: { "retry-after": "20" } });
     }) as unknown as typeof fetch;
-    const api = createSlackAppWebApi("http://fake-slack.test", fetchImpl);
+    const api = createSlackAppWebApi(
+      "http://fake-slack.test",
+      fetchImpl,
+      async () => "instance-jwt",
+    );
     const gate = new SlackReadGate({ intervalMs: 300, maxWaitMs: 500 });
 
     await expect(
@@ -1245,13 +1062,13 @@ describe("Slack app in the channels it is a member of", () => {
 
     expect(api.postMessage).toHaveBeenNthCalledWith(
       1,
-      "xoxb-a",
+      TEAM,
       { channel: "C_NEWS", markdown: "hello", threadTs: undefined },
       expect.anything(),
     );
     expect(api.postMessage).toHaveBeenNthCalledWith(
       2,
-      "xoxb-a",
+      TEAM,
       { channel: "C_NEWS", markdown: "in thread", threadTs: "1700000000.000001" },
       expect.anything(),
     );
@@ -1276,7 +1093,7 @@ describe("Slack app in the channels it is a member of", () => {
 
     expect(api.postMessage).toHaveBeenNthCalledWith(
       2,
-      "xoxb-a",
+      TEAM,
       { channel: "G_OPS", markdown: "second", threadTs: undefined },
       expect.anything(),
     );
@@ -1310,7 +1127,7 @@ describe("Slack app in the channels it is a member of", () => {
     expect(texts(byName)).toEqual(["news 3", "news 2", "news 1"]);
     expect(byName[0]).toMatchObject({ chatId: "C_NEWS", thread: { kind: "group" } });
     expect(api.conversationHistory).toHaveBeenCalledWith(
-      "xoxb-a",
+      TEAM,
       expect.objectContaining({ channel: "C_NEWS" }),
       expect.anything(),
     );
@@ -1410,7 +1227,7 @@ describe("Slack app in the channels it is a member of", () => {
     expect(last).toEqual([]);
     expect(conversationReplies).toHaveBeenNthCalledWith(
       2,
-      "xoxb-a",
+      TEAM,
       expect.objectContaining({ oldest: "1700000000.000114" }),
       expect.anything(),
     );
@@ -1453,13 +1270,12 @@ describe("Slack app in the channels it is a member of", () => {
     const pace = () => new SlackReadGate({ intervalMs: 60_000, maxWaitMs: 0 });
     const a = new SlackAppAdapter({
       channel: "slack_app",
-      botToken: "xoxb-a",
       teamId: TEAM,
       botUserId: BOT,
-      forwardSecret: SECRET,
-      mailbox: { connectUrl: "wss://relay.test/c/mbx", drainKey: "k" },
+      depositKey: DEPOSIT_KEY,
       api,
-      openMailbox: fakeMailbox().open,
+      bound: async () => true,
+      deliveryAttempts: 4,
       readGate: pace(),
       repliesGate: pace(),
     });

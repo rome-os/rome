@@ -665,9 +665,9 @@ enum MenuTitle {
 /// the guardian; a chat with no task list yet (a blank topic chat) has "…"
 /// alone, as the web does. "…" holds what else the Agent page shows (Outputs),
 /// then what is done to the chat: a topic chat's Rename and Pin
-/// or Unpin, then Share and Shared links, then Archive and Delete. An archived
-/// topic chat has Share, Shared links, Unarchive and Delete. The main Chat is only
-/// shared. Each button keeps a 44 pt target; the targets overlap so the
+/// or Unpin, then Share, then Archive and Delete. An archived topic chat has
+/// Share, Unarchive and Delete. The main Chat is only shared. Every link is
+/// listed in Settings, never here. Each button keeps a 44 pt target; the targets overlap so the
 /// icons sit as close as iOS's own paired toolbar buttons.
 struct ChatHeaderButtons: View {
     /// Two 44 pt targets overlapping by 10.
@@ -683,10 +683,6 @@ struct ChatHeaderButtons: View {
     var onUnarchive: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     @Environment(\.chatShare) private var share
-
-    /// A topic chat, archived or not: it lists its shared links. The main
-    /// Chat's are in Settings.
-    private var topic: Bool { onRename != nil || onUnarchive != nil }
 
     var body: some View {
         let needsYou = tasks?.needsYou ?? false
@@ -724,7 +720,6 @@ struct ChatHeaderButtons: View {
                         // Share mode with nothing picked yet, as the web's Share chat.
                         Button { share.begin(turn: nil) } label: { Label("Share", systemImage: "square.and.arrow.up") }
                     }
-                    ChatShareMenuItems(share: topic ? share : nil)
                     if let onArchive {
                         // Not red: an archived chat can come back.
                         Button(action: onArchive) { Label("Archive", systemImage: "archivebox") }

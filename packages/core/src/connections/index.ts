@@ -1,4 +1,5 @@
 // Connection public surface. Vocabulary: docs/domains/connections.md.
+// Promises, and what checks each one: ./AGENTS.md.
 
 export * from "./types.js";
 export * from "./errors.js";

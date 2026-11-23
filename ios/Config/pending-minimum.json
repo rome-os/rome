@@ -17,6 +17,12 @@
       "reason": "default switching: the pinned-chat hint reads followsDefault and pinnedModel on GET /chat/sessions/:id and calls POST /chat/sessions/:id/model/follow-default; the logout dialogs send moveExisting to the logout routes; account cards offer Retry and a switch reads refreshed. An older server sends none of the fields, ignores moveExisting and refuses Retry on an account card.",
       "pr": 2560,
       "server": "#2572"
+    },
+    {
+      "tier": "background",
+      "reason": "global Shared links: Settings lists every share link of the signed-in person with GET /chat/shares; an older server lacks the route, so the sheet shows its load error.",
+      "pr": 2593,
+      "server": "#2593"
     }
   ]
 }

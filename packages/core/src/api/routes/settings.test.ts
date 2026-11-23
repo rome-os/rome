@@ -8,6 +8,7 @@ import { GUARDIAN_TIMEZONE_SETTING_KEY } from "../../instance/timezone.js";
 import { COOKIE_NAME, createSession } from "../../access/auth.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";
+import { SPEECH_SESSIONS_SETTING_KEY } from "../../voice-output/rome-cloud-speech-credentials.js";
 
 const GUARDIAN_COOKIE = `${COOKIE_NAME}=${createSession("alex")}`;
 
@@ -222,6 +223,18 @@ describe("Settings API", () => {
     expect((await res.json()).error).toContain("conciergeFollowing");
     expect(await deps.settingsRepo.get("conciergeFollowing")).toEqual({ follows: [], people: {} });
     expect(await deps.settingsRepo.get("theme")).toBe("light");
+  });
+
+  it("keeps the speech sessions and their credentials out of the generic read and write", async () => {
+    const stored = [{ sessionId: "speech-1", token: "speech-token" }];
+    await deps.settingsRepo.set(SPEECH_SESSIONS_SETTING_KEY, stored);
+    const read = await (await app.request("/settings")).text();
+    expect(read).not.toContain(SPEECH_SESSIONS_SETTING_KEY);
+    expect(read).not.toContain("speech-token");
+
+    const res = await putSettings(app, { [SPEECH_SESSIONS_SETTING_KEY]: [] });
+    expect(res.status).toBe(400);
+    expect(await deps.settingsRepo.get(SPEECH_SESSIONS_SETTING_KEY)).toEqual(stored);
   });
 
   // A guardianTimezone change must re-target floating routines.

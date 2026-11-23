@@ -1115,6 +1115,16 @@
         }
       }
     },
+    "Audio" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音频"
+          }
+        }
+      }
+    },
     "Automatic" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3053,12 +3063,12 @@
         }
       }
     },
-    "Links you create in this chat show here." : {
+    "Links you share from a chat show here." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在这个对话中创建的链接会显示在这里。"
+            "value" : "你在对话中分享的链接会显示在这里。"
           }
         }
       }
@@ -4139,6 +4149,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "离线"
+          }
+        }
+      }
+    },
+    "Older · %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更早 · %lld"
           }
         }
       }
@@ -6937,6 +6957,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "通常 %@"
+          }
+        }
+      }
+    },
+    "Video" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "视频"
           }
         }
       }

@@ -2099,7 +2099,7 @@ export const handlers = [
           createdAt: Date.now(),
         },
       ],
-      users: [{ userId: "300000000000000001", name: "Mock Guardian", createdAt: Date.now() }],
+      users: [{ userId: "300000000000000001", name: "Mock Member", createdAt: Date.now() }],
     }),
   ),
   http.post("/api/connections/discord-app/install-link", () =>
