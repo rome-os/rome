@@ -258,6 +258,20 @@ describe("WhatsAppAdapter", () => {
       // Private: senderId === remoteJid
       expect(captured!.senderId).toBe("5551234@s.whatsapp.net");
     });
+
+    it("leaves the sender's name out when WhatsApp sends none", async () => {
+      let captured: ChannelMessage | undefined;
+      adapter.onInbound(async (msg) => {
+        captured = channelMessageOf(msg, "whatsapp");
+      });
+      await adapter.start();
+
+      await eventHandlers["messages.upsert"]({
+        messages: [{ ...makeWAMessage(), pushName: undefined }],
+      });
+
+      expect(captured).not.toHaveProperty("senderDisplayName");
+    });
   });
 
   describe("address-book sync", () => {
