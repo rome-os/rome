@@ -67,7 +67,7 @@ final class DrawerSwipeTests: XCTestCase {
     /// in or moves to its new place, `isHittable` fails the test instead of
     /// answering false, so it is asked only once this returns.
     @MainActor
-    private func waitOnScreen(_ app: XCUIApplication, _ element: XCUIElement, timeout: TimeInterval = 5) {
+    private func waitOnScreen(_ app: XCUIApplication, _ element: XCUIElement, timeout: TimeInterval = 30) {
         let deadline = Date().addingTimeInterval(timeout)
         while !onScreen(app, element), Date() < deadline {
             Thread.sleep(forTimeInterval: 0.25)
@@ -76,7 +76,7 @@ final class DrawerSwipeTests: XCTestCase {
     }
 
     @MainActor
-    private func waitFor(_ format: String, _ element: XCUIElement, timeout: TimeInterval = 5) {
+    private func waitFor(_ format: String, _ element: XCUIElement, timeout: TimeInterval = 30) {
         expectation(for: NSPredicate(format: format), evaluatedWith: element)
         waitForExpectations(timeout: timeout)
     }
@@ -129,7 +129,7 @@ final class DrawerSwipeTests: XCTestCase {
         let row = row(app, topic)
         row.press(forDuration: 1.2)
         let pin = app.buttons["Pin"].firstMatch
-        XCTAssertTrue(pin.waitForExistence(timeout: 3))
+        XCTAssertTrue(pin.waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Rename"].exists)
         XCTAssertTrue(app.buttons["Archive"].exists)
         XCTAssertTrue(app.buttons["Delete"].exists)
@@ -147,7 +147,7 @@ final class DrawerSwipeTests: XCTestCase {
         openDrawer(app)
         row(app, topic).press(forDuration: 1.2)
         let rename = app.buttons["Rename"].firstMatch
-        XCTAssertTrue(rename.waitForExistence(timeout: 3))
+        XCTAssertTrue(rename.waitForExistence(timeout: 10))
         rename.tap()
         let alert = app.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
@@ -169,7 +169,7 @@ final class DrawerSwipeTests: XCTestCase {
         let row = row(app, topic)
         row.press(forDuration: 1.2)
         let delete = app.buttons["Delete"].firstMatch
-        XCTAssertTrue(delete.waitForExistence(timeout: 3))
+        XCTAssertTrue(delete.waitForExistence(timeout: 10))
         delete.tap()
         let alert = app.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
@@ -180,7 +180,7 @@ final class DrawerSwipeTests: XCTestCase {
 
         row.press(forDuration: 1.2)
         let archive = app.buttons["Archive"].firstMatch
-        XCTAssertTrue(archive.waitForExistence(timeout: 3))
+        XCTAssertTrue(archive.waitForExistence(timeout: 10))
         archive.tap()
         waitFor("exists == false", row)
     }

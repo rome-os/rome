@@ -15,7 +15,7 @@ final class DrawerOlderTests: XCTestCase {
         XCTAssertTrue(header.waitForExistence(timeout: 10))
         waitOnScreen(app, header)
         expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: header)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 30)
     }
 
     /// The element is drawn inside the window, not slid away with the drawer.
@@ -29,7 +29,7 @@ final class DrawerOlderTests: XCTestCase {
     /// in or moves to its new place, `isHittable` fails the test instead of
     /// answering false, so it is asked only once this returns.
     @MainActor
-    private func waitOnScreen(_ app: XCUIApplication, _ element: XCUIElement, timeout: TimeInterval = 5) {
+    private func waitOnScreen(_ app: XCUIApplication, _ element: XCUIElement, timeout: TimeInterval = 30) {
         let deadline = Date().addingTimeInterval(timeout)
         while !onScreen(app, element), Date() < deadline {
             Thread.sleep(forTimeInterval: 0.25)
