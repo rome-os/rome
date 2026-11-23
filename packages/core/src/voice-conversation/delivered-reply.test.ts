@@ -12,8 +12,9 @@ function chat() {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    add(turnId: string, parts: object[], role = "assistant") {
-      for (const listener of listeners) listener({ turnId, role, content: JSON.stringify(parts) });
+    add(turnId: string, parts: object[], role = "assistant", sessionId = "chat-1") {
+      for (const listener of listeners)
+        listener({ sessionId, turnId, role, content: JSON.stringify(parts) });
     },
   };
 }
@@ -57,7 +58,7 @@ async function all(events: AsyncIterable<ReplyEvent>): Promise<ReplyEvent[]> {
 describe("a reply delivered as messages", () => {
   it("says the turn's messages and shows its cards, never its private text", async () => {
     const room = chat();
-    const delivered = gatherDelivered(room.subscribe);
+    const delivered = gatherDelivered("chat-1", room.subscribe);
     // A message can come before the send hands back its turn.
     room.add("t1", [{ type: "text", content: "好的，我来订。" }]);
     const answering = turn("t1");
@@ -73,6 +74,8 @@ describe("a reply delivered as messages", () => {
     room.add("t1", [{ type: "widget", appId: "core", ui: {} }]);
     room.add("t2", [{ type: "text", content: "别的对话" }]);
     room.add("t1", [{ type: "text", content: "我自己的话" }], "user");
+    // The turn sent to another chat: not this conversation's reply.
+    room.add("t1", [{ type: "text", content: "发给任务聊天的话" }], "assistant", "task-chat");
     answering.push({ type: "text", content: "done" });
     answering.end();
 
@@ -89,9 +92,28 @@ describe("a reply delivered as messages", () => {
     expect(room.listening()).toBe(0);
   });
 
+  it("waits for a card the chat stores after the turn ends", async () => {
+    const room = chat();
+    const delivered = gatherDelivered("chat-1", room.subscribe);
+    const answering = turn("t1");
+    let markStored = () => {};
+    const stored = new Promise<void>((resolve) => {
+      markStored = resolve;
+    });
+    const seen = all(delivered.of(answering, () => stored).events());
+    answering.push({ type: "tool_use", id: "c1", tool: "ask_question", input: {} });
+    answering.end();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The turn's stream writes its card a moment after the turn ended.
+    room.add("t1", [{ type: "widget", appId: "core", ui: {} }]);
+    markStored();
+    expect((await seen).filter((e) => e.type === "shown")).toEqual([{ type: "shown" }]);
+    expect(room.listening()).toBe(0);
+  });
+
   it("stops gathering for a send that started no turn", () => {
     const room = chat();
-    const delivered = gatherDelivered(room.subscribe);
+    const delivered = gatherDelivered("chat-1", room.subscribe);
     expect(room.listening()).toBe(1);
     delivered.stop();
     expect(room.listening()).toBe(0);

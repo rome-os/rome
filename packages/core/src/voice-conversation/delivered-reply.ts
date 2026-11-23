@@ -7,8 +7,13 @@
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ReplyEvent, ReplyTurn } from "./conversation.js";
 
-/** A message added to the chat, as far as the reply reads it. */
+// How long a reply waits, after its turn ends, for the turn's messages to be stored.
+const STORED_WITHIN_MS = 5_000;
+
+/** A message added to a chat, as far as the reply reads it. */
 export interface AddedMessage {
+  /** The chat it was added to. */
+  sessionId: string;
   turnId: string | null;
   role: string;
   /** The stored parts, as JSON. */
@@ -22,18 +27,24 @@ interface AnsweringTurn {
 }
 
 export interface DeliveredReply {
-  /** The reply of `turn`: its messages, and its events that are not its own text. */
-  of(turn: AnsweringTurn): ReplyTurn;
+  /**
+   * The reply of `turn`: its messages, and its events that are not its own
+   * text. `stored` resolves once the chat has stored every message of the
+   * turn, such as a card its stream writes after the turn ends. The reply
+   * waits for it up to 5 s.
+   */
+  of(turn: AnsweringTurn, stored?: () => Promise<unknown>): ReplyTurn;
   /** Stops gathering messages, for a send that started no turn. */
   stop(): void;
 }
 
 /**
- * Starts gathering the messages added to the chat now, before the turn that
- * adds them is known, so none is missed. `subscribe` calls its listener with
- * each message added and returns the unsubscribe.
+ * Starts gathering the messages added to chat `chatId` now, before the turn
+ * that adds them is known, so none is missed. `subscribe` calls its listener
+ * with each message added to any chat and returns the unsubscribe.
  */
 export function gatherDelivered(
+  chatId: string,
   subscribe: (listener: (message: AddedMessage) => void) => () => void,
 ): DeliveredReply {
   const early: AddedMessage[] = [];
@@ -41,9 +52,9 @@ export function gatherDelivered(
   const stop = subscribe((message) => (take ? take(message) : early.push(message)));
   return {
     stop,
-    of: (turn) => ({
+    of: (turn, stored) => ({
       events: () =>
-        readDelivered(turn, early, stop, (listener) => {
+        readDelivered(chatId, turn, stored, early, stop, (listener) => {
           take = listener;
         }),
     }),
@@ -51,7 +62,9 @@ export function gatherDelivered(
 }
 
 async function* readDelivered(
+  chatId: string,
   turn: AnsweringTurn,
+  stored: (() => Promise<unknown>) | undefined,
   early: AddedMessage[],
   stop: () => void,
   listen: (listener: (message: AddedMessage) => void) => void,
@@ -60,7 +73,9 @@ async function* readDelivered(
   let ended = false;
   let wake = () => {};
   const add = (message: AddedMessage) => {
-    if (message.turnId !== turn.id || message.role !== "assistant") return;
+    // The turn may also send to other chats: only this chat's messages are the reply.
+    if (message.sessionId !== chatId || message.turnId !== turn.id) return;
+    if (message.role !== "assistant") return;
     queue.push(...partsOf(message.content));
     wake();
   };
@@ -74,8 +89,10 @@ async function* readDelivered(
         queue.push(event);
         wake();
       }
+      // A message the turn's tools add is stored before the turn ends. A card
+      // its stream writes may come after, so the reply waits for the chat.
+      if (stored) await storedOrLate(stored);
     } finally {
-      // Every message of the turn is added before it ends.
       ended = true;
       stop();
       wake();
@@ -95,6 +112,19 @@ async function* readDelivered(
     }
   } finally {
     stop();
+  }
+}
+
+// Resolves once `stored` does, or after STORED_WITHIN_MS, whichever comes first.
+async function storedOrLate(stored: () => Promise<unknown>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, STORED_WITHIN_MS);
+  });
+  try {
+    await Promise.race([stored().catch(() => {}), late]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

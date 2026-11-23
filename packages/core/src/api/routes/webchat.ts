@@ -5861,7 +5861,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       );
       const delivered =
         policy.finalText === "private"
-          ? gatherDelivered((listener) => deps.webchatRepo.onMessageInserted(listener))
+          ? gatherDelivered(chatId, (listener) => deps.webchatRepo.onMessageInserted(listener))
           : null;
       const started: { turn?: Promise<AgentTurnHandle> } = {};
       try {
@@ -5879,7 +5879,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
       return delivered
         ? started.turn.then(
-            (turn) => delivered.of(turn),
+            // The turn's stream finishes once it has stored the cards it writes.
+            (turn) => delivered.of(turn, async () => streamsByTurnId.get(turn.id)?.onFinish),
             (err: unknown) => {
               delivered.stop();
               throw err;

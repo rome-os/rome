@@ -45,7 +45,6 @@ const FAILED = {
 // Rome's own last words may be heard this long after they were sent.
 const ECHO_TAIL_MS = 2_000;
 
-/** A turn of the chat's agent, as far as the conversation reads it. */
 /**
  * What a reply is made of: the turn's events, or, for an agent whose text is
  * private, the messages it delivers. `said` is a message's text. `shown` is
@@ -53,6 +52,7 @@ const ECHO_TAIL_MS = 2_000;
  */
 export type ReplyEvent = StreamAgentEvent | { type: "said"; text: string } | { type: "shown" };
 
+/** A turn of the chat's agent, as far as the conversation reads it. */
 export interface ReplyTurn {
   events(): AsyncIterable<ReplyEvent>;
 }
