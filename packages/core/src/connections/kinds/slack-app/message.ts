@@ -19,6 +19,10 @@ export interface SlackWireMessage {
   text?: string;
   thread_ts?: string;
   subtype?: string;
+  /** The workspace of its author, where Slack names one: in a channel
+   *  shared with another workspace (Slack Connect), an author can be from
+   *  either. */
+  user_team?: string;
   /** Its last edit, when it was edited. */
   edited?: { ts?: string };
 }
@@ -70,7 +74,9 @@ export function slackMessage(
     direction: author === context.botUserId ? "outbound" : "inbound",
     chatId: context.chatId as ChatId,
     messageId: slackMessageId(wire.ts, wire.thread_ts),
-    senderId: slackSenderId(context.teamId, author),
+    // Slack user ids are per workspace, so an author from another workspace
+    // is named under their own.
+    senderId: slackSenderId(wire.user_team ?? context.teamId, author),
     ...(name.displayName ? { senderDisplayName: name.displayName } : {}),
     ...(name.username ? { senderUsername: name.username } : {}),
     text,

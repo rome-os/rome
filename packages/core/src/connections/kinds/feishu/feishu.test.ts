@@ -538,7 +538,7 @@ describe("FeishuAdapter", () => {
     expect(captured[0]).not.toHaveProperty("routing");
   });
 
-  it("ignores normal group messages when group policy is disabled", async () => {
+  it("hands over a group message when group policy is disabled, since keeping it is Rome's call", async () => {
     const chatSettings = makeChatSettings({
       enabled: false,
       activation: { mode: "all" },
@@ -562,7 +562,7 @@ describe("FeishuAdapter", () => {
 
     await channel.emit({ chatType: "group", mentionedBot: true, content: "@_user_1 hello" });
 
-    expect(captured).toHaveLength(0);
+    expect(captured).toHaveLength(1);
   });
 
   it("delivers an addressed /stop when group policy is disabled", async () => {

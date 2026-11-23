@@ -267,7 +267,7 @@ const CONNECTIONS_PENDING: ReadonlyArray<{ from: string; to: readonly string[]; 
   {
     from: "connections/kinds/discord/discord.ts",
     to: ["chats/connected-accounts/account-agents.ts", "people/link-code/index.ts"],
-    why: "Discord still checks whether a chat is switched off and reads link codes, until those move up.",
+    why: "Discord still reads a chat's agent and link codes, until those move up.",
   },
   {
     from: "connections/kinds/email/email.ts",
@@ -284,10 +284,9 @@ const CONNECTIONS_PENDING: ReadonlyArray<{ from: string; to: readonly string[]; 
     to: [
       "chats/connected-accounts/account-agents.ts",
       "participation/mention-only.ts",
-      "people/link-code/index.ts",
       "people/model/people-repository.ts",
     ],
-    why: "Feishu still checks whether a chat is switched off, its mention-only rule and link codes, until those move up.",
+    why: "Feishu still reads a chat's agent and its mention-only rule, until those move up.",
   },
 ];
 

@@ -136,7 +136,6 @@ function adapter(
   api = fakeApi(),
   options: {
     chats?: ReturnType<typeof fakeChats>;
-    listened?: () => boolean;
     readGate?: SlackReadGate;
     bound?: () => Promise<boolean>;
   } = {},
@@ -153,7 +152,6 @@ function adapter(
     deliveryAttempts: 4,
     onFault: ({ kind }) => faults.push(kind),
     ...(options.readGate ? { readGate: options.readGate } : {}),
-    ...(options.listened ? { listened: options.listened } : {}),
   });
   a.onInbound(chats.accept);
   // The instance's drain hands frames to the connection while it runs.
@@ -224,7 +222,7 @@ describe("Slack app direct messages (R4)", () => {
     expect(receipt).toMatchObject({ chatId: "D_GUARDIAN", messageId: "2.0" });
   });
 
-  it("hears nothing but direct messages from people in the workspace", async () => {
+  it("hears nothing but direct messages someone said", async () => {
     const mailbox = fakeMailbox();
     const { adapter: a, delivered } = adapter(mailbox);
     await a.start();
@@ -232,10 +230,18 @@ describe("Slack app direct messages (R4)", () => {
     await mailbox.deposit(
       frame({ ...base, event_id: "E1", event: { ...base.event, user: BOT } }),
       frame({ ...base, event_id: "E3", event: { ...base.event, subtype: "message_changed" } }),
-      frame({ ...base, event_id: "E4", event: { ...base.event, user_team: "T_OTHER" } }),
       frame({ ...base, event_id: "E5", event: { ...base.event, type: "app_mention" } }),
     );
     expect(delivered).toHaveLength(0);
+  });
+
+  it("hands over an author from another workspace under that workspace", async () => {
+    const mailbox = fakeMailbox();
+    const { adapter: a, delivered } = adapter(mailbox);
+    await a.start();
+    const base = dmEvent(1);
+    await mailbox.deposit(frame({ ...base, event: { ...base.event, user_team: "T_OTHER" } }));
+    expect(delivered.map((m) => m.senderId)).toEqual([`T_OTHER/${base.event.user}`]);
   });
 
   it("reports a removed app as a refused credential once Rome Cloud let go of the workspace", async () => {
@@ -523,23 +529,6 @@ describe("Slack app acknowledging its mailbox", () => {
     await expect(answered).resolves.toEqual({ status: 200 });
   });
 
-  it("hands over nothing heard while Rome does not listen to the account", async () => {
-    const mailbox = fakeMailbox();
-    let listening = false;
-    const { adapter: a, delivered } = adapter(mailbox, fakeApi(), {
-      listened: () => listening,
-    });
-    await a.start();
-
-    await mailbox.deposit(frame(dmEvent(1)));
-    expect(mailbox.statuses).toEqual([200]);
-    expect(delivered).toHaveLength(0);
-
-    listening = true;
-    await mailbox.deposit(frame(dmEvent(2)));
-    expect(delivered.map((m) => m.text)).toEqual(["message 2"]);
-  });
-
   it("hands a message Slack delivers again to Chats, which has it once", async () => {
     const mailbox = fakeMailbox();
     const chats = fakeChats();
@@ -724,12 +713,11 @@ function openGate(): SlackReadGate {
 function historyAdapter(
   mailbox: ReturnType<typeof fakeMailbox>,
   slack: ReturnType<typeof fakeSlackHistory>,
-  options: { gate?: SlackReadGate; listened?: () => boolean } = {},
+  options: { gate?: SlackReadGate } = {},
 ) {
   const api = fakeApi({ conversationHistory: slack.conversationHistory });
   return adapter(mailbox, api, {
     readGate: options.gate ?? openGate(),
-    ...(options.listened ? { listened: options.listened } : {}),
   });
 }
 

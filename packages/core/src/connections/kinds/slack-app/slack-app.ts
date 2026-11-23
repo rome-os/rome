@@ -88,23 +88,12 @@ export interface SlackAppAdapterConfig {
    *  it until resumed. */
   deliveryAttempts: number;
   onFault?: (fault: { kind: "credential" | "transport"; cause: unknown }) => void;
-  /** Whether Rome listens to the account now. A message heard while it does
-   *  not is not handed over, so linking an agent later brings
-   *  none of it back (docs/domains/chats.md). Absent, Rome always listens. */
-  listened?: () => boolean;
   /** How reads of Slack's history take turns. Defaults to Slack's allowance. */
   readGate?: SlackReadGate;
   /** How reads of a thread take turns. Slack allows conversations.replies
    *  its own request a minute, apart from conversations.history. Defaults to
    *  `readGate` when one is given, else to Slack's allowance. */
   repliesGate?: SlackReadGate;
-}
-
-function isExternalAuthor(payload: SlackEventCallback): boolean {
-  const event = payload.event;
-  return [event.team, event.user_team, event.source_team].some(
-    (team) => typeof team === "string" && team !== payload.team_id,
-  );
 }
 
 /** What a read of a channel says when the workspace was connected before
@@ -283,9 +272,6 @@ export class SlackAppAdapter {
     // another bot that mentions the app is still heard. Its own post is never
     // handed over.
     if (event.user === this.config.botUserId) return { status: 200 };
-    // Slack user ids are per workspace: an author from another workspace
-    // (Slack Connect) never speaks under this workspace's address.
-    if (isExternalAuthor(payload)) return { status: 200 };
     // A bot or workflow that mentions the app posts as a bot_message, often
     // with no user: the bot is its author. Only a mention is taken from one,
     // since the app's own posts are told apart by their user.
@@ -294,8 +280,6 @@ export class SlackAppAdapter {
     if (!author || typeof event.text !== "string") return { status: 200 };
     const said = slackMessage(this.context(event.channel), wire);
     if (!said) return { status: 200 };
-    // Rome does not listen to the account, so the message is not handed over. A read once an agent is linked asks Slack for it.
-    if (this.config.listened && !this.config.listened()) return { status: 200 };
 
     const name = event.user ? await this.lookUpName(event.user) : {};
     const message: ChannelMessage = {

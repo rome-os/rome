@@ -279,8 +279,6 @@ export interface SlackAppDescriptorDeps {
   claimMailbox?: () => () => void;
   /** Has the mailbox hold Slack frames while a setup waits for approval. */
   holdSlackFrames?: () => () => void;
-  /** Whether Rome listens to the account behind a connection. */
-  listens: (connectionId: string) => boolean;
   approval?: { pollMs: number; limitMs: number };
   /** Revokes a token a grant from before the Worker holds (tests). */
   revokeLegacyToken?: (token: string, signal: AbortSignal) => Promise<string | null>;
@@ -374,7 +372,6 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
             bound: async () => holds(await deps.cloud.workspaces()),
             deliveryAttempts: deps.deliveryAttempts,
             onFault: ({ kind, cause }) => routeFault(cause, kind),
-            listened: () => deps.listens(kit.connectionId),
           });
           let unregister: (() => void) | null = null;
           let releaseMailbox: (() => void) | null = null;
