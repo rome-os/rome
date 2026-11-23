@@ -158,6 +158,137 @@ describe("Soniox start message", () => {
   });
 });
 
+describe("Soniox conversation mode", () => {
+  const silent = { onText() {}, onEnd() {}, onFailure() {} };
+  const startOf = (fake: FakeSoniox) => JSON.parse((fake.received[0] as { text: string }).text);
+  const keepalives = (fake: FakeSoniox) =>
+    fake.received.filter((frame) => frame.kind === "text" && frame.text === '{"type":"keepalive"}')
+      .length;
+
+  it("asks for endpoints in conversation mode only", async () => {
+    const fake = await fakeSoniox();
+    const transcriber = createSonioxTranscriber({ apiKey: "key-1", url: fake.url });
+    const stream = transcriber.open({ sampleRate: 16000, mode: "conversation" }, silent);
+    try {
+      await until(() => fake.received.length === 1);
+      expect(startOf(fake)).toMatchObject({
+        model: "stt-rt-v6",
+        enable_endpoint_detection: true,
+        endpoint_latency_adjustment_level: 2,
+        endpoint_sensitivity: 0.3,
+        max_endpoint_delay_ms: 1500,
+      });
+    } finally {
+      stream.abort();
+    }
+  });
+
+  it("reports an endpoint after the turn's settled text, and keeps listening", async () => {
+    const fake = await fakeSoniox();
+    const transcriber = createSonioxTranscriber({ apiKey: "key-1", url: fake.url });
+    const heard: string[] = [];
+    const stream = transcriber.open(
+      { sampleRate: 16000, mode: "conversation" },
+      {
+        onText: (settled, pending) => heard.push(`text:${settled}|${pending}`),
+        onEndpoint: () => heard.push("endpoint"),
+        onEnd: () => heard.push("end"),
+        onFailure: (failure) => heard.push(`failure:${failure}`),
+      },
+    );
+    try {
+      await until(() => fake.received.length === 1);
+      fake.say({ tokens: [{ text: "帮我看", is_final: false }] });
+      fake.say({
+        tokens: [
+          { text: "帮我看一下", is_final: true },
+          { text: "<end>", is_final: true },
+        ],
+      });
+      await until(() => heard.length === 3);
+      stream.sendAudio(new Uint8Array([1, 2]));
+      fake.say({ tokens: [{ text: "Hello", is_final: true }] });
+      await until(() => heard.length === 4);
+      expect(heard).toEqual(["text:|帮我看", "text:帮我看一下|", "endpoint", "text:Hello|"]);
+      expect(fake.received.at(-1)).toEqual({ kind: "audio", bytes: [1, 2] });
+    } finally {
+      stream.abort();
+    }
+  });
+
+  it("reports no endpoint in dictation mode", async () => {
+    const fake = await fakeSoniox();
+    const transcriber = createSonioxTranscriber({ apiKey: "key-1", url: fake.url });
+    const heard: string[] = [];
+    const stream = transcriber.open(
+      { sampleRate: 16000 },
+      { ...silent, onText: (settled) => heard.push(settled), onEndpoint: () => heard.push("!") },
+    );
+    try {
+      await until(() => fake.received.length === 1);
+      expect(startOf(fake)).not.toHaveProperty("enable_endpoint_detection");
+      fake.say({
+        tokens: [
+          { text: "Hi", is_final: true },
+          { text: "<end>", is_final: true },
+        ],
+      });
+      await until(() => heard.length === 1);
+      await new Promise((r) => setTimeout(r, 30));
+      expect(heard).toEqual(["Hi"]);
+    } finally {
+      stream.abort();
+    }
+  });
+
+  it("sends a keepalive only while no audio flows, and none after finishing", async () => {
+    const fake = await fakeSoniox();
+    const transcriber = createSonioxTranscriber({
+      apiKey: "key-1",
+      url: fake.url,
+      keepaliveMs: 150,
+    });
+    const stream = transcriber.open({ sampleRate: 16000, mode: "conversation" }, silent);
+    try {
+      await until(() => fake.received.length === 1);
+      // Audio every 20 ms holds the 150 ms keepalive off.
+      for (let i = 0; i < 10; i++) {
+        stream.sendAudio(new Uint8Array([i]));
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      expect(keepalives(fake)).toBe(0);
+      await until(() => keepalives(fake) >= 2);
+      // Keepalives carry no audio.
+      expect(stream.sentBytes).toBe(10);
+      stream.finish();
+      const endFrame = { kind: "text", text: "" };
+      await until(() => JSON.stringify(fake.received.at(-1)) === JSON.stringify(endFrame));
+      const after = fake.received.length;
+      await new Promise((r) => setTimeout(r, 150));
+      expect(fake.received.length).toBe(after);
+    } finally {
+      stream.abort();
+    }
+  });
+
+  it("sends no keepalive in dictation mode", async () => {
+    const fake = await fakeSoniox();
+    const transcriber = createSonioxTranscriber({
+      apiKey: "key-1",
+      url: fake.url,
+      keepaliveMs: 20,
+    });
+    const stream = transcriber.open({ sampleRate: 16000 }, silent);
+    try {
+      await until(() => fake.received.length === 1);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(fake.received).toHaveLength(1);
+    } finally {
+      stream.abort();
+    }
+  });
+});
+
 describe("voice input socket", () => {
   it("reads terms once per session and passes them through to the transcriber", async () => {
     const fake = await fakeSoniox();

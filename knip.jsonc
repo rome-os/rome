@@ -187,7 +187,7 @@
     },
 
     // An app's manifest, not its imports, decides what the runtime loads. Each
-    // pattern below mirrors a key in `app.yaml` — see rome_apps/CLAUDE.md.
+    // pattern below mirrors a key in `app.yaml` — see rome_apps/AGENTS.md.
     // These are globs over the shape of a manifest, not reads of one, so a
     // directory that matches the shape counts as an entry even when no
     // `app.yaml` lists it: an action dropped from a manifest goes quiet here

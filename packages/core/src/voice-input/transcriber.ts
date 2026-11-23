@@ -21,6 +21,11 @@ export interface TranscriptionListener {
    * ends, when the provider says.
    */
   onText(settled: string, pending: string, spokeUntilMs?: number): void;
+  /**
+   * In conversation mode, the speaker has finished a turn: every word before
+   * it has come through `onText` as settled. Never called in dictation.
+   */
+  onEndpoint?(): void;
   /** The provider has sent everything after `finish()`. Called once, last. */
   onEnd(): void;
   /** The stream stopped early. Called once, last, and never after `onEnd`. */
@@ -38,6 +43,13 @@ export interface TranscriptionStream {
   readonly sentBytes: number;
 }
 
+/**
+ * `dictation` (the default) transcribes until the client finishes.
+ * `conversation` also reports where each turn ends, and keeps the stream
+ * open through silence while no audio flows.
+ */
+export type TranscriptionMode = "dictation" | "conversation";
+
 export interface Transcriber {
   readonly place: TranscriptionPlace;
   /** The provider's model, as usage names it. */
@@ -46,7 +58,7 @@ export interface Transcriber {
   readonly providerId: string;
   /** Opens one stream. Audio sent before the provider answers is held and sent in order. */
   open(
-    options: { sampleRate: number; terms?: readonly string[] },
+    options: { sampleRate: number; terms?: readonly string[]; mode?: TranscriptionMode },
     listener: TranscriptionListener,
   ): TranscriptionStream;
 }

@@ -64,6 +64,34 @@ describe("resolveRelayDrains", () => {
     expect(drains).toEqual([]);
   });
 
+  it("drains the mailbox alone, with no target, while a connection claims it", async () => {
+    const claimed = { any: true };
+    expect(
+      await resolveRelayDrains(
+        settingsRepoReturning(CREDENTIAL),
+        catalogWith(app("notes", null)),
+        claimed,
+      ),
+    ).toEqual([
+      {
+        connectUrl: "wss://relay.example/c/mb1",
+        drainKey: "secret-key",
+        targetAppId: "",
+        targetPath: [],
+      },
+    ]);
+    expect(
+      await resolveRelayDrains(
+        settingsRepoReturning(CREDENTIAL),
+        catalogWith(app("connector", "webhook")),
+        claimed,
+      ),
+    ).toMatchObject([{ targetAppId: "connector" }]);
+    expect(
+      await resolveRelayDrains(settingsRepoReturning(undefined), catalogWith(), claimed),
+    ).toEqual([]);
+  });
+
   it("returns no drains when the credential is absent", async () => {
     const drains = await resolveRelayDrains(
       settingsRepoReturning(undefined),

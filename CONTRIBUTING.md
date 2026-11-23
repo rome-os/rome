@@ -29,10 +29,10 @@ Reviewers judge a pull request by the same questions.
 
 ## Make a change
 
-[`CLAUDE.md`](CLAUDE.md) is the working playbook for people and coding agents alike. It lists the repo layout, the patterns to follow, and the known traps. The points that matter most:
+[`AGENTS.md`](AGENTS.md) is the working playbook for people and coding agents alike. It lists the repo layout, the patterns to follow, and the known traps. The points that matter most:
 
 - If you name a chat, thread, account, agent, or connection in code, UI copy, or docs, use the words in [`docs/domains/`](docs/domains/README.md).
-- If you build or edit an app under `rome_apps/`, read [`rome_apps/CLAUDE.md`](rome_apps/CLAUDE.md) first.
+- If you build or edit an app under `rome_apps/`, read [`rome_apps/AGENTS.md`](rome_apps/AGENTS.md) first.
 - If you write docs or PR text, follow [`docs/authoring/WRITING.md`](docs/authoring/WRITING.md).
 
 Verify a change before you open a pull request:
