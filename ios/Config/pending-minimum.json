@@ -3,8 +3,8 @@
     {
       "tier": "background",
       "reason": "global Shared links: Settings lists every share link of the signed-in person with GET /chat/shares; an older server lacks the route, so the sheet shows its load error.",
-      "pr": 2591,
-      "server": "#2591"
+      "pr": 2593,
+      "server": "#2593"
     }
   ]
 }
