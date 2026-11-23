@@ -61,7 +61,7 @@ private struct BubbleMenuItems: View {
             }
             CopyButton(text: text)
             if let onSelect {
-                Button(action: onSelect) { Label("Select text", systemImage: "selection.pin.in.out") }
+                Button(action: onSelect) { Label("Select", systemImage: "selection.pin.in.out") }
             }
             if let onShare = menu.onShare {
                 Button(action: onShare) { Label("Share", systemImage: "square.and.arrow.up") }
