@@ -155,6 +155,10 @@ final class ClaudeLoginFlow {
     private let pollInterval: Duration
     private var socket: LoginSocket?
     private var tasks: [Task<Void, Never>] = []
+    /// Asks iOS for time while the login waits: the socket must outlive a
+    /// quick trip away, for an email code, and the server ends the login
+    /// when it closes.
+    private var background: UIBackgroundTaskIdentifier = .invalid
     var onConnected: ((AIToolsStatus) -> Void)?
 
     init(
@@ -194,6 +198,9 @@ final class ClaudeLoginFlow {
             return
         }
         self.socket = socket
+        background = UIApplication.shared.beginBackgroundTask(withName: "Claude login") { [weak self] in
+            self?.endBackground()
+        }
         tasks = [
             Task { [weak self] in await self?.read(socket) },
             Task { [weak self, prepareTimeout] in
@@ -285,6 +292,13 @@ final class ClaudeLoginFlow {
         tasks = []
         socket?.close()
         socket = nil
+        endBackground()
+    }
+
+    private func endBackground() {
+        guard background != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(background)
+        background = .invalid
     }
 }
 
@@ -457,9 +471,11 @@ struct ClaudeLoginSheet: View {
     var preview: ClaudeLoginFlow.Phase? = nil
     var previewRejected = false
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
     @State private var flow: ClaudeLoginFlow?
     @State private var code = ""
+    /// The sign-in page, open in Safari inside the app: Rome stays in front,
+    /// so the login's socket stays up while the guardian signs in.
+    @State private var signInPage: InAppSafari.Page?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -554,10 +570,7 @@ struct ClaudeLoginSheet: View {
             }
         }()
         return Button {
-            if let url {
-                openURL(url)
-                focused = true
-            }
+            if let url { signInPage = InAppSafari.Page(url: url) }
         } label: {
             HStack(spacing: 8) {
                 if url == nil {
@@ -576,6 +589,9 @@ struct ClaudeLoginSheet: View {
         .buttonStyle(PressScaleStyle(scale: 0.98))
         .disabled(url == nil)
         .accessibilityHint(url == nil ? Text("Preparing sign-in…") : Text("Opens Safari"))
+        .sheet(item: $signInPage, onDismiss: { focused = true }) { page in
+            InAppSafari(url: page.url).ignoresSafeArea()
+        }
     }
 
     private func close() {

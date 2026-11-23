@@ -1,4 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { Measure, Section } from "@rome-os/ui/page";
 import { Fragment, Suspense, useCallback, useEffect, useId, useState } from "react";
 import { lazy } from "@/lib/lazy-with-reload";
@@ -970,6 +971,8 @@ export function AiToolsPanel({
         return;
       }
       setLogoutProvider(null);
+      // A logout of the default may pin the open chats: they read themselves again.
+      emitSessionsChanged();
       await fetchStatus();
     } catch {
       setLogoutError(fallbackError);
@@ -1051,6 +1054,7 @@ export function AiToolsPanel({
       }
       setConfiguredAnthropicProvider(null);
       setRemoveAnthropicProviderOpen(false);
+      emitSessionsChanged();
       await fetchStatus();
     } catch (error) {
       setAnthropicProviderMessage(

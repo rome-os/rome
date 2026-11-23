@@ -1,4 +1,5 @@
 import { ChevronRight, CirclePause, Info, TriangleAlert } from "lucide-react";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -414,6 +415,9 @@ export function ProviderFailureCard({
     try {
       const answer = (await send()) as { refreshed?: boolean } | undefined;
       if (!answer?.refreshed) setSwitched(settled);
+      // A switch pins this chat, or moves the default: the open chat reads
+      // itself again, so its pinned hint and model menu show where it runs.
+      emitSessionsChanged();
       onSettled?.();
     } catch {
       setFailed(true);

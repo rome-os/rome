@@ -1645,6 +1645,16 @@
         }
       }
     },
+    "Could not go back to the default. Try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能改回默认，请重试。"
+          }
+        }
+      }
+    },
     "Could not log out of %@" : {
       "localizations" : {
         "zh-Hans" : {

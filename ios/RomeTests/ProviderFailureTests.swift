@@ -290,6 +290,30 @@ import Testing
         #expect(session.pinnedModel == .init(by: "owner", providerId: "anthropic", selection: "claude-haiku", model: nil))
     }
 
+    @Test func aFailedBackToDefaultKeepsTheHintAndSaysSo() async {
+        let backend = FakeBackend()
+        backend.chatSessionRead = ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "kept", providerId: "openai"))
+        backend.followDefaultFails = true
+        let store = TranscriptStore(sessionId: "s", kind: .concierge, backend: backend)
+        await store.readChatSession()
+        await store.followDefault()
+        #expect(PinnedHint.text(store.chatSession) == "On ChatGPT")
+        #expect(store.notice == "Could not go back to the default. Try again.")
+    }
+
+    @Test func aResyncReadsThePinAgain() async throws {
+        // A topic stays mounted while Settings changes the default with
+        // "Only new chats": the server pins it, and the next resync shows it.
+        let backend = FakeBackend()
+        backend.chatSessionRead = ChatSession(id: "s", name: "", followsDefault: true)
+        let store = TranscriptStore(sessionId: "s", kind: .concierge, backend: backend)
+        await store.readChatSession()
+        #expect(PinnedHint.text(store.chatSession) == nil)
+        backend.chatSessionRead = ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "kept", providerId: "anthropic"))
+        store.resync()
+        try await until { PinnedHint.text(store.chatSession) == "On Claude" }
+    }
+
     @Test func backToDefaultSaysWhereTheChatGoes() {
         let kept = ChatSession(id: "s", name: "", followsDefault: false, pinnedModel: .init(by: "kept", providerId: "anthropic"))
         #expect(PinnedHint.confirmBody(kept, default: .openai) == "This chat moves from Claude to ChatGPT, your default, from its next reply.")

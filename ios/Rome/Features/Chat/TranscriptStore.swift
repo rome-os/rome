@@ -830,6 +830,9 @@ final class TranscriptStore {
                 resyncAgain = false
                 await reload()
             } while resyncAgain
+            // A reconnect or a return may follow a change of the default made
+            // elsewhere: whether the chat is pinned is read again too.
+            await readChatSession()
             resyncWork = nil
         }
     }
@@ -1336,7 +1339,12 @@ final class TranscriptStore {
         guard !followingDefault else { return }
         followingDefault = true
         defer { followingDefault = false }
-        if let read = try? await backend.followDefault(sessionId: sessionId) { chatSession = read }
+        do {
+            chatSession = try await backend.followDefault(sessionId: sessionId)
+        } catch {
+            // The hint stays, and the error bar says why.
+            say(String(localized: "Could not go back to the default. Try again."))
+        }
     }
 
     /// Cards whose answer is on its way, by tool-use id: each is sent once.

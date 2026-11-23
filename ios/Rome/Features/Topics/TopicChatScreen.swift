@@ -99,7 +99,11 @@ struct TopicChatScreen: View {
         .environment(\.taskLinks, chatId.flatMap { workspace.taskLinks(forChat: $0) })
         .providerFailurePrompts(store, workspace: workspace)
         // Whether the chat follows the default, read each time it opens.
-        .task(id: store?.sessionId) { await store?.readChatSession() }
+        // Read again each time it comes back into view, as after Settings
+        // changed the default with the topic still mounted beneath it.
+        .task(id: "\(store?.sessionId ?? "")|\(chatId.map { visibleChat == $0 } ?? inFront)") {
+            if chatId.map({ visibleChat == $0 }) ?? inFront { await store?.readChatSession() }
+        }
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onReply: { store?.restoreReply($0) }, prefill: Binding(
             get: { workspace.composerPrefills[chatId ?? draftKey] },
             set: { workspace.composerPrefills[chatId ?? draftKey] = $0 }

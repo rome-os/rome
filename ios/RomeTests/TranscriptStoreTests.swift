@@ -367,8 +367,11 @@ final class FakeBackend: RomeBackend {
         guard let chatSessionRead else { throw APIError.notFound }
         return chatSessionRead
     }
+    /// Set, Back to default fails.
+    var followDefaultFails = false
     func followDefault(sessionId: String) async throws -> ChatSession {
         followDefaultCalls.append(sessionId)
+        if followDefaultFails { throw APIError.network }
         return ChatSession(id: sessionId, name: "", followsDefault: true)
     }
     /// The logouts and default changes sent, with their moveExisting.

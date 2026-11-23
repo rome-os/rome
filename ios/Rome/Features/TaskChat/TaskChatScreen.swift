@@ -36,7 +36,8 @@ struct TaskChatScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .providerFailurePrompts(store, workspace: workspace)
         // Whether the chat follows the default, read each time it opens.
-        .task(id: chatId) { await store.readChatSession() }
+        // Read again each time it comes back into view.
+        .task(id: "\(chatId)|\(visibleChat == chatId)") { if visibleChat == chatId { await store.readChatSession() } }
         .floatingTopBar { header }
         .overlay(alignment: .top) {
             TranscriptBanners(store: store)

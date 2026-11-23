@@ -94,7 +94,7 @@ export function PinnedModelHint({
       {pinnedHintText(pinnedModel, t)} ·{" "}
       <button
         type="button"
-        className="cursor-pointer rounded-4 underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+        className="cursor-pointer rounded-4 underline underline-offset-2 outline-1 outline-offset-2 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 disabled:cursor-default"
         disabled={pending}
         onClick={() => setConfirming(true)}
       >
