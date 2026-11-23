@@ -13,7 +13,8 @@
 // agent id, so a rename or a reused name never moves a conversation or a
 // link. Cloud refuses a send to an agent no link allows as `not_reachable`.
 
-import { type ChatId, SendRefused } from "@rome-os/app-runtime";
+import { type ChannelInboundMedia, type ChatId, SendRefused } from "@rome-os/app-runtime";
+import { saveIncomingAttachmentPayloads } from "../inbound/attachment-files.js";
 import type * as connections from "../message.js";
 import { messageAsText, refuseUnshownParts } from "../outbound/send-refusals.js";
 import { z } from "zod";
@@ -79,21 +80,39 @@ export function reviveAgentsProfile(record: ProfileRecord): ProfileDisplay {
 export function toAgentInboundMessage(message: AgentMessageEnvelope): connections.Message | null {
   const sender = message.from.agentId;
   if (!sender) return null;
-  const data =
-    message.data && Object.keys(message.data).length > 0
-      ? `\n\nData:\n\`\`\`json\n${JSON.stringify(message.data, null, 2)}\n\`\`\``
-      : "";
   return {
     id: message.messageId,
     where: { chatId: sender as ChatId, kind: "direct" },
     sender: { accountId: sender, name: agentLabel(message.from) },
-    content: { text: `${message.text}${data}`, attachments: [] },
+    content: {
+      text: message.text,
+      attachments: hasData(message) ? [{ type: "document", mimeType: JSON_MIME }] : [],
+    },
     receivedBy: message.to.agentId,
     ...(message.inReplyTo ? { replyTo: { messageId: message.inReplyTo } } : {}),
     saidAt: new Date(message.sentAt),
     raw: message,
   };
 }
+
+const JSON_MIME = "application/json";
+
+/** Whether the message carries data beside its text. */
+function hasData(message: AgentMessageEnvelope): boolean {
+  return message.data !== null && Object.keys(message.data).length > 0;
+}
+
+/** Saves a message's data as the JSON file its attachment names. */
+const inboundMedia: ChannelInboundMedia = {
+  async materialize(message) {
+    const envelope = message.raw as AgentMessageEnvelope | undefined;
+    const attachment = message.attachments.find((each) => each.mimeType === JSON_MIME);
+    if (!envelope || !attachment || !hasData(envelope)) return message.attachments;
+    return saveIncomingAttachmentPayloads(message, [
+      { attachment, data: Buffer.from(JSON.stringify(envelope.data, null, 2)) },
+    ]);
+  },
+};
 
 /** Whether Cloud refused the instance token itself, which no retry fixes: the
  *  token is unknown or revoked, or this Rome is no longer linked. */
@@ -234,6 +253,7 @@ export function createAgentsTalker(client: AgentMessagingClient): Talker {
   // page, as well as answer one. An address that is not an agent id, such as
   // a link left from before agent ids, offers nothing to write to.
   const features: TalkFeatures = {
+    inboundMedia,
     directMessaging: {
       async chatFor(channelUserId) {
         const address = channelUserId.trim();

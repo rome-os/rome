@@ -189,7 +189,7 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
 
   async function chats(
     target: Account | string,
-    { query, limit, cursor }: ChannelChatsQuery = {},
+    { query, limit, cursor, includeThreads, includeArchivedThreads }: ChannelChatsQuery = {},
   ): Promise<ChannelChatsPage> {
     const { channel, connection } = backing(target);
     const capped = Math.min(Math.max(1, Math.floor(limit ?? CHATS_LIMIT)), CHATS_LIMIT_MAX);
@@ -198,7 +198,8 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
     const listed = connection.withTalker((talker) =>
       talker.directory?.listConversations({
         limit: capped,
-        includeTopics: false,
+        includeTopics: includeThreads === true || includeArchivedThreads === true,
+        ...(includeArchivedThreads ? { includeArchived: true } : {}),
         ...(query ? { query } : {}),
         ...(cursor ? { cursor } : {}),
       }),
@@ -217,6 +218,8 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
         chatId: chat.ref.chatId,
         name: chat.displayName,
         kind: chat.kind,
+        ...(chat.parent ? { parent: chat.parent.chatId } : {}),
+        ...(chat.archived ? { archived: true } : {}),
       })),
       ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
     };

@@ -56,6 +56,8 @@ const ChatsParams = z
     query: z.string().optional(),
     limit: z.number().int().positive().optional(),
     cursor: z.string().optional(),
+    includeThreads: z.boolean().optional(),
+    includeArchivedThreads: z.boolean().optional(),
   })
   .strict();
 
@@ -192,11 +194,8 @@ export function chatWorkerCalls(
       );
     },
     "channels.chats": async (params, caller) => {
-      const { channel, query, limit, cursor } = parseWorkerCallParams(
-        "channels.chats",
-        ChatsParams,
-        params,
-      );
+      const { channel, query, limit, cursor, includeThreads, includeArchivedThreads } =
+        parseWorkerCallParams("channels.chats", ChatsParams, params);
       if (!channelsService.chats) throw new Error("This Rome lists no chats");
       // A listing names no one chat, so it reads as a query of no chat would:
       // a turn others read lists nothing.
@@ -207,6 +206,8 @@ export function chatWorkerCalls(
         ...(query ? { query } : {}),
         ...(limit ? { limit } : {}),
         ...(cursor ? { cursor } : {}),
+        ...(includeThreads ? { includeThreads } : {}),
+        ...(includeArchivedThreads ? { includeArchivedThreads } : {}),
       });
     },
     "agentNames.resolve": async (params) => {

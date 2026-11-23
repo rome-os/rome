@@ -1,6 +1,7 @@
 import type { AgentNameEvents } from "../people/guardian-profile/index.js";
 import type { ChatProviders } from "../webchat/chat-providers.js";
 import type { VoiceInputSource } from "../voice-input/index.js";
+import type { SpeakerSource } from "../voice-output/speaker-source.js";
 import type { PersonalDataRepository } from "../personal-data/repository.js";
 import type { DeviceConnectionsRepository } from "../connections/device/repository.js";
 import type { PlaceAudience } from "../core/place-audience.js";
@@ -72,6 +73,7 @@ import type { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
 import type { PhoneWatching } from "../lib/phone-watching.js";
 import type { DashboardActivity } from "../lib/dashboard-activity.js";
 import type { RelayDrainer } from "../relay/drainer.js";
+import type { MailboxClaimed } from "../relay/settings.js";
 import type { BootVersionReport } from "../instance/boot-version-report.js";
 import type { ReleaseNotes } from "../instance/system-upgrade/release-notes.js";
 import type { SystemUpgradeService } from "../instance/system-upgrade/service.js";
@@ -245,8 +247,14 @@ export interface ApiDeps {
   defaultProviders?: DefaultProviders;
   /** What a chat shows when its provider cannot run, and the actions on it. */
   providerFailures?: ProviderFailures;
-  /** How many chats follow the default, for the default-change dialog. */
-  chatProviders?: Pick<ChatProviders, "followingCount">;
+  /**
+   * How many chats follow the default, for the default-change dialog; which
+   * conversations are held on a provider; and a chat's "Back to default".
+   */
+  chatProviders?: Pick<
+    ChatProviders,
+    "followingCount" | "heldProvider" | "follow" | "release" | "pick"
+  >;
   /** Rome credits can be spent now: linked, enabled and with a balance. */
   romeCreditsUsable?: () => boolean;
   /** Codex's loopback route to Rome credits, built by the composition root. */
@@ -270,11 +278,15 @@ export interface ApiDeps {
   phoneWatching?: PhoneWatching;
   /** Where each listening session's speech becomes text, as Rome Cloud grants it. */
   voiceInput?: VoiceInputSource;
+  /** Where voice conversation mode's speaking sessions come from. Opens none while `voice_mode` is off. */
+  speaker?: SpeakerSource;
   /** Whether the guardian is at a web dashboard, from its signals on the live-events socket. */
   dashboardActivity?: DashboardActivity;
   /** Webhook relay drainer — present so the Integrations settings route can
    * hot-reload the live connection when the guardian edits relay credentials. */
   relayDrainer: RelayDrainer;
+  /** Connections running on the relay mailbox, so a reload keeps draining it for them. */
+  mailboxClaims?: MailboxClaimed;
   /** Boot-time comparison of the running release version against the one the
    * previous boot recorded — surfaced via `GET /api/build-info` so the
    * dashboard can show an "upgraded since last boot" notice. */

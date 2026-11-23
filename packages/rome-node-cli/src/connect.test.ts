@@ -194,7 +194,7 @@ describe("connect authorization modes", () => {
     expect(second.output()).not.toContain("User code:");
     f.socket()!.close(4001);
     expect(await second.exited).toBe(1);
-    expect(second.output()).toContain("Authorization revoked");
+    expect(second.output()).toContain("removed from your account");
     expect(second.output()).not.toContain(f.token);
     await delay(100);
     expect(f.socket()?.readyState).toBe(3);

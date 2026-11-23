@@ -30,6 +30,8 @@ enum DebugCommand: Equatable {
     case connectSheet(String?)
     /// The drawer's Archived sheet, in a stand-in frame, or closed.
     case archivedSheet(Bool)
+    /// An AI account's login sheet at its code step, in a stand-in frame; nil closes it.
+    case aiLoginSheet(AIAccount?)
 }
 
 /// Health sync's demo: a few syncs of today and yesterday.
@@ -137,7 +139,9 @@ enum SnapshotRunner {
 
         // Settings shows "Not set"; the Chat offer waits for its own screen.
         model.push.debugSet(permission: .notSet, dismissedAt: .now)
-        let styles: [(String, UIUserInterfaceStyle)] = [("light", .light), ("dark", .dark)]
+        // `ROME_SNAPSHOT_STYLE=light` (or `dark`) captures one style only.
+        let style = ProcessInfo.processInfo.environment["ROME_SNAPSHOT_STYLE"]
+        let styles: [(String, UIUserInterfaceStyle)] = [("light", .light), ("dark", .dark)].filter { style == nil || $0.0 == style }
         for (styleName, style) in styles {
             window?.overrideUserInterfaceStyle = style
             await capture("01-login", style: styleName, in: directory) { model.debugSetPhase(.signedOut) }
@@ -247,6 +251,30 @@ enum SnapshotRunner {
                 model.debugCommand = .section(.chat)
                 try? await Task.sleep(for: .seconds(0.4))
             }
+            if only.isEmpty || !only.isDisjoint(with: ["05f-drawer-older-collapsed", "05g-drawer-older-expanded", "05g2-drawer-older-folded", "05h-drawer-older-open"]) {
+                model.openDemo(.olderTopics)
+                try? await Task.sleep(for: .seconds(2))
+                model.workspace?.topics.setFolded(false)
+                await capture("05f-drawer-older-collapsed", style: styleName, in: directory) {
+                    model.workspace?.topics.setOlderExpanded(false)
+                    model.debugCommand = .drawer(true)
+                }
+                await capture("05g-drawer-older-expanded", style: styleName, in: directory) {
+                    model.workspace?.topics.setOlderExpanded(true)
+                }
+                // Topic chats folded: the Archived button stays in the header.
+                await capture("05g2-drawer-older-folded", style: styleName, in: directory) {
+                    model.workspace?.topics.setFolded(true)
+                }
+                model.workspace?.topics.setFolded(false)
+                model.workspace?.topics.setOlderExpanded(false)
+                model.debugCommand = .section(.topic("topic-meals"))
+                try? await Task.sleep(for: .seconds(1))
+                await capture("05h-drawer-older-open", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
+                model.debugCommand = .drawer(false)
+                model.openDemo()
+                try? await Task.sleep(for: .seconds(1))
+            }
             // Two topic chats pinned: atop the list, the latest pinned first, each with a pin.
             if only.isEmpty || only.contains("05f-drawer-pinned"), let workspace = model.workspace {
                 await workspace.pinTopic("topic-books", pinned: true)
@@ -266,16 +294,21 @@ enum SnapshotRunner {
                 model.openDemo()
                 try? await Task.sleep(for: .seconds(2))
             }
-            // Archived topic chats: the drawer's row under a short list, its
+            // Archived topic chats: the drawer's header button, its
             // sheet, and an archived chat, read only with its Restore banner.
             let archivedShots = ["05h-drawer-archived", "05i-archived-sheet", "24b-topic-archived"]
             if only.isEmpty || !only.isDisjoint(with: archivedShots), let workspace = model.workspace {
-                // Ten more archived, so the row shows under the five left.
+                // Ten more archived.
                 let moved = workspace.topics.chats.suffix(10).map(\.id)
                 for id in moved { await workspace.archiveTopic(id) }
                 workspace.archivedTopics.refresh()
                 try? await Task.sleep(for: .seconds(0.6))
                 await capture("05h-drawer-archived", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .drawer(true) }
+                // The demo's own archived chats only, so the sheet shows its
+                // groups rather than ten chats of today.
+                for id in moved { await workspace.restoreTopic(id) }
+                workspace.archivedTopics.refresh()
+                try? await Task.sleep(for: .seconds(0.6))
                 await capture("05i-archived-sheet", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .archivedSheet(true) }
                 model.debugCommand = .archivedSheet(false)
                 try? await Task.sleep(for: .seconds(0.3))
@@ -283,7 +316,6 @@ enum SnapshotRunner {
                 try? await Task.sleep(for: .seconds(0.4))
                 await capture("24b-topic-archived", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-archived-car")) }
                 model.debugCommand = .section(.chat)
-                for id in moved { await workspace.restoreTopic(id) }
                 try? await Task.sleep(for: .seconds(0.6))
             }
             await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.tasks) }
@@ -312,9 +344,76 @@ enum SnapshotRunner {
             }
             await capture("11-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([]) }
             await capture("11b-settings-shared-links", style: styleName, in: directory, wait: 1.2) {
-                Task { await model.workspace?.openMainChatLinks() }
+                Task { await model.workspace?.sharedLinks.open() }
             }
-            model.workspace?.showsMainChatLinks = false
+            model.workspace?.sharedLinks.shows = false
+            try? await Task.sleep(for: .seconds(0.6))
+            // The AI Tools row in each state, then its page and the two logins.
+            for (name, preview) in [("11c-settings-ai-ready", DemoBackend.AIModelPreview.ready), ("11d-settings-ai-paused", .paused), ("11e-settings-ai-login", .needsLogin), ("11f-settings-ai-not-set-up", .notSetUp), ("11g-settings-ai-credits", .credits)] {
+                await capture(name, style: styleName, in: directory, wait: 1.2) {
+                    DemoBackend.aiModelPreview = preview
+                    model.debugCommand = .settings(nil)
+                    Task {
+                        try? await Task.sleep(for: .seconds(0.4))
+                        model.debugCommand = .settings([])
+                    }
+                }
+            }
+            DemoBackend.aiModelPreview = .ready
+            await capture("11h-ai-model", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.aiModel]) }
+            await capture("11i-ai-model-login", style: styleName, in: directory, wait: 1.5) {
+                DemoBackend.aiModelPreview = .needsLogin
+                model.debugCommand = .settings(nil)
+                Task {
+                    try? await Task.sleep(for: .seconds(0.4))
+                    model.debugCommand = .settings([.aiModel])
+                }
+            }
+            // The page with no default, and with Rome credits as the default.
+            for (name, preview) in [("11l-ai-model-not-set-up", DemoBackend.AIModelPreview.notSetUp), ("11m-ai-model-credits", .credits)] {
+                await capture(name, style: styleName, in: directory, wait: 1.5) {
+                    DemoBackend.aiModelPreview = preview
+                    model.debugCommand = .settings(nil)
+                    Task {
+                        try? await Task.sleep(for: .seconds(0.4))
+                        model.debugCommand = .settings([.aiModel])
+                    }
+                }
+            }
+            // No account, credits left: Rome credits offer to be the default.
+            await capture("11n-ai-model-credits-usable", style: styleName, in: directory, wait: 1.5) {
+                DemoBackend.aiModelPreview = .creditsUsable
+                model.debugCommand = .settings(nil)
+                Task {
+                    try? await Task.sleep(for: .seconds(0.4))
+                    model.debugCommand = .settings([.aiModel])
+                }
+            }
+            // The default's dialogs over the page: Set as default, a logout
+            // that moves the default, and one that moves nothing.
+            DemoBackend.aiModelPreview = .ready
+            let dialogs: [(String, (AIModelStore) -> AIDefaultDialog)] = [
+                ("11o-ai-dialog-set-default", { $0.setDefaultDialog(.anthropic) }),
+                ("11p-ai-dialog-logout-default", { $0.logOutDialog(.chatgpt) }),
+                ("11q-ai-dialog-logout-other", { $0.logOutDialog(.claude) }),
+            ]
+            for (name, make) in dialogs {
+                await capture(name, style: styleName, in: directory, wait: 2) {
+                    AIModelScreen.debugDialog = make
+                    model.debugCommand = .settings(nil)
+                    Task {
+                        try? await Task.sleep(for: .seconds(0.4))
+                        model.debugCommand = .settings([.aiModel])
+                    }
+                }
+            }
+            AIModelScreen.debugDialog = nil
+            DemoBackend.aiModelPreview = .ready
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("11j-login-chatgpt", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .aiLoginSheet(.chatgpt) }
+            await capture("11k-login-claude", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .aiLoginSheet(.claude) }
+            model.debugCommand = .aiLoginSheet(nil)
             try? await Task.sleep(for: .seconds(0.6))
             await capture("27-settings-notifications-on", style: styleName, in: directory, wait: 1.2) {
                 model.push.debugSet(permission: .on, dismissedAt: .now)
@@ -437,19 +536,9 @@ enum SnapshotRunner {
                     if order.count > 1 { share.toggle(order[order.count - 2]) }
                 }
             }
-            await capture("62-shared-links", style: styleName, in: directory, wait: 1.5) {
-                guard let share = model.workspace?.topicStore("topic-trip").share else { return }
-                share.cancel()
-                share.openLinks()
-            }
-            await capture("63-shared-links-empty", style: styleName, in: directory, wait: 2) {
-                model.workspace?.topicStore("topic-trip").share.showsLinks = false
-                model.debugCommand = .section(.chat)
-                model.workspace?.concierge.share.openLinks()
-            }
+            model.workspace?.topicStore("topic-trip").share.cancel()
             // A task chat: its brief, a card, starts the first turn.
             await capture("64-share-task", style: styleName, in: directory, wait: 2.5) {
-                model.workspace?.concierge.share.showsLinks = false
                 model.debugCommand = .route([.taskChat(chatId: "chat-login", title: "修复登录页样式")])
                 Task {
                     try? await Task.sleep(for: .seconds(1.5))
@@ -461,8 +550,6 @@ enum SnapshotRunner {
             model.debugCommand = .route([])
             if let workspace = model.workspace {
                 workspace.topicStore("topic-trip").share.cancel()
-                workspace.topicStore("topic-trip").share.showsLinks = false
-                workspace.concierge.share.showsLinks = false
             }
             // A long chat, to scroll far from the bottom.
             await capture("53-topic-long-chat", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }
@@ -495,6 +582,13 @@ enum SnapshotRunner {
             await capture("57-agent-itinerary", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-itinerary")) }
             // Task links in each status: running, needs you, done, failed, stopped, no response, later.
             await capture("65-task-links", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-task-links")) }
+            await capture("66-reply-links", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-reply-links")) }
+            // Chat's connect-AI card with no account logged in: Connect opens the AI Tools page.
+            DemoBackend.aiModelPreview = .notSetUp
+            await capture("66-ai-tools-card", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-ai")) }
+            DemoBackend.aiModelPreview = .ready
+            // The three provider failure cards, a settled one, and the outage notice.
+            await capture("67-provider-failures", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-provider")) }
             // Share-location cards: shared, not shared, and one still open.
             await capture("57-location-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-location")) }
             // The drawer over a topic chat: its row selected.

@@ -32,9 +32,7 @@ type Open = "rename" | "disconnect" | "remove" | null;
 /**
  * A device's actions menu, on its card and on its page.
  *
- * Another device: rename, and remove, which revokes it and deletes it from the account in one
- * step. A device whose revocation Rome Cloud has not confirmed yet stays listed as revoked, and
- * removing it again deletes it.
+ * Another device: rename, and remove, which takes it out of the account in one step.
  * This computer: rename, and connect or disconnect through the app, which can be undone at any
  * time. It is removed on Rome Cloud, so the menu only points there.
  * Renders nothing when it has no action to offer.
@@ -51,7 +49,6 @@ export function DeviceMenu({
   m: NodeUiMessages;
 }) {
   const [open, setOpen] = useState<Open>(null);
-  const revoked = device.status === "revoked";
   if (!manage && !self) return null;
   const close = () => setOpen(null);
   return (
@@ -61,7 +58,7 @@ export function DeviceMenu({
           <IconButton label={m.manage.menu} icon={<Ellipsis />} size="sm" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {manage && !revoked && (
+          {manage && (
             <DropdownMenuItem onSelect={() => setOpen("rename")}>
               <Pencil className="size-4" aria-hidden />
               {m.manage.rename}
@@ -131,9 +128,7 @@ export function DeviceMenu({
           icon={<Trash2 aria-hidden />}
           title={format(m.manage.removeTitle, { name: device.name })}
           body={m.manage.removeLead}
-          points={(revoked ? m.manage.removeRevoked : m.manage.removeActive).map((point) =>
-            format(point, { name: device.name }),
-          )}
+          points={m.manage.removeActive.map((point) => format(point, { name: device.name }))}
           action={m.manage.remove}
           destructive
           m={m}

@@ -118,6 +118,14 @@ export interface StoredSharedChatSummary {
   createdAt: Date;
 }
 
+/** A live share with the chat it was made from, for the owner's list of all their links. */
+export interface StoredOwnerSharedChat extends StoredSharedChatSummary {
+  sessionId: string;
+  chatName: string;
+  chatAgentName: string | null;
+  chatOwnerKey: string | null;
+}
+
 export interface StoredWebchatHistoryMessage extends StoredWebchatMessage {
   sessionName: string;
   sessionAgentName: string | null;
@@ -1890,7 +1898,7 @@ export class WebChatRepository {
   /**
    * Stores the chat's model, with who chose it: its owner, or Rome. `kept` is
    * Rome's choice that a change of the default does not move: the chat stays
-   * on that model's provider (docs/domains/agents.md#kept-provider).
+   * on that model's provider (docs/domains/agents.md#pinned-chat).
    */
   async updateSessionLargeModelSelection(
     id: string,
@@ -1928,15 +1936,51 @@ export class WebChatRepository {
   }
 
   /**
+   * The chats among `ids` that exist, with the model each stored and who
+   * chose it, in one read.
+   */
+  async modelSelectionsOf(ids: readonly string[]): Promise<
+    Map<
+      string,
+      {
+        agentName: string | null;
+        largeModelSelection: string | null;
+        largeModelSelectionBy: ModelSelectionBy | null;
+      }
+    >
+  > {
+    const out = new Map<
+      string,
+      {
+        agentName: string | null;
+        largeModelSelection: string | null;
+        largeModelSelectionBy: ModelSelectionBy | null;
+      }
+    >();
+    if (ids.length === 0) return out;
+    const rows = await this.db
+      .select({
+        id: romeSessions.id,
+        agentName: romeSessions.agentName,
+        largeModelSelection: romeSessions.largeModelSelection,
+        largeModelSelectionBy: romeSessions.largeModelSelectionBy,
+      })
+      .from(romeSessions)
+      .where(inArray(romeSessions.id, [...new Set(ids)]));
+    for (const { id, ...row } of rows) out.set(id, row);
+    return out;
+  }
+
+  /**
    * The kept chats: a change of the default that moves existing chats lets
    * them follow it again.
    */
-  async keptChatCount(): Promise<number> {
+  async keptChats(): Promise<string[]> {
     const rows = await this.db
-      .select({ count: sql<number>`count(*)`.mapWith(Number) })
+      .select({ id: romeSessions.id })
       .from(romeSessions)
       .where(eq(romeSessions.largeModelSelectionBy, "kept"));
-    return rows[0]?.count ?? 0;
+    return rows.map((row) => row.id);
   }
 
   /**
@@ -3322,6 +3366,35 @@ export class WebChatRepository {
       .from(sharedChats)
       .where(and(eq(sharedChats.sessionId, sessionId), isNull(sharedChats.revokedAt)))
       .orderBy(desc(sharedChats.createdAt));
+  }
+
+  /**
+   * Every live share of the chats `ownerKey` owns, newest first. A chat with
+   * no owner is the guardian's; a null owner (no one signed in) owns none.
+   */
+  async listSharedChatsByOwner(ownerKey: string | null): Promise<StoredOwnerSharedChat[]> {
+    if (ownerKey === null) return [];
+    return this.db
+      .select({
+        id: sharedChats.id,
+        title: sharedChats.title,
+        createdAt: sharedChats.createdAt,
+        sessionId: sharedChats.sessionId,
+        chatName: romeSessions.name,
+        chatAgentName: romeSessions.agentName,
+        chatOwnerKey: romeSessions.ownerKey,
+      })
+      .from(sharedChats)
+      .innerJoin(romeSessions, eq(romeSessions.id, sharedChats.sessionId))
+      .where(
+        and(
+          isNull(sharedChats.revokedAt),
+          ownerKey === "guardian"
+            ? or(eq(romeSessions.ownerKey, ownerKey), isNull(romeSessions.ownerKey))
+            : eq(romeSessions.ownerKey, ownerKey),
+        ),
+      )
+      .orderBy(desc(sharedChats.createdAt), desc(sharedChats.id));
   }
 
   /** Soft-delete (revoke) a share. Returns true if a live row was revoked. */

@@ -1,0 +1,43 @@
+name: PR title
+
+# Squash-and-merge uses the PR title as the merge commit subject on main, and
+# release-please reads those subjects to decide the next version + CHANGELOG for
+# the packages in release-please-config.json. This is the only PR-time gate on
+# that input — see docs/releases.md.
+#
+# It is its own workflow so that editing a PR is cheap. A title is fixed by
+# editing it rather than by pushing, so this check must rerun on `edited`; the
+# main CI workflow does not listen to `edited`, and a title or description edit
+# no longer reruns (or cancels) the full suite.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-title-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # This check once ran as a `pull_request_target` workflow. That trigger ran
+  # main's copy of both the workflow and the validator, so a branch could not
+  # edit either one into reporting success for any title. On `pull_request` both
+  # come from the PR under test, so diff review is what catches a weakened gate,
+  # as it already is for every check in ci.yml.
+  title:
+    name: Validate PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      # The title is attacker-controlled text, so it is read as data through an
+      # environment variable and never interpolated into the run script.
+      - name: Validate PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: scripts/check-pr-title.sh

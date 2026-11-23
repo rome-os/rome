@@ -1280,7 +1280,12 @@ const chatSessions: ChatSession[] = [
   // Topic chats, which the Concierge section lists under the main chat.
   session("mock-topic-travel", "Travel planning", "default", CONCIERGE_AGENT_ID),
   session("mock-topic-news", "Weekly news digest", "default", CONCIERGE_AGENT_ID),
-  session(PROVIDER_CARDS_CHAT_ID, "Provider failure cards", "default", CONCIERGE_AGENT_ID),
+  // Kept on ChatGPT by a card's switch: it shows the pinned hint.
+  {
+    ...session(PROVIDER_CARDS_CHAT_ID, "Provider failure cards", "default", CONCIERGE_AGENT_ID),
+    followsDefault: false,
+    pinnedModel: { by: "kept", providerId: "openai", selection: null, model: "gpt-6-luna" },
+  },
   session(CARD_WIDTHS_CHAT_ID, "Card widths", "default", CONCIERGE_AGENT_ID),
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
@@ -1703,6 +1708,11 @@ const upgradeStatus = (): Omit<UpgradeStatus, "receivedAt"> => ({
   serverNow: Date.now(),
 });
 
+/** A server icon for the mock, drawn inline so the mock needs no network. */
+const MOCK_SERVER_ICON = `data:image/svg+xml;utf8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2f6f5e"/><stop offset="1" stop-color="#7cc4a4"/></linearGradient></defs><rect width="96" height="96" fill="url(#g)"/><path d="M18 70 L40 40 L54 58 L64 46 L80 70 Z" fill="#f4efe4"/><circle cx="68" cy="28" r="8" fill="#f4efe4"/></svg>',
+)}`;
+
 export const handlers = [
   ...appDocumentAccessHandlers,
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
@@ -1908,6 +1918,15 @@ export const handlers = [
     found.pinnedAt = pinned ? new Date().toISOString() : null;
     return HttpResponse.json(found);
   }),
+  // "Back to default": the chat follows the default again. Kept in memory like the pin.
+  http.post("/api/chat/sessions/:sessionId/model/follow-default", ({ params }) => {
+    const found = chatSessions.find((s) => s.id === params.sessionId);
+    if (!found) return HttpResponse.json({ error: "Unknown session" }, { status: 404 });
+    found.followsDefault = true;
+    found.pinnedModel = null;
+    found.largeModelSelection = null;
+    return HttpResponse.json(found);
+  }),
   // The open chat's model picker. Kept in memory like the pin.
   http.patch("/api/chat/sessions/:sessionId/model", async ({ params, request }) => {
     const found = chatSessions.find((s) => s.id === params.sessionId);
@@ -2062,6 +2081,32 @@ export const handlers = [
         },
       ],
     }),
+  ),
+  // Rome's own Discord bot: the servers and accounts bound to this Rome.
+  http.get("/api/connections/discord-app/servers", () =>
+    HttpResponse.json({
+      servers: [
+        {
+          serverId: "200000000000000001",
+          serverName: "Ray's Lab",
+          serverIcon: MOCK_SERVER_ICON,
+          createdAt: Date.now(),
+        },
+        {
+          serverId: "200000000000000002",
+          serverName: "Weekend Hikes",
+          serverIcon: null,
+          createdAt: Date.now(),
+        },
+      ],
+      users: [{ userId: "300000000000000001", name: "Mock Member", createdAt: Date.now() }],
+    }),
+  ),
+  http.post("/api/connections/discord-app/install-link", () =>
+    HttpResponse.json({ url: "https://discord.com/oauth2/authorize?client_id=mock" }),
+  ),
+  http.delete("/api/connections/discord-app/servers/:serverId", () =>
+    HttpResponse.json({ removed: true, left: true }),
   ),
   // An authorized grant is what puts Disconnect on a card, so seeding the three
   // above without this would make every one of those buttons fail locally.

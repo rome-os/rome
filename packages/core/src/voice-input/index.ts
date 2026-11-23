@@ -2,6 +2,7 @@ export type {
   Transcriber,
   TranscriptionFailure,
   TranscriptionListener,
+  TranscriptionMode,
   TranscriptionPlace,
   TranscriptionStream,
 } from "./transcriber.js";

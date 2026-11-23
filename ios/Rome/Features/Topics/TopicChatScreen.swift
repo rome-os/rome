@@ -25,12 +25,12 @@ struct TopicChatScreen: View {
     @State private var startFailed = false
     @State private var startFailure: SendFailure = .unknown
     @State private var startingImages: [ComposerImage] = []
-    @State private var renaming = false
+    /// Rename from the header, while its alert is up.
+    @State private var renaming: TopicRenameRequest?
     /// Archive or Delete from the header, while it is read and asked.
     @State private var retiring: TopicRetireRequest?
     /// Unarchive from the archived chat's banner, while it is read and asked.
     @State private var restoring: TopicRestoreRequest?
-    @State private var newName = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
 
@@ -67,8 +67,8 @@ struct TopicChatScreen: View {
                 },
                 onAgent: { onAgent(chatId, $0) },
                 onRename: { title in
-                    newName = title
-                    renaming = true
+                    guard let chatId else { return }
+                    renaming = TopicRenameRequest(chatId: chatId, name: title)
                 },
                 onPin: { pinned in
                     guard let chatId else { return }
@@ -92,19 +92,18 @@ struct TopicChatScreen: View {
         }
         // Reply brings the keyboard up.
         .onChange(of: store?.replies) { composerFocused = true }
-        .alert("Rename chat", isPresented: $renaming) {
-            TextField("Name", text: $newName)
-            Button("Cancel", role: .cancel) {}
-            Button("Rename") {
-                guard let chatId else { return }
-                let name = newName
-                Task { await workspace.renameTopic(chatId, to: name) }
-            }
-        }
+        .topicRename($renaming, workspace: workspace)
         .topicRetire($retiring, workspace: workspace) { _ in onArchived() }
         .topicRestore($restoring, workspace: workspace)
         .pageBackground()
         .environment(\.taskLinks, chatId.flatMap { workspace.taskLinks(forChat: $0) })
+        .providerFailurePrompts(store, workspace: workspace)
+        // Whether the chat follows the default, read each time it opens.
+        // Read again each time it comes back into view, as after Settings
+        // changed the default with the topic still mounted beneath it.
+        .task(id: "\(store?.sessionId ?? "")|\(chatId.map { visibleChat == $0 } ?? inFront)") {
+            if chatId.map({ visibleChat == $0 }) ?? inFront { await store?.readChatSession() }
+        }
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onReply: { store?.restoreReply($0) }, prefill: Binding(
             get: { workspace.composerPrefills[chatId ?? draftKey] },
             set: { workspace.composerPrefills[chatId ?? draftKey] = $0 }
@@ -168,7 +167,7 @@ struct TopicChatScreen: View {
     @ViewBuilder
     private var content: some View {
         if let store, store.loaded {
-            TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
+            TranscriptList(store: store, composerFocused: composerFocused, footer: archived ? nil : PinnedHintLine.footer(store, visitor: workspace.isVisitor), latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
                 ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.taskChats, tinted: store.tinted != nil && row.ownMessageId == store.tinted)
                     .equatable()
                     .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
@@ -343,8 +342,8 @@ private struct TopicChatHeader: View {
     }
 }
 
-/// What a topic chat's header "…" offers for the chat itself, besides Share
-/// and Shared links: a blank chat nothing yet; an archived one, as on the web,
+/// What a topic chat's header "…" offers for the chat itself, besides Share:
+/// a blank chat nothing yet; an archived one, as on the web,
 /// only Unarchive and Delete, since it is renamed and pinned once it is back.
 struct TopicHeaderMenu: Equatable {
     enum Item: Equatable, CaseIterable { case rename, pin, archive, unarchive, delete }

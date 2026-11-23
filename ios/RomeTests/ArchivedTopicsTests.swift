@@ -46,16 +46,6 @@ import Testing
         #expect(sessions.map(\.isArchivedTopicChat) == [true, false])
     }
 
-    /// The row under the topic chats: hidden with none archived, folded, or
-    /// while more topic chats are still to page in.
-    @Test func theEntryShowsOnlyWithArchivedChatsAtTheEnd() {
-        #expect(ArchivedTopicsStore.showsEntry(archived: 3, folded: false, shownTopics: 5, topics: 5))
-        #expect(ArchivedTopicsStore.showsEntry(archived: 1, folded: false, shownTopics: 0, topics: 0))
-        #expect(!ArchivedTopicsStore.showsEntry(archived: 0, folded: false, shownTopics: 5, topics: 5))
-        #expect(!ArchivedTopicsStore.showsEntry(archived: 3, folded: true, shownTopics: 0, topics: 5))
-        #expect(!ArchivedTopicsStore.showsEntry(archived: 3, folded: false, shownTopics: 30, topics: 45))
-    }
-
     /// The sheet pages as the drawer does: the first page, then a page more each time.
     @Test func theSheetShowsAPageAtATime() async {
         let backend = FakeBackend()
@@ -242,5 +232,100 @@ import Testing
 
         What happens to them?
         """)
+    }
+
+    // MARK: - The sheet's groups and its "Last active" line
+
+    /// Gregorian, weeks from Sunday, in UTC, so the groups never move with
+    /// the machine's settings.
+    private var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        calendar.firstWeekday = 1
+        return calendar
+    }
+
+    private func day(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -> Date {
+        calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour))!
+    }
+
+    private func chat(_ id: String) -> ConciergeChat {
+        ConciergeChat(id: id, name: id, main: false)
+    }
+
+    /// This week, earlier this month, then a group per month, newest first;
+    /// chats with no time last. A time ahead of now counts as this week.
+    @Test func groupsByWeekThenMonth() {
+        let now = day(2026, 11, 21) // a Saturday; the week began on Sunday 15th
+        let times: [String: Date] = [
+            "today": day(2026, 11, 21, hour: 9),
+            "ahead": day(2026, 11, 22),
+            "sunday": day(2026, 11, 15, hour: 1),
+            "saturday": day(2026, 11, 14),
+            "second": day(2026, 11, 2),
+            "oct30": day(2026, 10, 30),
+            "oct2": day(2026, 10, 2),
+            "sep": day(2026, 9, 5),
+            "lastYear": day(2025, 11, 30),
+        ]
+        let chats = ["ahead", "today", "sunday", "saturday", "second", "oct30", "oct2", "sep", "lastYear", "untimed"].map(chat)
+        let groups = ArchivedTopicsStore.groups(chats, lastActive: times, now: now, calendar: calendar)
+        #expect(groups.map(\.period) == [.thisWeek, .earlierThisMonth, .month(day(2026, 10, 1, hour: 0)), .month(day(2026, 9, 1, hour: 0)), .month(day(2025, 11, 1, hour: 0)), .undated])
+        #expect(groups.map { $0.chats.map(\.id) } == [["ahead", "today", "sunday"], ["saturday", "second"], ["oct30", "oct2"], ["sep"], ["lastYear"], ["untimed"]])
+    }
+
+    /// A week that began last month keeps its first days in This week.
+    @Test func thisWeekReachesIntoLastMonth() {
+        let now = day(2026, 12, 2) // a Wednesday; the week began on Sunday 29th
+        let times = ["mon": day(2026, 11, 30), "sat": day(2026, 11, 28)]
+        let groups = ArchivedTopicsStore.groups(["mon", "sat"].map(chat), lastActive: times, now: now, calendar: calendar)
+        #expect(groups.map(\.period) == [.thisWeek, .month(day(2026, 11, 1, hour: 0))])
+    }
+
+    @Test func noChatsNoGroups() {
+        #expect(ArchivedTopicsStore.groups([], lastActive: [:]).isEmpty)
+    }
+
+    /// Today a time, this year a day, before that a day with its year.
+    @Test func theLastActiveDateReadsAsElsewhere() {
+        let now = Date()
+        let earlier = now.addingTimeInterval(-60)
+        if Calendar.current.isDate(earlier, inSameDayAs: now) {
+            #expect(RelativeTime.moment(earlier, now: now) == RelativeTime.clock(earlier))
+        }
+        let en = Locale(identifier: "en_US")
+        let zh = Locale(identifier: "zh-Hans_CN")
+        let nov12 = day(2026, 11, 12)
+        let later = day(2026, 11, 21)
+        #expect(RelativeTime.moment(nov12, now: later, calendar: calendar, locale: en) == "Nov 12")
+        #expect(RelativeTime.moment(day(2025, 11, 12), now: later, calendar: calendar, locale: en) == "Nov 12, 2025")
+        #expect(RelativeTime.moment(nov12, now: later, calendar: calendar, locale: zh) == "11月12日")
+        #expect(RelativeTime.moment(day(2025, 11, 12), now: later, calendar: calendar, locale: zh) == "2025年11月12日")
+    }
+
+    /// A month's label carries its year only when it is not this year's.
+    @Test func monthLabelsCarryTheYearOnlyBeforeThisYear() {
+        let now = day(2026, 11, 21)
+        let en = Locale(identifier: "en_US")
+        let zh = Locale(identifier: "zh-Hans_CN")
+        #expect(RelativeTime.month(day(2026, 10, 1), now: now, calendar: calendar, locale: en) == "October")
+        #expect(RelativeTime.month(day(2025, 10, 1), now: now, calendar: calendar, locale: en) == "October 2025")
+        #expect(RelativeTime.month(day(2025, 10, 1), now: now, calendar: calendar, locale: zh) == "2025年10月")
+    }
+
+    /// The store keeps each chat's last activity from the list, and a chat
+    /// archived here keeps the time the drawer knew until the list is read.
+    @Test func keepsEachChatsLastActivity() async {
+        let backend = FakeBackend()
+        backend.archivedRows = [archived("car", "Car", daysAgo: 2), archived("untimed", "Holiday")]
+        let store = ArchivedTopicsStore(backend: backend)
+        store.refresh()
+        await settle()
+        #expect(store.lastActive["car"] != nil)
+        #expect(store.lastActive["untimed"] == nil)
+        let at = Date(timeIntervalSince1970: 1_800_000_000)
+        backend.archivedRows.insert(archived("trip", "Trip"), at: 0)
+        store.add(chat("trip"), lastActive: at)
+        #expect(store.lastActive["trip"] == at)
     }
 }

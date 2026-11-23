@@ -9,6 +9,8 @@ struct AppWebScreen: View {
     let app: InstalledApp
     /// A page of the instance a chat linked to, shown in place of the app's own.
     var pageURL: URL? = nil
+    /// A page of the app itself a chat linked to, opened in place of its first.
+    var startURL: URL? = nil
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -16,6 +18,8 @@ struct AppWebScreen: View {
     @State private var progress: Double = 0
     @State private var failed = false
     @State private var reloads = 0
+    /// The page the web view shows now, followed as the app moves within it.
+    @State private var shownURL: URL?
 
     /// The instance's origin; nil for demo data, which shows a sample page.
     private var origin: URL? { workspace.backend.origin }
@@ -25,7 +29,7 @@ struct AppWebScreen: View {
             header
             ZStack(alignment: .top) {
                 AppWebView(
-                    url: origin.flatMap { pageURL ?? AppLinks.fullURL(origin: $0, app: app) },
+                    url: origin.flatMap { pageURL ?? startURL ?? AppLinks.fullURL(origin: $0, app: app) },
                     demoHTML: pageURL == nil ? DemoApp.html : DemoApp.dashboardHTML,
                     origin: origin,
                     cookie: workspace.backend.webSessionCookie(),
@@ -34,7 +38,8 @@ struct AppWebScreen: View {
                     language: LanguageSync.code(Bundle.main.preferredLocalizations.first),
                     reloads: reloads,
                     progress: $progress,
-                    failed: $failed
+                    failed: $failed,
+                    shownURL: $shownURL
                 )
                 .opacity(failed ? 0 : 1)
                 if !failed && progress < 1 {
@@ -67,6 +72,12 @@ struct AppWebScreen: View {
         }
     }
 
+    /// What Open in Safari opens: the page shown now, else the page the sheet
+    /// opened at (a linked page, or an app's detail page), else the app.
+    static func safariURL(shown: URL?, page: URL?, start: URL?, web: URL, app: InstalledApp) -> URL? {
+        shown ?? page ?? start ?? AppLinks.fullURL(origin: web, app: app)
+    }
+
     private var header: some View {
         HStack {
             GlassCircleButton(accessibilityLabel: "Close", action: { dismiss() }) {
@@ -77,7 +88,7 @@ struct AppWebScreen: View {
                 Button { failed = false; reloads += 1 } label: {
                     Label("Reload", systemImage: "arrow.clockwise")
                 }
-                if let web = model.webURL, let url = pageURL ?? AppLinks.fullURL(origin: web, app: app) {
+                if let web = model.webURL, let url = Self.safariURL(shown: shownURL, page: pageURL, start: startURL, web: web, app: app) {
                     Button { openURL(url) } label: {
                         Label("Open in Safari", systemImage: "safari")
                     }
@@ -139,10 +150,11 @@ private struct InstancePageSheet: ViewModifier {
 private struct AppSheet: ViewModifier {
     let workspace: Workspace
     @Binding var app: InstalledApp?
+    let start: URL?
 
     func body(content: Content) -> some View {
         content.sheet(item: $app) { app in
-            AppWebScreen(workspace: workspace, app: app)
+            AppWebScreen(workspace: workspace, app: app, startURL: start)
                 .id(app.id)
                 .modifier(WebSheetPresentation(dragToClose: false))
         }
@@ -182,8 +194,9 @@ extension View {
     }
 
     /// The app set in `app` rises in a sheet over this view.
-    func appSheet(workspace: Workspace, app: Binding<InstalledApp?>) -> some View {
-        modifier(AppSheet(workspace: workspace, app: app))
+    /// `start` is a page of the app to open in place of its first.
+    func appSheet(workspace: Workspace, app: Binding<InstalledApp?>, start: URL? = nil) -> some View {
+        modifier(AppSheet(workspace: workspace, app: app, start: start))
     }
 }
 
@@ -222,6 +235,8 @@ struct AppWebView: UIViewRepresentable {
     let reloads: Int
     @Binding var progress: Double
     @Binding var failed: Bool
+    /// The page shown now; demo data shows none.
+    var shownURL: Binding<URL?> = .constant(nil)
 
     static func themeValue(_ appearance: Appearance) -> String {
         switch appearance {
@@ -296,6 +311,7 @@ struct AppWebView: UIViewRepresentable {
         var parent: AppWebView
         var reloads = 0
         private var progressWatch: NSKeyValueObservation?
+        private var urlWatch: NSKeyValueObservation?
 
         init(_ parent: AppWebView) { self.parent = parent }
 
@@ -303,6 +319,13 @@ struct AppWebView: UIViewRepresentable {
             progressWatch = view.observe(\.estimatedProgress, options: [.new]) { [weak self] view, _ in
                 let value = view.estimatedProgress
                 DispatchQueue.main.async { self?.parent.progress = value }
+            }
+            // `url` changes on a load and on the app's own history moves, so
+            // Open in Safari follows the page an app shows without reloading.
+            urlWatch = view.observe(\.url, options: [.new]) { [weak self] view, _ in
+                // Demo data loads an inline page: no URL to open.
+                guard let url = view.url, url.scheme == "http" || url.scheme == "https" else { return }
+                DispatchQueue.main.async { self?.parent.shownURL.wrappedValue = url }
             }
         }
 

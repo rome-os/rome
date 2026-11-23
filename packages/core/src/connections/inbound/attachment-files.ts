@@ -21,6 +21,7 @@ const EXTENSIONS_BY_MIME: Record<string, string> = {
   "audio/mpeg": ".mp3",
   "audio/ogg": ".ogg",
   "application/pdf": ".pdf",
+  "application/json": ".json",
 };
 
 export const MAX_ATTACHMENT_BYTES = 200 * 1024 * 1024;

@@ -101,6 +101,11 @@ export interface MessageListProps {
   variant?: ChatVariant;
   /** In a `concierge` transcript, the id of the first message that was unread when the chat opened. */
   unreadFrom?: string | null;
+  /**
+   * The transcript's last row, after the newest message: it scrolls with the
+   * chat, and new messages land above it. The pinned-chat hint is one.
+   */
+  tail?: ReactNode;
 }
 
 /** How a chat presents itself. `concierge` is the texting-style Concierge chat. */
@@ -432,6 +437,7 @@ export function MessageList({
   fork,
   variant = "default",
   unreadFrom,
+  tail,
 }: MessageListProps) {
   if (variant === "concierge") {
     return (
@@ -443,6 +449,7 @@ export function MessageList({
         contentRef={contentRef}
         feedback={feedback}
         unreadFrom={unreadFrom}
+        tail={tail}
       />
     );
   }
@@ -460,6 +467,7 @@ export function MessageList({
       actions={actions}
       feedback={feedback}
       fork={fork}
+      tail={tail}
     />
   );
 }
@@ -477,6 +485,7 @@ function TranscriptMessageList({
   actions,
   feedback,
   fork,
+  tail,
 }: Omit<MessageListProps, "variant" | "unreadFrom">) {
   const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
@@ -583,6 +592,7 @@ function TranscriptMessageList({
           ];
         })}
         {!anchorRow ? standalone : null}
+        {tail}
       </div>
     </div>
   );

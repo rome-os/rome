@@ -53,6 +53,7 @@ export const BUILTIN_ACCOUNT_LINKS: Readonly<Record<string, AccountLink>> = {
   telegram: "own_account",
   discord: "own_account",
   slack_app: "own_account",
+  discord_app: "own_account",
   telegram_user: "delegate",
 };
 

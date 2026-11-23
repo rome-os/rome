@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// The archived topic chats, in the sheet the drawer's "Archived · N" row
-/// opens: latest activity first, a page at a time as in the drawer. A row
-/// opens its chat, read only; a swipe or a press and hold restores or
-/// deletes it.
+/// The archived topic chats, in the sheet the drawer's Archived button
+/// opens: latest activity first, grouped by week and month, a page at a time
+/// as in the drawer. A row opens its chat, read only; a swipe or a press and
+/// hold restores or deletes it.
 struct ArchivedTopicsSheet: View {
     let workspace: Workspace
     /// A row was tapped: the sheet closes, then the chat opens.
@@ -60,24 +60,16 @@ struct ArchivedTopicsSheet: View {
             Spacer()
         } else {
             let shown = TopicChatsStore.shownCount(chats.count, limit: limit, openIndex: nil)
+            let groups = ArchivedTopicsStore.groups(Array(chats.prefix(shown)), lastActive: store.lastActive)
             List {
-                ForEach(chats.prefix(shown)) { chat in
-                    ArchivedTopicRow(chat: chat) { onOpen(chat.id) }
-                        .sheetRow()
-                        // Unarchive, which a full swipe takes, then Delete, which
-                        // only a tap takes and which always asks. Not the
-                        // destructive role, which drops the row before the
-                        // guardian has answered.
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button { restore(chat) } label: { Label("Unarchive", systemImage: "tray.and.arrow.up") }
-                                .tint(Palette.primary)
-                            Button { delete(chat) } label: { Label("Delete", systemImage: "trash") }
-                                .tint(Palette.destructive)
+                ForEach(groups) { group in
+                    Section {
+                        ForEach(group.chats) { chat in
+                            row(chat)
                         }
-                        .contextMenu {
-                            Button { restore(chat) } label: { Label("Unarchive", systemImage: "tray.and.arrow.up") }
-                            Button(role: .destructive) { delete(chat) } label: { Label("Delete", systemImage: "trash") }
-                        }
+                    } header: {
+                        ArchivedGroupHeader(period: group.period)
+                    }
                 }
                 if shown < chats.count {
                     // A new view for each page, so an end still in view
@@ -90,65 +82,89 @@ struct ArchivedTopicsSheet: View {
                         .sheetRow()
                 }
             }
-            .listStyle(.plain)
-            .listRowSpacing(2)
+            // One rounded card per group, with hairlines between its rows.
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(.compact)
             .environment(\.defaultMinListRowHeight, 1)
             .scrollContentBackground(.hidden)
-            .contentMargins(.horizontal, 14, for: .scrollContent)
+            // Right under the title: the grouped list's own top margin is far taller.
+            .contentMargins(.top, 0, for: .scrollContent)
             .contentMargins(.bottom, 14, for: .scrollContent)
         }
     }
+
+    private func row(_ chat: ConciergeChat) -> some View {
+        ArchivedTopicRow(chat: chat, lastActive: store.lastActive[chat.id]) { onOpen(chat.id) }
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Palette.elevated)
+            .listRowSeparatorTint(Palette.hair)
+            // Unarchive, which a full swipe takes, then Delete, which
+            // only a tap takes and which always asks. Not the
+            // destructive role, which drops the row before the
+            // guardian has answered.
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button { restore(chat) } label: { Label("Unarchive", systemImage: "tray.and.arrow.up") }
+                    .tint(Palette.primary)
+                Button { delete(chat) } label: { Label("Delete", systemImage: "trash") }
+                    .tint(Palette.destructive)
+            }
+            .contextMenu {
+                Button { restore(chat) } label: { Label("Unarchive", systemImage: "tray.and.arrow.up") }
+                Button(role: .destructive) { delete(chat) } label: { Label("Delete", systemImage: "trash") }
+            }
+    }
 }
 
-/// One archived topic chat: its name, as a drawer row draws it.
+/// A group's label, above its card, aligned with the rows' text.
+private struct ArchivedGroupHeader: View {
+    let period: ArchivedTopicGroup.Period
+
+    var body: some View {
+        Group {
+            switch period {
+            case .thisWeek: Text("This week")
+            case .earlierThisMonth: Text("Earlier this month")
+            case .month(let start): Text(verbatim: RelativeTime.month(start))
+            case .undated: Text("Earlier")
+            }
+        }
+        .romeFont(13, .medium)
+        .foregroundStyle(Palette.sub)
+        .textCase(nil)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// One archived topic chat: its name, then when it was last active.
 private struct ArchivedTopicRow: View {
     let chat: ConciergeChat
+    let lastActive: Date?
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack {
-                Text(verbatim: TopicChatsStore.title(chat))
-                    .romeFont(16)
-                    .foregroundStyle(Palette.fg)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: TopicChatsStore.title(chat))
+                        .romeFont(16)
+                        .foregroundStyle(Palette.fg)
+                        .lineLimit(1)
+                    if let lastActive {
+                        Text("Last active \(RelativeTime.moment(lastActive))")
+                            .romeFont(13)
+                            .foregroundStyle(Palette.sub)
+                            .lineLimit(1)
+                    }
+                }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             .frame(minHeight: 44)
-            // In the sheet's own color, so a swiped row covers what is under it.
-            .background(Palette.sheet, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(Rectangle())
         }
-        .buttonStyle(PressScaleStyle(scale: 0.98))
+        .buttonStyle(RowPressStyle())
         .accessibilityIdentifier("archived-topic-chat")
-    }
-}
-
-/// The drawer's last row under the topic chats: how many are archived. It
-/// opens the Archived sheet.
-struct ArchivedTopicsEntry: View {
-    let count: Int
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: "archivebox")
-                    .romeFont(14)
-                    .accessibilityHidden(true)
-                Text("Archived · \(count)")
-                    .romeFont(15)
-                Spacer(minLength: 0)
-            }
-            // Quieter than the topic rows above it.
-            .foregroundStyle(Palette.sub)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 44)
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .buttonStyle(PressScaleStyle(scale: 0.98))
-        .accessibilityIdentifier("archived-topic-chats")
     }
 }
 

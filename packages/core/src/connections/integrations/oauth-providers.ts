@@ -304,8 +304,7 @@ async function promptShopifyStore(interact: Parameters<SetupFn>[0]): Promise<str
  *      `registry.giveGrant` (which re-materializes the tmpfs token file + gh/git
  *      shell auth through custody). Abandoning at any point writes nothing.
  *
- * There is no guardian-channel mapping (OAuth providers are not channels), so
- * the grant omits `guardianChannelUserId`.
+ * OAuth providers are not channels, so the grant omits `connectedBy`.
  */
 export function makeOAuthProviderSetup(
   provider: OAuthProvider,

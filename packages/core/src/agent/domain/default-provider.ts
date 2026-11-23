@@ -87,23 +87,31 @@ export function legacyDefault(
  * The default after a login or a logout. With none yet, the first signed-in
  * provider becomes it. A default that is still signed in stays, whatever else
  * signs in, except Rome credits, which the first login replaces. A logged-out
- * default moves to the guardian's other login, and with none left it stays,
- * so the next send shows why: Rome credits never take over from a login.
+ * default moves to the guardian's other login, an expired one included, and
+ * with none left to Rome credits when `creditsUsable` says they take it: in
+ * the guardian's logout, with credits enabled and a balance left, as the
+ * logout dialog said. With neither it stays, so the next send shows why.
  * Usage limits and expired logins never move it.
  */
 export function reconciledDefault(
   current: DefaultProvider | null,
   signedIn: SignedInProviders,
   first: DefaultProvider | null,
+  creditsUsable = true,
 ): { provider: DefaultProvider | null; moved: boolean } {
   if (current === null) return { provider: first, moved: false };
   if (signedIn[current]) return { provider: current, moved: false };
   const remaining = (["anthropic", "openai"] as const).find(
     (candidate) => candidate !== current && signedIn[candidate],
   );
-  if (!remaining) return { provider: current, moved: false };
-  // Credits give way to the first login without a note: nothing was removed.
-  return { provider: remaining, moved: current !== "rome_credits" };
+  if (remaining) {
+    // Credits give way to the first login without a note: nothing was removed.
+    return { provider: remaining, moved: current !== "rome_credits" };
+  }
+  if (current !== "rome_credits" && signedIn.rome_credits && creditsUsable) {
+    return { provider: "rome_credits", moved: true };
+  }
+  return { provider: current, moved: false };
 }
 
 /**

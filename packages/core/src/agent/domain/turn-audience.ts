@@ -19,6 +19,7 @@ const DIRECT_MESSAGE_KINDS: ReadonlySet<string> = new Set([
   "linkedin",
   "slack",
   "slack_app",
+  "discord_app",
   "feishu",
   "lark",
 ]);

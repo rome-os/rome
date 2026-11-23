@@ -15,7 +15,7 @@ Commands:
   device describe  Query a device's platform and supported actions.
   device run       Execute an action on a device.
   device rename    Rename a device in the account.
-  device remove    Revoke a device and delete it from the account.
+  device remove    Remove a device from the account.
   cp               Copy a file to or from a device.
   watch            Stream caller connection snapshots and changes as JSON lines.
   daemon           Manage the caller's background connection.
@@ -214,17 +214,14 @@ The local exit status is 0 on success or 1 on failure.
 `,
   "device remove": `Usage: rome-node device remove <device-id>
 
-Revoke a device and delete it from the account. Use an ID from rome-node device.
-The device can be offline. A connected device is disconnected and must run
-rome-node connect and be approved again to come back.
+Remove a device from the account. Use an ID from rome-node device. The device
+can be offline. A connected device is disconnected and must run rome-node
+connect and be approved again to come back.
 
-Rome Cloud keeps a revoked device listed until the Gateway confirms the
-revocation. Until then remove fails with code revocation_pending: the device is
-already revoked, and running remove again later deletes it. Other failure codes
-are device_not_found, invalid_device_session, and cloud_unavailable.
-
-Prints {"type":"response","ok":true,"result":{}} on success. The local exit
-status is 0 on success or 1 on failure.
+Prints {"type":"response","ok":true,"result":{}} on success. Failures print
+{"type":"response","ok":false,"error":{"code":"...","message":"..."}} with code
+device_not_found, invalid_device_session, or cloud_unavailable.
+The local exit status is 0 on success or 1 on failure.
 `,
   "device run": `Usage:
   rome-node device run <device-id> <action> [--args <json>]

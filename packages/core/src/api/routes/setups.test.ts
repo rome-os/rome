@@ -6,6 +6,7 @@
 // terminal grant (a connection is minted and its credential imported),
 // cancel, idempotent late delivery, and the same-origin guard.
 
+import { linkGuardianOnConnect } from "../../people/guardian-mapping.js";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
@@ -67,7 +68,7 @@ const setupFn: SetupFn = async (interact) => {
   return {
     credential: { material: { token }, expiresAt: "never" },
     profile: { botUsername: "rome" },
-    guardianChannelUserId: "guardian-1",
+    connectedBy: { id: "guardian-1" },
     summary: { title: "Connected", body: ["Your bot is live."] },
   };
 };
@@ -93,7 +94,7 @@ function harness() {
   fixture.descriptor.auth.setup = setupFn;
   registry.register(fixture.descriptor);
   const peopleRepo = fakePersonRepo();
-  const manager = new SetupManager({ registry, peopleRepo });
+  const manager = new SetupManager({ registry, participant: linkGuardianOnConnect(peopleRepo) });
   const deps = {
     db,
     approvalsRepo: new ApprovalsRepository(db),
@@ -274,7 +275,7 @@ describe("Feishu setup through the generic routes (#1607)", () => {
     registry.register(feishuDeps(overrides, personRepo));
     const manager = new SetupManager({
       registry,
-      peopleRepo: personRepo as unknown as PeopleRepository,
+      participant: linkGuardianOnConnect(personRepo as unknown as PeopleRepository),
     });
     const deps = { connectionRegistry: registry, setupManager: manager } as unknown as ApiDeps;
     const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
@@ -626,7 +627,10 @@ describe("OAuth redirect setup + return leg (#1611)", () => {
           })),
       }),
     );
-    const manager = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
+    const manager = new SetupManager({
+      registry,
+      participant: linkGuardianOnConnect(fakePersonRepo()),
+    });
     const deps = { connectionRegistry: registry, setupManager: manager } as unknown as ApiDeps;
     const app = new Hono().route("/", setupsRoutes(deps)).route("/", connectionsRoutes(deps));
     return { app, registry };

@@ -28,7 +28,7 @@ final class TopicChatsStore {
     /// Each chat's last activity, from the chat list (`GET /chat/sessions`).
     /// Only the server's time moves a chat, so a replayed status never does.
     /// A chat missing here counts as newest.
-    private var lastActive: [String: Date] = [:]
+    private(set) var lastActive: [String: Date] = [:]
     /// When each pinned chat was pinned, from the same chat list. A chat
     /// missing here is not pinned.
     private(set) var pinnedAt: [String: Date] = [:]
@@ -40,6 +40,7 @@ final class TopicChatsStore {
     private var refreshAgain = false
     /// Whether the drawer folds the list away, kept on this phone per instance.
     private(set) var folded: Bool
+    private(set) var olderExpanded: Bool
     @ObservationIgnored private let fold: TopicChatsFold?
 
     /// Without a `fold`, the folded state lasts only as long as the store.
@@ -47,11 +48,17 @@ final class TopicChatsStore {
         self.backend = backend
         self.fold = fold
         folded = fold?.load() ?? false
+        olderExpanded = fold?.loadOlderExpanded() ?? false
     }
 
     func setFolded(_ folded: Bool) {
         self.folded = folded
         fold?.save(folded)
+    }
+
+    func setOlderExpanded(_ expanded: Bool) {
+        olderExpanded = expanded
+        fold?.saveOlderExpanded(expanded)
     }
 
     /// Replies waiting unread across every topic chat, for the folded header.
@@ -234,10 +241,31 @@ final class TopicChatsStore {
     /// scroll near the end adds, as on the web.
     nonisolated static let pageSize = 30
 
-    /// How many of `count` chats show: the first `limit`, and as far as the
-    /// open chat when it is further down, so it stays in view.
+    /// The archived list's page, including an open row beyond its end.
     nonisolated static func shownCount(_ count: Int, limit: Int, openIndex: Int?) -> Int {
         min(count, max(limit, (openIndex ?? -1) + 1))
+    }
+
+    /// Preserves the drawer's order. An unknown activity time stays outside Older.
+    nonisolated static func groups(_ chats: [ConciergeChat], lastActive: [String: Date], pinnedAt: [String: Date], openId: String?, now: Date = .now) -> (current: [ConciergeChat], older: [ConciergeChat]) {
+        let cutoff = now.addingTimeInterval(-7 * 24 * 60 * 60)
+        var current: [ConciergeChat] = []
+        var older: [ConciergeChat] = []
+        for chat in chats {
+            if let at = lastActive[chat.id], at <= cutoff, pinnedAt[chat.id] == nil, (chat.unread ?? 0) == 0, chat.id != openId {
+                older.append(chat)
+            } else {
+                current.append(chat)
+            }
+        }
+        return (current, older)
+    }
+
+    /// Exceptions past the page stay visible without revealing the intervening rows.
+    nonisolated static func page(_ chats: [ConciergeChat], limit: Int, pinnedAt: [String: Date], openId: String?) -> [ConciergeChat] {
+        chats.enumerated().compactMap { index, chat in
+            index < limit || pinnedAt[chat.id] != nil || (chat.unread ?? 0) > 0 || chat.id == openId ? chat : nil
+        }
     }
 
     /// The rows a folded list keeps: only the open chat, so it stays reachable.
@@ -302,10 +330,11 @@ final class TopicChatsStore {
     }
 }
 
-/// Whether the drawer's topic chat list is folded, per instance, like the
-/// recent apps. Only a fold is stored; unfolded is the default.
+/// The topic list and Older group choices, per instance. The whole list
+/// starts open, and Older starts closed.
 struct TopicChatsFold {
     static let prefix = "topicChatsFolded."
+    private static let olderPrefix = "olderTopicChatsExpanded."
 
     let host: String
     var defaults: UserDefaults = .standard
@@ -318,8 +347,16 @@ struct TopicChatsFold {
         if folded { defaults.set(true, forKey: key) } else { defaults.removeObject(forKey: key) }
     }
 
+    func loadOlderExpanded() -> Bool { defaults.bool(forKey: Self.olderPrefix + host) }
+
+    func saveOlderExpanded(_ expanded: Bool) {
+        if expanded { defaults.set(true, forKey: Self.olderPrefix + host) }
+        else { defaults.removeObject(forKey: Self.olderPrefix + host) }
+    }
+
     /// Sign-out, or another account: every instance's choice.
     static func removeAll(defaults: UserDefaults = .standard) {
         defaults.removeKeys(prefix: prefix)
+        defaults.removeKeys(prefix: olderPrefix)
     }
 }

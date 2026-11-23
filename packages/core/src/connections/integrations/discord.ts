@@ -14,10 +14,11 @@
 //   - any other terminal gateway/websocket failure → Disconnected → runtime
 //     backs off and rebuilds.
 
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures } from "../types.js";
-import { DiscordAdapter } from "../kinds/discord/discord.js";
+import { DiscordAdapter, type GuildChannelInfo } from "../kinds/discord/discord.js";
 import type { PeopleRepository } from "../../people/model/people-repository.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
@@ -222,6 +223,17 @@ export function makeDiscordSetup(deps: {
   };
 }
 
+/** How many archived listings of one account may page at once. */
+const SNAPSHOTS = 4;
+
+/** A cursor into a snapshot of an archived listing: the snapshot's token,
+ *  then the offset in it. Any other cursor names none. */
+function snapshotCursor(cursor: string | undefined): { token: string; offset: string } | undefined {
+  const dot = cursor?.indexOf(".") ?? -1;
+  if (!cursor || dot < 0) return undefined;
+  return { token: cursor.slice(0, dot), offset: cursor.slice(dot + 1) };
+}
+
 /**
  * Build the Discord descriptor. `deps` carries the adapter's runtime
  * dependencies (settings repo, agent lister) so the wire stage can thread them
@@ -296,25 +308,70 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
               };
             },
           };
+          // A listing of archived threads reads every archive from Discord,
+          // so later pages read the first page's snapshot instead of reading
+          // the archives again, which would also shift offsets between reads.
+          // A few listings may run at once; the oldest is dropped past that.
+          const snapshots = new Map<string, GuildChannelInfo[]>();
+          const listed = async (
+            input: Parameters<TalkDirectory["listConversations"]>[0],
+          ): Promise<GuildChannelInfo[]> => {
+            const query = input.query?.toLocaleLowerCase();
+            // The gateway keeps a thread it saw archived; one is listed only
+            // when archived threads are asked for.
+            const active = adapter
+              .listGuildChannels()
+              .filter((channel) => input.includeArchived || !channel.archived)
+              // The gateway also names chats the bot may not see.
+              .filter((channel) => adapter.sees(channel));
+            const named = new Set(active.map((channel) => channel.id));
+            // Archived threads are read from Discord; the gateway names the
+            // ones it has seen. A thread both name is listed once.
+            const archived = input.includeArchived
+              ? (await adapter.listArchivedThreads()).filter((thread) => !named.has(thread.id))
+              : [];
+            const threads = input.includeTopics || input.includeArchived;
+            return [...active, ...archived]
+              .filter((channel) => threads || channel.type !== "thread")
+              .filter(
+                (channel) =>
+                  !query ||
+                  `${channel.guildName} ${channel.name}`.toLocaleLowerCase().includes(query),
+              )
+              .sort((left, right) =>
+                `${left.guildName}\0${left.name}\0${left.id}`.localeCompare(
+                  `${right.guildName}\0${right.name}\0${right.id}`,
+                ),
+              );
+          };
           const directory: TalkDirectory = {
             async listConversations(input) {
-              const query = input.query?.toLocaleLowerCase();
-              const page = directoryPage(
-                adapter
-                  .listGuildChannels()
-                  .filter((channel) => input.includeTopics || channel.type !== "thread")
-                  .filter(
-                    (channel) =>
-                      !query ||
-                      `${channel.guildName} ${channel.name}`.toLocaleLowerCase().includes(query),
-                  )
-                  .sort((left, right) =>
-                    `${left.guildName}\0${left.name}\0${left.id}`.localeCompare(
-                      `${right.guildName}\0${right.name}\0${right.id}`,
-                    ),
-                  ),
-                input,
-              );
+              // Before the gateway logs in it names no chats, which is no
+              // listing of them.
+              if (!adapter.isReady()) {
+                throw new Error("Discord is not connected yet; list its chats again shortly");
+              }
+              const resumed = input.includeArchived ? snapshotCursor(input.cursor) : undefined;
+              const kept = resumed ? snapshots.get(resumed.token) : undefined;
+              if (resumed && !kept) {
+                throw new Error("This Discord listing has expired; list its chats from the start");
+              }
+              const items = kept ?? (await listed(input));
+              const cursor = resumed ? resumed.offset : input.cursor;
+              const page = directoryPage(items, { ...input, ...(cursor ? { cursor } : {}) });
+              let nextCursor = page.nextCursor;
+              if (input.includeArchived) {
+                const token = resumed?.token ?? randomUUID();
+                if (!nextCursor) snapshots.delete(token);
+                else {
+                  if (!resumed) {
+                    snapshots.set(token, items);
+                    const oldest = snapshots.keys().next().value;
+                    if (snapshots.size > SNAPSHOTS && oldest) snapshots.delete(oldest);
+                  }
+                  nextCursor = `${token}.${nextCursor}`;
+                }
+              }
               return {
                 conversations: page.items.map((channel) => ({
                   ref: {
@@ -326,6 +383,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                   kind: channel.type === "thread" ? ("topic" as const) : ("channel" as const),
                   displayName: channel.name,
                   containerName: channel.guildName,
+                  ...(channel.archived ? { archived: true } : {}),
                   // Discord also uses parentId for a channel's category.
                   // Only native threads inherit conversation settings.
                   ...(channel.type === "thread" && channel.parentId
@@ -337,7 +395,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
                       }
                     : {}),
                 })),
-                ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+                ...(nextCursor ? { nextCursor } : {}),
               };
             },
           };

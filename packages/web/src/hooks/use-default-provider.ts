@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { DefaultModelProvider, ProviderFailureReason } from "@rome/api-types/chat";
 import { fetchJson } from "@/lib/fetch-json";
@@ -70,6 +71,8 @@ export function useSetDefaultProvider() {
     onSuccess: (data) => {
       qc.setQueryData(DEFAULT_PROVIDER_QUERY_KEY, data.defaultProvider);
       void qc.invalidateQueries({ queryKey: PROVIDER_OUTAGES_QUERY_KEY });
+      // "Only new chats" pins the open chats: they read themselves again.
+      emitSessionsChanged();
     },
   });
 }

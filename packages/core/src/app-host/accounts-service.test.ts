@@ -395,6 +395,44 @@ describe("ChannelsService — chats", () => {
     });
   });
 
+  it("lists threads, archived ones too, each naming its chat", async () => {
+    const listConversations = rs.fn(async () => ({
+      conversations: [
+        {
+          ref: { connectionId: "slack-1", chatId: "C1" },
+          connectionKind: "slack_app",
+          service: "slack_app",
+          kind: "channel",
+          displayName: "#news",
+        },
+        {
+          ref: { connectionId: "slack-1", chatId: "T1" },
+          connectionKind: "slack_app",
+          service: "slack_app",
+          kind: "topic",
+          displayName: "launch",
+          parent: { connectionId: "slack-1", chatId: "C1" },
+          archived: true,
+        },
+      ],
+    }));
+    const channelsService = listing(listConversations);
+
+    const page = await channelsService.chats?.(SLACK, { includeArchivedThreads: true });
+
+    expect(listConversations).toHaveBeenCalledWith({
+      limit: 100,
+      includeTopics: true,
+      includeArchived: true,
+    });
+    expect(page).toEqual({
+      chats: [
+        { chatId: "C1", name: "#news", kind: "channel" },
+        { chatId: "T1", name: "launch", kind: "topic", parent: "C1", archived: true },
+      ],
+    });
+  });
+
   it("rejects with the platform's refusal rather than an empty page", async () => {
     const channelsService = listing(async () => {
       throw new Error("Ask the guardian to approve the app again");

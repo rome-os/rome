@@ -53,9 +53,8 @@ devices without asserting that they are online.
 `renameDevice(deviceId, name)` and `removeDevice(deviceId)` change the account's
 device list in Cloud and resolve with no value. A failure throws
 `DeviceActionError` with code `device_not_found`, `invalid_device_name`,
-`invalid_device_session`, or `cloud_unavailable`. `removeDevice` revokes the
-device first and throws `revocation_pending` while the Gateway has not confirmed
-the revocation. The device stays listed as revoked until a later call deletes it.
+`invalid_device_session`, or `cloud_unavailable`. `removeDevice` ends the
+device's token and connection and deletes it from the account in one call.
 
 `runBinary(deviceId, action, args?, body?)` resolves to `{ response, body }`.
 It sends `body` as input bytes in a binary frame. For `exec`, the input is the
@@ -81,8 +80,8 @@ See [copying files](../../docs/rome-node.md#copying-files).
 `getDevicesStatus()` checks device reachability through read-only `system.info`
 requests through an existing daemon and returns `{ connection, checkedAt, devices }`.
 It returns `null` when no daemon runs and never starts or restarts one. Each device has
-`id`, `name`, `platform`, and status `connected`, `not_connected`, `unknown`, or
-`revoked`. The daemon shares concurrent checks and caches snapshots for ten
+`id`, `name`, `platform`, and status `connected`, `not_connected`, or `unknown`.
+The daemon shares concurrent checks and caches snapshots for ten
 seconds. A timeout is unknown, not proof that a device is offline. This call
 opens the shared Gateway connection when there are active devices to check.
 

@@ -24,7 +24,6 @@ import { domainOf } from "../../connections/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
 import { DrizzlePeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
 import {
   createTestDb,
   grantReaching,
@@ -547,7 +546,6 @@ describe("DELETE /connections/:id/grants/:name", () => {
     });
     const setupManager = new SetupManager({
       registry,
-      peopleRepo: {} as PeopleRepository,
     });
     const conn = await registry.connect("fake-telegram");
     await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.validCredential(), {

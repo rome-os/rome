@@ -185,6 +185,18 @@ export async function updateSessionModel(
   return jsonOrThrow<ChatSession>(res);
 }
 
+/**
+ * "Back to default": a chat pinned to a model follows the default provider
+ * again from its next turn. docs/domains/agents.md#pinned-chat
+ */
+export async function followDefaultProvider(sessionId: string): Promise<ChatSession> {
+  const res = await fetch(`/api/chat/sessions/${sessionId}/model/follow-default`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return jsonOrThrow<ChatSession>(res);
+}
+
 const inFlightReads = new Map<string, Promise<unknown>>();
 
 /**

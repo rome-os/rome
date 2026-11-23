@@ -13,6 +13,7 @@
 //   3. autoConnectEmail — the same terminal write without the Connect click,
 //      which never touches an existing email connection.
 
+import { linkGuardianOnConnect } from "../../people/guardian-mapping.js";
 import { createHmac } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
@@ -265,7 +266,10 @@ function makeSetupApp() {
       ownerEmailResolver: async () => undefined,
     }),
   );
-  const setupManager = new SetupManager({ registry, peopleRepo });
+  const setupManager = new SetupManager({
+    registry,
+    participant: linkGuardianOnConnect(peopleRepo),
+  });
   const deps = {
     settingsRepo,
     connectionRegistry: registry,
