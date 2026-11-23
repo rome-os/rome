@@ -307,6 +307,7 @@ A read-only copy of chosen turns of a dashboard chat, which anyone with its link
 - A link is a snapshot made when it is shared. What is said or changed in the chat later does not reach it.
 - The page tells search engines not to index it. A link pasted elsewhere previews with the share's title and a fixed line about Rome, never with the chat's words.
 - A chat's links are listed in its share mode, and its owner revokes any of them there. A revoked link opens nothing, and deleting the chat removes its links.
+- All of an owner's links are also listed together, newest first, each with the chat it came from. The iOS app lists them only there, in its Settings, and its owner copies, shares or revokes any of them there. A visitor's list holds only their own links.
 
 ## Delivery
 

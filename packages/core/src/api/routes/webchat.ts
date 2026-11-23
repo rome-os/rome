@@ -3566,6 +3566,31 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     );
   });
 
+  // Every live link of the signed-in person's chats, across all of them, for
+  // one list of their links. A visitor sees only their own; someone not
+  // signed in sees none.
+  app.get("/chat/shares", async (c) => {
+    const shares = await deps.webchatRepo.listSharedChatsByOwner(await callerOwner());
+    return c.json(
+      shares.map((s) => ({
+        id: s.id,
+        title: s.title,
+        url: `/share/${s.id}`,
+        createdAt: s.createdAt.toISOString(),
+        chatId: s.sessionId,
+        // The main Chat is labeled Chat, as every client shows it, not by
+        // the name it was created with.
+        chatName: isMainConciergeChat({
+          id: s.sessionId,
+          agentName: s.chatAgentName,
+          ownerKey: s.chatOwnerKey,
+        })
+          ? "Chat"
+          : s.chatName,
+      })),
+    );
+  });
+
   app.delete("/chat/shares/:shareId", async (c) => {
     const shareId = c.req.param("shareId");
     const revoked = await deps.webchatRepo.revokeSharedChat(shareId);

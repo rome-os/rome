@@ -114,7 +114,6 @@ struct TaskChatScreen: View {
                 Button(role: .destructive) { confirmDelete = true } label: {
                     Label("Delete", systemImage: "trash")
                 }
-                ChatShareMenuItems(share: store.share)
             } label: {
                 Image(systemName: "ellipsis")
                     .romeFont(17, .semibold)

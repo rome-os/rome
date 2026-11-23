@@ -803,14 +803,17 @@ struct AccountIdentity: Equatable, Sendable {
 }
 
 /// A read-only public link to some turns of a chat: one row of
-/// `GET /chat/sessions/:id/shares`, or the answer of
-/// `POST /chat/sessions/:id/share`. `url` is a path on the instance,
-/// `/share/<token>`.
+/// `GET /chat/shares`, or the answer of `POST /chat/sessions/:id/share`.
+/// `url` is a path on the instance, `/share/<token>`.
 struct ChatShareLink: Codable, Identifiable, Hashable, Sendable {
     let id: String
     var url: String
     var title: String?
     var createdAt: String?
+    /// The chat the link was made from, and its name now (the main Chat's
+    /// is "Chat"); only in `GET /chat/shares`.
+    var chatId: String? = nil
+    var chatName: String? = nil
 
     var date: Date? { createdAt.flatMap(RomeDate.parse) }
 }
