@@ -894,16 +894,6 @@ export class DiscordAdapter {
     await this.dispatchMessage(message, isDm, isThread);
   }
 
-  /** Whether the message came through a webhook that is linked to a person. */
-  private async isPersonsWebhook(message: Message): Promise<boolean> {
-    if (!message.webhookId || !this.resolveDiscordPerson) return false;
-    try {
-      return (await this.resolveDiscordPerson(message.author.id)) !== null;
-    } catch {
-      return false;
-    }
-  }
-
   /** Whether a guild message is said to Rome's bot: it mentions the bot,
    *  replies to the bot's message, or sits in a thread the bot started. Only
    *  a stop in a chat switched off asks, since that chat is not heard. */
@@ -958,9 +948,7 @@ export class DiscordAdapter {
     // fetching it, and a direct message needs none.
     const repliedTo = !isDm && replyToMessageId ? await this.repliedToAuthor(message) : undefined;
     const startedBy = parentId ? this.threadStarter(message) : undefined;
-    // A webhook linked to a person speaks for that person, so only another
-    // bot's own message counts as a bot's.
-    const isBot = message.author.bot && !(await this.isPersonsWebhook(message));
+    const isBot = message.author.bot;
 
     const msg: connections.Message = {
       id: message.id,

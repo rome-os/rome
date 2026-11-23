@@ -317,6 +317,7 @@ import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./instance/timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
+import { botsOfPeople } from "./people/bots-of-people.js";
 import { linkGuardianOnConnect, linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
@@ -757,6 +758,7 @@ async function main() {
     settingsRepo,
     platform: AGENTS_KIND,
   });
+  const readBotsOfPeople = botsOfPeople(peopleRepo);
   const guardianLinkCodes = new GuardianLinkCodes();
   const linkCodeAdmission = createGuardianLinkAdmission({
     codes: guardianLinkCodes,
@@ -771,6 +773,8 @@ async function main() {
     // Before the inbox resolves the sender, so the first message already
     // reads as the guardian's.
     if (connectionKind === AGENTS_KIND) await linkAgentToGuardian(message);
+    const platform = accounts.accountOf(connectionId)?.platform;
+    if (platform) await readBotsOfPeople(platform, message);
     return linkCodeAdmission(connectionId, connectionKind, message);
   };
   // How app actions — here and, over RPC, in workers — send and read on

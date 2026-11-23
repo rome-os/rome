@@ -366,8 +366,6 @@ describe("DiscordAdapter gateway filters", () => {
       // The chat answers mentions only and ignores bots and mentions of others,
       // which is the wake gate's call now, not the connection's.
       chatSettings: chatSettingsOf(true),
-      resolveDiscordPerson: async (id) =>
-        id === "member-webhook" ? { id: "person-1", bondLevel: "acquaintance" } : null,
     });
 
     await say(guildMessage("m1", "the demo moved to Thursday"));
@@ -402,10 +400,9 @@ describe("DiscordAdapter gateway filters", () => {
       ["m1", "ambient", false, false],
       ["m2", "ambient", false, true],
       ["m3", "mention", false, false],
-      // Another bot's message, and a webhook linked to nobody.
+      // Every bot's message is a bot's, as Discord says, webhooks included.
       ["m4", "mention", true, false],
-      // A webhook linked to a person speaks for that person.
-      ["w1", "mention", false, false],
+      ["w1", "mention", true, false],
       ["w2", "mention", true, false],
     ]);
     // The text is what a person sees, Rome's own mention included.
