@@ -584,9 +584,12 @@ enum LinkTargets {
         guard !destination.hasPrefix("<"), destination.contains(where: \.isWhitespace) else { return nil }
         var target = destination
         var title = ""
-        if destination.hasSuffix("\""), let open = destination.dropLast().range(of: " \"", options: .backwards) {
-            target = String(destination[..<open.lowerBound]).trimmingCharacters(in: .whitespaces)
-            title = String(destination[open.lowerBound...])
+        // A title: `"…"`, `'…'` or `(…)` after the target.
+        for (open, close) in [("\"", "\""), ("'", "'"), ("(", ")")] where destination.hasSuffix(close) {
+            guard let start = destination.dropLast().range(of: " " + open, options: .backwards) else { continue }
+            target = String(destination[..<start.lowerBound]).trimmingCharacters(in: .whitespaces)
+            title = String(destination[start.lowerBound...])
+            break
         }
         guard !target.isEmpty, target.contains(where: \.isWhitespace), !target.contains("<"), !target.contains(">") else { return nil }
         return ("<" + target + ">" + title, end)

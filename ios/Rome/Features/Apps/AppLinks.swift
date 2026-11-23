@@ -75,7 +75,7 @@ enum AppLinks {
             path = url.path(percentEncoded: true)
             tail = (url.query(percentEncoded: true).map { "?" + $0 } ?? "") + (url.fragment(percentEncoded: true).map { "#" + $0 } ?? "")
         case "file":
-            return diskFile(url.path(percentEncoded: false)).map(ChatLink.file) ?? .unopenableFile
+            return diskFile(url.path(percentEncoded: false), origin: origin).map(ChatLink.file) ?? .unopenableFile
         default:
             return .system
         }
@@ -93,7 +93,7 @@ enum AppLinks {
         if parts.count == 2, parts[0] == "chat", !parts[1].isEmpty {
             return .chat(id: parts[1], page: page)
         }
-        if let file = routeFile(decoded) ?? diskFile(decoded) { return .file(file) }
+        if let file = routeFile(decoded, origin: origin) ?? diskFile(decoded, origin: origin) { return .file(file) }
         if let first = parts.first, diskRoots.contains(first) { return .unopenableFile }
         return page.map(ChatLink.page) ?? .system
     }
@@ -125,31 +125,40 @@ enum AppLinks {
         return (id, parts[(at + 1)...].joined(separator: "/"))
     }
 
-    /// A file a route of the instance serves: `/projects/<path>` and
-    /// `/memory/<path>` with a file name (a folder opens in the web view), and
+    /// A file a route of the instance serves: a path under `/projects/` or
+    /// `/memory/`, which `/resolve` later tells from a folder, and
     /// `/api/assets/<file>`. `path` is percent-decoded.
-    private static func routeFile(_ path: String) -> LinkedFile? {
-        let name = (path as NSString).lastPathComponent
-        let named = !path.hasSuffix("/") && name.range(of: #"\.[A-Za-z0-9]{1,8}$"#, options: .regularExpression) != nil
-        for folder in ["projects", "memory"] where path.hasPrefix("/\(folder)/") && named {
-            let logical = String(path.dropFirst())
-            return LinkedFile(apiPath: "/\(folder)/download", query: "path=" + APIClient.strictQueryValue(logical), name: name)
+    private static func routeFile(_ path: String, origin: URL?) -> LinkedFile? {
+        for folder in ["projects", "memory"] where path.hasPrefix("/\(folder)/") {
+            let logical = String(path.dropFirst()).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard logical.count > folder.count else { return nil }
+            let name = (logical as NSString).lastPathComponent
+            let encoded = logical.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? logical
+            return LinkedFile(
+                apiPath: "/\(folder)/download",
+                query: "path=" + APIClient.strictQueryValue(logical),
+                name: name,
+                logicalPath: logical,
+                page: origin.flatMap { URL(string: APIClient.originString($0) + "/" + encoded) }
+            )
         }
-        if path.hasPrefix("/api/assets/"), named, !path.dropFirst("/api/assets/".count).contains("/") {
+        let name = (path as NSString).lastPathComponent
+        if path.hasPrefix("/api/assets/"), !path.dropFirst("/api/assets/".count).contains("/"),
+           name.range(of: #"\.[A-Za-z0-9]{1,8}$"#, options: .regularExpression) != nil {
             guard let encoded = name.addingPercentEncoding(withAllowedCharacters: segmentAllowed) else { return nil }
             return LinkedFile(apiPath: "/assets/" + encoded, query: nil, name: name)
         }
         return nil
     }
 
-    /// The project or memory file a path on the instance's disk names: one in
+    /// The project or memory path a path on the instance's disk names: one in
     /// `.rome/<profile>/projects/` or `.rome/<profile>/memory/`, where an
     /// instance keeps them unless it was set up with other folders.
-    private static func diskFile(_ path: String) -> LinkedFile? {
+    private static func diskFile(_ path: String, origin: URL?) -> LinkedFile? {
         let parts = path.split(separator: "/").map(String.init)
         guard let rome = parts.firstIndex(of: ".rome"), rome + 3 < parts.count,
               ["projects", "memory"].contains(parts[rome + 2]) else { return nil }
-        return routeFile("/" + parts[(rome + 2)...].joined(separator: "/"))
+        return routeFile("/" + parts[(rome + 2)...].joined(separator: "/"), origin: origin)
     }
 
     /// Whether a link stays in the app's web view: only the instance's own
@@ -175,6 +184,16 @@ struct LinkedFile: Hashable, Sendable {
     let query: String?
     /// Its file name, as Quick Look and the share sheet show it.
     let name: String
+    /// A project or memory path, `projects/…` or `memory/…`, which may name
+    /// a folder: `/<its folder>/resolve` says which before it is downloaded.
+    var logicalPath: String? = nil
+    /// The dashboard's page for it, which a folder opens.
+    var page: URL? = nil
+}
+
+/// What a linked project or memory path names on the instance.
+enum LinkedFileKind: Sendable {
+    case file, folder, missing
 }
 
 /// An app the guardian can ask Chat to make, as a ready prompt.

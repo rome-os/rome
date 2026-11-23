@@ -107,6 +107,9 @@ protocol RomeBackend: AnyObject, Sendable {
     /// A file a chat links to (`/projects/download`, `/memory/download` or an
     /// asset), as large as an output may be.
     func linkedFile(_ file: LinkedFile) async throws -> Data
+    /// What a linked project or memory path names, from `/<folder>/resolve`;
+    /// `.file` for any other link.
+    func linkedFileKind(_ file: LinkedFile) async throws -> LinkedFileKind
     func approval(id: String) async throws -> ApprovalRecord
     /// Every pending approval; the guardian's only (a visitor gets an error).
     func pendingApprovals() async throws -> [PendingApproval]
@@ -361,6 +364,16 @@ final class LiveBackend: RomeBackend {
         try await client.getFile(apiPath: file.apiPath, percentEncodedQuery: file.query, limit: APIClient.outputLimit, accept: "*/*")
     }
 
+    func linkedFileKind(_ file: LinkedFile) async throws -> LinkedFileKind {
+        guard let logical = file.logicalPath, let folder = logical.split(separator: "/").first else { return .file }
+        let answer: JSONValue = try await client.get("/\(folder)/resolve", query: [URLQueryItem(name: "path", value: logical)])
+        switch answer["type"]?.string {
+        case "directory": return .folder
+        case "missing": return .missing
+        default: return .file
+        }
+    }
+
     func pendingApprovals() async throws -> [PendingApproval] {
         let rows: JSONValue = try await client.get("/approvals", query: [URLQueryItem(name: "status", value: "pending")], reportsUnauthorized: false)
         return (rows.array ?? []).compactMap(PendingApproval.init(json:))
@@ -552,6 +565,7 @@ extension RomeBackend {
     func chatWork(chatId: String) async throws -> ConciergeChatWork { throw APIError.notFound }
     /// Test doubles hold no linked files.
     func linkedFile(_ file: LinkedFile) async throws -> Data { throw APIError.notFound }
+    func linkedFileKind(_ file: LinkedFile) async throws -> LinkedFileKind { .file }
     /// Test doubles archive nothing for good.
     func archivedTopicChats() async throws -> [ChatSession] { [] }
     func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws { throw APIError.notFound }

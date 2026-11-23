@@ -9,6 +9,10 @@ import UIKit
     @Test func spacedTargetsBecomeLinks() {
         #expect(LinkTargets.bracketed("[f](/projects/my report.md)") == "[f](</projects/my report.md>)")
         #expect(LinkTargets.bracketed(#"see [f](/a b.md "Plan") now"#) == #"see [f](</a b.md> "Plan") now"#)
+        #expect(LinkTargets.bracketed("[f](/a b.md 'Plan')") == "[f](</a b.md> 'Plan')")
+        #expect(LinkTargets.bracketed("[f](/a b.md (Plan))") == "[f](</a b.md> (Plan))")
+        #expect(LinkTargets.bracketed("[f](/a.md 'Plan')") == "[f](/a.md 'Plan')")
+        #expect(LinkTargets.bracketed("[f](/my report(final).pdf)") == "[f](</my report(final).pdf>)")
         #expect(LinkTargets.bracketed("![p](/x/my pic.png)") == "![p](</x/my pic.png>)")
         let line = MarkdownParser.inline("Open [the plan](/projects/my report.md).")
         #expect(String(line.characters) == "Open the plan.")
@@ -1010,8 +1014,7 @@ final class StubBackend: RomeBackend {
         #expect(try link("/settings/models") == .page(URL(string: "https://me.romeos.cc/settings/models")!))
         #expect(try link("/apps") == .page(URL(string: "https://me.romeos.cc/apps")!))
         #expect(try link("/chat") == .page(URL(string: "https://me.romeos.cc/chat")!))
-        // A folder of the projects opens their browser.
-        #expect(try link("/projects/default") == .page(URL(string: "https://me.romeos.cc/projects/default")!))
+        #expect(try link("/projects") == .page(URL(string: "https://me.romeos.cc/projects")!))
         // No origin (demo data): a page has nowhere to resolve.
         #expect(try link("/settings", origin: nil) == .system)
         #expect(try link("/apps/habit-tracker", origin: nil) == .app(id: "habit-tracker", page: nil))
@@ -1041,31 +1044,45 @@ final class StubBackend: RomeBackend {
         #expect(try link("https://example.com/chat/123") == .external)
     }
 
-    /// Project and memory files and stored assets download through the
-    /// routes the web uses, with the file's name.
+    /// A project or memory path is a file to resolve and download through
+    /// the routes the web uses, with its name and the page a folder opens;
+    /// a stored asset downloads as it is.
     @Test func filesOpenOnThePhone() throws {
-        #expect(try link("/projects/default/my%20report.md") == .file(LinkedFile(apiPath: "/projects/download", query: "path=projects/default/my%20report.md", name: "my report.md")))
-        #expect(try link("https://me.romeos.cc/projects/a/%E6%8A%A5%E5%91%8A.pdf") == .file(LinkedFile(apiPath: "/projects/download", query: "path=projects/a/%E6%8A%A5%E5%91%8A.pdf", name: "报告.pdf")))
-        #expect(try link("/memory/journal/2026-11-20.md") == .file(LinkedFile(apiPath: "/memory/download", query: "path=memory/journal/2026-11-20.md", name: "2026-11-20.md")))
+        #expect(try link("/projects/default/my%20report.md") == .file(LinkedFile(
+            apiPath: "/projects/download", query: "path=projects/default/my%20report.md", name: "my report.md",
+            logicalPath: "projects/default/my report.md", page: URL(string: "https://me.romeos.cc/projects/default/my%20report.md"))))
+        #expect(try link("https://me.romeos.cc/projects/a/%E6%8A%A5%E5%91%8A.pdf") == .file(LinkedFile(
+            apiPath: "/projects/download", query: "path=projects/a/%E6%8A%A5%E5%91%8A.pdf", name: "报告.pdf",
+            logicalPath: "projects/a/报告.pdf", page: URL(string: "https://me.romeos.cc/projects/a/%E6%8A%A5%E5%91%8A.pdf"))))
+        // A name without an extension, or a folder, is for /resolve to tell.
+        #expect(try link("/memory/journal/") == .file(LinkedFile(
+            apiPath: "/memory/download", query: "path=memory/journal", name: "journal",
+            logicalPath: "memory/journal", page: URL(string: "https://me.romeos.cc/memory/journal"))))
         let stored = "0123456789abcdef0123456789abcdef.pdf"
         #expect(try link("/api/assets/" + stored) == .file(LinkedFile(apiPath: "/assets/" + stored, query: nil, name: stored)))
-        #expect(try link("/projects/a/b.csv", origin: nil) == .file(LinkedFile(apiPath: "/projects/download", query: "path=projects/a/b.csv", name: "b.csv")))
+        #expect(try link("/projects/a/b.csv", origin: nil) == .file(LinkedFile(
+            apiPath: "/projects/download", query: "path=projects/a/b.csv", name: "b.csv", logicalPath: "projects/a/b.csv")))
     }
 
-    /// A path on the instance's disk is the project or memory file it names,
-    /// else a file no route serves; `file://` the same.
+    /// A path on the instance's disk is the project or memory path it names,
+    /// whatever folder holds `.rome`, else a file no route serves; `file://`
+    /// the same.
     @Test func diskPathsMapToTheirRoute() throws {
-        let budget = LinkedFile(apiPath: "/projects/download", query: "path=projects/demo/budget.csv", name: "budget.csv")
+        let budget = LinkedFile(
+            apiPath: "/projects/download", query: "path=projects/demo/budget.csv", name: "budget.csv",
+            logicalPath: "projects/demo/budget.csv", page: URL(string: "https://me.romeos.cc/projects/demo/budget.csv"))
         #expect(try link("/home/rome/.rome/default/projects/demo/budget.csv") == .file(budget))
         #expect(try link("file:///home/rome/.rome/default/projects/demo/budget.csv") == .file(budget))
         // Whatever the first folder, as the container's own home is.
         #expect(try link("/rome-home/.rome/default/projects/demo/budget.csv") == .file(budget))
         #expect(try link("https://me.romeos.cc/rome-home/.rome/default/projects/demo/budget.csv") == .file(budget))
-        #expect(try link("file:///Users/lin/.rome/work/memory/notes.md") == .file(LinkedFile(apiPath: "/memory/download", query: "path=memory/notes.md", name: "notes.md")))
+        #expect(try link("file:///Users/lin/.rome/work/memory/notes.md") == .file(LinkedFile(
+            apiPath: "/memory/download", query: "path=memory/notes.md", name: "notes.md",
+            logicalPath: "memory/notes.md", page: URL(string: "https://me.romeos.cc/memory/notes.md"))))
         #expect(try link("/tmp/run.log") == .unopenableFile)
         #expect(try link("/Users/lin/Desktop/a.csv") == .unopenableFile)
         #expect(try link("file:///etc/hosts") == .unopenableFile)
-        #expect(try link("/home/rome/.rome/default/projects/demo") == .unopenableFile)
+        #expect(try link("/home/rome/.rome/default/projects") == .unopenableFile)
     }
 
     /// Other sites go to Safari, other schemes to the system.

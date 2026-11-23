@@ -320,6 +320,42 @@ describe("routeProjectLinks", () => {
     );
   });
 
+  it("keeps punctuation and emphasis around a bare file URL outside its link", () => {
+    const at = "file:///home/p/test/out.csv";
+    const link = "[out.csv](/projects/test/out.csv)";
+    expect(routeProjectLinks(`Saved to ${at}.`, ROOT)).toBe(`Saved to ${link}.`);
+    expect(routeProjectLinks(`见 ${at}。`, ROOT)).toBe(`见 ${link}。`);
+    expect(routeProjectLinks(`${at}, ${at}`, ROOT)).toBe(`${link}, ${link}`);
+    expect(routeProjectLinks(`**${at}**`, ROOT)).toBe(`**${link}**`);
+    // A file URL that labels a link stays its label.
+    expect(routeProjectLinks(`[${at}](${at})`, ROOT)).toBe(`[${at}](/projects/test/out.csv)`);
+  });
+
+  it("reads a link's title and the parentheses in its path", () => {
+    expect(routeProjectLinks("[a](/home/p/x.md 'Title')", ROOT)).toBe(
+      "[a](/projects/x.md 'Title')",
+    );
+    expect(routeProjectLinks("[a](/home/p/x.md (Title))", ROOT)).toBe(
+      "[a](/projects/x.md (Title))",
+    );
+    expect(routeProjectLinks("[r](/home/p/test/report(final).pdf)", ROOT)).toBe(
+      "[r](</projects/test/report(final).pdf>)",
+    );
+  });
+
+  it("leaves indented code and code inside quotes and lists as written", () => {
+    const kept = [
+      'Config:\n\n    url = "file:///home/p/test/report.csv"\n    [r](/home/p/r.pdf)\n',
+      "> Run:\n> ```\n> cat file:///home/p/a.md\n> ```\n",
+      "- Step\n\n      [r](/home/p/r.pdf)\n",
+      "<div>[r](/home/p/r.pdf)</div>\n",
+    ];
+    for (const text of kept) expect(routeProjectLinks(text, ROOT)).toBe(text);
+    expect(routeProjectLinks("    code\n\nSee [r](/home/p/r.pdf).", ROOT)).toBe(
+      "    code\n\nSee [r](/projects/r.pdf).",
+    );
+  });
+
   it("leaves code, routes, web links and paths outside the projects folder as written", () => {
     const kept = [
       "Run `cat /home/p/test/a.md` or `[x](/home/p/a.md)`.",

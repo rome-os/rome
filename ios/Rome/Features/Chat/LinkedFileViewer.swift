@@ -13,9 +13,11 @@ extension View {
     /// session, then shown in Quick Look, whose Share button sends or saves it,
     /// or straight in the share sheet when Quick Look cannot show it. A file
     /// that fails, or that no route serves, gets a short notice at the top.
-    /// `top` is how far below the view's top edge the notice sits.
-    func linkedFileViewer(backend: RomeBackend, request: Binding<LinkedFileRequest?>, top: CGFloat = 58) -> some View {
-        modifier(LinkedFileViewer(backend: backend, request: request, top: top))
+    /// A project or memory path that names a folder goes to `openPage` with
+    /// the dashboard's page for it. `top` is how far below the view's top
+    /// edge the notice sits.
+    func linkedFileViewer(backend: RomeBackend, request: Binding<LinkedFileRequest?>, top: CGFloat = 58, openPage: @escaping (URL) -> Void) -> some View {
+        modifier(LinkedFileViewer(backend: backend, request: request, top: top, openPage: openPage))
     }
 }
 
@@ -23,6 +25,7 @@ private struct LinkedFileViewer: ViewModifier {
     let backend: RomeBackend
     @Binding var request: LinkedFileRequest?
     let top: CGFloat
+    let openPage: (URL) -> Void
 
     @State private var preview: URL?
     @State private var sharing: SharedFile?
@@ -70,6 +73,16 @@ private struct LinkedFileViewer: ViewModifier {
         Task {
             defer { loading = false }
             do {
+                // An instance that cannot say what it is gets the download tried.
+                switch (try? await backend.linkedFileKind(file)) ?? .file {
+                case .folder:
+                    if let page = file.page { openPage(page) } else { notice = String(localized: "This file cannot be opened here.") }
+                    return
+                case .missing:
+                    throw APIError.notFound
+                case .file:
+                    break
+                }
                 let data = try await backend.linkedFile(file)
                 guard let url = AgentOutputsView.write(data, name: file.name) else { throw APIError.network }
                 if AgentOutputsView.quickLookReads(url) {

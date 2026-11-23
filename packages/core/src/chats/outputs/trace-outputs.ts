@@ -1,6 +1,7 @@
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import type { ChatOutputKind } from "@rome/api-types/chat-outputs";
 import { describeFile } from "../../lib/file-browser-server.js";
+import { marked, type Token } from "marked";
 import { shellWrites } from "./shell-writes.js";
 
 /** An output found in a trace or a message, before it is stored. */
@@ -344,38 +345,70 @@ export function outputsInReply(
 
 /**
  * A Markdown link: `[label](href)`, `[label](<href>)`, or `[label](href with
- * spaces)` as an agent writes it against the rule, with an optional title, an
- * image's `![label](href)` too. Groups: the label with its brackets, the
- * bracketed href, the bare href, the title.
+ * spaces)` as an agent writes it against the rule, with an optional `"…"`,
+ * `'…'` or `(…)` title, an image's `![label](href)` too. A bare href may hold
+ * balanced parentheses. Groups: the label with its brackets, the bracketed
+ * href, the bare href, the title.
  */
 const MARKDOWN_LINK =
-  /(!?\[(?:\\.|[^\]\\])*\])\(\s*(?:<([^>\n]+)>|([^)\n]*?))(\s+"[^"\n]*")?\s*\)/g;
+  /(!?\[(?:\\.|[^\]\\])*\])\(\s*(?:<([^>\n]+)>|((?:[^()\n]|\([^()\n]*\))*?))(\s+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?\s*\)/g;
 
-/** A `file://` URL in prose, outside any link. */
-const BARE_FILE_URL = /(?<![(<])file:\/\/[^\s<>()[\]]+/g;
+/** A `file://` URL in prose, outside any link and its label. */
+const BARE_FILE_URL = /(?<![(<[])file:\/\/[^\s<>()[\]]+/g;
 
-/** A fenced code block, or a code span: their text is code, never a link. */
-const CODE =
-  /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[ \t]*$|(?![\s\S]))|(`+)(?!`)[\s\S]*?[^`]\2(?!`)/gm;
+/** What ends a sentence or closes emphasis after a bare URL, never part of it. */
+const URL_TRAIL = /[.,;:!?'"*_~`。，；：！？、」』）]+$/u;
+
+/** A code span: its text is code, never a link. */
+const CODE_SPAN = /(`+)(?!`)[\s\S]*?[^`]\1(?!`)/g;
 
 /**
  * The reply with each link to a file under `projectsRoot`, written as an
  * absolute path or a `file://` URL, pointed at its `/projects/<path>` route,
  * which every client opens. A bare `file://` URL becomes a link named after
- * its file. Code is left as written, and so is every other link.
+ * its file. Code is left as written: a code span, and every top-level block
+ * that holds a code block or HTML, as Markdown reads them. So is every other
+ * link.
  */
 export function routeProjectLinks(markdown: string, projectsRoot: string): string {
   if (!markdown.includes("/")) return markdown;
-  let out = "";
-  let at = 0;
-  for (const code of markdown.matchAll(CODE)) {
-    out += routeInProse(markdown.slice(at, code.index), projectsRoot) + code[0];
-    at = code.index + code[0].length;
-  }
-  return out + routeInProse(markdown.slice(at), projectsRoot);
+  const source = markdown.replace(/\r\n?/g, "\n");
+  const blocks = marked.lexer(source);
+  // The blocks are cut from the text in order; when they are not, nothing is changed.
+  if (blocks.map((block) => block.raw).join("") !== source) return markdown;
+  let changed = false;
+  const routed = blocks
+    .map((block) => {
+      if (holdsCode(block)) return block.raw;
+      const text = routeInProse(block.raw, projectsRoot);
+      if (text !== block.raw) changed = true;
+      return text;
+    })
+    .join("");
+  return changed ? routed : markdown;
+}
+
+/** Whether `token` is, or holds, a code block or HTML. */
+function holdsCode(token: Token): boolean {
+  if (token.type === "code" || token.type === "html") return true;
+  const children: Token[] = [
+    ...("tokens" in token && Array.isArray(token.tokens) ? token.tokens : []),
+    ...("items" in token && Array.isArray(token.items) ? (token.items as Token[]) : []),
+  ];
+  return children.some(holdsCode);
 }
 
 function routeInProse(text: string, projectsRoot: string): string {
+  let out = "";
+  let at = 0;
+  for (const span of text.matchAll(CODE_SPAN)) {
+    out += routeLinks(text.slice(at, span.index), projectsRoot) + span[0];
+    at = span.index + span[0].length;
+  }
+  return out + routeLinks(text.slice(at), projectsRoot);
+}
+
+function routeLinks(text: string, projectsRoot: string): string {
   const linked = text.replace(
     MARKDOWN_LINK,
     (whole, label: string, bracketed?: string, bare?: string, title?: string) => {
@@ -383,11 +416,13 @@ function routeInProse(text: string, projectsRoot: string): string {
       return route ? `${label}(${linkTarget(route)}${title ?? ""})` : whole;
     },
   );
-  return linked.replace(BARE_FILE_URL, (url) => {
+  return linked.replace(BARE_FILE_URL, (found) => {
+    const trail = URL_TRAIL.exec(found)?.[0] ?? "";
+    const url = found.slice(0, found.length - trail.length);
     const route = projectRoute(url, projectsRoot);
-    if (!route) return url;
+    if (!route) return found;
     const name = route.slice(route.lastIndexOf("/") + 1);
-    return `[${name.replace(/([[\]\\])/g, "\\$1")}](${linkTarget(route)})`;
+    return `[${name.replace(/([[\]\\*_`])/g, "\\$1")}](${linkTarget(route)})${trail}`;
   });
 }
 

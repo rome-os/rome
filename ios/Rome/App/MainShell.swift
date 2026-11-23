@@ -264,7 +264,7 @@ struct MainShell: View {
                 .environment(\.visibleChat, visibleChat)
                 .instancePageSheet(workspace: workspace, url: $page)
                 .appSheet(workspace: workspace, app: $openApp, start: openAppStart)
-                .linkedFileViewer(backend: workspace.backend, request: $linkedFile, top: geometry.safeAreaInsets.top + 58)
+                .linkedFileViewer(backend: workspace.backend, request: $linkedFile, top: geometry.safeAreaInsets.top + 58) { page = $0 }
                 .environment(\.isVisitor, workspace.isVisitor)
                 .environment(\.shareAgentName, AgentName.display(workspace.agentName))
                 // Over the page, so beside a pinned drawer they sit above the chat.
@@ -305,7 +305,7 @@ struct MainShell: View {
             .environment(\.shareAgentName, AgentName.display(workspace.agentName))
             .instancePageSheet(workspace: workspace, url: $agentLinkPage)
             .appSheet(workspace: workspace, app: $agentApp, start: agentAppStart)
-            .linkedFileViewer(backend: workspace.backend, request: $agentLinkedFile)
+            .linkedFileViewer(backend: workspace.backend, request: $agentLinkedFile) { agentLinkPage = $0 }
             .presentationBackground(Palette.bg)
             .agentZoomTransition(route.zoomSource, in: agentZoom)
         }
