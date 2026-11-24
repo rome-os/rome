@@ -230,6 +230,9 @@ final class TranscriptFocusPosition {
     weak var focused: UICollectionView?
     weak var surface: TranscriptLiveSurface?
     var reduceMotion: () -> Bool = { UIAccessibility.isReduceMotionEnabled }
+    /// Starts a handoff's animator. Tests hold it instead and step it to
+    /// chosen fractions, so a busy runner cannot skip the frames they check.
+    var runAnimation: (UIViewPropertyAnimator) -> Void = { $0.startAnimation() }
     private var animator: UIViewPropertyAnimator?
     private weak var active: ThreadFocus?
     private var contents: [String: WeakTranscriptContent] = [:]
@@ -458,7 +461,7 @@ final class TranscriptFocusPosition {
         let animator = UIViewPropertyAnimator(duration: reduced ? 0.15 : 0.25, curve: .easeInOut, animations: changes)
         self.animator = animator
         animator.addCompletion { _ in finish() }
-        animator.startAnimation()
+        runAnimation(animator)
     }
 
     func footerHit(at point: CGPoint, in surface: UIView, event: UIEvent?) -> UIView? {
