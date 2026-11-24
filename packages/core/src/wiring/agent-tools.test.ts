@@ -12,6 +12,10 @@ const NAMES = [
   "system:resume_routine",
   "system:run_routine",
   "system:stop_routine",
+  "system:read_devices",
+  "system:run_on_device",
+  "system:rename_device",
+  "system:remove_device",
 ];
 
 describe("core's agent tools", () => {
