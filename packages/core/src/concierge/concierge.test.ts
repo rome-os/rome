@@ -924,6 +924,108 @@ describe("Concierge tools", () => {
       expect((said[2] as { message: { replyTo?: string } }).message.replyTo).toBeUndefined();
     });
 
+    describe("on an account that serves its workspace", () => {
+      const workspace = (s: ReturnType<typeof setup>) => {
+        const sent: unknown[] = [];
+        s.deps.servesWorkspace = (channel) => channel === "discord_app";
+        s.deps.sendInChat = async (from, message) => {
+          sent.push({ from, message });
+          return { sent: "800000000000000010" };
+        };
+        return sent;
+      };
+      const inThread = (context: SessionToolContext, thread: string): SessionToolContext => ({
+        ...context,
+        getTurnThread: () => thread,
+      });
+
+      it("sends for anyone's turn to the chat and thread a place names", async () => {
+        const s = setup();
+        const chatId = await connectionChat(s);
+        const sent = workspace(s);
+        const names = (await buildConciergeTools(s.service, there(s, chatId, "other"))).map(
+          (tool) => tool.name,
+        );
+        expect(names).toEqual([...CONNECTION_TOOLS, "send"]);
+        const result = await run(there(s, chatId, "other"), s, "send", {
+          chat: "901",
+          thread: "901:5.0",
+          text: "The launch moved.",
+        });
+        expect(result.isError).toBeFalsy();
+        // "none", as a place names the open chat, sends to the open chat.
+        await run(there(s, chatId, "other"), s, "send", {
+          chat: "902",
+          thread: "none",
+          text: "Hi",
+        });
+        expect(sent).toEqual([
+          {
+            from: { id: chatId, channel: "discord_app", threadId: "900" },
+            message: {
+              chat: "901",
+              thread: "901:5.0",
+              text: "The launch moved.",
+              turnId: expect.any(String),
+            },
+          },
+          {
+            from: { id: chatId, channel: "discord_app", threadId: "900" },
+            message: { chat: "902", text: "Hi", turnId: expect.any(String) },
+          },
+        ]);
+      });
+
+      it("says a message that quotes nothing into the thread the turn stands in", async () => {
+        const s = setup();
+        const chatId = await connectionChat(s);
+        const sent = workspace(s);
+        const said: unknown[] = [];
+        s.deps.sayInChat = async (_chat, message) => {
+          said.push(message.text);
+          return { sent: "1" };
+        };
+        // A task's report: no message of its own to quote.
+        s.deps.webchatRepo.getTurnChatMessages = (async () => []) as never;
+        await run(inThread(there(s, chatId, undefined), "900:5.0"), s, "say", { text: "Done" });
+        expect(said).toEqual([]);
+        expect(sent).toEqual([
+          {
+            from: { id: chatId, channel: "discord_app", threadId: "900" },
+            message: { chat: "900", thread: "900:5.0", text: "Done", turnId: expect.any(String) },
+          },
+        ]);
+      });
+
+      it("runs a task's report in the chat and thread that asked for it", async () => {
+        const s = setup();
+        const chatId = await connectionChat(s);
+        workspace(s);
+        s.deps.chatSessionKey = (chat) => `${chat.channel}:*`;
+        const started = await run(
+          inThread(there(s, chatId, "guardian"), "900:5.0"),
+          s,
+          "chat_start",
+          { title: "Flights", brief: "Find flights to Tokyo" },
+        );
+        const { chatId: taskId } = JSON.parse(started.content[0]!.text) as { chatId: string };
+        const asked: BackendTurnParams[] = [];
+        s.onBackendTurn((params) => {
+          asked.push(params);
+          return "completed";
+        });
+        await s.service.runSystemTurn(chatId, "<task_events/>", { taskIds: [taskId] });
+        expect(asked).toEqual([
+          expect.objectContaining({
+            channel: "discord_app",
+            threadId: "900",
+            romeSessionId: chatId,
+            inThread: "900:5.0",
+          }),
+        ]);
+      });
+    });
+
     it("lets anyone's turn say something, and tells the gate whom it answers", async () => {
       const s = setup();
       const chatId = await connectionChat(s);

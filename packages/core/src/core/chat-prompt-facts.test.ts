@@ -332,9 +332,10 @@ describe("chatPromptFacts on an account that serves its workspace", () => {
     expect(promptFacts.place?.(group, "C1:1700.1")).toBe(
       "<place>\nchat: C1\nthread: C1:1700.1\nkind: group\nname: general\n</place>",
     );
-    // A task's report names its chat by channel alone.
+    // A task's report names its chat by channel alone, and does not know
+    // what kind of chat it is.
     expect(promptFacts.place?.({ channel: "slack_app", threadId: "D2" }, undefined)).toBe(
-      "<place>\nchat: D2\nthread: none\nkind: group\n</place>",
+      "<place>\nchat: D2\nthread: none\n</place>",
     );
     expect(promptFacts.place?.({ ...group, connectionId: "telegram" }, undefined)).toBeNull();
   });

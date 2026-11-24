@@ -617,6 +617,33 @@ describe("backend turn delivery", () => {
       expect(send).not.toHaveBeenCalled();
     });
 
+    it("runs a turn in the chat and thread its params name, where its session answers many chats", async () => {
+      const agentRunner = answered();
+      const runner = createBackendTurnRunner({
+        agentRunner,
+        channel: () => wechatWith(rs.fn<Send>(async (chatId) => ({ chatId }))),
+        chats,
+        replies: { send: async () => null },
+      });
+
+      await runner
+        .runAndDeliver({
+          ...params,
+          romeSessionId: "chat-7",
+          inThread: "wechat-thread-1:5",
+        } as never)
+        .catch(() => {});
+      await runner.runAndDeliver(params).catch(() => {});
+
+      expect(agentRunner.calls[0]).toMatchObject({
+        threadContext: { threadId: "wechat-thread-1", romeSessionId: "chat-7" },
+        inThread: "wechat-thread-1:5",
+      });
+      // Without them the turn stands where its session does.
+      expect(agentRunner.calls[1]?.threadContext).not.toHaveProperty("romeSessionId");
+      expect(agentRunner.calls[1]).not.toHaveProperty("inThread");
+    });
+
     it("keeps the turn's trace but leaves its answer for the speaker to record", async () => {
       const agentRunner = answered();
       const runner = createBackendTurnRunner({

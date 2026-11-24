@@ -287,7 +287,12 @@ import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
 import { agentOfKindIn, conciergePlaceSetup } from "./concierge/on-connection.js";
-import { envoyPrompt, readEnvoyVerdict, sayOnConnection } from "./concierge/connection-say.js";
+import {
+  envoyPrompt,
+  readEnvoyVerdict,
+  sayOnConnection,
+  sendOnConnection,
+} from "./concierge/connection-say.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -1408,6 +1413,44 @@ async function main() {
     const id = channelRecords.byId(channel)?.connectionId;
     return id ? connectionRegistry.all().find((connection) => connection.id === id) : undefined;
   };
+  // Whether the account behind a channel or a place serves its whole
+  // workspace (docs/domains/participation.md#workspace-account).
+  const servesWorkspace = servesWorkspaceIn(connectionRegistry);
+  const channelServesWorkspace = (channel: string) => {
+    const id = channelRecords.byId(channel)?.connectionId;
+    return !!id && servesWorkspace(id);
+  };
+  const placeServesWorkspace = (place: { channel: string; connectionId?: string }) =>
+    place.connectionId
+      ? servesWorkspace(place.connectionId)
+      : channelServesWorkspace(place.channel);
+  // Each message the Concierge says on a connection, and the send gate's
+  // decision on it, as the inbox records an agent's reply.
+  const recordOutgoing = async ({
+    status,
+    description,
+    chat: target,
+    text,
+  }: {
+    status: "auto_approved" | "pending" | "rejected";
+    description: string;
+    chat: { channel: string; threadId: string };
+    text: string;
+  }) => {
+    await approvalsRepo
+      .create({
+        type: "outgoing_message",
+        requestedBy: CONCIERGE_AGENT_ID,
+        description,
+        payload: { response: text, channel: target.channel, threadId: target.threadId },
+        status,
+      })
+      .catch((error: unknown) =>
+        log.warn("outgoing message not put on record", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+  };
   const concierge: ConciergeService = new ConciergeService({
     skillCatalog,
     settingsRepo,
@@ -1424,7 +1467,7 @@ async function main() {
     sayInChat: (chat, message) =>
       sayOnConnection(
         {
-          gate: workspaceSend(servesWorkspaceIn(connectionRegistry), guardedSend),
+          gate: workspaceSend(servesWorkspace, guardedSend),
           connectionOf: (channel) => channelRecords.byId(channel)?.connectionId ?? null,
           envoy: async (input) => {
             let verdict: unknown;
@@ -1460,23 +1503,27 @@ async function main() {
             if (!said) throw new Error("This chat stands nowhere a message can be said.");
             return said.sent;
           },
-          record: async ({ status, description, chat: target, text }) => {
-            await approvalsRepo
-              .create({
-                type: "outgoing_message",
-                requestedBy: CONCIERGE_AGENT_ID,
-                description,
-                payload: { response: text, channel: target.channel, threadId: target.threadId },
-                status,
-              })
-              .catch((error: unknown) =>
-                log.warn("outgoing message not put on record", {
-                  error: error instanceof Error ? error.message : String(error),
-                }),
-              );
-          },
+          record: recordOutgoing,
         },
         { chat, ...message },
+      ),
+    servesWorkspace: channelServesWorkspace,
+    // What the Concierge sends to another chat of a workspace it serves goes
+    // out on the channel's send port, which records it in that chat.
+    sendInChat: (from, message) =>
+      sendOnConnection(
+        {
+          gate: workspaceSend(servesWorkspace, guardedSend),
+          connectionOf: (channel) => channelRecords.byId(channel)?.connectionId ?? null,
+          deliver: async (channel, address, text) => {
+            const port = recordedChannels.find((candidate) => candidate.name === channel)?.send;
+            if (!port) throw new Error(`Channel "${channel}" cannot send`);
+            const receipt = await port.send(address as ChatId, { text });
+            return receipt.messageId ?? "";
+          },
+          record: recordOutgoing,
+        },
+        { from, ...message },
       ),
     // Who answers a chat on a connection, as the inbox routes it: the
     // account's agent (a task started there reports there when it is the
@@ -1491,7 +1538,7 @@ async function main() {
     sessionRepository,
     chatSessionKey: chatSessionKeyOf(
       (channel) => channelRecords.byId(channel)?.connectionId ?? null,
-      servesWorkspaceIn(connectionRegistry),
+      servesWorkspace,
     ),
     accounts: modelAccounts,
     defaults: defaultProviders,
@@ -1580,7 +1627,7 @@ async function main() {
         labels: chatsWired.labels,
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface,
-        servesWorkspace: servesWorkspaceIn(connectionRegistry),
+        servesWorkspace,
         connectionOfChannel: (channel) => channelRecords.byId(channel)?.connectionId ?? null,
         // A new session reads the chat's latest messages from where the chat
         // lives, and only from a platform that answers them live, bounded at
@@ -1609,7 +1656,8 @@ async function main() {
             modelAccounts.read().openai?.account,
           ),
       }),
-      placeSetup: conciergePlaceSetup,
+      placeSetup: (agentName, thread) =>
+        conciergePlaceSetup(agentName, thread, placeServesWorkspace),
       chatInstructions: taskChatInstructions({ webchatRepo }),
       ownAccountName: ownAccountNames(connectionRegistry),
       sessionTracing: romeSessionTracing,
@@ -1706,11 +1754,10 @@ async function main() {
   // That session runs the Concierge on the model a Concierge chat Rome picks
   // runs on, the default provider's strong one (Opus 5.5 on Anthropic), at
   // low effort.
-  const conversationSessions = workspaceSessions(
-    agentSessionManager,
-    servesWorkspaceIn(connectionRegistry),
-    () => ({ selectionId: concierge.strongModel(), reasoningEffort: "low" }),
-  );
+  const conversationSessions = workspaceSessions(agentSessionManager, servesWorkspace, () => ({
+    selectionId: concierge.strongModel(),
+    reasoningEffort: "low",
+  }));
   const agentSessionBridge = new AgentSessionBridge(
     conversationSessions,
     webchatRepo,
@@ -2046,7 +2093,7 @@ async function main() {
     bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,
-    servesWorkspace: servesWorkspaceIn(connectionRegistry),
+    servesWorkspace,
   });
   // Only the Concierge writes in a Concierge chat. An app's action sending
   // there, as a task chat's agent or a routine may, wakes the Concierge with
@@ -2097,7 +2144,7 @@ async function main() {
     sentinelLogRepo,
     approvalsRepo,
     policyEngine,
-    sendGate: workspaceSend(servesWorkspaceIn(connectionRegistry), guardedSend),
+    sendGate: workspaceSend(servesWorkspace, guardedSend),
     wakeGateFor,
     routinesRepo,
     routineEngine,

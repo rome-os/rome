@@ -191,13 +191,14 @@ export function chatPromptFacts(deps: ChatPromptFactsDeps): PromptFacts {
  *  serves its workspace: the chat and thread ids a send takes, and what the
  *  chat is. */
 function placeLine(place: ThreadContext, thread: string | undefined): string {
-  const kind = place.threadType === "private" ? "direct message" : "group";
+  // A turn Rome runs, such as a task's report, may not know what the chat is.
+  const kind = place.threadType && (place.threadType === "private" ? "direct message" : "group");
   const name = place.threadName?.trim().replace(/[<>&\n]/g, " ");
   return [
     "<place>",
     `chat: ${place.threadId}`,
     `thread: ${thread ?? "none"}`,
-    `kind: ${kind}`,
+    ...(kind ? [`kind: ${kind}`] : []),
     ...(name ? [`name: ${name}`] : []),
     "</place>",
   ].join("\n");

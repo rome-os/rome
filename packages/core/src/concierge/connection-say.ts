@@ -30,6 +30,8 @@ export type EnvoyVerdict = {
   reason?: string;
 };
 
+export type SendGateDecision = "send" | "check" | "ask_guardian" | "refuse";
+
 /** The account's send gate, as core wires it (participation/send-gate): may
  *  a message go out, and does Envoy check it first. */
 type SendGate = (request: {
@@ -42,7 +44,7 @@ type SendGate = (request: {
   };
   recipient: { bondLevel: BondLevel } | null;
   author: { agentName: string };
-}) => "send" | "check" | "ask_guardian" | "refuse";
+}) => SendGateDecision;
 
 export interface ConnectionSayDeps {
   gate: SendGate;
@@ -66,7 +68,7 @@ export interface ConnectionSayDeps {
   record: (decision: {
     status: "auto_approved" | "pending" | "rejected";
     description: string;
-    chat: ConnectionChat;
+    chat: Pick<ConnectionChat, "channel" | "threadId">;
     text: string;
   }) => Promise<void>;
 }
@@ -137,6 +139,74 @@ export async function sayOnConnection(
   return {
     notSent: `This message was not sent: ${verdict.reason ?? "it may not go to this chat"}.`,
   };
+}
+
+export interface ConnectionSendDeps
+  extends Pick<ConnectionSayDeps, "gate" | "connectionOf" | "record"> {
+  /** Sends `text` to the platform address `address` on `channel`, as turn
+   *  `turnId`'s, and records it there. Answers the platform's key. */
+  deliver: (channel: string, address: string, text: string, turnId: string) => Promise<string>;
+}
+
+/**
+ * Sends `text` to chat `chat`, in thread `thread` or its open chat, on the
+ * account chat `from` is on, past the send gate. It answers no message said
+ * there, so Envoy, which reads a reply against the message it answers, has
+ * nothing to read it against: a send the gate would check waits for the
+ * guardian instead.
+ */
+export async function sendOnConnection(
+  deps: ConnectionSendDeps,
+  input: {
+    from: Pick<ConnectionChat, "channel" | "threadId">;
+    chat: string;
+    thread?: string;
+    text: string;
+    turnId: string;
+  },
+): Promise<ConnectionSaid> {
+  const { from, text } = input;
+  const connectionId = deps.connectionOf(from.channel);
+  if (!connectionId) throw new Error("This chat's account cannot send.");
+  // A thread's platform id is the address a message to it goes to.
+  const target = { channel: from.channel, threadId: input.thread ?? input.chat };
+  const decision = deps.gate({
+    destination: {
+      connectionId,
+      chatId: input.chat,
+      place: "group",
+      sameChatAsWake: input.chat === from.threadId,
+      onlyGuardianReads: false,
+    },
+    recipient: null,
+    author: { agentName: "core:concierge" },
+  });
+  if (decision === "send") {
+    const sent = await deps.deliver(from.channel, target.threadId, text, input.turnId);
+    await deps.record({
+      status: "auto_approved",
+      description: "Sent past the send gate",
+      chat: target,
+      text,
+    });
+    return { sent };
+  }
+  if (decision === "refuse") {
+    await deps.record({
+      status: "rejected",
+      description: "Refused by the send gate",
+      chat: target,
+      text,
+    });
+    return { notSent: "The send gate refused this message, so it was not sent." };
+  }
+  await deps.record({
+    status: "pending",
+    description: "Held by the send gate",
+    chat: target,
+    text,
+  });
+  return { notSent: "This message waits for the guardian's approval, so it was not sent yet." };
 }
 
 const BOND_LEVEL_WORDS: Record<string, string> = {

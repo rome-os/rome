@@ -233,6 +233,14 @@ export async function buildConciergeTools(
   // tools for tasks (CONNECTION_TOOLS): a task started there reports to
   // that chat. Every other tool needs a Concierge chat on the dashboard.
   const onConnection = conciergePlaceSetup(context.agentName, context.getThreadContext()) !== null;
+  // On an account that serves its workspace one session answers every chat,
+  // and may send to any of them.
+  const sessionChannel = context.getThreadContext()?.channel;
+  const inWorkspace =
+    onConnection &&
+    sessionChannel !== undefined &&
+    service.deps.servesWorkspace?.(sessionChannel) === true &&
+    service.deps.sendInChat !== undefined;
   // The connection chat this session is in, for a turn whose thread does not
   // name it, as a task's report does.
   let sessionChatId: string | null = null;
@@ -710,6 +718,12 @@ export async function buildConciergeTools(
     const quoting =
       replyTo ??
       (service.saidAnyInTurn(turnId) ? undefined : (await turnMessageKeys(chatId, turnId)).at(-1));
+    // Where one session answers the workspace, a message that quotes none
+    // still goes to the thread the turn stands in.
+    const thread = inWorkspace && !quoting ? context.getTurnThread?.() : undefined;
+    if (thread && service.deps.sendInChat) {
+      return service.deps.sendInChat(chat, { chat: chat.threadId, thread, text, turnId });
+    }
     return service.deps.sayInChat(chat, {
       text,
       ...(quoting ? { replyTo: quoting } : {}),
@@ -952,6 +966,46 @@ export async function buildConciergeTools(
     said(chatId, turnId, task?.title ? `${task.title}: ${pushBody(card.text)}` : card.text);
     service.keepSaid(turnId, key, id);
     return id;
+  };
+
+  // A message to any chat and thread of the workspace, named as a turn's
+  // `<place>` names them. Only a session that serves its workspace has it.
+  const sendTool: RomeTool = {
+    name: "send",
+    description:
+      "Send one message to a chat of this workspace, in one of its threads or its open chat. Name the chat and thread exactly as a <place> block names them. " +
+      "Use it to answer somewhere other than where the message you are answering was said, such as a task's result to the chat and thread that asked for it. Others may read every chat: nothing sent is private.",
+    inputSchema: {
+      type: "object",
+      required: ["chat", "text"],
+      properties: {
+        chat: {
+          type: "string",
+          description: "The chat, as a <place> block's chat: line names it.",
+        },
+        thread: {
+          type: "string",
+          description:
+            "The thread, as a <place> block's thread: line names it. Leave it out for the open chat.",
+        },
+        text: { type: "string", description: "The message, in Markdown." },
+      },
+    },
+    handler: (input) =>
+      runTool("send", input, async (args) => {
+        const { chatId, turnId } = currentTurn();
+        const here = await service.connectionChat(chatId);
+        if (!here || !service.deps.sendInChat) throw new Error("Nothing can be sent from here.");
+        const thread = optionalString(args, "thread");
+        const sent = await service.deps.sendInChat(here, {
+          chat: requireString(args, "chat"),
+          ...(thread && thread !== "none" ? { thread } : {}),
+          text: requireString(args, "text"),
+          turnId,
+        });
+        if ("notSent" in sent) return { sent: false, note: sent.notSent };
+        return { sent: "Sent. Call send again only for a new message.", messageId: sent.sent };
+      }),
   };
 
   const tools: RomeTool[] = [
@@ -1210,6 +1264,9 @@ export async function buildConciergeTools(
             // Its row exists before the first turn, so that turn's events find it.
             await tasks.repo.create(chatId, { chatId: conciergeChatId, sourceMessageId });
             made = true;
+            // Its report stands in the thread it was asked in.
+            const askedIn = onConnection ? context.getTurnThread?.() : undefined;
+            if (askedIn) service.noteAskedIn(chatId, askedIn);
             if (schedule) {
               await service.deps.schedules?.set(
                 { id: chatId, title, owner: await ownerHere() },
@@ -1736,7 +1793,7 @@ export async function buildConciergeTools(
   // message from anyone else may not use them; a turn Rome runs there, such as
   // a task's report, may. Anyone's turn may say something.
   const othersRefused = () => bondHere(currentTurn().chatId) !== "guardian";
-  return tools
+  const kept = tools
     .filter((tool) => (CONNECTION_TOOLS as readonly string[]).includes(tool.name))
     .map(
       (tool): RomeTool =>
@@ -1758,4 +1815,6 @@ export async function buildConciergeTools(
                   : tool.handler(input, call),
             },
     );
+  // Anyone's turn may send within the workspace, as anyone's may say.
+  return inWorkspace ? [...kept, sendTool] : kept;
 }

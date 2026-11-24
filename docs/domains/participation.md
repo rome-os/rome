@@ -38,6 +38,8 @@ One of Rome's accounts that serves the whole workspace it is in, such as Rome's 
 - Every chat of the account shares one session of its agent: each direct message and each mention enters it, with who wrote it, the chat and the thread. The session ends by the chat's [session reset](../concepts/sessions.md#continuity-key) rule; Rome's Slack app fixes it at an hour idle, about as long as the model's prompt cache lasts, and the next message starts a new one. The session reads as shared, whichever chat opened it. It runs on the model Rome picks for a Concierge chat, the default provider's strong one, at low effort.
 - Each turn begins with a `<place>` block naming the chat and thread its message was said in, by the ids a send takes. A turn on a message in a chat is shown what was said there since the last message the session was shown from it, or the chat's latest messages in a new session, read from the platform where the chat lives and kept nowhere. When the platform refuses or delays the read, the turn answers without it.
 - Its agent's messages into any chat of the account go out with no check and no approval card ([Send gate](#send-gate)). A chat outside it keeps the rule of [Reply](#reply).
+- Its agent answers in the chat and thread of the message it answers, and can send to any other chat and thread of the account by the ids a `<place>` block names. Rome reaches no chat of another account this way.
+- A task the agent starts reports back into the session on a turn that names the chat and thread that asked for it, and the report is said there. Rome keeps the thread in memory, so after a restart a report goes to that chat's open chat.
 
 ## Addressed
 

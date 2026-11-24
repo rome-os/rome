@@ -22,6 +22,9 @@ export interface SessionToolContext {
   /** The id of the one Concierge task the running turn reports on, or
    *  undefined when it reports on none or on several. */
   getTurnReportedTask(): string | undefined;
+  /** The platform thread the running turn's message was said in, or
+   *  undefined for one said in the open chat. Absent, none is known. */
+  getTurnThread?(): string | undefined;
   /** Capture at tool-handler entry, before async setup. The sender refuses a changed source. */
   captureTaskInput?(): TaskInputSender;
 }

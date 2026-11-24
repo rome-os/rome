@@ -4,7 +4,9 @@ import {
   type EnvoyVerdict,
   envoyPrompt,
   readEnvoyVerdict,
+  type SendGateDecision,
   sayOnConnection,
+  sendOnConnection,
 } from "./connection-say.js";
 
 const chat = { id: "chat-1", channel: "discord_app", threadId: "900" };
@@ -104,5 +106,60 @@ describe("what the Concierge says in a chat on a connection", () => {
     });
     expect(readEnvoyVerdict({ verdict: "maybe" }).action).toBe("require_approval");
     expect(readEnvoyVerdict(undefined).action).toBe("require_approval");
+  });
+});
+
+describe("what the Concierge sends to another chat of its account", () => {
+  const send = async (decision: SendGateDecision, thread?: string) => {
+    const delivered: unknown[] = [];
+    const records: unknown[] = [];
+    const destinations: unknown[] = [];
+    const said = await sendOnConnection(
+      {
+        gate: ({ destination }) => {
+          destinations.push(destination);
+          return decision;
+        },
+        connectionOf: (channel) => (channel === "slack_app" ? "slack" : null),
+        deliver: async (channel, address, text, turnId) => {
+          delivered.push([channel, address, text, turnId]);
+          return "1.5";
+        },
+        record: async ({ status, chat: target }) => {
+          records.push([status, target.threadId]);
+        },
+      },
+      {
+        from: { channel: "slack_app", threadId: "C1" },
+        chat: "C2",
+        ...(thread ? { thread } : {}),
+        text: "Hi",
+        turnId: "turn-1",
+      },
+    );
+    return { said, delivered, records, destinations };
+  };
+
+  it("sends to the thread named, else the open chat, when the gate lets it", async () => {
+    const inThread = await send("send", "C2:1.0");
+    expect(inThread.said).toEqual({ sent: "1.5" });
+    expect(inThread.delivered).toEqual([["slack_app", "C2:1.0", "Hi", "turn-1"]]);
+    expect(inThread.records).toEqual([["auto_approved", "C2:1.0"]]);
+    expect(inThread.destinations).toEqual([
+      expect.objectContaining({ connectionId: "slack", chatId: "C2", sameChatAsWake: false }),
+    ]);
+    expect((await send("send")).delivered).toEqual([["slack_app", "C2", "Hi", "turn-1"]]);
+  });
+
+  it("holds for the guardian what the gate would check, and sends nothing the gate refuses", async () => {
+    for (const decision of ["check", "ask_guardian"] as const) {
+      const held = await send(decision);
+      expect(held.delivered).toEqual([]);
+      expect(held.records).toEqual([["pending", "C2"]]);
+      expect(held.said).toHaveProperty("notSent");
+    }
+    const refused = await send("refuse");
+    expect(refused.delivered).toEqual([]);
+    expect(refused.records).toEqual([["rejected", "C2"]]);
   });
 });

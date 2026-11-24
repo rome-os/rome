@@ -286,6 +286,18 @@ export interface ConciergeDeps {
       recipient: ConnectionRecipient;
     },
   ) => Promise<ConnectionSaid>;
+  /** Whether the account behind `channel` serves its whole workspace, so one
+   *  session answers all its chats and may send to any of them. Absent, none
+   *  does. */
+  servesWorkspace?: (channel: string) => boolean;
+  /** Sends a message of turn `turnId` to chat `chat`, in thread `thread` or
+   *  the open chat, on the account `from` is a chat of: past its send gate,
+   *  to the platform, recorded there. Answers the platform's key for it, or
+   *  why it was not sent. Absent, nothing is sent outside the turn's chat. */
+  sendInChat?: (
+    from: ConnectionChat,
+    message: { chat: string; thread?: string; text: string; turnId: string },
+  ) => Promise<ConnectionSaid>;
   accounts: Pick<ModelAccounts, "read">;
   /** The default provider. Absent, none is set, and chats keep their models. */
   defaults?: Pick<DefaultProviders, "current"> & Partial<Pick<DefaultProviders, "signedIn">>;
@@ -315,6 +327,10 @@ export interface ConciergeDeps {
 export type TurnParams = BackendTurnParams & { taskIds?: readonly string[] };
 export type ResolvedTurn = TurnParams & {
   reportedTask?: string;
+  /** The chat it runs in, where its session answers more than one. */
+  romeSessionId?: string;
+  /** The platform thread it stands in, where its session answers more than one chat. */
+  inThread?: string;
   /** Where its input came from, when a check the Concierge set came due: its replies are labelled with it. */
   inputSource?: SystemInputSource;
   inputLabel?: string;
@@ -388,6 +404,10 @@ export class ConciergeService {
   private readonly saidByKey = new Map<string, Map<string, string>>();
   /** Per chat on a connection, how many turns of Rome's own run there now. */
   private readonly systemTurns = new Map<string, number>();
+  /** The platform thread each task started on a workspace account was asked
+   *  in, so its report stands there. Kept in memory: after a restart a report
+   *  stands in its chat's open chat. */
+  private readonly askedIn = new Map<string, string>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
@@ -1203,13 +1223,15 @@ export class ConciergeService {
     prompt: string,
     options: SystemTurnOptions,
   ): Promise<"completed" | "stopped" | "interrupted" | "failed"> {
-    const stored = await this.deps.sessionRepository.current(
-      this.deps.chatSessionKey?.(chat) ?? channelChatSessionKey(chat.channel, chat.threadId),
-      CONCIERGE_AGENT_ID,
-    );
+    const ownKey = channelChatSessionKey(chat.channel, chat.threadId);
+    const sessionKey = this.deps.chatSessionKey?.(chat) ?? ownKey;
+    const stored = await this.deps.sessionRepository.current(sessionKey, CONCIERGE_AGENT_ID);
     if (!stored) return "failed";
     const taskIds = options.taskIds ?? [];
     const reportedTask = await this.reportedTaskOf(taskIds, chat.id);
+    // A session that answers many chats is told which chat, and which thread
+    // the task was asked in, the turn stands in.
+    const thread = reportedTask ? this.askedIn.get(reportedTask) : undefined;
     const params: ResolvedTurn = {
       agentName: CONCIERGE_AGENT_ID,
       sessionId: stored.id,
@@ -1218,6 +1240,9 @@ export class ConciergeService {
       prompt,
       ...(options.taskIds ? { taskIds: options.taskIds } : {}),
       ...(reportedTask ? { reportedTask } : {}),
+      ...(sessionKey !== ownKey
+        ? { romeSessionId: chat.id, ...(thread ? { inThread: thread } : {}) }
+        : {}),
     };
     // A turn Rome runs there, such as a task's report or a reminder, has no
     // sender: while it runs, its tools act for the guardian, who started the
@@ -1236,6 +1261,12 @@ export class ConciergeService {
       if (carried.length > 0) this.carriedReports.set(chat.id, carried);
     }
     return outcome;
+  }
+
+  /** Task `taskId` was asked for in platform thread `thread`, where its
+   *  report stands. */
+  noteAskedIn(taskId: string, thread: string): void {
+    this.askedIn.set(taskId, thread);
   }
 
   /**

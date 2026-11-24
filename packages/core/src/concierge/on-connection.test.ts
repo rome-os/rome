@@ -5,6 +5,7 @@ import {
   CONNECTION_PROMPT,
   CONNECTION_TOOLS,
   conciergePlaceSetup,
+  WORKSPACE_PROMPT,
 } from "./on-connection.js";
 
 describe("the Concierge on a connection", () => {
@@ -54,6 +55,25 @@ describe("the Concierge on a connection", () => {
     for (const name of CONNECTION_TOOLS) expect(CONNECTION_PROMPT).toContain(`\`${name}\``);
     expect(CONNECTION_PROMPT).toContain("Only the guardian may ask for one");
     expect(CONNECTION_PROMPT).toContain("Never approve anything yourself.");
+  });
+
+  it("tells a session that serves its workspace where each message was said, and how to send elsewhere", () => {
+    const serves = (thread: { channel: string; connectionId?: string }) =>
+      thread.connectionId === "slack";
+    const setup = conciergePlaceSetup(
+      "core:concierge",
+      { channel: "slack_app", connectionId: "slack" },
+      serves,
+    );
+    expect(setup?.systemPromptPrefix).toBe(`${CONNECTION_PROMPT}\n\n${WORKSPACE_PROMPT}`);
+    expect(WORKSPACE_PROMPT).toContain("`<place>`");
+    expect(WORKSPACE_PROMPT).toContain("`send`");
+    // Every other account, and the Concierge without the rule, keep theirs.
+    expect(
+      conciergePlaceSetup("core:concierge", { channel: "discord_app", connectionId: "d" }, serves)
+        ?.systemPromptPrefix,
+    ).toBe(CONNECTION_PROMPT);
+    expect(conciergePlaceSetup("core:concierge", { channel: "webchat" }, () => true)).toBeNull();
   });
 
   it("reads the chat's earlier messages from the connection, never sending anyone to the dashboard for them", () => {

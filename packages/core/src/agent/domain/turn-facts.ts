@@ -80,6 +80,9 @@ export interface TurnFacts {
   /** The id of the one Concierge task the running turn reports on, or
    *  undefined when it reports on none or on several. */
   reportedTask(): string | undefined;
+  /** The platform thread the running turn's message was said in, or
+   *  undefined for one said in the open chat or no message. Absent, none. */
+  thread?(): string | undefined;
   /** Runs `fn` in the turn's trace context, so the work it starts nests under the turn. */
   inTurn<T>(fn: () => T): T;
 }

@@ -119,15 +119,40 @@ const ON_CONNECTION: PlaceSetup = {
 };
 
 /**
+ * What the Concierge is told besides {@link CONNECTION_PROMPT} on an account
+ * that serves its whole workspace, where one session answers every chat
+ * (docs/domains/participation.md#workspace-account): each message names its
+ * place, and `send` reaches any chat of the workspace.
+ */
+export const WORKSPACE_PROMPT = [
+  "# One session for the whole workspace",
+  "- You serve everyone in this account's workspace from this one session. You hear a chat when someone mentions you there or writes to you directly, and anyone in the workspace may: answer each of them.",
+  "- Each message you are given starts with a `<place>` block naming the chat and thread it was said in, and what was said there since you last looked. Answer from that chat's messages, never from another chat's: what was said in a direct message stays in it.",
+  "- `say` answers in the chat and thread of the message you answer. `send` sends one message to any chat and thread of this workspace, named exactly as a `<place>` block names them: use it only to speak somewhere other than where the message you answer was said.",
+  "- A task's news reaches you with the `<place>` of the chat and thread that asked for it: tell its result there with `say`.",
+].join("\n");
+
+const ON_WORKSPACE: PlaceSetup = {
+  ...ON_CONNECTION,
+  systemPromptPrefix: `${CONNECTION_PROMPT}\n\n${WORKSPACE_PROMPT}`,
+};
+
+/**
  * How the place a session serves changes the Concierge there, the one answer
  * every part reads: its actions, its own tools and its instructions. Null for any other agent, and for
- * the Concierge on the dashboard or in a place nothing names.
+ * the Concierge on the dashboard or in a place nothing names. `servesWorkspace`
+ * tells whether the account a place is on serves its whole workspace; absent,
+ * none does.
  */
 export function conciergePlaceSetup(
   agentName: string,
-  thread: Pick<ThreadContext, "channel"> | undefined,
+  thread:
+    | (Pick<ThreadContext, "channel"> & Partial<Pick<ThreadContext, "connectionId">>)
+    | undefined,
+  servesWorkspace?: (thread: Pick<ThreadContext, "channel" | "connectionId">) => boolean,
 ): PlaceSetup | null {
-  return isConciergeAgent(agentName) && thread !== undefined && thread.channel !== WEBCHAT_CHANNEL
-    ? ON_CONNECTION
-    : null;
+  if (!isConciergeAgent(agentName) || thread === undefined || thread.channel === WEBCHAT_CHANNEL) {
+    return null;
+  }
+  return servesWorkspace?.(thread) ? ON_WORKSPACE : ON_CONNECTION;
 }

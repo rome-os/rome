@@ -1689,6 +1689,7 @@ async function openSession(
     refs: TurnExecRefs,
     pushLevel: () => PushLevel | undefined = () => undefined,
     reportedTask: () => string | undefined = () => undefined,
+    thread: () => string | undefined = () => undefined,
   ): TurnFacts => ({
     agentName: key.agentName,
     continuityKey: key.channelThreadKey,
@@ -1718,12 +1719,14 @@ async function openSession(
     captureTaskInputLiveness: refs.captureTaskInputLiveness,
     audience: refs.getAudience,
     reportedTask,
+    thread,
     inTurn: refs.bindTurnCtx,
   });
   const liveTurn = turnFacts(
     sessionExecRefs,
     () => impl.currentTurnPushLevelRef,
     () => impl.currentTurnReportedTaskRef,
+    () => impl.currentTurnThreadRef,
   );
 
   const makeExecuteSubagent =
@@ -2783,6 +2786,10 @@ class AgentSessionImpl implements AgentSession {
 
   get currentTurnReportedTaskRef(): string | undefined {
     return this.currentSink?.reportedTask;
+  }
+
+  get currentTurnThreadRef(): string | undefined {
+    return this.currentSink?.inThread;
   }
 
   get currentTurnSharedContextRef(): Record<string, unknown> | undefined {

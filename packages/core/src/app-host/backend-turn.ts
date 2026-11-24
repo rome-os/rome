@@ -142,11 +142,18 @@ export interface BackendTurnRunnerDeps {
   isTextPrivate?: (agentName: string, channel: string) => boolean;
 }
 
+/**
+ * A backend turn, with where in its session's place it runs when the session
+ * answers more than one chat: `romeSessionId`, the chat it runs in, and
+ * `inThread`, the platform thread it stands in. Absent, the session's own.
+ */
+export type PlacedTurnParams = BackendTurnParams & { romeSessionId?: string; inThread?: string };
+
 export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBackendTurnRunner {
   let webchatRuntime: WebchatSessionStreamHost | undefined;
 
   const runTurn = (
-    params: BackendTurnParams,
+    params: PlacedTurnParams,
     workingDir: string | undefined,
     trace: Pick<
       RunParams,
@@ -177,8 +184,10 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         channel: params.channel,
         threadId: params.threadId,
         channelUserId: params.channelUserId,
+        ...(params.romeSessionId ? { romeSessionId: params.romeSessionId } : {}),
         ...(deviceFolder ? { deviceFolder } : {}),
       },
+      ...(params.inThread ? { inThread: params.inThread as ChatId } : {}),
       // A continuation is not a guardian-authored turn — mark it system so the
       // turn-level logic treats it as an internal re-entry, not a fresh message.
       initiatedBy: "system",
@@ -273,7 +282,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     asked: BackendTurnParams,
     options?: BackendTurnOptions,
   ): Promise<BackendTurnOutcome> {
-    const params: BackendTurnParams & {
+    const params: PlacedTurnParams & {
       reportedTask?: string;
       inputSource?: SystemInputSource;
       inputLabel?: string;
