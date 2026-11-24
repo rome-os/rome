@@ -15,6 +15,7 @@ import {
 } from "../../access/auth.js";
 import { GUARDIAN, OUTSIDER, TEAMMATE } from "./instance.js";
 import { reachOf, type HttpOperation, type UpgradeOperation } from "./surface.js";
+import { bodyFor } from "./bodies.js";
 
 export type Role = "guardian" | "teammate" | "outsider" | "anonymous";
 
@@ -111,7 +112,7 @@ export async function callHttp(app: Hono, op: HttpOperation, role: Role): Promis
           ...forwarded,
           ...(hasBody ? { "content-type": "application/json" } : {}),
         },
-        ...(hasBody ? { body: "{}" } : {}),
+        ...(hasBody ? { body: JSON.stringify(bodyFor(op.method, op.pattern)) } : {}),
       }),
     ),
   );

@@ -1,6 +1,7 @@
 // The verifier proven against stand-in products whose verdicts never change,
-// whatever state the product in the tree is in: one with a route only the
-// guardian may call, which must fail rule 2 naming that route; one where every
+// whatever state the product in the tree is in: one with routes only the
+// guardian may call, which must fail rule 2 naming them, and must not count
+// the one it calls without a valid body as verified; one where every
 // check admits the teammate as it admits the guardian, which must pass; one
 // that admits a visitor nobody invited, which must fail; and one whose sign-in
 // hands an uninvited account the guardian's session, which must fail rule 1;
@@ -9,7 +10,12 @@
 
 import { describe, expect, it } from "@rstest/core";
 import { runRule1b } from "./rule1.js";
-import { runRule2, STAND_IN_GUARDIAN_ONLY_ROUTE, type Rule2Result } from "./rule2.js";
+import { runRule2, type Rule2Result } from "./rule2.js";
+import {
+  STAND_IN_GUARDIAN_ONLY_ROUTE,
+  STAND_IN_GUARDIAN_ONLY_WRITE,
+  STAND_IN_VALIDATES_FIRST,
+} from "./stand-in-routes.js";
 import { runRule3Dashboard } from "./rule3.js";
 import { writePart } from "./report.js";
 
@@ -17,6 +23,7 @@ const summary = (result: Rule2Result) => ({
   pass: result.pass,
   teammateRefused: result.teammateRefused,
   statusDiffers: result.statusDiffers,
+  unverified: result.unverified,
   outsiderAdmitted: result.outsiderAdmitted,
   unclaimedUpgradeHandlers: result.unclaimedUpgradeHandlers,
   mountDrift: result.mountDrift,
@@ -25,12 +32,15 @@ const summary = (result: Rule2Result) => ({
 const proofs: Record<string, unknown> = {};
 
 describe("the rule 2 verifier", () => {
-  it("fails a stand-in with a route only the guardian may call, naming that route", async () => {
+  it("fails a stand-in with routes only the guardian may call, naming them", async () => {
     const result = await runRule2({ standIn: "guardian-only-route" });
     proofs.guardianOnlyRoute = summary(result);
     writePart("proofs", proofs);
     expect(result.pass).toBe(false);
-    expect(result.teammateRefused).toContain(STAND_IN_GUARDIAN_ONLY_ROUTE);
+    expect(result.teammateRefused).toEqual(
+      expect.arrayContaining([STAND_IN_GUARDIAN_ONLY_ROUTE, STAND_IN_GUARDIAN_ONLY_WRITE]),
+    );
+    expect(result.unverified).toContain(STAND_IN_VALIDATES_FIRST);
   }, 600_000);
 
   it("passes a stand-in whose checks admit the teammate as they admit the guardian", async () => {

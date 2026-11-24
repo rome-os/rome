@@ -5,7 +5,8 @@
 #   nix develop -c packages/core/src/test/team/run.sh [--proofs]
 #
 # --proofs also runs the verifier against its stand-ins (proofs.verify.ts).
-# Exits 0 when every rule passes, 1 when one fails, 2 when it refuses to run.
+# Exits 0 when every rule and every proof passes, 1 when one fails, 2 when it
+# refuses to run.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,9 +31,12 @@ mkdir -p "$here/out"
   >"$here/out/core.log" 2>&1 || true
 (cd "$repo/packages/web" && pnpm test run --include "src/pages/SettingsTabPage.team.verify.tsx") \
   >"$here/out/web.log" 2>&1 || true
+proofs_exit=()
 if [ "${1:-}" = "--proofs" ]; then
+  status=0
   (cd "$repo/packages/core" && pnpm test run --include "src/test/team/proofs.verify.ts") \
-    >"$here/out/proofs.log" 2>&1 || echo "proofs failed: see out/proofs.log" >&2
+    >"$here/out/proofs.log" 2>&1 || status=$?
+  proofs_exit=("$status")
 fi
 
-exec node "$here/merge-report.mjs" "$repo" "$folder" "$web_file"
+exec node "$here/merge-report.mjs" "$repo" "$folder" "$web_file" "${proofs_exit[@]}"
