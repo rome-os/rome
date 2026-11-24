@@ -7,14 +7,19 @@ import Testing
 
 private struct TimedOut: Error {}
 
+@MainActor private var aWaitTimedOut = false
+
 /// Waits until `condition` holds, polling between run-loop turns. The
-/// deadline is long because CI's first seconds can starve the main actor
-/// for most of a minute; a passing wait returns as soon as it holds.
+/// default deadline is long because CI's first seconds can starve the main
+/// actor for most of a minute. After one wait times out, the rest give up
+/// in 5 s, so a regression that fails every case still reports its named
+/// failures inside the CI job's limit.
 @MainActor
-private func until(_ what: String, _ condition: () throws -> Bool) async throws {
-    let deadline = ContinuousClock.now + .seconds(120)
+private func until(_ what: String, timeout: Duration = .seconds(60), _ condition: () throws -> Bool) async throws {
+    let deadline = ContinuousClock.now + (aWaitTimedOut ? .seconds(5) : timeout)
     while try !condition() {
         guard ContinuousClock.now < deadline else {
+            aWaitTimedOut = true
             Issue.record("Timed out waiting for \(what)")
             throw TimedOut()
         }
@@ -150,8 +155,7 @@ private final class HeldAnimators {
         try await exercise(y: 440, count: 8, width: 390, reduced: true)
     }
 
-    // The middle Y is covered by the agent cases above.
-    @Test(arguments: [CGFloat(180), CGFloat(660)], [8, 25])
+    @Test(arguments: [CGFloat(180), CGFloat(440), CGFloat(660)], [8, 25])
     func agentRoleSharesTheSameContentAtBothEdges(y: CGFloat, count: Int) async throws {
         try await exercise(y: y, count: count, width: 390, agent: true)
     }
@@ -398,10 +402,13 @@ private final class HeldAnimators {
         }
         // Each handoff is held and stepped through its fractions, so every
         // run checks the same in-flight frames however busy the runner is.
-        func step(_ animator: UIViewPropertyAnimator, _ phase: String, through fractions: [CGFloat]) throws {
+        // A frame's wait at each fraction lets UIKit and SwiftUI lay out
+        // while the handoff is in flight, as they do in the app.
+        func step(_ animator: UIViewPropertyAnimator, _ phase: String, through fractions: [CGFloat]) async throws {
             for fraction in fractions {
                 animator.fractionComplete = fraction
                 CATransaction.flush()
+                try await Task.sleep(for: .milliseconds(16))
                 try sample(phase, picture: fraction == 0.5)
             }
         }
@@ -409,10 +416,10 @@ private final class HeldAnimators {
         try sample("open")
         let entry = try await animators.next(after: 0)
         if interrupted {
-            try step(entry, "open", through: [0, 0.25])
+            try await step(entry, "open", through: [0, 0.25])
             store.closeThread(); store.closeThread()
             let close = try await animators.next(after: 1)
-            try step(close, "close", through: [0, 0.25, 0.5, 0.75])
+            try await step(close, "close", through: [0, 0.25, 0.5, 0.75])
             animators.finish(close)
             try await until("the interrupted focus to close") { store.threadFocus == nil && mainList.alpha == 1 }
             try sample("close")
@@ -425,7 +432,7 @@ private final class HeldAnimators {
             #expect(store.threadFocus == nil, "Late response cannot reopen an interrupted focus")
             return
         }
-        try step(entry, "open", through: [0, 0.25, 0.5, 0.75, 1])
+        try await step(entry, "open", through: [0, 0.25, 0.5, 0.75, 1])
         animators.finish(entry)
         try await until("the open handoff to finish") { !store.focusPosition.transitioning }
         try sample("open")
@@ -496,7 +503,7 @@ private final class HeldAnimators {
         focused.delegate?.scrollViewDidEndDragging?(focused, willDecelerate: false)
         store.closeThread()
         let close = try await animators.next(after: 1)
-        try step(close, "close", through: [0, 0.25, 0.5, 0.75, 1])
+        try await step(close, "close", through: [0, 0.25, 0.5, 0.75, 1])
         animators.finish(close)
         try await until("the focused list to unmount") {
             store.threadFocus == nil && !store.focusPosition.transitioning && list(host.view, "reply-chain-transcript") == nil
