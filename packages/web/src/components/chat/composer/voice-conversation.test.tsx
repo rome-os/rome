@@ -14,10 +14,11 @@ const conversation = rs.hoisted(() => ({
   started: [] as string[],
   handlers: null as null | {
     onState(state: string): void;
-    onEnded(reason: string | null): void;
+    onEnded(reason: string | null, unsent: string): void;
   },
   muted: [] as boolean[],
   ended: 0,
+  unsent: "",
 }));
 rs.mock("@/lib/voice-conversation/conversation", () => ({
   startVoiceConversation: (chatId: string, handlers: typeof conversation.handlers) => {
@@ -26,7 +27,7 @@ rs.mock("@/lib/voice-conversation/conversation", () => ({
     return {
       end: () => {
         conversation.ended += 1;
-        handlers?.onEnded(null);
+        handlers?.onEnded(null, conversation.unsent);
       },
       setMuted: (muted: boolean) => conversation.muted.push(muted),
       micLevel: () => 0,
@@ -45,6 +46,7 @@ afterEach(() => {
   conversation.handlers = null;
   conversation.muted = [];
   conversation.ended = 0;
+  conversation.unsent = "";
 });
 
 function renderComposer(available: boolean, ref = createRef<ChatComposerHandle>()) {
@@ -108,6 +110,19 @@ describe("voice conversation in the Concierge's message field", () => {
     expect(conversation.ended).toBe(1);
     expect(document.querySelector("[data-voice-conversation-capsule]")).toBeNull();
     expect(screen.getByRole("button", { name: "Voice conversation" })).toBeTruthy();
+  });
+
+  it("puts the words a conversation ended before sending in the field", async () => {
+    renderComposer(true);
+    const field = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    fireEvent.change(field, { target: { value: "Also" } });
+    fireEvent.click(screen.getByRole("button", { name: "Voice conversation" }));
+
+    conversation.unsent = "remind me at seven";
+    fireEvent.click(screen.getByRole("button", { name: "End" }));
+    expect(field.value).toBe("Also remind me at seven");
+    // Nothing is sent: the guardian decides.
+    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
   });
 
   it("ends the conversation when the host hides the composer without unmounting it", async () => {

@@ -29,8 +29,12 @@ export type ConversationStopReason = z.infer<typeof conversationStopReasonSchema
 export interface ConversationHandlers {
   /** Rome's state changed: listening, thinking or speaking. */
   onState(state: VoiceConversationState): void;
-  /** Called once, last. `reason` is null when the guardian ended it. */
-  onEnded(reason: ConversationStopReason | null): void;
+  /**
+   * Called once, last. `reason` is null when the guardian ended it. `unsent`
+   * is what Rome heard of the guardian's turn and never sent, as the turn had
+   * not ended; empty while Rome was speaking, when it may be Rome's own voice.
+   */
+  onEnded(reason: ConversationStopReason | null, unsent: string): void;
   /** True while the browser asks the guardian for the microphone, false once answered. */
   onAsking?(asking: boolean): void;
 }
@@ -99,6 +103,13 @@ export function startVoiceConversation(
   // The reply's sample rate, once Rome names it.
   let sampleRate = 0;
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
+  // What Rome heard of the guardian's turn so far, and whether Rome is speaking.
+  let unsent = "";
+  let speaking = false;
+  const stateChanged = (state: VoiceConversationState) => {
+    speaking = state === "speaking";
+    handlers.onState(state);
+  };
 
   const teardown = () => {
     done = true;
@@ -116,7 +127,7 @@ export function startVoiceConversation(
   const finish = (reason: ConversationStopReason | null) => {
     if (done) return;
     teardown();
-    handlers.onEnded(reason);
+    handlers.onEnded(reason, speaking ? "" : unsent.trim());
   };
   function lost() {
     finish("connection-lost");
@@ -170,7 +181,9 @@ export function startVoiceConversation(
         if (!message.success) return;
         const data = message.data;
         if (data.type === "ready") sampleRate = data.sampleRate;
-        else if (data.type === "state") handlers.onState(data.state);
+        else if (data.type === "state") stateChanged(data.state);
+        else if (data.type === "heard") unsent = `${data.settled}${data.pending}`;
+        else if (data.type === "turn") unsent = "";
         else if (data.type === "clear") player.clear();
         else if (data.type === "ended") finish(null);
         else if (data.type === "error") finish(data.reason);

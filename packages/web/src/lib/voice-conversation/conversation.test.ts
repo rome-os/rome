@@ -71,9 +71,16 @@ function setup(refuse?: string) {
   };
   const states: string[] = [];
   const ended: Array<ConversationStopReason | null> = [];
+  const unsent: string[] = [];
   const conversation = startVoiceConversation(
     "concierge",
-    { onState: (s) => states.push(s), onEnded: (r) => ended.push(r) },
+    {
+      onState: (s) => states.push(s),
+      onEnded: (r, words) => {
+        ended.push(r);
+        unsent.push(words);
+      },
+    },
     deps,
   );
   return {
@@ -81,6 +88,7 @@ function setup(refuse?: string) {
     conversation,
     states,
     ended,
+    unsent,
     played,
     cleared: () => cleared,
     closedPlayer: () => closedPlayer,
@@ -136,6 +144,35 @@ describe("a voice conversation in the browser", () => {
     expect(c.ended).toEqual([null]);
     expect(c.micClosed()).toBe(true);
     expect(c.closedPlayer()).toBe(true);
+  });
+
+  it("hands back the words Rome heard and never sent, but not while Rome speaks", async () => {
+    const c = setup();
+    await settle();
+    c.socket.open();
+    c.socket.say({ type: "heard", settled: "Book a table", pending: "" });
+    c.socket.say({ type: "turn", text: "Book a table" });
+    c.socket.say({ type: "heard", settled: "for four ", pending: "at seven" });
+    c.conversation.end();
+    expect(c.unsent).toEqual(["for four at seven"]);
+
+    // While Rome speaks, what is heard may be its own voice.
+    const speaking = setup();
+    await settle();
+    speaking.socket.open();
+    speaking.socket.say({ type: "state", state: "speaking" });
+    speaking.socket.say({ type: "heard", settled: "Sure, for", pending: "" });
+    speaking.conversation.end();
+    expect(speaking.unsent).toEqual([""]);
+
+    // A conversation that stops on its own hands them back too.
+    const lost = setup();
+    await settle();
+    lost.socket.open();
+    lost.socket.say({ type: "heard", settled: "", pending: "Remind me" });
+    lost.socket.onclose?.();
+    expect(lost.ended).toEqual(["connection-lost"]);
+    expect(lost.unsent).toEqual(["Remind me"]);
   });
 
   it("gives the socket 10 s to open, then 3 s of quiet from Rome", async () => {
