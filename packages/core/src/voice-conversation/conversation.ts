@@ -375,7 +375,10 @@ export function createConversation(deps: ConversationDeps): Conversation {
         lateEcho = playing ? null : back;
         lateAfter = [];
       }
-      if (state === "speaking" && enoughWords(words) && !isEcho(words, echoAt(begunAt).join(" "))) {
+      // A turn begun after the audio keeps the sentences that could come back
+      // then, even once their time has passed, and adds what Rome played since.
+      const back = lateEcho ? [...lateEcho, ...lateAfter.map((q) => q.text)] : echoAt(begunAt);
+      if (state === "speaking" && enoughWords(words) && !isEcho(words, back.join(" "))) {
         log.info("guardian spoke over the reply");
         maybeEcho = false;
         drop();

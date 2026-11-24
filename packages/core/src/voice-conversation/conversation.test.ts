@@ -427,6 +427,28 @@ describe("voice conversation", () => {
     expect(t.sent).toEqual(["check the build", "me check"]);
   });
 
+  it("does not take a late echo as speaking over the next sentence, past the echo's own time", async () => {
+    const t = setup();
+    t.conversation.heard("查一下天气", "");
+    t.conversation.endpoint();
+    await settled();
+    t.clock.advance(LOOKING_AFTER_MS);
+    t.turns[0]?.push({ type: "text_delta", content: "今天晴。" });
+    await settled();
+    t.speak(0, 800);
+    // Recognition of the echo begins 1.9 s after its audio ends.
+    t.clock.advance(800 + 1900);
+    t.conversation.heard("", "我查");
+    // The next sentence plays once the looking line could no longer come back.
+    t.clock.advance(200);
+    t.speak(1, 1000);
+    t.conversation.heard("我查一下。", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["查一下天气"]);
+    expect(t.signals[0]?.aborted).toBe(false);
+  });
+
   it("forgets a stopped reply's words on time, even when the next reply starts at once", async () => {
     const t = setup();
     t.conversation.heard("deploy it", "");
