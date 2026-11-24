@@ -77,7 +77,7 @@ struct ChatScreen: View {
                     if ConciergeStarters.visible(loaded: store.readOnce, empty: store.rowsEmpty) {
                         ConciergeStarters { store.send($0.text) }
                     }
-                    Composer(text: $draft, placeholder: store.threadFocus == nil ? String(localized: "Message") : String(localized: "Message in thread"), focused: $composerFocused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: workspace.concierge.sessionId, voiceField: .chat, onScreen: visible && !store.share.isSelecting) {
+                    Composer(text: $draft, placeholder: store.threadFocus == nil ? String(localized: "Message") : String(localized: "Message in thread"), focused: $composerFocused, attachments: attachments, voiceInput: workspace.voiceInput, voiceKey: workspace.concierge.sessionId, voiceField: .chat, onScreen: visible && !store.share.isSelecting, conversationHere: store.composerReply == nil && store.threadFocus == nil) {
                         // A photo still being made small would land in the next message.
                         guard !attachments.isPreparing else { return }
                         if store.send(draft, images: attachments.images, fromComposer: true, reply: store.composerReply) {
