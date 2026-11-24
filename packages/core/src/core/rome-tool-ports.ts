@@ -28,7 +28,7 @@ import {
   type RoutineActivationGate,
 } from "../routines/propose-routine-tool.js";
 import type { SessionToolsProvider } from "./session-tools.js";
-import { connectAccountTools } from "./connect-account-tool.js";
+import { connectServiceTools } from "./connect-service-tool.js";
 import type { DeviceKind, DeviceKindState } from "../connections/connect-card.js";
 import { askingDeviceOf, type LiveTurn } from "../connections/device/live-route.js";
 import { type PrivateTurn, shareLocationTools } from "./share-location-tool.js";
@@ -54,7 +54,7 @@ export interface RomeToolPortsDeps {
    * only a task chat of its own chat's owner. When absent, no check names one.
    */
   taskOwner?: (chatId: string) => Promise<string | null>;
-  /** The device kinds `connect_account` connects. When absent, none. */
+  /** The device kinds `connect_service` connects. When absent, none. */
   deviceKinds?: () => readonly DeviceKind[];
   /** How a device kind stands for a turn, on its asking device alone when it has one. */
   deviceState?: (kind: string, turn: LiveTurn) => DeviceKindState | undefined;
@@ -303,9 +303,9 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
         // A session whose own tools already show a connect card (the
         // Concierge's `connect_card`) keeps that one for the kinds Rome
         // connects itself, so the agent has one way to ask for each, and gets
-        // `connect_account` for device kinds alone, which that card does not
+        // `connect_service` for device kinds alone, which that card does not
         // connect.
-        ...connectAccountTools({
+        ...connectServiceTools({
           widgets: turn.widgets,
           hasSpeaker,
           devices: deps.deviceKinds?.(),

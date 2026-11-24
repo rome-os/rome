@@ -39,7 +39,7 @@ export interface DeviceKindState {
   askingDeviceId?: string;
 }
 
-/** A live route's pointer as `connect_account` reads it. */
+/** A live route's pointer as `connect_service` reads it. */
 export function deviceKindState(pointer: LivePointer, turn: LiveTurn): DeviceKindState {
   return {
     state: pointer.state,
@@ -168,7 +168,7 @@ export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKin
   const rank = { working: 0, off: 1, broken: 2 } as const;
   const kinds = new Map<string, DeviceKind>();
   // A kind's summary is the first one reported in device-id order, whatever
-  // each connection's state, so `connect_account`'s description does not
+  // each connection's state, so `connect_service`'s description does not
   // change when the devices' states do.
   const summaries = new Map<string, string>();
   for (const connection of connections) {
@@ -196,8 +196,8 @@ export function deviceKinds(connections: readonly DeviceConnection[]): DeviceKin
   return [...kinds.values()];
 }
 
-/** The connection kind `connect_account` was asked for, or why it can't connect it. */
-export function parseConnectAccountInput(
+/** The connection kind `connect_service` was asked for, or why it can't connect it. */
+export function parseConnectServiceInput(
   input: unknown,
   devices: readonly DeviceKind[] = [],
   options: { devicesOnly?: boolean } = {},
@@ -254,7 +254,7 @@ export async function connectCardRequest(
   sources: ConnectCardSources,
 ): Promise<ConnectCardRequest> {
   const devices = sources.devices ?? [];
-  const parsed = parseConnectAccountInput(input, devices, { devicesOnly: sources.devicesOnly });
+  const parsed = parseConnectServiceInput(input, devices, { devicesOnly: sources.devicesOnly });
   if (!parsed.ok) return { status: "refused", error: parsed.error };
   if (!parsed.device) return oauthCardRequest(parsed.kind);
   // A device kind that already works needs no card: read as it stands now.
@@ -330,7 +330,7 @@ function oauthCardRequest(kind: OAuthProvider): ConnectCardAnswer {
 }
 
 /**
- * What `connect_account` hands back for a request. Where a widget shows, the
+ * What `connect_service` hands back for a request. Where a widget shows, the
  * turn waits on the connect card; `builtin: true` marks it as core's own,
  * which the drain checks against the tool that emitted it. Otherwise the
  * model asks the guardian in a message.

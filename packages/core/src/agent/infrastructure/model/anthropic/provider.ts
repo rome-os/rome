@@ -104,14 +104,20 @@ export const CLAUDE_AGENT_SDK_SETTINGS = {
 // skips a response whose last non-error tool results came from one, instead
 // of re-running the model to force a reply. The CLI also counts a transcript
 // ending in such a result as a finished turn, not an interrupted one, on
-// resume. Both behaviors are undocumented CLI internals checked against agent
-// SDK 0.3.293, so re-check them when bumping the SDK.
+// resume, so a tool's former names are listed too: a thread parked on a call
+// made before the rename still resumes as finished. Both behaviors are
+// undocumented CLI internals checked against agent SDK 0.3.293, so re-check
+// them when bumping the SDK.
 function endsTurnToolNames(tools: RomeTools): string[] {
   return ROME_TOOL_GROUPS.flatMap((group) =>
     tools
       .listTools(group)
       .filter((tool) => tool.endsTurn === true)
-      .map((tool) => anthropicToolName(group, tool)),
+      .flatMap((tool) =>
+        [tool.name, ...(tool.formerNames ?? [])].map((name) =>
+          anthropicToolName(group, { ...tool, name }),
+        ),
+      ),
   );
 }
 

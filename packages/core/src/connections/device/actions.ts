@@ -263,7 +263,10 @@ async function runOperation(
           : "Answer from what you have, such as synced personal data, and say how fresh it is."),
     };
   }
-  return { error: `${answer.code}: ${answer.message}` };
+  // Shipped phone apps name the connect card's tool by its name before
+  // `connect_service`, which no session serves any more.
+  const message = answer.message.replaceAll("connect_account", "connect_service");
+  return { error: `${answer.code}: ${message}` };
 }
 
 function target(connection: DeviceConnection) {

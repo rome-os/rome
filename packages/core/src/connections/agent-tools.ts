@@ -1,7 +1,7 @@
 // What agents do with connections: read what is connected and whether it
 // works, and disconnect one. The Connections page reads the same projection
 // (`GET /api/connections`) and disconnects through the same operation
-// (disconnect.ts). Connecting is `connect_account`'s card (connect-card.ts).
+// (disconnect.ts). Connecting is `connect_service`'s card (connect-card.ts).
 // Vocabulary: docs/domains/connections.md. How a tool is declared:
 // docs/concepts/actions.md#core-agent-tools.
 
@@ -42,7 +42,7 @@ const connectionId = z.string().describe("The connection's id, from read_connect
 export const readConnections = agentTool({
   name: "system:read_connections",
   description:
-    "See what is connected to Rome and whether each connection works, with the account each one reaches. Use it when the guardian asks what is connected, whether a service such as Slack or Google is connected, or why a connection is not working, and to find a connection's id before disconnecting it. To connect a kind listed under notConnected, call connect_account with that kind; for a kind connect_account does not take, the guardian connects it in Settings › Connections",
+    "See what is connected to Rome and whether each connection works, with the account each one reaches. Use it when the guardian asks what is connected, whether a service such as Slack or Google is connected, or why a connection is not working, and to find a connection's id before disconnecting it. To connect a kind listed under notConnected, call connect_service with that kind; for a kind connect_service does not take, the guardian connects it in Settings › Connections",
   sideEffects: "read-only",
   input: z.object({}),
   run: async (_input, { deps }) => {

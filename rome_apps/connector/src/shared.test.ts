@@ -290,7 +290,7 @@ describe("subscribeTriggerFeed", () => {
     if (result.ok) throw new Error("expected failure");
     expect(result.message).toContain("Settings → Connections");
     expect(result.message).toContain(
-      `connect_account tool with ${JSON.stringify({ kind: toolkit })}`,
+      `connect_service tool with ${JSON.stringify({ kind: toolkit })}`,
     );
   });
 
@@ -365,14 +365,14 @@ describe("subscribeTriggerFeed", () => {
 });
 
 describe("romeManagedConnectHint", () => {
-  it("sends Slack to Rome's Slack app, which has no connect_account kind", () => {
+  it("sends Slack to Rome's Slack app, which has no connect_service kind", () => {
     expect(romeManagedConnectHint("slack")).toBe(SLACK_APP_CONNECT_HINT);
     expect(romeManagedConnectHint("Slack")).toBe(SLACK_APP_CONNECT_HINT);
   });
 
-  it("sends the other Rome-managed toolkits to connect_account", () => {
+  it("sends the other Rome-managed toolkits to connect_service", () => {
     expect(romeManagedConnectHint("github")).toContain(
-      'connect_account tool with {"kind":"github"}',
+      'connect_service tool with {"kind":"github"}',
     );
   });
 });
