@@ -6,11 +6,14 @@ import { type AgentToolDeps, agentToolNames, registerAgentTools } from "./agent-
 const NAMES = [
   "system:read_connections",
   "system:disconnect_service",
+  "system:read_routines",
+  "system:change_routine",
   "system:list_routine_runs",
   "system:read_routine_run",
   "system:pause_routine",
   "system:resume_routine",
   "system:run_routine",
+  "system:stop_routine_run",
   "system:stop_routine",
 ];
 
