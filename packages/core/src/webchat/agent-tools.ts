@@ -105,7 +105,8 @@ export const startChat = agentTool({
       ...(input.folder ? { deviceFolder: input.folder } : {}),
       ...(input.model ? { largeModelSelection: input.model } : {}),
     });
-    if (started.status >= 400) return toolError(`${errorOf(started)}. Nothing was started.`);
+    if (started.status >= 400)
+      return toolError(`${errorOf(started)}. Nothing was started; tell the guardian why.`);
     const id = String(started.body.id);
     const text = input.firstMessage?.trim();
     if (text) {
@@ -169,7 +170,7 @@ export const changeChat = agentTool({
       if (answer.status === 404) return toolError(notFound(id));
       if (answer.status >= 400) {
         const done = last ? " The changes before it were made." : "";
-        return toolError(`${errorOf(answer)}.${done}`);
+        return toolError(`${errorOf(answer)}.${done} Tell the guardian why.`);
       }
       last = answer;
     }
@@ -199,7 +200,8 @@ export const deleteChat = agentTool({
     const name = await page.chatName(id);
     const deleted = await page.deleteChat(id);
     if (deleted.status === 404) return toolError(notFound(id));
-    if (deleted.status >= 400) return toolError(`${errorOf(deleted)}.`);
+    if (deleted.status >= 400)
+      return toolError(`${errorOf(deleted)}. Nothing was deleted; tell the guardian why.`);
     return { chatId: id, name, deleted: true };
   },
 });
