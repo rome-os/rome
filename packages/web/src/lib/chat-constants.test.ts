@@ -1,6 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
 import { canRunModel, modelFamily, runnableLargeModelOptions } from "./chat-constants";
-import { distinctModelOptions } from "./model-options";
 
 const signedIn = (anthropic: boolean, openai: boolean, rome_credits: boolean) => ({
   anthropic,
@@ -35,29 +34,5 @@ describe("runnable models", () => {
     expect(ids).toContain("claude-opus-5-5");
     expect(ids).toContain("gpt-6-luna");
     expect(ids).not.toContain("gpt-6-astra");
-  });
-});
-
-describe("exact model identities", () => {
-  const row = (id: string, model: string, providerId = "anthropic") => ({ id, model, providerId });
-
-  it("shows one row for the same provider and complete wire id", () => {
-    const canonical = row("claude-opus-5-5", "claude-opus-5-5[1m]");
-    const alias = row("claude-opus-alias", canonical.model);
-    expect(distinctModelOptions([canonical, alias], "auto")).toEqual([canonical]);
-    expect(distinctModelOptions([canonical, alias], alias.id)).toEqual([alias]);
-    expect(distinctModelOptions([alias, canonical], alias.id)).toEqual([alias]);
-  });
-
-  it("never conflates versions, context variants, unknown aliases, or providers", () => {
-    const options = [
-      row("legacy", "claude-opus-4-8[1m]"),
-      row("next", "claude-opus-5[1m]"),
-      row("latest", "claude-opus-5-5[1m]"),
-      row("short", "claude-opus-5-5"),
-      row("floating", "opus"),
-      row("other-provider", "claude-opus-5-5[1m]", "custom"),
-    ];
-    expect(distinctModelOptions(options, "auto")).toEqual(options);
   });
 });

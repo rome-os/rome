@@ -1,6 +1,6 @@
 import type { DefaultModelProvider } from "@rome/api-types/chat";
 import type { ReasoningEffort } from "./chat-types";
-import { distinctModelOptions, LARGE_MODEL_OPTIONS } from "./model-options";
+import { LARGE_MODEL_OPTIONS } from "./model-options";
 
 export { LARGE_MODEL_OPTIONS } from "./model-options";
 
@@ -57,7 +57,7 @@ export function runnableLargeModelOptions(
   signedIn: Record<DefaultModelProvider, boolean> | null | undefined,
   selected: string,
 ): ReadonlyArray<(typeof LARGE_MODEL_OPTIONS)[number]> {
-  return distinctModelOptions(LARGE_MODEL_OPTIONS, selected).filter(
+  return LARGE_MODEL_OPTIONS.filter(
     (option) => option.id === selected || canRunModel(option.id, signedIn),
   );
 }
