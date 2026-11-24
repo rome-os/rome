@@ -348,7 +348,9 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UICollectionView {
-        context.coordinator.makeView()
+        let view = context.coordinator.makeView()
+        if thread == nil { _ = position?.claimMain(view, take: true) }
+        return view
     }
 
     /// A chat closed mid-fold still turns UIKit's animations back on and
@@ -378,15 +380,19 @@ private struct ChatCollection<Row: View>: UIViewRepresentable {
         coordinator.focusHitAreas = context.environment.threadFocusHitAreas
         coordinator.onNearBottom = thread.map { thread in { Task { await thread.load(.after) } } }
         coordinator.focusPosition = position
+        // A copy of this chat on its way out keeps its rows but stops
+        // laying out the shared ones.
+        let ownsShared = thread != nil || position?.claimMain(view) == true
         if thread == nil {
-            position?.main = view
-            position?.pause = { [weak coordinator] in coordinator?.pauseForFocus() }
-            position?.frame = { [weak coordinator] id in coordinator?.windowFrame(id) }
-            position?.mainGeometry = { [weak coordinator] id in coordinator?.contentWindowFrame(id) }
+            if ownsShared {
+                position?.pause = { [weak coordinator] in coordinator?.pauseForFocus() }
+                position?.frame = { [weak coordinator] id in coordinator?.windowFrame(id) }
+                position?.mainGeometry = { [weak coordinator] id in coordinator?.contentWindowFrame(id) }
+            }
         } else {
             position?.focusedGeometry = { [weak coordinator] id in coordinator?.contentWindowFrame(id) }
         }
-        if sharedContent { position?.registerInput(view, gestures: coordinator.contentGestures) }
+        if sharedContent, ownsShared { position?.registerInput(view, gestures: coordinator.contentGestures) }
         scroll.target = coordinator
         PerfProbe.count("listUpdate")
         coordinator.cells.environment = context.environment

@@ -282,6 +282,17 @@ final class TranscriptFocusPosition {
         surface.prune()
     }
 
+    /// Whether `list` is the main transcript, taking the place when it is
+    /// free. A chat's screen can be on screen twice for a moment, the old one
+    /// fading out as a new one fades in. The newest takes the place when it
+    /// is made (`take`) and the old one never takes it back: each one's
+    /// update would otherwise hand the shared rows to its own cells, which
+    /// updates the other, and the two update each other forever.
+    func claimMain(_ list: UICollectionView, take: Bool = false) -> Bool {
+        if take || main == nil { main = list }
+        return main === list
+    }
+
     func registerInput(_ view: UICollectionView, gestures: [UIGestureRecognizer]) {
         if view === main { mainInput = gestures }
         else { focusInputList = view; focusInput = gestures }
@@ -312,7 +323,13 @@ final class TranscriptFocusPosition {
         animator.finishAnimation(at: .end)
     }
 
-    func removeSurface() {
+    /// A surface leaving: only the current one takes the shared rows with it.
+    /// An old screen's surface goes after the new screen has made its own.
+    func removeSurface(_ leaving: TranscriptLiveSurface) {
+        guard leaving === surface else {
+            leaving.clear()
+            return
+        }
         interrupt()
         travelling.removeAll()
         restoreInput(mainInput, to: main)
@@ -532,7 +549,10 @@ private struct ThreadTransitionSurface: UIViewRepresentable {
         return view
     }
     func updateUIView(_ view: UIView, context: Context) { position.layout() }
-    static func dismantleUIView(_ view: UIView, coordinator: ()) { (view as? TranscriptLiveSurface)?.position?.removeSurface() }
+    static func dismantleUIView(_ view: UIView, coordinator: ()) {
+        guard let surface = view as? TranscriptLiveSurface else { return }
+        surface.position?.removeSurface(surface)
+    }
 }
 
 private struct ThreadFocusModifier: ViewModifier {

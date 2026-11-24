@@ -128,6 +128,10 @@ enum SnapshotRunner {
         Set((ProcessInfo.processInfo.environment["ROME_SNAPSHOT_ONLY"] ?? "").split(separator: ",").map(String.init))
     }
 
+    /// The step a pass started again after, past a step that hung; the
+    /// steps up to it are skipped.
+    private static var resumeAfter = ProcessInfo.processInfo.environment[SnapshotWatchdog.resumeKey]
+
     static func run(model: AppModel) async {
         guard let directory else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -136,6 +140,9 @@ enum SnapshotRunner {
             await runLive(model: model, directory: directory)
             return
         }
+        let hung = directory.appending(path: SnapshotWatchdog.hungFile)
+        if resumeAfter == nil { try? FileManager.default.removeItem(at: hung) }
+        SnapshotWatchdog.shared.start(directory: directory)
 
         // Settings shows "Not set"; the Chat offer waits for its own screen.
         model.push.debugSet(permission: .notSet, dismissedAt: .now)
@@ -832,6 +839,11 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(0.6))
         }
         FileManager.default.createFile(atPath: directory.appending(path: "DONE").path, contents: Data())
+        // A pass that went on past a hung step says so, and fails.
+        if let steps = try? String(contentsOf: hung, encoding: .utf8) {
+            FileHandle.standardError.write(Data("Snapshot steps that hung:\n\(steps)".utf8))
+            exit(1)
+        }
         exit(0)
     }
 
@@ -904,6 +916,12 @@ enum SnapshotRunner {
         wait: Double = 1.2,
         _ setUp: () -> Void
     ) async {
+        let step = "\(name)-\(style)"
+        SnapshotWatchdog.shared.reached(step)
+        if let after = resumeAfter {
+            if step == after { resumeAfter = nil }
+            return
+        }
         guard only.isEmpty || only.contains(name) else { return }
         setUp()
         try? await Task.sleep(for: .seconds(wait))
@@ -924,6 +942,84 @@ enum SnapshotRunner {
             }
         }
         try? image.pngData()?.write(to: directory.appending(path: "\(name)-\(style).png"))
+    }
+}
+
+/// Watches a snapshot pass from off the main thread. A step can hang the
+/// main thread itself, as a SwiftUI update that never settles does, and then
+/// no await on the main actor ever resumes, so no timeout there can fire.
+/// When no step starts for `limit`, the watchdog names the last one in
+/// `HUNG` and on stderr, and starts a fresh copy of the app that goes on
+/// after it. This one freezes its stuck main thread and waits for the copy,
+/// so the command still ends when the pass does, and fails. A hang with no
+/// step to go on after (before the first one, or again before any step past
+/// the one a copy resumed after) ends the pass there instead.
+final class SnapshotWatchdog: @unchecked Sendable {
+    static let shared = SnapshotWatchdog()
+    static let resumeKey = "ROME_SNAPSHOT_RESUME_AFTER"
+    static let hungFile = "HUNG"
+    /// Well above the longest step, a capture's wait and the pause after it.
+    static let limit: TimeInterval = 60
+
+    private let lock = NSLock()
+    /// Before the first step there is nothing to resume after.
+    private static let beforeFirstStep = "start"
+    private var step = beforeFirstStep
+    private var since = Date.now
+    private var timer: DispatchSourceTimer?
+    private var mainThread: thread_act_t = 0
+
+    /// Called on the main thread, the one a hang freezes.
+    func start(directory: URL) {
+        let main = pthread_mach_thread_np(pthread_self())
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now() + 5, repeating: 5)
+        timer.setEventHandler { [self] in check(directory) }
+        lock.withLock { self.timer = timer; mainThread = main; since = .now }
+        timer.resume()
+    }
+
+    /// A step started, whether or not it is captured.
+    func reached(_ step: String) {
+        lock.withLock {
+            self.step = step
+            since = .now
+        }
+    }
+
+    private func check(_ directory: URL) {
+        let stuck: String? = lock.withLock {
+            guard Date.now.timeIntervalSince(since) > Self.limit else { return nil }
+            timer?.cancel()
+            return step
+        }
+        guard let stuck else { return }
+        // Code between steps runs again in a copy, so a hang there comes
+        // back before any new step: going on would start copies forever.
+        let resumable = stuck != Self.beforeFirstStep && stuck != ProcessInfo.processInfo.environment[Self.resumeKey]
+        let line = "\(stuck) did not finish in \(Int(Self.limit)) s; \(resumable ? "starting again after it" : "stopping the pass")\n"
+        FileHandle.standardError.write(Data(line.utf8))
+        let hung = directory.appending(path: Self.hungFile)
+        if let file = try? FileHandle(forWritingTo: hung) {
+            file.seekToEndOfFile()
+            file.write(Data("\(stuck)\n".utf8))
+            try? file.close()
+        } else {
+            FileManager.default.createFile(atPath: hung.path, contents: Data("\(stuck)\n".utf8))
+        }
+        guard resumable else { _exit(1) }
+        // The same binary, arguments and environment, past the step that
+        // hung. Replacing this process in place (exec) brings the app back
+        // with no window on Mac Catalyst, so the copy is a new process.
+        setenv(Self.resumeKey, stuck, 1)
+        var child: pid_t = 0
+        guard let path = Bundle.main.executablePath,
+              posix_spawn(&child, path, nil, nil, CommandLine.unsafeArgv, environ) == 0
+        else { _exit(1) }
+        thread_suspend(lock.withLock { mainThread })
+        var status: Int32 = 0
+        while waitpid(child, &status, 0) == -1, errno == EINTR {}
+        _exit((status & 0x7f) == 0 ? (status >> 8) & 0xff : 1)
     }
 }
 #endif
