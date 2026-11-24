@@ -204,7 +204,6 @@
     "POST /api/system/upgrade",
     "POST /api/vault/grants",
     "POST /api/vault/pin",
-    "POST /api/vault/reset",
     "PUT /api/ai-tools/anthropic-compatible-credentials",
     "PUT /api/ai-tools/default",
     "PUT /api/app-connection-access/:appId/:connectionId/:identity/:operation",
