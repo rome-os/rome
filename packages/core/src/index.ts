@@ -1916,6 +1916,12 @@ async function main() {
       routineRuns: routineRunsRepo,
       actionExecutions: actionExecutionsRepo,
     },
+    // The service the Devices page calls, and what each device reported.
+    devices: {
+      devices: nodeDevices,
+      connections: deviceConnectionsRepo,
+      run: (deviceId, action, args) => nodeDevices.runAction(deviceId, action, args),
+    },
     // The projection `GET /connections` serves, and the Connections page's disconnect.
     connections: {
       connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),

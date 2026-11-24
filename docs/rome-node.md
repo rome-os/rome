@@ -678,8 +678,8 @@ phone as a whole. A capability's actions follow its own Live access, and fail wi
 `live_off` while it is off. The phone reports its connections to the Rome open on
 it, as below, so Rome lists them. Each operation in the report carries its
 `usage` as `description`, and an `input` schema and `examples` where the phone
-declares them, so an agent finds and runs them with `core:device_describe` and
-`core:device_run`, with no shell.
+declares them, so an agent finds and runs them with `system:read_devices` and
+`system:run_on_device`, with no shell.
 Signed in with a Live access on, the phone is a device. It is online only while the app is in front: iOS suspends a background app's sockets, and Health's data is
 unreadable while the phone is locked. When the app leaves the front, requests
 under way finish their replies, then the connection closes. Signing out
