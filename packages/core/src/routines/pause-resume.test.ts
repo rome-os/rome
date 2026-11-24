@@ -6,23 +6,17 @@ import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/db.js";
-import {
-  type RoutineOperations,
-  type RoutineTurn,
-  routineControlService,
-  routineOperations,
-} from "./control.js";
+import { actionOf, callTool, GUARDIAN_TURN } from "../apps/actions/agent-tool-contract.js";
+import type { ToolTurn } from "../apps/actions/agent-tool.js";
+import { pauseRoutine, resumeRoutine, type RoutineToolDeps } from "./agent-tools.js";
 import { RoutineEngine } from "./engine.js";
 import type { Trigger } from "./types.js";
 
-const guardianAsked: RoutineTurn = {
-  actor: { kind: "guardian", userId: "guardian", via: "cookie" },
-  audience: "private",
-};
+const guardianAsked = GUARDIAN_TURN;
 
 let testDb: TestDb;
 let routines: RoutinesRepository;
-let ops: RoutineOperations;
+let deps: RoutineToolDeps;
 const routineEngine = { activate: rs.fn(async () => {}), deactivate: rs.fn(async () => {}) };
 
 beforeEach(() => {
@@ -31,13 +25,12 @@ beforeEach(() => {
   routines = new RoutinesRepository(testDb.db, async () => "private");
   routineEngine.activate.mockClear();
   routineEngine.deactivate.mockClear();
-  ops = routineOperations({
+  deps = {
     routines,
-    engine: routineEngine as unknown as Parameters<typeof routineOperations>[0]["engine"],
+    engine: routineEngine as unknown as RoutineToolDeps["engine"],
     routineRuns: new RoutineRunsRepository(testDb.db),
     actionExecutions: new ActionExecutionsRepository(testDb.db),
-    ownerOfChat: async () => "guardian",
-  });
+  };
 });
 
 afterEach(() => testDb.close());
@@ -53,10 +46,10 @@ const daily: Trigger = {
 const createRoutine = (enabled: boolean, trigger: Trigger = daily) =>
   routines.create({ name: "Water reminder", trigger, actionName: "summon", args: {}, enabled });
 
-const pause = (routineId: string, turn: RoutineTurn = guardianAsked) =>
-  ops.pause({ routineId }, turn);
-const resume = (routineId: string, turn: RoutineTurn = guardianAsked) =>
-  ops.resume({ routineId }, turn);
+const pause = (routineId: string, turn: ToolTurn = guardianAsked) =>
+  callTool(pauseRoutine, deps, { routineId }, turn);
+const resume = (routineId: string, turn: ToolTurn = guardianAsked) =>
+  callTool(resumeRoutine, deps, { routineId }, turn);
 
 describe("pausing and resuming a routine", () => {
   it("pauses a routine and stops its trigger", async () => {
@@ -102,8 +95,8 @@ describe("pausing and resuming a routine", () => {
     });
   });
 
-  it("names the field to pass when the id comes under another name", async () => {
-    expect(await ops.pause({ id: "a-routine" }, guardianAsked)).toEqual({
+  it("asks for the routine's id when none is given", async () => {
+    expect(await callTool(pauseRoutine, deps, { routineId: "" })).toEqual({
       status: "error",
       error: "Pass the routine's id as routineId. Find it with system:search_routine.",
     });
@@ -114,7 +107,7 @@ describe("who may pause or resume a routine", () => {
   it("refuses a turn the guardian's own message did not start, such as a routine's", async () => {
     const id = await createRoutine(true);
     const result = await pause(id, { audience: "private" });
-    expect((result as { error: string }).error).toMatch(/^routine_needs_guardian:/);
+    expect((result as { error: string }).error).toMatch(/^needs_guardian:/);
     expect((await routines.findById(id))?.enabled).toBe(true);
   });
 
@@ -125,7 +118,7 @@ describe("who may pause or resume a routine", () => {
       run: (_name: string, args: Record<string, unknown>, context: ActionRunContext) =>
         actionExecutionContext.run(
           { ...context, executionId: "fire", rootExecutionId: "fire", initiator: "routine" },
-          () => routineControlService(ops).call("pause", args),
+          () => actionOf(pauseRoutine, deps).execute(args),
         ),
     } as unknown as ActionEngine;
     const target = await createRoutine(true);
@@ -155,13 +148,13 @@ describe("who may pause or resume a routine", () => {
 
     const run = await fires.runNow(firing);
 
-    expect(run.error).toMatch(/routine_needs_guardian:/);
+    expect(run.error).toMatch(/needs_guardian:/);
     expect((await routines.findById(target))?.enabled).toBe(true);
   });
 
   it("refuses a visitor", async () => {
     const id = await createRoutine(true);
-    const visitor: RoutineTurn = {
+    const visitor: ToolTurn = {
       actor: { kind: "visitor", accountId: "v", email: "v@example.test" },
       audience: "private",
     };
@@ -171,7 +164,7 @@ describe("who may pause or resume a routine", () => {
   it("refuses a chat that is not private with the guardian", async () => {
     const id = await createRoutine(true);
     const result = await pause(id, { ...guardianAsked, audience: "shared" });
-    expect((result as { error: string }).error).toMatch(/^routine_private_only:/);
+    expect((result as { error: string }).error).toMatch(/^private_only:/);
     expect((await routines.findById(id))?.enabled).toBe(true);
   });
 });

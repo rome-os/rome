@@ -4,37 +4,42 @@ import { ActionExecutionsRepository } from "../apps/repositories/action-executio
 import { routineRuns as routineRunsTable } from "../db/schema.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
+import { callTool, whoMayAskSuite } from "../apps/actions/agent-tool-contract.js";
 import { createTestDb, type TestDb } from "../test/db.js";
-import { type RoutineOperations, type RoutineTurn, routineOperations } from "./control.js";
+import {
+  listRoutineRunsTool,
+  pauseRoutine,
+  readRoutineRunTool,
+  resumeRoutine,
+  type RoutineToolDeps,
+  runRoutine,
+  stopRoutine,
+} from "./agent-tools.js";
 
-const guardian: RoutineTurn = { actor: { kind: "guardian", userId: "guardian", via: "cookie" } };
-const visitor: RoutineTurn = {
-  actor: { kind: "visitor", accountId: "visitor", email: "visitor@example.test" },
-};
+whoMayAskSuite(listRoutineRunsTool, { routineId: "r-1" });
+whoMayAskSuite(readRoutineRunTool, { routineId: "r-1", runId: "run-1" });
+whoMayAskSuite(pauseRoutine, { routineId: "r-1" });
+whoMayAskSuite(resumeRoutine, { routineId: "r-1" });
+whoMayAskSuite(runRoutine, { routineId: "r-1" });
+whoMayAskSuite(stopRoutine, { routineId: "r-1" });
 
 let testDb: TestDb;
 let routines: RoutinesRepository;
 let routineRuns: RoutineRunsRepository;
 let actionExecutions: ActionExecutionsRepository;
-let ops: RoutineOperations;
+let deps: RoutineToolDeps;
 
 beforeEach(async () => {
   testDb = createTestDb();
   routines = new RoutinesRepository(testDb.db);
   routineRuns = new RoutineRunsRepository(testDb.db);
   actionExecutions = new ActionExecutionsRepository(testDb.db);
-  ops = routineOperations({
+  deps = {
     routines,
-    engine: {} as Parameters<typeof routineOperations>[0]["engine"],
+    engine: {} as RoutineToolDeps["engine"],
     routineRuns,
     actionExecutions,
-    ownerOfChat: async (chatId) =>
-      chatId === "visitor-chat"
-        ? "visitor:visitor"
-        : chatId === "guardian-chat"
-          ? "guardian"
-          : null,
-  });
+  };
 });
 
 afterEach(() => testDb.close());
@@ -48,10 +53,8 @@ const createRoutine = () =>
     enabled: true,
   });
 
-const list = (args: Record<string, unknown>, turn: RoutineTurn = guardian) =>
-  ops.listRuns(args, turn);
-const read = (args: Record<string, unknown>, turn: RoutineTurn = guardian) =>
-  ops.readRun(args, turn);
+const list = (args: Record<string, unknown>) => callTool(listRoutineRunsTool, deps, args);
+const read = (args: Record<string, unknown>) => callTool(readRoutineRunTool, deps, args);
 
 describe("listing a routine's runs", () => {
   it("returns the routine's state and its runs newest first, with each run's error", async () => {
@@ -111,7 +114,11 @@ describe("listing a routine's runs", () => {
   });
 
   it("names the field to pass when the id comes under another name", async () => {
-    expect(await list({ id: "a-routine" })).toEqual({
+    expect(await list({ id: "a-routine" })).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/routineId/),
+    });
+    expect(await list({ routineId: " " })).toEqual({
       status: "error",
       error: "Pass the routine's id as routineId. Find it with system:search_routine.",
     });
@@ -180,29 +187,5 @@ describe("reading one run", () => {
     });
 
     expect((await read({ routineId, runId })).status).toBe("error");
-  });
-});
-
-describe("who may read a routine's runs", () => {
-  it("refuses a visitor, and a turn no one started in a chat a visitor owns or that is gone", async () => {
-    const routineId = await createRoutine();
-    expect((await list({ routineId }, visitor)).status).toBe("error");
-    const visitorChat = { channel: "webchat", threadId: "visitor-chat" };
-    expect((await list({ routineId }, { channelContext: visitorChat })).status).toBe("error");
-    const goneChat = { channel: "webchat", threadId: "gone-chat" };
-    expect((await read({ routineId, runId: "x" }, { channelContext: goneChat })).status).toBe(
-      "error",
-    );
-  });
-
-  it("refuses a turn with neither an actor nor a chat", async () => {
-    const routineId = await createRoutine();
-    expect((await list({ routineId }, {})).status).toBe("error");
-  });
-
-  it("reads for a turn no one started in the guardian's chat", async () => {
-    const routineId = await createRoutine();
-    const guardianChat = { channel: "webchat", threadId: "guardian-chat" };
-    expect((await list({ routineId }, { channelContext: guardianChat })).status).toBe("ok");
   });
 });

@@ -255,7 +255,7 @@ import { registerAgentNameAction } from "./people/guardian-profile/index.js";
 import { personHistory } from "./people/person-history/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
 import { registerReadPersonAction } from "./people/actions/read-person.js";
-import { routineControlService, routineOperations } from "./routines/control.js";
+import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";
 import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
@@ -1060,6 +1060,7 @@ async function main() {
       // Coordination roots run in main only when the lockfile marks their app
       // first-party; the action's own manifest is never trusted for this.
       isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
+      mainActions: agentToolNames,
       placeAudience: chatAudience,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
       onApprovalCreated: (approval) => sendApprovalCard(approvalCardChannels, approval),
@@ -1920,14 +1921,13 @@ async function main() {
     people: peopleRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
-  // What the system app's routine actions do beyond create, search and
-  // delete: in this process directly, from a worker over `routines.control`.
-  const routineOps = routineOperations({
-    routines: routinesRepo,
-    engine: routineEngine,
-    routineRuns: routineRunsRepo,
-    actionExecutions: actionExecutionsRepo,
-    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+  registerAgentTools(actionRegistry, (chatId) => concierge.ownerOfChat(chatId), {
+    routines: {
+      routines: routinesRepo,
+      engine: routineEngine,
+      routineRuns: routineRunsRepo,
+      actionExecutions: actionExecutionsRepo,
+    },
   });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
@@ -2065,7 +2065,6 @@ async function main() {
     wakeGateFor,
     routinesRepo,
     routineEngine,
-    routineControl: routineControlService(routineOps),
     // Real coordinators in the main process; workers inject the matching proxies
     // (see worker-runtime.ts) so the event/app-lifecycle actions are
     // process-agnostic — they never branch on where they run.
@@ -2720,7 +2719,6 @@ async function main() {
         routinesRepo,
         routineEngine,
         routineCreation,
-        routineOperations: routineOps,
       }),
       ...mailWorkerCalls(actionRegistry),
       ...connectionWorkerCalls({
