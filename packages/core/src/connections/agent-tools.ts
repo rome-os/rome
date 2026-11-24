@@ -78,8 +78,10 @@ export const connectService = agentTool({
   // Shipped phone apps still tell the agent to call `connect_account`.
   olderNames: ["connect_account"],
   description:
-    "Ask the guardian to connect an account Rome connects itself, such as GitHub or Google, or to turn on a capability one of their devices reported, such as Apple Health on an iPhone, through a card in the chat they press to finish. Use it when a task needs one of these and it is not connected, when the guardian asks to connect one, or when a call or a device says not_connected or live_off. It answers at once that a device kind already works, with no card. Whether the guardian connected it or dismissed the card comes back as the next turn. A kind it does not take, such as Slack or Telegram, the guardian connects in Settings › Connections. A device kind turns on one capability, in the Rome app of a device that already reported it: it never adds, pairs or wakes a device, so for an offline device ask the guardian to bring it online instead. Only in the guardian's private chat, in a turn their own message started. Check what is connected with system:read_connections",
-  sideEffects: "write",
+    "Ask the guardian to connect an account Rome connects itself, such as GitHub or Google, or to turn on a capability one of their devices reported, such as Apple Health on an iPhone, through a card in the chat they press to finish. Use it when a task needs one of these and it is not connected, when the guardian asks to connect one, or when a call or a device says not_connected or live_off. It answers at once that a device kind already works, with no card. Whether the guardian connected it or dismissed the card comes back as the next turn. A kind it does not take, such as Slack or Telegram, the guardian connects in Settings › Connections. A device kind turns on one capability, in the Rome app of a device that already reported it: it never adds, pairs or wakes a device, so for an offline device ask the guardian to bring it online instead. Where the chat shows no card, it answers with what to ask the guardian instead. Check what is connected with system:read_connections",
+  // Showing the card changes nothing: the guardian finishes the sign-in
+  // themselves. So any turn that works for the guardian may show it.
+  sideEffects: "read-only",
   input: z.object({
     kind: z
       .string()
@@ -87,7 +89,8 @@ export const connectService = agentTool({
         'The kind to connect: one Rome connects itself, such as "github" or "google", or a device kind such as "apple_health". A kind it does not take is answered with the kinds it does.',
       ),
   }),
-  // Where the chat draws no card, the agent asks the guardian in a message.
+  // Where the chat draws no card, the session hands the agent the card's
+  // `ask` to say instead (`actionToolOutput`), such as connecting in Settings.
   run: async (input, { deps, turn }) => {
     const askingDeviceId = askingDeviceOf(turn.channelContext);
     const request = await connectCardRequest(input, {

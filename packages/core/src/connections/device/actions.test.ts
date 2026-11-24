@@ -305,7 +305,7 @@ describe("device actions", () => {
     expect(result).toEqual({
       status: "error",
       error:
-        'live_off: Live access to Device on iPhone is off. Offer to turn it on: in the guardian\'s own private chat, show the card with system:connect_service and kind "device", otherwise ask the guardian to turn on Live access in the Rome app on their device.',
+        'live_off: Live access to Device on iPhone is off. Offer to turn it on: show the card with system:connect_service and kind "device", or, where it cannot run, ask the guardian to turn on Live access in the Rome app on their device.',
     });
     expect(calls).toEqual([]);
   });

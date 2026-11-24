@@ -24,17 +24,17 @@ export function connectStep(target: ConnectStepTarget, before?: string): string 
   if (target.state === "not_connected") {
     const there = target.device ? "the device they are asking from" : "their device";
     return target.kind
-      ? `${then("offer")} to connect it: in the guardian's own private chat, show the card ` +
-          `with system:connect_service and kind "${target.kind}", otherwise ask the guardian to ` +
-          `connect it in the Rome app on ${there}.`
+      ? `${then("offer")} to connect it: show the card with system:connect_service and kind ` +
+          `"${target.kind}", or, where it cannot run, ask the guardian to connect it in the ` +
+          `Rome app on ${there}.`
       : `${then("ask")} the guardian to connect it in the Rome app on ${there}.`;
   }
   const on = target.device.name ? `${target.title} on ${target.device.name}` : target.title;
   if (target.state === "off") {
     return (
-      `Live access to ${on} is off. ${then("offer")} to turn it on: in the guardian's own ` +
-      `private chat, show the card with system:connect_service and kind "${target.kind}", ` +
-      "otherwise ask the guardian to turn on Live access in the Rome app on their device."
+      `Live access to ${on} is off. ${then("offer")} to turn it on: show the card with ` +
+      `system:connect_service and kind "${target.kind}", or, where it cannot run, ask the ` +
+      "guardian to turn on Live access in the Rome app on their device."
     );
   }
   if (target.state === "broken") {

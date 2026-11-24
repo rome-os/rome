@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import {
+  actionOf,
   approvalOf,
   callTool,
   GUARDIAN_TURN,
   whoMayAskSuite,
 } from "../apps/actions/agent-tool-contract.js";
+import type { ToolTurn } from "../apps/actions/agent-tool.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
+import { executeActionTool, testRomeTools } from "../test/tool-calls.js";
 import {
   type ConnectionToolDeps,
   connectService,
@@ -242,5 +246,134 @@ describe("asking the guardian to connect a service", () => {
     const result = await ops.connect({ kind: "slack" });
 
     expect(result.status === "error" && result.error).toContain("Settings › Connections");
+  });
+});
+
+describe("where the connect card shows", () => {
+  beforeEach(() => {
+    rs.stubEnv("PANTHEON_BASE_ORIGIN", "https://cloud.example");
+  });
+  afterEach(() => {
+    rs.unstubAllEnvs();
+  });
+
+  const loopback = { kind: "guardian", userId: "guardian", via: "loopback" } as const;
+  const visitor = { kind: "visitor", accountId: "visitor", email: "v@example.test" } as const;
+  const SETTINGS = "Connect GitHub to Rome, from Settings › Connections.";
+
+  // What the agent reads when it calls the tool through `execute_action` in
+  // `turn`, in a session whose cards show or not: a place that draws cards,
+  // with a speaker to carry them, shows them.
+  async function asAgent(turn: ToolTurn, cardsShow: boolean) {
+    const action = actionOf(connectService, {
+      connections: async () => [],
+      registry: {} as ConnectionToolDeps["registry"],
+    });
+    const tools = testRomeTools({
+      widgetsShow: cardsShow,
+      actions: {
+        list: () => [],
+        permits: () => true,
+        appOf: () => undefined,
+        find: () => undefined,
+        run: async (_turn, _name, input) =>
+          actionExecutionContext.run(
+            { executionId: "exec", rootExecutionId: "exec", initiator: "test", ...turn },
+            () => action.execute(input as Record<string, unknown>),
+          ),
+      },
+    });
+    return executeActionTool(tools, "system:connect_service", { kind: "github" });
+  }
+
+  const shown = { pendingInteraction: true, render: { componentId: "connect-card" } };
+  const settings = { message: expect.stringContaining(SETTINGS) };
+
+  for (const c of [
+    {
+      name: "the guardian's own message in their private chat",
+      turn: GUARDIAN_TURN,
+      cardsShow: true,
+      reads: shown,
+    },
+    {
+      name: "the guardian in a shared chat",
+      turn: { ...GUARDIAN_TURN, audience: "shared" as const },
+      cardsShow: true,
+      reads: shown,
+    },
+    {
+      name: "a routine's turn in the guardian's chat",
+      turn: { audience: "private" as const, channelContext: GUARDIAN_TURN.channelContext },
+      cardsShow: true,
+      reads: shown,
+    },
+    {
+      name: "a routine's turn in no chat, acting for the guardian",
+      turn: { actor: loopback },
+      cardsShow: false,
+      reads: settings,
+    },
+    {
+      name: "a direct message on Telegram",
+      turn: { channelContext: { channel: "telegram", threadId: "dm-1" } },
+      cardsShow: false,
+      reads: settings,
+    },
+    {
+      name: "a direct message on Slack",
+      turn: { channelContext: { channel: "slack", threadId: "D1" } },
+      cardsShow: false,
+      reads: settings,
+    },
+    {
+      // A fork's turn has its source's actor and chat, and no speaker.
+      name: "a forked turn of the guardian's chat",
+      turn: GUARDIAN_TURN,
+      cardsShow: false,
+      reads: settings,
+    },
+  ]) {
+    it(`gives ${c.reads === shown ? "the card" : "the Settings sentence"} to ${c.name}`, async () => {
+      expect(await asAgent(c.turn, c.cardsShow)).toMatchObject(c.reads);
+    });
+  }
+
+  it("refuses a visitor, in a chat that would draw the card", async () => {
+    const result = await asAgent(
+      { actor: visitor, audience: "private", channelContext: GUARDIAN_TURN.channelContext },
+      true,
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/^guardian_only/),
+    });
+  });
+
+  it("refuses a turn in a visitor's task chat", async () => {
+    const result = await asAgent(
+      { channelContext: { channel: "webchat", threadId: "visitor-chat" } },
+      true,
+    );
+
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringMatching(/^guardian_only/),
+    });
+  });
+
+  it("hands the guardian's loopback call the card as data, which no chat draws", async () => {
+    const result = await callTool(
+      connectService,
+      { connections: async () => [], registry: {} as ConnectionToolDeps["registry"] },
+      { kind: "github" },
+      { actor: loopback },
+    );
+
+    expect(result).toMatchObject({
+      status: "pending_interaction",
+      interaction: { promptText: SETTINGS },
+    });
   });
 });
