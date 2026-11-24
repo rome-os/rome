@@ -2568,7 +2568,6 @@ class AgentSessionImpl implements AgentSession {
   private hadComputerUseGrant = false;
   /** Steered inputs the provider retained across a turn boundary and has not yet adopted/consumed. */
   private readonly retainedProviderInputs = new Set<string>();
-  private retainedInputsWaiters: Array<() => void> = [];
   private selectionId?: ModelSelectionId;
   /** A model the next turn runs instead, once: an overload swap. */
   private oneTurnSelection?: ModelSelectionId;
@@ -2936,7 +2935,7 @@ class AgentSessionImpl implements AgentSession {
         resumeThreadId,
       );
       this.modelSession = next;
-      this.clearRetainedProviderInputs();
+      this.retainedProviderInputs.clear();
       this.modelSessionAvailable = true;
       if (resumeThreadId === undefined) {
         // Another provider: the new thread has seen nothing of this chat.
@@ -2991,9 +2990,18 @@ class AgentSessionImpl implements AgentSession {
           if (msg.state === "queued") {
             this.retainedProviderInputs.add(msg.inputId);
           } else if (msg.state === "consumed") {
-            this.deleteRetainedProviderInput(msg.inputId);
-            if (sink.computerUseGrant && msg.inputId !== sink.expectedInputId) {
-              sink.computerUseGrant = undefined;
+            this.retainedProviderInputs.delete(msg.inputId);
+            if (sink.computerUseGrant) {
+              if (
+                msg.inputId === sink.expectedInputId &&
+                !sink.lifecycleInterrupted &&
+                Date.now() < sink.computerUseGrant.expiresAt
+              ) {
+                sink.providerInputStarted = true;
+              } else {
+                sink.computerUseGrant = undefined;
+                sink.providerInputStarted = false;
+              }
             }
           }
           await this.inputs.observe(msg, sink.turnId);
@@ -3445,6 +3453,7 @@ class AgentSessionImpl implements AgentSession {
 
   private finalizeTurn(sink: TurnSink, terminal: TurnResultEvent | TurnErrorEvent): void {
     sink.computerUseGrant = undefined;
+    sink.providerInputStarted = false;
     if (sink.hadComputerUseGrant) {
       void this.deps.computerUse?.cancelTurn?.(this.sessionId, sink.turnId).catch(() => undefined);
     }
@@ -3687,40 +3696,6 @@ class AgentSessionImpl implements AgentSession {
       turnStatus({ terminal: sink.saidTerminal, stoppedByRome: false }) === "completed" ||
         sink.stoppedByGuardian,
     );
-    if (!this.inputs.busy) this.notifyRetainedInputsChanged();
-  }
-
-  private clearRetainedProviderInputs(): void {
-    if (this.retainedProviderInputs.size === 0) return;
-    this.retainedProviderInputs.clear();
-    this.notifyRetainedInputsChanged();
-  }
-
-  private deleteRetainedProviderInput(inputId: string): void {
-    if (!this.retainedProviderInputs.delete(inputId)) return;
-    if (this.retainedProviderInputs.size === 0) this.notifyRetainedInputsChanged();
-  }
-
-  private notifyRetainedInputsChanged(): void {
-    const waiters = this.retainedInputsWaiters;
-    this.retainedInputsWaiters = [];
-    for (const resolve of waiters) resolve();
-  }
-
-  private waitForRetainedInputsDrain(expiresAt: number): Promise<void> {
-    if (this.retainedProviderInputs.size === 0 || !this.inputs.busy) return Promise.resolve();
-    return new Promise((resolve) => {
-      const remainingMs = Math.max(0, expiresAt - Date.now());
-      const onDone = () => {
-        clearTimeout(timer);
-        const idx = this.retainedInputsWaiters.indexOf(onDone);
-        if (idx !== -1) this.retainedInputsWaiters.splice(idx, 1);
-        resolve();
-      };
-      const timer = setTimeout(onDone, remainingMs);
-      timer.unref?.();
-      this.retainedInputsWaiters.push(onDone);
-    });
   }
 
   private clearSubagentLinks(sink: TurnSink): void {
@@ -4219,6 +4194,9 @@ class AgentSessionImpl implements AgentSession {
         grant.expiresAt <= Date.now())
     )
       throw new Error("Computer use requires an unexpired grant for a private guardian turn.");
+    if (grant && (!input.inputId || input.inputId.trim().length === 0)) {
+      throw new Error("A computer-use grant requires an inputId.");
+    }
     this.observeTaskInputScope(options);
     // turnId is allocated here, at the bottom of the agent
     // stack, and threaded back to every consumer (route, tracing, IPC stream
@@ -4325,61 +4303,34 @@ class AgentSessionImpl implements AgentSession {
     // here — the fire-and-forget promise is intentionally discarded.
     const mutexPriority =
       input.inputId && this.retainedProviderInputs.has(input.inputId) ? 2 : input.inputId ? 1 : 0;
-    const runExclusiveTurn = (): Promise<void> =>
-      this.turnMutex
-        .runExclusive(async () => {
-          if (
-            sink.computerUseGrant &&
-            this.retainedProviderInputs.size > 0 &&
-            !sink.done &&
-            !sink.lifecycleInterrupted &&
-            !this.closing &&
-            this.status !== "closed" &&
-            Date.now() < sink.computerUseGrant.expiresAt
-          ) {
-            if (this.inputs.busy) return "yield" as const;
-            this.failTurn(
-              sink,
-              "Cannot start a computer-use turn while a previous provider input is still pending.",
-            );
+    void this.turnMutex
+      .runExclusive(async () => {
+        try {
+          await context.with(turnCtx, () => this.runOneTurn(turnId, input, sink, turnCtx));
+        } catch (err) {
+          // Safety net: if runOneTurn threw before reaching its own finally
+          // (e.g. synchronous failure before the modelSession call), the
+          // agent span may still be open. End it so the trace closes.
+          if (!span.isRecording || span.isRecording()) {
+            span.setStatus({
+              code: SpanStatusCode.ERROR,
+              message: err instanceof Error ? err.message : String(err),
+            });
+            if (err instanceof Error) span.recordException(err);
             span.end();
-            return "done" as const;
           }
-          try {
-            await context.with(turnCtx, () => this.runOneTurn(turnId, input, sink, turnCtx));
-          } catch (err) {
-            // Safety net: if runOneTurn threw before reaching its own finally
-            // (e.g. synchronous failure before the modelSession call), the
-            // agent span may still be open. End it so the trace closes.
-            if (!span.isRecording || span.isRecording()) {
-              span.setStatus({
-                code: SpanStatusCode.ERROR,
-                message: err instanceof Error ? err.message : String(err),
-              });
-              if (err instanceof Error) span.recordException(err);
-              span.end();
-            }
-            // Surface failure on the sink so consumers' for-await ends cleanly.
-            this.failTurn(
-              sink,
-              toModelResolutionErrorPayload(err) ??
-                (err instanceof Error ? err.message : String(err)),
-            );
-          }
-          return "done" as const;
-        }, mutexPriority)
-        .then(async (outcome) => {
-          if (outcome !== "yield") return;
-          if (sink.computerUseGrant) {
-            await this.waitForRetainedInputsDrain(sink.computerUseGrant.expiresAt);
-          }
-          return runExclusiveTurn();
-        });
-
-    void runExclusiveTurn().finally(() => {
-      this.admitted -= 1;
-      this.emitStatus();
-    });
+          // Surface failure on the sink so consumers' for-await ends cleanly.
+          this.failTurn(
+            sink,
+            toModelResolutionErrorPayload(err) ??
+              (err instanceof Error ? err.message : String(err)),
+          );
+        }
+      }, mutexPriority)
+      .finally(() => {
+        this.admitted -= 1;
+        this.emitStatus();
+      });
 
     this.turns.add(turn);
     return Object.assign(turn, { turnContext: turnCtx });
@@ -4409,7 +4360,7 @@ class AgentSessionImpl implements AgentSession {
       await this.ensureModelSessionForTurn(true);
     }
     if (sink.lifecycleInterrupted) {
-      this.clearRetainedProviderInputs();
+      this.retainedProviderInputs.clear();
       await this.modelSession.interrupt("user-stop");
       this.ensureTurnStart(sink);
       this.finalizeTurn(sink, { type: "result", content: "" });
@@ -4712,7 +4663,7 @@ class AgentSessionImpl implements AgentSession {
           return;
         }
         if (sink.lifecycleInterrupted) {
-          this.clearRetainedProviderInputs();
+          this.retainedProviderInputs.clear();
           await this.modelSession.interrupt("user-stop");
           this.finalizeTurn(sink, { type: "result", content: "" });
           return;
@@ -4730,18 +4681,10 @@ class AgentSessionImpl implements AgentSession {
                 this.finalizeTurn(sink, { type: "result", content: "" });
                 return;
               }
-              if (this.retainedProviderInputs.size > 0) {
-                this.failTurn(
-                  sink,
-                  "Cannot start a computer-use turn while a previous provider input is still pending.",
-                );
-                return;
-              }
               if (Date.now() >= grant.expiresAt) {
                 this.failTurn(sink, "The computer-use grant expired before the input could start.");
                 return;
               }
-              sink.providerInputStarted = true;
             }
             // The login kind this turn is sent under; Codex holds a queued turn to it.
             sink.loginKind = this.modelSession.loginKind;
@@ -4751,7 +4694,7 @@ class AgentSessionImpl implements AgentSession {
               images: input.images,
               reasoningEffort: mwInput.reasoningEffort,
             });
-            if (input.inputId) this.deleteRetainedProviderInput(input.inputId);
+            if (input.inputId) this.retainedProviderInputs.delete(input.inputId);
             // Taking the input may have replaced a Claude query, and its login kind.
             sink.loginKind = this.modelSession.loginKind;
             this.inputs.ready(turnId);
@@ -4933,13 +4876,15 @@ class AgentSessionImpl implements AgentSession {
     const sink = this.currentSink;
     if (!sink || sink.done || (expectedTurnId && sink.turnId !== expectedTurnId)) return;
     sink.lifecycleInterrupted = true;
+    sink.computerUseGrant = undefined;
+    sink.providerInputStarted = false;
     if (reason !== SUPERSEDED_INTERRUPT_REASON) {
       this.taskInputEpoch++;
       sink.stoppedByGuardian = true;
     }
     // Cancel the provider before awaiting child cleanup. A slow child must
     // not keep its parent generating after the user presses Stop.
-    this.clearRetainedProviderInputs();
+    this.retainedProviderInputs.clear();
     await Promise.all([
       this.modelSession.interrupt(reason),
       this.hadComputerUseGrant
@@ -4966,7 +4911,7 @@ class AgentSessionImpl implements AgentSession {
     if (this.status === "closed") return;
     this.taskInputEpoch++;
     this.inputs.close();
-    this.clearRetainedProviderInputs();
+    this.retainedProviderInputs.clear();
     this.closingPromise = (async () => {
       this.log.info("agent session closing", {
         sessionId: this.sessionId,

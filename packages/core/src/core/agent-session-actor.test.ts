@@ -54,7 +54,11 @@ async function withRunningSession(
   }) => Promise<void>,
   initialActor: TurnActor = { kind: "visitor", accountId: "synthetic-visitor" },
   initialOptions: SubmitOptions = {},
-  test: { computerUse?: AgentComputerUse; initialError?: boolean } = {},
+  test: {
+    computerUse?: AgentComputerUse;
+    initialError?: boolean;
+    deferConsumeSecond?: boolean;
+  } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), "rome-task-actor-stop-"));
   const rows = new Map<string, Session>();
@@ -102,26 +106,38 @@ async function withRunningSession(
   let facts: TurnFacts | undefined;
   let running = false;
   let runs = 0;
+  let currentInputId: string | undefined;
   const turnEnds = Array.from({ length: 4 }, () => gate());
   const provider: ModelProvider = {
     id: "anthropic",
     builtinTools: new Set(),
-    openSession: async (params) => ({
-      ...createSessionFromRun(
+    openSession: async (params) => {
+      const base = createSessionFromRun(
         "anthropic",
         async function* () {
           const index = runs++;
           running = true;
+          const inputId = currentInputId;
+          if (inputId && !(index === 1 && test.deferConsumeSecond)) {
+            yield { type: "input_status", inputId, state: "consumed" };
+          }
           await Promise.race([ended, turnEnds[index].promise]);
           if (index === 0 && test.initialError) yield { type: "error", error: "synthetic failure" };
           else yield { type: "result", content: "done" };
         },
         params,
-      ),
-      interrupt: async () => {
-        await acknowledgement;
-      },
-    }),
+      );
+      return {
+        ...base,
+        sendUserInput: async (input) => {
+          currentInputId = input.inputId;
+          return base.sendUserInput(input);
+        },
+        interrupt: async () => {
+          await acknowledgement;
+        },
+      };
+    },
   };
   const noop = () => {};
   const manager = createSessions(
@@ -178,11 +194,17 @@ async function withRunningSession(
     const session = await openSession();
     const visitor = initialActor;
     const receipt = session.submit(
-      { prompt: "go" },
+      {
+        ...(initialOptions.computerUseGrant ? { inputId: "initial-computer-request" } : {}),
+        prompt: "go",
+      },
       { actor: visitor, priority: "next", ...initialOptions },
     );
     const firstTurn = await receipt.turn;
     await rs.waitFor(() => expect(running).toBe(true));
+    if (initialOptions.computerUseGrant) {
+      await rs.waitFor(() => expect(facts?.computerUseGrant?.()).toBeDefined());
+    }
     await run({
       session,
       facts: facts!,
@@ -216,14 +238,23 @@ it.each([
       };
       const firstId = facts.turnId();
       expect(() =>
-        session.submit({ prompt: "cannot steer" }, { actor: guardian, computerUseGrant: grant }),
+        session.submit(
+          { inputId: "cannot-steer", prompt: "cannot steer" },
+          { actor: guardian, computerUseGrant: grant },
+        ),
       ).toThrow("requires a separate turn");
       expect(() =>
         session.submit(
-          { prompt: "no system grants" },
+          { inputId: "no-system", prompt: "no system grants" },
           { actor: guardian, priority: "after", initiatedBy: "system", computerUseGrant: grant },
         ),
       ).toThrow("requires an unexpired grant for a private guardian turn");
+      expect(() =>
+        session.submit(
+          { prompt: "missing inputId" },
+          { actor: guardian, priority: "after", computerUseGrant: grant },
+        ),
+      ).toThrow("requires an inputId");
       const statuses: string[] = [];
       const receipt = session.submit(
         { inputId: "computer-request", prompt: "separate input" },
@@ -248,13 +279,18 @@ it.each([
       finishFirst();
       await nextStarted();
       expect(facts.turnId()).toBe(receipt.turnId);
-      expect(facts.computerUseGrant?.()).toEqual({
-        deviceId: originalDeviceId,
-        expiresAt: grant.expiresAt,
-        allowPreemption: true,
-      });
 
-      if (outcome === "failed") {
+      if (outcome === "consumed") {
+        await rs.waitFor(() =>
+          expect(facts.computerUseGrant?.()).toEqual({
+            deviceId: originalDeviceId,
+            expiresAt: grant.expiresAt,
+            allowPreemption: true,
+          }),
+        );
+      } else {
+        // Before the provider confirms consumption, the grant is inactive and stop fails the input.
+        expect(facts.computerUseGrant?.()).toBeUndefined();
         const stop = session.stop("user-stop");
         expect(facts.computerUseGrant?.()).toBeUndefined();
         acknowledge();
@@ -266,6 +302,8 @@ it.each([
       await rs.waitFor(() => expect(statuses).toEqual(["queued", outcome]));
     },
     guardian,
+    {},
+    { deferConsumeSecond: outcome === "failed" },
   );
 });
 
@@ -342,7 +380,7 @@ it("releases the caller lease when a computer-use grant is rejected on submit", 
     expect(inUse(wrongPriority)).toBe(true);
     expect(() =>
       wrongPriority.submit(
-        { prompt: "wrong priority" },
+        { inputId: "wrong-priority", prompt: "wrong priority" },
         { actor: guardian, priority: "next", computerUseGrant: validGrant },
       ),
     ).toThrow("requires a separate turn");
@@ -352,7 +390,7 @@ it("releases the caller lease when a computer-use grant is rejected on submit", 
     expect(inUse(expired)).toBe(true);
     expect(() =>
       expired.submit(
-        { prompt: "expired grant" },
+        { inputId: "expired-grant", prompt: "expired grant" },
         { actor: guardian, priority: "after", computerUseGrant: expiredGrant },
       ),
     ).toThrow("requires an unexpired grant for a private guardian turn");
@@ -362,7 +400,7 @@ it("releases the caller lease when a computer-use grant is rejected on submit", 
     expect(inUse(nonPrivate)).toBe(true);
     expect(() =>
       nonPrivate.submit(
-        { prompt: "shared audience" },
+        { inputId: "shared-audience", prompt: "shared audience" },
         {
           actor: guardian,
           priority: "after",
@@ -372,6 +410,16 @@ it("releases the caller lease when a computer-use grant is rejected on submit", 
       ),
     ).toThrow("requires an unexpired grant for a private guardian turn");
     expect(inUse(nonPrivate)).toBe(false);
+
+    const missingInputId = await openSession();
+    expect(inUse(missingInputId)).toBe(true);
+    expect(() =>
+      missingInputId.submit(
+        { prompt: "missing input id" },
+        { actor: guardian, priority: "after", computerUseGrant: validGrant },
+      ),
+    ).toThrow("requires an inputId");
+    expect(inUse(missingInputId)).toBe(false);
   }, guardian);
 });
 
@@ -459,6 +507,7 @@ it("drains a provider-retained steer B into its own ungranted turn before queued
           }
           const nativeInputId = nativeQueue.shift()!;
           pushEvent({ type: "input_status", inputId: nativeInputId, state: "consumed" });
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
           observed.push({
             nativeInputId,
             turnId: facts?.turnId(),
@@ -613,6 +662,196 @@ it("drains a provider-retained steer B into its own ungranted turn before queued
     ]);
   } finally {
     finishA.resolve();
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("keeps a computer-use grant inactive during an SDK-started background turn until the granted input is consumed", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "rome-sdk-bg-grant-"));
+  const rows = new Map<string, Session>();
+  const repository: SessionRepository = {
+    session: async (id) => rows.get(id) ?? null,
+    current: async () => [...rows.values()][0] ?? null,
+    predecessorOf: async () => null,
+    add: async (row) => {
+      rows.set(row.id, row);
+      row.markSaved();
+    },
+    save: async (row) => {
+      rows.set(row.id, row);
+      row.markSaved();
+    },
+    replace: async () => {
+      throw new Error("unexpected replacement");
+    },
+    deprecatedCheckpoint: async () => null,
+  };
+  const agent: Agent = {
+    name: "core:concierge",
+    localName: "concierge",
+    ownerId: "core",
+    ownerType: "core",
+    definition: {
+      description: "synthetic",
+      tier: "medium",
+      providerId: "anthropic",
+      reasoningEffort: "high",
+      systemPromptPrefix: "Synthetic test",
+      tools: [],
+      actions: ["core:computer_use"],
+      permissionMode: "default",
+    },
+  };
+  const loader: AgentCatalog = { find: () => agent, list: () => [agent] };
+
+  const grant: ComputerUseGrant = {
+    deviceId: "synthetic-device",
+    expiresAt: Date.now() + 30_000,
+  };
+  const runComputer = rs.fn(async (turn: TurnFacts) => ({
+    content: [{ type: "text" as const, text: `grant:${turn.computerUseGrant?.()?.deviceId}` }],
+  }));
+  const computerUse: AgentComputerUse = {
+    permits: (turn) => turn.computerUseGrant?.() !== undefined,
+    run: runComputer,
+  };
+
+  let facts: TurnFacts | undefined;
+  let tools:
+    | {
+        callTool: (
+          group: "computer",
+          name: string,
+          input: Record<string, unknown>,
+        ) => Promise<{
+          content: Array<{ type: string; text?: string }>;
+          isError?: boolean;
+        }>;
+      }
+    | undefined;
+  let pushEvent!: (event: ModelSessionEvent) => void;
+  const sentG = gate();
+
+  const provider: ModelProvider = {
+    id: "anthropic",
+    builtinTools: new Set(),
+    openSession: async (params) => {
+      tools = params.tools;
+      const outbox: ModelSessionEvent[] = [];
+      let notifyOutbox: (() => void) | undefined;
+      let closed = false;
+      pushEvent = (event) => {
+        outbox.push(event);
+        notifyOutbox?.();
+        notifyOutbox = undefined;
+      };
+      return {
+        providerId: "anthropic",
+        model: "synthetic",
+        events: (async function* () {
+          while (!closed || outbox.length > 0) {
+            if (outbox.length === 0) {
+              await new Promise<void>((resolve) => {
+                notifyOutbox = resolve;
+              });
+              continue;
+            }
+            yield outbox.shift()!;
+          }
+        })(),
+        sendUserInput: async () => {
+          sentG.resolve();
+        },
+        interrupt: async () => {},
+        close: async () => {
+          closed = true;
+          notifyOutbox?.();
+        },
+      };
+    },
+  };
+
+  const noop = () => {};
+  const manager = createSessions(
+    {
+      agentLoader: loader,
+      sessionRepository: repository,
+      systemPrompts: { build: () => "Synthetic test", fingerprint: () => "synthetic" } as never,
+      modelResolver: createModelResolver({
+        providers: [provider],
+        accounts: fakeAccounts(bothAvailable()),
+      }),
+      networkMcpServers: () => ({}),
+      skillCatalog: { list: () => [], find: () => undefined },
+      computerUse,
+      turnLifecycle: { started: noop, ended: noop, couldNotStart: noop } as never,
+      readAnswerShape: () => {
+        throw new Error("unexpected output schema");
+      },
+      sessionTracing: romeSessionTracing,
+      turnUsage: new Proxy({}, { get: () => noop }) as never,
+      folders: { defaultWorkingDir: directory, projectsFolder: directory },
+      log: { info: noop, warn: noop, error: noop },
+      actions: {
+        list: () => [],
+        permits: () => false,
+        appOf: () => undefined,
+        find: () => undefined,
+        run: async () => ({ status: "ok" }),
+      },
+      defer: {
+        schedule: async () => {
+          throw new Error("unexpected defer");
+        },
+      },
+      sessionTools: {
+        forTurn: async (turn) => {
+          facts = turn;
+          return [];
+        },
+      },
+    },
+    { keepAliveAcrossTurns: true },
+  );
+
+  try {
+    const session = await manager.open(
+      { agentName: agent.name, channelThreadKey: "webchat:sdk-bg" },
+      {
+        workingDir: directory,
+        audience: "private",
+        threadContext: { channel: "webchat", threadId: "sdk-bg", threadType: "private" },
+      },
+    );
+
+    const receiptG = session.submit(
+      { inputId: "input-g", prompt: "operate device" },
+      { actor: guardian, priority: "after", computerUseGrant: grant },
+    );
+
+    // Wait until sendUserInput(G) has been invoked, while an SDK-started
+    // background-task turn is still executing before G's replay arrives.
+    await sentG.promise;
+    expect(tools).toBeDefined();
+    expect(facts?.computerUseGrant?.()).toBeUndefined();
+
+    const bgCall = await tools!.callTool("computer", "computer_status", {});
+    expect(bgCall.isError).toBe(true);
+    expect(runComputer).not.toHaveBeenCalled();
+
+    // Once the SDK replays G's own input, the grant activates for G's tool calls.
+    pushEvent({ type: "input_status", inputId: "input-g", state: "consumed" });
+    await rs.waitFor(() => expect(facts?.computerUseGrant?.()).toEqual(grant));
+
+    const grantedCall = await tools!.callTool("computer", "computer_status", {});
+    expect(grantedCall.isError).toBeFalsy();
+    expect(runComputer).toHaveBeenCalledTimes(1);
+
+    pushEvent({ type: "result", content: "done", reasoningEffort: "medium" });
+    await (await receiptG.turn).ended();
+    expect(facts?.computerUseGrant?.()).toBeUndefined();
+  } finally {
     await manager.shutdown();
     await rm(directory, { recursive: true, force: true });
   }
