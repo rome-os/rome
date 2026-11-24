@@ -274,7 +274,8 @@ private struct UserImageGrid: View {
         .frame(width: width)
         .fullScreenCover(item: $viewer) { start in
             PhotoViewer(images: gallery, start: start.index)
-        }    }
+        }
+    }
 }
 
 private struct UserImageTile: View {
