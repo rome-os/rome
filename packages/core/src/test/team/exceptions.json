@@ -12,6 +12,17 @@
     {
       "name": "removing the guardian",
       "routes": []
+    },
+    {
+      "name": "the guardian's own",
+      "routes": [
+        "POST /api/personal-data/ingest",
+        "PUT /api/personal-data/sources/:source/origins/:origin/state",
+        "DELETE /api/personal-data/sources/:source/origins/:origin",
+        "PUT /api/device-connections",
+        "POST /api/people/link-code",
+        "POST /api/settings/guardian-timezone/detected"
+      ]
     }
   ]
 }

@@ -1,4 +1,4 @@
-# A dashboard admin has the guardian's access, with three exceptions
+# A dashboard admin has the guardian's access, with four exceptions
 
 - **Status**: Accepted
 - **Date**: 2026-11-24
@@ -13,11 +13,12 @@ A guardian who invites people to the dashboard wants them to use Rome as the gua
 
 The guardian and every dashboard admin are the [team](../concepts/people.md#team). Every dashboard check that admitted only the guardian admits the team instead, and asks Access one question: whether the session actor is on the team, read from the dashboard allow-list as it stands at the request.
 
-Three things stay the guardian's alone:
+Four things stay the guardian's alone:
 
 - Billing for the instance.
 - Deleting the instance.
-- Removing or replacing the guardian's seat or its credentials, which includes linking an outside account to the guardian as a person.
+- Removing or replacing the guardian's seat or its credentials.
+- What is the guardian's own person: their personal data, their devices, their time zone, and making an account theirs. A dashboard admin reads the guardian's personal data and devices, but never sends readings, reports a device, pauses or deletes an origin, sets the guardian's time zone, or links an outside account to the guardian.
 
 Each person's Concierge chats stay private to that person.
 
@@ -32,6 +33,6 @@ A dashboard admin can approve or reject any approval, change the vault, and chan
 
 Future diffs must respect:
 
-- A dashboard check asks whether the session actor is on the team. It never compares the actor's kind with `guardian` alone, except for the three exceptions.
+- A dashboard check asks whether the session actor is on the team. It never compares the actor's kind with `guardian` alone, except for the four exceptions.
 - Removing an email from the dashboard allow-list takes the person off the team at their next request.
 - A visitor allow-listed for one app is not on the team.

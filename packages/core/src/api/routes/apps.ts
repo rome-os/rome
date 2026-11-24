@@ -353,8 +353,8 @@ export function appsRoutes(deps: ApiDeps): Hono {
   // Registered before the `:appId` GET so the static segment wins, reserving
   // "events" as an app id — same trick as `/apps/updates` above.
   //
-  // Guardian-only on purpose: app existence and change-timing must never leak
-  // to visitors or anonymous callers, so the gate runs before the stream opens.
+  // Team-only on purpose: app existence and change-timing must never leak to
+  // app visitors or anonymous callers, so the gate runs before the stream opens.
   app.get("/apps/events", async (c) => {
     const actor = await resolveSessionActorFromMaterial(sessionActorMaterial(c), deps.db);
     if (!isOnTeam(actor, deps.dashboardAccessState)) {

@@ -10,12 +10,7 @@ import {
   GUARDIAN_TIMEZONE_SETTING_KEY,
   applyGuardianTimezoneWrite,
 } from "../../instance/timezone.js";
-import {
-  resolveSessionActorFromMaterial,
-  sessionActorMaterial,
-  sessionOwnerKey,
-} from "../../access/session-actor.js";
-import { isOnTeam } from "../../access/team.js";
+import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { parseTimeZone } from "../../lib/timezone.js";
 import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
@@ -132,22 +127,18 @@ export function settingsRoutes(deps: ApiDeps): Hono {
   // fills it in. It only writes when no zone is stored: a zone the guardian set
   // is never overwritten by whichever browser loads the dashboard next.
   app.post("/settings/guardian-timezone/detected", async (c) => {
-    // A dashboard admin also reaches `phase: "ready"` and reports their own
-    // browser's zone, which must not become the zone every floating routine is
-    // scheduled in. Theirs is their Concierge's time zone instead.
-    const actor = await resolveSessionActorFromMaterial(sessionActorMaterial(c), deps.db);
-    if (!isOnTeam(actor, deps.dashboardAccessState)) {
+    // Only the guardian's own browser may report it. An allow-listed dashboard
+    // visitor also reaches `phase: "ready"` and the edge passes it through to
+    // `/api/settings/*`, so without this check the first visitor to load the
+    // dashboard would set the zone every floating routine is scheduled in.
+    const session = await resolveGuardianSession(c, deps.db);
+    if (!session) {
       return c.json({ error: "Guardian session required" }, 403);
     }
+
     const body = await c.req
       .json<Record<string, unknown>>()
       .catch(() => ({}) as Record<string, unknown>);
-    const owner = sessionOwnerKey(actor);
-    if (actor.kind === "visitor" && owner) {
-      const zone = parseTimeZone(body.timezone);
-      if (zone && deps.concierge) await deps.concierge.following.setTimezone(owner, zone);
-      return c.json({ status: "unchanged" });
-    }
     const stored = parseTimeZone(await deps.settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY));
     if (stored) {
       return c.json({ status: "unchanged", tzid: stored });

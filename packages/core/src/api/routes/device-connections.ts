@@ -33,11 +33,17 @@ export function deviceConnectionRoutes(deps: DeviceConnectionRoutesDeps): Hono {
     deps.sessionActor ??
     ((c: Context) => resolveSessionActorFromMaterial(sessionActorMaterial(c), deps.db));
 
-  // Only a team member's own signed-in session, as for personal data: a
-  // loopback caller, which an agent's shell is, does not count here.
+  // As for personal data: a team member's own signed-in session reads the
+  // list, and only the guardian's reports a device, because agents reach every
+  // listed device as the guardian's. A loopback caller, which an agent's shell
+  // is, does not count here.
   app.use("/device-connections", async (c, next) => {
     const actor = await sessionActor(c);
     if (!isOnTeam(actor, deps.dashboardAccessState) || !bySignedInSession(actor)) {
+      return c.json({ error: "Guardian session required" }, 403);
+    }
+    const reads = c.req.method === "GET" || c.req.method === "HEAD";
+    if (!reads && actor.kind !== "guardian") {
       return c.json({ error: "Guardian session required" }, 403);
     }
     c.header("Cache-Control", "no-store");
