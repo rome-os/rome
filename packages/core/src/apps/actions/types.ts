@@ -13,6 +13,19 @@ export type {
   PendingInteraction,
 } from "@rome-os/app-runtime";
 
+const APPROVAL_PER_CALL = Symbol("approval-per-call");
+
+/** Marks a `requiresApproval` action whose `preview` also decides each call:
+ *  a call it words no card for runs without approval. Core's agent tools are
+ *  marked (agent-tool.ts); the mark is core's, so no app action carries it. */
+export function withApprovalPerCall(action: Action): Action {
+  return Object.assign(action, { [APPROVAL_PER_CALL]: true });
+}
+
+export function decidesApprovalPerCall(action: Action): boolean {
+  return (action as { [APPROVAL_PER_CALL]?: boolean })[APPROVAL_PER_CALL] === true;
+}
+
 export interface ActionRegistry {
   register(action: Action): void;
   get(name: string): Action | undefined;
