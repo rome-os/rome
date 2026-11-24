@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { AiToolSignInCardProps } from "@rome/api-types/ai-tool-sign-in-card";
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
-import { AiToolsPanel, hasConnectedAiProvider } from "@/components/ai-tools-panel";
+import {
+  type AiToolProviderId,
+  AiToolsPanel,
+  hasConnectedAiProvider,
+} from "@/components/ai-tools-panel";
 import {
   formatCreditDollars,
   hasUsableRomeCredits,
@@ -23,8 +28,21 @@ import { Button } from "@/components/ui/button";
 // The card probes the status itself before mounting the panel. Mounting first
 // and waiting for the panel's own probe would show sign-in buttons to a
 // guardian who already has a provider, then snatch them away a moment later.
+//
+// Given `aiTools`, it is instead `system:sign_in_ai_tool`'s card: the panel
+// shows only those AI tools, the card answers once one of them is signed in,
+// whatever else is, and it offers neither a skip nor credits.
 
 const HIDDEN_PROVIDERS = ["gemini", "grok"] as const;
+
+/** The panel's row for each AI tool the agent names. */
+const PANEL_ROWS = {
+  claude: { statusKey: "claude", i18nKey: "claudeCode" },
+  chatgpt: { statusKey: "codex", i18nKey: "codex" },
+} as const satisfies Record<
+  AiToolSignInCardProps["aiTools"][number],
+  { statusKey: AiToolProviderId; i18nKey: string }
+>;
 
 type Probe = "checking" | "connected" | "absent";
 
@@ -38,6 +56,8 @@ const STATUS_RETRY_MS = 1_000;
 
 export interface AiToolsCardProps {
   toolUseId: string;
+  /** The AI tools to sign in to, outside onboarding. */
+  aiTools?: AiToolSignInCardProps["aiTools"];
   /** Prior submitted output when this instance already resolved. */
   result?: Record<string, unknown>;
   onSubmit: (
@@ -52,8 +72,19 @@ interface Submission {
   summary: string;
 }
 
-export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
+export function AiToolsCard({ toolUseId, aiTools, result, onSubmit }: AiToolsCardProps) {
   const { t, i18n } = useTranslation("chat");
+  const { t: tSettings } = useTranslation("settings");
+  const named = aiTools !== undefined;
+  const aiToolsKey = aiTools?.join(",");
+  const hiddenProviders = useMemo<readonly AiToolProviderId[]>(() => {
+    if (!aiToolsKey) return HIDDEN_PROVIDERS;
+    const shown = aiToolsKey.split(",") as AiToolSignInCardProps["aiTools"];
+    const others = (Object.keys(PANEL_ROWS) as AiToolSignInCardProps["aiTools"])
+      .filter((id) => !shown.includes(id))
+      .map((id) => PANEL_ROWS[id].statusKey);
+    return [...HIDDEN_PROVIDERS, ...others];
+  }, [aiToolsKey]);
   const [sent, setSent] = useState(false);
   const [sentWithCredits, setSentWithCredits] = useState(false);
   // An answer that did not go through. The card hides its controls once it
@@ -88,6 +119,12 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
     void readStatus()
       .then(async (first) => {
         let status = first;
+        if (named) {
+          if (!cancelled) {
+            setProbe(hasConnectedAiProvider(status, hiddenProviders) ? "connected" : "absent");
+          }
+          return;
+        }
         // Right after boot the first Codex probe may not have settled. Ask
         // once more before settling, since only a signed-out ChatGPT lets
         // credits pay.
@@ -127,7 +164,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
     return () => {
       cancelled = true;
     };
-  }, [result]);
+  }, [result, named, hiddenProviders]);
 
   useEffect(() => {
     if (probe === "connected" && !resolved && !failed) {
@@ -140,6 +177,11 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
     !usingCredits && (result?.connected === true || (sent && probe === "connected"));
   const skipped = result?.skip === true || result?.dismissed === true;
   const offerCredits = !resolved && probe === "absent" && hasUsableRomeCredits(credits);
+  const names = aiTools
+    ? new Intl.ListFormat(i18n.language, { type: "disjunction" }).format(
+        aiTools.map((id) => tSettings(`aiTools.providers.${PANEL_ROWS[id].i18nKey}.name`)),
+      )
+    : "";
 
   return (
     <div
@@ -149,26 +191,30 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
     >
       <div className="p-4">
         <p className="text-ui text-foreground">
-          {connected
-            ? t("aiToolsCard.connectedTitle")
-            : usingCredits
-              ? t("aiToolsCard.credits.usingTitle")
-              : offerCredits
-                ? t("aiToolsCard.credits.title")
-                : t("aiToolsCard.title")}
+          {named
+            ? t("aiToolsCard.signIn.title", { names })
+            : connected
+              ? t("aiToolsCard.connectedTitle")
+              : usingCredits
+                ? t("aiToolsCard.credits.usingTitle")
+                : offerCredits
+                  ? t("aiToolsCard.credits.title")
+                  : t("aiToolsCard.title")}
         </p>
         {!resolved && probe === "absent" ? (
           <>
-            <p className="mt-1 text-aux text-muted-foreground">
-              {offerCredits && credits
-                ? t("aiToolsCard.credits.hint", {
-                    amount: formatCreditDollars(credits.availableMicros, i18n.language),
-                  })
-                : t("aiToolsCard.hint")}
-            </p>
+            {!named && (
+              <p className="mt-1 text-aux text-muted-foreground">
+                {offerCredits && credits
+                  ? t("aiToolsCard.credits.hint", {
+                      amount: formatCreditDollars(credits.availableMicros, i18n.language),
+                    })
+                  : t("aiToolsCard.hint")}
+              </p>
+            )}
             <div className="mt-4">
               <AiToolsPanel
-                hiddenProviders={HIDDEN_PROVIDERS}
+                hiddenProviders={hiddenProviders}
                 showHeader={false}
                 showUsage={false}
                 showRomeCredits={offerCredits}
@@ -190,7 +236,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
               : usingCredits
                 ? t("aiToolsCard.credits.using")
                 : skipped
-                  ? t("aiToolsCard.skipped")
+                  ? t(named ? "aiToolsCard.signIn.dismissed" : "aiToolsCard.skipped")
                   : probe === "checking"
                     ? t("aiToolsCard.checking")
                     : offerCredits
@@ -212,6 +258,7 @@ export function AiToolsCard({ toolUseId, result, onSubmit }: AiToolsCardProps) {
             {t("aiToolsCard.credits.continue")}
           </Button>
         ) : (
+          !named &&
           !resolved &&
           probe === "absent" && (
             <Button

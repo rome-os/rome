@@ -555,6 +555,10 @@
     "skippedSummary": "Skipped connecting an AI",
     "connectedTitle": "AI connected",
     "checking": "Checking your AI connections…",
+    "signIn": {
+      "title": "Sign in to {{names}}",
+      "dismissed": "Not signed in"
+    },
     "credits": {
       "title": "Start with free Rome credits",
       "hint": "Your account has {{amount}} in Rome credits, so I can start now. Sign in to Claude or ChatGPT any time to use your own subscription instead.",
@@ -564,6 +568,12 @@
       "using": "Rome credits in use",
       "ready": "Rome credits ready"
     }
+  },
+  "addDeviceCard": {
+    "waiting": "Waiting for a new device",
+    "added": "Added {{name}}",
+    "addedSummary": "Added the device {{name}}",
+    "dismissed": "No device added"
   },
   "modelSwitch": {
     "quota": "{{from}} quota ran out, switched to {{to}}",

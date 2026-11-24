@@ -65,6 +65,8 @@ import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
+import { ADD_DEVICE_CARD_ID } from "@rome/api-types/add-device-card";
+import { AI_TOOL_SIGN_IN_CARD_ID } from "@rome/api-types/ai-tool-sign-in-card";
 import { CHAT_RULE_DEFAULTS, chatRuleDefaultsOf, connections } from "./connections-store";
 
 /** The questions of the mock `ask_question` card: one per layout the card takes. */
@@ -1254,6 +1256,42 @@ transcripts[CARD_WIDTHS_CHAT_ID] = [
   ]),
 ];
 
+// The cards core's agent tools send for what the guardian finishes themselves,
+// each in a chat of its own, since a typed message dismisses an open one: a
+// sign-in to ChatGPT while Claude is signed in, and adding a device.
+const SIGN_IN_CARD_CHAT_ID = "mock-topic-sign-in-card";
+const ADD_DEVICE_CARD_CHAT_ID = "mock-topic-add-device-card";
+transcripts[SIGN_IN_CARD_CHAT_ID] = [
+  ...turn(SIGN_IN_CARD_CHAT_ID, 1, "2026-08-08T11:00:00.000Z", "Sign in to ChatGPT too.", [
+    {
+      type: "pending_interaction",
+      toolUseId: "mock-setup-cards-ai-tool",
+      appId: "core",
+      render: {
+        kind: "inline",
+        componentId: AI_TOOL_SIGN_IN_CARD_ID,
+        builtin: true,
+        props: { aiTools: ["chatgpt"] },
+      },
+    } as TranscriptPart,
+  ]),
+];
+transcripts[ADD_DEVICE_CARD_CHAT_ID] = [
+  ...turn(ADD_DEVICE_CARD_CHAT_ID, 1, "2026-08-08T11:05:00.000Z", "Add my new laptop.", [
+    {
+      type: "pending_interaction",
+      toolUseId: "mock-setup-cards-device",
+      appId: "core",
+      render: {
+        kind: "inline",
+        componentId: ADD_DEVICE_CARD_ID,
+        builtin: true,
+        props: { deviceIds: pickerDevices.map((device) => device.id) },
+      },
+    } as TranscriptPart,
+  ]),
+];
+
 /** Session metadata is derived from the transcript so `messageCount` and the
  *  activity timestamps can't drift away from the messages they describe. */
 const session = (
@@ -1292,6 +1330,8 @@ const chatSessions: ChatSession[] = [
     pinnedModel: { by: "kept", providerId: "openai", selection: null, model: "gpt-6-luna" },
   },
   session(CARD_WIDTHS_CHAT_ID, "Card widths", "default", CONCIERGE_AGENT_ID),
+  session(SIGN_IN_CARD_CHAT_ID, "AI tool sign-in card", "default", CONCIERGE_AGENT_ID),
+  session(ADD_DEVICE_CARD_CHAT_ID, "Add device card", "default", CONCIERGE_AGENT_ID),
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
   {

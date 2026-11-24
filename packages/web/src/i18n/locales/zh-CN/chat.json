@@ -555,6 +555,10 @@
     "skippedSummary": "暂时跳过连接 AI",
     "connectedTitle": "AI 已连接",
     "checking": "正在检查你的 AI 连接…",
+    "signIn": {
+      "title": "登录 {{names}}",
+      "dismissed": "未登录"
+    },
     "credits": {
       "title": "使用免费 Rome 额度开始",
       "hint": "你的账户有 {{amount}} 的 Rome 额度，我现在就可以开始。你也可以随时登录 Claude 或 ChatGPT，改用自己的订阅。",
@@ -564,6 +568,12 @@
       "using": "Rome 额度使用中",
       "ready": "Rome 额度可用"
     }
+  },
+  "addDeviceCard": {
+    "waiting": "等待新设备",
+    "added": "已添加 {{name}}",
+    "addedSummary": "已添加设备 {{name}}",
+    "dismissed": "未添加设备"
   },
   "modelSwitch": {
     "quota": "{{from}} 额度已用完，已切换到 {{to}}",

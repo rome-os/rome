@@ -1,4 +1,9 @@
 import { createContext, lazy, Suspense, useContext } from "react";
+import { ADD_DEVICE_CARD_ID } from "@rome/api-types/add-device-card";
+import {
+  AI_TOOL_SIGN_IN_CARD_ID,
+  aiToolSignInCardPropsSchema,
+} from "@rome/api-types/ai-tool-sign-in-card";
 import { useLiveTaskCard } from "./live-task-cards";
 import type { ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
@@ -8,6 +13,7 @@ import { TranscriptEntry } from "@/components/chat/TranscriptEntry";
 import { ApprovalCard } from "../approval/ApprovalCard";
 import { AgentCallView } from "./AgentCallView";
 import { SystemInputView } from "./SystemInputView";
+import { AddDeviceCard } from "./AddDeviceCard";
 import { AiToolsCard } from "./AiToolsCard";
 import { AppComponentView } from "./AppComponentView";
 import { ConnectCard } from "./ConnectCard";
@@ -225,6 +231,29 @@ export function renderSingleEntry(
           <AiToolsCard
             key={`ai-tools-card-${block.toolUseId}`}
             toolUseId={block.toolUseId}
+            result={resultFor(block.toolUseId)}
+            onSubmit={submit}
+          />
+        );
+      }
+      if (block.render.builtin && block.render.componentId === AI_TOOL_SIGN_IN_CARD_ID) {
+        const props = aiToolSignInCardPropsSchema.safeParse(block.render.props);
+        return (
+          <AiToolsCard
+            key={`ai-tool-sign-in-card-${block.toolUseId}`}
+            toolUseId={block.toolUseId}
+            aiTools={props.success ? props.data.aiTools : ["claude", "chatgpt"]}
+            result={resultFor(block.toolUseId)}
+            onSubmit={submit}
+          />
+        );
+      }
+      if (block.render.builtin && block.render.componentId === ADD_DEVICE_CARD_ID) {
+        return (
+          <AddDeviceCard
+            key={`add-device-card-${block.toolUseId}`}
+            toolUseId={block.toolUseId}
+            props={block.render.props}
             result={resultFor(block.toolUseId)}
             onSubmit={submit}
           />
