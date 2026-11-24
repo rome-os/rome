@@ -1909,6 +1909,8 @@ async function main() {
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
   registerAgentTools(actionRegistry, (chatId) => concierge.ownerOfChat(chatId), {
+    // The Chat page's routes, once the API layer that serves them is up.
+    chat: { page: () => internalApi?.chatPage ?? null },
     routines: {
       routines: routinesRepo,
       engine: routineEngine,
