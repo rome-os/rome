@@ -3,8 +3,8 @@
 // serves every conversation until shortly before it expires, or until the
 // provider refuses it, also across restarts: the session is kept in settings. What Rome speaks on a session is
 // added up as it goes and reported once, after the session has expired.
-// `speaker-source.ts` is the only caller and asks only while `voice_mode` is
-// on. Contract: docs/concepts/rome-cloud.md#voice-conversation.
+// `speaker-source.ts` is the only caller and asks only when a conversation
+// starts. Contract: docs/concepts/rome-cloud.md#voice-conversation.
 
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger } from "../logger.js";
