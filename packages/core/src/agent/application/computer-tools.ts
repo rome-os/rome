@@ -136,7 +136,9 @@ const action = {
 
 export function computerTools(computer: AgentComputerUse | undefined, turn: TurnFacts): RomeTool[] {
   // Catalogs open before a turn exists. Runtime admission stays in each callback.
-  if (!computer || turn.isSubagent || !declaresComputerUse(turn.actions)) return [];
+  if (!computer || turn.isSubagent || !declaresComputerUse(turn.actions, turn.withheldActions)) {
+    return [];
+  }
   const tool = (
     operation: ComputerOperation,
     description: string,

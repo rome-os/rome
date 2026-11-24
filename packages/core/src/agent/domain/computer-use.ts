@@ -30,13 +30,19 @@ export interface AgentComputerUse {
   cancelSession?(sessionId: string): Promise<void>;
 }
 
-export function declaresComputerUse(actions: readonly string[]): boolean {
+export function declaresComputerUse(
+  actions: readonly string[],
+  withheldActions?: readonly string[],
+): boolean {
+  if (withheldActions?.includes("*") || withheldActions?.includes(COMPUTER_USE_ACTION)) {
+    return false;
+  }
   return actions.includes("*") || actions.includes(COMPUTER_USE_ACTION);
 }
 
 export function permitsComputerUse(turn: TurnFacts): boolean {
   return (
-    declaresComputerUse(turn.actions) &&
+    declaresComputerUse(turn.actions, turn.withheldActions) &&
     !turn.isSubagent &&
     turn.actor()?.kind === "guardian" &&
     turn.audience() === "private" &&

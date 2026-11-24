@@ -49,6 +49,33 @@ describe("computer tools", () => {
     );
   });
 
+  it("honors place-level withheldActions for wildcard and explicit computer-use grants", async () => {
+    const run = rs.fn(async () => ({ content: [{ type: "text" as const, text: "ok" }] }));
+    const port = { permits: permitsComputerUse, run };
+
+    for (const actions of [["*"], ["core:computer_use"]] as const) {
+      for (const withheldActions of [["core:computer_use"], ["*"]] as const) {
+        const denied = { ...turn, actions, withheldActions };
+        expect(permitsComputerUse(denied)).toBe(false);
+        expect(computerTools(port, denied)).toEqual([]);
+      }
+    }
+
+    // Inherited catalogs recheck dynamic withheldActions at call time.
+    let withheld: readonly string[] = [];
+    const dynamicTurn: TurnFacts = {
+      ...turn,
+      get withheldActions() {
+        return withheld;
+      },
+    };
+    const tools = computerTools(port, dynamicTurn);
+    expect(tools.length).toBeGreaterThan(0);
+    withheld = ["core:computer_use"];
+    expect((await tools[0].handler({})).isError).toBe(true);
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("avoids oneOf/anyOf in tool schemas for model provider compatibility", () => {
     const tools = computerTools({ permits: () => true, run: rs.fn() }, turn);
     for (const tool of tools) {
