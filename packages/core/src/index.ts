@@ -1936,11 +1936,23 @@ async function main() {
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
   registerAgentTools(actionRegistry, (chatId) => concierge.ownerOfChat(chatId), {
+    // The Routines page's records, and the rules a changed routine meets as a new one does.
     routines: {
       routines: routinesRepo,
       engine: routineEngine,
       routineRuns: routineRunsRepo,
       actionExecutions: actionExecutionsRepo,
+      actionRegistry,
+      agentRunner,
+      resolveOneOffDate: (trigger: Trigger) =>
+        resolveOneOffDate(trigger, () => resolveGuardianTimezone(settingsRepo)),
+      hasTriggerType: (type) => routineEngine.hasProvider(type),
+    },
+    // The service the Devices page calls, and what each device reported.
+    devices: {
+      devices: nodeDevices,
+      connections: deviceConnectionsRepo,
+      run: (deviceId, action, args) => nodeDevices.runAction(deviceId, action, args),
     },
     // The projection `GET /connections` serves, and the Connections page's disconnect.
     connections: {
