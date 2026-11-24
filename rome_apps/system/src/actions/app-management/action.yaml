@@ -1,6 +1,6 @@
 name: app_management
 type: system
-description: Manage Rome app lifecycle (install / uninstall / enable / disable), scaffold a new dev app, or create a remix by copying installed code or downloading a pinned Store bundle without installing the source. Use system:app_store_search for read-only Store discovery or listing details; install from the Rome App Store with source.mode='appstore' and a listingId from system:app_store_search. Omit version to install the latest live version, or pass a specific live version from listing detail. First-party apps ship with Rome — bundled at build time, installed at boot, not installable or uninstallable here; only enable/disable applies to them.
+description: "To install a Store app, update an app, turn one on or off, or remove one, use system:manage_app instead; this older action keeps working for saved routines. Use this one to scaffold a new dev app (op 'create' with rootPath and template), to create a remix by copying installed code or downloading a pinned Store bundle without installing the source (op 'create' with from), or to install a local dev app from its source folder or a packed bundle (op 'install' with source.mode 'source' or 'bundle'). It still installs from the Rome App Store with source.mode='appstore' and a listingId from system:search_app_store, and uninstalls, enables or disables apps. First-party apps ship with Rome — bundled at build time, installed at boot, not installable or uninstallable here; only enable/disable applies to them."
 complexity: simple
 speed: fast
 reliability: medium

@@ -28,7 +28,8 @@ Write both as product copy for users: what the app does, its main features, and 
 2. Reinstall from source (`install` in [`SKILL.md`](./SKILL.md)). Always do this before you publish. The publish ships the artifact that was packed at the last install. It does not include source edits made after that install, including the version bump, and it gives no warning about them. Edits under `.rome_store/` alone do not need a reinstall. A `README.md` edit does.
 3. Publish:
    - The guardian can open **Apps**, select the app, and select **Publish**.
-   - When the guardian asked you to publish, call the loopback API. Encode the app id as one path segment, as described in [`SHARING.md`](./SHARING.md):
+   - When the guardian asked you to publish, call `system:publish_app` with the app id. The guardian approves it on a card first. It answers with the listing id and the published version, or with the error the table below explains.
+   - Where `system:publish_app` is not available, call the loopback API. Encode the app id as one path segment, as described in [`SHARING.md`](./SHARING.md):
 
      ```bash
      curl -s -w '\n%{http_code}\n' -X POST "http://127.0.0.1:${INTERNAL_API_PORT:-4141}/api/apps/<encoded appId>/publish"
@@ -50,7 +51,7 @@ Write both as product copy for users: what the app does, its main features, and 
      | `413` | The bundle or the `.rome_store` folder is over the store's size limit. | Shrink `.rome_store/assets/` or the app, then publish again. |
      | `501` | This Rome has no App Store origin configured. | Tell the guardian. |
      | `502` | The store was unreachable or failed. | Retry once after a short wait. If it fails again, tell the guardian. |
-4. Verify with `system:app_store_search` that the listing shows the new version. Report the listing id and version to the guardian.
+4. Verify with `system:search_app_store` that the listing shows the new version. Report the listing id and version to the guardian.
 
 ## Update or remove
 

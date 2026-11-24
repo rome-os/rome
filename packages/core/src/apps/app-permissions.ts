@@ -66,6 +66,29 @@ export function normalizeAppPermissionsSetting(raw: unknown): AppPermissionsSett
   };
 }
 
+/**
+ * The setting with one app's access replaced, as the app page's access dialog
+ * saves it: `public` for anyone with the link, `cloud-email` for the listed
+ * visitor emails, `private` for the guardian alone. Every other app keeps its
+ * access. The result is normalized, so an invalid email is dropped.
+ */
+export function withAppAccess(
+  setting: AppPermissionsSetting,
+  appId: string,
+  access: { mode: AppAccessMode; emails?: readonly string[] },
+): AppPermissionsSetting {
+  const allowedApps = new Set(setting.allowedApps);
+  const cloudEmailAccess = { ...setting.cloudEmailAccess };
+  allowedApps.delete(appId);
+  delete cloudEmailAccess[appId];
+  if (access.mode === "public") allowedApps.add(appId);
+  if (access.mode === "cloud-email") cloudEmailAccess[appId] = [...(access.emails ?? [])];
+  return normalizeAppPermissionsSetting({
+    allowedApps: Array.from(allowedApps).sort(),
+    cloudEmailAccess,
+  });
+}
+
 /** Each app's permission, keyed by app id. An app missing from the map is guardian-only. */
 export function appPermissions(setting: AppPermissionsSetting): Map<string, Permission> {
   const byApp = new Map<string, Permission>();

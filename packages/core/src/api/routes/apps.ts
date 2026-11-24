@@ -23,9 +23,9 @@ import { deriveRuntimeStatusFromView } from "../../apps/runtime-status-subscribe
 import { SpecSourceSchema } from "../../apps/lockfile.js";
 import { type ArtifactRef, isResolvedApp } from "../../apps/state.js";
 import type { AppOwnedArtifactLoadFailure } from "../../apps/types.js";
-import { purgeAppUserData, resolveTablePrefixForPurge } from "../../apps/user-data-purge.js";
+import { uninstallApp } from "../../apps/uninstall.js";
 import { appIdToPathSegment, assertValidAppId } from "../../apps/packaging/index.js";
-import { isPublishableSource, publishAppBundle, publishArtifactRoot } from "../../apps/publish.js";
+import { isPublishableSource, publishInstalledApp } from "../../apps/publish.js";
 import { findUpgradeCandidates } from "../../apps/upgrade-detector.js";
 import { parseSkillFrontmatterResult } from "../../apps/packaging/skill-frontmatter.js";
 import { getProfileAppsDir, getProjectsRoot } from "../../paths.js";
@@ -303,7 +303,7 @@ async function loadArtifactDetailsByApp(
 
 // Read from the stored setting, not `deps.permissions`, so the app page shows
 // what is saved even when loading it at startup failed.
-async function loadAppPermissions(deps: ApiDeps): Promise<Map<string, Permission>> {
+async function loadAppPermissions(deps: Pick<ApiDeps, "db">): Promise<Map<string, Permission>> {
   return appPermissions(await loadAppPermissionsSetting(deps.db));
 }
 
@@ -325,6 +325,30 @@ function assertAppIdIsNotSystem(c: Context, appId: string, verbMessage: string) 
     return c.json({ error: `SYSTEM_PROTECTED: ${verbMessage}` }, 400);
   }
   return null;
+}
+
+/** The installed apps as the Apps page lists them (`GET /apps`), apps
+ * installed from a local source first. */
+export async function listInstalledApps(
+  deps: Pick<ApiDeps, "appCatalog" | "db" | "agentLoader" | "actionLoader" | "skillCatalog">,
+): Promise<InstalledAppCard[]> {
+  const catalog = deps.appCatalog;
+  const permissions = await loadAppPermissions(deps);
+  const artifactDetailsByApp = await loadArtifactDetailsByApp(catalog, [
+    ...deps.agentLoader.getRegistryLoadFailures(),
+    ...deps.actionLoader.getRegistryLoadFailures(),
+    ...deps.skillCatalog.getRegistryLoadFailures(),
+  ]);
+  const cards = catalog
+    .list()
+    .map((view) =>
+      toInstalledAppCard(
+        view,
+        permissions.get(view.appId) ?? GUARDIAN_ONLY,
+        artifactDetailsByApp.get(view.appId) ?? emptyArtifactDetails(),
+      ),
+    );
+  return rankSourceInstalledAppsFirst(cards);
 }
 
 export function appsRoutes(deps: ApiDeps): Hono {
@@ -456,23 +480,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
   });
 
   app.get("/apps", async (c) => {
-    const catalog = deps.appCatalog;
-    const views = catalog.list();
-    const permissions = await loadAppPermissions(deps);
-    const artifactDetailsByApp = await loadArtifactDetailsByApp(catalog, [
-      ...deps.agentLoader.getRegistryLoadFailures(),
-      ...deps.actionLoader.getRegistryLoadFailures(),
-      ...deps.skillCatalog.getRegistryLoadFailures(),
-    ]);
-    const cards = views.map((view) =>
-      toInstalledAppCard(
-        view,
-        permissions.get(view.appId) ?? GUARDIAN_ONLY,
-        artifactDetailsByApp.get(view.appId) ?? emptyArtifactDetails(),
-      ),
-    );
-
-    const response: AppListResponse = { apps: rankSourceInstalledAppsFirst(cards) };
+    const response: AppListResponse = { apps: await listInstalledApps(deps) };
     return c.json(response);
   });
 
@@ -552,30 +560,19 @@ export function appsRoutes(deps: ApiDeps): Hono {
     const systemBlock = assertAppIdIsNotSystem(c, appId, 'App "system" cannot be uninstalled');
     if (systemBlock) return systemBlock;
     const body = await c.req.json<{ purge?: boolean }>().catch(() => ({}) as { purge?: boolean });
-    const appsRoot = deps.appsRoot ?? getProfileAppsDir();
-    const wantsPurge = body.purge === true;
+    const purge = body.purge === true;
     try {
-      let tablePrefix: string | null = null;
-      if (wantsPurge) {
-        tablePrefix = await resolveTablePrefixForPurge({
-          appId,
-          appsRoot,
+      await uninstallApp(
+        {
+          manager: deps.appManager,
           catalog: deps.appCatalog,
-        });
-      }
-      const result = await deps.appManager.uninstall(appId, { purge: wantsPurge });
-      if (result.alreadyAbsent) {
-        return c.json({ appId, purged: wantsPurge });
-      }
-      if (wantsPurge) {
-        await purgeAppUserData({
-          appId,
-          tablePrefix,
           db: deps.db,
-          appsRoot,
-        });
-      }
-      return c.json({ appId, purged: wantsPurge });
+          appsRoot: deps.appsRoot ?? getProfileAppsDir(),
+        },
+        appId,
+        { purge },
+      );
+      return c.json({ appId, purged: purge });
     } catch (err) {
       return appManagerErrorResponse(c, err);
     }
@@ -713,91 +710,25 @@ export function appsRoutes(deps: ApiDeps): Hono {
   // enforced by the store; its rejection messages pass through verbatim with
   // their status so the dashboard can surface them.
   app.post("/apps/:appId/publish", async (c) => {
-    const appId = c.req.param("appId");
-    try {
-      assertValidAppId(appId);
-    } catch {
-      return c.json({ error: "Invalid app id" }, 400);
-    }
-    const systemBlock = assertAppIdIsNotSystem(c, appId, 'App "system" cannot be published');
-    if (systemBlock) return systemBlock;
-    const view = deps.appCatalog.get(appId);
-    if (!view) {
-      return c.json({ error: `App "${appId}" is not installed` }, 404);
-    }
-    if (view.state !== "installed") {
-      return c.json({ error: `App "${appId}" is ${view.state}; cannot publish` }, 409);
-    }
-    const artifactRoot = publishArtifactRoot(view.source);
-    if (artifactRoot == null || !isPublishableSource(appId, view.source)) {
-      return c.json(
-        {
-          error: `App "${appId}" was not developed on this instance; only locally developed apps can be published`,
-        },
-        409,
-      );
-    }
-    if (view.installedHash == null) {
-      return c.json(
-        { error: `App "${appId}" has no pinned install hash; re-install before publishing` },
-        409,
-      );
-    }
-    // Publish the pinned source artifact (verified against installedHash
-    // inside publishAppBundle), never the materialized install dir — see the
-    // module doc in apps/publish.ts. This also keeps disabled apps
-    // publishable: nothing here requires runtime resolution.
-    const result = await publishAppBundle(artifactRoot, view.installedHash);
-    switch (result.status) {
+    const outcome = await publishInstalledApp(deps.appCatalog, c.req.param("appId"));
+    switch (outcome.status) {
       case "ok": {
         const response: AppPublishResponse = {
-          appId,
-          listing: result.listing,
-          version: result.version,
-          claimed: result.claimed,
+          appId: outcome.appId,
+          listing: outcome.listing,
+          version: outcome.version,
+          claimed: outcome.claimed,
         };
         return c.json(response, 201);
       }
-      case "artifact_missing":
-        return c.json(
-          {
-            error: `The source artifact for "${appId}" is no longer at ${artifactRoot}; re-install it before publishing`,
-          },
-          409,
-        );
-      case "artifact_drifted":
-        return c.json(
-          {
-            error: `The source artifact for "${appId}" has changed since it was installed; install it again before publishing`,
-          },
-          409,
-        );
-      case "no_token":
-        return c.json(
-          {
-            error:
-              "This Rome instance is not connected to a Rome account, so it cannot publish to the App Store.",
-          },
-          412,
-        );
-      case "auth_invalid":
-        return c.json(
-          {
-            error:
-              "The App Store no longer accepts this Rome instance's credentials. Reconnect this instance to its Rome account and try again.",
-          },
-          403,
-        );
-      case "unconfigured":
-        return c.json({ error: "App Store origin is not configured for this instance" }, 501);
-      case "unreachable":
-        return c.json({ error: `Could not reach the App Store: ${result.message}` }, 502);
+      case "refused":
+        return c.json({ error: outcome.error }, outcome.httpStatus);
       case "rejected": {
         // Client-class refusals (auth, version policy, size cap) keep their
         // status; an upstream 5xx is our gateway failure, not the caller's.
         const status =
-          result.httpStatus >= 400 && result.httpStatus < 500 ? result.httpStatus : 502;
-        return c.json({ error: result.message }, status as ContentfulStatusCode);
+          outcome.httpStatus >= 400 && outcome.httpStatus < 500 ? outcome.httpStatus : 502;
+        return c.json({ error: outcome.error }, status as ContentfulStatusCode);
       }
     }
   });

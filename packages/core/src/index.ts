@@ -288,6 +288,9 @@ import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
 import { listConnectionViews } from "./api/routes/connections.js";
+import { listInstalledApps } from "./api/routes/apps.js";
+import { publishInstalledApp } from "./apps/publish.js";
+import { findUpgradeCandidates } from "./apps/upgrade-detector.js";
 import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
 import { createAppStartedDispatcher } from "./apps/app-started.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
@@ -327,7 +330,11 @@ import { HostExecutionService } from "./apps/host-execution/service.js";
 import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./instance/auto-upgrade-gate.js";
 import { Permissions } from "./access/permissions.js";
-import { loadAppPermissions } from "./apps/app-permissions.js";
+import {
+  loadAppPermissions,
+  loadAppPermissionsSetting,
+  saveAppPermissionsSetting,
+} from "./apps/app-permissions.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { DashboardAccessStore } from "./access/dashboard-access-store.js";
 import {
@@ -1908,7 +1915,25 @@ async function main() {
     people: peopleRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
+  // Built here so the Apps page's tools save sharing into it; it loads the
+  // stored setting below, before the API serves.
+  const permissions = new Permissions();
   registerAgentTools(actionRegistry, (chatId) => concierge.ownerOfChat(chatId), {
+    // The projection and operations the Apps page's routes call.
+    apps: {
+      apps: () => listInstalledApps({ appCatalog, db, agentLoader, actionLoader, skillCatalog }),
+      updates: () => findUpgradeCandidates(appCatalog, { romeCloudListings }),
+      appStore,
+      manager: appManager,
+      catalog: appCatalog,
+      db,
+      publish: (appId) => publishInstalledApp(appCatalog, appId),
+      appAccess: {
+        load: () => loadAppPermissionsSetting(db),
+        save: (setting) => saveAppPermissionsSetting(db, permissions, setting),
+      },
+      publicOrigin: () => getConfiguredInstanceOrigin(),
+    },
     routines: {
       routines: routinesRepo,
       engine: routineEngine,
@@ -2779,7 +2804,6 @@ async function main() {
     await messageHooks.reload();
     await persistHookStatus();
   };
-  const permissions = new Permissions();
   try {
     await loadAppPermissions(db, permissions);
   } catch (err) {
