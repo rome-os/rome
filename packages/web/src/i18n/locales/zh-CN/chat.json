@@ -759,6 +759,31 @@
     "sendMessage": "发送消息",
     "action": "动作"
   },
+  "voiceConversation": {
+    "start": "语音对话",
+    "mute": "静音",
+    "unmute": "取消静音",
+    "end": "结束",
+    "state": {
+      "listening": "在听",
+      "thinking": "在想",
+      "speaking": "在说",
+      "muted": "已静音"
+    },
+    "asking": "允许使用麦克风，就能和 Rome 语音对话",
+    "stopped": {
+      "unavailable": "现在用不了语音对话",
+      "listening-failed": "Rome 听不到，语音对话已结束",
+      "speaking-failed": "Rome 说不出来，语音对话已结束",
+      "chat-refused": "这个聊天不能语音对话",
+      "time-limit": "语音对话到了时间上限，已结束",
+      "bad-request": "出错了，语音对话已结束",
+      "microphone-blocked": "麦克风被禁用了，请在浏览器的网站设置里允许",
+      "microphone-missing": "没有找到麦克风",
+      "microphone-failed": "麦克风没能打开",
+      "connection-lost": "和 Rome 的连接断了，语音对话已结束"
+    }
+  },
   "voiceInput": {
     "start": "开始语音输入",
     "stop": "停止语音输入",

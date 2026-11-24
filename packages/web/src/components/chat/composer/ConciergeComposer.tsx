@@ -66,9 +66,16 @@ import { useSlashSkill } from "./use-slash-skill";
 import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
 import { SlashSkillMenu } from "./SlashSkillMenu";
 import { useChatDraft } from "./use-chat-draft";
+import { useVoiceConversation } from "./use-voice-conversation";
 import { useVoiceInput } from "./use-voice-input";
 import { VoiceInputButton, VoiceInputNotice, VoiceInputWaveform } from "./VoiceInputControl";
 import { VoiceInputSpokenText } from "./VoiceInputSpokenText";
+import {
+  VoiceConversationButton,
+  VoiceConversationCapsule,
+  VoiceConversationEnd,
+  VoiceConversationMute,
+} from "./VoiceConversationControl";
 import type { ReplyTarget } from "../reply/reply-draft";
 
 const TEXTAREA_MAX_HEIGHT = 240;
@@ -185,6 +192,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       onSend: () => void runSendRef.current(),
     });
     const runSendRef = useRef<() => Promise<void>>(async () => {});
+    // A voice conversation with the Concierge, in this chat. Its capsule sits
+    // above the box, and its mute and end take the place of send.
+    const conversation = useVoiceConversation({ chatId });
     const voiceActiveRef = useRef(false);
     voiceActiveRef.current = voice.active;
 
@@ -240,6 +250,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       // Text alone clears at once and comes back on failure. Attachments keep
       // the text on screen until the server accepts the upload.
       voice.dismissNotice();
+      conversation.dismissStopped();
       const clearsOptimistically = uploads.length === 0;
       const replyTo = replyDraft?.target ?? undefined;
       // The draft's change count once this send cleared it: a failed send
@@ -288,6 +299,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       snapshotOf,
       replyDraft,
       voice.active,
+      conversation.dismissStopped,
     ]);
     runSendRef.current = runSend;
 
@@ -375,6 +387,20 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             reason={typeof streamError === "string" ? undefined : streamError.reason}
           />
         )}
+        {conversation.active ? (
+          <VoiceConversationCapsule
+            state={conversation.state}
+            muted={conversation.muted}
+            level={conversation.level}
+          />
+        ) : null}
+        {conversation.asking || conversation.stopped ? (
+          <p role="status" className="mb-2 text-center text-ui text-muted-foreground">
+            {conversation.asking
+              ? t("voiceConversation.asking")
+              : t(`voiceConversation.stopped.${conversation.stopped}`)}
+          </p>
+        ) : null}
         <form
           data-chat-composer-box
           className={cn("relative z-10", boxClassName)}
@@ -648,11 +674,23 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             ) : voice.active ? (
               <div aria-hidden className="flex-1" />
             ) : null}
-            {voice.available && (voice.active || !uploadInFlight) ? (
+            {voice.available && !conversation.active && (voice.active || !uploadInFlight) ? (
               <VoiceInputButton state={voice.state} onToggle={voice.toggle} />
             ) : null}
+            {conversation.available && !conversation.active && !voice.active && !uploadInFlight ? (
+              <VoiceConversationButton onStart={conversation.start} />
+            ) : null}
+            {conversation.active ? (
+              <>
+                <VoiceConversationMute
+                  muted={conversation.muted}
+                  onToggle={conversation.toggleMute}
+                />
+                <VoiceConversationEnd onEnd={conversation.end} />
+              </>
+            ) : null}
             {/* Hidden while voice input is on, so its square is never mistaken for voice input's. */}
-            {isStreaming && onStop && !voice.active && (
+            {isStreaming && onStop && !voice.active && !conversation.active && (
               <Button
                 type="button"
                 variant="outline"
@@ -665,7 +703,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                 <span aria-hidden="true" className="inline-block size-2.5 bg-foreground" />
               </Button>
             )}
-            {uploadInFlight ? (
+            {conversation.active ? null : uploadInFlight ? (
               <Button
                 variant="secondary"
                 size="icon-sm"

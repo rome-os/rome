@@ -3131,13 +3131,35 @@ describe("Webchat API", () => {
     });
   });
 
+  // A Concierge topic chat of the guardian's, where a voice conversation talks.
+  const conciergeTopic = async (id = "voice-topic") => {
+    await deps.webchatRepo.createSession(
+      id,
+      "Topic",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    return id;
+  };
+
   it("hands a spoken input the turn that answers it, in the guardian's chats only", async () => {
     rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
     const { runtime } = createWebchatRuntime(deps);
-    const id = await runtime.startChat({}, "guardian");
+    const id = await conciergeTopic();
     expect(await runtime.canSendSpoken(id)).toBe(true);
     const reply = await runtime.sendSpoken(id, "你好");
     expect(reply.events).toEqual(expect.any(Function));
+
+    // A task chat, or any chat but a Concierge one, takes no voice conversation.
+    const task = await runtime.startChat({}, "guardian");
+    expect(await runtime.canSendSpoken(task)).toBe(false);
+    await expect(runtime.sendSpoken(task, "你好")).rejects.toThrow("only for a Concierge chat");
 
     await deps.webchatRepo.createSession(
       "visitor-task",
@@ -3176,7 +3198,7 @@ describe("Webchat API", () => {
       };
     });
     const { runtime } = createWebchatRuntime(deps);
-    const id = await runtime.startChat({}, "guardian");
+    const id = await conciergeTopic();
     // Whatever else listens to the chat's messages.
     const before = listening;
     const left = new AbortController();
@@ -3190,7 +3212,7 @@ describe("Webchat API", () => {
       buildAgent(name, { name: "main", policy: { finalText: "private" } }),
     );
     const { runtime } = createWebchatRuntime(deps);
-    const id = await runtime.startChat({}, "guardian");
+    const id = await conciergeTopic();
     expect(await runtime.canSendSpoken(id)).toBe(true);
     const reply = await runtime.sendSpoken(id, "订好了吗");
     const turnId = (await deps.webchatRepo.getMessages(id)).find((m) => m.role === "user")?.turnId;
@@ -3217,8 +3239,9 @@ describe("Webchat API", () => {
       find: () => undefined,
       shutdown: async () => undefined,
     } as unknown as typeof deps.agentSessionManager;
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
     const { runtime } = createWebchatRuntime(deps);
-    const id = await runtime.startChat({}, "guardian");
+    const id = await conciergeTopic();
     await expect(runtime.sendSpoken(id, "你好")).rejects.toThrow("No turn started");
   });
 
