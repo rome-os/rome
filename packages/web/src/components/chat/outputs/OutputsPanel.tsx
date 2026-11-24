@@ -324,7 +324,7 @@ export function OutputsPanel({
   const indexing = outputs.data?.indexing === true;
   // Earlier outputs still being read back, said quietly where the list is.
   const indexingNote = indexing ? (
-    <p role="status" className="px-1 text-aux text-muted-foreground">
+    <p role="status" className="px-3 text-aux text-muted-foreground">
       {t("outputs.indexing")}
     </p>
   ) : null;
@@ -360,7 +360,13 @@ export function OutputsPanel({
   }
   if (current) return preview(current);
   if (list.length === 0) {
-    if (indexing) return <div className="p-4">{indexingNote}</div>;
+    if (indexing) {
+      return (
+        <p role="status" className="p-4 text-aux text-muted-foreground">
+          {t("outputs.indexing")}
+        </p>
+      );
+    }
     return (
       <EmptyState className="h-full" role="region">
         <EmptyStateIcon>
@@ -382,7 +388,7 @@ export function OutputsPanel({
   const group = (key: "today" | "earlier", items: ChatOutput[]) =>
     items.length === 0 ? null : (
       <section key={key} className="flex flex-col gap-2">
-        <h3 className="px-1 text-aux text-muted-foreground">{t(`outputs.${key}`)}</h3>
+        <h3 className="px-3 text-aux text-muted-foreground">{t(`outputs.${key}`)}</h3>
         <ul
           aria-label={t(`outputs.${key}`)}
           className="divide-y divide-border-subtle overflow-hidden rounded-12 border border-border bg-surface"
