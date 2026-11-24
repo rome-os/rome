@@ -169,7 +169,7 @@ import Testing
     }
 
     @Test func aFaultSaysWhyEvenWithNothingHeard() {
-        for reason in [VoiceInputStopReason.noSpeech, .connectionLost, .microphoneBlocked, .serviceRefused, .appClosed] {
+        for reason in [VoiceInputStopReason.noSpeech, .connectionLost, .microphoneBlocked, .serviceRefused] {
             #expect(VoiceInputStop(reason: reason).notice(afterHearing: "") == VoiceInputStop(reason: reason))
         }
     }
@@ -197,26 +197,101 @@ import Testing
         #expect(expired.value)
     }
 
-    @Test func goingToTheBackgroundStopsTheClock() async {
+    @Test func notificationCenterOverTheAppStopsTheClockUntilItIsBack() async {
         let center = NotificationCenter()
-        let timer = VoiceNoticeTimer(lifetime: .milliseconds(100), center: center, appActive: { true })
+        let timer = VoiceNoticeTimer(lifetime: .milliseconds(50), center: center, appActive: { true })
         let expired = Flag()
         timer.start { expired.set() }
-        center.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
-        try? await Task.sleep(for: .milliseconds(300))
+        // Inactive only, longer than the notice's time: no trip to the background.
+        center.post(name: UIApplication.willResignActiveNotification, object: nil)
+        try? await Task.sleep(for: .milliseconds(250))
         #expect(!expired.value)
-    }
-
-    @Test func aHiddenFieldStopsTheClockUntilItShowsAgain() async {
-        let timer = VoiceNoticeTimer(lifetime: .milliseconds(50), center: NotificationCenter(), appActive: { true })
-        let expired = Flag()
-        timer.start { expired.set() }
-        timer.fieldShown(false)
-        try? await Task.sleep(for: .milliseconds(200))
-        #expect(!expired.value)
-        timer.fieldShown(true)
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
         await expired.wait()
         #expect(expired.value)
+    }
+
+    @Test func onlyAStopWithoutAFaultGoesByItself() {
+        for reason in [VoiceInputStopReason.backgrounded, .interrupted, .leftChat, .appClosed] { #expect(reason.endsWithoutFault) }
+        for reason in [VoiceInputStopReason.noSpeech, .connectionLost, .microphoneBlocked, .serviceRefused, .timeLimit] { #expect(!reason.endsWithoutFault) }
+    }
+
+    @Test func aBackgroundNoticeGoesAfterItsTimeAndStaysGoneAfterARelaunch() async {
+        let defaults = UserDefaults(suiteName: "voice-input-\(UUID())")!
+        let first = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults)
+        first.listening(in: "chat")
+        first.stopped(in: "chat", VoiceInputStop(reason: .backgrounded))
+        let service = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults)
+        let voice = Self.controller()
+        voice.arrive(service: service, chat: "chat")
+        #expect(voice.notice == VoiceInputStop(reason: .backgrounded))
+        for _ in 0..<100 where voice.notice != nil { try? await Task.sleep(for: .milliseconds(20)) }
+        #expect(voice.notice == nil)
+        #expect(VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).takeNotice(for: "chat") == nil)
+    }
+
+    @Test func aFaultsNoticeStaysUntilAnEditOrSend() async {
+        let service = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: UserDefaults(suiteName: "voice-input-\(UUID())")!)
+        let blocked = VoiceInputStop(reason: .microphoneBlocked)
+        service.keep(blocked, for: "chat")
+        let voice = Self.controller()
+        voice.arrive(service: service, chat: "chat")
+        try? await Task.sleep(for: .milliseconds(250))
+        #expect(voice.notice == blocked)
+        voice.edited(service: service, chat: "chat")
+        #expect(voice.notice == nil)
+    }
+
+    @Test func leavingTheChatCountsABackgroundNoticeAsSeen() {
+        let defaults = UserDefaults(suiteName: "voice-input-\(UUID())")!
+        let first = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults)
+        first.listening(in: "chat")
+        first.stopped(in: "chat", VoiceInputStop(reason: .backgrounded))
+        let service = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults)
+        let voice = VoiceInputController()
+        voice.arrive(service: service, chat: "chat")
+        voice.leave(service: service, chat: "chat")
+        #expect(voice.notice == nil)
+        #expect(service.takeNotice(for: "chat") == nil)
+        #expect(VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).takeNotice(for: "chat") == nil)
+    }
+
+    @Test func leavingTheChatKeepsAFaultsNoticeForTheReturn() {
+        let service = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: UserDefaults(suiteName: "voice-input-\(UUID())")!)
+        let blocked = VoiceInputStop(reason: .microphoneBlocked)
+        service.keep(blocked, for: "chat")
+        let voice = VoiceInputController()
+        voice.arrive(service: service, chat: "chat")
+        voice.leave(service: service, chat: "chat")
+        let back = VoiceInputController()
+        back.arrive(service: service, chat: "chat")
+        #expect(back.notice == blocked)
+    }
+
+    // MARK: What a stop keeps for the next launch
+
+    @Test func aBackgroundStopWithNothingHeardLeavesNothingForTheNextLaunch() {
+        let defaults = UserDefaults(suiteName: "voice-input-\(UUID())")!
+        let service = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults)
+        service.listening(in: "chat")
+        let voice = Self.controller()
+        voice.finished(heard: "", stop: VoiceInputStop(reason: .backgrounded), service: service, chat: "chat", text: .constant(""), handle: ComposerTextHandle())
+        #expect(voice.notice == nil)
+        #expect(VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).takeNotice(for: "chat") == nil)
+    }
+
+    @Test func aBackgroundStopAfterWordsSaysWhyOnTheNextLaunch() {
+        let defaults = UserDefaults(suiteName: "voice-input-\(UUID())")!
+        let service = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults)
+        service.listening(in: "chat")
+        let voice = Self.controller()
+        voice.finished(heard: "Call the dentist", stop: VoiceInputStop(reason: .backgrounded), service: service, chat: "chat", text: .constant(""), handle: ComposerTextHandle())
+        #expect(VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).takeNotice(for: "chat") == VoiceInputStop(reason: .backgrounded))
+    }
+
+    /// A controller whose notices go after 50 ms, in an app that stays active.
+    private static func controller() -> VoiceInputController {
+        VoiceInputController(noticeTimer: VoiceNoticeTimer(lifetime: .milliseconds(50), center: NotificationCenter(), appActive: { true }))
     }
 
     @Test func anEditTakesTheNoticeDownBeforeItsTime() async {

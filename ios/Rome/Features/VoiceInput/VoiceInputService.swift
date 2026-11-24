@@ -171,7 +171,8 @@ final class VoiceInputController {
 
     private(set) var state: State = .idle
     /// Why listening last stopped on its own; it goes away on the next edit
-    /// or send, or once it has been on screen for `VoiceNoticeTimer.lifetime`.
+    /// or send. A stop without a fault also goes once it has been on screen
+    /// for `VoiceNoticeTimer.lifetime`, or when the field leaves.
     private(set) var notice: VoiceInputStop?
     @ObservationIgnored private let noticeTimer: VoiceNoticeTimer
     /// The loudness of this listening, for the waveform; a new one each start.
@@ -226,8 +227,11 @@ final class VoiceInputController {
                     self?.show(insertion, before: before, after: after, text: text, handle: handle)
                 },
                 onDone: { [weak self] heard, stop in
-                    let said = self?.done(heard: heard, stop: stop, service: service, chat: chat, text: text, handle: handle) ?? stop
-                    if let chat { service.stopped(in: chat, said) }
+                    if let self {
+                        self.finished(heard: heard, stop: stop, service: service, chat: chat, text: text, handle: handle)
+                    } else if let chat {
+                        service.stopped(in: chat, stop?.notice(afterHearing: heard))
+                    }
                 }
             )
         )
@@ -259,12 +263,27 @@ final class VoiceInputController {
         stop()
     }
 
+    /// Listening ended: the last words go in the field, and the notice shown
+    /// is the one kept for the next launch, none when it says nothing.
+    func finished(heard: String, stop: VoiceInputStop?, service: VoiceInputService, chat: String?, text: Binding<String>, handle: ComposerTextHandle) {
+        let said = done(heard: heard, stop: stop, service: service, chat: chat, text: text, handle: handle)
+        if let chat { service.stopped(in: chat, said) }
+    }
+
     /// The field is going away with the chat: listening stops, the words stay
-    /// in the draft, and the chat says why when the guardian comes back.
-    /// A notice showing waits, unseen, until the field shows again.
+    /// in the draft, and the chat says why when the guardian comes back. A
+    /// notice that goes by itself counts as seen; a fault's shows again on
+    /// return, until an edit or send.
     func leave(service: VoiceInputService?, chat: String?) {
-        noticeTimer.fieldShown(false)
-        guard let dictation else { return }
+        guard let dictation else {
+            guard let notice else { return }
+            if notice.reason.endsWithoutFault {
+                dismissNotice(service: service, chat: chat)
+            } else if let service, let chat {
+                service.keep(notice, for: chat)
+            }
+            return
+        }
         let heard = dictation.heard
         sendWhenDone = nil
         dictation.cancel()
@@ -276,9 +295,9 @@ final class VoiceInputController {
         service.stopped(in: chat, stop)
     }
 
-    /// The field opened: a chat left while listening says why.
+    /// The field came on screen: a chat left while listening says why. Call
+    /// it only once the field shows, since a notice's clock starts here.
     func arrive(service: VoiceInputService?, chat: String?) {
-        noticeTimer.fieldShown(true)
         guard let service, let chat, let stop = service.takeNotice(for: chat) else { return }
         show(stop, service: service, chat: chat)
     }
@@ -297,7 +316,6 @@ final class VoiceInputController {
     }
 
     /// Puts the last words in the field, and returns the notice it shows.
-    @discardableResult
     private func done(heard: String, stop: VoiceInputStop?, service: VoiceInputService?, chat: String?, text: Binding<String>, handle: ComposerTextHandle) -> VoiceInputStop? {
         let send = sendWhenDone
         sendWhenDone = nil
@@ -324,7 +342,13 @@ final class VoiceInputController {
 
     private func show(_ stop: VoiceInputStop, service: VoiceInputService?, chat: String?) {
         notice = stop
-        noticeTimer.start { [weak self] in self?.dismissNotice(service: service, chat: chat) }
+        // A fault's notice may ask for something, such as allowing the
+        // microphone in Settings, so it stays until an edit or send.
+        if stop.reason.endsWithoutFault {
+            noticeTimer.start { [weak self] in self?.dismissNotice(service: service, chat: chat) }
+        } else {
+            noticeTimer.cancel()
+        }
         UIAccessibility.post(notification: .announcement, argument: stop.notice)
     }
 
@@ -371,10 +395,12 @@ final class VoiceInputController {
 }
 
 /// Takes a notice down once it has been on screen for `lifetime`. The clock
-/// runs only while the field shows and the app is active, and starts over on
-/// each return, so a notice that arrives in the background (listening ended
-/// as the app left) still shows when the guardian comes back, and goes soon
-/// after. It never stays up for hours over a field nobody is looking at.
+/// runs only while the app is active, and starts over on each return, so a
+/// notice that arrives in the background (listening ended as the app left)
+/// still shows when the guardian comes back, and goes soon after. UIKit's
+/// notifications, not the scene phase, which may miss a trip to the
+/// background (see `ios/AGENTS.md`). The field leaving takes its notice down
+/// at once (`VoiceInputController.leave`), so the clock never runs unseen.
 @MainActor
 final class VoiceNoticeTimer {
     static let lifetime: Duration = .seconds(7)
@@ -383,7 +409,6 @@ final class VoiceNoticeTimer {
     nonisolated(unsafe) private let center: NotificationCenter
     private let appActive: @MainActor () -> Bool
     private var expire: (() -> Void)?
-    private var shown = true
     private var active = false
     private var countdown: Task<Void, Never>?
     nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
@@ -416,17 +441,10 @@ final class VoiceNoticeTimer {
         observers = []
     }
 
-    /// The field left the screen, or came back, with the chat.
-    func fieldShown(_ shown: Bool) {
-        guard self.shown != shown else { return }
-        self.shown = shown
-        restart()
-    }
-
     private func restart() {
         countdown?.cancel()
         countdown = nil
-        guard expire != nil, shown, active else { return }
+        guard expire != nil, active else { return }
         countdown = Task { [weak self, lifetime] in
             try? await Task.sleep(for: lifetime)
             guard !Task.isCancelled, let self, let expire = self.expire else { return }
@@ -436,7 +454,9 @@ final class VoiceNoticeTimer {
     }
 
     private func observe() {
-        observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+        // Resigning active comes first on the way to the background, and alone
+        // under Notification Center or Control Center.
+        observers.append(center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.active = false
                 self?.restart()

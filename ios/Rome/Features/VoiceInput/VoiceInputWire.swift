@@ -53,6 +53,16 @@ enum VoiceInputStopReason: String, Sendable, Equatable {
     /// The app closed while listening; told on the next launch.
     case appClosed = "app-closed"
 
+    /// Listening ended because Rome or the guardian moved on, not after a
+    /// fault: the words heard are in the draft, and the notice only says why
+    /// listening is off, so it goes by itself.
+    var endsWithoutFault: Bool {
+        switch self {
+        case .backgrounded, .interrupted, .leftChat, .appClosed: true
+        default: false
+        }
+    }
+
     /// The notice the field shows, in the dashboard's words.
     var notice: String {
         switch self {
@@ -93,13 +103,11 @@ struct VoiceInputStop: Sendable, Equatable {
     }
 
     /// The notice to show after listening heard `heard`, or nil for none.
-    /// The app going to the background, another app taking the microphone
-    /// or leaving the chat ends listening without a fault, so with no words
-    /// heard nothing was lost and there is nothing to say.
+    /// A stop without a fault with no words heard lost nothing, so there is
+    /// nothing to say.
     func notice(afterHearing heard: String) -> VoiceInputStop? {
-        let quiet: Set<VoiceInputStopReason> = [.backgrounded, .interrupted, .leftChat]
         let nothingHeard = heard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return quiet.contains(reason) && nothingHeard ? nil : self
+        return reason.endsWithoutFault && nothingHeard ? nil : self
     }
 }
 
