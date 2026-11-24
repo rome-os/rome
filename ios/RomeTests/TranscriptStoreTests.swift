@@ -30,6 +30,20 @@ final class FakeBackend: RomeBackend {
     /// newest), as the server hands them out; a page missing fails.
     var servedPages: [String?: MessagePage] = [:]
 
+    var threadPages: [String: ThreadPage] = [:]
+    var threadReads: [(anchor: String, before: String?, after: String?, limit: Int)] = []
+    var threadError: APIError?
+    var duringThreadFetch: (() async -> Void)?
+
+    func threadPage(sessionId: String, anchor: String, before: String?, after: String?, limit: Int) async throws -> ThreadPage {
+        threadReads.append((anchor, before, after, limit))
+        if let threadError { throw threadError }
+        let page = threadPages[before.map { "before:\($0)" } ?? after.map { "after:\($0)" } ?? "open"]
+        if let duringThreadFetch { await duringThreadFetch() }
+        guard let page else { throw APIError.notFound }
+        return page
+    }
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         pageLimits.append(limit)
         if let messagesError { throw messagesError }
@@ -128,12 +142,41 @@ final class FakeBackend: RomeBackend {
 
     func archiveChat(_ id: String, stoppingWork: Bool) async throws {
         calls.append(stoppingWork ? "archive \(id) stopping work" : "archive \(id)")
+        if let chat = topicChats.first(where: { $0.id == id }) {
+            archivedRows.insert(ChatSession(id: id, name: chat.name, agentName: ChatSession.conciergeAgent, archivedAt: RomeDate.string(.now), activityAt: RomeDate.string(.now)), at: 0)
+        }
         topicChats.removeAll { $0.id == id }
     }
 
     func deleteChat(_ id: String, stoppingWork: Bool) async throws {
         calls.append(stoppingWork ? "delete \(id) stopping work" : "delete \(id)")
         topicChats.removeAll { $0.id == id }
+        archivedRows.removeAll { $0.id == id }
+    }
+
+    /// `GET /chat/sessions?status=archived`, as the server answers it:
+    /// every archived chat, task chats included. `archivedFetches` counts the reads.
+    var archivedRows: [ChatSession] = []
+    var archivedFetches = 0
+    var unarchiveFails = false
+
+    /// Runs inside the archived list's fetch, after the list is read and
+    /// before it answers: a change made here lands while the read is under way.
+    var duringArchivedFetch: (() async -> Void)?
+
+    func archivedTopicChats() async throws -> [ChatSession] {
+        archivedFetches += 1
+        let rows = archivedRows.filter(\.isArchivedTopicChat)
+        await duringArchivedFetch?()
+        return rows
+    }
+
+    func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws {
+        calls.append(movingFollowsBack ? "restore \(id) moving follows back" : "restore \(id)")
+        if unarchiveFails { throw APIError.network }
+        guard let row = archivedRows.first(where: { $0.id == id }) else { throw APIError.notFound }
+        archivedRows.removeAll { $0.id == id }
+        topicChats.append(ConciergeChat(id: id, name: row.name, main: false, unread: 0))
     }
 
     func chatWork(chatId: String) async throws -> ConciergeChatWork {
@@ -160,12 +203,14 @@ final class FakeBackend: RomeBackend {
         return try shareAnswer.get()
     }
 
-    /// The chats whose links were listed, in order.
-    var sharesListed: [String] = []
-    func chatShares(sessionId: String) async throws -> [ChatShareLink] {
-        sharesListed.append(sessionId)
+    /// How many times every link was listed.
+    var sharesListed = 0
+    func allShares() async throws -> [ChatShareLink] {
+        sharesListed += 1
+        if let sharesError { throw sharesError }
         return shareLinks
     }
+    var sharesError: APIError?
 
     /// Runs inside a revoke, before it answers.
     var duringRevoke: (() async -> Void)?
@@ -299,7 +344,65 @@ final class FakeBackend: RomeBackend {
         resolved.append(id)
     }
     func toolCalls(traceMessageId: String) async throws -> [ToolCall] { [] }
-    func aiTools() async throws -> AIToolsStatus { throw APIError.network }
+    /// What the AI status reads answer; nil fails them.
+    var aiStatus: AIToolsStatus?
+    var aiReads = 0
+    var deviceCode = DeviceLoginCode(userCode: "ABCD-1234", verificationUrl: "https://auth.example/device")
+    var deviceLoginCancels = 0
+    var answeredCards: [(sessionId: String, toolUseId: String, output: JSONValue)] = []
+    /// Set, a card's answer fails.
+    var answerFails = false
+    func aiTools() async throws -> AIToolsStatus {
+        aiReads += 1
+        guard let aiStatus else { throw APIError.network }
+        return aiStatus
+    }
+    func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus { try await aiTools() }
+    func startChatGPTDeviceLogin() async throws -> DeviceLoginCode { deviceCode }
+    func cancelChatGPTDeviceLogin() async { deviceLoginCancels += 1 }
+    func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws {
+        if answerFails { throw APIError.network }
+        answeredCards.append((sessionId, toolUseId, output))
+    }
+    /// The provider failure buttons sent, as (message id, switch body or nil for continue).
+    var failureCalls: [(messageId: String, change: JSONValue?)] = []
+    /// Set, a failure card's button fails with it.
+    var failureError: APIError?
+    /// Set, a switch answers that the option went stale and a fresh card was written.
+    var switchRefreshes = false
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws -> Bool {
+        if let failureError { throw failureError }
+        failureCalls.append((messageId, change))
+        return switchRefreshes
+    }
+    /// What the chat reads answer, and the Back to default calls made.
+    var chatSessionRead: ChatSession?
+    var sessionReads = 0
+    var followDefaultCalls: [String] = []
+    /// Set, the chat read waits here until the test lets it go.
+    var sessionReadGate: (() async -> Void)?
+    func chatSession(_ id: String) async throws -> ChatSession {
+        sessionReads += 1
+        await sessionReadGate?()
+        guard let chatSessionRead else { throw APIError.notFound }
+        return chatSessionRead
+    }
+    /// Set, Back to default fails.
+    var followDefaultFails = false
+    func followDefault(sessionId: String) async throws -> ChatSession {
+        followDefaultCalls.append(sessionId)
+        if followDefaultFails { throw APIError.network }
+        return ChatSession(id: sessionId, name: "", followsDefault: true)
+    }
+    /// The logouts and default changes sent, with their moveExisting.
+    var logOutCalls: [(account: AIAccount, moveExisting: Bool)] = []
+    var defaultCalls: [(provider: DefaultModelProvider, moveExisting: Bool)] = []
+    func logOut(_ account: AIAccount, moveExisting: Bool) async throws { logOutCalls.append((account, moveExisting)) }
+    func setDefaultProvider(_ provider: DefaultModelProvider, moveExisting: Bool) async throws { defaultCalls.append((provider, moveExisting)) }
+    func continueProviderFailure(messageId: String) async throws {
+        if let failureError { throw failureError }
+        failureCalls.append((messageId, nil))
+    }
     func setConciergeEnabled(_ enabled: Bool) async throws {}
     func search(_ query: String) async throws -> [SearchHit] { [] }
     var identity: Result<AccountIdentity?, Error> = .success(nil)

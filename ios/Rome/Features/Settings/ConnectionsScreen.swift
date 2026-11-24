@@ -99,7 +99,6 @@ struct ConnectionsScreen: View {
         .floatingTopBar { PageHeader(title: "Connections", inSheet: true) }
         .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .background(SwipeBackEnabler())
     }
 
     private func value(_ capability: any NodeCapability) -> String {
@@ -135,7 +134,7 @@ enum NodeStatusLine {
         case .online: return String(localized: "Online")
         case .connecting: return String(localized: "Connecting…")
         case .stopped(.superseded): return String(localized: "Replaced")
-        case .stopped(.revoked): return String(localized: "Revoked")
+        case .stopped(.revoked): return String(localized: "Removed from your account")
         case .off: return String(localized: "Offline")
         }
     }
@@ -187,7 +186,6 @@ struct ConnectionScreen: View {
         .floatingTopBar { PageHeader(title: "", inSheet: true) }
         .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .background(SwipeBackEnabler())
         .task(id: node.requestSerial) { await node.reloadRecent() }
     }
 
@@ -524,7 +522,6 @@ struct NodeRequestsScreen: View {
         .floatingTopBar { PageHeader(title: "Live reads", inSheet: true) }
         .secondaryPageBackground()
         .toolbar(.hidden, for: .navigationBar)
-        .background(SwipeBackEnabler())
         .task(id: node.requestSerial) { await node.reloadRecent() }
     }
 }

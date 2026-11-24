@@ -27,9 +27,23 @@ struct ChatHeaderBlur: View {
         return (statusShows ? ChatIdentity.statusHeight(for: dynamicTypeSize) : 0) - belowButtons
     }
 
+    /// UI tests launch with `-RomeUITestsNoHeaderBlur YES` to leave out the
+    /// blur: XCUITest counts its paused animators as animations still running,
+    /// so it never finds the app idle and waits 60 s before every tap. Debug
+    /// builds only; Release always draws the blur.
+    static let leftOutForUITests: Bool = {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "RomeUITestsNoHeaderBlur")
+        #else
+        return false
+        #endif
+    }()
+
     var body: some View {
         ZStack {
-            HeaderBlur()
+            if !Self.leftOutForUITests {
+                HeaderBlur()
+            }
             // A faint wash of the page under the clock only, so it reads over
             // any row. Dark has none: the black page would sink the blurred rows.
             // Eased, as the bands are, so its end shows no line.

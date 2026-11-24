@@ -29,7 +29,7 @@ describe("connect_account", () => {
   });
 
   it("asks for Settings in a message, and goes on, where no card shows", async () => {
-    const { tool, result } = await call("plain_text", { kind: "slack" });
+    const { tool, result } = await call("plain_text", { kind: "github" });
     expect(tool?.endsTurn).toBe(false);
     expect(result.content[0]!.text).toContain("Settings › Connections");
   });

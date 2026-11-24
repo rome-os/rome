@@ -73,7 +73,9 @@ describe("DeviceHost", () => {
   });
 
   it("stays connected, in a limited mode, while Computer use is off", async () => {
-    const { subject, gateway, limited, options } = host({ enabled: () => false });
+    const { subject, gateway, limited, options } = host({
+      enabled: () => false,
+    });
     subject.start();
     await settle();
     // Nothing that can run programs is connected, and the login shell's PATH is not needed.
@@ -148,7 +150,9 @@ describe("DeviceHost", () => {
     await settle();
     limited.emit({ type: "connection", status: "revoked" });
     limited.emit({ type: "connection", status: "stopped" });
-    limited.end(new Error("Authorization revoked. Explicit authorization is required."));
+    limited.end(
+      new Error("This device was removed from your account. Connect it again to add it back."),
+    );
     await settle();
     expect(options.onRevoked).toHaveBeenCalledTimes(1);
     expect(subject.status()).toEqual({ state: "off" });
@@ -175,6 +179,20 @@ describe("DeviceHost", () => {
       deviceId: credential.deviceSessionId,
       name: "RayBook",
     });
+  });
+
+  it("forwards the shared native computer-use host only when Computer use is enabled", async () => {
+    const computerUse = {} as Exclude<HostOptions["computerUse"], false | undefined>;
+    let enabled = false;
+    const { subject, gateway } = host({ computerUse, enabled: () => enabled });
+    await subject.start();
+    expect(gateway.calls).toHaveLength(0);
+    await subject.stop();
+
+    enabled = true;
+    await subject.start();
+    expect(gateway.calls[0]?.computerUse).toBe(computerUse);
+    await subject.stop();
   });
 
   it("records every remote request in the app's audit log", async () => {
@@ -227,7 +245,9 @@ describe("DeviceHost", () => {
     gateway.emit({ type: "connection", status: "revoked" });
     // The host then stops the connection, which reports "stopped" before it ends.
     gateway.emit({ type: "connection", status: "stopped" });
-    gateway.end(new Error("Authorization revoked. Explicit authorization is required."));
+    gateway.end(
+      new Error("This device was removed from your account. Connect it again to add it back."),
+    );
     await settle();
     expect(options.onRevoked).toHaveBeenCalledTimes(1);
     expect(subject.status()).toEqual({ state: "off" });

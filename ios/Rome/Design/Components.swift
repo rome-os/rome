@@ -158,6 +158,83 @@ struct PressScaleStyle: ButtonStyle {
     }
 }
 
+/// What covers the screen behind a half-height sheet: a plain dim, so the
+/// page stays faintly there around the sheet. It takes no touches; the
+/// sheet's own dismissal still gets a tap above it. Snapshot stand-ins draw
+/// it; a real sheet dims through `SheetDim`.
+struct SheetScrim: View {
+    var body: some View {
+        Palette.sheetScrim
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Dims the screen behind the sheet whose content it sits in, for a sheet
+/// the system leaves undimmed (a half-height one on iOS 26). The dim lives
+/// in the sheet's own container and moves with the sheet's transition, so it
+/// rises with the sheet, follows a swipe down and is gone when the sheet is.
+struct SheetDim: UIViewControllerRepresentable {
+    func makeUIViewController(context: Context) -> Controller { Controller() }
+    func updateUIViewController(_ controller: Controller, context: Context) {}
+
+    final class Controller: UIViewController {
+        private let dim: UIView = {
+            let view = UIView()
+            view.backgroundColor = UIColor(Palette.sheetScrim)
+            view.isUserInteractionEnabled = false
+            view.accessibilityElementsHidden = true
+            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            return view
+        }()
+
+        /// The controller the system presented: the top of this one's parents.
+        private var presented: UIViewController? {
+            var controller: UIViewController = self
+            while let parent = controller.parent { controller = parent }
+            return controller.presentingViewController == nil ? nil : controller
+        }
+
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            guard let presented, let container = presented.presentationController?.containerView else { return }
+            if dim.superview !== container {
+                dim.frame = container.bounds
+                dim.alpha = 0
+                container.insertSubview(dim, at: 0)
+            }
+            fade(to: 1, of: presented)
+        }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            // Something presented over the sheet leaves it, and its dim, up.
+            guard let presented, presented.isBeingDismissed else { return }
+            fade(to: 0, of: presented)
+        }
+
+        private func fade(to alpha: CGFloat, of presented: UIViewController) {
+            guard let coordinator = presented.transitionCoordinator else {
+                UIView.animate(withDuration: 0.25) { self.dim.alpha = alpha }
+                return
+            }
+            coordinator.animate(alongsideTransition: { _ in
+                self.dim.alpha = alpha
+            }, completion: { context in self.settle(after: context, of: presented) })
+        }
+
+        /// Where the dim ends once a transition is over: on while the sheet
+        /// is up, off once it is gone. Read from the transition, not from the
+        /// fade that asked, because a swipe down let go early runs two fades
+        /// on it, the one out and then the one back in.
+        private func settle(after context: UIViewControllerTransitionCoordinatorContext, of presented: UIViewController) {
+            let dismissal = context.viewController(forKey: .from) === presented
+            dim.alpha = dismissal == context.isCancelled ? 1 : 0
+        }
+    }
+}
+
 /// A row press: the background darkens instead of the content scaling.
 struct RowPressStyle: ButtonStyle {
     var pressed: Color = Palette.pressed
@@ -332,7 +409,8 @@ struct AlertGlyph: View {
 
 /// The capsule banner under the header: offline, session expired, first-open hint.
 struct TopBanner: View {
-    enum Kind { case warning, error, info }
+    /// `archived`: an archived chat, read only until it is restored.
+    enum Kind { case warning, error, info, archived }
 
     let kind: Kind
     let text: String
@@ -350,6 +428,8 @@ struct TopBanner: View {
                 AlertGlyph(size: 15)
             case .info:
                 Image(systemName: "arrow.left.arrow.right").romeFont(13, .semibold)
+            case .archived:
+                Image(systemName: "archivebox").romeFont(13, .semibold)
             }
             Text(text).romeFont(14, .medium)
             if let actionTitle, let action {
@@ -364,7 +444,7 @@ struct TopBanner: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 10)
                 .frame(height: 28)
-                .background(Palette.destructive, in: Capsule())
+                .background(kind == .archived ? Palette.primary : Palette.destructive, in: Capsule())
                 .buttonStyle(PressScaleStyle())
                 .disabled(busy)
                 .accessibilityValue(busy ? Text("Loading") : Text(verbatim: ""))
@@ -383,7 +463,7 @@ struct TopBanner: View {
         switch kind {
         case .warning: return Palette.warningText
         case .error: return Palette.destructive
-        case .info: return Palette.fg
+        case .info, .archived: return Palette.fg
         }
     }
 
@@ -391,7 +471,7 @@ struct TopBanner: View {
         switch kind {
         case .warning: return Palette.warnSoft
         case .error: return Palette.dangerSoft
-        case .info: return Palette.elevated.opacity(0.9)
+        case .info, .archived: return Palette.elevated.opacity(0.9)
         }
     }
 }

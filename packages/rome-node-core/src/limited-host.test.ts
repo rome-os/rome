@@ -118,6 +118,6 @@ describe("connectLimitedHost", () => {
     const { done } = run();
     await connected();
     options.onStatus?.("revoked");
-    await expect(done).rejects.toThrow("revoked");
+    await expect(done).rejects.toThrow("removed from your account");
   });
 });

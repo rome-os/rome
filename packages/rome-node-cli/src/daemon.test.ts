@@ -183,7 +183,6 @@ describe("standalone CLI daemon processes", () => {
     ]);
   });
   it.each([
-    [503, "revocation_pending"],
     [404, "device_not_found"],
     [400, "invalid_device_name"],
   ])("reports Cloud's %i %s as a structured failure", async (status, error) => {

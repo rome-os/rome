@@ -218,7 +218,11 @@
   "reply": {
     "action": "Reply",
     "dismiss": "Cancel reply",
-    "jump": "Go to the original message"
+    "jump": "Go to the original message",
+    "closeChain": "Close reply chain",
+    "loadingChain": "Loading reply chain",
+    "loadFailed": "Could not load the reply chain",
+    "retry": "Retry"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -451,6 +455,7 @@
   "composer": {
     "placeholderDefault": "How can I help you today?",
     "lockedByCard": "Answer the card above to continue.",
+    "placeholderInThread": "Message in thread",
     "placeholderWithUploads": "Add a message or send the uploaded files...",
     "hints": {
       "skill": "Type / to use a skill",
@@ -821,7 +826,7 @@
       "title": "Switch to {{provider}}?",
       "body": "This chat continues on {{provider}}, and the stopped turn picks up again.",
       "bodyCredits": "Every chat runs on Rome credits ({{balance}} left), and the stopped turn picks up again.",
-      "makeDefaultHelp": "Other chats that follow the default switch to {{provider}} on their next reply.",
+      "thisChatOnlyHelp": "Only this chat switches. Other chats stay where they are.",
       "moveExisting": "Move existing chats too",
       "moveExistingHelp": "Other chats switch to {{provider}} on their next reply.",
       "switch": "Switch",
@@ -858,20 +863,28 @@
     "edit": "Edit",
     "doneEditing": "Done",
     "filterLabel": "Show",
-    "noneOfType": "No outputs of this kind yet.",
+    "more": "More",
+    "moreChosen": "More: {{kind}}",
     "today": "Today",
     "earlier": "Earlier",
     "filters": {
       "all": "All",
       "document": "Documents",
+      "image": "Pictures",
       "spreadsheet": "Spreadsheets",
-      "page": "Pages"
+      "page": "Pages",
+      "audio": "Audio",
+      "video": "Videos",
+      "code": "Code",
+      "file": "Other"
     },
     "types": {
       "document": "Document",
       "spreadsheet": "Spreadsheet",
       "page": "Page",
       "image": "Picture",
+      "audio": "Audio",
+      "video": "Video",
       "code": "Code",
       "file": "File"
     },
@@ -900,5 +913,19 @@
     "untitled": "Task",
     "mainChat": "Main chat",
     "backTo": "Back to {{name}}"
+  },
+  "pinnedHint": {
+    "kept": "On {{provider}}",
+    "owner": "You picked {{model}}",
+    "backToDefault": "Back to default",
+    "romeCredits": "Rome credits",
+    "failed": "Could not change it. Try again.",
+    "confirm": {
+      "title": "Back to the default?",
+      "bodyKept": "This chat moves from {{from}} to {{to}}, your default, from its next reply.",
+      "bodyOwner": "This chat stops using {{model}} and follows your default, {{to}}, from its next reply.",
+      "bodyNoDefault": "This chat follows your default from its next reply.",
+      "cancel": "Cancel"
+    }
   }
 }

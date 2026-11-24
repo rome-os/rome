@@ -667,6 +667,12 @@ importers:
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
+    optionalDependencies:
+      '@rome-os/node-core-darwin-arm64':
+        specifier: workspace:*
+        version: link:../rome-node-core-darwin-arm64
+
+  packages/rome-node-core-darwin-arm64: {}
 
   packages/rome-node-ui:
     dependencies:

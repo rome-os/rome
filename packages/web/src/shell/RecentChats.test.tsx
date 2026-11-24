@@ -45,6 +45,11 @@ beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
 
+beforeEach(() => {
+  // Keep the dated fixtures inside the week shown by the topic list.
+  rs.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-07T12:00:00Z"));
+});
+
 afterEach(() => {
   cleanup();
   rs.useRealTimers();
@@ -2034,27 +2039,11 @@ describe("RecentChats", () => {
       expect(screen.queryByRole("region", { name: "Projects" })).toBeNull();
 
       await user.click(screen.getByRole("button", { name: "Actions for Old topic" }));
+      // An archived topic chat is renamed once it is unarchived.
       expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-        "Rename",
         "Unarchive chat",
         "Delete",
       ]);
-    });
-
-    it("shows a renamed archived topic chat under its new name", async () => {
-      localStorage.setItem("rome-recent-chats-status-filter", "archived");
-      const user = userEvent.setup();
-      renderRecentChats();
-      await within(conciergeSection()).findByRole("link", { name: "Old topic" });
-      await user.click(screen.getByRole("button", { name: "Actions for Old topic" }));
-      await user.click(screen.getByRole("menuitem", { name: "Rename" }));
-      const input = await screen.findByRole("textbox", { name: "Chat name" });
-      await user.clear(input);
-      await user.type(input, "Renamed topic{Enter}");
-      expect(
-        await within(conciergeSection()).findByRole("link", { name: "Renamed topic" }),
-      ).toBeTruthy();
-      expect(screen.queryByText("Old topic")).toBeNull();
     });
 
     it("shows the main chat and every topic chat under all", async () => {
@@ -2118,6 +2107,7 @@ describe("RecentChats", () => {
       projectName: "default",
       projectPath: "default",
     }));
+    topics[0].activityAt = "2026-06-01T00:00:00Z";
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.startsWith("/api/chat/sessions")) return Response.json(topics);
@@ -2139,7 +2129,9 @@ describe("RecentChats", () => {
     }) as typeof fetch);
     FakeWebSocket.instances = [];
     renderRecentChats("/chat/open-chat", fakeSocketLiveEventsClient());
-    await screen.findByRole("link", { name: "Topic 1" });
+    await screen.findByRole("link", { name: "Topic 2" });
+    expect(screen.queryByRole("link", { name: "Topic 1" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Older · 1" })).toBeTruthy();
     let socket!: FakeWebSocket;
     act(() => {
       socket = acceptLatestSocket();
@@ -2151,6 +2143,7 @@ describe("RecentChats", () => {
       ),
     ).toEqual([]);
 
+    topics[0].activityAt = new Date(Date.now()).toISOString();
     unread["topic-1"] = 2;
     act(() =>
       socket.receive({
@@ -2161,6 +2154,7 @@ describe("RecentChats", () => {
       }),
     );
     expect(await screen.findByRole("link", { name: "Topic 1, 2 unread messages" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Older/ })).toBeNull();
   });
 
   it("keeps the open topic chat in view when it is past the first page", async () => {

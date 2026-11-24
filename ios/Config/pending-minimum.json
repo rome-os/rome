@@ -1,3 +1,10 @@
 {
-  "entries": []
+  "entries": [
+    {
+      "tier": "background",
+      "reason": "Reply-chain focus reads the message thread endpoint.",
+      "pr": 2574,
+      "server": "#2574"
+    }
+  ]
 }

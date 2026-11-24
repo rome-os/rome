@@ -30,8 +30,8 @@ export interface ReplyDraft {
   sessionId: string | null;
   /** The message the reply quotes. */
   target: ReplyTarget | null;
-  /** Picks the reply and opens the reply bar with its quote. */
-  set: (target: ReplyTarget) => void;
+  /** Picks the reply and opens the reply bar with its quote. With `quiet` the composer does not take focus. */
+  set: (target: ReplyTarget, options?: { quiet?: boolean }) => void;
   /** Drops the reply. Answers the draft's change count after it, for `restore`. */
   clear: () => number;
   /**
@@ -42,8 +42,14 @@ export interface ReplyDraft {
    * picked.
    */
   restore: (target: ReplyTarget, since?: number) => void;
-  /** Goes to a quoted message: scrolls to it, loading older pages when it is not loaded yet. */
-  jump: (messageId: string) => void;
+  /**
+   * What pressing a quote does. `messageId` is the message quoted and `from`
+   * the one that carries the quote. Absent, as in a chain in focus, the quote
+   * is plain text.
+   */
+  jump?: (messageId: string, from: string) => void;
+  /** What the reply bar's × does. Defaults to `clear`. */
+  dismiss?: () => void;
 }
 
 /** The form fields that carry a reply to the server. */
@@ -70,11 +76,14 @@ export function useReplyDraftState({
   chatId,
   sessionId,
   jump,
+  onDismiss,
   focusComposer,
 }: {
   chatId: string | undefined;
   sessionId: string | null;
-  jump: (messageId: string) => void;
+  jump: (messageId: string, from: string) => void;
+  /** Runs after the reply bar's × drops the reply. */
+  onDismiss?: () => void;
   focusComposer: () => void;
 }): ReplyDraft {
   const [target, setTarget] = useState<ReplyTarget | null>(null);
@@ -91,10 +100,10 @@ export function useReplyDraftState({
 
   const focus = useCallback(() => requestAnimationFrame(() => focusRef.current()), []);
   const set = useCallback(
-    (next: ReplyTarget) => {
+    (next: ReplyTarget, options?: { quiet?: boolean }) => {
       changes.current += 1;
       setTarget(next);
-      focus();
+      if (!options?.quiet) focus();
     },
     [focus],
   );
@@ -103,6 +112,12 @@ export function useReplyDraftState({
     setTarget(null);
     return changes.current;
   }, []);
+  const dismissRef = useRef(onDismiss);
+  dismissRef.current = onDismiss;
+  const dismiss = useCallback(() => {
+    clear();
+    dismissRef.current?.();
+  }, [clear]);
   const restore = useCallback((next: ReplyTarget, since?: number) => {
     if (since !== undefined && since !== changes.current) return;
     changes.current += 1;
@@ -117,7 +132,8 @@ export function useReplyDraftState({
       clear,
       restore,
       jump,
+      dismiss,
     }),
-    [sessionId, target, set, clear, restore, jump],
+    [sessionId, target, set, clear, restore, jump, dismiss],
   );
 }

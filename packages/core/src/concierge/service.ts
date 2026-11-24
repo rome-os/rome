@@ -1,5 +1,6 @@
 import type { AgentPlan, SystemInputSource } from "@rome/api-types/trace-segments";
 import { automatedInputLabel } from "./automated-input.js";
+import type { ConnectionChat, ConnectionRecipient, ConnectionSaid } from "./connection-say.js";
 // Concierge: texting-style chats that hand work to task chats. One Concierge
 // talks in a main chat and in any topic chats its owner starts, all sharing one
 // memory, one list of follows and one task list (docs/domains/chats.md#concierge-chat,
@@ -30,6 +31,7 @@ import {
   isModelSelectionId,
   MODEL_SELECTIONS,
   providerOfDefault,
+  runsOnRomeCredits,
   selectionOfStrength,
   type DefaultProviders,
   type ModelStrength,
@@ -222,6 +224,7 @@ export interface ConciergeDeps {
     WebChatRepository,
     | "createSession"
     | "getSession"
+    | "chatOfSession"
     | "listSessions"
     | "updateSessionName"
     | "updateSessionLargeModelSelection"
@@ -252,9 +255,37 @@ export interface ConciergeDeps {
   approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved" | "findById">;
   messages: TaskChatMessages;
   sessionRepository: Pick<SessionRepository, "current">;
+  /** The agent that answers on a channel: the agent of the account the
+   *  channel is, as the inbox routes it. A chat on a connection stores no
+   *  agent of its own. Absent, a chat's stored agent is read. */
+  channelAgentOf?: (channel: string) => string | null | undefined;
+  /** Reacts to message `messageId` of a chat on a connection with `emoji`, as
+   *  the account. Rejects when the chat's platform takes no reaction. Absent,
+   *  no chat on a connection takes one. */
+  reactInChat?: (
+    chat: { channel: string; threadId: string },
+    messageId: string,
+    emoji: string,
+  ) => Promise<void>;
+  /** Says a message of turn `turnId` in a chat on a connection: past the
+   *  account's send gate, to the platform, recorded in the chat. Answers the
+   *  platform's key for it, or why it was not sent. Absent, nothing can be
+   *  said in a chat on a connection. */
+  sayInChat?: (
+    chat: ConnectionChat,
+    message: {
+      text: string;
+      replyTo?: string;
+      turnId: string;
+      place: "direct" | "group";
+      recipient: ConnectionRecipient;
+    },
+  ) => Promise<ConnectionSaid>;
   accounts: Pick<ModelAccounts, "read">;
   /** The default provider. Absent, none is set, and chats keep their models. */
-  defaults?: Pick<DefaultProviders, "current">;
+  defaults?: Pick<DefaultProviders, "current"> & Partial<Pick<DefaultProviders, "signedIn">>;
+  /** Whether a chat is held on a provider, off Rome credits. Absent, none is. */
+  held?: (chatId: string) => boolean;
   agentSessionManager: Pick<Sessions, "find">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
@@ -350,6 +381,8 @@ export class ConciergeService {
   private readonly handedOnPrompts = new Map<string, string[]>();
   /** What each Concierge turn said, by its parts, task and answered messages: a repeat is the same message. */
   private readonly saidByKey = new Map<string, Map<string, string>>();
+  /** Per chat on a connection, how many turns of Rome's own run there now. */
+  private readonly systemTurns = new Map<string, number>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
@@ -607,7 +640,38 @@ export class ConciergeService {
     owner: ConciergeOwner,
   ): Promise<string | null> {
     if (chatId && (await this.conciergeChat(chatId))) return chatId;
+    // A task started in a chat on one of Rome's connected accounts reports
+    // there while that chat is the Concierge's. Such a chat is the guardian's.
+    if (chatId && owner === GUARDIAN_OWNER && (await this.connectionChat(chatId))) return chatId;
     return this.findChatId(owner);
+  }
+
+  /**
+   * Chat `chatId` when it is a chat on one of Rome's connected accounts where
+   * the Concierge answers, such as a Discord or Slack DM, channel or thread:
+   * the channel it is on and the platform's id for it. Null for any other
+   * chat, and for one that is gone.
+   */
+  async connectionChat(
+    chatId: string,
+  ): Promise<{ id: string; channel: string; threadId: string } | null> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (
+      !chat ||
+      chat.type !== "channel" ||
+      // A dashboard chat is a channel row too, on the webchat channel.
+      chat.sourceChannel === "webchat" ||
+      chat.archivedAt ||
+      !chat.sourceChannel ||
+      !chat.sourceThreadId
+    ) {
+      return null;
+    }
+    // A chat on a connection records no agent: the account's agent answers it,
+    // as the inbox routes each message.
+    const agent = this.deps.channelAgentOf?.(chat.sourceChannel) ?? chat.agentName;
+    if (!agent || !isConciergeAgent(agent)) return null;
+    return { id: chat.id, channel: chat.sourceChannel, threadId: chat.sourceThreadId };
   }
 
   /** An owner's Concierge chats: the main chat first, then the topic chats, oldest first. */
@@ -671,7 +735,10 @@ export class ConciergeService {
         storedChatId(mainChatIdOf(owner)),
         owner,
       )) ?? [];
-    const rows = (await this.deps.tasks.repo.listForConciergeChat(chatId, owner, new Date())).map(
+    // Every row since the start, ended or not: a row's ended mark can be
+    // stale, and the read keeps activity to the second, so the status below
+    // is what tells an open task from an ended one.
+    const rows = (await this.deps.tasks.repo.listForConciergeChat(chatId, owner, new Date(0))).map(
       (task) => task.row,
     );
     const status = await this.deps.tasks.statusOf(rows);
@@ -892,9 +959,12 @@ export class ConciergeService {
   }
 
   /**
-   * A chat whose model hit a limit of its own moves to another model of the
-   * same provider, with a note. It never moves to another provider, and never
-   * off a model its owner picked: that chat shows a card instead.
+   * A chat whose model hit a limit of its own runs its next turn on another
+   * model of the same provider, with a note, and only that turn: the turn
+   * after it tries its own model again. The other model is never stored as the
+   * chat's. It never moves to another provider, and never off a model its
+   * owner picked: that chat shows a card instead. Null when it cannot move,
+   * as when the chat has no live session to run the turn in.
    */
   async switchForModelLimit(chatId: string, failure: AgentTurnFailure, agentName?: string) {
     const chat = await this.deps.webchatRepo.getSession(chatId);
@@ -908,9 +978,16 @@ export class ConciergeService {
         agentName ?? (isConciergeChat(chat) ? CONCIERGE_AGENT_ID : (chat.agentName ?? "main")),
       channelThreadKey: webchatSessionKey(chatId),
     };
+    const session = this.deps.agentSessionManager.find(key);
+    if (!session?.selectModelForOneTurn) return null;
     // On Rome credits every chat runs its model's strength on Codex, whatever
-    // provider its stored model names. A login takes the default off them.
-    const credits = this.deps.defaults?.current() === "rome_credits";
+    // provider its stored model names. They run only while no account is
+    // logged in, and never for a chat held on the guardian's own account.
+    const current = this.deps.defaults?.current() ?? null;
+    const credits =
+      (this.deps.defaults?.signedIn
+        ? runsOnRomeCredits(current, this.deps.defaults.signedIn())
+        : current === "rome_credits") && this.deps.held?.(chatId) !== true;
     const stored = resolveWebchatLargeModelSelection(chat.largeModelSelection);
     const selected = credits && stored?.providerId !== "openai" ? null : stored;
     const runtime = selected
@@ -942,13 +1019,9 @@ export class ConciergeService {
       (this.leftModels.get(modelKey(MODEL_SELECTIONS[target.selectionId].model)) ?? 0) > Date.now()
     )
       return null;
-    await this.deps.webchatRepo.updateSessionLargeModelSelection(
-      chatId,
-      target.selectionId,
-      chat.largeModelSelectionBy === "kept" ? "kept" : "auto",
-    );
-    // The move keeps a kept chat kept.
-    this.deps.agentSessionManager.find(key)?.selectModel(target.selectionId);
+    // Nothing is stored: the session's pin keeps its own model, so the turn
+    // after the swap resolves that one again.
+    session.selectModelForOneTurn(target.selectionId);
     this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);
     await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [
       {
@@ -958,6 +1031,7 @@ export class ConciergeService {
         reason: "model_limit",
         fromModel,
         model: MODEL_SELECTIONS[target.selectionId].model,
+        oneTurn: true,
       },
     ]);
     return { from, to: target.provider, selectionId: target.selectionId };
@@ -1085,6 +1159,8 @@ export class ConciergeService {
     prompt: string,
     options: SystemTurnOptions = {},
   ): Promise<"completed" | "stopped" | "interrupted" | "failed"> {
+    const onConnection = await this.connectionChat(chatId);
+    if (onConnection) return this.connectionTurnOutcome(onConnection, prompt, options);
     const params = await this.resolveTurn({
       agentName: CONCIERGE_AGENT_ID,
       sessionId: "",
@@ -1109,6 +1185,52 @@ export class ConciergeService {
   }
 
   /**
+   * A system turn, such as a task's report, in a chat on a connected account.
+   * It runs in the chat's own session, and its text is the reply, sent to the
+   * same DM, channel or thread. A chat that never had a turn has no session,
+   * and nothing runs.
+   */
+  private async connectionTurnOutcome(
+    chat: { id: string; channel: string; threadId: string },
+    prompt: string,
+    options: SystemTurnOptions,
+  ): Promise<"completed" | "stopped" | "interrupted" | "failed"> {
+    const stored = await this.deps.sessionRepository.current(
+      `${chat.channel}:${chat.threadId}`,
+      CONCIERGE_AGENT_ID,
+    );
+    if (!stored) return "failed";
+    const taskIds = options.taskIds ?? [];
+    const reportedTask = await this.reportedTaskOf(taskIds, chat.id);
+    const params: ResolvedTurn = {
+      agentName: CONCIERGE_AGENT_ID,
+      sessionId: stored.id,
+      channel: chat.channel,
+      threadId: chat.threadId,
+      prompt,
+      ...(options.taskIds ? { taskIds: options.taskIds } : {}),
+      ...(reportedTask ? { reportedTask } : {}),
+    };
+    // A turn Rome runs there, such as a task's report or a reminder, has no
+    // sender: while it runs, its tools act for the guardian, who started the
+    // task. No other turn without a sender does.
+    this.systemTurns.set(chat.id, (this.systemTurns.get(chat.id) ?? 0) + 1);
+    let outcome: "completed" | "stopped" | "interrupted" | "failed";
+    try {
+      outcome = (await this.deps.runBackendTurn(params, options)) ?? "failed";
+    } finally {
+      const left = (this.systemTurns.get(chat.id) ?? 1) - 1;
+      if (left > 0) this.systemTurns.set(chat.id, left);
+      else this.systemTurns.delete(chat.id);
+    }
+    if (outcome === "interrupted") {
+      const carried = await this.ownTasks(taskIds, chat.id);
+      if (carried.length > 0) this.carriedReports.set(chat.id, carried);
+    }
+    return outcome;
+  }
+
+  /**
    * Task `taskId`'s result was said, as by `say` naming it. Saying it settles
    * nothing: the news stays until a report that carried it runs to its end.
    * Only a Stop of that report turn reads it, so the result is not shown as
@@ -1121,6 +1243,63 @@ export class ConciergeService {
   /** The message Concierge turn `turnId` said as `key` already, if it did. */
   saidInTurn(turnId: string, key: string): string | undefined {
     return this.saidByKey.get(turnId)?.get(key);
+  }
+
+  /**
+   * The events of a Concierge turn the guardian's message started in a chat on
+   * a connection, as the dashboard's route takes a Concierge chat's turn: it
+   * takes the message, and its working tool calls show it working
+   * (docs/domains/chats.md#status). Null for any other turn.
+   */
+  observeConnectionTurn(turn: {
+    agentName: string;
+    turnId: string;
+    channel?: string;
+    chatId?: string;
+    messageKey?: string;
+    senderBondLevel?: string;
+  }): {
+    event(msg: { type: string; tool?: string; id?: string; toolUseId?: string }): void;
+    end(): void;
+  } | null {
+    const { chatId, messageKey, turnId } = turn;
+    if (
+      !isConciergeAgent(turn.agentName) ||
+      !turn.channel ||
+      turn.channel === "webchat" ||
+      !chatId ||
+      !messageKey ||
+      turn.senderBondLevel !== "guardian"
+    ) {
+      return null;
+    }
+    this.messageStatus.taken(chatId, messageKey, turnId);
+    void this.deps.tasks.repo.takeMessage(turnId, { chatId, messageKey }).catch((error: unknown) =>
+      log.warn("failed to record the message a turn took", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return {
+      event: (msg) => {
+        if (msg.type === "tool_use" && msg.tool && msg.id) {
+          void this.messageStatus.toolCalled(chatId, turnId, msg.tool, msg.id);
+        } else if (msg.type === "tool_result" && msg.toolUseId) {
+          this.messageStatus.toolEnded(chatId, turnId, msg.toolUseId);
+        }
+      },
+      end: () => {},
+    };
+  }
+
+  /** Whether Rome runs a turn of its own, such as a report, in chat `chatId` on a connection now. */
+  runsSystemTurnIn(chatId: string): boolean {
+    return this.systemTurns.has(chatId);
+  }
+
+  /** Whether Concierge turn `turnId` has said any message yet. */
+  saidAnyInTurn(turnId: string): boolean {
+    return (this.saidByKey.get(turnId)?.size ?? 0) > 0;
   }
 
   /** Concierge turn `turnId` said message `id` as `key`; forgotten once the turn ends. */

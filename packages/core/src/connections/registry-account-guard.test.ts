@@ -2,9 +2,9 @@
 // Connection of the service already holds, directly and through a SetupManager
 // setup. Observed through the ledger and the setup state.
 
+import { linkGuardianOnConnect } from "../people/guardian-mapping.js";
 import { describe, expect, it } from "@rstest/core";
 import { DrizzlePeopleRepository } from "../people/infrastructure/drizzle-people-repository.js";
-import type { PeopleRepository } from "../people/model/people-repository.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";
 import { createTestDb, testAccountLinkOf } from "../test/db.js";
 import { platformOf } from "@rome/api-types/platform";
@@ -294,7 +294,6 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
     try {
       const manager = new SetupManager({
         registry,
-        peopleRepo: {} as PeopleRepository,
       });
       const first = await registry.connect(SERVICE);
       const firstSetup = await manager.start(
@@ -335,7 +334,7 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
     };
     const { registry, close } = setupRegistry(pasteBot);
     try {
-      const manager = new SetupManager({ registry, peopleRepo: {} as PeopleRepository });
+      const manager = new SetupManager({ registry });
       const first = await registry.connect(SERVICE);
       const connect = await manager.start(
         { connectionKind: SERVICE, connectionId: first.id },
@@ -370,14 +369,14 @@ describe("ConnectionRegistry.giveGrant account guard", () => {
       return {
         credential: credentialFor(token!),
         profile: { botId },
-        guardianChannelUserId: botId,
+        connectedBy: { id: botId },
       };
     };
     const { db, registry, close } = setupRegistry(pairOwn);
     try {
       const people = new DrizzlePeopleRepository(db);
       await people.createWithId("guardian", { displayName: "Guardian", bondLevel: "guardian" });
-      const manager = new SetupManager({ registry, peopleRepo: people });
+      const manager = new SetupManager({ registry, participant: linkGuardianOnConnect(people) });
       const first = await registry.connect(SERVICE);
       const connect = await manager.start(
         { connectionKind: SERVICE, connectionId: first.id },

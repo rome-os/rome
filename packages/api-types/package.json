@@ -42,6 +42,7 @@
     "./persons": "./src/persons.ts",
     "./devices": "./src/devices.ts",
     "./voice-input": "./src/voice-input.ts",
+    "./voice-conversation": "./src/voice-conversation.ts",
     "./node-console": "./src/node-console.ts",
     "./live-events": "./src/live-events.ts",
     "./app-connection-access": "./src/app-connection-access.ts",

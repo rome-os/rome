@@ -46,8 +46,11 @@ import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.
 import { openQuestion } from "./transcript.js";
 import { automatedSource } from "../webchat/automated-source.js";
 import { replyQuoteOf } from "../webchat/reply-quote.js";
-import { ownerOf } from "../webchat/owner.js";
-import { conciergePlaceSetup } from "./on-connection.js";
+import { GUARDIAN_OWNER, ownerOf } from "../webchat/owner.js";
+import { getConfiguredInstanceOrigin } from "../instance/rome-cloud-origin.js";
+import { CONNECTION_TOOLS, conciergePlaceSetup } from "./on-connection.js";
+import { partsText } from "../chats/storage/message.js";
+import type { BondLevel } from "@rome-os/app-runtime";
 import {
   parseTaskSchedule,
   SCHEDULE_REPORTS,
@@ -225,18 +228,81 @@ export async function buildConciergeTools(
   context: SessionToolContext,
 ): Promise<RomeTool[]> {
   if (!isConciergeAgent(context.agentName) || context.isSubagent) return [];
-  // On a connection the Concierge answers in plain text: every tool here needs
-  // a Concierge chat on the dashboard.
-  if (conciergePlaceSetup(context.agentName, context.getThreadContext())) return [];
   const { webchatRepo, messages, tasks } = service.deps;
+  // On a connection the Concierge answers in plain text, and keeps only the
+  // tools for tasks (CONNECTION_TOOLS): a task started there reports to
+  // that chat. Every other tool needs a Concierge chat on the dashboard.
+  const onConnection = conciergePlaceSetup(context.agentName, context.getThreadContext()) !== null;
+  // The connection chat this session is in, for a turn whose thread does not
+  // name it, as a task's report does.
+  let sessionChatId: string | null = null;
+  if (onConnection) {
+    try {
+      sessionChatId = (await webchatRepo.chatOfSession(context.sessionId))?.id ?? null;
+    } catch {
+      // A turn whose thread names its chat needs no lookup.
+    }
+  }
 
   const currentTurn = (): { chatId: string; turnId: string } => {
     const turnId = context.getTurnId();
     const thread = context.getThreadContext();
+    if (onConnection) {
+      const chatId = thread?.romeSessionId ?? sessionChatId;
+      if (!turnId || !chatId) throw new Error("This tool works only during a turn in this chat");
+      return { chatId, turnId };
+    }
     if (!turnId || thread?.channel !== "webchat" || !thread.threadId) {
       throw new Error("This tool works only during a turn in a Concierge chat");
     }
     return { chatId: thread.threadId, turnId };
+  };
+
+  // A reaction in a chat on a connection: one emoji on the guardian's
+  // message, sent to the platform. It cannot be taken back there, and no
+  // message status follows it.
+  // The keys of this turn's messages in a chat on a connection, oldest first.
+  // The model sees no message ids there, so a reply and a reaction name one
+  // of these, never an id it guessed.
+  const turnMessageKeys = async (chatId: string, turnId: string) =>
+    (await webchatRepo.getTurnChatMessages(chatId, turnId))
+      .filter((row) => row.role === "user")
+      .map((row) => row.id);
+
+  const reactOnConnection = async (args: Record<string, unknown>) => {
+    const { chatId, turnId } = currentTurn();
+    const { emoji } = args;
+    if (emoji === null) throw new Error("A reaction here cannot be taken back.");
+    if (!(CONCIERGE_REACTIONS as readonly unknown[]).includes(emoji)) {
+      throw new Error(`emoji must be one of ${CONCIERGE_REACTIONS.join(" ")}`);
+    }
+    const chat = await service.connectionChat(chatId);
+    if (!chat) throw new Error("This chat takes no reaction.");
+    const keys = await turnMessageKeys(chatId, turnId);
+    const asked = optionalString(args, "message_id");
+    const target = asked && keys.includes(asked) ? asked : keys.at(-1);
+    if (!target) throw new Error("No message of the guardian's in this turn to react to.");
+    if (!service.deps.reactInChat) throw new Error("This chat takes no reaction.");
+    // A message shows one emoji for its whole life, as on the dashboard: one
+    // that showed working takes no reaction (docs/domains/chats.md#reaction).
+    if (await tasks.repo.showedWorking(chatId, target)) {
+      return "Not reacted: this message already showed 👀 working, and a message shows one emoji. Answer it in one short line with say instead.";
+    }
+    await service.deps.reactInChat(chat, target, emoji as string);
+    // The reaction is how the turn handles the message: it shows working never.
+    await service.messageStatus.reactedTo(chatId, target);
+    return `Reacted ${emoji as string}.`;
+  };
+
+  // A task's link as this chat shows it: a chip on the dashboard, and the
+  // dashboard's public address on a connection, where a chip means nothing.
+  // With no public address, only the title: a loopback address opens nowhere
+  // on the guardian's phone.
+  const linkOf = (title: string, chatId: string) => {
+    if (!onConnection) return taskLink(title, chatId);
+    const plain = title.replace(/[[\]]/g, "");
+    const origin = getConfiguredInstanceOrigin();
+    return origin ? `[${plain}](${origin}/chat/${encodeURIComponent(chatId)})` : plain;
   };
 
   const taskProjectPath = async (project: string | undefined) =>
@@ -251,6 +317,8 @@ export async function buildConciergeTools(
   // chat and row the tools reach is that owner's.
   const ownerHere = async () => {
     const { chatId } = currentTurn();
+    // A chat on a connection is the guardian's Concierge's.
+    if (onConnection) return GUARDIAN_OWNER;
     const owner = await service.ownerOfChat(chatId);
     if (owner === null) throw new Error(`No Concierge chat ${chatId}`);
     return owner;
@@ -601,14 +669,77 @@ export async function buildConciergeTools(
     return guardian.length === 1 ? guardian[0] : undefined;
   };
 
+  // The bond level of the turn's sender on a connection. A turn Rome runs
+  // there, such as a task's report or a reminder, has none and acts for the
+  // guardian, who started the task. Any other turn without one is anyone's.
+  const bondHere = (chatId: string): string => {
+    const bond = context.getThreadContext()?.senderBondLevel;
+    if (bond !== undefined) return bond;
+    return service.runsSystemTurnIn(chatId) ? "guardian" : "other";
+  };
+
+  // The turn's message on a connection, which a message said there answers:
+  // its sender as People knows them, and what they said.
+  const connectionRecipient = async (chatId: string, turnId: string) => {
+    const thread = context.getThreadContext();
+    const asked = (await webchatRepo.getTurnChatMessages(chatId, turnId))
+      .filter((row) => row.role === "user")
+      .at(-1);
+    let said = asked?.content ?? "";
+    try {
+      const parts: unknown = JSON.parse(said);
+      if (Array.isArray(parts)) said = partsText(parts);
+    } catch {
+      // Plain text already.
+    }
+    return {
+      bondLevel: bondHere(chatId) as BondLevel,
+      shownName: thread?.channelUserId ?? "someone",
+      said,
+    };
+  };
+
+  // Says `text` in this chat on a connection, through the account's send
+  // gate to the platform. Answers the platform's key, or why it was not sent.
+  // The turn's first message quotes the message it answers, as the inbox
+  // quoted every reply.
+  const sayOnConnection = async (text: string, replyTo: string | undefined) => {
+    const { chatId, turnId } = currentTurn();
+    const chat = await service.connectionChat(chatId);
+    if (!chat || !service.deps.sayInChat) throw new Error("Nothing can be said in this chat.");
+    const quoting =
+      replyTo ??
+      (service.saidAnyInTurn(turnId) ? undefined : (await turnMessageKeys(chatId, turnId)).at(-1));
+    return service.deps.sayInChat(chat, {
+      text,
+      ...(quoting ? { replyTo: quoting } : {}),
+      turnId,
+      place: context.getThreadContext()?.threadType === "private" ? "direct" : "group",
+      recipient: await connectionRecipient(chatId, turnId),
+    });
+  };
+
   const say = async (
     text: string,
     format: "bubble" | "long",
     isPrivate: boolean,
     replyTo?: string,
-  ) => {
+  ): Promise<{ id: string } | { notSent: string }> => {
     const { chatId, turnId } = currentTurn();
-    const target = replyTo ? await requireReplyTarget(replyTo) : undefined;
+    // Others may read a chat on a connection, and no lock screen hides a
+    // message there: nothing said there is private.
+    if (onConnection && isPrivate) {
+      throw new Error(
+        "Nothing here is private: others may read this chat. Say it without the secret, or tell the guardian to ask you for it on the dashboard.",
+      );
+    }
+    // On a connection the model sees no message ids: a replyTo that names
+    // none of the chat's quotes the turn's message instead of failing.
+    const target = replyTo
+      ? onConnection
+        ? ((await webchatRepo.getReplyTarget(chatId, replyTo)) ?? undefined)
+        : await requireReplyTarget(replyTo)
+      : undefined;
     const parts: Parameters<typeof webchatRepo.addBackendMessage>[2] = [
       { type: "text", content: text, ...(format === "long" ? { format } : {}) },
     ];
@@ -616,8 +747,17 @@ export async function buildConciergeTools(
     // message can ring the guardian's phone, so the repeat is the same message.
     const key = sayKey(JSON.stringify(parts), replyTo);
     const repeated = service.saidInTurn(turnId, key);
-    if (repeated) return repeated;
-    const id = await addMessage(parts, target);
+    if (repeated) return { id: repeated };
+    // Only where the message goes differs: the dashboard chat, or the
+    // platform the chat on a connection is on.
+    let id: string;
+    if (onConnection) {
+      const result = await sayOnConnection(text, target?.id);
+      if ("notSent" in result) return result;
+      id = result.sent;
+    } else {
+      id = await addMessage(parts, target);
+    }
     service.keepSaid(turnId, key, id);
     // A reply to a task's start message tells that task's result.
     const taskId = target ? await taskStartedAt(target.id) : undefined;
@@ -625,9 +765,10 @@ export async function buildConciergeTools(
       service.noteSaid(taskId);
       await writeStatus("settle", () => tasks.resultSaid(taskId));
     }
-    said(chatId, turnId, text, isPrivate);
+    // A chat on a connection rings no phone: the platform tells its readers.
+    if (!onConnection) said(chatId, turnId, text, isPrivate);
     await settleAnswered(target?.id, taskId);
-    return id;
+    return { id };
   };
 
   // A message answers the guardian message of this turn that it replies to,
@@ -813,13 +954,15 @@ export async function buildConciergeTools(
     return id;
   };
 
-  return [
+  const tools: RomeTool[] = [
     {
       name: "say",
-      description:
-        "Send the guardian one message. This is the only way the guardian hears you: text you write outside this tool is private. " +
-        "One call is one message. Use format bubble (default) for a short chat line, and long for one long message with content the guardian asked for. " +
-        "Every message can show on the guardian's phone lock screen: set private for one that holds a code, password, token or other secret, and the phone shows a fixed line instead.",
+      description: onConnection
+        ? "Send one message to this chat. This is the only way anyone here hears you: text you write outside this tool is private. " +
+          "One call is one message. Others may read this chat: nothing here is private, and private is refused."
+        : "Send the guardian one message. This is the only way the guardian hears you: text you write outside this tool is private. " +
+          "One call is one message. Use format bubble (default) for a short chat line, and long for one long message with content the guardian asked for. " +
+          "Every message can show on the guardian's phone lock screen: set private for one that holds a code, password, token or other secret, and the phone shows a fixed line instead.",
       inputSchema: {
         type: "object",
         required: ["text"],
@@ -840,40 +983,57 @@ export async function buildConciergeTools(
       },
       handler: (input) =>
         runTool("say", input, async (args) => {
-          const messageId = await say(
+          const said = await say(
             requireString(args, "text"),
             args.format === "long" ? "long" : "bubble",
             args.private === true,
             optionalString(args, "replyTo"),
           );
+          if ("notSent" in said) return { sent: false, note: said.notSent };
           return {
-            sent: "The guardian sees it. Call say again only for a new message.",
-            messageId,
+            sent: onConnection
+              ? "Sent to this chat. Call say again only for a new message."
+              : "The guardian sees it. Call say again only for a new message.",
+            messageId: said.id,
           };
         }),
     },
     {
       name: "react",
-      description:
-        "React to one guardian message with an emoji, or clear its reaction. A reaction never rings the phone and never answers the message. A message holds one reaction; a new one replaces it, and it stays until you change it.",
-      inputSchema: {
-        type: "object",
-        required: ["emoji"],
-        properties: {
-          emoji: {
-            type: ["string", "null"],
-            enum: [...CONCIERGE_REACTIONS, null],
-            description: "The reaction, or null to clear the message's reaction.",
+      description: onConnection
+        ? "React to the guardian's message of this turn with an emoji. It cannot be taken back here."
+        : "React to one guardian message with an emoji, or clear its reaction. A reaction never rings the phone and never answers the message. A message holds one reaction; a new one replaces it, and it stays until you change it.",
+      inputSchema: onConnection
+        ? {
+            type: "object",
+            required: ["emoji"],
+            properties: {
+              emoji: {
+                type: "string",
+                enum: [...CONCIERGE_REACTIONS],
+                description: "The reaction.",
+              },
+            },
+          }
+        : {
+            type: "object",
+            required: ["emoji"],
+            properties: {
+              emoji: {
+                type: ["string", "null"],
+                enum: [...CONCIERGE_REACTIONS, null],
+                description: "The reaction, or null to clear the message's reaction.",
+              },
+              message_id: {
+                type: "string",
+                description:
+                  "The message_id of the guardian message, from its <chat_thread> line. Leave it out when this turn holds one guardian message: it reacts to that one. Required when the turn carries several.",
+              },
+            },
           },
-          message_id: {
-            type: "string",
-            description:
-              "The message_id of the guardian message, from its <chat_thread> line. Leave it out when this turn holds one guardian message: it reacts to that one. Required when the turn carries several.",
-          },
-        },
-      },
       handler: (input) =>
         runTool("react", input, async (args) => {
+          if (onConnection) return reactOnConnection(args);
           const { chatId } = currentTurn();
           // Only a Concierge chat, the main chat or a topic chat, takes a reaction.
           if (!(await service.conciergeChat(chatId))) {
@@ -980,13 +1140,16 @@ export async function buildConciergeTools(
           if (schedule && !service.deps.schedules)
             throw new Error("Rome cannot schedule tasks here");
           // Settled before the chat starts, so a refusal leaves nothing running.
-          const sourceMessageId = await sourceMessageForTask(
-            messageId,
-            optionalString(args, "answers"),
-          );
+          // A chat on a connection keeps no dashboard message for the task to
+          // point to.
+          const sourceMessageId = onConnection
+            ? undefined
+            : await sourceMessageForTask(messageId, optionalString(args, "answers"));
           // The guardian message the task is for, if one can tell. Checked
           // before anything starts.
-          const prompt = await promptFor(optionalString(args, "answers"), sourceMessageId);
+          const prompt = onConnection
+            ? undefined
+            : await promptFor(optionalString(args, "answers"), sourceMessageId);
           const { chatId: conciergeChatId, turnId } = currentTurn();
           // A retry may rename the task: a start counts as failed before by
           // its title or its brief.
@@ -1084,7 +1247,7 @@ export async function buildConciergeTools(
             );
           }
           await nameChat();
-          const link = taskLink(title, chatId);
+          const link = linkOf(title, chatId);
           if (schedule) {
             const view = await service.deps.schedules?.of(chatId);
             return {
@@ -1129,7 +1292,9 @@ export async function buildConciergeTools(
           // once the task has taken it, so the result replies to this request
           // and not to the first one. Checked before anything is sent, so a
           // bad id sends nothing.
-          const relayed = await relayedMessage(optionalString(args, "answers"));
+          const relayed = onConnection
+            ? undefined
+            : await relayedMessage(optionalString(args, "answers"));
           // New work for a task the guardian or you stopped takes it up again.
           if (task) await tasks.repo.resume(task.id);
           // A scheduled task's runs are no work for one message: it links and moves none.
@@ -1376,6 +1541,9 @@ export async function buildConciergeTools(
             .map((task, index) =>
               compactTask(task, task.status, args.details === true, schedules[index]),
             )
+            .map((task) =>
+              onConnection ? { ...task, link: linkOf(task.title, task.chatId) } : task,
+            )
             .sort((a, b) => a.chatId.localeCompare(b.chatId));
           const conciergeChats =
             wanted || onlyHere
@@ -1502,10 +1670,22 @@ export async function buildConciergeTools(
           const wanted = requireString(args, "service");
           const { chatId, turnId } = currentTurn();
           const { connectors } = await service.following.list(await ownerHere());
-          const connector = connectors.find((entry) => entry.service === wanted);
+          // An agent may name a service as the guardian reads it: "slack" for
+          // the entry labelled Slack, whose service is slack_app. Only a label
+          // one service carries names it.
+          const named = connectors.filter(
+            (entry) => entry.label.toLowerCase() === wanted.toLowerCase(),
+          );
+          const connector =
+            connectors.find((entry) => entry.service === wanted) ??
+            (named.length === 1 ? named[0] : undefined);
           if (!connector) {
             throw new Error(
-              `No service ${wanted}. Use core:concierge_following_list for the service names.`,
+              named.length > 0
+                ? `No service ${wanted}. Services labelled ${named[0].label}: ${named
+                    .map((entry) => `${entry.service} (${entry.state ?? "not connected"})`)
+                    .join(", ")}. Pass one of those.`
+                : `No service ${wanted}. Use core:concierge_following_list for the service names.`,
             );
           }
           if (connector.state === "working") {
@@ -1551,4 +1731,31 @@ export async function buildConciergeTools(
         }),
     },
   ];
+  if (!onConnection) return tools;
+  // On a connection, a reaction and the task tools act for the guardian. A
+  // message from anyone else may not use them; a turn Rome runs there, such as
+  // a task's report, may. Anyone's turn may say something.
+  const othersRefused = () => bondHere(currentTurn().chatId) !== "guardian";
+  return tools
+    .filter((tool) => (CONNECTION_TOOLS as readonly string[]).includes(tool.name))
+    .map(
+      (tool): RomeTool =>
+        tool.name === "say"
+          ? tool
+          : {
+              ...tool,
+              handler: async (input, call) =>
+                othersRefused()
+                  ? {
+                      content: [
+                        {
+                          type: "text",
+                          text: "Only the guardian can react or start or change tasks here. Answer with say.",
+                        },
+                      ],
+                      isError: true,
+                    }
+                  : tool.handler(input, call),
+            },
+    );
 }

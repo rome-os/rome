@@ -143,9 +143,11 @@ import {
 } from "../../concierge/automated-input.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../agent/index.js";
-import { MessageWriting, messageWritingModeOf } from "./message-writing.js";
+import { MessageWriting, messageWritingModeOf } from "../../core/message-writing.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { EMPTY_WORKSPACE_CONTEXT } from "../../core/sticky-headers.js";
+import { type ReplyTurn, SPOKEN_TURN_NOTE } from "../../voice-conversation/conversation.js";
+import { gatherDelivered } from "../../voice-conversation/delivered-reply.js";
 import type {
   BackendEmitOptions,
   BackendSessionTask,
@@ -212,6 +214,13 @@ const TURN_FEEDBACK_QUOTE_MAX_LENGTH = 4000;
 /** Turns per message page when a request pages without naming `limit`. */
 const MESSAGE_PAGE_DEFAULT_LIMIT = 20;
 const MESSAGE_PAGE_MAX_LIMIT = 100;
+const PAGE_LIMIT_ERROR = `limit must be an integer from 1 to ${MESSAGE_PAGE_MAX_LIMIT}`;
+
+/** A page's `limit` query, the default when absent, null when out of range. */
+function parsePageLimit(raw: string | undefined): number | null {
+  const limit = raw === undefined ? MESSAGE_PAGE_DEFAULT_LIMIT : Number.parseInt(raw, 10);
+  return Number.isInteger(limit) && limit >= 1 && limit <= MESSAGE_PAGE_MAX_LIMIT ? limit : null;
+}
 
 /** Flatten the ambient session actor into audit-log attributes so the
  * session-lifecycle events answer "who did this" the same way
@@ -1118,6 +1127,17 @@ export interface WebchatRuntime {
   openSession(chatId: string): Promise<string>;
   /** Sends `text` into the chat as the guardian's own message, as their composer does. Throws the route's error. */
   sendAsGuardian(chatId: string, text: string): Promise<void>;
+  /**
+   * Sends what the guardian said aloud in a voice conversation as their message,
+   * marked spoken, ending any turn the chat is running. Resolves with the reply:
+   * the turn that answers it, or, for an agent whose text is private, the
+   * messages that turn adds to the chat. Throws the route's error, and also for
+   * a chat the guardian may not open or a send that started no turn. Once
+   * `signal` aborts, it lets go of what it gathered and rejects.
+   */
+  sendSpoken(chatId: string, text: string, signal?: AbortSignal): Promise<ReplyTurn>;
+  /** Whether `sendSpoken` would take a turn for `chatId`: one the guardian may open. */
+  canSendSpoken(chatId: string): Promise<boolean>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
   /**
@@ -1171,6 +1191,16 @@ function withinBudget<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 }
 
 export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: WebchatRuntime } {
+  // A chat as the APIs show it, with whether it follows the default provider.
+  const sessionResponse = (
+    session: Parameters<typeof toWebchatSessionResponse>[0],
+    messageCount: number,
+  ) =>
+    toWebchatSessionResponse(
+      session,
+      messageCount,
+      deps.chatProviders?.heldProvider(webchatSessionKey(session.id)),
+    );
   const activeStreams = new Map<string, ActiveWebchatStream[]>();
   /**
    * secondary index for direct lookup by turnId. Populated when a
@@ -1896,11 +1926,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const messages = await deps.webchatRepo.getMessages(sessionId);
       return c.json(await enrichStoredMessages(sessionId, messages));
     }
-    const limit =
-      limitParam === undefined ? MESSAGE_PAGE_DEFAULT_LIMIT : Number.parseInt(limitParam, 10);
-    if (!Number.isInteger(limit) || limit < 1 || limit > MESSAGE_PAGE_MAX_LIMIT) {
-      return c.json({ error: `limit must be an integer from 1 to ${MESSAGE_PAGE_MAX_LIMIT}` }, 400);
-    }
+    const limit = parsePageLimit(limitParam);
+    if (limit === null) return c.json({ error: PAGE_LIMIT_ERROR }, 400);
     const before = beforeParam === undefined ? null : decodeMessageCursor(beforeParam);
     if (beforeParam !== undefined && !before)
       return c.json({ error: "Invalid before cursor" }, 400);
@@ -2869,7 +2896,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       sessions.map((session) => {
         const running = isSessionRunning(session.id);
         return {
-          ...toWebchatSessionResponse(session, session.messageCount),
+          ...sessionResponse(session, session.messageCount),
           running,
           // A new turn's trace is written a moment after it starts, so until
           // then the newest trace is the previous turn's. Running wins.
@@ -2927,7 +2954,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
     return c.json(
       matches.map((match) => ({
-        session: toWebchatSessionResponse(match.session, match.session.messageCount),
+        session: sessionResponse(match.session, match.session.messageCount),
         message: {
           id: match.message.id,
           role: match.message.role,
@@ -3143,7 +3170,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       deviceFolder: deviceFolder !== null,
       ...(await sessionActorLogAttributes()),
     });
-    return answer(toWebchatSessionResponse(createdSession, 0));
+    return answer(sessionResponse(createdSession, 0));
   };
 
   app.post("/chat/sessions", async (c) => {
@@ -3182,7 +3209,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     await deps.webchatRepo.updateSessionProject(sessionId, project.name, project.path);
     return c.json(
-      toWebchatSessionResponse(
+      sessionResponse(
         { ...session, projectName: project.name, projectPath: project.path },
         messageCount,
       ),
@@ -3220,7 +3247,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         ? await deps.concierge?.deps.tasks.repo.getWithChat(sessionId)
         : null;
     return c.json({
-      ...toWebchatSessionResponse(session, messageCount),
+      ...sessionResponse(session, messageCount),
       model: runtimeSession?.model ?? null,
       reasoningEffort: runtimeSession?.reasoningEffort ?? null,
       ...(task
@@ -3266,6 +3293,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // goes with the chat in the delete's own transaction.
     if (deps.concierge) await deps.concierge.endTaskChat(sessionId, "deleted");
     else await deps.webchatRepo.deleteSession(sessionId);
+    // A held conversation goes with its chat.
+    await deps.chatProviders?.release(sessionId);
     // Told after the delete, as an archive is, so the activity reads the
     // chat's finished rows as the main chat's.
     if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo, true);
@@ -3316,7 +3345,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse(session, messageCount));
+    return c.json(sessionResponse(session, messageCount));
   });
 
   // The checks pending in a chat, which its owner can cancel there.
@@ -3366,7 +3395,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse(session, messageCount));
+    return c.json(sessionResponse(session, messageCount));
   });
 
   // The model picker of an open chat. The pick is stored on the chat and the
@@ -3400,15 +3429,36 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "The model selector is turned off" }, 409);
     }
     const selection = resolveWebchatLargeModelSelection(requested);
-    await deps.webchatRepo.updateSessionLargeModelSelection(
-      sessionId,
-      selection?.id ?? null,
-      "owner",
-    );
+    // One transition with the chat's hold: Auto lets a held conversation go,
+    // and a pick on another provider takes the hold there.
+    if (deps.chatProviders) await deps.chatProviders.pick(sessionId, selection?.id ?? null);
+    else {
+      await deps.webchatRepo.updateSessionLargeModelSelection(
+        sessionId,
+        selection?.id ?? null,
+        "owner",
+      );
+    }
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse(session, messageCount));
+    return c.json(sessionResponse(session, messageCount));
+  });
+
+  // "Back to default": a chat pinned to a model, kept by a card or a change of
+  // the default, or picked by its owner, follows the default provider again
+  // from its next turn, at the strength it runs now.
+  app.post("/chat/sessions/:id/model/follow-default", async (c) => {
+    const sessionId = c.req.param("id");
+    // A fork chat the guardian can keep talking to is held as any chat is.
+    const lookup = await getContinuableSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    if (!deps.chatProviders) return c.json({ error: "Not available" }, 404);
+    await deps.chatProviders.follow(sessionId);
+    const session = await deps.webchatRepo.getSession(sessionId);
+    if (!session) return c.json({ error: "Session not found" }, 404);
+    const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
+    return c.json(sessionResponse(session, messageCount));
   });
 
   app.patch("/chat/sessions/:id/name", async (c) => {
@@ -3439,7 +3489,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     await deps.webchatRepo.updateSessionName(sessionId, name);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
-    return c.json(toWebchatSessionResponse({ ...session, name }, messageCount));
+    return c.json(sessionResponse({ ...session, name }, messageCount));
   });
 
   app.get("/chat/sessions/:id/layout", async (c) => {
@@ -3533,6 +3583,31 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     );
   });
 
+  // Every live link of the signed-in person's chats, across all of them, for
+  // one list of their links. A visitor sees only their own; someone not
+  // signed in sees none.
+  app.get("/chat/shares", async (c) => {
+    const shares = await deps.webchatRepo.listSharedChatsByOwner(await callerOwner());
+    return c.json(
+      shares.map((s) => ({
+        id: s.id,
+        title: s.title,
+        url: `/share/${s.id}`,
+        createdAt: s.createdAt.toISOString(),
+        chatId: s.sessionId,
+        // The main Chat is labeled Chat, as every client shows it, not by
+        // the name it was created with.
+        chatName: isMainConciergeChat({
+          id: s.sessionId,
+          agentName: s.chatAgentName,
+          ownerKey: s.chatOwnerKey,
+        })
+          ? "Chat"
+          : s.chatName,
+      })),
+    );
+  });
+
   app.delete("/chat/shares/:shareId", async (c) => {
     const shareId = c.req.param("shareId");
     const revoked = await deps.webchatRepo.revokeSharedChat(shareId);
@@ -3547,6 +3622,37 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // Only a top-level session has a layout; GET /layout 404s for the rest.
     return respondWithSessionMessages(c, sessionId, {
       withLayout: lookup.session.type === "webchat",
+    });
+  });
+
+  // A reply chain around a message, or before or after one of its messages
+  // (docs/domains/chats.md#chat-thread). Under /chat/sessions/:id, so
+  // privateChatGate applies.
+  app.get("/chat/sessions/:id/messages/:messageId/thread", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getStoredWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const before = c.req.query("before");
+    const after = c.req.query("after");
+    if (before !== undefined && after !== undefined) {
+      return c.json({ error: "before and after cannot be given together" }, 400);
+    }
+    const limit = parsePageLimit(c.req.query("limit"));
+    if (limit === null) return c.json({ error: PAGE_LIMIT_ERROR }, 400);
+    const page = await deps.webchatRepo.getThreadPage(sessionId, c.req.param("messageId"), {
+      limit,
+      ...(before === undefined ? {} : { before }),
+      ...(after === undefined ? {} : { after }),
+    });
+    if ("error" in page) {
+      return page.error === "not_in_thread"
+        ? c.json({ error: "The cursor is in another thread", code: page.error }, 400)
+        : c.json({ error: "Message not found", code: page.error }, 404);
+    }
+    return c.json({
+      messages: await enrichStoredMessages(sessionId, page.rows),
+      hasOlder: page.hasOlder,
+      hasNewer: page.hasNewer,
     });
   });
 
@@ -4047,6 +4153,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
      * turn only; never persisted.
      */
     workspace?: WorkspaceContextSnapshot;
+    /**
+     * The guardian said this aloud in a voice conversation. Adds a line to the
+     * model's prompt for this turn only, asking for a short spoken answer. It
+     * is never persisted. Rome's voice conversation sets it.
+     */
+    spoken?: boolean;
     /** How the input treats a running turn. See `InputPriority`. */
     priority?: unknown;
     /**
@@ -4128,6 +4240,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       askingDeviceId?: string;
       taskActor?: SessionActor;
       taskInput?: TaskInputClaim;
+      /** Gets the turn this input starts or joins, once the input is submitted. */
+      onTurn?: (turn: Promise<AgentTurnHandle>) => void;
     } = {},
   ): Promise<RouteAnswer> => {
     // A Concierge turn's timing starts when the owner's send reaches Rome.
@@ -4476,7 +4590,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : modelPrompt;
     // The quote rides this input's own prompt, so a steered or queued input
     // keeps it.
-    const repliedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
+    const quotedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
+    const repliedPrompt =
+      body.spoken === true ? `${SPOKEN_TURN_NOTE}\n\n${quotedPrompt}` : quotedPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
     // user message so the cached fixed part of the system prompt stays stable.
     // The session leaves out a block that did not change, so the input after
@@ -4561,11 +4677,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       largeModelSelection =
         (await deps.webchatRepo.getSession(sessionId))?.largeModelSelection ?? null;
     }
-    // A branch has no stored selection: it continues the model thread
-    // `persistForkThread` saved, on whatever model that thread pinned.
+    // A branch continues the model thread `persistForkThread` saved, on the
+    // model that thread pinned, unless it stores one of its own: kept by a
+    // change of the default, or Rome's strength after Back to default. A
+    // model the first message names does not apply to a branch.
     const modelSelection =
       session.parentSessionId !== null
-        ? null
+        ? resolveStoredModelSelection(largeModelSelection)
         : await resolveSessionModelSelectionForTurn(
             {
               id: sessionId,
@@ -5339,6 +5457,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       : agentSess.submit(input, options);
     // The turn this input started gets its stream here, and so does one a
     // queued input starts later. A turn it was folded or steered into has one.
+    said.onTurn?.(receipt.turn);
     const attached = receipt.turn.then((handle) => {
       if (attachedTurns.has(handle.id)) return undefined;
       attachedTurns.add(handle.id);
@@ -5639,6 +5758,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
   };
 
+  // Why a spoken turn may not go into `chatId`, or null when it may.
+  // The guardian's socket reaches the chats the guardian's dashboard opens, as the routes' gate allows.
+  const spokenRefusal = async (chatId: string): Promise<string | null> =>
+    (await canOpenChat((id) => deps.webchatRepo.getSession(id), chatId, "guardian"))
+      ? null
+      : "Session not found";
+
   const runtime: WebchatRuntime = {
     activeStreams,
     async flushAll(): Promise<void> {
@@ -5758,6 +5884,57 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       } finally {
         opened.release();
       }
+    },
+    canSendSpoken: async (chatId) => (await spokenRefusal(chatId)) === null,
+    async sendSpoken(chatId, text, signal) {
+      const refusal = await spokenRefusal(chatId);
+      if (refusal) throw new Error(refusal);
+      // An agent whose text is private answers with the messages its tools add,
+      // so they are gathered from before the send, to miss none.
+      const session = await deps.webchatRepo.getSession(chatId);
+      const policy = resolveAgentPolicy(
+        agentPolicySource(deps.agentLoader, session?.agentName ?? "main"),
+      );
+      const delivered =
+        policy.finalText === "private"
+          ? gatherDelivered(chatId, (listener) => deps.webchatRepo.onMessageInserted(listener))
+          : null;
+      const started: { turn?: Promise<AgentTurnHandle> } = {};
+      try {
+        const sent = await handleChatSend(
+          chatId,
+          { inputId: randomUUID(), text, spoken: true, priority: "now" },
+          { onTurn: (turn) => (started.turn = turn) },
+        );
+        if (sent.status >= 400) throw new Error(routeError(sent));
+        // A send whose agent could not be opened records a failed turn and submits none.
+        if (!started.turn) throw new Error("No turn started");
+      } catch (err) {
+        delivered?.stop();
+        throw err;
+      }
+      const reply: Promise<ReplyTurn> = delivered
+        ? started.turn.then(
+            // The turn's stream finishes once it has stored the cards it writes.
+            (turn) => delivered.of(turn, async () => streamsByTurnId.get(turn.id)?.onFinish),
+            (err: unknown) => {
+              delivered.stop();
+              throw err;
+            },
+          )
+        : started.turn;
+      if (!signal) return reply;
+      // A queued input can be cancelled, and then its turn never comes: once the
+      // conversation stops waiting, the messages gathered for it are let go.
+      return new Promise<ReplyTurn>((resolve, reject) => {
+        const leave = () => {
+          delivered?.stop();
+          reject(new Error("The conversation no longer waits for this turn"));
+        };
+        if (signal.aborted) return leave();
+        signal.addEventListener("abort", leave, { once: true });
+        reply.then(resolve, reject).finally(() => signal.removeEventListener("abort", leave));
+      });
     },
     async sendAsGuardian(chatId, text) {
       const inputId = randomUUID();

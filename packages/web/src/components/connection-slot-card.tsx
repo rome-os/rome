@@ -80,6 +80,8 @@ export interface ConnectionSlotCardProps {
   connectedSubtitle?: ReactNode;
   /** The right-aligned primary action (Disconnect / Reconnect), if any. */
   action?: ReactNode;
+  /** Leaves the copy title and bullets out, for a card whose own body says it. */
+  plain?: boolean;
   /** The service-specific connect ceremony (controls + inline instructions). */
   children?: ReactNode;
 }
@@ -93,6 +95,7 @@ export function ConnectionSlotCard({
   identityTitle,
   connectedSubtitle,
   action,
+  plain = false,
   children,
 }: ConnectionSlotCardProps) {
   const { t } = useTranslation("settings");
@@ -104,7 +107,7 @@ export function ConnectionSlotCard({
   // yields the title to it; otherwise the copy title. A bare card drops the
   // unconnected title — the dialog header already names the service.
   const copyTitle = copy.title ? t(copy.title.key, copy.title.params) : null;
-  const title = identityTitle ?? (bare && !connected ? null : copyTitle);
+  const title = identityTitle ?? (plain || (bare && !connected) ? null : copyTitle);
 
   // The setup subtitle ("Sign in with GitHub", "Create the account with @BotFather") is
   // the slot's descriptor in a framed multi-slot card. A bare card drops it too:
@@ -139,7 +142,7 @@ export function ConnectionSlotCard({
         </div>
       )}
 
-      {copy.bullets.length > 0 && (
+      {!plain && copy.bullets.length > 0 && (
         <div className="space-y-2 text-ui text-foreground">
           <p>{t(`connections.headings.${headingRole}`)}</p>
           <ul className="list-disc space-y-2 pl-5">

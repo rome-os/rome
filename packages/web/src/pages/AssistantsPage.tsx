@@ -213,6 +213,7 @@ function AssistantChat({
 
       <div
         ref={scrollRef}
+        data-chat-scroller
         className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pt-12 scroll-pt-12"
       >
         <div className="flex-1">

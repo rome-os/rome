@@ -47,6 +47,8 @@ export interface DeviceHostOptions {
   onNotification?: HostOptions["onNotification"];
   /** Every remote request is recorded here before it runs. */
   audit: HostOptions["audit"];
+  /** The native executor shared with the standalone Node host. */
+  computerUse?: HostOptions["computerUse"];
   connect?: (options: HostOptions) => Promise<void>;
   /** The connection used while Computer use is off. It answers and runs nothing. */
   connectLimited?: (options: LimitedHostOptions) => Promise<void>;
@@ -64,9 +66,8 @@ class SignInRequired extends Error {
  * The sign-in and the device are one record in Rome Cloud: revoking the device
  * signs the app out, and signing out disconnects the device.
  *
- * With Computer use on, the user's Rome can run programs here. With it off,
- * the connection stays but is limited: it answers system.info, refuses
- * everything else, and runs nothing. Notifications arrive either way.
+ * With Computer use off, the connection only answers system.info.
+ * Notifications arrive in either mode.
  */
 export class DeviceHost {
   private running: {
@@ -119,7 +120,6 @@ export class DeviceHost {
     }
     const deviceId = credential.deviceSessionId;
     const computerUse = this.options.enabled();
-    // Only Computer use runs programs, which is what the login shell's PATH is for.
     if (computerUse) {
       this.prepared ??= (this.options.prepare?.() ?? Promise.resolve()).catch((err) => {
         log.warn(`Preparing this computer for Rome failed (${String(err)})`);
@@ -177,7 +177,11 @@ export class DeviceHost {
       },
     };
     try {
-      if (computerUse) await (this.options.connect ?? connectHost)(shared);
+      if (computerUse)
+        await (this.options.connect ?? connectHost)({
+          ...shared,
+          ...(this.options.computerUse ? { computerUse: this.options.computerUse } : {}),
+        });
       else await (this.options.connectLimited ?? connectLimitedHost)(shared);
     } catch (err) {
       if (signal.aborted) return;

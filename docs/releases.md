@@ -98,7 +98,7 @@ Only the release job writes to the repository, and it does not see the update fe
 
 ## npm packages (via release-please)
 
-Seven workspace packages are managed for npm publication via [release-please](https://github.com/googleapis/release-please):
+Eight workspace packages are managed for npm publication via [release-please](https://github.com/googleapis/release-please):
 
 - `@rome-os/app-runtime` (`packages/app-runtime-sdk/`)
 - `@rome-os/app-web-sdk` (`packages/app-web-sdk/`)
@@ -107,6 +107,7 @@ Seven workspace packages are managed for npm publication via [release-please](ht
 - `@rome-os/rome-web-components` (`packages/web-content/`) — internal web content components shared by Rome surfaces
 - `@rome-os/node` (`packages/rome-node-cli/`) — the standalone device CLI
 - `@rome-os/node-core` (`packages/rome-node-core/`) — the device library and shared caller daemon
+- `@rome-os/node-core-darwin-arm64` (`packages/rome-node-core-darwin-arm64/`) — optional Apple Silicon macOS native computer-use helper (version-linked with `@rome-os/node-core`)
 
 The SDKs and `@rome-os/ui` are supported public packages. `@rome-os/libs` and
 `@rome-os/rome-web-components` will be published so Rome and Rome Cloud can
@@ -127,7 +128,8 @@ Releases are driven by **Conventional Commits**, not by hand-authored changeset 
   "packages/lib":             { "package-name": "@rome-os/libs" },
   "packages/web-content":     { "package-name": "@rome-os/rome-web-components" },
   "packages/rome-node-cli":       { "package-name": "@rome-os/node" },
-  "packages/rome-node-core":      { "package-name": "@rome-os/node-core" }
+  "packages/rome-node-core":      { "package-name": "@rome-os/node-core", "component": "node-core" },
+  "packages/rome-node-core-darwin-arm64": { "package-name": "@rome-os/node-core-darwin-arm64", "component": "node-core-darwin-arm64" }
 }
 ```
 
@@ -149,7 +151,7 @@ Commit messages drive both the changelog and the version bump. The release workf
 
 The pre-1.0 column reflects our config (`bump-minor-pre-major: true`, `bump-patch-for-minor-pre-major: true`). Once a package cuts `1.0.0`, drop those flags for that entry to get standard semver.
 
-All seven packages are still under `0.x.y` today, so the practical rules are:
+All eight packages are still under `0.x.y` today, so the practical rules are:
 
 - Removed export, changed signature, behavior change consumers must adapt to → `feat!:` or include `BREAKING CHANGE:` in the body → minor bump.
 - New API or backwards-compatible additive change → `feat:` → patch bump.
@@ -162,7 +164,7 @@ All seven packages are still under `0.x.y` today, so the practical rules are:
 2. If the change touches any path configured in `release-please-config.json`, pick the right type so the version bump reflects observable impact. Use `feat!:` (or `BREAKING CHANGE:` in the body) for breakage even pre-1.0 — it is still the loudest signal in the changelog.
 3. If the change does not touch a releasable package's path, no special handling needed — release-please ignores it.
 
-The title format is enforced: CI's `lint` job runs `scripts/check-pr-title.sh` on every PR open/edit, so a non-conventional title fails a check instead of landing on `main` as a commit release-please cannot read. It validates the shape (`<type>[(<scope>)][!]: <subject>`, lower-case type and scope) against the standard type set — it does not judge whether you picked the *right* type for the change, or whether the subject reads well.
+The title format is enforced: the `PR title` workflow runs `scripts/check-pr-title.sh` on every PR open/edit, so a non-conventional title fails a check instead of landing on `main` as a commit release-please cannot read. It validates the shape (`<type>[(<scope>)][!]: <subject>`, lower-case type and scope) against the standard type set — it does not judge whether you picked the *right* type for the change, or whether the subject reads well.
 
 The subject is optional on a normal title (`chore:` passes), but **required whenever `!` is present**. release-please's parser reports a bare `feat!:` as non-breaking while reporting `feat!: subject` as breaking, so a subject-less breaking title would quietly downgrade a minor bump to a patch. Run it locally before pushing:
 
@@ -231,11 +233,11 @@ reusable workflow calls are authorized against the caller workflow, so
 - `.github/workflows/sdk-publish.yml` — Reusable implementation called by `release.yml`. Do not run it directly.
 - `.github/workflows/desktop-build.yml` and `.github/workflows/desktop-publish-updates.yml` — Mac app build, update feed, and GitHub release. See [Mac app](#mac-app).
 - `scripts/check-publish-targets.test.mjs` (`pnpm test:release:targets`, part of `test:unit:rest`) — Holds the three package lists together: the `all` dispatch target, the dispatch menu, and `release-please-config.json`. It also asserts every released package declares `repository`.
-- The `lint` job in `.github/workflows/ci.yml` + `scripts/check-pr-title.sh` — PR-time gate on the Conventional Commit title that becomes the squash commit. It is the job's first step, ahead of the toolchain install, so a bad title reports in seconds. Read the note below before making it a required check.
+- `.github/workflows/pr-title.yml` + `scripts/check-pr-title.sh` — PR-time gate on the Conventional Commit title that becomes the squash commit. It is its own workflow, the only one that reruns when a PR is edited, so fixing a title does not rerun the full CI. Read the note below before making it a required check.
 
 ### Before requiring any check on `main`
 
 Workflows do not start automatically for pull requests opened by the built-in `GITHUB_TOKEN`. Runs on release-please's own PR are created in the `action_required` state and wait for a maintainer to approve them — visible on the release branch today, where `CI` runs alternate between `action_required` and `success` depending on whether someone clicked through. Nothing is permanently unsatisfiable, but every required context becomes a manual approval step on every release PR, and `main` sets `enforce_admins: true`, so there is no admin bypass when someone forgets.
 
-To restore automatic runs, pass a GitHub App installation token (or a PAT) as `token:` to `googleapis/release-please-action` in `release.yml` — PRs it opens then trigger workflows like any other. Do that first if you do not want the approval step, then add `lint` — and whatever else should gate merges — to the required status checks.
+To restore automatic runs, pass a GitHub App installation token (or a PAT) as `token:` to `googleapis/release-please-action` in `release.yml` — PRs it opens then trigger workflows like any other. Do that first if you do not want the approval step, then add `Validate PR title`, `lint` and whatever else should gate merges to the required status checks.
 - `packages/<pkg>/CHANGELOG.md` — Generated and appended-to by release-please. Do not edit by hand. Release-please reconciles entries from commits.

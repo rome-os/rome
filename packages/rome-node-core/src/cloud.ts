@@ -5,12 +5,10 @@ const messages: Record<string, string> = {
   invalid_device_session: "Device authorization is invalid.",
   device_not_found: "No device with this ID exists in the account.",
   invalid_device_name: "Use a name of 1 to 80 characters without control characters.",
-  revocation_pending:
-    "The device is revoked. Rome Cloud deletes it after the Gateway confirms the revocation. Remove it again later.",
 };
 
 /** Error codes that Cloud returns for device management requests. */
-const deviceErrors = new Set(["device_not_found", "invalid_device_name", "revocation_pending"]);
+const deviceErrors = new Set(["device_not_found", "invalid_device_name"]);
 
 export class CloudError extends Error {
   constructor(readonly code: string) {

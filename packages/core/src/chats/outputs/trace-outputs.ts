@@ -333,16 +333,32 @@ export function outputsInReply(
   startedAt?: Date,
 ): OutputFound[] {
   const found = new Map<string, OutputFound>();
-  // `[label](href)` or `[label](<href>)`, an image's `![label](href)` too.
-  const link = /\[(?:\\.|[^\]\\])*\]\(\s*(?:<([^>\n]+)>|([^)\s]+))/g;
-  for (const match of reply.matchAll(link)) {
-    const path = localPath(match[1] ?? match[2], scope.projectsRoot);
+  for (const match of reply.matchAll(MARKDOWN_LINK)) {
+    const path = localPath(match[2] ?? match[3], scope.projectsRoot);
     if (path && !found.has(path) && producible(path, scope, startedAt)) {
       found.set(path, writtenFile(`reply:${traceId}:${path}`, path));
     }
   }
   return [...found.values()];
 }
+
+/**
+ * A Markdown link: `[label](href)`, `[label](<href>)`, or `[label](href with
+ * spaces)` as an agent writes it against the rule, with an optional `"…"`,
+ * `'…'` or `(…)` title, an image's `![label](href)` too. A bare href may hold
+ * balanced parentheses. Groups: the label with its brackets, the bracketed
+ * href, the bare href, the title.
+ */
+const MARKDOWN_LINK = new RegExp(
+  // The label, then `(` and any blanks.
+  String.raw`(!?\[(?:\\.|[^\]\\])*\])\([ \t]*` +
+    // A bracketed href, or a bare one that starts and ends with a non-blank,
+    // so no run of blanks can be split between its parts.
+    String.raw`(?:<([^>\n]+)>|((?:[^()\s]|\([^()\n]*\))(?:(?:[^()\n]|\([^()\n]*\))*?(?:[^()\s]|\([^()\n]*\)))?))` +
+    // A title, whose quotes or parentheses may hold escaped ones.
+    String.raw`([ \t]+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\((?:\\.|[^()\\\n])*\)))?[ \t]*\)`,
+  "g",
+);
 
 /** The file a link's `href` points at on this machine, or null for anything else. */
 function localPath(href: string, projectsRoot: string): string | null {

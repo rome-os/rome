@@ -115,7 +115,9 @@ import { AppTurnMiddleware } from "../app-host/app-turn-middleware.js";
 import type {
   AgentTurnFinishedEvent,
   AgentTurnStartedEvent,
+  ChatId,
   ProviderSessionResetPolicy,
+  ThreadContext,
 } from "@rome-os/app-runtime";
 import type { TurnUsageFacts } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
@@ -6907,6 +6909,309 @@ describe("AgentRunner", () => {
       expect(seen).toEqual([]);
     });
 
+    it("reads a platform thread's earlier messages once per thread when Rome holds no id for the message shown", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "slack_app",
+        threadId: "C_NEWS",
+        agentName: "main",
+      });
+      const said = (minute: number, text: string) => ({
+        channel: "slack_app",
+        chatId: "C_NEWS",
+        messageId: `root:m${minute}`,
+        direction: "inbound",
+        senderId: "T_A/U_SAM",
+        senderDisplayName: "Sam",
+        text,
+        attachments: [],
+        timestamp: new Date(Date.UTC(2026, 7, 3, 8, minute)),
+      });
+      const latest = rs.fn(
+        async (place: ThreadContext) =>
+          (place.threadId === "C_NEWS:root"
+            ? [said(2, "the venue moved to Hollyfold"), said(1, "picnic on Saturday?")]
+            : [said(4, "the other thread")]) as never,
+      );
+      const promptFacts = chatPromptFacts({
+        facts: { unseen: () => [], seen: () => undefined },
+        messages: { byIds: () => [] },
+        labels: new SenderLabels({ byAccount: async () => null }),
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+        latest,
+      });
+      const providerPrompts: string[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (input) {
+          providerPrompts.push(input.prompt);
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks: promptFacts,
+        keepAliveAcrossTurns: true,
+      });
+      for (const [prompt, inThread] of [
+        ["where is the picnic?", "C_NEWS:root"],
+        ["and when?", "C_NEWS:root"],
+        ["what about this one?", "C_NEWS:other"],
+      ] as const) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt,
+            channelThreadKey: "slack_app:C_NEWS",
+            romeSessionId: conversation.id,
+            threadContext: { channel: "slack_app", threadId: "C_NEWS", threadType: "group" },
+            inThread: inThread as ChatId,
+          }),
+        );
+      }
+
+      expect(latest.mock.calls.map(([place]) => place.threadId)).toEqual([
+        "C_NEWS:root",
+        "C_NEWS:other",
+      ]);
+      const [first, second, third] = providerPrompts;
+      expect(first).toContain("<thread_messages>");
+      expect(first.indexOf("picnic on Saturday?")).toBeLessThan(
+        first.indexOf("the venue moved to Hollyfold"),
+      );
+      expect(second).not.toContain("<thread_messages>");
+      expect(third).toContain("the other thread");
+      expect(third).not.toContain("Hollyfold");
+    });
+
+    it("does not read a platform thread again when its session closed idle and reopened on the same model thread", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "slack_app",
+        threadId: "C_NEWS",
+        agentName: "main",
+      });
+      const latest = rs.fn(
+        async () =>
+          [
+            {
+              channel: "slack_app",
+              chatId: "C_NEWS",
+              messageId: "root:m1",
+              direction: "inbound",
+              senderId: "T_A/U_SAM",
+              senderDisplayName: "Sam",
+              text: "picnic on Saturday?",
+              attachments: [],
+              timestamp: new Date(Date.UTC(2026, 7, 3, 8, 1)),
+            },
+          ] as never,
+      );
+      const promptFacts = chatPromptFacts({
+        facts: { unseen: () => [], seen: () => undefined },
+        messages: { byIds: () => [] },
+        labels: new SenderLabels({ byAccount: async () => null }),
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+        latest,
+      });
+      const providerPrompts: string[] = [];
+      const resumes: (string | undefined)[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: async (params) => {
+          resumes.push(params.thread.kind === "resume" ? params.thread.modelThreadId : undefined);
+          const session = await makeOpenSessionFromRun("mock", async function* (input) {
+            providerPrompts.push(input.prompt);
+            yield { type: "result", content: "ok" };
+          })(params);
+          // A thread the provider named, which the reopen resumes.
+          Object.assign(session, { modelThreadId: "thread-1" });
+          return session;
+        },
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks: promptFacts,
+        keepAliveAcrossTurns: true,
+      });
+      const manager = (runner as unknown as { agentSessionManager: Sessions }).agentSessionManager;
+      for (const prompt of ["where is the picnic?", "and when?"]) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt,
+            channelThreadKey: "slack_app:C_NEWS",
+            romeSessionId: conversation.id,
+            threadContext: { channel: "slack_app", threadId: "C_NEWS", threadType: "group" },
+            inThread: "C_NEWS:root" as ChatId,
+          }),
+        );
+        // The session closes idle between the two mentions.
+        await manager
+          .find({ agentName: "test-main", channelThreadKey: "slack_app:C_NEWS" })
+          ?.close("idle");
+      }
+
+      expect(resumes).toEqual([undefined, "thread-1"]);
+      expect(latest).toHaveBeenCalledTimes(1);
+      expect(providerPrompts[0]).toContain("picnic on Saturday?");
+      expect(providerPrompts[1]).not.toContain("<thread_messages>");
+    });
+
+    it("reads a platform thread again when the turn that read it failed before the model took its input", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "slack_app",
+        threadId: "C_NEWS",
+        agentName: "main",
+      });
+      const latest = rs.fn(
+        async () =>
+          [
+            {
+              channel: "slack_app",
+              chatId: "C_NEWS",
+              messageId: "root:m1",
+              direction: "inbound",
+              senderId: "T_A/U_SAM",
+              senderDisplayName: "Sam",
+              text: "picnic on Saturday?",
+              attachments: [],
+              timestamp: new Date(Date.UTC(2026, 7, 3, 8, 1)),
+            },
+          ] as never,
+      );
+      const promptFacts = chatPromptFacts({
+        facts: { unseen: () => [], seen: () => undefined },
+        messages: { byIds: () => [] },
+        labels: new SenderLabels({ byAccount: async () => null }),
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+        latest,
+      });
+      const providerPrompts: string[] = [];
+      let sends = 0;
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: async (params) => {
+          const session = await makeOpenSessionFromRun("mock", async function* (input) {
+            providerPrompts.push(input.prompt);
+            yield { type: "result", content: "ok" };
+          })(params);
+          const send = session.sendUserInput.bind(session);
+          // A thread the provider named, so a failed turn leaves it standing.
+          Object.assign(session, { modelThreadId: "thread-1" });
+          // The second input fails before the model takes it.
+          session.sendUserInput = async (input) => {
+            sends += 1;
+            if (sends === 2) throw new Error("transport closed");
+            return send(input);
+          };
+          return session;
+        },
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks: promptFacts,
+        keepAliveAcrossTurns: true,
+      });
+      for (const [prompt, inThread] of [
+        ["hello", undefined],
+        ["where is the picnic?", "C_NEWS:root"],
+        ["where is the picnic, again?", "C_NEWS:root"],
+      ] as const) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt,
+            channelThreadKey: "slack_app:C_NEWS",
+            romeSessionId: conversation.id,
+            threadContext: { channel: "slack_app", threadId: "C_NEWS", threadType: "group" },
+            ...(inThread ? { inThread: inThread as ChatId } : {}),
+          }),
+        );
+      }
+
+      expect(latest).toHaveBeenCalledTimes(2);
+      expect(providerPrompts.at(-1)).toContain("picnic on Saturday?");
+    });
+
+    it("brings each thread's own earlier messages to mentions in two threads of one group, waiting for a slow second read, and says when a read fails", async () => {
+      const webchatRepo = new ChatsWebChatRepository(testDb.db);
+      const conversation = await webchatRepo.ensureChannelChat({
+        channel: "slack_app",
+        threadId: "C_NEWS",
+        agentName: "main",
+      });
+      const said = (minute: number, text: string) => ({
+        channel: "slack_app",
+        chatId: "C_NEWS",
+        messageId: `root:m${minute}`,
+        direction: "inbound",
+        senderId: "T_A/U_SAM",
+        senderDisplayName: "Sam",
+        text,
+        attachments: [],
+        timestamp: new Date(Date.UTC(2026, 7, 3, 8, minute)),
+      });
+      // The platform answers the second thread only after its turn, as Slack
+      // paces thread reads, and refuses the third.
+      const latest = rs.fn(async (place: ThreadContext) => {
+        if (place.threadId === "C_NEWS:one") return [said(1, "lunch is at the noodle bar")];
+        if (place.threadId === "C_NEWS:two") {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          return [said(2, "the offsite is in Lisbon")];
+        }
+        throw new Error("Could not read these messages yet");
+      });
+      const promptFacts = chatPromptFacts({
+        facts: { unseen: () => [], seen: () => undefined },
+        messages: { byIds: () => [] },
+        labels: new SenderLabels({ byAccount: async () => null }),
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface: () => ({ interactiveCards: false, promptContext: true }),
+        latest: latest as never,
+        latestWaitMs: 50,
+      });
+      const providerPrompts: string[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: makeOpenSessionFromRun("mock", async function* (input) {
+          providerPrompts.push(input.prompt);
+          yield { type: "result", content: "ok" };
+        }),
+      };
+      const runner = createRunner(provider, undefined, {
+        turnLinks: promptFacts,
+        keepAliveAcrossTurns: true,
+      });
+      for (const [prompt, inThread] of [
+        ["where is lunch?", "C_NEWS:one"],
+        ["where is the offsite?", "C_NEWS:two"],
+        ["and this one?", "C_NEWS:three"],
+      ] as const) {
+        await collectMessages(
+          runner.run({
+            agentName: "test-main",
+            prompt,
+            channelThreadKey: "slack_app:C_NEWS",
+            romeSessionId: conversation.id,
+            threadContext: { channel: "slack_app", threadId: "C_NEWS", threadType: "group" },
+            inThread: inThread as ChatId,
+          }),
+        );
+      }
+
+      const [first, second, third] = providerPrompts;
+      expect(first).toContain("lunch is at the noodle bar");
+      expect(second).toContain("the offsite is in Lisbon");
+      expect(second).not.toContain("noodle bar");
+      expect(third).toContain("could not be read");
+    });
+
     it("reads the chat's latest messages from the platform on a new session's first turn only", async () => {
       const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
@@ -7886,6 +8191,116 @@ describe("AgentRunner", () => {
 
     const claudeProvider = (opens: ModelSessionParams[]): ModelProvider =>
       recordingProvider("anthropic", "claude-thread", opens);
+
+    it.each([
+      ["no pin", "none"],
+      ["a pin on the same provider", "same"],
+      ["a pin on another provider", "other"],
+    ] as const)("an overload swap lasts one turn, with %s, and through a restart", async (_label, pin) => {
+      const state = { openai: reportOf("available"), anthropic: reportOf("available") };
+      let current: "anthropic" | "openai" = pin === "other" ? "openai" : "anthropic";
+      const opens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [codexProvider(opens), claudeProvider(opens)],
+        accounts: fakeAccounts(() => state),
+        defaults: { ready: async () => {}, current: () => current },
+      });
+      const key = { agentName: "test-main", channelThreadKey: `webchat:swap-table-${pin}` };
+      const ran = async (session: AgentSession, prompt: string) =>
+        (
+          (await collectMessages((await startAfter(session, { prompt })).events())).find(
+            (message) => message.type === "result",
+          ) as { content: string }
+        ).content;
+      const first = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      const session = await first.open(key);
+      // The turn before the swap: none, or one that pins a model.
+      if (pin !== "none") await ran(session, "before");
+      current = "anthropic";
+      const before = await sessionRepository.session(session.sessionId);
+      session.selectModelForOneTurn?.("claude-sonnet");
+      expect(await ran(session, "swapped")).toBe("claude-sonnet-5-5");
+      // The swap writes nothing: the row names what it named before, on its provider.
+      const after = await sessionRepository.session(session.sessionId);
+      expect(after?.model).toBe(before?.provider === "anthropic" ? before.model : null);
+      // The next turn runs exactly what it would have without the swap.
+      const own = await ran(session, "next");
+      expect(own).not.toBe("claude-sonnet-5-5");
+      expect(own).toMatch(/claude/);
+      await first.shutdown();
+      const again = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      expect(await ran(await again.open(key), "after restart")).toBe(own);
+      await again.shutdown();
+    });
+
+    it("an overload swap lasts one turn: the next turn runs the session's own model again", async () => {
+      const state = { openai: reportOf("unauthorized"), anthropic: reportOf("available") };
+      const opens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [claudeProvider(opens)],
+        accounts: fakeAccounts(() => state),
+      });
+      const manager = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      const session = await manager.open({
+        agentName: "test-main",
+        channelThreadKey: "webchat:one-turn-swap",
+      });
+      const ran = async (prompt: string) =>
+        (await collectMessages((await startAfter(session, { prompt })).events())).find(
+          (message) => message.type === "result",
+        );
+      const own = (await ran("first")) as { content: string };
+      session.selectModelForOneTurn?.("claude-sonnet");
+      expect(await ran("swapped")).toMatchObject({ content: "claude-sonnet-5-5" });
+      expect(await ran("after")).toMatchObject({ content: own.content });
+      await manager.shutdown();
+    });
+
+    it("an overload swap lasts one turn: a restart after it resumes the session's own model", async () => {
+      const state = { openai: reportOf("unauthorized"), anthropic: reportOf("available") };
+      const opens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [claudeProvider(opens)],
+        accounts: fakeAccounts(() => state),
+      });
+      const first = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      const key = { agentName: "test-main", channelThreadKey: "webchat:one-turn-restart" };
+      const session = await first.open(key);
+      await collectMessages((await startAfter(session, { prompt: "first" })).events());
+      const own = (await sessionRepository.session(session.sessionId))!.model;
+      session.selectModelForOneTurn?.("claude-sonnet");
+      await collectMessages((await startAfter(session, { prompt: "swapped" })).events());
+      // The row still names the session's own model, not the one the swap lent it.
+      expect((await sessionRepository.session(session.sessionId))!.model).toBe(own);
+      await first.shutdown();
+      const again = createSessions(managerDeps(modelResolver), { keepAliveAcrossTurns: true });
+      const resumed = await again.open(key);
+      const after = (
+        await collectMessages((await startAfter(resumed, { prompt: "after" })).events())
+      ).find((message) => message.type === "result");
+      expect(after).toMatchObject({ content: own });
+      await again.shutdown();
+    });
+
+    it("an unchecked move keeps every existing chat: a held session runs where it was held", async () => {
+      const state = { openai: reportOf("available"), anthropic: reportOf("available") };
+      const opens: ModelSessionParams[] = [];
+      const modelResolver = createModelResolver({
+        providers: [codexProvider(opens), claudeProvider(opens)],
+        accounts: fakeAccounts(() => state),
+      });
+      const manager = createSessions(
+        {
+          ...managerDeps(modelResolver),
+          heldProvider: (key: string) => (key.startsWith("telegram:") ? "anthropic" : undefined),
+        },
+        { keepAliveAcrossTurns: true },
+      );
+      const held = await manager.open({ agentName: "test-main", channelThreadKey: "telegram:42" });
+      await collectMessages((await startAfter(held, { prompt: "hi" })).events());
+      expect(opens.at(-1)?.config.model).toMatch(/claude/);
+      await manager.shutdown();
+    });
 
     it("a pinned session keeps its model across an entitlement upgrade (no backend reopen)", async () => {
       const state = {

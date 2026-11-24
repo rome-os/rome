@@ -2,7 +2,7 @@
 // `session_turn_checkpoints`. Port: agent/domain/session-repository.ts.
 // Aggregate: agent/domain/session.ts.
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx } from "../../db/index.js";
 import { sessions, sessionTurnCheckpoints } from "../../db/schema.js";
 import {
@@ -42,6 +42,26 @@ export class DrizzleSessionRepository implements SessionRepository {
       .orderBy(desc(sessions.lastActiveAt))
       .limit(1);
     return rows[0] ? restore(rows[0]) : null;
+  }
+
+  /**
+   * The continuity keys of the active sessions that ran a turn and were
+   * active since `since`, each once. Outside the port: the web chat side reads
+   * it to hold conversations on a provider when the default changes.
+   */
+  async continuityKeysSince(since: Date): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ key: sessions.channelThreadKey })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.status, "active"),
+          isNotNull(sessions.provider),
+          isNotNull(sessions.channelThreadKey),
+          gte(sessions.lastActiveAt, since),
+        ),
+      );
+    return rows.flatMap((row) => (row.key ? [row.key] : []));
   }
 
   async current(continuityKey: ContinuityKey, agentName: AgentName): Promise<Session | null> {

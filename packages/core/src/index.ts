@@ -27,6 +27,8 @@ import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { loadConfig } from "./config.js";
 import { createVoiceInputSource } from "./voice-input/index.js";
+import { createRomeCloudSpeechCredentials } from "./voice-output/rome-cloud-speech-credentials.js";
+import { createSpeakerSource } from "./voice-output/speaker-source.js";
 import { resolveCloudAuthEnabled } from "./access/cloud-auth-gate.js";
 import { createLogger } from "./logger.js";
 import {
@@ -88,10 +90,11 @@ import {
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
 import type { Channel, ChannelsService, ChatId, ChatStopHandler } from "@rome-os/app-runtime";
+import { isSendRefused } from "@rome-os/app-runtime";
 import { conciergeChatGuard } from "./concierge/automated-input.js";
 import { resolveAutomatedSender } from "./api/routes/chat-senders.js";
 import { actionExecutionContext } from "./apps/actions/context.js";
-import { isConciergeChat } from "./webchat/privacy.js";
+import { CONCIERGE_AGENT_ID, isConciergeChat } from "./webchat/privacy.js";
 
 const log = createLogger("startup");
 
@@ -204,6 +207,8 @@ import { ActionWorkerCoordinator } from "./apps/actions/action-subprocess.js";
 import { endInterruptedRuns } from "./apps/actions/restart-recovery.js";
 import { WorkerRpcServer } from "./apps/actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./apps/actions/worker-rpc-client.js";
+import { connectionTyping, observeTurnWith } from "./core/connection-typing.js";
+import { ConnectionStatusMarks } from "./concierge/connection-status.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import type { ChatResetPolicy } from "./core/chat-reset-policy.js";
 import {
@@ -278,6 +283,7 @@ import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { taskChatInstructions } from "./concierge/conclusion.js";
 import { agentOfKindIn, conciergePlaceSetup } from "./concierge/on-connection.js";
+import { envoyPrompt, readEnvoyVerdict, sayOnConnection } from "./concierge/connection-say.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -311,7 +317,7 @@ import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./instance/timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
-import { linkGuardianToAccount } from "./people/guardian-mapping.js";
+import { linkGuardianOnConnect, linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
 import { ReleaseNotes } from "./instance/system-upgrade/release-notes.js";
@@ -398,6 +404,12 @@ import type { KindMount } from "./connections/kind-mount.js";
 import { guardianOnly } from "./access/guardian-only.js";
 import { feishu } from "./connections/kinds/feishu/index.js";
 import { linkedin } from "./connections/kinds/linkedin/index.js";
+import {
+  deliverDiscordFrame,
+  discordApp,
+  isDiscordFrame,
+  romeCloudDiscordApp,
+} from "./connections/kinds/discord-app/index.js";
 import { ChatSettingsRepository, ChatSettingsService } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
 import {
@@ -414,10 +426,17 @@ import { createOgImageStore } from "./apps/og/store.js";
 import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./app-host/api.js";
-import { DELIVERY_ATTEMPTS, RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
+import {
+  DELIVERY_ATTEMPTS,
+  RelayDrainer,
+  buildRelayReplayRequest,
+  type RelayDrain,
+} from "./relay/drainer.js";
 import { createSlackAppWebApi } from "./connections/kinds/slack-app/web-api.js";
 import { romeCloudSlackApp } from "./connections/kinds/slack-app/rome-cloud.js";
-import { SLACK_APP_KIND } from "./connections/integrations/slack-app.js";
+import { isSlackFrame } from "./connections/kinds/slack-app/deposit.js";
+import { deliverSlackFrame, SlackSetupHolds } from "./connections/kinds/slack-app/drain.js";
+import { MailboxClaims } from "./relay/mailbox-claims.js";
 import {
   RELAY_SETTING_KEY,
   deriveDepositUrl,
@@ -781,12 +800,12 @@ async function main() {
   });
   const agentNameResolver = createAgentNames(listedAgents);
   // Grant setups: in-memory session store keyed per grant,
-  // sharing the registry (descriptor lookup + terminal write) and the person
-  // mapping repo (guardian-link auto-mapping). Drives the generic setup
+  // sharing the registry (descriptor lookup + terminal write). People joins each
+  // connect to link the account that connected to the guardian. Drives the generic setup
   // routes; created here so descriptors registered later expose their setup.
   const setupManager = new SetupManager({
     registry: connectionRegistry,
-    peopleRepo,
+    participant: linkGuardianOnConnect(peopleRepo),
   });
   // Descriptors are registered LATER (before registry.load(), just above the
   // Talk runtime) so their factories can be threaded the runtime
@@ -1095,9 +1114,13 @@ async function main() {
   const stopCodexLoginChoice = () => codexLoginChoice.stop();
   // Wired once the chats' sessions exist, before Rome serves a request.
   let chatProviders: ChatProviders = {
+    ready: async () => {},
+    release: async () => {},
+    pick: async () => {},
     beforeDefaultChange: async () => {},
+    heldProvider: () => undefined,
     keep: async () => null,
-    follow: async () => {},
+    follow: async () => null,
     followingCount: async () => 0,
   };
   const defaultProviders = createDefaultProviders({
@@ -1105,6 +1128,8 @@ async function main() {
     accounts: modelAccounts,
     providers: ["anthropic", "openai"],
     creditsEnabled: () => codexLoginChoice.creditsEnabled(),
+    // The last logout hands the default to credits only when they can be spent.
+    creditsUsable: () => codexLoginChoice.creditsUsable(),
     // An upgrade keeps the Concierge where it runs: the provider of the model
     // Rome chose for the guardian's main chat, when it has one.
     seed: async () => {
@@ -1310,6 +1335,15 @@ async function main() {
       return access ? credentialFingerprint(access.credentialId) : null;
     },
   });
+  // Speech credentials for voice conversation mode. Only the speaker source
+  // asks for one, and only while `voice_mode` is on. At boot this reports the
+  // usage of speech sessions an earlier run left, if any.
+  const speechCredentials = createRomeCloudSpeechCredentials({
+    romeCloud: romeCloudAccess,
+    settings: settingsRepo,
+    usage: usageRecorder,
+  });
+  void speechCredentials.report();
   // Real push sender in the main process (holds the durable instance token);
   // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
   // `notify.send` back to this same instance. The Concierge pushes through it too.
@@ -1343,9 +1377,86 @@ async function main() {
     ownerOf: async (taskId) => (await conciergeTasksRepo.getWithChat(taskId))?.owner ?? null,
   });
   const conciergeTasksRepo = new ConciergeTasksRepository(db);
+  // The connection behind a channel, for what its talker offers that no
+  // channel port carries: typing by the dashboard's rule, and reactions.
+  const connectionOfChannel = (channel: string) => {
+    const id = channelRecords.byId(channel)?.connectionId;
+    return id ? connectionRegistry.all().find((connection) => connection.id === id) : undefined;
+  };
   const concierge: ConciergeService = new ConciergeService({
     skillCatalog,
     settingsRepo,
+    reactInChat: async (chat, messageId, emoji) => {
+      const added = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.add(chat.threadId as ChatId, messageId, emoji),
+      );
+      if (!added) throw new Error("This chat's account takes no reaction.");
+      await added;
+    },
+    // What the Concierge says in a chat on a connection goes out as the inbox
+    // sends an agent's reply: past the send gate, and Envoy where it asks, to
+    // the platform through the chat's speaker, which records it.
+    sayInChat: (chat, message) =>
+      sayOnConnection(
+        {
+          gate: guardedSend,
+          connectionOf: (channel) => channelRecords.byId(channel)?.connectionId ?? null,
+          envoy: async (input) => {
+            let verdict: unknown;
+            for await (const event of agentRunner.run({
+              agentName: "envoy",
+              prompt: envoyPrompt(input),
+              initiatedBy: "system",
+            })) {
+              if (event.type === "result") verdict = event.structuredOutput;
+            }
+            return readEnvoyVerdict(verdict);
+          },
+          send: async (target, text, replyTo, turnId) => {
+            const channel = channels.find((candidate) => candidate.name === target.channel);
+            if (!channel) throw new Error(`Channel "${target.channel}" cannot send`);
+            const say = (quoting: string | undefined) =>
+              chatsWired.replies.send(
+                target.id,
+                channel,
+                { text, ...(quoting ? { replyTo: { key: quoting } } : {}) },
+                { turnId, agent: CONCIERGE_AGENT_ID },
+              );
+            let said: Awaited<ReturnType<typeof say>>;
+            try {
+              said = await say(replyTo);
+            } catch (error) {
+              // A platform that cannot quote that message takes it unquoted.
+              if (!replyTo || !isSendRefused(error) || error.reason !== "reply_unaddressable") {
+                throw error;
+              }
+              said = await say(undefined);
+            }
+            if (!said) throw new Error("This chat stands nowhere a message can be said.");
+            return said.sent;
+          },
+          record: async ({ status, description, chat: target, text }) => {
+            await approvalsRepo
+              .create({
+                type: "outgoing_message",
+                requestedBy: CONCIERGE_AGENT_ID,
+                description,
+                payload: { response: text, channel: target.channel, threadId: target.threadId },
+                status,
+              })
+              .catch((error: unknown) =>
+                log.warn("outgoing message not put on record", {
+                  error: error instanceof Error ? error.message : String(error),
+                }),
+              );
+          },
+        },
+        { chat, ...message },
+      ),
+    // Who answers a chat on a connection, as the inbox routes it: the
+    // account's agent (a task started there reports there when it is the
+    // Concierge).
+    channelAgentOf: byChannel(channelRecords, accountAgentResolver(accountAgents, agentLoader)),
     owners: createConciergeOwners({
       settingsRepo,
       visitorProfiles: new VisitorProfilesRepository(db),
@@ -1355,6 +1466,7 @@ async function main() {
     sessionRepository,
     accounts: modelAccounts,
     defaults: defaultProviders,
+    held: (chatId) => chatProviders.heldProvider(webchatSessionKey(chatId)) !== undefined,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { find: (continuityKey) => agentSessionManager.find(continuityKey) },
@@ -1377,6 +1489,26 @@ async function main() {
     phoneWatching,
     dashboardActivity,
   });
+  // A chat on a connection shows a message's status as the account's own
+  // reaction on it, since the platform draws none (docs/domains/chats.md#status).
+  const connectionStatus = new ConnectionStatusMarks({
+    chatOf: (chatId) => concierge.connectionChat(chatId),
+    add: async (chat, messageKey, emoji) => {
+      const added = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.add(chat.threadId as ChatId, messageKey, emoji),
+      );
+      if (added) await added;
+    },
+    remove: async (chat, messageKey, emoji) => {
+      const removed = connectionOfChannel(chat.channel)?.withTalker((talker) =>
+        talker.reactions?.remove(chat.threadId as ChatId, messageKey, emoji),
+      );
+      if (removed) await removed;
+    },
+  });
+  concierge.onMessageStatus((event) => {
+    void connectionStatus.statusChanged(event.sessionId, event.messageId, event.status);
+  });
   const channelSurface: ChannelSurfaces = (channel) => {
     if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
     const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))?.capabilities
@@ -1395,6 +1527,8 @@ async function main() {
       // Rome credits are the instance's choice: while they run, every chat runs on them.
       onRomeCredits: () =>
         runsOnRomeCredits(defaultProviders.current(), defaultProviders.signedIn()),
+      // A conversation the guardian left on a provider when the default changed stays there.
+      heldProvider: (key) => chatProviders.heldProvider(key),
       systemPrompts,
       modelResolver,
       networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),
@@ -1414,11 +1548,12 @@ async function main() {
         // `until`. A store a personal account syncs, such as WhatsApp's, also
         // holds what the guardian said before Rome was connected, and refuses
         // `until` (app-host/accounts-service.ts), so it reads none.
-        latest: (place, { limit, until, olderThan }) =>
+        latest: (place, { limit, until, olderThan, newerThan }) =>
           channelsService.query(place.channel, {
             chatId: place.threadId as ChatId,
             until,
             ...(olderThan === undefined ? {} : { olderThan }),
+            ...(newerThan === undefined ? {} : { newerThan }),
             limit,
           }),
       }),
@@ -1494,6 +1629,9 @@ async function main() {
   chatProviders = createChatProviders({
     webchatRepo,
     accounts: modelAccounts,
+    settings: settingsRepo,
+    currentDefault: () => defaultProviders.current(),
+    ranSince: (since) => sessionRepository.continuityKeysSince(since),
     selectModel: (chatId, agentName, selection) =>
       agentSessionManager
         .find({ agentName: agentName ?? "main", channelThreadKey: webchatSessionKey(chatId) })
@@ -1507,10 +1645,23 @@ async function main() {
     },
     agentTier: (agentName) => agentLoader.find(agentName ?? "main")?.definition.tier,
   });
+  await chatProviders.ready();
   const actionWorkerCoordinator = new ActionWorkerCoordinator(actionEngine);
   actionEngine.setActionWorkerCoordinator(actionWorkerCoordinator);
   const chatResetPolicy: ChatResetPolicy = async (chat) =>
     (await chatSettings.get(chat)).effective.session.reset;
+  // Whether an agent's text stays private on a channel: the Concierge's
+  // does everywhere, and it speaks through `say` (docs/architecture/concierge.md).
+  const isTextPrivate = (agentName: string, channel: string) => {
+    const agent = agentLoader.find(agentName);
+    return (
+      agent !== undefined &&
+      policyInPlace(
+        resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }),
+        conciergePlaceSetup(agentName, { channel }),
+      ).finalText === "private"
+    );
+  };
   const agentSessionBridge = new AgentSessionBridge(
     agentSessionManager,
     webchatRepo,
@@ -1521,6 +1672,21 @@ async function main() {
     chatResetPolicy,
     openingFor,
     (chat, turn) => chatTurns.start(chat, turn),
+    observeTurnWith(
+      // A connected chat's typing indicator, by the dashboard's typing-dots rule.
+      connectionTyping({
+        typingOf: (channel) => {
+          const connection = connectionOfChannel(channel);
+          if (!connection?.withTalker((talker) => talker.typing !== undefined)) return null;
+          return (chatId) =>
+            connection.withTalker((talker) => talker.typing?.show(chatId as ChatId)) ??
+            Promise.resolve();
+        },
+      }),
+      // The status of the guardian's message a Concierge turn there works on.
+      (turn) => concierge.observeConnectionTurn(turn),
+    ),
+    isTextPrivate,
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1583,18 +1749,7 @@ async function main() {
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
     replies: chatsWired.replies,
-    // The place can change the agent's policy: on a connection the
-    // Concierge's text is the reply (docs/architecture/concierge.md).
-    isTextPrivate: (agentName, channel) => {
-      const agent = agentLoader.find(agentName);
-      return (
-        agent !== undefined &&
-        policyInPlace(
-          resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }),
-          conciergePlaceSetup(agentName, { channel }),
-        ).finalText === "private"
-      );
-    },
+    isTextPrivate,
   });
 
   // A provider that cannot run shows a card in the chat, and for unattended
@@ -1613,6 +1768,7 @@ async function main() {
     swapModel: (chatId, agentName, failure) =>
       concierge.switchForModelLimit(chatId, failure, agentName),
     creditsUsable: () => codexLoginChoice.creditsUsable(),
+    held: (chatId) => chatProviders.heldProvider(webchatSessionKey(chatId)) !== undefined,
     // A recovery turn acts for the chat's owner, as a continuation does for its turn's.
     actorOf: async (chatId) => {
       const chat = await webchatRepo.getSession(chatId);
@@ -1620,6 +1776,11 @@ async function main() {
     },
     // A newer message in the chat answers instead of a card's resumed turn.
     movedOnSince: (chatId, since) => webchatRepo.chatMovedOnSince(chatId, since),
+    // A card still the chat's newest message is rewritten in place on a repeat refusal.
+    newestMessageId: async (chatId) => {
+      const { rows } = await webchatRepo.getMessagesPage(chatId, { limit: 1 });
+      return rows.filter((row) => row.role !== "trace").at(-1)?.id ?? null;
+    },
     // A quota card promises only what the usage-limit continuation will do.
     continuesAfterLimit: (chatId, until) =>
       usageLimitContinuationTakes(webchatRepo, chatId, Date.parse(until), modelAccounts.read()),
@@ -2013,7 +2174,16 @@ async function main() {
       depositUrl: deriveDepositUrl(config.relay.drainUrl),
     } satisfies RelayDrainSetting);
   }
-  const relayDrains = await resolveRelayDrains(settingsRepo, appCatalog);
+  // Rome's Slack app deposits into this mailbox too, so while it runs the
+  // mailbox is drained even when no installed app takes its webhooks; a
+  // webhook drained with no app to take it is then dropped
+  // (relay/mailbox-claims.ts). Claims come once talkers start, which is after
+  // the drainer exists, so the reload is bound below.
+  let refreshRelayDrains: () => void = () => {};
+  const mailboxClaims = new MailboxClaims(() => refreshRelayDrains());
+  const resolveDrains = (): Promise<RelayDrain[]> =>
+    resolveRelayDrains(settingsRepo, appCatalog, mailboxClaims);
+  const relayDrains = await resolveDrains();
   const relayDispatcher = new AppApiDispatcher(appCatalog, {
     db,
     actionEngine,
@@ -2022,7 +2192,23 @@ async function main() {
     favorService,
     appConnections,
   });
+  // Rome's Discord bot deposits into the instance's own mailbox, marked by its
+  // header: those frames go to its connection, never to the app the mailbox
+  // otherwise serves (connections/kinds/discord-app/drain.ts).
+  const slackSetupHolds = new SlackSetupHolds();
   const relayDrainer = new RelayDrainer(relayDrains, async (drain, event) => {
+    if (isSlackFrame(event.headers)) {
+      return deliverSlackFrame(
+        connectionRegistry,
+        { headers: event.headers, body: event.body },
+        slackSetupHolds,
+      );
+    }
+    if (isDiscordFrame(event.headers)) return deliverDiscordFrame(connectionRegistry, event);
+    if (!drain.targetAppId) {
+      log.warn("relay webhook dropped: no installed app takes it");
+      return { status: 404 };
+    }
     const res = await relayDispatcher.dispatch(
       drain.targetAppId,
       buildRelayReplayRequest(drain, event),
@@ -2152,28 +2338,22 @@ async function main() {
   const { RomeCloudMailProvider } = await import("./connections/kinds/email/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
-    // Rome's own Slack app: Slack's Web API at the configured origin, Rome
-    // Cloud for sign-in and the workspace binding, and a relay drain per
-    // workspace for its events.
+    // Rome's own Slack app: the Slack gateway Worker holds the app and its
+    // tokens, Rome Cloud signs the link that adds it, and its events arrive
+    // in this instance's own relay mailbox (drained below).
     slackApp: {
-      api: createSlackAppWebApi(config.slackApiBaseUrl),
-      cloud: romeCloudSlackApp(),
-      listens: (connectionId) => accountListening.listens(connectionId),
-      openMailbox: (mailbox, onFrame) => {
-        const drainer = new RelayDrainer(
-          [
-            {
-              connectUrl: mailbox.connectUrl,
-              drainKey: mailbox.drainKey,
-              targetAppId: SLACK_APP_KIND,
-              targetPath: [],
-            },
-          ],
-          (_drain, event) => onFrame({ headers: event.headers, body: event.body }),
-        );
-        drainer.start();
-        return { stop: () => drainer.stop(), attempts: DELIVERY_ATTEMPTS };
+      api: createSlackAppWebApi(config.slackGatewayUrl),
+      cloud: romeCloudSlackApp(config.slackGatewayUrl),
+      depositUrl: async () => {
+        const relay = await settingsRepo.get<Partial<RelayDrainSetting>>(RELAY_SETTING_KEY);
+        return typeof relay?.depositUrl === "string" && relay.depositUrl ? relay.depositUrl : null;
       },
+      deliveryAttempts: DELIVERY_ATTEMPTS,
+      claimMailbox: () => mailboxClaims.claim(),
+      // A setup's hold ends with the setup; frames held behind it then reach
+      // its connection or are dropped.
+      holdSlackFrames: () => slackSetupHolds.hold(),
+      listens: (connectionId) => accountListening.listens(connectionId),
     },
     settingsRepo,
     chatSettings,
@@ -2187,8 +2367,8 @@ async function main() {
     listAgents: () => agentLoader.list().map((agent) => agent.name),
     hasAgent: (name) => agentLoader.find(name) !== undefined,
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
-    // Auto-map the guardian onto their own WhatsApp account on connect.
-    onWhatsAppGuardianConnected: (selfJid) => {
+    // The account that connected is the guardian's own, so People links it.
+    onWhatsAppAccountConnected: (selfJid) => {
       linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {
         log.error("failed to auto-map guardian on WhatsApp connect", {
           error: err instanceof Error ? err.message : String(err),
@@ -2214,6 +2394,15 @@ async function main() {
       listAgents: () => agentLoader.list().map((agent) => agent.name),
       accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
       hasAgent: (name) => agentLoader.find(name) !== undefined,
+    }),
+    discordApp({
+      cloud: romeCloudDiscordApp(),
+      depositUrl: async () => {
+        const relay = await settingsRepo.get<Partial<RelayDrainSetting>>(RELAY_SETTING_KEY);
+        return typeof relay?.depositUrl === "string" && relay.depositUrl ? relay.depositUrl : null;
+      },
+      nameOf: async (userId) =>
+        (await peopleRepo.byAccount({ platform: "discord", id: userId }))?.displayName,
     }),
     linkedin({
       syncSink: refreshingAfter(
@@ -2473,16 +2662,28 @@ async function main() {
   // upgrading the app that declares api.relayWebhook changes which app/path the
   // drain resolves to. Without this the drainer would keep replaying to the old
   // target (or loop on 5xx after the consumer disappears) until a manual save.
+  // A connection claiming or releasing the mailbox changes it the same way.
   let activeRelayDrains = relayDrains;
+  let relayReload: Promise<void> = Promise.resolve();
+  const reloadRelayDrains = (cause: string) => {
+    relayReload = relayReload
+      .then(async () => {
+        const next = await resolveDrains();
+        if (relayDrainsEqual(activeRelayDrains, next)) return;
+        activeRelayDrains = next;
+        await relayDrainer.reload(next);
+        log.info(`relay drains reloaded after ${cause}`, {
+          targets: next.map((d) => `${d.targetAppId}/${d.targetPath.join("/")}`),
+        });
+      })
+      .catch((err) => log.error("relay drains not reloaded", { error: String(err) }));
+    return relayReload;
+  };
   appCatalog.subscribe(async function relayDrainSubscriber() {
-    const next = await resolveRelayDrains(settingsRepo, appCatalog);
-    if (relayDrainsEqual(activeRelayDrains, next)) return;
-    activeRelayDrains = next;
-    await relayDrainer.reload(next);
-    log.info("relay drains reloaded after catalog change", {
-      targets: next.map((d) => `${d.targetAppId}/${d.targetPath.join("/")}`),
-    });
+    await reloadRelayDrains("catalog change");
   });
+  refreshRelayDrains = () => void reloadRelayDrains("a mailbox claim changed");
+  if (mailboxClaims.any) refreshRelayDrains();
 
   const workerRpcServer = new WorkerRpcServer(
     {
@@ -2719,11 +2920,13 @@ async function main() {
         romeCloud: romeCloudAccess,
       }),
       transcriptionUsage: usageRecorder,
+      speaker: createSpeakerSource({ credentials: speechCredentials }),
       dashboardAccessStore,
       visitorAllowListSync,
       phoneWatching,
       dashboardActivity,
       relayDrainer,
+      mailboxClaims,
       bootVersionReport,
       favorService,
       appConnections,
@@ -2794,7 +2997,7 @@ async function main() {
         }
       },
       provisionNodeCaller,
-      () => provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer }),
+      () => provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer, mailboxClaims }),
       () => favorDispatchRunner.runOnce(),
       () => syncStoredVisitorAllowList(dashboardAccessStore, visitorAllowListSync),
     ];
@@ -3045,6 +3248,7 @@ async function main() {
     await computerUse.stop();
     shutdownLog.info("instance identity heartbeat stopped");
 
+    speechCredentials.stop();
     try {
       await usageRecorder.flush();
       await usageReporter.stop();

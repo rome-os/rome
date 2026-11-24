@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -13,7 +13,17 @@ import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import { acceptLatestSocket, fakeSocketLiveEventsClient } from "@/test/fake-websocket";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { LARGE_TEXT_FILE_BYTES, getProjectsAutoSavePolicy } from "@/lib/projects-autosave";
-import { OutputsPanel, outputTitle, outputTypeOf, previewOf, readPrefix } from "./OutputsPanel";
+import {
+  type FilterRowSize,
+  kindsThatFit,
+  kindsThatStillFit,
+  OutputFile,
+  OutputsPanel,
+  outputTitle,
+  outputTypeOf,
+  previewOf,
+  readPrefix,
+} from "./OutputsPanel";
 import { outputOfLink } from "./chat-outputs";
 import { projectPathOf } from "./OutputEditor";
 
@@ -163,6 +173,7 @@ function renderPanel(
     taskChats?: boolean;
     onOpenTaskChat?: (id: string) => void;
     onNavigate?: () => void;
+    onOpenOutput?: (output: ChatOutputDto) => void;
   } = {},
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -196,8 +207,9 @@ describe("OutputsPanel", () => {
       }),
     ];
     renderPanel();
-    expect((await screen.findByRole("heading", { name: /Outputs/ })).textContent).toContain("3");
-    const today = screen.getByRole("list", { name: "Today" });
+    const today = await screen.findByRole("list", { name: "Today" });
+    // The tab or the sheet around the list names it: it has no heading of its own.
+    expect(screen.queryByRole("heading", { name: /Outputs/ })).toBeNull();
     const rows = within(today).getAllByRole("listitem");
     expect(rows.map((row) => within(row).getByRole("button").textContent)).toEqual([
       "Trip notes",
@@ -227,23 +239,164 @@ describe("OutputsPanel", () => {
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
-  it("filters by documents, spreadsheets and pages, and keeps other kinds under All", async () => {
+  it("offers All and each kind the chat holds, the most held first", async () => {
     const user = userEvent.setup();
     outputs = [
-      output("notes", { name: "notes.md", mimeType: "text/markdown" }),
-      output("sheet", { name: "sheet.xlsx", mimeType: null }),
       output("pic", { name: "pic.png", mimeType: "image/png", kind: "shown" }),
+      output("map", { name: "map.png", mimeType: "image/png", kind: "shown" }),
+      output("sheet", { name: "sheet.xlsx", mimeType: null }),
+      output("notes", { name: "notes.md", mimeType: "text/markdown" }),
     ];
     renderPanel();
     await screen.findByRole("list", { name: "Today" });
+    // Pictures lead with two; the kinds held once keep their usual order.
+    expect(screen.getAllByRole("radio").map((chip) => chip.textContent)).toEqual([
+      "All",
+      "Pictures",
+      "Documents",
+      "Spreadsheets",
+    ]);
+    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
     await user.click(screen.getByRole("radio", { name: "Spreadsheets" }));
     expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
       expect.stringContaining("Sheet"),
     ]);
-    await user.click(screen.getByRole("radio", { name: "Pages" }));
-    expect(screen.getByText("No outputs of this kind yet.")).toBeTruthy();
     await user.click(screen.getByRole("radio", { name: "All" }));
-    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+  });
+
+  it("puts the kinds past three under More, which names the one it filters by", async () => {
+    const user = userEvent.setup();
+    outputs = [
+      output("notes", { name: "notes.md", mimeType: "text/markdown" }),
+      output("plan", { name: "plan.md", mimeType: "text/markdown" }),
+      output("pic", { name: "pic.png", mimeType: "image/png", kind: "shown" }),
+      output("sheet", { name: "sheet.csv", mimeType: "text/csv" }),
+      output("site", { name: "site.html", mimeType: "text/html" }),
+      output("voice", { name: "voice.wav", mimeType: "audio/wav" }),
+      output("script", { name: "script.ts", mimeType: "text/typescript" }),
+    ];
+    renderPanel();
+    await screen.findByRole("list", { name: "Today" });
+    expect(screen.getAllByRole("radio").map((chip) => chip.textContent)).toEqual([
+      "All",
+      "Documents",
+      "Pictures",
+      "Spreadsheets",
+    ]);
+    await user.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+      "Pages",
+      "Audio",
+      "Code",
+    ]);
+    await user.click(screen.getByRole("menuitemradio", { name: "Audio" }));
+    const more = screen.getByRole("button", { name: "More: Audio" });
+    expect(more.textContent).toBe("Audio");
+    expect(screen.getAllByRole("listitem").map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Voice"),
+    ]);
+    expect(
+      screen.getAllByRole("radio").some((chip) => chip.getAttribute("aria-checked") === "true"),
+    ).toBe(false);
+    await user.click(screen.getByRole("radio", { name: "All" }));
+    expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
+    expect(screen.getAllByRole("listitem")).toHaveLength(7);
+  });
+
+  it("shows as many kinds as the row's width holds, and lays them out again as it resizes", async () => {
+    // Every chip is 8px a letter plus its padding, side by side with no gap.
+    const original = Element.prototype.getBoundingClientRect;
+    const OriginalObserver = globalThis.ResizeObserver;
+    const resized: (() => void)[] = [];
+    let rowWidth = 260;
+    const widthOf = (element: Element) => (element.textContent?.length ?? 0) * 8 + 24;
+    const box = (left: number, width: number) =>
+      ({
+        left,
+        right: left + width,
+        width,
+        top: 0,
+        bottom: 0,
+        height: 0,
+        x: left,
+        y: 0,
+      }) as DOMRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      if (this.getAttribute("data-slot") === "output-filters") return box(0, rowWidth);
+      const measure = this.closest('[data-slot="output-filters-measure"]');
+      if (!measure) return original.call(this);
+      if (!this.matches("[data-slot=filter-chip]")) return box(0, widthOf(this) + 16);
+      let left = 0;
+      for (const chip of measure.querySelectorAll("[data-slot=filter-chip]")) {
+        if (chip === this) break;
+        left += widthOf(chip);
+      }
+      return box(left, widthOf(this));
+    };
+    globalThis.ResizeObserver = class {
+      constructor(callback: () => void) {
+        resized.push(callback);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      const user = userEvent.setup();
+      outputs = [
+        output("notes", { name: "notes.md", mimeType: "text/markdown" }),
+        output("plan", { name: "plan.md", mimeType: "text/markdown" }),
+        output("pic", { name: "pic.png", mimeType: "image/png", kind: "shown" }),
+        output("sheet", { name: "sheet.csv", mimeType: "text/csv" }),
+        output("site", { name: "site.html", mimeType: "text/html" }),
+        output("voice", { name: "voice.wav", mimeType: "audio/wav" }),
+        output("script", { name: "script.ts", mimeType: "text/typescript" }),
+      ];
+      renderPanel();
+      await screen.findByRole("list", { name: "Today" });
+      const chips = () => screen.getAllByRole("radio").map((chip) => chip.textContent);
+      // 260px holds All (48), Documents (96) and More (72), not Pictures too.
+      await waitFor(() => expect(chips()).toEqual(["All", "Documents"]));
+      const resize = (width: number) => {
+        rowWidth = width;
+        act(() => {
+          for (const callback of resized) callback();
+        });
+      };
+      // 310px fits Pictures beside More (304) but not with the 12px to spare.
+      resize(310);
+      expect(chips()).toEqual(["All", "Documents"]);
+      // Choosing a filter does not bring it in either; only room to spare does.
+      await user.click(screen.getByRole("radio", { name: "Documents" }));
+      expect(chips()).toEqual(["All", "Documents"]);
+      resize(330);
+      expect(chips()).toEqual(["All", "Documents", "Pictures"]);
+      await user.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+        "Spreadsheets",
+        "Pages",
+        "Audio",
+        "Code",
+      ]);
+      await user.click(screen.getByRole("menuitemradio", { name: "Audio" }));
+      expect(screen.getByRole("button", { name: "More: Audio" }).textContent).toBe("Audio");
+      expect(chips()).toEqual(["All", "Documents", "Pictures"]);
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+      globalThis.ResizeObserver = OriginalObserver;
+    }
+  });
+
+  it("offers no filters while the chat holds one kind", async () => {
+    outputs = [
+      output("notes", { name: "notes.md", mimeType: "text/markdown" }),
+      output("plan", { name: "plan.txt" }),
+    ];
+    renderPanel();
+    await screen.findByRole("list", { name: "Today" });
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
   it("says a file that moved or went is gone, and offers nothing to open", async () => {
@@ -253,18 +406,61 @@ describe("OutputsPanel", () => {
     expect(screen.queryByRole("link", { name: "Download" })).toBeNull();
   });
 
-  it("previews Markdown rendered, with no HTML running, and goes back to the list", async () => {
+  it("previews ordinary Markdown with links and images, sanitizes HTML, and goes back to the list", async () => {
     const user = userEvent.setup();
     outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
-    files[outputs[0].contentUrl!] = "# Plan\n\n<img src=x onerror=alert(1)>\n\n- one";
+    files[outputs[0].contentUrl!] =
+      "# Plan\n\n[Reference](https://example.com/reference)\n\n![Chart](https://example.com/chart.png)\n\n<img src=x onerror=alert(1)>\n\n- one";
     renderPanel({ selectedId: "notes" });
     const markdown = await screen.findByTestId("output-markdown");
     await waitFor(() =>
       expect(within(markdown).getByRole("heading", { name: "Plan" })).toBeTruthy(),
     );
-    expect(markdown.querySelector("img")).toBeNull();
+    expect(within(markdown).getByRole("link", { name: "Reference" }).getAttribute("href")).toBe(
+      "https://example.com/reference",
+    );
+    expect(within(markdown).getByRole("img", { name: "Chart" }).getAttribute("src")).toBe(
+      "https://example.com/chart.png",
+    );
+    expect(markdown.querySelector("[onerror]")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Back to outputs" }));
     expect(screen.getByRole("list", { name: "Today" })).toBeTruthy();
+  });
+
+  it("renders a Mermaid flowchart in a Markdown output preview", async () => {
+    const measureText = rs.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    rs.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(private readonly callback: IntersectionObserverCallback) {}
+        observe(target: Element) {
+          this.callback(
+            [{ isIntersecting: true, target } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver,
+          );
+        }
+        unobserve() {}
+        disconnect() {}
+        takeRecords() {
+          return [];
+        }
+      },
+    );
+    try {
+      outputs = [output("report", { name: "report.md", mimeType: "text/markdown" })];
+      files[outputs[0].contentUrl!] =
+        "# Architecture\n\n```mermaid\nflowchart TD\n    W[Web React / Vite] --> RPC[认证 WebSocket RPC + HTTP]\n```";
+      renderPanel({ selectedId: "report" });
+
+      const markdown = await screen.findByTestId("output-markdown");
+      await waitFor(() => expect(markdown.querySelector("svg.pele-flowchart")).not.toBeNull());
+      expect(markdown.querySelector("svg.pele-flowchart")?.textContent).toContain(
+        "Web React / Vite",
+      );
+      expect(markdown.querySelector('[data-streamdown="code-block"]')).toBeNull();
+    } finally {
+      measureText.mockRestore();
+    }
   });
 
   it("opens a row's preview: text as text, a picture inline, anything else as a download", async () => {
@@ -553,8 +749,43 @@ describe("outputTypeOf and outputTitle", () => {
     expect(outputTypeOf({ name: "a.html", mimeType: "text/html" })).toBe("page");
     expect(outputTypeOf({ name: "a.png", mimeType: "image/png" })).toBe("image");
     expect(outputTypeOf({ name: "a.ts", mimeType: null })).toBe("code");
+    expect(outputTypeOf({ name: "a.pptx", mimeType: null })).toBe("document");
+    expect(outputTypeOf({ name: "a.wav", mimeType: "audio/wav" })).toBe("audio");
+    expect(outputTypeOf({ name: "a.mp4", mimeType: "video/mp4" })).toBe("video");
+    expect(outputTypeOf({ name: "a.diff", mimeType: null })).toBe("code");
+    expect(outputTypeOf({ name: "a.zip", mimeType: "application/zip" })).toBe("file");
     expect(outputTitle("weekly-news_digest.md")).toBe("Weekly news digest");
     expect(outputTitle("Rome 发布摘要.md")).toBe("Rome 发布摘要");
+  });
+});
+
+describe("kindsThatFit", () => {
+  // All ends at 50 and each of three kinds adds 100; More is 60 wide, or 100 naming a kind.
+  const size = (width: number): FilterRowSize => ({
+    width,
+    gap: 8,
+    ends: [50, 150, 250, 350],
+    more: 60,
+    moreNamed: [100, 100, 100],
+  });
+
+  it("shows as many kinds as fit beside All and More, and needs no More when all fit", () => {
+    expect(kindsThatFit(size(100), -1)).toBe(0);
+    expect(kindsThatFit(size(300), -1)).toBe(1);
+    expect(kindsThatFit(size(330), -1)).toBe(2);
+    expect(kindsThatFit(size(350), -1)).toBe(3);
+  });
+
+  it("leaves room for More to name the kind chosen under it", () => {
+    expect(kindsThatFit(size(330), 2)).toBe(1);
+    expect(kindsThatFit(size(330), 0)).toBe(2);
+  });
+
+  it("drops a chip as soon as it no longer fits, and shows one again only with room to spare", () => {
+    expect(kindsThatStillFit(size(317), -1, 2)).toBe(1);
+    expect(kindsThatStillFit(size(320), -1, 1)).toBe(1);
+    expect(kindsThatStillFit(size(331), -1, 1)).toBe(2);
+    expect(kindsThatStillFit(size(320), -1, 2)).toBe(2);
   });
 });
 
@@ -614,5 +845,100 @@ describe("readPrefix", () => {
     expect(prefix).toEqual({ text: "x".repeat(2500), cut: true });
     expect(pulled).toBeLessThan(10);
     expect(cancel).toHaveBeenCalled();
+  });
+});
+
+describe("OutputsPanel in the side pane", () => {
+  it("hands a chosen output to the pane and keeps the list in place", async () => {
+    const user = userEvent.setup();
+    outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
+    const onOpenOutput = rs.fn();
+    renderPanel({ onOpenOutput });
+    await user.click(await screen.findByRole("button", { name: "Notes" }));
+    expect(onOpenOutput).toHaveBeenCalledWith(expect.objectContaining({ id: "notes" }));
+    expect(screen.getByRole("list", { name: "Today" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back to outputs" })).toBeNull();
+  });
+});
+
+describe("OutputFile", () => {
+  function renderFile(opened: { id: string; link: string | null }, withActions = true) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const actions = document.createElement("div");
+    document.body.append(actions);
+    const guard = { current: null as (() => Promise<boolean>) | null };
+    const view = render(
+      <QueryClientProvider client={client}>
+        <ThemeProvider>
+          <MemoryRouter>
+            <OutputFile
+              chatId="chat-1"
+              opened={opened}
+              actions={withActions ? actions : null}
+              leaveGuard={guard}
+            />
+          </MemoryRouter>
+        </ThemeProvider>
+      </QueryClientProvider>,
+    );
+    return Object.assign(view, { actions, guard });
+  }
+
+  it("shows the file alone, with its buttons in the pane's tab row", async () => {
+    outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
+    files[outputs[0].contentUrl!] = "# Plan";
+    const { actions } = renderFile({ id: "notes", link: outputs[0].link });
+    const markdown = await screen.findByTestId("output-markdown");
+    await waitFor(() =>
+      expect(within(markdown).getByRole("heading", { name: "Plan" })).toBeTruthy(),
+    );
+    // No header: no way back, and the name and kind are the tab's.
+    expect(screen.queryByRole("button", { name: "Back to outputs" })).toBeNull();
+    expect(screen.queryByText("notes.md")).toBeNull();
+    expect(within(actions).getByRole("link", { name: "Download" }).getAttribute("href")).toBe(
+      outputs[0].contentUrl,
+    );
+    actions.remove();
+  });
+
+  it("draws no buttons while its tab is not the one showing", async () => {
+    outputs = [output("notes", { name: "notes.md", mimeType: "text/markdown" })];
+    files[outputs[0].contentUrl!] = "# Plan";
+    renderFile({ id: "notes", link: outputs[0].link }, false);
+    await screen.findByTestId("output-markdown");
+    expect(screen.queryByRole("link", { name: "Download" })).toBeNull();
+  });
+
+  it("follows the file to its new record, and says when it is gone", async () => {
+    outputs = [output("notes-2", { name: "notes.txt" })];
+    files[outputs[0].contentUrl!] = "second take";
+    renderFile({ id: "notes-1", link: outputs[0].link });
+    expect(await screen.findByText("second take")).toBeTruthy();
+    cleanup();
+
+    outputs = [];
+    renderFile({ id: "notes-1", link: "/projects/demo/notes.txt" });
+    expect(await screen.findByText("Moved or deleted")).toBeTruthy();
+  });
+
+  it("edits a written text file in place, and Done in the tab row returns to the preview", async () => {
+    const user = userEvent.setup();
+    outputs = [output("one", { name: "notes.txt" })];
+    files[outputs[0].contentUrl!] = "hello";
+    resolved["projects/demo/notes.txt"] = {};
+    outputs[0] = {
+      ...outputs[0],
+      path: "/projects/demo/notes.txt",
+      link: "/projects/demo/notes.txt",
+    };
+    const { actions, guard } = renderFile({ id: "one", link: outputs[0].link });
+    await user.click(await within(actions).findByRole("button", { name: "Edit" }));
+    expect(await screen.findByTestId("project-browser")).toBeTruthy();
+    // The pane's close of the tab asks the editor first.
+    expect(guard.current).not.toBeNull();
+    await user.click(within(actions).getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByTestId("project-browser")).toBeNull());
+    expect(await screen.findByText("hello")).toBeTruthy();
+    actions.remove();
   });
 });

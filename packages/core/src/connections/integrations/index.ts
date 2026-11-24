@@ -53,8 +53,8 @@ export interface BuiltinConnectionDeps {
   accountAgentOf?: (connectionId: string) => string | null | undefined;
   /** Whether an agent is loaded, aliases included. */
   hasAgent?: (name: string) => boolean;
-  /** Guardian auto-map on WhatsApp connect (canonical self JID → channel mapping). */
-  onWhatsAppGuardianConnected: (selfJid: string) => void;
+  /** Told the WhatsApp account's canonical self JID each time it connects. */
+  onWhatsAppAccountConnected: (selfJid: string) => void;
   /** Rome Cloud mail client for the Email adapter. */
   mailProvider: MailProvider;
   /** Optional email dep mirrored from index.ts (whoami resolver). */
@@ -109,7 +109,7 @@ export function registerBuiltinConnections(
   registry.register(
     createWhatsAppDescriptor({
       syncSink: deps.whatsAppSyncSink,
-      onGuardianConnected: deps.onWhatsAppGuardianConnected,
+      onAccountConnected: deps.onWhatsAppAccountConnected,
     }),
   );
   // Rome Cloud-OAuth provider connection state (github/slack/
@@ -135,7 +135,7 @@ export function registerBuiltinConnections(
           }),
         redeem: async (handoff, state) => {
           const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
-          const credential = credentialFromBundle(redeemed.provider, redeemed.tokens);
+          const credential = credentialFromBundle(redeemed.tokens);
           if (!credential) {
             throw new Error("OAuth redemption produced no usable credential for the grant ledger.");
           }
@@ -151,7 +151,6 @@ export function registerBuiltinConnections(
         refresh: ROME_CLOUD_REFRESHABLE_PROVIDERS.has(provider)
           ? async (refreshToken) => {
               const credential = credentialFromBundle(
-                provider,
                 await refreshRomeCloudOAuthGrant(provider, refreshToken),
               );
               if (!credential) {

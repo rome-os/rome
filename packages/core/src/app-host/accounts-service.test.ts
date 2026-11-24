@@ -337,6 +337,114 @@ describe("ChannelsService — by account", () => {
   });
 });
 
+describe("ChannelsService — chats", () => {
+  const SLACK = { platform: "slack", id: "T1/B1" };
+  const accounts: RomeAccounts = {
+    accountOf: (id) => (id === "slack-1" ? SLACK : null),
+    holderOf: (account) => (account.id === SLACK.id ? "slack-1" : null),
+  };
+
+  function listing(listConversations: (input: object) => Promise<unknown>) {
+    const talkers: Record<string, object> = {
+      "slack-1": { send: async () => RECEIPT, directory: { listConversations } },
+      "discord-1": { send: async () => RECEIPT },
+    };
+    const all = Object.entries({ "slack-1": "slack_app", "discord-1": "discord" }).map(
+      ([id, kind]) =>
+        ({
+          id,
+          connectionKind: kind,
+          withTalker: (call: (live: object) => unknown) => call(talkers[id] as object),
+          status: () => ({ chat: { state: "unlocked" } }),
+        }) as unknown as Connection,
+    );
+    return createChannelsService({
+      channels: () => [] as unknown as Channels,
+      registry: { all: () => all },
+      channelOf: kindChannelOf,
+      accounts,
+    });
+  }
+
+  it("answers the account's own connection's page, with its cursor", async () => {
+    const listConversations = rs.fn(async () => ({
+      conversations: [
+        {
+          ref: { connectionId: "slack-1", chatId: "C1" },
+          connectionKind: "slack_app",
+          service: "slack_app",
+          kind: "channel",
+          displayName: "#news",
+        },
+      ],
+      nextCursor: "1",
+    }));
+    const channelsService = listing(listConversations);
+
+    const page = await channelsService.chats?.(SLACK, { query: "ne", cursor: "0", limit: 5_000 });
+
+    expect(listConversations).toHaveBeenCalledWith({
+      limit: 200,
+      includeTopics: false,
+      query: "ne",
+      cursor: "0",
+    });
+    expect(page).toEqual({
+      chats: [{ chatId: "C1", name: "#news", kind: "channel" }],
+      nextCursor: "1",
+    });
+  });
+
+  it("lists threads, archived ones too, each naming its chat", async () => {
+    const listConversations = rs.fn(async () => ({
+      conversations: [
+        {
+          ref: { connectionId: "slack-1", chatId: "C1" },
+          connectionKind: "slack_app",
+          service: "slack_app",
+          kind: "channel",
+          displayName: "#news",
+        },
+        {
+          ref: { connectionId: "slack-1", chatId: "T1" },
+          connectionKind: "slack_app",
+          service: "slack_app",
+          kind: "topic",
+          displayName: "launch",
+          parent: { connectionId: "slack-1", chatId: "C1" },
+          archived: true,
+        },
+      ],
+    }));
+    const channelsService = listing(listConversations);
+
+    const page = await channelsService.chats?.(SLACK, { includeArchivedThreads: true });
+
+    expect(listConversations).toHaveBeenCalledWith({
+      limit: 100,
+      includeTopics: true,
+      includeArchived: true,
+    });
+    expect(page).toEqual({
+      chats: [
+        { chatId: "C1", name: "#news", kind: "channel" },
+        { chatId: "T1", name: "launch", kind: "topic", parent: "C1", archived: true },
+      ],
+    });
+  });
+
+  it("rejects with the platform's refusal rather than an empty page", async () => {
+    const channelsService = listing(async () => {
+      throw new Error("Ask the guardian to approve the app again");
+    });
+
+    await expect(channelsService.chats?.(SLACK)).rejects.toThrow("approve the app again");
+    await expect(channelsService.chats?.("discord")).rejects.toThrow(
+      'Channel "discord" lists no chats',
+    );
+  });
+});
+
 describe("ChannelsService — a channel Rome serves itself", () => {
   it("sends through its own port and lists it as sendable, with no Connection behind it", async () => {
     const own = rs.fn<ChannelsService["send"]>(async () => RECEIPT);

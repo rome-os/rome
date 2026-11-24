@@ -345,9 +345,11 @@ export class TelegramUserAdapter {
     const senderDisplayName = isOutgoing ? this.settings.displayName : undefined;
     return {
       id: String(message.id),
-      // A live message carries no dialog context, so it reads as a group even
-      // in a private chat.
-      where: { chatId: threadId as ChatId, kind: "group" },
+      // A private chat's peer is the other user; a group's or channel's is the chat.
+      where: {
+        chatId: threadId as ChatId,
+        kind: message.peerId instanceof telegram().Api.PeerUser ? "direct" : "group",
+      },
       sender: {
         accountId: isOutgoing ? this.settings.userId : fromId,
         ...(senderDisplayName ? { name: senderDisplayName } : {}),

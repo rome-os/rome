@@ -23,6 +23,19 @@ export interface ChatSession {
   name: string;
   personaId: string | null;
   largeModelSelection?: string | null;
+  /** Whether the chat follows the default provider. Absent from an older server. */
+  followsDefault?: boolean;
+  /**
+   * The model the chat is pinned to while it does not follow the default: its
+   * owner's pick, or one a card or a change of the default kept. A held fork
+   * names only the provider.
+   */
+  pinnedModel?: {
+    by: "owner" | "kept";
+    providerId: string;
+    selection: string | null;
+    model: string | null;
+  } | null;
   /** Concrete model pinned by the session’s last successful turn, when known. */
   model?: string | null;
   /** Effort the session’s last successful turn ran with, in the provider’s own terms, when known. */
@@ -186,6 +199,8 @@ export interface ChatMessage {
   /** Rome's status on a guardian message of a Concierge chat, shown over its
    *  reaction. Absent when it has none, and from servers before it. */
   status?: import("@rome/api-types/concierge").ConciergeMessageStatus | null;
+  /** The id of the root of the message's reply chain (its own id for a root). Absent from servers before it. */
+  chatThreadId?: string | null;
 }
 
 export interface ProjectOption {

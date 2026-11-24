@@ -4,6 +4,7 @@
 // terminal write imports into the ADDRESSED connection (never blindly
 // find()[0]), and the guardian map — never reaching into the manager internals.
 
+import { linkGuardianOnConnect } from "../../people/guardian-mapping.js";
 import { describe, expect, it, rs } from "@rstest/core";
 import type { DrizzleTx } from "../../db/index.js";
 import type { PeopleRepository } from "../../people/model/people-repository.js";
@@ -25,7 +26,7 @@ const discordSetup: SetupFn = async (interact) => {
   return {
     credential: { material: { token }, expiresAt: "never" },
     profile: { botUsername: "rome" },
-    guardianChannelUserId: "guardian-1",
+    connectedBy: { id: "guardian-1" },
   };
 };
 
@@ -97,7 +98,10 @@ const PLACEHOLDER = { connectionKind: "discord" } as const;
 describe("SetupManager", () => {
   it("starts a setup and exposes its initial awaiting-input state", async () => {
     const { registry } = fakeRegistry(discordSetup);
-    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
+    const mgr = new SetupManager({
+      registry,
+      participant: linkGuardianOnConnect(fakePersonRepo()),
+    });
     const started = await mgr.start(PLACEHOLDER, "bot");
     expect(started.reattached).toBe(false);
     expect(started.state.status).toBe("awaiting-input");
@@ -107,7 +111,10 @@ describe("SetupManager", () => {
 
   it("re-attaches a duplicate start to the live setup (same cid)", async () => {
     const { registry } = fakeRegistry(discordSetup);
-    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
+    const mgr = new SetupManager({
+      registry,
+      participant: linkGuardianOnConnect(fakePersonRepo()),
+    });
     const first = await mgr.start(PLACEHOLDER, "bot");
     const second = await mgr.start(PLACEHOLDER, "bot");
     expect(second.reattached).toBe(true);
@@ -116,7 +123,10 @@ describe("SetupManager", () => {
 
   it("force-starts a fresh setup, cancelling the prior one", async () => {
     const { registry } = fakeRegistry(discordSetup);
-    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
+    const mgr = new SetupManager({
+      registry,
+      participant: linkGuardianOnConnect(fakePersonRepo()),
+    });
     const first = await mgr.start(PLACEHOLDER, "bot");
     const forced = await mgr.start(PLACEHOLDER, "bot", { force: true });
     expect(forced.cid).not.toBe(first.cid);
@@ -129,7 +139,7 @@ describe("SetupManager", () => {
     const linkStated = rs.fn(() => "id");
     const mgr = new SetupManager({
       registry,
-      peopleRepo: fakePersonRepo(linkStated),
+      participant: linkGuardianOnConnect(fakePersonRepo(linkStated)),
     });
     const started = await mgr.start(PLACEHOLDER, "bot");
     const outcome = await mgr.provideInput(started.cid, { token: "abc" })!;
@@ -156,7 +166,10 @@ describe("SetupManager", () => {
       mkConn("conn-A"),
       mkConn("conn-B"),
     ]);
-    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
+    const mgr = new SetupManager({
+      registry,
+      participant: linkGuardianOnConnect(fakePersonRepo()),
+    });
     const started = await mgr.start({ connectionKind: "discord", connectionId: "conn-B" }, "bot");
     expect(mgr.activeFor("conn-B", "bot")).toBe(started.cid);
     await mgr.provideInput(started.cid, { token: "abc" })!;
@@ -166,7 +179,10 @@ describe("SetupManager", () => {
 
   it("fails the setup when the addressed connection has vanished (no resurrection)", async () => {
     const { registry, imports, connect } = fakeRegistry(discordSetup, []);
-    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
+    const mgr = new SetupManager({
+      registry,
+      participant: linkGuardianOnConnect(fakePersonRepo()),
+    });
     const started = await mgr.start({ connectionKind: "discord", connectionId: "gone" }, "bot");
     const outcome = await mgr.provideInput(started.cid, { token: "abc" })!;
     expect(outcome.state.status).toBe("failed");
@@ -186,7 +202,10 @@ describe("SetupManager", () => {
       await gate;
       return fn();
     };
-    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
+    const mgr = new SetupManager({
+      registry,
+      participant: linkGuardianOnConnect(fakePersonRepo()),
+    });
     const started = await mgr.start(PLACEHOLDER, "bot");
     const input = mgr.provideInput(started.cid, { token: "abc" })!;
     await rs.waitFor(() => expect(entered).toHaveBeenCalled());
@@ -200,7 +219,10 @@ describe("SetupManager", () => {
 
   it("begins fresh after an explicit cancel", async () => {
     const { registry } = fakeRegistry(discordSetup);
-    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
+    const mgr = new SetupManager({
+      registry,
+      participant: linkGuardianOnConnect(fakePersonRepo()),
+    });
     const first = await mgr.start(PLACEHOLDER, "bot");
     await mgr.cancel(first.cid);
     expect(mgr.activeFor("discord", "bot")).toBeNull();
@@ -211,7 +233,10 @@ describe("SetupManager", () => {
 
   it("cancelActive cancels a live setup for the addressed grant", async () => {
     const { registry } = fakeRegistry(discordSetup, [mkConn("conn-A")]);
-    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
+    const mgr = new SetupManager({
+      registry,
+      participant: linkGuardianOnConnect(fakePersonRepo()),
+    });
     const started = await mgr.start({ connectionKind: "discord", connectionId: "conn-A" }, "bot");
     await mgr.cancelActive("conn-A", "bot");
     expect(mgr.state(started.cid)).toEqual({ status: "cancelled" });
@@ -222,7 +247,10 @@ describe("SetupManager", () => {
 
   it("serializes concurrent forced starts so exactly one setup stays active", async () => {
     const { registry } = fakeRegistry(discordSetup);
-    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
+    const mgr = new SetupManager({
+      registry,
+      participant: linkGuardianOnConnect(fakePersonRepo()),
+    });
     const first = await mgr.start(PLACEHOLDER, "bot");
 
     // Two forced starts fired concurrently must not both survive.
@@ -246,7 +274,10 @@ describe("SetupManager", () => {
 
   it("throws NoSetupError when the grant declares no setup", async () => {
     const { registry } = fakeRegistry(undefined);
-    const mgr = new SetupManager({ registry, peopleRepo: fakePersonRepo() });
+    const mgr = new SetupManager({
+      registry,
+      participant: linkGuardianOnConnect(fakePersonRepo()),
+    });
     await expect(mgr.start(PLACEHOLDER, "bot")).rejects.toBeInstanceOf(NoSetupError);
   });
 });

@@ -15,6 +15,11 @@ export interface ToolTraceTab {
 export interface ToolTraceHost {
   /** Element inside the Trace tab's panel, or null while no tab is mounted. */
   outlet: HTMLElement | null;
+  /**
+   * Element in the pane's tab row for the trace's own buttons, such as its
+   * download, or null while the Trace tab is not the one showing.
+   */
+  actions: HTMLElement | null;
   /** Whether the pane is showing, counting a pane a trace holds open. */
   paneOpen: boolean;
   /**

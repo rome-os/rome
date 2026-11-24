@@ -3,7 +3,6 @@ import { dirname } from "node:path";
 import type {
   OAuthProviderGrantProfile,
   ShopifyGrantProfile,
-  SlackGrantProfile,
 } from "../integrations/oauth-providers.js";
 import type { SecretRecord } from "../types.js";
 import { createLogger } from "../../logger.js";
@@ -24,8 +23,8 @@ const log = createLogger("provider-token-files");
  * and the on-disk shape both live in exactly one place.
  *
  * The write is driven by the grant's own shape: the secret `material`
- * (`SecretRecord`) plus the non-secret service-owned profile — the Slack
- * file needs `SlackGrantProfile.teamId`, which is profile, not material.
+ * (`SecretRecord`) plus the non-secret service-owned profile — the Shopify
+ * file needs the store's domain, which is profile, not material.
  */
 
 const DEFAULT_TOKEN_DIR = "/run/rome";
@@ -53,9 +52,6 @@ export function getProviderTokenFilePath(provider: OAuthProvider): string {
  *
  * On-disk shape per provider:
  * - `github`: a single bare access-token line (`material.accessToken`).
- * - `slack`: a JSON object `{ botToken, userToken, teamId }` — the bot/user
- *   tokens are secret (`material.botToken` / `material.userToken`); `teamId` is
- *   workspace identity and rides in `profile.teamId`.
  * - `shopify`: a JSON object `{ accessToken, shop }` — the hourly access token
  *   (`material.accessToken`, rewritten on each refresh) and the store's
  *   `.myshopify.com` domain, the Admin API host (`profile.login`). No file
@@ -71,13 +67,6 @@ function serializeProviderTokenFile(
     case "github": {
       const accessToken = material.accessToken?.trim();
       return accessToken ? `${accessToken}\n` : null;
-    }
-    case "slack": {
-      const botToken = material.botToken?.trim();
-      if (!botToken) return null;
-      const userToken = material.userToken ?? null;
-      const teamId = (profile as SlackGrantProfile).teamId ?? null;
-      return `${JSON.stringify({ botToken, userToken, teamId })}\n`;
     }
     case "shopify": {
       const accessToken = material.accessToken?.trim();

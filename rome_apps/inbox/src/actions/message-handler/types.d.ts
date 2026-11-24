@@ -68,6 +68,9 @@ export interface MessageHandlerInput {
   messageId: string;
   /** Provider-normalized message explicitly referenced by this reply. */
   replyTo?: MessageReplyReference;
+  /** The platform thread the message was said in, where `threadId` names its
+   *  conversation (ChannelMessage.inThread). */
+  inThread?: string;
   /** How the message addressed Rome's account, as the connection reported it. */
   addressing?: MessageAddressing;
   /** Another bot sent it, as the connection reported it. */

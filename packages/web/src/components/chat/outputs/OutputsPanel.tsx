@@ -1,13 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   AppWindow,
+  ChevronDown,
   ChevronLeft,
   Download,
   File as FileIcon,
+  FileAudio,
   FileCode,
   FileImage,
   FileOutput,
   FileText,
+  FileVideo,
   Pencil,
   Sheet,
 } from "lucide-react";
@@ -16,13 +19,22 @@ import {
   type MouseEvent,
   type ReactNode,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import Markdown from "@/components/markdown";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   EmptyState,
   EmptyStateDescription,
@@ -51,7 +63,7 @@ type Preview = "image" | "markdown" | "text" | "file";
 const TEXT_TYPES =
   /^(text\/|application\/(json|xml|javascript|typescript|x-yaml|yaml|toml|sql|x-sh))/;
 const CODE_EXTENSIONS =
-  /\.(c|cc|cpp|cs|css|go|h|java|js|jsx|json|kt|mjs|py|rb|rs|sh|sql|swift|toml|ts|tsx|xml|ya?ml)$/i;
+  /\.(c|cc|cjs|cpp|cs|css|diff|go|h|java|js|jsx|json|kt|mjs|patch|py|rb|rs|sh|sql|swift|toml|ts|tsx|xml|ya?ml)$/i;
 
 /** How the tab previews an output: never as a page that runs. */
 export function previewOf(output: Pick<ChatOutput, "name" | "mimeType">): Preview {
@@ -62,17 +74,105 @@ export function previewOf(output: Pick<ChatOutput, "name" | "mimeType">): Previe
   return "file";
 }
 
-/** What an output is, as the list names it and filters it. */
-export type OutputType = "document" | "spreadsheet" | "page" | "image" | "code" | "file";
+/**
+ * What an output is, as the list names it and filters it. Two kinds a list
+ * holds as many of keep this order: what people come back for first, working
+ * files last.
+ */
+const OUTPUT_TYPES = [
+  "document",
+  "image",
+  "spreadsheet",
+  "page",
+  "audio",
+  "video",
+  "code",
+  "file",
+] as const;
+export type OutputType = (typeof OUTPUT_TYPES)[number];
 
+/** The iOS app's `ChatOutputType` sorts files the same way: change both together. */
 export function outputTypeOf(output: Pick<ChatOutput, "name" | "mimeType">): OutputType {
   const extension = /\.([a-z0-9]+)$/i.exec(output.name)?.[1]?.toLowerCase() ?? "";
-  if (["md", "markdown", "txt", "pdf", "docx", "doc"].includes(extension)) return "document";
+  const mimeType = output.mimeType ?? "";
+  if (["md", "markdown", "txt", "pdf", "docx", "doc", "pptx", "ppt"].includes(extension)) {
+    return "document";
+  }
   if (["csv", "tsv", "xlsx", "xls"].includes(extension)) return "spreadsheet";
   if (["html", "htm"].includes(extension)) return "page";
-  if ((output.mimeType ?? "").startsWith("image/")) return "image";
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (mimeType.startsWith("video/")) return "video";
   if (CODE_EXTENSIONS.test(output.name)) return "code";
   return "file";
+}
+
+/** The most kinds the filters show as chips after All; the rest wait under More. */
+export const CHIP_KINDS = 3;
+
+/** A filter row as laid out, in pixels. */
+export interface FilterRowSize {
+  /** The row's width. */
+  width: number;
+  /** The space between two chips. */
+  gap: number;
+  /** Where All's chip and then each kind's ends, from the row's start, side by side. */
+  ends: number[];
+  /** The More chip's width while it reads More. */
+  more: number;
+  /** The More chip's width while it names each kind, in the kinds' order. */
+  moreNamed: number[];
+}
+
+/**
+ * How many kinds show as chips: as many as fit beside All, and beside More
+ * when any kind is left for it, up to CHIP_KINDS. More names the chosen kind
+ * when it holds it, so it is measured that wide. `chosen` is the chosen kind's
+ * place among the kinds, or -1 for All.
+ */
+export function kindsThatFit(size: FilterRowSize, chosen: number): number {
+  const kinds = size.ends.length - 1;
+  for (let count = Math.min(CHIP_KINDS, kinds); count > 0; count--) {
+    const more =
+      count === kinds
+        ? 0
+        : size.gap + (chosen >= count ? (size.moreNamed[chosen] ?? size.more) : size.more);
+    if ((size.ends[count] ?? 0) + more <= size.width) return count;
+  }
+  return 0;
+}
+
+/**
+ * How far past the width one more chip needs the row must grow before it
+ * shows, so a width resting on the edge does not flip it back and forth.
+ */
+export const FIT_SLACK = 12;
+
+/**
+ * kindsThatFit as the row resizes or a filter is chosen: one fewer as soon as
+ * a chip no longer fits, one more only once the row is FIT_SLACK past the
+ * width it needs.
+ */
+export function kindsThatStillFit(size: FilterRowSize, chosen: number, previous: number): number {
+  const fits = kindsThatFit(size, chosen);
+  if (fits < previous) return fits;
+  return Math.max(previous, kindsThatFit({ ...size, width: size.width - FIT_SLACK }, chosen));
+}
+
+/**
+ * The kinds a list holds, the one it holds most of first, for its filters.
+ * None while it holds one kind, which All already shows.
+ */
+export function kindsOf(outputs: readonly Pick<ChatOutput, "name" | "mimeType">[]): OutputType[] {
+  const counts = new Map<OutputType, number>();
+  for (const output of outputs) {
+    const type = outputTypeOf(output);
+    counts.set(type, (counts.get(type) ?? 0) + 1);
+  }
+  if (counts.size < 2) return [];
+  return OUTPUT_TYPES.filter((type) => counts.has(type)).sort(
+    (a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0),
+  );
 }
 
 /** A file name as a title: no extension, words for dashes and underscores, a capital first. */
@@ -85,14 +185,15 @@ export function outputTitle(name: string): string {
   return words.charAt(0).toLocaleUpperCase() + words.slice(1);
 }
 
-const FILTERS = ["all", "document", "spreadsheet", "page"] as const;
-type Filter = (typeof FILTERS)[number];
+type Filter = "all" | OutputType;
 
 const TYPE_ICON: Record<OutputType, { icon: ReactNode; tint: string }> = {
   document: { icon: <FileText />, tint: "bg-primary/10 text-primary" },
   spreadsheet: { icon: <Sheet />, tint: "bg-success-bg text-success-fg" },
   page: { icon: <AppWindow />, tint: "bg-info-bg text-info-fg" },
   image: { icon: <FileImage />, tint: "bg-brand/15 text-brand" },
+  audio: { icon: <FileAudio />, tint: "bg-brand/15 text-brand" },
+  video: { icon: <FileVideo />, tint: "bg-brand/15 text-brand" },
   code: { icon: <FileCode />, tint: "bg-surface-muted text-muted-foreground" },
   file: { icon: <FileIcon />, tint: "bg-surface-muted text-muted-foreground" },
 };
@@ -142,8 +243,11 @@ interface OutputsPanelProps {
   onNavigate?: () => void;
   /** Opens a task chat beside the chat instead of as its page, as the side pane does. */
   onOpenTaskChat?: (taskChatId: string, name: string) => void;
-  /** Whether the panel names itself, where nothing around it does. */
-  heading?: boolean;
+  /**
+   * Opens a chosen output somewhere else, as the side pane opens it in a tab of
+   * its own. Without it the output's preview takes the list's place.
+   */
+  onOpenOutput?: (output: ChatOutput) => void;
   /** A Concierge chat: read again when one of its task chats changes, as its turn ends. */
   taskChats?: boolean;
   /**
@@ -164,7 +268,7 @@ export function OutputsPanel({
   selectionSeq = 0,
   onNavigate,
   onOpenTaskChat,
-  heading = true,
+  onOpenOutput,
   taskChats = false,
   leaveGuard,
 }: OutputsPanelProps) {
@@ -269,7 +373,10 @@ export function OutputsPanel({
   }
 
   const now = new Date();
-  const shown = list.filter((output) => filter === "all" || outputTypeOf(output) === filter);
+  const kinds = kindsOf(list);
+  // A chosen kind this list does not hold, as another chat's, falls back to All.
+  const active = filter !== "all" && kinds.includes(filter) ? filter : "all";
+  const shown = list.filter((output) => active === "all" || outputTypeOf(output) === active);
   const today = shown.filter((output) => sameDay(new Date(output.at), now));
   const earlier = shown.filter((output) => !sameDay(new Date(output.at), now));
   const group = (key: "today" | "earlier", items: ChatOutput[]) =>
@@ -285,7 +392,7 @@ export function OutputsPanel({
               key={output.id}
               output={output}
               when={whenLabel(new Date(output.at), now, i18n.language)}
-              onOpen={() => setChosen(output.id)}
+              onOpen={() => (onOpenOutput ? onOpenOutput(output) : setChosen(output.id))}
               onNavigate={follow}
             />
           ))}
@@ -296,33 +403,182 @@ export function OutputsPanel({
   return (
     <div className="h-full overflow-y-auto pb-safe" data-testid="chat-outputs">
       <div className="flex flex-col gap-4 p-4 max-md:px-3">
-        {heading && (
-          <h2 className="flex items-baseline gap-2 text-title text-foreground">
-            {t("outputs.title")}
-            <span className="text-ui tabular-nums text-muted-foreground">{list.length}</span>
-          </h2>
-        )}
-        {/* Chips a step tighter than the kit's touch spacing, so the four fit a
-            phone's sheet and scroll only in a narrower pane. */}
-        <div style={{ "--control-filter-px": "var(--rome-space-3)" } as CSSProperties}>
-          <FilterChipGroup<Filter>
-            aria-label={t("outputs.filterLabel")}
-            value={filter}
-            onValueChange={setFilter}
-            options={FILTERS.map((value) => ({ value, label: t(`outputs.filters.${value}`) }))}
-          />
-        </div>
+        {kinds.length > 0 && <KindFilters kinds={kinds} value={active} onValueChange={setFilter} />}
         {indexingNote}
-        {shown.length === 0 ? (
-          <p className="px-1 text-ui text-muted-foreground">{t("outputs.noneOfType")}</p>
-        ) : (
-          <div className="flex flex-col gap-4">
-            {group("today", today)}
-            {group("earlier", earlier)}
-          </div>
-        )}
+        <div className="flex flex-col gap-4">
+          {group("today", today)}
+          {group("earlier", earlier)}
+        </div>
       </div>
     </div>
+  );
+}
+
+/** The kit's filter chip, as More's menu trigger rather than a radio. */
+function moreChipClass(chosen: boolean): string {
+  return cn(
+    "inline-flex shrink-0 items-center gap-1 rounded-full border px-[var(--control-filter-px)] py-1 text-badge min-h-[var(--control-min-h)] whitespace-nowrap transition-colors outline-none outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50 [&_svg]:size-4",
+    chosen
+      ? "border-transparent bg-primary text-primary-foreground"
+      : "border-border-strong bg-surface text-foreground hover:bg-surface-muted",
+  );
+}
+
+/**
+ * All and as many kinds as the row's width holds, up to CHIP_KINDS, with the
+ * rest under More, so the row never scrolls. A hidden copy of every chip is
+ * measured to tell how many fit, again whenever the row or the chips resize.
+ */
+function KindFilters({
+  kinds,
+  value,
+  onValueChange,
+}: {
+  kinds: OutputType[];
+  value: Filter;
+  onValueChange: (filter: Filter) => void;
+}) {
+  const { t, i18n } = useTranslation("chat");
+  const rowRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [fitted, setFitted] = useState(CHIP_KINDS);
+  // The count last shown, kept across choosing a filter as well as resizes, so
+  // a click never adds a chip that only the slack was holding back.
+  const shownRef = useRef<number | null>(null);
+  const count = Math.min(fitted, kinds.length);
+  const chosen = value === "all" ? -1 : kinds.indexOf(value);
+  const kindsKey = kinds.join(",");
+  const label = (filter: Filter) => t(`outputs.filters.${filter}`);
+
+  // Measured again whenever the kinds, the chosen one or the language change what the chips say.
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    const measure = measureRef.current;
+    if (!row || !measure) return;
+    const fit = () => {
+      // Unrounded, as the chips are measured, so a fractional width cannot round up past them.
+      const width = row.getBoundingClientRect().width;
+      // Not laid out, as in a closed sheet: keep the most chips until it is.
+      if (width === 0) return;
+      const chips = [...measure.querySelectorAll<HTMLElement>("[data-slot=filter-chip]")];
+      const start = chips[0]?.getBoundingClientRect().left ?? 0;
+      const widthOf = (selector: string) =>
+        measure.querySelector<HTMLElement>(selector)?.getBoundingClientRect().width ?? 0;
+      const size: FilterRowSize = {
+        width,
+        gap: Number.parseFloat(getComputedStyle(row).columnGap) || 0,
+        ends: chips.map((chip) => chip.getBoundingClientRect().right - start),
+        more: widthOf("[data-more]"),
+        moreNamed: kinds.map((kind) => widthOf(`[data-more-named="${kind}"]`)),
+      };
+      const next = kindsThatStillFit(size, chosen, shownRef.current ?? CHIP_KINDS);
+      shownRef.current = next;
+      setFitted(next);
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(row);
+    observer.observe(measure);
+    return () => observer.disconnect();
+  }, [kindsKey, chosen, i18n.language]);
+
+  return (
+    // Chips a step tighter than the kit's touch spacing, so more of them fit.
+    <div
+      ref={rowRef}
+      data-slot="output-filters"
+      className="relative flex min-w-0 items-start gap-2"
+      style={{ "--control-filter-px": "var(--rome-space-3)" } as CSSProperties}
+    >
+      <FilterChipGroup<Filter>
+        aria-label={t("outputs.filterLabel")}
+        value={value}
+        onValueChange={onValueChange}
+        options={(["all", ...kinds.slice(0, count)] as Filter[]).map((filter) => ({
+          value: filter,
+          label: label(filter),
+        }))}
+      />
+      {count < kinds.length && (
+        <MoreKinds kinds={kinds.slice(count)} value={value} onValueChange={onValueChange} />
+      )}
+      {/* Clipped to nothing, so the copy's full width never scrolls the pane. */}
+      <div
+        aria-hidden
+        inert
+        className="pointer-events-none invisible absolute inset-x-0 top-0 h-0 overflow-hidden"
+      >
+        <div
+          ref={measureRef}
+          data-slot="output-filters-measure"
+          className="flex w-max items-start gap-2"
+        >
+          <FilterChipGroup<Filter>
+            aria-label={t("outputs.filterLabel")}
+            value={value}
+            onValueChange={onValueChange}
+            options={(["all", ...kinds] as Filter[]).map((filter) => ({
+              value: filter,
+              label: label(filter),
+            }))}
+          />
+          <span data-more className={moreChipClass(false)}>
+            {t("outputs.more")}
+            <ChevronDown aria-hidden />
+          </span>
+          {kinds.map((kind) => (
+            <span key={kind} data-more-named={kind} className={moreChipClass(true)}>
+              {label(kind)}
+              <ChevronDown aria-hidden />
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The kinds past the chips, under one chip that opens a menu of them. It reads
+ * as chosen, and names the kind, while one of them filters the list.
+ */
+function MoreKinds({
+  kinds,
+  value,
+  onValueChange,
+}: {
+  kinds: OutputType[];
+  value: Filter;
+  onValueChange: (kind: OutputType) => void;
+}) {
+  const { t } = useTranslation("chat");
+  const chosen = kinds.find((kind) => kind === value);
+  const chosenLabel = chosen && t(`outputs.filters.${chosen}`);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={chosenLabel ? t("outputs.moreChosen", { kind: chosenLabel }) : undefined}
+          className={moreChipClass(Boolean(chosen))}
+        >
+          {chosenLabel ?? t("outputs.more")}
+          <ChevronDown aria-hidden />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuRadioGroup
+          value={chosen ?? ""}
+          onValueChange={(next) => onValueChange(next as OutputType)}
+        >
+          {kinds.map((kind) => (
+            <DropdownMenuRadioItem key={kind} value={kind}>
+              {t(`outputs.filters.${kind}`)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -423,6 +679,58 @@ export async function readPrefix(
   return { text: text.slice(0, chars), cut: true };
 }
 
+/**
+ * Output `opened` of chat `chatId` in a file tab of the side pane: the file
+ * alone, with its Edit, Done and Download buttons in the pane's tab row. It
+ * follows the file when the agent writes it again under a new record, and says
+ * so when the file is gone.
+ */
+export function OutputFile({
+  chatId,
+  opened,
+  actions,
+  leaveGuard,
+}: {
+  chatId: string;
+  opened: { id: string; link: string | null };
+  /** Where the file's buttons go, or null while its tab is not the one showing. */
+  actions: HTMLElement | null;
+  /** Filled with the check the pane runs before it closes the tab. */
+  leaveGuard: LeaveGuard;
+}) {
+  const { t } = useTranslation("chat");
+  const outputs = useChatOutputs(chatId);
+  const list = outputs.data?.outputs ?? [];
+  const found =
+    list.find((output) => output.id === opened.id) ??
+    list.find((output) => opened.link !== null && output.link === opened.link) ??
+    null;
+  // The edit holds on to the record it began with, as the panel's does.
+  const [editing, setEditing] = useState<{ path: string; output: ChatOutput } | null>(null);
+  const output = editing?.output ?? found;
+  if (!output) {
+    if (outputs.isPending) return <Skeleton className="m-4 h-24" />;
+    return (
+      <p className="p-4 text-ui text-muted-foreground">
+        {outputs.isError ? t("outputs.loadFailed") : t("outputs.missing")}
+      </p>
+    );
+  }
+  return (
+    <div className="h-full overflow-y-auto pb-safe" data-testid="chat-output-file">
+      <OutputPreview
+        key={output.id}
+        output={output}
+        leaveGuard={leaveGuard}
+        editingPath={editing?.path ?? null}
+        onEdit={(path) => setEditing({ path, output })}
+        onDone={() => leaveEditor(leaveGuard, () => setEditing(null))}
+        actions={actions}
+      />
+    </div>
+  );
+}
+
 function OutputPreview({
   output,
   leaveGuard,
@@ -431,6 +739,7 @@ function OutputPreview({
   onDone,
   onBack,
   onNavigate,
+  actions,
 }: {
   output: ChatOutput;
   leaveGuard: LeaveGuard;
@@ -438,14 +747,21 @@ function OutputPreview({
   editingPath: string | null;
   onEdit: (path: string) => void;
   onDone: () => void;
-  onBack: () => void;
+  onBack?: () => void;
   onNavigate?: FollowTaskChat;
+  /**
+   * A file tab's buttons go here, and the preview draws no header, since its
+   * tab names it. Undefined in a list's place, where it draws its own header
+   * with a way back.
+   */
+  actions?: HTMLElement | null;
 }) {
   const { t } = useTranslation("chat");
   const kind = previewOf(output);
   const url = output.contentUrl;
   const textual = kind === "markdown" || kind === "text";
   const editing = editingPath !== null;
+  const inTab = actions !== undefined;
   // A text file the agent wrote into the projects folder can be edited in
   // place. Once it is being edited the folder's answer is not asked again.
   const editablePath = useEditablePath(output, textual && output.kind === "written" && !editing);
@@ -455,14 +771,26 @@ function OutputPreview({
     enabled: textual && Boolean(url) && !editing,
   });
 
-  const download = url ? (
+  // In a tab's row, beside the pane's own buttons, Download is an icon too.
+  const download = !url ? null : inTab ? (
+    <Button asChild variant="ghost" size="icon-sm">
+      <a
+        href={url}
+        download={output.name}
+        aria-label={t("outputs.download")}
+        title={t("outputs.download")}
+      >
+        <Download />
+      </a>
+    </Button>
+  ) : (
     <Button asChild variant="outline" size="sm">
       <a href={url} download={output.name}>
         <Download data-icon="inline-start" />
         {t("outputs.download")}
       </a>
     </Button>
-  ) : null;
+  );
   const editToggle =
     editingPath !== null ? (
       <Button variant="outline" size="sm" onClick={onDone}>
@@ -476,7 +804,17 @@ function OutputPreview({
         onClick={() => onEdit(editablePath)}
       />
     ) : null;
-  const header = (
+  const header = inTab ? (
+    actions ? (
+      createPortal(
+        <>
+          {editToggle}
+          {download}
+        </>,
+        actions,
+      )
+    ) : null
+  ) : (
     <div className="flex items-center gap-2 pt-2 pr-4 pl-2">
       <IconButton size="sm" label={t("outputs.back")} icon={<ChevronLeft />} onClick={onBack} />
       <div className="min-w-0 flex-1">
@@ -493,10 +831,12 @@ function OutputPreview({
       {download}
     </div>
   );
+  // With no header above it, the file starts a step below the tab row.
+  const frame = cn("flex flex-col gap-3", inTab && "pt-4");
 
   if (editingPath !== null) {
     return (
-      <div className="flex h-full flex-col gap-3">
+      <div className={cn(frame, "h-full", inTab && "pt-0")}>
         {header}
         <div className="min-h-0 flex-1">
           <OutputEditor path={editingPath} textUrl={url} leaveGuard={leaveGuard} />
@@ -507,7 +847,7 @@ function OutputPreview({
 
   if (!url) {
     return (
-      <div className="flex flex-col gap-3">
+      <div className={frame}>
         {header}
         <p className="px-4 text-ui text-muted-foreground">
           {output.missing ? t("outputs.missing") : t("outputs.unavailable")}
@@ -518,7 +858,7 @@ function OutputPreview({
 
   if (kind === "image") {
     return (
-      <div className="flex flex-col gap-3">
+      <div className={frame}>
         {header}
         <img
           src={url}
@@ -530,7 +870,7 @@ function OutputPreview({
   }
   if (kind === "file") {
     return (
-      <div className="flex flex-col gap-3">
+      <div className={frame}>
         {header}
         <p className="px-4 text-ui text-muted-foreground">{t("outputs.noPreview")}</p>
       </div>
@@ -538,7 +878,7 @@ function OutputPreview({
   }
   if (text.isPending) {
     return (
-      <div className="flex flex-col gap-3">
+      <div className={frame}>
         {header}
         <Skeleton className="mx-4 h-24" />
       </div>
@@ -546,7 +886,7 @@ function OutputPreview({
   }
   if (text.isError) {
     return (
-      <div className="flex flex-col gap-3">
+      <div className={frame}>
         {header}
         <p className="px-4 text-ui text-muted-foreground">{t("outputs.previewFailed")}</p>
       </div>
@@ -554,7 +894,7 @@ function OutputPreview({
   }
   const { text: body, cut } = text.data;
   return (
-    <div className="flex flex-col gap-3 pb-4">
+    <div className={cn(frame, "pb-4")}>
       {header}
       {cut && (
         <p className="px-4 text-aux text-muted-foreground">
@@ -563,7 +903,7 @@ function OutputPreview({
       )}
       {kind === "markdown" ? (
         <div className="px-4" data-testid="output-markdown">
-          <Markdown inert>{body}</Markdown>
+          <Markdown>{body}</Markdown>
         </div>
       ) : (
         <pre className="mx-4 overflow-x-auto rounded-8 bg-surface-muted p-3 font-mono text-aux whitespace-pre text-foreground">

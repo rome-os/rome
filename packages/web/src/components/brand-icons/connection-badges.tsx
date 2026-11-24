@@ -150,6 +150,7 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
 const BADGE_OF_SERVICE: Readonly<Record<string, string>> = {
   slack_bot: "slack",
   slack_app: "slack",
+  discord_app: "discord",
 };
 
 /** Whether a service has a brand mark of its own. */
