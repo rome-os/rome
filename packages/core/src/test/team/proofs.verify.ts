@@ -1,10 +1,13 @@
-// The verifier proven against products whose verdicts are known: the product
-// in the tree, where the guardian-only checks must fail rule 2 by name; a
-// stand-in where every check admits the teammate, which must pass; and a
-// stand-in that admits a visitor nobody invited, which must fail.
+// The verifier proven against stand-in products whose verdicts never change,
+// whatever state the product in the tree is in: one with a route only the
+// guardian may call, which must fail rule 2 naming that route; one where every
+// check admits the teammate as it admits the guardian, which must pass; one
+// that admits a visitor nobody invited, which must fail; and one whose sign-in
+// hands an uninvited account the guardian's session, which must fail rule 1.
 
 import { describe, expect, it } from "@rstest/core";
-import { runRule2, type Rule2Result } from "./rule2.js";
+import { runRule1b } from "./rule1.js";
+import { runRule2, STAND_IN_GUARDIAN_ONLY_ROUTE, type Rule2Result } from "./rule2.js";
 import { writePart } from "./report.js";
 
 const summary = (result: Rule2Result) => ({
@@ -19,20 +22,12 @@ const summary = (result: Rule2Result) => ({
 const proofs: Record<string, unknown> = {};
 
 describe("the rule 2 verifier", () => {
-  it("fails the product in the tree on its guardian-only routes", async () => {
-    const result = await runRule2();
-    proofs.productInTree = summary(result);
+  it("fails a stand-in with a route only the guardian may call, naming that route", async () => {
+    const result = await runRule2({ standIn: "guardian-only-route" });
+    proofs.guardianOnlyRoute = summary(result);
     writePart("proofs", proofs);
     expect(result.pass).toBe(false);
-    expect(result.teammateRefused).toEqual(
-      expect.arrayContaining([
-        "GET /api/approvals",
-        "POST /api/approvals/:id/approve",
-        "GET /api/vault",
-        "PUT /api/vault/:name",
-      ]),
-    );
-    expect(result.outsiderAdmitted).toEqual([]);
+    expect(result.teammateRefused).toContain(STAND_IN_GUARDIAN_ONLY_ROUTE);
   }, 600_000);
 
   it("passes a stand-in whose checks admit the teammate as they admit the guardian", async () => {
@@ -54,4 +49,14 @@ describe("the rule 2 verifier", () => {
       expect.arrayContaining(["GET /api/chat/sessions", "GET /api/settings"]),
     );
   }, 600_000);
+});
+
+describe("the rule 1 sign-in check", () => {
+  it("fails a stand-in whose sign-in hands an uninvited account the guardian's session", async () => {
+    const result = await runRule1b({ standIn: "guardian-session-for-everyone" });
+    proofs.guardianSessionForEveryone = { pass: result.pass, uninvited: result.uninvited };
+    writePart("proofs", proofs);
+    expect(result.pass).toBe(false);
+    expect(result.uninvited.at(-1)?.ok).toBe(false);
+  }, 60_000);
 });
