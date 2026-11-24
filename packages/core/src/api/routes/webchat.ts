@@ -2922,28 +2922,35 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     return c.body(row.content);
   });
 
+  /** The chats `viewer` may open, as `GET /chat/sessions` lists them in the sidebar. */
+  const listChats = async (
+    status: "active" | "archived" | "all",
+    ownerKey: string | null | undefined,
+    viewer: string | null,
+  ) => {
+    const sessions = await deps.webchatRepo.listSessions(status, ownerKey, viewer);
+    return sessions.map((session) => {
+      const running = isSessionRunning(session.id);
+      return {
+        ...sessionResponse(session, session.messageCount),
+        running,
+        // A new turn's trace is written a moment after it starts, so until
+        // then the newest trace is the previous turn's. Running wins.
+        // A provider card in the chat says why and what to do: no red mark beside it.
+        lastTurnFailed:
+          session.lastTurnFailed && !running && !deps.providerFailures?.carded(session.id),
+        awaitingGuardian: session.awaitingGuardian && !running,
+      };
+    });
+  };
+
   app.get("/chat/sessions", async (c) => {
     const rawStatus = c.req.query("status");
     const status =
       rawStatus === "archived" || rawStatus === "all" ? rawStatus : ("active" as const);
     const ownerKey =
       c.req.query("scope") === "mine" ? sessionOwnerKey(await currentSessionActor()) : undefined;
-    const sessions = await deps.webchatRepo.listSessions(status, ownerKey, await callerOwner());
-    return c.json(
-      sessions.map((session) => {
-        const running = isSessionRunning(session.id);
-        return {
-          ...sessionResponse(session, session.messageCount),
-          running,
-          // A new turn's trace is written a moment after it starts, so until
-          // then the newest trace is the previous turn's. Running wins.
-          // A provider card in the chat says why and what to do: no red mark beside it.
-          lastTurnFailed:
-            session.lastTurnFailed && !running && !deps.providerFailures?.carded(session.id),
-          awaitingGuardian: session.awaitingGuardian && !running,
-        };
-      }),
-    );
+    return c.json(await listChats(status, ownerKey, await callerOwner()));
   });
 
   // One stream for the whole sidebar: a `session_running` event for each chat
@@ -5864,6 +5871,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (!(await guardianOpens(chatId))) return null;
       return (await findTopLevelSession(chatId))?.name ?? null;
     },
+    listChats: () => listChats("all", undefined, GUARDIAN_OWNER),
   };
 
   const runtime: WebchatRuntime = {

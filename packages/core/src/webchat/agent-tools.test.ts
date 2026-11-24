@@ -10,6 +10,7 @@ import {
   type ChatPageAnswer,
   type ChatToolDeps,
   changeChat,
+  type ListedChat,
   startChat,
 } from "./agent-tools.js";
 
@@ -40,6 +41,18 @@ const chat = (fields: Record<string, unknown> = {}): ChatPageAnswer => ({
 });
 const refused = (status: number, error: string): ChatPageAnswer => ({ status, body: { error } });
 
+// The guardian's chats as the page lists them, latest activity first.
+const listed: ListedChat[] = [
+  { id: "c-taxes", name: "Taxes", activityAt: "2026-11-24T09:00:00.000Z" },
+  { id: "c-lisbon", name: "Trip to Lisbon", activityAt: "2026-11-23T09:00:00.000Z" },
+  { id: "c-groceries", name: "Groceries", activityAt: "2026-11-22T09:00:00.000Z" },
+  { id: "c-plan-1", name: "Plan", activityAt: "2026-11-21T09:00:00.000Z" },
+  { id: "c-plan-2", name: "plan ", activityAt: "2026-11-20T09:00:00.000Z" },
+  { id: "c-recipes", name: "Recipes", activityAt: "2026-11-19T09:00:00.000Z" },
+  { id: "c-porto", name: "Trip to Porto", activityAt: "2026-11-18T09:00:00.000Z" },
+  { id: "c-books", name: "Books", activityAt: "2026-11-17T09:00:00.000Z" },
+];
+
 function chatPage(overrides: Partial<ChatPage> = {}) {
   const page = {
     startChat: rs.fn(async () => chat()),
@@ -55,6 +68,7 @@ function chatPage(overrides: Partial<ChatPage> = {}) {
     setChatProject: rs.fn(async (_id: string, projectPath: string) => chat({ projectPath })),
     deleteChat: rs.fn(async () => ({ status: 200, body: { ok: true } })),
     chatName: rs.fn(async () => "Trip plan"),
+    listChats: rs.fn(async (): Promise<ListedChat[]> => listed),
   };
   // The defaults stay typed as mocks; a test reads the mock of none it overrides.
   Object.assign(page, overrides);
@@ -263,7 +277,113 @@ describe("changing a chat", () => {
   });
 });
 
+describe("naming a chat", () => {
+  it("changes the one chat with the name, whatever its case and the spaces around it", async () => {
+    const { page, deps } = chatPage();
+
+    const result = await callTool(changeChat, deps, {
+      chatName: "  trip TO lisbon ",
+      pinned: true,
+    });
+
+    expect(page.pinChat).toHaveBeenCalledWith("c-lisbon", true);
+    expect(result).toMatchObject({ status: "ok" });
+  });
+
+  it("names the closest chats, then the most recent, when no chat has the name", async () => {
+    const { page, deps } = chatPage();
+
+    const result = await callTool(changeChat, deps, { chatName: "Trip", name: "Holiday" });
+
+    expect(result).toEqual({
+      status: "error",
+      error:
+        'No chat is named "Trip", so nothing was changed. The chats with the closest names, then the most recent: "Trip to Lisbon", "Trip to Porto", "Taxes", "Groceries", "Plan". Ask the guardian which chat they mean.',
+    });
+    expect(page.renameChat).not.toHaveBeenCalled();
+  });
+
+  it("lists every chat with the name, and changes none, when several have it", async () => {
+    const { page, deps } = chatPage();
+
+    const result = await callTool(changeChat, deps, { chatName: "plan", archived: true });
+
+    expect(result).toEqual({
+      status: "error",
+      error:
+        '2 chats are named "plan", so nothing was changed: "Plan" (last active 2026-11-21T09:00:00.000Z, id c-plan-1); "plan " (last active 2026-11-20T09:00:00.000Z, id c-plan-2). Ask the guardian which one they mean, then pass its chatId.',
+    });
+    expect(page.archiveChat).not.toHaveBeenCalled();
+  });
+
+  it("takes the id when the id and the name agree, even among chats of one name", async () => {
+    const { page, deps } = chatPage();
+
+    await callTool(changeChat, deps, { chatId: "c-plan-2", chatName: "Plan", pinned: true });
+
+    expect(page.pinChat).toHaveBeenCalledWith("c-plan-2", true);
+  });
+
+  it("changes nothing when the id and the name are of different chats", async () => {
+    const { page, deps } = chatPage();
+
+    const result = await callTool(changeChat, deps, {
+      chatId: "c-taxes",
+      chatName: "Trip to Lisbon",
+      pinned: true,
+    });
+
+    expect(result).toMatchObject({
+      status: "error",
+      error: expect.stringContaining('The chat with id "c-taxes" is not named "Trip to Lisbon"'),
+    });
+    expect(page.pinChat).not.toHaveBeenCalled();
+  });
+
+  it("finds no chat the page does not list", async () => {
+    const { page, deps } = chatPage();
+
+    // The page lists only chats the guardian may open, so another person's
+    // Concierge chat is not among them, whatever its name.
+    const result = await callTool(changeChat, deps, { chatName: "Concierge", delete: true });
+
+    expect(result).toMatchObject({ status: "error", error: expect.stringContaining("No chat") });
+    expect(page.deleteChat).not.toHaveBeenCalled();
+  });
+});
+
 describe("deleting a chat", () => {
+  it("is approved on a card that names the chat its name found", async () => {
+    const { deps } = chatPage();
+
+    expect(
+      await approvalOf(changeChat, deps, { chatName: "trip to lisbon", delete: true }),
+    ).toEqual({
+      kind: "generic",
+      title: 'Delete the chat "Trip to Lisbon"',
+      summary: "Deletes the chat and all its messages. This cannot be undone.",
+    });
+  });
+
+  it("shows no card, and does not run, for a name that finds no one chat", async () => {
+    const { deps } = chatPage();
+
+    for (const chatName of ["Trip", "Plan"]) {
+      await expect(approvalOf(changeChat, deps, { chatName, delete: true })).rejects.toThrow(
+        "so nothing was changed",
+      );
+    }
+  });
+
+  it("deletes the chat its name found through the page's delete", async () => {
+    const { page, deps } = chatPage();
+
+    const result = await callTool(changeChat, deps, { chatName: "Groceries", delete: true });
+
+    expect(page.deleteChat).toHaveBeenCalledWith("c-groceries");
+    expect(result).toMatchObject({ status: "ok", data: { chatId: "c-groceries", deleted: true } });
+  });
+
   it("is approved by the guardian on a card that names the chat", async () => {
     const { deps } = chatPage();
 

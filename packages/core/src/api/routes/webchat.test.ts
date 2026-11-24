@@ -191,6 +191,15 @@ describe("Webchat API", () => {
     };
     expect(shown).toMatchObject({ name: "Taxes", archivedAt: expect.any(String) });
     expect(await page.chatName(id)).toBe("Taxes");
+    // The tools find a chat by its name in the sidebar's list, archived chats included.
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    const sidebar = await runWithSessionActor(guardian, async () =>
+      (await app.request("/chat/sessions?status=all")).json(),
+    );
+    expect(await page.listChats()).toEqual(sidebar);
+    expect(await page.listChats()).toContainEqual(
+      expect.objectContaining({ id, name: "Taxes", activityAt: expect.any(String) }),
+    );
 
     expect(await page.deleteChat(id)).toEqual({ status: 200, body: { ok: true } });
     expect(await deps.webchatRepo.getSession(id)).toBeNull();
@@ -214,6 +223,7 @@ describe("Webchat API", () => {
       body: { error: "Session not found" },
     });
     expect(await page.chatName("visitor-main")).toBeNull();
+    expect((await page.listChats()).map((chat) => chat.id)).not.toContain("visitor-main");
     expect((await deps.webchatRepo.getSession("visitor-main"))?.name).toBe("Concierge");
   });
 
