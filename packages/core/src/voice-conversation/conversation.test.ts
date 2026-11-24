@@ -322,6 +322,88 @@ describe("voice conversation", () => {
     expect(t.messages.filter((m) => m.type === "clear")).toEqual([]);
   });
 
+  it("drops the looking line's echo that is heard only after its audio played", async () => {
+    const t = setup();
+    t.conversation.heard("查一下天气", "");
+    t.conversation.endpoint();
+    await settled();
+    t.clock.advance(LOOKING_AFTER_MS);
+    expect(t.said.map((s) => s.text)).toEqual(["我查一下。"]);
+    t.speak(0, 800);
+    // Recognition runs behind: the echo's first words come 300 ms after the audio ends.
+    t.clock.advance(800 + 300);
+    t.conversation.heard("", "我查一下");
+    t.conversation.heard("我查一下。", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["查一下天气"]);
+    expect(t.signals[0]?.aborted).toBe(false);
+
+    // The reply starts playing while the next echo is still being heard.
+    t.conversation.heard("", "我查一下");
+    t.turns[0]?.push({ type: "text_delta", content: "今天晴。" });
+    await settled();
+    t.speak(1, 1000);
+    t.conversation.heard("我查一下。今天晴", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["查一下天气"]);
+    expect(t.signals[0]?.aborted).toBe(false);
+
+    // Once Rome's words can no longer come back, the guardian is heard again.
+    t.clock.advance(5000);
+    t.conversation.heard("我查一下明天", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["查一下天气", "我查一下明天"]);
+  });
+
+  it("drops an English looking line heard late, but sends part of a sentence as an answer", async () => {
+    const t = setup();
+    t.conversation.heard("check the build", "");
+    t.conversation.endpoint();
+    await settled();
+    t.clock.advance(LOOKING_AFTER_MS);
+    t.speak(0, 700);
+    t.clock.advance(700 + 300);
+    t.conversation.heard("Let me check.", "");
+    t.conversation.endpoint();
+    t.conversation.heard("me check", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["check the build", "me check"]);
+  });
+
+  it("forgets a stopped reply's words on time, even when the next reply starts at once", async () => {
+    const t = setup();
+    t.conversation.heard("deploy it", "");
+    t.conversation.endpoint();
+    await settled();
+    t.turns[0]?.push({
+      type: "text_delta",
+      content: "Deploying to the production server now.\nThen I will check the logs.\n",
+    });
+    await settled();
+    t.speak(0, 3000);
+    t.speak(1, 3000);
+    t.clock.advance(1000);
+    t.conversation.heard("wait stop", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["deploy it", "wait stop"]);
+
+    // The next reply plays before the stopped one's words could have stopped coming back.
+    t.clock.advance(500);
+    t.turns[1]?.push({ type: "text_delta", content: "Okay, stopped.\n" });
+    await settled();
+    t.speak(2, 4000);
+    t.clock.advance(3000);
+    t.conversation.heard("the production server", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["deploy it", "wait stop", "the production server"]);
+  });
+
   it("speaks the messages a private-text agent delivers, and points to the chat once for cards", async () => {
     const t = setup();
     t.conversation.heard("订机票", "");

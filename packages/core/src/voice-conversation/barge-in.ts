@@ -24,3 +24,19 @@ export function isEcho(heard: string, said: string): boolean {
   const words = normalize(heard);
   return words !== "" && normalize(said).includes(words);
 }
+
+/**
+ * Whether `heard` is exactly Rome's last sentence, or its last few: the late
+ * echo of audio that has already played. Part of a sentence is the guardian
+ * picking from what Rome said, as in "下午的航班".
+ */
+export function isLateEcho(heard: string, sentences: readonly string[]): boolean {
+  const words = normalize(heard);
+  if (words === "") return false;
+  let tail = "";
+  for (let i = sentences.length - 1; i >= 0 && tail.length < words.length; i--) {
+    tail = normalize(sentences[i] as string) + tail;
+    if (tail === words) return true;
+  }
+  return false;
+}
