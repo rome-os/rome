@@ -33,6 +33,8 @@ import type {
 } from "@rome/api-types/sessions";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import type { WidgetPlacement } from "@/pages/free/use-free-cells";
+import { fetchJson } from "@/lib/fetch-json";
+import { z } from "zod";
 import { randomUUID } from "./random-uuid";
 
 const JSON_HEADERS = { "Content-Type": "application/json" } as const;
@@ -98,6 +100,42 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
 export type SessionStatusFilter = "active" | "archived" | "all";
 
 export type SessionScope = "mine" | "all";
+
+const computerUseTargetSchema = z.object({
+  deviceId: z.string().uuid(),
+  name: z.string().trim().min(1).max(200),
+  authorized: z.literal(true).optional(),
+});
+
+export type ChatComputerUseTarget = z.infer<typeof computerUseTargetSchema>;
+
+export async function getChatComputerUseTarget(sessionId: string, signal: AbortSignal) {
+  return computerUseTargetSchema
+    .extend({
+      targets: z.array(computerUseTargetSchema).max(4).optional(),
+      persistentAccess: z.literal(true).optional(),
+    })
+    .parse(
+      await fetchJson<unknown>(`/api/chat/sessions/${encodeURIComponent(sessionId)}/computer-use`, {
+        signal,
+        fallback: "Computer use is unavailable.",
+      }),
+    );
+}
+
+export async function setChatComputerUseAccess(
+  sessionId: string,
+  deviceId: string,
+  authorized: boolean,
+): Promise<void> {
+  await fetchJson<void>(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/computer-use/${encodeURIComponent(deviceId)}`,
+    {
+      method: authorized ? "PUT" : "DELETE",
+      fallback: "Couldn't update computer use access.",
+    },
+  );
+}
 
 export async function listSessions(
   status: SessionStatusFilter = "active",

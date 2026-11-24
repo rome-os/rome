@@ -10,7 +10,9 @@ import { desktopDevice, type DesktopDeviceStatus } from "@/lib/electron-shell";
  *
  * `onChange` runs after the app applied a change, so the host can read the devices again.
  */
-export function useThisDevice(onChange?: () => void): NodeThisDevice | null | undefined {
+export function useThisDevice(
+  onChange?: () => void,
+): (NodeThisDevice & { openComputerUsePermissions?: () => Promise<void> }) | null | undefined {
   const [bridge] = useState(desktopDevice);
   const [status, setStatus] = useState<DesktopDeviceStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,6 +51,9 @@ export function useThisDevice(onChange?: () => void): NodeThisDevice | null | un
     // The app opens its own window; the log never reaches this page.
     openAuditLog: bridge.openAuditLog
       ? () => void bridge.openAuditLog?.().catch(() => undefined)
+      : undefined,
+    openComputerUsePermissions: bridge.openComputerUsePermissions
+      ? () => bridge.openComputerUsePermissions!()
       : undefined,
     onEnabledChange(enabled) {
       setBusy(true);
