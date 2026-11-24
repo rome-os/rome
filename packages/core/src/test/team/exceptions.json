@@ -1,0 +1,17 @@
+{
+  "rule": "A check runs every dashboard operation once as the guardian and once as a teammate, and the results match. Exceptions: billing, deleting the instance, removing the guardian.",
+  "exceptions": [
+    {
+      "name": "billing",
+      "routes": ["GET /api/favors/recharge", "POST /api/favors/recharge"]
+    },
+    {
+      "name": "deleting the instance",
+      "routes": []
+    },
+    {
+      "name": "removing the guardian",
+      "routes": []
+    }
+  ]
+}
