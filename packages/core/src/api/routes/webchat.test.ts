@@ -23,6 +23,8 @@ import { STICKY_HEADERS } from "../../core/sticky-headers.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
+import { AgentLoader } from "../../app-host/agent-loader.js";
+import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
 import { askingDeviceOf } from "../../connections/device/live-route.js";
 import { webchatChannel, webchatCaller } from "../../webchat/dashboard-account.js";
 import {
@@ -59,6 +61,7 @@ import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { reportOf } from "../../test/kit/model-accounts.js";
+import { computerUseApprovalKey } from "../../core/computer-use-approvals.js";
 import { WEBCHAT_REASONING_EFFORT_SETTING_KEY } from "../../core/model-selector.js";
 import { showCardTools } from "../../core/show-card-tool.js";
 
@@ -128,6 +131,435 @@ describe("Webchat API", () => {
     } else {
       process.env.ROME_PROJECTS_ROOT = originalProjectsRoot;
     }
+  });
+
+  it("blocks loopback, unknown-device, cross-origin, and shared-audience computer-use requests", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const deviceId = "46569840-79c2-4fff-9f18-b1c86d3d1ec4";
+    rs.spyOn(deps.nodeDevices, "listDevices").mockResolvedValue({
+      devices: [{ id: deviceId, name: "Test Mac", platform: "macos" }],
+    });
+    let audience: "private" | "shared" = "private";
+    const app = createWebchatRuntime({
+      ...deps,
+      placeAudience: async () => audience,
+    }).routes;
+    const cookieGuardian = { kind: "guardian", userId: "seat", via: "cookie" } as const;
+    const loopbackGuardian = { kind: "guardian", userId: "seat", via: "loopback" } as const;
+    const created = await runWithSessionActor(cookieGuardian, () =>
+      app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Mac chat" }),
+      }),
+    );
+    const { id } = (await created.json()) as { id: string };
+    const route = `/chat/sessions/${id}`;
+    expect(
+      (await runWithSessionActor(loopbackGuardian, () => app.request(`${route}/computer-use`)))
+        .status,
+    ).toBe(404);
+    const post = (
+      actor: typeof cookieGuardian | typeof loopbackGuardian,
+      requested: string,
+      origin = "http://rome.test",
+    ) =>
+      runWithSessionActor(actor, () =>
+        app.request(`http://rome.test${route}/turns`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin },
+          body: JSON.stringify({ text: "Open the fixture", computerUseDeviceId: requested }),
+        }),
+      );
+    expect((await post(loopbackGuardian, deviceId)).status).toBe(403);
+    expect((await post(cookieGuardian, "different-device")).status).toBe(403);
+    expect((await post(cookieGuardian, deviceId, "https://unrelated.test")).status).toBe(403);
+    audience = "shared";
+    expect((await post(cookieGuardian, deviceId)).status).toBe(403);
+    expect(await deps.webchatRepo.getMessageCount(id)).toBe(0);
+  });
+
+  it("offers a cookie guardian local and paired Mac targets without duplicating IDs or non-Mac devices", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const local = { deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02", name: "This computer" };
+    const remote = { deviceId: "46569840-79c2-4fff-9f18-b1c86d3d1ec4", name: "Remote Mac" };
+    rs.spyOn(deps.nodeDevices, "listDevices").mockResolvedValue({
+      devices: [
+        { id: local.deviceId, name: "Duplicate Local", platform: "macos" },
+        { id: remote.deviceId, name: remote.name, platform: "macos" },
+        { id: "11111111-1111-4111-8111-111111111111", name: "Linux Box", platform: "linux" },
+      ],
+    });
+    const app = createWebchatRuntime({
+      ...deps,
+      computerUseLocal: local,
+      placeAudience: async () => "private",
+    }).routes;
+    const guardian = { kind: "guardian", userId: "seat", via: "cookie" } as const;
+    const created = await runWithSessionActor(guardian, () =>
+      app.request("/chat/sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Local computer chat" }),
+      }),
+    );
+    const { id } = (await created.json()) as { id: string };
+    const route = `http://rome.test/chat/sessions/${id}`;
+    const advertised = await runWithSessionActor(guardian, () =>
+      app.request(`${route}/computer-use`),
+    );
+    expect(await advertised.json()).toEqual({
+      ...local,
+      persistentAccess: true,
+      targets: [local, remote],
+    });
+  });
+
+  it("offers computer use for the shipped Concierge and refuses grants for agents without it", async () => {
+    const agentLoader = new AgentLoader({ legacyBindings: createEmptyLegacyArtifactBindings() });
+    await agentLoader.loadAll(join(import.meta.dirname, "../../../agents"));
+    const local = { deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02", name: "This computer" };
+    const { routes: app } = createWebchatRuntime({
+      ...deps,
+      agentLoader,
+      computerUseLocal: local,
+      placeAudience: async () => "private",
+    });
+    const actor = {
+      kind: "guardian",
+      userId: "seat",
+      via: "cookie",
+    } as const;
+    const request = (path: string, options?: RequestInit) =>
+      runWithSessionActor(actor, () => app.request(`http://rome.test${path}`, options));
+    const post = (path: string, body: object) =>
+      request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://rome.test" },
+        body: JSON.stringify(body),
+      });
+    const concierge = await post("/chat/sessions", { agentName: "core:concierge" });
+    const triage = await post("/chat/sessions", { agentName: "core:concierge-triage" });
+    const { id: conciergeId } = (await concierge.json()) as { id: string };
+    const { id: triageId } = (await triage.json()) as { id: string };
+    const offered = await request(`/chat/sessions/${conciergeId}/computer-use`);
+    expect(offered.status).toBe(200);
+    expect(await offered.json()).toEqual({ ...local, persistentAccess: true });
+    expect((await request(`/chat/sessions/${triageId}/computer-use`)).status).toBe(404);
+    expect(
+      (
+        await post(`/chat/sessions/${triageId}/turns`, {
+          text: "Open the fixture",
+          computerUseDeviceId: local.deviceId,
+        })
+      ).status,
+    ).toBe(403);
+    expect(await deps.webchatRepo.getMessageCount(triageId)).toBe(0);
+  });
+
+  it("reuses one device approval across chats and derives short-lived authority only for eligible turns", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const deviceId = "46569840-79c2-4fff-9f18-b1c86d3d1ec4";
+    rs.spyOn(deps.nodeDevices, "listDevices").mockResolvedValue({
+      devices: [{ id: deviceId, name: "Test Mac", platform: "macos" }],
+    });
+    let next = 0;
+    const submit = rs.fn((input: AgentTurnInput, _options?: SendTurnOptions) =>
+      testReceipt(
+        testTurnHandle({
+          turnId: `computer-test-turn-${++next}`,
+          events: (async function* () {
+            yield { type: "result" as const, content: "Done" };
+          })(),
+        }),
+        input.inputId,
+      ),
+    );
+    rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+      sessionId: "computer-test-session",
+      status: "idle",
+      submit,
+      key: { agentName: "main", channelThreadKey: "webchat:computer-test" },
+      selectModel: () => {},
+      release: () => {},
+      onStatusChange: () => () => {},
+      fork: () => {
+        throw new Error("not forked");
+      },
+      stop: async () => {},
+      close: async () => {},
+    });
+    const { routes: app } = createWebchatRuntime({
+      ...deps,
+      placeAudience: async () => "private",
+    });
+    const actor = { kind: "guardian", userId: "seat", via: "cookie" } as const;
+    const create = () =>
+      runWithSessionActor(actor, () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Mac chat" }),
+        }),
+      );
+    const { id } = (await (await create()).json()) as { id: string };
+    const { id: otherChat } = (await (await create()).json()) as { id: string };
+    const mutation = (
+      method: string,
+      target: string,
+      sessionId = id,
+      via: "cookie" | "loopback" = "cookie",
+    ) =>
+      runWithSessionActor({ ...actor, via }, () =>
+        app.request(`http://rome.test/chat/sessions/${sessionId}/computer-use/${target}`, {
+          method,
+          headers: { origin: "http://rome.test" },
+        }),
+      );
+    const post = (target?: string, preemption?: unknown, sessionId = id) =>
+      runWithSessionActor(actor, () =>
+        app.request(`http://rome.test/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: "http://rome.test" },
+          body: JSON.stringify({
+            text: "Open the fixture",
+            computerUseDeviceId: target,
+            computerUsePreemption: preemption,
+          }),
+        }),
+      );
+    expect((await post(deviceId)).status).toBe(403);
+    const legacySettingKey = computerUseApprovalKey(actor, deviceId, "mac");
+    await deps.settingsRepo.set(legacySettingKey, `${deviceId}.${"0".repeat(64)}`);
+    expect((await post(deviceId)).status).toBe(403);
+    expect((await mutation("PUT", deviceId, id, "loopback")).status).toBe(404);
+    expect((await mutation("PUT", deviceId)).status).toBe(204);
+    const reused = await runWithSessionActor(actor, () =>
+      app.request(`http://rome.test/chat/sessions/${otherChat}/computer-use`),
+    );
+    expect(await reused.json()).toMatchObject({
+      deviceId,
+      authorized: true,
+      persistentAccess: true,
+    });
+    expect((await post(deviceId, undefined, otherChat)).status).toBe(200);
+    expect((await post()).status).toBe(200);
+    expect((await post(undefined, true)).status).toBe(403);
+    expect((await post(deviceId, "true")).status).toBe(403);
+    expect((await post(deviceId, true)).status).toBe(200);
+    const form = new FormData();
+    form.set("text", "Open the fixture from the composer");
+    form.set("computerUseDeviceId", deviceId);
+    form.set("computerUsePreemption", "true");
+    const multipart = await runWithSessionActor(actor, () =>
+      app.request(`http://rome.test/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { origin: "http://rome.test" },
+        body: form,
+      }),
+    );
+    expect(multipart.status).toBe(200);
+    expect(submit.mock.calls[0]?.[1]).toMatchObject({
+      priority: "after",
+      computerUseGrant: { deviceId, expiresAt: expect.any(Number) },
+    });
+    expect(submit.mock.calls[0]?.[1]?.computerUseGrant).not.toHaveProperty("allowPreemption");
+    expect(submit.mock.calls[1]?.[1]).not.toHaveProperty("computerUseGrant");
+    expect(submit.mock.calls[2]?.[1]).toMatchObject({
+      priority: "after",
+      computerUseGrant: { deviceId, allowPreemption: true },
+    });
+    expect(submit.mock.calls[3]?.[1]).toMatchObject({
+      priority: "after",
+      computerUseGrant: { deviceId, allowPreemption: true },
+    });
+    expect(submit).toHaveBeenCalledTimes(4);
+    const firstTurn = submit.mock.calls[0]?.[1]?.computerUseGrant;
+    expect(await firstTurn?.isCurrent?.()).toBe(true);
+    expect((await mutation("PUT", deviceId)).status).toBe(204);
+    expect(await firstTurn?.isCurrent?.()).toBe(true);
+    expect((await mutation("DELETE", deviceId, otherChat)).status).toBe(204);
+    expect(await firstTurn?.isCurrent?.()).toBe(false);
+    expect((await post(deviceId)).status).toBe(403);
+    expect((await mutation("PUT", deviceId)).status).toBe(204);
+    expect(await firstTurn?.isCurrent?.()).toBe(false);
+  });
+
+  it("marks failed input and does not double-release the session when a granted submit throws", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const local = { deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02", name: "This computer" };
+    const release = rs.fn();
+    const submit = rs.fn(() => {
+      throw new Error("Computer use requires an unexpired grant for a private guardian turn.");
+    });
+    rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+      sessionId: "computer-throw-session",
+      status: "idle",
+      submit,
+      key: { agentName: "main", channelThreadKey: "webchat:computer-throw" },
+      selectModel: () => {},
+      release,
+      onStatusChange: () => () => {},
+      fork: () => {
+        throw new Error("not forked");
+      },
+      stop: async () => {},
+      close: async () => {},
+    });
+    const updateUserInput = rs.spyOn(deps.webchatRepo, "updateUserInput");
+    const { routes: app } = createWebchatRuntime({
+      ...deps,
+      computerUseLocal: local,
+      placeAudience: async () => "private",
+    });
+    const actor = { kind: "guardian", userId: "seat", via: "cookie" } as const;
+    const { id } = (await (
+      await runWithSessionActor(actor, () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Throw chat" }),
+        }),
+      )
+    ).json()) as { id: string };
+    expect(
+      (
+        await runWithSessionActor(actor, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/computer-use/${local.deviceId}`, {
+            method: "PUT",
+            headers: { origin: "http://rome.test" },
+          }),
+        )
+      ).status,
+    ).toBe(204);
+
+    const res = await runWithSessionActor(actor, () =>
+      app.request(`http://rome.test/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://rome.test" },
+        body: JSON.stringify({
+          text: "Open the fixture",
+          computerUseDeviceId: local.deviceId,
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: "This message's computer-use authorization ended",
+      code: "computer_use_denied",
+    });
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
+    expect(updateUserInput).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ type: "input_status", state: "failed" }),
+    );
+  });
+
+  it("denies loopback computer-use control while keeping ordinary loopback messages working", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const local = { deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02", name: "This computer" };
+    const submit = rs.fn((input: AgentTurnInput, _options?: SendTurnOptions) =>
+      testReceipt(
+        testTurnHandle({
+          turnId: "loopback-turn-1",
+          events: (async function* () {
+            yield { type: "result" as const, content: "Done" };
+          })(),
+        }),
+        input.inputId,
+      ),
+    );
+    rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+      sessionId: "loopback-session",
+      status: "idle",
+      submit,
+      key: { agentName: "main", channelThreadKey: "webchat:loopback" },
+      selectModel: () => {},
+      release: () => {},
+      onStatusChange: () => () => {},
+      fork: () => {
+        throw new Error("not forked");
+      },
+      stop: async () => {},
+      close: async () => {},
+    });
+    const { routes: app } = createWebchatRuntime({
+      ...deps,
+      computerUseLocal: local,
+      placeAudience: async () => "private",
+    });
+    const cookieGuardian = { kind: "guardian", userId: "seat", via: "cookie" } as const;
+    const loopbackGuardian = { kind: "guardian", userId: "seat", via: "loopback" } as const;
+    const { id } = (await (
+      await runWithSessionActor(cookieGuardian, () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Local computer chat" }),
+        }),
+      )
+    ).json()) as { id: string };
+    expect(
+      (
+        await runWithSessionActor(cookieGuardian, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/computer-use/${local.deviceId}`, {
+            method: "PUT",
+            headers: { origin: "http://rome.test" },
+          }),
+        )
+      ).status,
+    ).toBe(204);
+
+    // Loopback callers cannot discover, mutate, or exercise computer-use authority.
+    expect(
+      (
+        await runWithSessionActor(loopbackGuardian, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/computer-use`),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await runWithSessionActor(loopbackGuardian, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/computer-use/${local.deviceId}`, {
+            method: "PUT",
+            headers: { origin: "http://rome.test" },
+          }),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await runWithSessionActor(loopbackGuardian, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/turns`, {
+            method: "POST",
+            headers: { "content-type": "application/json", origin: "http://rome.test" },
+            body: JSON.stringify({
+              text: "Control my Mac",
+              computerUseDeviceId: local.deviceId,
+            }),
+          }),
+        )
+      ).status,
+    ).toBe(403);
+
+    // Ordinary internal loopback senders (e.g. system:send_user_message) keep working.
+    const internalTurn = await runWithSessionActor(loopbackGuardian, () =>
+      app.request(`http://rome.test/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          text: "Scheduled digest ready",
+          automatedSource: "routine",
+          automatedActorKind: "guardian",
+        }),
+      }),
+    );
+    expect(internalTurn.status).toBe(200);
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("computerUseGrant");
   });
 
   it("stamps verified owners and scopes lists without trusting submitted identity", async () => {

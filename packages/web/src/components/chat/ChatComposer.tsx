@@ -108,6 +108,8 @@ export interface ChatComposerSnapshot {
 export interface ChatComposerSendControls {
   /** Called as soon as a new session exists, even if posting its first turn fails. */
   onSessionCreated?: () => void;
+  /** A send from the input, separate from quick entries and other imperative sends. */
+  userSubmitted?: true;
   /** `null` means the browser cannot determine the multipart body size. */
   onUploadProgress: (progress: number | null) => void;
   /**
@@ -610,13 +612,17 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
   }, [newProjectName, t, connectOnCreate, locations.addProject]);
 
   const invokeOnSend = useCallback(
-    (snapshot: ChatComposerSnapshot, clearDraftOnAdoption = false) =>
+    (
+      snapshot: ChatComposerSnapshot,
+      options: { clearDraftOnAdoption?: boolean; userSubmitted?: true } = {},
+    ) =>
       trackUpload(snapshot.uploads, (controls) =>
         onSend(snapshot, {
           ...controls,
+          ...(options.userSubmitted ? { userSubmitted: true as const } : {}),
           onSessionCreated: () => {
             sessionCreatedRef.current = true;
-            if (clearDraftOnAdoption && textareaRef.current) clearNewChatDraft();
+            if (options.clearDraftOnAdoption && textareaRef.current) clearNewChatDraft();
           },
         }),
       ),
@@ -761,7 +767,10 @@ const ChatComposerImpl = forwardRef<ChatComposerHandle, ChatComposerProps>(funct
     }
     setHint((current) => pickComposerHint(hints, current));
     try {
-      await invokeOnSend(snapshot, persistNewChatDraft);
+      await invokeOnSend(snapshot, {
+        clearDraftOnAdoption: persistNewChatDraft,
+        userSubmitted: true,
+      });
       failedSendRef.current = null;
       if (!clearsOptimistically) {
         replyDraft?.clear();

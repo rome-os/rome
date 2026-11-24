@@ -1,5 +1,6 @@
 import type { NodeThisDeviceState } from "@rome-os/node-ui";
-import { Laptop, ScrollText } from "lucide-react";
+import { Laptop, ScrollText, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
 import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconButton } from "@/components/ui/icon-button";
@@ -107,6 +108,21 @@ export function ThisComputerButton({ tooltipSide = "top" }: { tooltipSide?: "top
               onCheckedChange={device.onEnabledChange}
             />
           </div>
+          {device.openComputerUsePermissions ? (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                void device
+                  .openComputerUsePermissions?.()
+                  .catch(() => toast.error(t("thisComputer.permissionsFailed")));
+              }}
+              className="flex min-h-[var(--control-min-h)] w-full items-center gap-2 rounded-8 px-2 py-1 text-left text-ui text-foreground outline-1 outline-offset-0 outline-transparent transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-ring/50 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground"
+            >
+              <ShieldCheck aria-hidden />
+              {t("thisComputer.permissions")}
+            </button>
+          ) : null}
           {device.openAuditLog ? (
             <>
               <Separator className="my-1" />

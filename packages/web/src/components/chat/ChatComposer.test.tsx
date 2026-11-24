@@ -975,6 +975,7 @@ describe("New chat draft", () => {
     else act(() => composerRef.current?.submit("Quick entry"));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(onSend.mock.calls[0][0].personaId).toBe(draft.personaId);
+    expect(onSend.mock.calls[0][1].userSubmitted).toBe(method === "send" ? true : undefined);
   });
 
   it("restores a draft device folder and sends it with the first turn", async () => {
