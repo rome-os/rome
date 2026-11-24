@@ -43,12 +43,7 @@ export async function resolveGuardianSessionFromMaterial(
   // Same invariant as lib/trusted-loopback.ts: loopback peer + no XFF header
   // (every fronting proxy stamps XFF; a client can only add one, which demotes
   // it — never strip it).
-  // Opting into instance-local control disables the container trust shortcut.
-  if (
-    process.env.ROME_COMPUTER_USE_LOCAL_DEVICE_ID === undefined &&
-    !material.hasForwardedFor &&
-    isLoopbackAddress(material.peerAddress)
-  ) {
+  if (!material.hasForwardedFor && isLoopbackAddress(material.peerAddress)) {
     const [guardian] = await db.select({ userId: guardianAuth.userId }).from(guardianAuth).limit(1);
     if (guardian) return { userId: guardian.userId, via: "loopback" };
   }

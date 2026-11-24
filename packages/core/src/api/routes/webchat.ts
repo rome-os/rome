@@ -5474,7 +5474,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : agentSess.submit(input, options);
     } catch (error) {
       if (!said.computerUseGrant) throw error;
-      agentSess.release();
+      log.warn("computer-use turn submission rejected", {
+        sessionId,
+        inputId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       await deps.webchatRepo.updateUserInput(sessionId, {
         type: "input_status",
         inputId,

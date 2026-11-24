@@ -385,6 +385,183 @@ describe("Webchat API", () => {
     expect(await firstTurn?.isCurrent?.()).toBe(false);
   });
 
+  it("marks failed input and does not double-release the session when a granted submit throws", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const local = { deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02", name: "This computer" };
+    const release = rs.fn();
+    const submit = rs.fn(() => {
+      throw new Error("Computer use requires an unexpired grant for a private guardian turn.");
+    });
+    rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+      sessionId: "computer-throw-session",
+      status: "idle",
+      submit,
+      key: { agentName: "main", channelThreadKey: "webchat:computer-throw" },
+      selectModel: () => {},
+      release,
+      onStatusChange: () => () => {},
+      fork: () => {
+        throw new Error("not forked");
+      },
+      stop: async () => {},
+      close: async () => {},
+    });
+    const updateUserInput = rs.spyOn(deps.webchatRepo, "updateUserInput");
+    const { routes: app } = createWebchatRuntime({
+      ...deps,
+      computerUseLocal: local,
+      placeAudience: async () => "private",
+    });
+    const actor = { kind: "guardian", userId: "seat", via: "cookie" } as const;
+    const { id } = (await (
+      await runWithSessionActor(actor, () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Throw chat" }),
+        }),
+      )
+    ).json()) as { id: string };
+    expect(
+      (
+        await runWithSessionActor(actor, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/computer-use/${local.deviceId}`, {
+            method: "PUT",
+            headers: { origin: "http://rome.test" },
+          }),
+        )
+      ).status,
+    ).toBe(204);
+
+    const res = await runWithSessionActor(actor, () =>
+      app.request(`http://rome.test/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://rome.test" },
+        body: JSON.stringify({
+          text: "Open the fixture",
+          computerUseDeviceId: local.deviceId,
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: "This message's computer-use authorization ended",
+      code: "computer_use_denied",
+    });
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
+    expect(updateUserInput).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ type: "input_status", state: "failed" }),
+    );
+  });
+
+  it("denies loopback computer-use control while keeping ordinary loopback messages working", async () => {
+    rs.spyOn(deps.agentLoader, "find").mockReturnValue(buildAgent("core:main", { actions: ["*"] }));
+    const local = { deviceId: "ee969ec6-1944-4e85-9fd3-31ec802f8e02", name: "This computer" };
+    const submit = rs.fn((input: AgentTurnInput, _options?: SendTurnOptions) =>
+      testReceipt(
+        testTurnHandle({
+          turnId: "loopback-turn-1",
+          events: (async function* () {
+            yield { type: "result" as const, content: "Done" };
+          })(),
+        }),
+        input.inputId,
+      ),
+    );
+    rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+      sessionId: "loopback-session",
+      status: "idle",
+      submit,
+      key: { agentName: "main", channelThreadKey: "webchat:loopback" },
+      selectModel: () => {},
+      release: () => {},
+      onStatusChange: () => () => {},
+      fork: () => {
+        throw new Error("not forked");
+      },
+      stop: async () => {},
+      close: async () => {},
+    });
+    const { routes: app } = createWebchatRuntime({
+      ...deps,
+      computerUseLocal: local,
+      placeAudience: async () => "private",
+    });
+    const cookieGuardian = { kind: "guardian", userId: "seat", via: "cookie" } as const;
+    const loopbackGuardian = { kind: "guardian", userId: "seat", via: "loopback" } as const;
+    const { id } = (await (
+      await runWithSessionActor(cookieGuardian, () =>
+        app.request("/chat/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: "Local computer chat" }),
+        }),
+      )
+    ).json()) as { id: string };
+    expect(
+      (
+        await runWithSessionActor(cookieGuardian, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/computer-use/${local.deviceId}`, {
+            method: "PUT",
+            headers: { origin: "http://rome.test" },
+          }),
+        )
+      ).status,
+    ).toBe(204);
+
+    // Loopback callers cannot discover, mutate, or exercise computer-use authority.
+    expect(
+      (
+        await runWithSessionActor(loopbackGuardian, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/computer-use`),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await runWithSessionActor(loopbackGuardian, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/computer-use/${local.deviceId}`, {
+            method: "PUT",
+            headers: { origin: "http://rome.test" },
+          }),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await runWithSessionActor(loopbackGuardian, () =>
+          app.request(`http://rome.test/chat/sessions/${id}/turns`, {
+            method: "POST",
+            headers: { "content-type": "application/json", origin: "http://rome.test" },
+            body: JSON.stringify({
+              text: "Control my Mac",
+              computerUseDeviceId: local.deviceId,
+            }),
+          }),
+        )
+      ).status,
+    ).toBe(403);
+
+    // Ordinary internal loopback senders (e.g. system:send_user_message) keep working.
+    const internalTurn = await runWithSessionActor(loopbackGuardian, () =>
+      app.request(`http://rome.test/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          text: "Scheduled digest ready",
+          automatedSource: "routine",
+          automatedActorKind: "guardian",
+        }),
+      }),
+    );
+    expect(internalTurn.status).toBe(200);
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("computerUseGrant");
+  });
+
   it("stamps verified owners and scopes lists without trusting submitted identity", async () => {
     const app = createWebchatRuntime(deps).routes;
     const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };

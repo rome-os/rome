@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { STICKY_HEADERS } from "./core/sticky-headers.js";
 import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
