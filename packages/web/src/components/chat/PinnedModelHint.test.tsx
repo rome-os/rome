@@ -43,7 +43,7 @@ describe("pinnedHintText", () => {
         { by: "owner", providerId: "anthropic", selection: "claude-haiku", model: null },
         t,
       ),
-    ).toBe("You picked Haiku");
+    ).toBe("You picked Haiku 5.5");
   });
 
   it("reads in Chinese", () => {

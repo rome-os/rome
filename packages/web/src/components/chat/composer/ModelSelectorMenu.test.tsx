@@ -39,8 +39,8 @@ describe("ModelSelectorMenu", () => {
       expect.arrayContaining(["Auto (default provider)", "Opus 5.5", "GPT-6 Astra"]),
     );
     // The long tail is folded away until the guardian expands or searches.
-    expect(names).not.toContain("Sonnet");
-    expect(names).not.toContain("Haiku");
+    expect(names).not.toContain("Sonnet 5.5");
+    expect(names).not.toContain("Haiku 5.5");
     expect(screen.getByText(SHOW_ALL)).toBeTruthy();
   });
 
@@ -57,13 +57,13 @@ describe("ModelSelectorMenu", () => {
     const user = userEvent.setup();
     render(<ModelSelectorMenu {...baseProps()} />);
 
-    expect(optionNames()).not.toContain("Sonnet");
+    expect(optionNames()).not.toContain("Sonnet 5.5");
     await user.click(screen.getByText(SHOW_ALL));
 
     await waitFor(() =>
       expect(screen.getAllByRole("option").length).toBe(LARGE_MODEL_OPTIONS.length),
     );
-    expect(optionNames()).toContain("Sonnet");
+    expect(optionNames()).toContain("Sonnet 5.5");
     // The show-all row is gone once everything is shown.
     expect(screen.queryByText(SHOW_ALL)).toBeNull();
   });
@@ -76,7 +76,7 @@ describe("ModelSelectorMenu", () => {
 
     await waitFor(() => {
       const names = optionNames();
-      expect(names).toContain("Sonnet");
+      expect(names).toContain("Sonnet 5.5");
       expect(names).not.toContain("Auto (default provider)");
     });
   });
@@ -129,7 +129,7 @@ describe("ModelSelectorMenu", () => {
 
     // Filter down to a non-curated model, then pick it — selection closes the menu.
     await user.type(screen.getByPlaceholderText("Search models…"), "sonnet");
-    await waitFor(() => expect(optionNames()).toContain("Sonnet"));
+    await waitFor(() => expect(optionNames()).toContain("Sonnet 5.5"));
     await user.click(screen.getByRole("option", { name: /Sonnet/ }));
     expect(props.onChange).toHaveBeenCalledWith("claude-sonnet");
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
@@ -145,7 +145,7 @@ describe("ModelSelectorMenu", () => {
     expect(names).toEqual(
       expect.arrayContaining(["Auto (default provider)", "Opus 5.5", "GPT-6 Astra"]),
     );
-    expect(names).not.toContain("Sonnet");
+    expect(names).not.toContain("Sonnet 5.5");
     expect(screen.getByText(SHOW_ALL)).toBeTruthy();
     // The search field is cleared too.
     expect((screen.getByPlaceholderText("Search models…") as HTMLInputElement).value).toBe("");
@@ -176,4 +176,28 @@ describe("ModelSelectorMenu sign-ins", () => {
     );
     expect(optionNames()).toContain("GPT-6 Luna");
   });
+});
+
+it.each([
+  ["en", "claude-opus", "Opus 4.8"],
+  ["zh-CN", "claude-opus", "Opus 4.8"],
+  ["en", "claude-sonnet", "Sonnet 5.5"],
+  ["zh-CN", "claude-haiku", "Haiku 5.5"],
+  ["en", "claude-fable", "Fable 5.1"],
+])("keeps stored %s/%s selected with its exact version", async (language, value, label) => {
+  await i18n.changeLanguage(language);
+  const props = { ...baseProps(), value };
+  const view = render(<ModelSelectorMenu {...props} />);
+  try {
+    const row = screen.getByRole("option", { name: label });
+    expect(row.querySelector("svg")).not.toBeNull();
+    expect(
+      screen.getByRole("button", { name: language === "en" ? "Model" : "模型" }).textContent,
+    ).toContain(label);
+    await userEvent.setup().click(row);
+    expect(props.onChange).toHaveBeenCalledWith(value);
+  } finally {
+    view.unmount();
+    await i18n.changeLanguage("en");
+  }
 });

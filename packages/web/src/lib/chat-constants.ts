@@ -1,26 +1,12 @@
 import type { DefaultModelProvider } from "@rome/api-types/chat";
 import type { ReasoningEffort } from "./chat-types";
+import { distinctModelOptions, LARGE_MODEL_OPTIONS } from "./model-options";
+
+export { LARGE_MODEL_OPTIONS } from "./model-options";
 
 export const DEFAULT_PROJECT_NAME = "default";
 
 export const DEFAULT_LARGE_MODEL_SELECTION = "auto";
-export const LARGE_MODEL_OPTIONS = [
-  { id: "auto", labelKey: "modelSelector.options.auto" },
-  { id: "claude-opus", labelKey: "modelSelector.options.claudeOpus" },
-  { id: "claude-opus-5-5", labelKey: "modelSelector.options.opus55" },
-  { id: "claude-opus-5", labelKey: "modelSelector.options.opus5" },
-  { id: "claude-opus-4-6", labelKey: "modelSelector.options.opus46" },
-  { id: "claude-sonnet", labelKey: "modelSelector.options.sonnet" },
-  { id: "claude-haiku", labelKey: "modelSelector.options.haiku" },
-  { id: "claude-fable", labelKey: "modelSelector.options.fable" },
-  { id: "gpt-6-astra", labelKey: "modelSelector.options.gpt6Astra" },
-  { id: "gpt-6-1-sol", labelKey: "modelSelector.options.gpt61Sol" },
-  { id: "gpt-6-sol", labelKey: "modelSelector.options.gpt6Sol" },
-  { id: "gpt-6-luna", labelKey: "modelSelector.options.gpt6Luna" },
-  { id: "gpt-5-6-sol", labelKey: "modelSelector.options.gpt56Sol" },
-  { id: "gpt-5-6-terra", labelKey: "modelSelector.options.gpt56Terra" },
-  { id: "gpt-5-6-luna", labelKey: "modelSelector.options.gpt56Luna" },
-] as const;
 
 // The curated "commonly used" subset the model menu shows before the guardian
 // expands it or types to filter. Nothing in the client records which models a
@@ -71,7 +57,7 @@ export function runnableLargeModelOptions(
   signedIn: Record<DefaultModelProvider, boolean> | null | undefined,
   selected: string,
 ): ReadonlyArray<(typeof LARGE_MODEL_OPTIONS)[number]> {
-  return LARGE_MODEL_OPTIONS.filter(
+  return distinctModelOptions(LARGE_MODEL_OPTIONS, selected).filter(
     (option) => option.id === selected || canRunModel(option.id, signedIn),
   );
 }
