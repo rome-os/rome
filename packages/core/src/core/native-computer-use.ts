@@ -229,6 +229,8 @@ type Client = Pick<
 >;
 interface Binding {
   owner: string;
+  actorUserId?: string;
+  actorAccountId?: string;
   agentSessionId: string;
   turnId: string | undefined;
   deviceId: string;
@@ -250,6 +252,8 @@ interface Binding {
 }
 interface WindowReference {
   owner: string;
+  actorUserId?: string;
+  actorAccountId?: string;
   agentSessionId: string;
   turnId: string | undefined;
   deviceId: string;
@@ -482,6 +486,7 @@ function adoptTerminal(binding: Binding, response: ActionResponse): void {
 /** A call never retries. Native sessions remain bound to the admitting actor, agent and device. */
 export function createNativeComputerUseService(options: Options = {}): AgentComputerUse & {
   listDevices(): Promise<unknown>;
+  cancelDevice(deviceId: string, actor?: { userId: string; accountId?: string }): Promise<void>;
   close(): Promise<void>;
 } {
   let client: Client | undefined;
@@ -637,9 +642,7 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
       });
     return binding.cancelling;
   };
-  const cancelScope = async (agentSessionId: string, turnId?: string) => {
-    const matches = (entry: Binding | WindowReference) =>
-      entry.agentSessionId === agentSessionId && (turnId === undefined || entry.turnId === turnId);
+  const cancelMatching = async (matches: (entry: Binding | WindowReference) => boolean) => {
     const pending: Promise<void>[] = [];
     for (const bind of pendingBindings) {
       if (!matches(bind.reference)) continue;
@@ -648,12 +651,27 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
     }
     for (const [ref, entry] of windows) if (matches(entry)) windows.delete(ref);
     const selected = [...bindings].filter(([, binding]) => matches(binding));
+    for (const [, binding] of selected) stopBindingLocally(binding, "cancel_requested");
     await Promise.allSettled([
       ...pending,
       ...selected.flatMap(([, binding]) => (binding.stopConfirmed ? [] : [cancelBinding(binding)])),
     ]);
     for (const [id] of selected) bindings.delete(id);
   };
+  const cancelScope = (agentSessionId: string, turnId?: string) =>
+    cancelMatching(
+      (entry) =>
+        entry.agentSessionId === agentSessionId &&
+        (turnId === undefined || entry.turnId === turnId),
+    );
+  const cancelDevice = (deviceId: string, actor?: { userId: string; accountId?: string }) =>
+    cancelMatching(
+      (entry) =>
+        entry.deviceId === deviceId &&
+        (!actor ||
+          (entry.actorUserId === actor.userId &&
+            (entry.actorAccountId ?? undefined) === (actor.accountId ?? undefined))),
+    );
   return {
     permits,
     listDevices,
@@ -820,8 +838,10 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
           const eligible = listed.data
             .map((window) => ({
               window,
-              applicationNames: [window.appName, window.bundleId]
-                .filter((name): name is string => typeof name === "string")
+              applicationNames: [window.appName, window.bundleName, window.bundleId]
+                .filter(
+                  (name): name is string => typeof name === "string" && name.trim().length > 0,
+                )
                 .map(normalizeApplication),
             }))
             .filter(({ applicationNames }) => !expected || applicationNames.includes(expected));
@@ -838,10 +858,13 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
               "The window reference budget is full. Wait for old references to expire.",
             );
           const expiresAt = started + 15_000;
+          const admittingActor = turn.actor();
           const refs = eligible.map(({ window, applicationNames }) => {
             const ref = randomUUID();
             windows.set(ref, {
               owner: admittingOwner,
+              actorUserId: admittingActor?.userId,
+              actorAccountId: admittingActor?.accountId,
               agentSessionId: turn.sessionId,
               turnId: admittingTurn,
               deviceId,
@@ -1078,6 +1101,8 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
           const sessionId = randomUUID();
           const binding: Binding = {
             owner: admittingOwner,
+            actorUserId: reference.actorUserId,
+            actorAccountId: reference.actorAccountId,
             agentSessionId: turn.sessionId,
             turnId: admittingTurn,
             deviceId: String(args.deviceId),
@@ -1275,7 +1300,7 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
                 body: undefined,
               };
           if (!(await authorizedHere()) || binding.terminal) {
-            await cancelBinding(binding);
+            await cancelBinding(binding).catch(() => {});
             return error("session_stopped", "The session stopped before observation completed.");
           }
           if (request !== binding.observationRequest)
@@ -1341,7 +1366,10 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
               png.readUInt32BE(20) !== screenshot.data.height
             )
               return error("invalid_image", "The computer returned an invalid bounded screenshot.");
-            const metadata = text({ ...view, screenshot: screenshot.data });
+            const metadata = text({
+              ...reply.response,
+              result: { ...view, screenshot: screenshot.data },
+            });
             if (metadata.isError) return metadata;
             output = {
               ...metadata,
@@ -1361,7 +1389,7 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
           authorizedHere,
         );
         if (!(await authorizedHere())) {
-          await cancelBinding(binding);
+          await cancelBinding(binding).catch(() => {});
           return error(
             "session_stopped",
             "The session stopped while its result was in flight. Do not replay input.",
@@ -1438,7 +1466,7 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
             verification = { type: "response", ok: false, error: invalidActionReceipt };
           adoptTerminal(binding, verification);
           if (!(await authorizedHere())) {
-            await cancelBinding(binding);
+            await cancelBinding(binding).catch(() => {});
             return error(
               "session_stopped",
               "The session stopped while verification was in flight. Do not replay input.",
@@ -1490,6 +1518,9 @@ export function createNativeComputerUseService(options: Options = {}): AgentComp
     },
     cancelSession(agentSessionId) {
       return cancelScope(agentSessionId);
+    },
+    cancelDevice(deviceId, actor) {
+      return cancelDevice(deviceId, actor);
     },
     close() {
       return (closing ??= (async () => {

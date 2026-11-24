@@ -177,6 +177,7 @@ import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./apps/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
 import { ComputerUseService } from "./desktops/computer-use.js";
+import { isProtectedApprovalSecret } from "./core/computer-use-approvals.js";
 import { createNativeComputerUseService } from "./core/native-computer-use.js";
 import { createComputerUseHost } from "@rome-os/node-core/computer-use";
 import { registerComputerUseAction } from "./core/computer-use-action.js";
@@ -2895,6 +2896,8 @@ async function main() {
     const apiDeps: ApiDeps = {
       agentNameEvents,
       ...(computerUseLocal ? { computerUseLocal } : {}),
+      computerUseSigningSecretReady: isProtectedApprovalSecret(),
+      nativeComputerUse,
       personalData: personalDataRepo,
       deviceConnections: deviceConnectionsRepo,
       placeAudience: chatAudience,
