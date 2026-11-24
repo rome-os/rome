@@ -10,7 +10,6 @@ Durable design documentation for Rome. For the rules used when writing docs, see
 - [`architecture/`](architecture/index.md) — the components on each surface and the invariants binding them.
 - `adrs/` — records of standing decisions, one file per decision keyed by filename. [authoring/adrs.md](authoring/adrs.md) defines the family.
 - [`authoring/`](authoring/authoring.md) — the rulebook for each content type (docs, PRs, issues, ADRs, design tokens, code comments, AGENTS.md files) plus the cross-cutting prose rules.
-- [`northstars/`](northstars/AGENTS.md) — ideal-state docs, one per area: what should be true, checked against the codebase by the `loop-reconcile` skill.
 - [`ui/`](ui/AGENTS.md) — the design token docs, one directory per kind of token. [authoring/ui-tokens.md](authoring/ui-tokens.md) holds the rules they share.
 
 Other top-level files in `docs/` are operational references paired with the surface they document — [`design-system.md`](design-system.md), [`ui-kit.md`](ui-kit.md), [`dashboard-mock-mode.md`](dashboard-mock-mode.md), [`concierge-eval.md`](concierge-eval.md), [`releases.md`](releases.md), [`self-hosting.md`](self-hosting.md), [`personal-data.md`](personal-data.md), [`vault.md`](vault.md), [`observability/`](observability/). Rome Cloud deployment operations live in the private [`amantru/rome-cloud`](https://github.com/amantru/rome-cloud) repository.
