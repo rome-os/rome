@@ -118,6 +118,7 @@ describe("the Devices page's tools", () => {
       expect(result).toEqual({
         status: "ok",
         data: {
+          checkedAt: ONLINE.checkedAt,
           devices: [
             {
               deviceId: "dev-phone",
@@ -174,6 +175,53 @@ describe("the Devices page's tools", () => {
       expect(data.devices).toEqual([
         expect.objectContaining({ deviceId: "dev-phone", status: "unknown" }),
       ]);
+    });
+  });
+
+  describe("reading the devices' status fresh", () => {
+    let clock: number;
+    let reads: DevicesStatus[];
+
+    beforeEach(() => {
+      clock = NOW;
+      deps.now = () => clock;
+      deps.sleep = async (ms) => {
+        clock += ms;
+      };
+      // The device service answers its last snapshot, then the check that
+      // reading it started.
+      reads = [];
+      deps.devices.getStatus = async () => reads.shift() ?? status;
+    });
+
+    it("waits for the check a stale snapshot starts, as the page's next poll would", async () => {
+      reads = [
+        {
+          ...ONLINE,
+          checkedAt: new Date(NOW - 60_000).toISOString(),
+          devices: [{ id: "dev-phone", name: "Phone", platform: "ios", status: "connected" }],
+        },
+      ];
+      status = {
+        ...ONLINE,
+        checkedAt: new Date(NOW + 2_000).toISOString(),
+        devices: [{ id: "dev-phone", name: "Phone", platform: "ios", status: "not_connected" }],
+      };
+
+      const result = await callTool(readDevices, deps, {});
+
+      const data = (result as { data: { checkedAt: string; devices: unknown[] } }).data;
+      expect(data.devices[0]).toMatchObject({ deviceId: "dev-phone", status: "not_connected" });
+      expect(data.checkedAt).toBe(status.checkedAt);
+    });
+
+    it("answers the last snapshot with its age when no check comes in time", async () => {
+      status = { ...ONLINE, checkedAt: new Date(NOW - 60_000).toISOString() };
+
+      const result = await callTool(readDevices, deps, {});
+
+      expect((result as { data: { checkedAt: string } }).data.checkedAt).toBe(status.checkedAt);
+      expect(clock - NOW).toBeLessThanOrEqual(20_000);
     });
   });
 
@@ -263,6 +311,20 @@ describe("the Devices page's tools", () => {
         error: expect.stringContaining("1 to 80 characters"),
       });
     });
+  });
+
+  it.each([
+    ["renaming", renameDevice, { deviceId: "dev-phone", name: "Work iPhone" }],
+    ["removing", removeDevice, { deviceId: "dev-phone" }],
+  ] as const)("says the outcome is unknown when Rome Cloud does not confirm %s", async (_, tool, args) => {
+    manage = { ok: false, code: "unavailable" };
+
+    const result = await callTool(tool, deps, args);
+
+    const error = (result as { error: string }).error;
+    expect(error).toMatch(/^outcome_unknown:/);
+    expect(error).toContain("may or may not have happened");
+    expect(error).not.toContain("nothing changed");
   });
 
   describe("removing a device", () => {

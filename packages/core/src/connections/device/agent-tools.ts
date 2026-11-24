@@ -26,6 +26,7 @@ export interface DeviceToolDeps {
   /** Runs one action on a device through core's node client. */
   run: DeviceActionDeps["run"];
   now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 const agentTool = agentToolsOf<DeviceToolDeps>();
@@ -39,7 +40,7 @@ export const readDevices = agentTool({
   sideEffects: "read-only",
   input: z.object({}),
   run: async (_input, { deps, turn }) => {
-    const status = await deps.devices.getStatus();
+    const status = await freshStatus(deps);
     const reach = describeDevices(
       deps.connections.list(),
       (deps.now ?? Date.now)(),
@@ -79,6 +80,8 @@ export const readDevices = agentTool({
     return {
       ...(service ? { deviceService: { state: status.connection, note: service } } : {}),
       ...("askingDevice" in reach ? { askingDevice: reach.askingDevice } : {}),
+      // How old each device's online status is.
+      checkedAt: status.checkedAt,
       devices,
     };
   },
@@ -155,6 +158,29 @@ export const removeDevice = agentTool({
   },
 });
 
+/** A status checked longer ago than this is the device service's last
+ *  snapshot, and reading it started a new check. */
+const FRESH_FOR_MS = 10_000;
+/** How long a read waits for that check: the service bounds one at 15 s. */
+const WAIT_FOR_CHECK_MS = 20_000;
+const POLL_MS = 500;
+
+/** The devices' status checked in the last 10 s, as the Devices page has it
+ *  by polling. A read answers once, so it waits for the check its read
+ *  started; when none comes in time it answers the last one, whose
+ *  `checkedAt` says how old it is. */
+async function freshStatus(deps: DeviceToolDeps): Promise<DevicesStatus> {
+  const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const deadline = now() + WAIT_FOR_CHECK_MS;
+  let status = await deps.devices.getStatus();
+  while (now() - Date.parse(status.checkedAt) >= FRESH_FOR_MS && now() < deadline) {
+    await sleep(POLL_MS);
+    status = await deps.devices.getStatus();
+  }
+  return status;
+}
+
 /** The Devices page's agent tools. */
 export const deviceTools = [readDevices, runOnDeviceTool, renameDevice, removeDevice];
 
@@ -174,7 +200,8 @@ function manageError(result: Extract<DeviceManageResult, { ok: false }>, id: str
       return `No device found with id "${id}". Use system:read_devices to find the right id.`;
     case "invalid_device_name":
       return "invalid_device_name: A device name is 1 to 80 characters, with no control characters. Ask the guardian for a name that fits.";
+    // Also a request whose answer was lost after Cloud applied it.
     case "unavailable":
-      return "unavailable: Rome Cloud could not be reached, so nothing changed. Tell the guardian to try again later.";
+      return "outcome_unknown: Rome Cloud did not confirm the change, so it may or may not have happened. Call system:read_devices to see whether it did before you tell the guardian or try again.";
   }
 }

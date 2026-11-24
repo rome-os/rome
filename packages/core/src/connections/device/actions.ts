@@ -9,7 +9,11 @@
 import { actionExecutionContext } from "../../apps/actions/context.js";
 import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js";
 import type { ActionRegistry } from "../../apps/actions/types.js";
-import { changeRefusalReason, type ToolTurn } from "../../apps/actions/who-may-ask.js";
+import {
+  changeRefusalReason,
+  type ToolTurn,
+  type WhoMayAsk,
+} from "../../apps/actions/who-may-ask.js";
 import type { DeviceRunResult } from "../../desktops/node-devices.js";
 import { createLogger } from "../../logger.js";
 import { connectStep } from "./connect-step.js";
@@ -37,20 +41,32 @@ export interface DeviceActionDeps {
     action: string,
     args: Record<string, unknown>,
   ) => Promise<DeviceRunResult>;
-  /** The running turn's audience and asking device. Default: the action's own run context. */
-  turn?: () => DeviceRunTurn;
   now?: () => number;
 }
 
 /** The error code for a connection that cannot answer, by its state. */
 const STATE_CODE = { off: "live_off", broken: "permission_denied" } as const;
 
+/**
+ * Registers the older names. `whoMayAsk` is the check the agent tools pass:
+ * each older name asks it as its new name does, a read, so either name lets
+ * the same turns in. A change to the device has its own rule in the run.
+ */
 export function registerDeviceActions(
   actions: Pick<ActionRegistry, "register">,
-  deps: DeviceActionDeps,
+  deps: DeviceActionDeps & { whoMayAsk: WhoMayAsk },
 ): void {
   const now = deps.now ?? Date.now;
-  const turn = deps.turn ?? (() => deviceRunTurnOf(actionExecutionContext.getStore()));
+  const runningTurn = (): ToolTurn => {
+    const store = actionExecutionContext.getStore();
+    return {
+      ...(store?.actor ? { actor: store.actor } : {}),
+      ...(store?.audience ? { audience: store.audience } : {}),
+      ...(store?.channelContext ? { channelContext: store.channelContext } : {}),
+    };
+  };
+  const refusalFor = (name: string, turn: ToolTurn) =>
+    deps.whoMayAsk({ name, sideEffects: "read-only" }, turn);
 
   actions.register({
     config: {
@@ -68,10 +84,15 @@ export function registerDeviceActions(
       sideEffects: "read-only",
     },
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    execute: async () => ({
-      status: "ok",
-      data: describeDevices(deps.connections.list(), now(), turn().askingDeviceId),
-    }),
+    execute: async () => {
+      const turn = runningTurn();
+      const refusal = await refusalFor(DEVICE_DESCRIBE_ACTION, turn);
+      if (refusal) return { status: "error", error: refusal };
+      return {
+        status: "ok",
+        data: describeDevices(deps.connections.list(), now(), askingDeviceOf(turn.channelContext)),
+      };
+    },
   });
 
   actions.register({
@@ -110,6 +131,9 @@ export function registerDeviceActions(
       additionalProperties: false,
     },
     execute: async (input) => {
+      const turn = runningTurn();
+      const refusal = await refusalFor(DEVICE_RUN_ACTION, turn);
+      if (refusal) return { status: "error", error: refusal };
       const {
         operation,
         args = {},
@@ -128,7 +152,7 @@ export function registerDeviceActions(
       if (device !== undefined && typeof device !== "string") {
         return { status: "error", error: "Invalid input: device must be a device id." };
       }
-      const outcome = await runOnDevice({ ...deps, now }, turn(), {
+      const outcome = await runOnDevice({ ...deps, now }, deviceRunTurnOf(turn), {
         operation,
         args: args as Record<string, unknown>,
         deviceId: device,
