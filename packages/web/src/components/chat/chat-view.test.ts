@@ -130,6 +130,31 @@ describe("buildChatView", () => {
     expect(v.interactionResults.get(interactionResultKey(MAIN, "c_1"))).toBeUndefined();
   });
 
+  it.each([
+    "ai-tool-sign-in-card",
+    "add-device-card",
+  ])("auto-dismisses an open %s when the guardian replies in chat", (componentId) => {
+    const card = {
+      type: "pending_interaction",
+      toolUseId: "k_0",
+      appId: "core",
+      render: { kind: "inline", componentId, builtin: true, props: {} },
+    };
+    const messages = new Map<string, ChatMessage[]>([
+      [
+        MAIN,
+        [
+          mk(MAIN, "assistant", "t1", [card]),
+          mk(MAIN, "user", "t2", [{ type: "text", content: "never mind" }]),
+        ],
+      ],
+    ]);
+    const v = buildChatView(messages, MAIN, MAIN_IDENTITY);
+    expect(v.interactionResults.get(interactionResultKey(MAIN, "k_0"))).toEqual({
+      dismissed: true,
+    });
+  });
+
   it("keeps a real card answer over auto-dismiss, and leaves unanswered cards open", () => {
     const messages = new Map<string, ChatMessage[]>([
       [

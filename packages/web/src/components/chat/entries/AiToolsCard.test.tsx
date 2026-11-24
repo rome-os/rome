@@ -294,6 +294,62 @@ describe("AiToolsCard", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Try again" })).toBeNull());
   });
 
+  describe("for AI tools the agent names", () => {
+    it("offers only the named AI tool, with no skip or credits, while another is signed in", async () => {
+      mockStatus({ claude: { loggedIn: true }, codex: { loggedIn: false } }, SIGNUP_CREDITS);
+      const onSubmit = rs.fn();
+
+      render(<AiToolsCard toolUseId="t-named" aiTools={["chatgpt"]} onSubmit={onSubmit} />);
+
+      expect(await screen.findByText("Sign in to ChatGPT")).toBeTruthy();
+      expect(await screen.findByText("ChatGPT")).toBeTruthy();
+      expect(screen.getByText("Waiting for a sign-in")).toBeTruthy();
+      expect(screen.queryByText("Claude")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Continue with credits" })).toBeNull();
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("answers once the named AI tool is signed in", async () => {
+      mockStatus({ claude: { loggedIn: false }, codex: { loggedIn: true } });
+      const onSubmit = rs.fn();
+
+      render(<AiToolsCard toolUseId="t-named-done" aiTools={["chatgpt"]} onSubmit={onSubmit} />);
+
+      await waitFor(() =>
+        expect(onSubmit).toHaveBeenCalledWith(
+          "t-named-done",
+          { connected: true },
+          "Connected an AI",
+        ),
+      );
+      expect(screen.getByText("Connected")).toBeTruthy();
+    });
+
+    it("names every AI tool it offers", async () => {
+      mockStatus({ claude: { loggedIn: false }, codex: { loggedIn: false } });
+
+      render(
+        <AiToolsCard toolUseId="t-named-both" aiTools={["claude", "chatgpt"]} onSubmit={rs.fn()} />,
+      );
+
+      expect(await screen.findByText("Sign in to Claude or ChatGPT")).toBeTruthy();
+    });
+
+    it("says it was not signed in once a reply dismissed it", () => {
+      render(
+        <AiToolsCard
+          toolUseId="t-named-dismissed"
+          aiTools={["chatgpt"]}
+          result={{ dismissed: true }}
+          onSubmit={rs.fn()}
+        />,
+      );
+
+      expect(screen.getByText("Not signed in")).toBeTruthy();
+    });
+  });
+
   it("stops sending a connected answer on its own once it fails", async () => {
     mockStatus({ claude: { loggedIn: true }, codex: { loggedIn: false } });
     const onSubmit = rs.fn().mockRejectedValue(new Error("offline"));
