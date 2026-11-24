@@ -928,6 +928,7 @@ describe("Concierge tools", () => {
       const workspace = (s: ReturnType<typeof setup>) => {
         const sent: unknown[] = [];
         s.deps.servesWorkspace = (channel) => channel === "discord_app";
+        s.deps.guardianAccess = (channel, guardian) => guardian || channel === "discord_app";
         s.deps.sendInChat = async (from, message) => {
           sent.push({ from, message });
           return { sent: "800000000000000010" };
@@ -987,6 +988,24 @@ describe("Concierge tools", () => {
         expect(result.isError).toBeFalsy();
         const { chatId: taskId } = JSON.parse(result.content[0]!.text) as { chatId: string };
         expect((await s.taskRepo.getWithChat(taskId))?.conciergeChat.id).toBe(chatId);
+      });
+
+      it("watches anyone's message in the workspace as it watches the guardian's", async () => {
+        const s = setup();
+        const chatId = await connectionChat(s);
+        workspace(s);
+        const turn = {
+          agentName: CONCIERGE_AGENT_ID,
+          turnId: "c-work",
+          channel: "discord_app",
+          chatId,
+          messageKey: "800000000000000001",
+          senderBondLevel: "other",
+        };
+        expect(s.service.observeConnectionTurn(turn)).not.toBeNull();
+        // Without the workspace's access, only the guardian's is watched.
+        s.deps.guardianAccess = undefined;
+        expect(s.service.observeConnectionTurn({ ...turn, turnId: "c-2" })).toBeNull();
       });
 
       it("says a message that quotes nothing into the thread the turn stands in", async () => {

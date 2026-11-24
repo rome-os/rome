@@ -354,6 +354,7 @@ import { guardedSend, workspaceSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
 import { ownAccountNames } from "./connections/own-account-name.js";
 import { servesWorkspaceIn } from "./connections/serves-workspace.js";
+import { actsWithGuardianAccess } from "./participation/guardian-access.js";
 import { chatSessionKeyOf, workspaceSessions } from "./core/workspace-sessions.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
@@ -1508,6 +1509,8 @@ async function main() {
         { chat, ...message },
       ),
     servesWorkspace: channelServesWorkspace,
+    guardianAccess: (channel, guardian) =>
+      actsWithGuardianAccess({ servesWorkspace: channelServesWorkspace(channel), guardian }),
     // What the Concierge sends to another chat of a workspace it serves goes
     // out on the channel's send port, which records it in that chat.
     sendInChat: (from, message) =>

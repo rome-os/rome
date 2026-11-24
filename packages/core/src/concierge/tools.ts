@@ -1789,11 +1789,14 @@ export async function buildConciergeTools(
     },
   ];
   if (!onConnection) return tools;
-  // On a connection, a reaction and the task tools act for the guardian. A
-  // message from anyone else may not use them; a turn Rome runs there, such as
-  // a task's report, may. Anyone's turn may say something. On an account that
-  // serves its workspace anyone in it may use them, as the guardian does.
-  const othersRefused = () => !inWorkspace && bondHere(currentTurn().chatId) !== "guardian";
+  // On a connection, a reaction and the task tools act for the guardian. Only
+  // a sender with the guardian's access may use them; a turn Rome runs there,
+  // such as a task's report, may. Anyone's turn may say something.
+  const othersRefused = () =>
+    !service.actsWithGuardianAccess(
+      sessionChannel ?? "",
+      bondHere(currentTurn().chatId) === "guardian",
+    );
   const kept = tools
     .filter((tool) => (CONNECTION_TOOLS as readonly string[]).includes(tool.name))
     .map(

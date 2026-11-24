@@ -1,3 +1,4 @@
+import { actsWithGuardianAccess } from "../guardian-access.js";
 import type { PolicyInput } from "./policy/policy-engine.js";
 import { decidePolicy } from "./policy/policy-engine.js";
 import type { Addressed } from "../addressing.js";
@@ -50,7 +51,17 @@ export function chatSettingsWake(settings: ChatWakeSettings): WakeGate {
       threadType: message.place === "direct" ? "private" : "group",
     });
     if (policy.action === "block") return "block";
-    if (settings.servesWorkspace && addressedOf(message) === "rome") return "wake";
+    // Whoever may act with the guardian's access wakes the agent when they
+    // address it. The guardian wakes by the levels below, as before.
+    if (
+      addressedOf(message) === "rome" &&
+      actsWithGuardianAccess({
+        servesWorkspace: settings.servesWorkspace === true,
+        guardian: false,
+      })
+    ) {
+      return "wake";
+    }
     if (!settings.replyToLevels.includes(bondLevel)) return "quiet";
     if (settings.trustedLevels.includes(bondLevel) || policy.action === "allow") return "wake";
     return "review";

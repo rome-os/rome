@@ -69,6 +69,7 @@ describe("the Concierge on a connection", () => {
     // Anyone in the workspace may ask for a task there.
     expect(setup?.systemPromptPrefix).toContain("Anyone in this workspace may ask for one.");
     expect(setup?.systemPromptPrefix).not.toContain("Only the guardian may ask for one");
+    expect(setup?.systemPromptPrefix).not.toContain("Only the guardian's messages take one");
     expect(WORKSPACE_PROMPT).toContain("`<place>`");
     expect(WORKSPACE_PROMPT).toContain("`send`");
     // Every other account, and the Concierge without the rule, keep theirs.

@@ -290,6 +290,10 @@ export interface ConciergeDeps {
    *  session answers all its chats and may send to any of them. Absent, none
    *  does. */
   servesWorkspace?: (channel: string) => boolean;
+  /** Whether a sender on `channel` may act with the guardian's access there,
+   *  given whether they are the guardian (participation/guardian-access).
+   *  Absent, only the guardian may. */
+  guardianAccess?: (channel: string, guardian: boolean) => boolean;
   /** Sends a message of turn `turnId` to chat `chat`, in thread `thread` or
    *  the open chat, on the account `from` is a chat of: past its send gate,
    *  to the platform, recorded there. Answers the platform's key for it, or
@@ -1263,6 +1267,12 @@ export class ConciergeService {
     return outcome;
   }
 
+  /** Whether a sender on `channel` may act with the guardian's access there,
+   *  given whether they are the guardian. */
+  actsWithGuardianAccess(channel: string, guardian: boolean): boolean {
+    return this.deps.guardianAccess?.(channel, guardian) ?? guardian;
+  }
+
   /** Task `taskId` was asked for in platform thread `thread`, where its
    *  report stands. */
   noteAskedIn(taskId: string, thread: string): void {
@@ -1308,7 +1318,7 @@ export class ConciergeService {
       turn.channel === "webchat" ||
       !chatId ||
       !messageKey ||
-      turn.senderBondLevel !== "guardian"
+      !this.actsWithGuardianAccess(turn.channel, turn.senderBondLevel === "guardian")
     ) {
       return null;
     }
