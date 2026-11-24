@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
-import { widgetEventRoutes } from "./widget-events.js";
+import type { SetupStartOutcome } from "../../connections/setup/start.js";
+import { type SetupStartRequest, widgetEventRoutes } from "./widget-events.js";
 import { connectCardUi } from "../../connections/connect-card.js";
 
 const button = (id: string, name: string, context?: unknown) => ({
@@ -51,7 +52,16 @@ function setup(
   deviceConnections: unknown[] = [],
   audience: "private" | "shared" = "private",
   storedDevice: string | null = null,
+  setupState: SetupStartOutcome = {
+    status: "started",
+    started: {
+      cid: "cid-1",
+      reattached: false,
+      state: { status: "awaiting-redirect", url: "https://cloud.example/authorize?state=s1" },
+    },
+  },
 ) {
+  const setups: SetupStartRequest[] = [];
   const forwarded: {
     url: string;
     body: unknown;
@@ -82,6 +92,10 @@ function setup(
           : { id, agentName: null, ownerKey: null, triggerKind: null }) as never,
     },
     callerOwner: async () => caller,
+    startSetup: async (request) => {
+      setups.push(request);
+      return setupState;
+    },
     forward: async (request) => {
       if (request.method === "GET" && new URL(request.url).pathname === "/api/connections") {
         return Response.json({ connections });
@@ -105,10 +119,16 @@ function setup(
   const fire = (widgetId: string, body: unknown, headers: Record<string, string> = {}) =>
     app.request(`/chat/widgets/${widgetId}/events`, {
       method: "POST",
-      headers: { "content-type": "application/json", cookie: "rome_session=x", ...headers },
+      headers: {
+        "content-type": "application/json",
+        cookie: "rome_session=x",
+        // As a browser on this instance's own page sends it.
+        "sec-fetch-site": "same-origin",
+        ...headers,
+      },
       body: JSON.stringify(body),
     });
-  return { fire, forwarded };
+  return { fire, forwarded, setups };
 }
 
 describe("an event on a widget", () => {
@@ -539,25 +559,98 @@ describe("an event on the connect card core owns", () => {
       },
     },
   };
-  const github = (state: string | null, connect: unknown) => [
-    { connectionKind: "github", state, connect },
+  const github = (state: string | null, connect: unknown, id: string | null = null) => [
+    { id, connectionKind: "github", grants: { user: "unauthorized" }, state, connect },
   ];
   const link = {
-    url: "https://cloud.example/oauth/github",
+    url: "/api/oauth/github/start",
     available: true,
     unavailableReason: null,
   };
+  const redirect = (url: string): SetupStartOutcome => ({
+    status: "started",
+    started: { cid: "cid-1", reattached: false, state: { status: "awaiting-redirect", url } },
+  });
 
-  it("opens the kind's authorization page on Connect, and answers nothing yet", async () => {
-    const { fire, forwarded } = setup(
+  it("starts the setup the Connections page's Connect starts, and opens its authorization page", async () => {
+    const { fire, forwarded, setups } = setup(
       { m: { chatId: "c1", content: [connectCard] } },
       "guardian",
       undefined,
       github(null, link),
     );
     const res = await fire("m", { name: "connect", context: { kind: "github" } });
-    expect(await res.json()).toEqual({ open: "https://cloud.example/oauth/github" });
+    expect(await res.json()).toEqual({ open: "https://cloud.example/authorize?state=s1" });
+    expect(setups).toEqual([{ idOrKind: "github", grant: "user", force: false }]);
     expect(forwarded).toEqual([]);
+  });
+
+  it("starts no setup for a Connect from another site, as the setup route refuses one", async () => {
+    const { fire, setups } = setup(
+      { m: { chatId: "c1", content: [connectCard] } },
+      "guardian",
+      undefined,
+      github(null, link),
+    );
+    const res = await fire(
+      "m",
+      { name: "connect", context: { kind: "github" } },
+      { "sec-fetch-site": "same-site" },
+    );
+    expect(res.status).toBe(403);
+    expect(setups).toEqual([]);
+  });
+
+  it("starts afresh into a broken connection, as the page's Reconnect does", async () => {
+    const { fire, setups } = setup(
+      { m: { chatId: "c1", content: [connectCard] } },
+      "guardian",
+      undefined,
+      github("broken", link, "conn-1"),
+    );
+    await fire("m", { name: "connect", context: { kind: "github" } });
+    expect(setups).toEqual([{ idOrKind: "conn-1", grant: "user", force: true }]);
+  });
+
+  it("opens Shopify's install page, as the page does, and starts no setup", async () => {
+    const install = {
+      url: "https://apps.shopify.com/rome",
+      available: true,
+      unavailableReason: null,
+    };
+    const { fire, setups } = setup(
+      { m: { chatId: "c1", content: [connectCard] } },
+      "guardian",
+      undefined,
+      [
+        {
+          id: null,
+          connectionKind: "shopify",
+          grants: { store: "unauthorized" },
+          state: null,
+          connect: install,
+        },
+      ],
+    );
+    const res = await fire("m", { name: "connect", context: { kind: "shopify" } });
+    expect(await res.json()).toEqual({ open: "https://apps.shopify.com/rome" });
+    expect(setups).toEqual([]);
+  });
+
+  it("refuses Connect with the setup's reason when it does not start", async () => {
+    const { fire } = setup(
+      { m: { chatId: "c1", content: [connectCard] } },
+      "guardian",
+      undefined,
+      github(null, link),
+      [],
+      "private",
+      null,
+      { status: "refused", code: 404, error: "No setup for this grant." },
+    );
+    const res = await fire("m", { name: "connect", context: { kind: "github" } });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "No setup for this grant." });
   });
 
   it("turns a link to a dashboard page into a link on the caller's origin", async () => {
@@ -565,7 +658,11 @@ describe("an event on the connect card core owns", () => {
       { m: { chatId: "c1", content: [connectCard] } },
       "guardian",
       undefined,
-      github(null, { url: "/settings/connections", available: true, unavailableReason: null }),
+      github(null, link),
+      [],
+      "private",
+      null,
+      redirect("/settings/connections"),
     );
     const res = await fire("m", { name: "connect", context: { kind: "github" } });
     expect(await res.json()).toEqual({ open: "http://localhost/settings/connections" });
@@ -576,7 +673,11 @@ describe("an event on the connect card core owns", () => {
       { m: { chatId: "c1", content: [connectCard] } },
       "guardian",
       undefined,
-      github(null, { url: "/settings/connections", available: true, unavailableReason: null }),
+      github(null, link),
+      [],
+      "private",
+      null,
+      redirect("/settings/connections"),
     );
     const res = await fire(
       "m",

@@ -1,11 +1,10 @@
 import type { RomeTool, WidgetDrawing } from "../agent/index.js";
 import {
   connectableKinds,
-  connectAccountToolOutput,
+  connectCardRequest,
+  connectCardToolOutput,
   type DeviceKind,
   type DeviceKindState,
-  deviceConnectToolOutput,
-  parseConnectAccountInput,
 } from "../connections/connect-card.js";
 
 /**
@@ -84,32 +83,16 @@ export function connectAccountTools(input: {
             isError: true,
           };
         }
-        const parsed = parseConnectAccountInput(args, devices, {
+        const request = await connectCardRequest(args, {
+          devices,
+          deviceState: input.deviceState,
+          language: input.language,
           devicesOnly: input.devicesOnly,
         });
-        if (!parsed.ok) return { content: [{ type: "text", text: parsed.error }], isError: true };
-        // A device kind that already works needs no card: read as it stands now.
-        const now = parsed.device ? input.deviceState?.(parsed.kind) : undefined;
-        if (parsed.device) {
-          if (now?.state === "working") {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `${parsed.device.label} is already connected${now.device ? ` on ${now.device}` : ""}. Go ahead; no card shown.`,
-                },
-              ],
-            };
-          }
+        if (request.status === "refused") {
+          return { content: [{ type: "text", text: request.error }], isError: true };
         }
-        const output = parsed.device
-          ? deviceConnectToolOutput(
-              parsed.device,
-              widgetsShow,
-              now?.askingDeviceId,
-              await input.language?.(),
-            )
-          : connectAccountToolOutput(parsed.kind, widgetsShow);
+        const output = connectCardToolOutput(request, widgetsShow);
         return {
           content: [
             { type: "text", text: typeof output === "string" ? output : JSON.stringify(output) },
