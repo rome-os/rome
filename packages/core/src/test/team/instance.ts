@@ -14,7 +14,9 @@ import { randomUUID } from "node:crypto";
 import type { Hono } from "hono";
 import { buildApp, startApi } from "../../api/index.js";
 import type { ApiDeps, ApiHandle, Feature } from "../../api/deps.js";
-import { buildTestDeps, createTestDb, type TestDeps } from "../helpers.js";
+import { stringify as stringifyYaml } from "yaml";
+import { AgentLoader } from "../../app-host/agent-loader.js";
+import { buildAgentConfig, buildTestDeps, createTestDb, type TestDeps } from "../helpers.js";
 import { seedBaseline } from "../seeds.js";
 import { guardianAuth, settings } from "../../db/schema.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
@@ -27,7 +29,11 @@ import { feishu } from "../../connections/kinds/feishu/index.js";
 import { discordApp, romeCloudDiscordApp } from "../../connections/kinds/discord-app/index.js";
 import { linkedin } from "../../connections/kinds/linkedin/index.js";
 import type { KindMount } from "../../connections/kind-mount.js";
+import { ConnectionRegistry, DrizzleConnectionsRepository } from "../../connections/index.js";
+import { SetupManager } from "../../connections/setup/manager.js";
+import { placeAudience } from "../../core/place-audience.js";
 import { ownerOfChat } from "../../webchat/owner.js";
+import { CONCIERGE_AGENT_ID } from "../../webchat/privacy.js";
 import type { VoiceInputSource } from "../../voice-input/voice-input-source.js";
 import type { SpeakerSource } from "../../voice-output/speaker-source.js";
 
@@ -49,10 +55,17 @@ export interface InstanceOptions {
   dashboardEmails: string[];
   /** Seeds a guardian seat with onboarding complete. Default true. */
   guardianSeat?: boolean;
+  /** Mounted after the daemon's features, for a stand-in product. */
+  extraFeatures?: Feature[];
 }
 
 export interface SeededIds {
+  /** A chat every dashboard user may open. */
   chatId: string;
+  /** Each caller's own Concierge chat, private to them. */
+  conciergeChatIds: { guardian: string; teammate: string };
+  /** The Mac computer use is set up on. */
+  deviceId: string;
   routineId: string;
   approvalId: string;
   personId: string;
@@ -67,6 +80,9 @@ export interface Instance {
   /** Serves the instance on a loopback port, with every WebSocket upgrade
    *  handler `startApi` attaches. */
   listen(): Promise<{ port: number; server: Server; close(): Promise<void> }>;
+  /** Puts the dashboard email list back to the one the instance booted with,
+   *  in the database and in the live access state. */
+  restoreDashboardList(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -127,6 +143,8 @@ function features(deps: ApiDeps): Feature[] {
   ];
 }
 
+const COMPUTER_USE_DEVICE = "verifier-mac";
+
 let networkGuarded = false;
 
 /** Lets `fetch` reach loopback only, where the stand-ins listen. A route that
@@ -180,16 +198,69 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
   const baseline = await seedBaseline(db);
 
   const testDeps = await buildTestDeps(db);
+  // The daemon loads `main` and the Concierge from the installed first-party
+  // apps, which this instance has none of. Agents that may call every action
+  // stand in, so the routes that read a chat's agent (computer use) answer.
+  const agentsDir = join(root, "agents");
+  mkdirSync(agentsDir);
+  for (const name of ["main", "concierge"]) {
+    writeFileSync(
+      join(agentsDir, `${name}.yaml`),
+      stringifyYaml(buildAgentConfig({ name, actions: ["*"] })),
+    );
+  }
+  if (!(testDeps.agentLoader instanceof AgentLoader)) {
+    throw new Error("the test deps no longer build a real agent loader");
+  }
+  await testDeps.agentLoader.loadAll(agentsDir);
+  const kinds = connectionKinds(testDeps);
+  // The registry and setups as the daemon builds them, with the mounted kinds
+  // registered, so the connection and setup routes answer instead of 404.
+  const connectionRegistry = new ConnectionRegistry({
+    repository: new DrizzleConnectionsRepository(db),
+  });
+  for (const kind of kinds) {
+    if (kind.descriptor) connectionRegistry.register(kind.descriptor);
+  }
   const deps: ApiDeps = {
     ...testDeps,
-    connectionKinds: connectionKinds(testDeps),
+    connectionKinds: kinds,
+    connectionRegistry,
+    setupManager: new SetupManager({ registry: connectionRegistry }),
+    // The daemon's rule, in place of the test deps' "every chat is shared".
+    placeAudience: placeAudience({
+      dashboardChat: (chatId) => testDeps.webchatRepo.getSession(chatId),
+      visitorsAllowed: () => testDeps.dashboardAccessState.hasCloudEmailAccess(),
+    }),
     voiceInput: alwaysAvailableVoice,
     speaker: silentSpeaker,
+    // A Mac this Rome can use, as when computer use is set up on the host.
+    computerUseLocal: { deviceId: COMPUTER_USE_DEVICE, name: "Verifier Mac" },
   };
-  deps.features = features(deps);
+  deps.features = [...features(deps), ...(options.extraFeatures ?? [])];
 
   const chatId = randomUUID();
   await deps.webchatRepo.createSession(chatId, "Team verifier chat");
+  const conciergeChat = async (ownerKey: string | null) => {
+    const id = randomUUID();
+    await deps.webchatRepo.createSession(
+      id,
+      "Team verifier Concierge chat",
+      undefined,
+      undefined,
+      null,
+      undefined,
+      CONCIERGE_AGENT_ID,
+      "webchat",
+      null,
+      { ownerKey },
+    );
+    return id;
+  };
+  const conciergeChatIds = {
+    guardian: await conciergeChat(null),
+    teammate: await conciergeChat(`visitor:${TEAMMATE.accountId}`),
+  };
   const routineId = await testDeps.routinesRepo.create({
     name: "Team verifier routine",
     trigger: {
@@ -205,6 +276,8 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
   });
   const ids: SeededIds = {
     chatId,
+    conciergeChatIds,
+    deviceId: COMPUTER_USE_DEVICE,
     routineId,
     approvalId: baseline.approvals.pendingId,
     personId: baseline.persons.innerCircleId,
@@ -237,6 +310,12 @@ export async function createInstance(options: InstanceOptions): Promise<Instance
       servers.push(handle);
       if (!server) throw new Error("startApi attached no upgrade handler");
       return { port: handle.port, server, close: () => handle.close() };
+    },
+    async restoreDashboardList() {
+      await deps.settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
+        cloudEmailAccess: options.dashboardEmails,
+      });
+      await deps.dashboardAccessState.load(db);
     },
     async close() {
       for (const server of servers) await server.close().catch(() => {});

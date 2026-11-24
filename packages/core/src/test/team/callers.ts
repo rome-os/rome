@@ -51,13 +51,18 @@ const PROBE_COPIED_HEADERS = [
 
 const isRefusal = (status: number | "timeout") => status === 401 || status === 403;
 
+let requestsSent = 0;
+
 /** Headers every browser request through Caddy carries. The forwarded address
  *  keeps the in-container loopback trust from applying, as it never does to a
- *  request from outside. */
+ *  request from outside. Each request comes from its own address: the login
+ *  rate limit counts per address for the whole process, so one shared address
+ *  would answer a later run's login with 429 for what earlier runs sent. */
 function browserHeaders(cookie: string | null): Record<string, string> {
+  requestsSent += 1;
   return {
     ...(cookie ? { cookie } : {}),
-    "x-forwarded-for": "203.0.113.7",
+    "x-forwarded-for": `2001:db8::${requestsSent.toString(16)}`,
     "x-forwarded-proto": "https",
     "sec-fetch-site": "same-origin",
     origin: `https://${INSTANCE_HOST}`,
@@ -77,7 +82,7 @@ async function withTimeout<T>(promise: Promise<T>): Promise<T | "timeout"> {
 }
 
 /** Asks the probe about `path` the way Caddy's `forward_auth` does. */
-async function probe(app: Hono, path: string, cookie: string | null) {
+async function probe(app: Browsable, path: string, cookie: string | null) {
   return app.request(`https://${INSTANCE_HOST}/api/auth/verify`, {
     headers: { ...browserHeaders(cookie), "x-forwarded-uri": path },
   });
@@ -205,10 +210,13 @@ export async function unclaimedUpgradeHandlers(
   return unclaimed;
 }
 
+/** What a browser request reaches: the instance's app, or a stand-in around it. */
+export type Browsable = Pick<Hono, "request">;
+
 /** One browser request through the edge, as `callHttp` makes it, with a JSON
  *  body when given. Resolves the probe's refusal when the probe refuses. */
 export async function browse(
-  app: Hono,
+  app: Browsable,
   init: { method: string; path: string; cookie: string | null; json?: unknown },
 ): Promise<{ stage: "edge" | "route"; response: Response }> {
   const forwarded: Record<string, string> = {};
