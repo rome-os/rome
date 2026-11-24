@@ -61,6 +61,24 @@ export interface AgentCatalog {
   find(name: string): Agent | undefined;
 }
 
+/**
+ * Whether an agent holds nothing it could call: no built-in tool, an action
+ * list it declares empty, no subagent, no server, and an answer shape it
+ * returns instead. Its sessions are served no Rome tools at all, skills and
+ * `ask_question` included, so what it reads can never make it act.
+ */
+export function holdsNoTools(definition: AgentDefinition): boolean {
+  return (
+    definition.tools.length === 0 &&
+    definition.actions !== undefined &&
+    definition.actions.length === 0 &&
+    (definition.allowedSubagents ?? []).length === 0 &&
+    Object.keys(definition.mcpServers ?? {}).length === 0 &&
+    definition.networkDiscovery !== true &&
+    definition.outputSchema !== undefined
+  );
+}
+
 /** The agent by any of its names. Throws when no installed agent has the name. */
 export function requireAgent(catalog: AgentCatalog, name: string): Agent {
   const agent = catalog.find(name);

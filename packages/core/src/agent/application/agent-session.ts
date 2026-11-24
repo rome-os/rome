@@ -11,6 +11,7 @@ import {
 import { afterLanding, isQueueInput } from "../domain/input-queue.js";
 import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
 import {
+  holdsNoTools,
   requireAgent,
   type Agent,
   type AgentCatalog,
@@ -1176,22 +1177,27 @@ function sessionSetupOf(
           taskChecks: policy.taskChecks,
         }
       : undefined;
+  // An agent that holds nothing it could call is served nothing either: no
+  // skills and no `ask_question`, which every other session gets.
+  const toolless = holdsNoTools(config);
   const romeTools: SessionSetupSource["romeTools"] = (turn, run, session) =>
-    createRomeTools({
-      turn,
-      actions: deps.actions,
-      skills: deps.skillCatalog,
-      subagents: { list: () => subagents, run },
-      // Without a speaker, action results that hand back a widget take their
-      // plain-text forms. Otherwise the tool result claims a card was shown
-      // while nothing mounted and the fork dead-ends.
-      widgetsShow: showsWidgets(widgets, session.hasSpeaker),
-      log: deps.log,
-      defer: session.defers ? deferTool : undefined,
-      sessionTools: session.sessionTools,
-      repliesTo: policy.delegatesWork,
-      computerUse: deps.computerUse,
-    });
+    toolless
+      ? NO_ROME_TOOLS
+      : createRomeTools({
+          turn,
+          actions: deps.actions,
+          skills: deps.skillCatalog,
+          subagents: { list: () => subagents, run },
+          // Without a speaker, action results that hand back a widget take their
+          // plain-text forms. Otherwise the tool result claims a card was shown
+          // while nothing mounted and the fork dead-ends.
+          widgetsShow: showsWidgets(widgets, session.hasSpeaker),
+          log: deps.log,
+          defer: session.defers ? deferTool : undefined,
+          sessionTools: session.sessionTools,
+          repliesTo: policy.delegatesWork,
+          computerUse: deps.computerUse,
+        });
   let answerShape: { shape: AnswerShape | undefined } | undefined;
   return {
     definition: config,

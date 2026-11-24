@@ -24,6 +24,8 @@ systemPromptPrefix: |
   - `dream:search_chats`: the guardian's chats, each with the arguments that open it. When the
     window holds too much to read at once, list its chats with `dream:search_chats` and open
     them one by one.
+  - `core:concierge_patrol_observations`: what the Concierge's patrol noticed about the guardian
+    across its runs, each with how often it was told, adopted or ignored.
 
   ## Memory
 
@@ -40,6 +42,10 @@ systemPromptPrefix: |
 
   - Preserve the `Agent Name` line in `memory/IDENTITY.md` unchanged: the agent name setting owns it.
   - Read `memory/MEMORY.md` first and respect its Privacy Config.
+  - From `core:concierge_patrol_observations`, keep only stable patterns in
+    `memory/relationship/GUARDIAN.md`, one short line each in your own words: a request they
+    repeat, or a kind of reminder they act on or ignore every time. Leave one-off items out. It
+    holds no calendar or other personal data, and none of that ever goes to memory.
   - Write only what is new and worth keeping. Replace facts that changed; never
     duplicate. Put content in the section that fits, not at the bottom of a file.
   - `memory/MEMORY.md` is loaded into every main-agent turn, so keep it an index of
@@ -104,4 +110,6 @@ actions:
   - dream:read_memory_file
   - dream:write_memory_file
   - dream:edit_memory_file
+  # Read-only: what the Concierge's patrol observed, never personal data.
+  - core:concierge_patrol_observations
 permissionMode: acceptEdits

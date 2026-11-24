@@ -450,6 +450,8 @@ async function persistCard(
     // turn streams, not only on the post-turn reload. `addMessage` is silent.
     if (replies) {
       await replies.concierge.addCard(sessionId, turnId, part, replies.named.get(part.toolUseId));
+      // A card is a message: a counted Concierge turn counts it.
+      replies.concierge.cardShown?.(sessionId);
     } else {
       await webchatRepo.addBackendMessage(sessionId, turnId, [part]);
     }

@@ -66,6 +66,18 @@ const configSchema = z.object({
     .positive()
     .default(24 * 60),
 
+  // Hours between two runs of the Concierge patrol. Quiet hours, digest times
+  // and a guardian who is away hold it more often than this. A divisor of 24
+  // below 24: the schedule restarts its hours at midnight, so any other step
+  // fires unevenly.
+  conciergePatrolIntervalHours: z.coerce
+    .number()
+    .int()
+    .refine((hours) => [1, 2, 3, 4, 6, 8, 12].includes(hours), {
+      message: "must be 1, 2, 3, 4, 6, 8 or 12",
+    })
+    .default(3),
+
   hostExecutionSocket: z.string().startsWith("/").optional(),
   computerUseLocalDeviceId: z
     .uuid()
@@ -176,6 +188,9 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   }
   if (env.CONCIERGE_TASK_WAIT_EXPIRY_MINUTES) {
     raw.conciergeTaskWaitExpiryMinutes = env.CONCIERGE_TASK_WAIT_EXPIRY_MINUTES;
+  }
+  if (env.CONCIERGE_PATROL_INTERVAL_HOURS) {
+    raw.conciergePatrolIntervalHours = env.CONCIERGE_PATROL_INTERVAL_HOURS;
   }
   if (env.ROME_HOST_EXECUTION_SOCKET) {
     raw.hostExecutionSocket = env.ROME_HOST_EXECUTION_SOCKET;

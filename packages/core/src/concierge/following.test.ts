@@ -3,6 +3,7 @@ import type { ConciergeWatchCapability } from "@rome/api-types/concierge";
 import type { Action } from "../apps/actions/types.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import { ConciergeFollowItemsRepository } from "../db/repositories/concierge-follow-items.js";
+import { ConciergeToldRepository } from "../db/repositories/concierge-told.js";
 import { createTestDb } from "../test/db.js";
 import type { Routine } from "../routines/types.js";
 import {
@@ -228,6 +229,11 @@ function setup(
   const prompts: string[] = [];
   const testDb = createTestDb();
   const items = new ConciergeFollowItemsRepository(testDb.db);
+  const told = new ConciergeToldRepository(testDb.db);
+  /** The chats whose turns run to their end and say nothing. */
+  const silentChats = new Set<string>();
+  /** The chats whose turns say one message and then fail to run to their end. */
+  const saysBeforeFailing = new Set<string>();
   const agentRunner: AgentRunnerInterface = {
     run: (params) =>
       (async function* () {
@@ -371,6 +377,7 @@ function setup(
     connections: async () => connectionViews(),
     items,
     agentRunner,
+    told,
     callingChat: () => calling.chat,
   };
   const ownerOfChat = async (id: string | null | undefined) =>
@@ -394,6 +401,20 @@ function setup(
       pushLevels.push(turnOptions?.pushLevel);
       if (failingChats.throws.has(chatId)) throw new Error("the session crashed");
       return !turnFails.on && !failingChats.ends.has(chatId);
+    },
+    // Each turn that ran said one message, unless a test says it said none.
+    async runCountedTurn(
+      chatId: string,
+      prompt: string,
+      turnOptions?: { inputLabel?: string; pushLevel?: string; inputSource?: unknown },
+    ) {
+      const ran = await (
+        this as unknown as {
+          runSystemTurn: (c: string, p: string, o?: unknown) => Promise<boolean>;
+        }
+      ).runSystemTurn(chatId, prompt, turnOptions);
+      const spoke = (ran || saysBeforeFailing.has(chatId)) && !silentChats.has(chatId);
+      return { ran, said: spoke ? 1 : 0, chatId };
     },
     attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
     listChats: async (owner = GUARDIAN_OWNER) =>
@@ -432,6 +453,9 @@ function setup(
     dropped,
     calling,
     turnChats,
+    told,
+    silentChats,
+    saysBeforeFailing,
     following: () => following!,
     stop: () => {
       stop();
@@ -969,6 +993,57 @@ describe("the follow pipeline", () => {
     expect(turn.indexOf("line for e4")).toBeLessThan(turn.indexOf("line for e3"));
     expect(turn).not.toMatch(/important="true"[^>]*>line for e3</);
     expect(await s.items.owedToDigest()).toEqual([]);
+    s.stop();
+  });
+
+  it("writes what an alert or digest said to the shared ledger, and nothing for a turn that said nothing", async () => {
+    rs.useFakeTimers();
+    const s = setup({ triage: { e2: "digest" } });
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    const main = mainChatIdOf(GUARDIAN_OWNER);
+    await fire(s, "e1");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    // The Concierge stayed silent on the second alert: nothing was told.
+    s.silentChats.add(main);
+    await fire(s, "e3");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    s.silentChats.delete(main);
+    await fire(s, "e2");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    await s.action("core:concierge_digest").execute({}, {} as never);
+    const told = await s.told.since(new Date(0));
+    expect(told.map((entry) => [entry.kind, entry.messages, entry.chatId])).toEqual([
+      ["digest", 1, main],
+      ["alert", 1, main],
+    ]);
+    expect(told[1]?.items).toEqual([{ topic: "follow:github:acme/widgets", line: "line for e1" }]);
+    expect(told[0]?.items.map((item) => item.line).sort()).toEqual([
+      "line for e1",
+      "line for e2",
+      "line for e3",
+    ]);
+    expect(await s.told.messagesSince(new Date(0))).toBe(2);
+    s.stop();
+  });
+
+  it("writes what an interrupted alert or digest said to the ledger, and keeps their items owed", async () => {
+    rs.useFakeTimers();
+    const s = setup();
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    const main = mainChatIdOf(GUARDIAN_OWNER);
+    s.failingChats.ends.add(main);
+    s.saysBeforeFailing.add(main);
+    await fire(s, "e1");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    await s.action("core:concierge_digest").execute({}, {} as never);
+    const told = await s.told.since(new Date(0));
+    expect(told.map((entry) => [entry.kind, entry.messages])).toEqual([
+      ["digest", 1],
+      ["alert", 1],
+    ]);
+    // The turns did not run to their end: their items are still owed.
+    expect((await s.items.owedToConcierge()).map((item) => item.eventId)).toEqual(["e1"]);
+    expect((await s.items.owedToDigest()).map((item) => item.eventId)).toEqual(["e1"]);
     s.stop();
   });
 

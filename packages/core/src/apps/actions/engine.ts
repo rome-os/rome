@@ -185,6 +185,11 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   // A task's scheduled run (concierge/task-schedule.ts). It sends the task's
   // brief through the Concierge, which only the main process holds.
   "core:concierge_task_run",
+  // The Concierge's patrol (concierge/patrol/index.ts), which only main
+  // registers. Its routine's fire runs the patrol, and Dream reads what it
+  // observed.
+  "core:concierge_patrol",
+  "core:concierge_patrol_observations",
 ]);
 
 export interface ActionRunContext {

@@ -18,4 +18,5 @@ Browse by surface:
 - [`concierge.md`](concierge.md) — How one Concierge talks in its main and topic chats, hands work to task chats, and sends each result, alert and digest to the chat that should hear it.
 - [`concierge-activity.md`](concierge-activity.md) — How Rome works out what each Concierge chat is doing from facts it holds, and tells only that chat's owner.
 - [`concierge-following.md`](concierge-following.md) — How an event from a followed service reaches the Concierge through its connection, triage and digest, and the rules that keep service differences in the connection.
+- [`concierge-patrol.md`](concierge-patrol.md) — How the guardian's Concierge looks over what Rome holds every few hours and, when one thing is worth it, tells them in one message, with code deciding when it may speak.
 - [`observability.md`](observability.md) — The OTEL → Collector → ClickHouse pipeline, required telemetry attributes, and the dev-vs-prod topology split.

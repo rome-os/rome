@@ -33,6 +33,7 @@ import type {
   ConciergeFollowItemRow,
   ConciergeFollowItemsRepository,
 } from "../db/repositories/concierge-follow-items.js";
+import type { ConciergeToldRepository } from "../db/repositories/concierge-told.js";
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { RoutineEngine } from "../routines/engine.js";
@@ -267,6 +268,8 @@ export interface ConciergeFollowingDeps {
   timezoneMoved?: (owner: ConciergeOwner, timezone: string) => Promise<void>;
   /** Where triage runs are recorded, so Sessions shows them. */
   triageRecord?: TriageRecordStore;
+  /** The shared "already told" ledger, which an alert or digest that said something writes. */
+  told?: Pick<ConciergeToldRepository, "record">;
   now?: () => number;
   /**
    * The chat whose turn called a follow action, when a turn did. Reads the
@@ -650,6 +653,39 @@ export function startConciergeFollowing(
     return storedChatId(mainChatIdOf(owner));
   };
 
+  /**
+   * Writes a turn that said something to the "already told" ledger, with the
+   * lines of every item it had. A ledger that fails to write loses the entry
+   * and nothing else.
+   */
+  const recordTold = async (
+    kind: "alert" | "digest",
+    owner: ConciergeOwner,
+    turn: { said: number; chatId: string; ledgered?: () => void },
+    items: readonly ConciergeFollowItemRow[],
+  ) => {
+    if (!deps.told || turn.said < 1) return;
+    // Until the ledger has it, the patrol counts the turn from memory, and a
+    // turn that fails to be written stays counted there for the day.
+    await deps.told
+      .record({
+        ownerKey: owner,
+        kind,
+        chatId: turn.chatId,
+        messages: turn.said,
+        items: items.map((item) => ({
+          topic: `follow:${item.source}:${item.target}`,
+          line: item.line,
+        })),
+        at: new Date(now()),
+      })
+      .then(
+        () => turn.ledgered?.(),
+        (error: unknown) =>
+          log.warn("failed to record what was told", { kind, error: messageOf(error) }),
+      );
+  };
+
   const delivery = new ImportantDelivery({
     now,
     isServed: (owner) => service.isServed(owner),
@@ -672,21 +708,24 @@ export function startConciergeFollowing(
       // Its input stays in the run's trace, so Sessions shows why it said what it said.
       const at = guardianNow(now(), await timezoneOf(items[0]?.ownerKey ?? GUARDIAN_OWNER));
       const kindLabel = kindLabelsOf(await readSources().catch(() => [] as WatchSource[]));
-      const ran =
-        chatId !== null &&
-        (await service.runSystemTurn(chatId, renderImportantTurn(items, held, at, kindLabel), {
-          quiet: true,
-          inputLabel: `Following · important (${items.length})`,
-          // Its replies are labelled with what it follows: the kind of
-          // events, when they are all of one kind.
-          inputSource: {
-            type: "following",
-            name: oneKind(items, kindLabel),
-          },
-          pushLevel: "active",
-        }));
+      const turn =
+        chatId === null
+          ? null
+          : await service.runCountedTurn(chatId, renderImportantTurn(items, held, at, kindLabel), {
+              quiet: true,
+              inputLabel: `Following · important (${items.length})`,
+              // Its replies are labelled with what it follows: the kind of
+              // events, when they are all of one kind.
+              inputSource: {
+                type: "following",
+                name: oneKind(items, kindLabel),
+              },
+              pushLevel: "active",
+            });
+      // What it said reached the guardian, whether or not the turn ran to its end.
+      if (turn) await recordTold("alert", owner, turn, items);
       // Items the Concierge never had stay owed, and the delivery tries again.
-      if (!ran) throw new Error("the Concierge's important turn did not run to its end");
+      if (!turn?.ran) throw new Error("the Concierge's important turn did not run to its end");
       await deps.items.markOffered(
         items.map((item) => item.id),
         new Date(now()),
@@ -871,25 +910,33 @@ export function startConciergeFollowing(
     let turns = 0;
     for (const [chatId, items] of perChat) {
       let ok = false;
+      let told: { said: number; chatId: string; ledgered?: () => void } = {
+        said: 0,
+        chatId: chatId ?? "",
+      };
       const note = chatId === null ? undefined : notes.get(chatId);
       const turn = renderDigestTurn(items, at, kindLabel);
       const prompt = note ? `${turn}\n${note.text}` : turn;
       try {
-        ok =
-          chatId !== null &&
-          (await outsideAction(() =>
-            service.runSystemTurn(chatId, prompt, {
+        if (chatId !== null) {
+          const ran = await outsideAction(() =>
+            service.runCountedTurn(chatId, prompt, {
               quiet: true,
               inputLabel: `Following · digest (${items.length})`,
               inputSource: { type: "digest", name: null },
               // A digest is expected at its time, so it arrives without an alert.
               pushLevel: "passive",
             }),
-          ));
+          );
+          ok = ran.ran;
+          told = ran;
+        }
       } catch (error) {
         log.warn("digest turn threw; its items stay owed", { chatId, error: messageOf(error) });
       }
       log.info("following digest", { chatId, items: items.length, delivered: ok });
+      // What it said reached the guardian, whether or not the turn ran to its end.
+      await recordTold("digest", owner, told, items);
       // A digest that did not run to its end leaves its items and notes for the next one.
       if (!ok) continue;
       await deps.items.markDigested(
