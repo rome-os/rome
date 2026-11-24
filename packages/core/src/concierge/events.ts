@@ -873,7 +873,11 @@ export function startConciergeEvents(
     const place = `${thread.channel}:${thread.threadId}`;
     const reminder = connectionReminders.get(place);
     if (reminder) reminder.finished = event.turn.turnId;
-    const chatId = (await webchatRepo.chatOfSession(event.turn.sessionId))?.id;
+    // The turn's own chat: one session may answer every chat of an account
+    // that serves its workspace.
+    const chatId =
+      (await webchatRepo.findChatIdByAddress(thread.channel, thread.threadId)) ??
+      (await webchatRepo.chatOfSession(event.turn.sessionId))?.id;
     const chat = chatId ? await service.connectionChat(chatId) : null;
     if (!chatId || !chat) return;
     // The messages the turn took settle as on the dashboard: done, failed or

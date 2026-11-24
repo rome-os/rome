@@ -300,8 +300,10 @@ export function makeSlackAppDescriptor(deps: SlackAppDescriptorDeps): Connection
     // The app serves the whole workspace: any member who mentions it or
     // writes to it is answered.
     servesWorkspace: true,
-    // An official app offers no chat rules: every chat runs at the defaults.
-    chatRules: { offers: [] },
+    // An official app offers no chat rules. Its one session starts afresh
+    // after an hour with no message, about as long as the model's prompt
+    // cache keeps it; every other rule runs at the default.
+    chatRules: { offers: [], fixed: { "session.reset": { mode: "idle", idleMinutes: 60 } } },
     // A task chat sends, reads and searches Slack through the connector's
     // proxy, which makes its calls through this connection's talker with the
     // bot grant.

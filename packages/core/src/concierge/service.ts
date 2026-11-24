@@ -18,7 +18,7 @@ import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-
 import type { Place } from "../chats/place.js";
 import type { Body, SendResult } from "../chats/send.js";
 import { DASHBOARD_PLATFORM } from "../webchat/dashboard-account.js";
-import { webchatSessionKey } from "../core/agent-session-key.js";
+import { channelChatSessionKey, webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../webchat/repository.js";
 import type { ApprovalsRepository } from "../apps/repositories/approvals.js";
@@ -225,6 +225,7 @@ export interface ConciergeDeps {
     | "createSession"
     | "getSession"
     | "chatOfSession"
+    | "findChatIdByAddress"
     | "listSessions"
     | "updateSessionName"
     | "updateSessionLargeModelSelection"
@@ -255,6 +256,10 @@ export interface ConciergeDeps {
   approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved" | "findById">;
   messages: TaskChatMessages;
   sessionRepository: Pick<SessionRepository, "current">;
+  /** The key of the session that answers a chat on a connection: the
+   *  account's one session when it serves its workspace. Absent, each chat's
+   *  own, its channel and the platform's id for it. */
+  chatSessionKey?: (chat: { channel: string; threadId: string }) => string;
   /** The agent that answers on a channel: the agent of the account the
    *  channel is, as the inbox routes it. A chat on a connection stores no
    *  agent of its own. Absent, a chat's stored agent is read. */
@@ -1186,7 +1191,7 @@ export class ConciergeService {
 
   /**
    * A system turn, such as a task's report, in a chat on a connected account.
-   * It runs in the chat's own session, and its text is the reply, sent to the
+   * It runs in the session that answers the chat, and its text is the reply, sent to the
    * same DM, channel or thread. A chat that never had a turn has no session,
    * and nothing runs.
    */
@@ -1196,7 +1201,7 @@ export class ConciergeService {
     options: SystemTurnOptions,
   ): Promise<"completed" | "stopped" | "interrupted" | "failed"> {
     const stored = await this.deps.sessionRepository.current(
-      `${chat.channel}:${chat.threadId}`,
+      this.deps.chatSessionKey?.(chat) ?? channelChatSessionKey(chat.channel, chat.threadId),
       CONCIERGE_AGENT_ID,
     );
     if (!stored) return "failed";

@@ -12,6 +12,19 @@ export function webchatSessionKey(chatId: string): string {
   return `${WEBCHAT_KEY_PREFIX}${chatId}`;
 }
 
+/** A chat's key on a connected account: its channel and the platform's id
+ *  for the chat. */
+export function channelChatSessionKey(channel: string, chatId: string): string {
+  return `${channel}:${chatId}`;
+}
+
+/** The key of the one session an account that serves its workspace holds for
+ *  every chat on its channel. No chat id is `*`, so it names no chat's
+ *  session. */
+export function workspaceSessionKey(channel: string): string {
+  return `${channel}:*`;
+}
+
 /** A one-off key for a run that names no conversation. */
 export function adhocSessionKey(agentName: string): string {
   return `${agentName}:${uuidv4()}`;

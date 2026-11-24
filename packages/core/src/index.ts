@@ -349,6 +349,7 @@ import { guardedSend, workspaceSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
 import { ownAccountNames } from "./connections/own-account-name.js";
 import { servesWorkspaceIn } from "./connections/serves-workspace.js";
+import { chatSessionKeyOf, workspaceSessions } from "./core/workspace-sessions.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
 import type { EmailAdapter, EmailSettings } from "./connections/kinds/email/email.js";
@@ -1488,6 +1489,10 @@ async function main() {
     }),
     webchatRepo,
     sessionRepository,
+    chatSessionKey: chatSessionKeyOf(
+      (channel) => channelRecords.byId(channel)?.connectionId ?? null,
+      servesWorkspaceIn(connectionRegistry),
+    ),
     accounts: modelAccounts,
     defaults: defaultProviders,
     held: (chatId) => chatProviders.heldProvider(webchatSessionKey(chatId)) !== undefined,
@@ -1694,8 +1699,14 @@ async function main() {
       ).finalText === "private"
     );
   };
-  const agentSessionBridge = new AgentSessionBridge(
+  // Inbound conversations open their sessions here, so every chat of an
+  // account that serves its workspace shares the account's one session.
+  const conversationSessions = workspaceSessions(
     agentSessionManager,
+    servesWorkspaceIn(connectionRegistry),
+  );
+  const agentSessionBridge = new AgentSessionBridge(
+    conversationSessions,
     webchatRepo,
     actionWorkerCoordinator,
     agentTurnStreamRegistry,
@@ -1723,7 +1734,7 @@ async function main() {
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
   const agentRunner = new AgentRunner(
-    agentSessionManager,
+    conversationSessions,
     agentLoader,
     webchatRepo,
     agentTurnStreamRegistry,
