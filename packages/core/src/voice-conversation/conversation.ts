@@ -26,13 +26,24 @@ const log = createLogger("voice-conversation");
 
 /**
  * Opens the model's prompt for a turn the guardian spoke, for that turn only:
- * the reply is read aloud. Code, tables and long lists still go in the chat.
- * The conversation does not read them out.
+ * the reply is read aloud, as a secretary answers on the phone. It leads with
+ * the conclusion in a sentence or two, without echoing the guardian or asking
+ * back, names what the guardian must decide, and says what went wrong. Details
+ * stay in the chat, and nothing that needs its original text is settled by
+ * voice. The conversation does not read code or tables out.
  */
-export const SPOKEN_TURN_NOTE =
-  "<voice_context>The guardian said this aloud in a voice conversation and hears your reply read aloud. " +
-  "Answer briefly in plain spoken sentences, in the language they spoke. " +
-  "Put code, tables and long lists in the chat as usual. They are not read aloud, so say only that they are there.</voice_context>";
+export const SPOKEN_TURN_NOTE = [
+  "<voice_context>",
+  "The guardian said this aloud on a voice call and hears your reply read aloud. Answer as a secretary on the phone, in the language they spoke:",
+  "- Lead with the conclusion, in one or two short spoken sentences.",
+  "- Do not repeat back what they said, and do not ask follow-up questions.",
+  "- Use no headings, lists or other formatting.",
+  "- If they must decide something, name it with at most two options.",
+  "- If something went wrong, say so plainly.",
+  "- Leave details, code and tables to the chat as usual. They are not read aloud, so say only that the details are in the chat.",
+  "- Anything that needs its original text to decide, such as a pull request's text before it opens, a merge, an email, spending or an approval, is only mentioned on the call: say it is waiting in the chat, and do not take a spoken answer as the decision. A decision that needs no original text and sends nothing out may be made by voice.",
+  "</voice_context>",
+].join("\n");
 
 /** How long the agent may work with nothing said before Rome says it is looking. */
 export const LOOKING_AFTER_MS = 2_000;
@@ -58,8 +69,12 @@ export interface ReplyTurn {
 }
 
 export interface ConversationDeps {
-  /** Sends the guardian's turn to the chat, and resolves with the turn that answers it. Rejects when the chat refuses it. */
-  send(text: string): Promise<ReplyTurn>;
+  /**
+   * Sends the guardian's turn to the chat, and resolves with the turn that
+   * answers it. Rejects when the chat refuses it. `signal` aborts once the
+   * conversation no longer waits for that turn, so the send lets go of what it holds.
+   */
+  send(text: string, signal: AbortSignal): Promise<ReplyTurn>;
   /** A text frame to the client. */
   message(message: VoiceConversationServerMessage): void;
   /** Reply audio to the client, in the order to play it. */
@@ -93,6 +108,8 @@ interface Reply {
   ended: boolean;
   /** Rome said it is looking, or something was said already. */
   quietOver: boolean;
+  /** Aborts once the conversation moves on from this reply. */
+  left: AbortController;
 }
 
 /** A sentence said, until all its audio has gone to the client. */
@@ -229,6 +246,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
   // Stops the reply: what is said and queued, and what the client still plays.
   const drop = () => {
     if (reply || queue.length > 0) speaker?.stop();
+    reply?.left.abort();
     reply = null;
     const unplayed = now() < playsUntil || queue.some((q) => q.started);
     queue.length = 0;
@@ -355,11 +373,12 @@ export function createConversation(deps: ConversationDeps): Conversation {
         said: 0,
         ended: false,
         quietOver: false,
+        left: new AbortController(),
       };
       reply = to;
       deps.message({ type: "turn", text });
       update();
-      deps.send(text).then(
+      deps.send(text, to.left.signal).then(
         (turn) =>
           read(to, turn).catch((err: unknown) => {
             // The reply still shows in the chat. Rome says what it has.
@@ -381,6 +400,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
     close() {
       if (closed) return;
       closed = true;
+      reply?.left.abort();
       reply = null;
       queue.length = 0;
       stopPlayed();

@@ -1132,9 +1132,10 @@ export interface WebchatRuntime {
    * marked spoken, ending any turn the chat is running. Resolves with the reply:
    * the turn that answers it, or, for an agent whose text is private, the
    * messages that turn adds to the chat. Throws the route's error, and also for
-   * a chat the guardian may not open or a send that started no turn.
+   * a chat the guardian may not open or a send that started no turn. Once
+   * `signal` aborts, it lets go of what it gathered and rejects.
    */
-  sendSpoken(chatId: string, text: string): Promise<ReplyTurn>;
+  sendSpoken(chatId: string, text: string, signal?: AbortSignal): Promise<ReplyTurn>;
   /** Whether `sendSpoken` would take a turn for `chatId`: one the guardian may open. */
   canSendSpoken(chatId: string): Promise<boolean>;
   /** Whether the chat is running a turn now. */
@@ -5885,7 +5886,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     },
     canSendSpoken: async (chatId) => (await spokenRefusal(chatId)) === null,
-    async sendSpoken(chatId, text) {
+    async sendSpoken(chatId, text, signal) {
       const refusal = await spokenRefusal(chatId);
       if (refusal) throw new Error(refusal);
       // An agent whose text is private answers with the messages its tools add,
@@ -5912,7 +5913,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         delivered?.stop();
         throw err;
       }
-      return delivered
+      const reply: Promise<ReplyTurn> = delivered
         ? started.turn.then(
             // The turn's stream finishes once it has stored the cards it writes.
             (turn) => delivered.of(turn, async () => streamsByTurnId.get(turn.id)?.onFinish),
@@ -5922,6 +5923,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             },
           )
         : started.turn;
+      if (!signal) return reply;
+      // A queued input can be cancelled, and then its turn never comes: once the
+      // conversation stops waiting, the messages gathered for it are let go.
+      return new Promise<ReplyTurn>((resolve, reject) => {
+        const leave = () => {
+          delivered?.stop();
+          reject(new Error("The conversation no longer waits for this turn"));
+        };
+        if (signal.aborted) return leave();
+        signal.addEventListener("abort", leave, { once: true });
+        reply.then(resolve, reject).finally(() => signal.removeEventListener("abort", leave));
+      });
     },
     async sendAsGuardian(chatId, text) {
       const inputId = randomUUID();
