@@ -430,7 +430,8 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             listening: deps.voiceInput ?? NO_VOICE_INPUT,
             speaker: deps.speaker,
             canTalkIn: (chatId) => webchatRuntime.canSendSpoken(chatId),
-            send: (chatId, text, signal) => webchatRuntime.sendSpoken(chatId, text, signal),
+            send: (chatId, text, signal, note) =>
+              webchatRuntime.sendSpoken(chatId, text, signal, note),
             watch: (listener) => deps.webchatRepo.onMessageInserted(listener),
             // A late result is offered by the name of the task it reports on.
             nameOf: async (chatId, messageId) => {

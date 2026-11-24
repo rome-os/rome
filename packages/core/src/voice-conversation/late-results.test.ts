@@ -1,38 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
-import { isYes, lateMessage, offerLine } from "./late-results.js";
+import { lateMessage, offerLine, offerNote } from "./late-results.js";
 
 describe("late messages", () => {
-  it("takes a short yes as a yes, and anything else as a turn", () => {
-    for (const yes of [
-      "要",
-      "好",
-      "好的。",
-      "嗯嗯",
-      "念吧",
-      "好，念吧",
-      "要听",
-      "可以",
-      "来吧",
-      "Yes",
-      "yeah, go ahead",
-      "OK read it",
-    ]) {
-      expect(isYes(yes)).toBe(true);
-    }
-    for (const other of [
-      "不要",
-      "不用了",
-      "先不听",
-      "要不明天再说吧",
-      "好的谢谢你再帮我查一下",
-      "no",
-      "not now",
-      "yes but first tell me the weather",
-    ]) {
-      expect(isYes(other)).toBe(false);
-    }
-  });
-
   it("keys a report by the task it replies to, the task chat its card shows, or its turn", () => {
     const text = (content: string) => ({ type: "text", content });
     expect(
@@ -67,5 +36,24 @@ describe("late messages", () => {
       "Fix CI has a result. Want to hear it?",
     );
     expect(offerLine({ name: "x".repeat(40), task: true }, "en")).toMatch(/^x{24}… has a result/);
+  });
+
+  it("tells the agent what Rome asked and what the result says, for it to read the answer", () => {
+    const message = lateMessage(
+      JSON.stringify([
+        { type: "text", content: "三家酒店都订得到。" },
+        { type: "widget", widget: "card" },
+      ]),
+      "t1",
+      "msg-1",
+    );
+    if (!message) throw new Error("expected a late message");
+    const note = offerNote(message, "「夏威夷酒店」有结果了，要听吗？");
+    expect(note).toContain('Rome asked the guardian aloud: "「夏威夷酒店」有结果了，要听吗？"');
+    expect(note).toContain("(message msg-1 in this chat)");
+    expect(note).toContain("三家酒店都订得到。\n[Something the chat shows, such as a card]");
+    expect(note).toMatch(/If they want to hear it, tell them the whole result/);
+    expect(note).toMatch(/If they decline or want it later/);
+    expect(note).toMatch(/do each, in the order they asked/);
   });
 });

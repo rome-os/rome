@@ -1,8 +1,10 @@
 // A message that reaches the chat during a voice conversation outside the
 // guardian's spoken turns, such as a task's result the Concierge says. Rome
 // does not read it at once: once the guardian and Rome are both quiet, it asks
-// once whether to read it, and reads it whole only on a yes. This file reads
-// such a message and the guardian's answer. When to ask is `conversation.ts`'s.
+// once whether they want to hear it. Whatever they answer goes to the chat as
+// their turn, with a note for that turn only that tells the agent what was
+// asked and what the result says, so the agent reads their answer itself.
+// When to ask is `conversation.ts`'s.
 
 import type { ReplyEvent } from "./conversation.js";
 import { partsOf } from "./delivered-reply.js";
@@ -16,6 +18,8 @@ export interface LateMessage {
    */
   key: string;
   turnId: string | null;
+  /** The ids of its messages in the chat. */
+  ids: string[];
   /** The start message it replies to, to look the task's name up by. */
   replyTo: string | null;
   /** The task's name, when the message itself carries it. */
@@ -29,7 +33,11 @@ export interface LateMessage {
 }
 
 /** Reads a stored message, or null when it says and shows nothing. */
-export function lateMessage(content: string, turnId: string | null): LateMessage | null {
+export function lateMessage(
+  content: string,
+  turnId: string | null,
+  id?: string,
+): LateMessage | null {
   let parts: unknown;
   try {
     parts = JSON.parse(content);
@@ -55,13 +63,24 @@ export function lateMessage(content: string, turnId: string | null): LateMessage
   }
   const events = partsOf(content);
   if (events.length === 0) return null;
-  const text = events.map((e) => (e.type === "said" ? e.text : "")).join(" ");
+  const text = events
+    .map((e) => (e.type === "said" ? e.text : "[Something the chat shows, such as a card]"))
+    .join("\n");
   const key = replyTo
     ? `start:${replyTo}`
     : taskChat
       ? `task:${taskChat}`
       : `turn:${turnId ?? Math.random().toString(36).slice(2)}`;
-  return { key, turnId, replyTo, name, task: Boolean(replyTo || taskChat), events, text };
+  return {
+    key,
+    turnId,
+    ids: id ? [id] : [],
+    replyTo,
+    name,
+    task: Boolean(replyTo || taskChat),
+    events,
+    text,
+  };
 }
 
 // A name read aloud stays short.
@@ -84,26 +103,24 @@ export function offerLine(
     : "There's a new message. Want to hear it?";
 }
 
-const ZH_YES_WORD = /^(?:嗯|好|要|念|读|说|听|可以|行|来|吧|的|啊|呀|一下)+$/u;
-const ZH_YES_CORE = /[嗯好要念读说听行来]|可以/u;
-const EN_YES_FIRST = new Set(["yes", "yeah", "yep", "sure", "ok", "okay", "go", "read", "please"]);
-const EN_YES_WORDS = new Set([...EN_YES_FIRST, "ahead", "it", "on", "out"]);
-
-/** Whether the guardian's turn is a short yes to "want to hear it?". */
-export function isYes(text: string): boolean {
-  const zh = text.replace(/[\s\p{P}]/gu, "");
-  if (/\p{Script=Han}/u.test(zh)) {
-    return zh.length <= 6 && ZH_YES_WORD.test(zh) && ZH_YES_CORE.test(zh);
-  }
-  const words = text
-    .toLowerCase()
-    .replace(/[^\p{L}\s]/gu, " ")
-    .split(/\s+/)
-    .filter(Boolean);
-  return (
-    words.length > 0 &&
-    words.length <= 4 &&
-    EN_YES_FIRST.has(words[0] as string) &&
-    words.every((w) => EN_YES_WORDS.has(w))
-  );
+/**
+ * The note that opens the prompt of the guardian's next spoken turn, for that
+ * turn only, after Rome asked about `message` with `question`. The agent reads
+ * the answer: a yes, a no, a later, something else, or several of these.
+ */
+export function offerNote(message: LateMessage, question: string): string {
+  const ids = message.ids.length > 0 ? ` (message ${message.ids.join(", ")} in this chat)` : "";
+  return [
+    "<voice_offer>",
+    `Just before this turn, Rome asked the guardian aloud: "${question}" It is about this result${ids}:`,
+    "<result>",
+    message.text,
+    "</result>",
+    "What they said now answers that question, maybe along with something else. Read it yourself:",
+    "- If they want to hear it, tell them the whole result in plain spoken language. Leave code and tables to the chat.",
+    "- If they decline or want it later, acknowledge it in a few words and do not tell the result.",
+    "- If they talk about something else, answer that. You may touch on the result if it helps.",
+    "- If they ask for several things, such as hearing it and then something else, do each, in the order they asked.",
+    "</voice_offer>",
+  ].join("\n");
 }

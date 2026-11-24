@@ -12,6 +12,8 @@ const STORED_WITHIN_MS = 5_000;
 
 /** A message added to a chat, as far as the reply reads it. */
 export interface AddedMessage {
+  /** Its id in the chat. */
+  id?: string;
   /** The chat it was added to. */
   sessionId: string;
   turnId: string | null;

@@ -48,8 +48,8 @@ export interface VoiceConversationDeps {
   speaker: SpeakerSource;
   /** Whether `chatId` can take spoken turns, asked before any session opens. */
   canTalkIn(chatId: string): Promise<boolean>;
-  /** Sends the guardian's turn into `chatId`, and resolves with the turn that answers it. `signal` aborts once the conversation stops waiting. */
-  send(chatId: string, text: string, signal: AbortSignal): Promise<ReplyTurn>;
+  /** Sends the guardian's turn into `chatId`, and resolves with the turn that answers it. `signal` aborts once the conversation stops waiting. `note` opens the turn's prompt, for that turn only. */
+  send(chatId: string, text: string, signal: AbortSignal, note?: string): Promise<ReplyTurn>;
   /** Calls `listener` with each message added to any chat, and returns the unsubscribe. */
   watch?: (listener: (message: AddedMessage) => void) => () => void;
   /** The name of the task started at message `messageId` of `chatId`. */
@@ -131,12 +131,12 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   };
 
   const conversation = createConversation({
-    send: (text, signal) => {
+    send: (text, signal, note) => {
       const to = chatId;
       if (!to) return Promise.reject(new Error("no chat"));
       return actor
-        ? runWithSessionActor(actor, () => deps.send(to, text, signal))
-        : deps.send(to, text, signal);
+        ? runWithSessionActor(actor, () => deps.send(to, text, signal, note))
+        : deps.send(to, text, signal, note);
     },
     message: (message) => {
       if (!closed) reply(message);

@@ -3956,6 +3956,39 @@ describe("Webchat API", () => {
     }
   });
 
+  it("puts the voice conversation's note after the spoken note, for that turn only, and stores only the words", async () => {
+    const prompts: string[] = [];
+    deps.agentSessionManager = fakeSessionManager(async () => ({
+      key: { agentName: "main", channelThreadKey: "webchat:test" },
+      sessionId: "agent-session",
+      status: "idle",
+      startTurn(input: AgentTurnInput) {
+        prompts.push(input.prompt);
+        return testTurnHandle({
+          turnId: `spoken-${prompts.length}`,
+          events: (async function* () {
+            yield { type: "result" as const, content: "" };
+          })(),
+          turnContext: otelContext.active(),
+        });
+      },
+      onStatusChange: () => () => undefined,
+      stop: async () => undefined,
+      close: async () => undefined,
+    }));
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+    const { runtime } = createWebchatRuntime(deps);
+    const id = await conciergeTopic();
+    await runtime.sendSpoken(id, "念一下", undefined, "<voice_offer>asked</voice_offer>");
+    expect(prompts[0]).toBe(`${SPOKEN_TURN_NOTE}\n<voice_offer>asked</voice_offer>\n\n念一下`);
+    const words = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
+    expect(JSON.parse(words.at(-1)?.content ?? "[]")).toEqual([
+      { type: "text", content: "念一下" },
+    ]);
+    await runtime.sendSpoken(id, "明天呢");
+    expect(prompts[1]).toBe(`${SPOKEN_TURN_NOTE}\n\n明天呢`);
+  });
+
   it("rejects a spoken input whose agent cannot be opened, rather than waiting for a turn", async () => {
     deps.agentSessionManager = {
       open: rs.fn(async () => {

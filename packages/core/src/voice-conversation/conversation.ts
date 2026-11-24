@@ -4,7 +4,8 @@
 // stops it at once. While the agent works with nothing to say for 2 s, Rome
 // says once that it is looking. A message the chat gets outside the
 // guardian's spoken turns, such as a task's result, is offered once both are
-// quiet for 3 s, and read whole on a yes (`late-results.ts`). The socket,
+// quiet for 3 s. The answer goes to the chat as a turn, with a note on what
+// was asked, so the agent reads it (`late-results.ts`). The socket,
 // listening and the chat are the caller's: this file holds no I/O of its own,
 // so tests drive it by hand.
 
@@ -18,7 +19,7 @@ import { createLogger } from "../logger.js";
 import type { SpeakerListener, SpeakerSession } from "../voice-output/speaker.js";
 import { enoughWords, isEcho } from "./barge-in.js";
 import type { AddedMessage } from "./delivered-reply.js";
-import { isYes, type LateMessage, lateMessage, offerLine } from "./late-results.js";
+import { type LateMessage, lateMessage, offerLine, offerNote } from "./late-results.js";
 import { createSentenceSplitter, type SentenceSplitter } from "./sentences.js";
 import {
   createSpeakableFilter,
@@ -82,8 +83,9 @@ export interface ConversationDeps {
    * Sends the guardian's turn to the chat, and resolves with the turn that
    * answers it. Rejects when the chat refuses it. `signal` aborts once the
    * conversation no longer waits for that turn, so the send lets go of what it holds.
+   * `note`, when given, opens the turn's prompt after the spoken note, for that turn only.
    */
-  send(text: string, signal: AbortSignal): Promise<ReplyTurn>;
+  send(text: string, signal: AbortSignal, note?: string): Promise<ReplyTurn>;
   /** A text frame to the client. */
   message(message: VoiceConversationServerMessage): void;
   /** Reply audio to the client, in the order to play it. */
@@ -183,8 +185,8 @@ export function createConversation(deps: ConversationDeps): Conversation {
   const offers: Offer[] = [];
   // What was offered in this conversation, by key: each is offered once.
   const offered = new Set<string>();
-  // The message Rome asked about, until the guardian's next turn.
-  let asked: LateMessage | null = null;
+  // The message Rome asked about and how, until the guardian's next turn.
+  let asked: { message: LateMessage; question: string } | null = null;
   let lastHeardAt = 0;
   let lastLanguage: ReplyLanguage | null = null;
   let stopOffering: (() => void) | null = null;
@@ -248,36 +250,26 @@ export function createConversation(deps: ConversationDeps): Conversation {
     }
     offers.splice(offers.indexOf(next), 1);
     offered.add(next.message.key);
-    asked = next.message;
     replies++;
     const to = newReply(lastLanguage ?? languageOf(next.message.text));
     reply = to;
-    say(to, offerLine(next.message, to.language));
+    const question = offerLine(next.message, to.language);
+    asked = { message: next.message, question };
+    say(to, question);
     to.ended = true;
     update();
   }
 
-  // Reads a late message whole, as a reply.
-  const readLate = (message: LateMessage) => {
-    replies++;
-    const to = newReply(lastLanguage ?? languageOf(message.text));
-    reply = to;
-    for (const event of message.events) {
-      if (event.type === "said") feed(to, `${event.text}\n`);
-      else speakAll(to, to.splitter.push(to.filter.point()));
-    }
-    finish(to);
-  };
-
   const take = (added: AddedMessage) => {
     if (added.turnId && ownTurns.has(added.turnId)) return;
-    const message = lateMessage(added.content, added.turnId);
+    const message = lateMessage(added.content, added.turnId, added.id);
     if (!message || offered.has(message.key)) return;
     const waiting = offers.find((o) => o.message.key === message.key);
     if (waiting && waiting.message.turnId === message.turnId) {
       // More of the same turn's report, such as its card.
       waiting.message.events.push(...message.events);
-      waiting.message.text = `${waiting.message.text} ${message.text}`;
+      waiting.message.ids.push(...message.ids);
+      waiting.message.text = `${waiting.message.text}\n${message.text}`;
       return;
     }
     if (waiting) {
@@ -492,22 +484,18 @@ export function createConversation(deps: ConversationDeps): Conversation {
       }
       lastHeardAt = now();
       lastLanguage = languageOf(text);
-      // A yes to "want to hear it?" reads the message here. It is not sent to the chat.
-      const answered = asked;
+      // An answer to "want to hear it?" goes to the chat as any turn does. The
+      // agent reads it, told what was asked and what the result says.
+      const note = asked ? offerNote(asked.message, asked.question) : undefined;
       asked = null;
       drop();
-      if (answered && isYes(text)) {
-        deps.message({ type: "turn", text });
-        readLate(answered);
-        return;
-      }
       replies++;
       const to = newReply(languageOf(text));
       reply = to;
       deps.message({ type: "turn", text });
       update();
       sending++;
-      deps.send(text, to.left.signal).then(
+      deps.send(text, to.left.signal, note).then(
         (turn) => {
           sent(turn.id);
           return read(to, turn).catch((err: unknown) => {

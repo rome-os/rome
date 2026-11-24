@@ -74,6 +74,7 @@ function setup(options: { nameOf?: (messageId: string) => Promise<string | null>
   const messages: VoiceConversationServerMessage[] = [];
   const played: number[] = [];
   const sent: string[] = [];
+  const notes: (string | undefined)[] = [];
   const signals: AbortSignal[] = [];
   const turns: ReturnType<typeof scriptedTurn>[] = [];
   const said: { id: string; text: string }[] = [];
@@ -89,8 +90,9 @@ function setup(options: { nameOf?: (messageId: string) => Promise<string | null>
     close: () => {},
   };
   const conversation = createConversation({
-    send: async (text, signal) => {
+    send: async (text, signal, note) => {
       sent.push(text);
+      notes.push(note);
       signals.push(signal);
       const turn = scriptedTurn();
       turns.push(turn);
@@ -125,6 +127,7 @@ function setup(options: { nameOf?: (messageId: string) => Promise<string | null>
     messages,
     played,
     sent,
+    notes,
     signals,
     turns,
     said,
@@ -454,7 +457,8 @@ describe("the spoken turn's note", () => {
 
 describe("late messages in a voice conversation", () => {
   /** A message the Concierge adds outside the guardian's spoken turns. */
-  const late = (turnId: string, text: string, replyTo?: string) => ({
+  const late = (turnId: string, text: string, replyTo?: string, id?: string) => ({
+    ...(id ? { id } : {}),
     sessionId: "concierge",
     turnId,
     role: "assistant",
@@ -464,22 +468,49 @@ describe("late messages in a voice conversation", () => {
     ]),
   });
   const texts = (c: ReturnType<typeof setup>) => c.said.map((s) => s.text);
+  /** Rome speaks its question, and the guardian answers. */
+  const answer = (c: ReturnType<typeof setup>, words: string) => {
+    c.speak(c.said.length - 1);
+    c.clock.advance(1000);
+    c.conversation.heard(words, "");
+    c.conversation.endpoint();
+  };
 
-  it("asks once both are quiet for 3 s, and reads the whole result on a yes without sending it to the chat", async () => {
+  it("asks once both are quiet for 3 s, and sends the answer to the chat with what was asked", async () => {
     const c = setup({ nameOf: async (id) => (id === "start-1" ? "夏威夷酒店" : null) });
-    c.conversation.arrived(late("system-1", "酒店查好了。一共三家，都在海边。", "start-1"));
+    c.conversation.arrived(late("system-1", "酒店查好了。一共三家。", "start-1", "msg-1"));
     await settled();
     c.clock.advance(OFFER_AFTER_QUIET_MS - 1);
     expect(c.said).toEqual([]);
     c.clock.advance(1);
     expect(texts(c)).toEqual(["「夏威夷酒店」有结果了，要听吗？"]);
-    c.speak(0);
-    c.clock.advance(1000);
 
-    c.conversation.heard("要", "");
+    answer(c, "念一下，然后再查下明天天气");
+    // Whatever the answer, it is the guardian's turn. The agent reads it.
+    expect(c.sent).toEqual(["念一下，然后再查下明天天气"]);
+    expect(c.notes[0]).toContain('"「夏威夷酒店」有结果了，要听吗？"');
+    expect(c.notes[0]).toContain("message msg-1");
+    expect(c.notes[0]).toContain("酒店查好了。一共三家。");
+    await settled();
+    c.turns[0]?.push({ type: "said", text: "三家酒店都在海边。明天晴。" });
+    c.turns[0]?.end();
+    await settled();
+    expect(texts(c).slice(1)).toEqual(["三家酒店都在海边。", "明天晴。"]);
+  });
+
+  it("adds the note to the next turn only", async () => {
+    const c = setup();
+    c.conversation.arrived(late("system-1", "PR 合并了。"));
+    await settled();
+    c.clock.advance(OFFER_AFTER_QUIET_MS);
+    answer(c, "先不用");
+    c.turns[0]?.end();
+    await settled();
+    c.conversation.heard("明天几点开会", "");
     c.conversation.endpoint();
-    expect(c.sent).toEqual([]);
-    expect(texts(c).slice(1)).toEqual(["酒店查好了。", "一共三家，都在海边。"]);
+    expect(c.sent).toEqual(["先不用", "明天几点开会"]);
+    expect(c.notes[0]).toContain("PR 合并了。");
+    expect(c.notes[1]).toBeUndefined();
   });
 
   it("waits while the guardian speaks and while Rome answers", async () => {
@@ -489,6 +520,7 @@ describe("late messages in a voice conversation", () => {
     c.clock.advance(5_000);
     expect(c.said).toEqual([]);
     c.conversation.endpoint();
+    expect(c.notes).toEqual([undefined]);
     await settled();
     c.turns[0]?.push({ type: "said", text: "好的，我去看。" });
     c.turns[0]?.end();
@@ -502,17 +534,13 @@ describe("late messages in a voice conversation", () => {
     expect(texts(c)[1]).toBe("有新消息了，要听吗？");
   });
 
-  it("sends anything but a yes to the chat, and asks about each task once", async () => {
+  it("asks about each task once a conversation", async () => {
     const c = setup();
     c.conversation.arrived(late("system-1", "测试都过了。", "start-1"));
     await settled();
     c.clock.advance(OFFER_AFTER_QUIET_MS);
     expect(texts(c)).toEqual(["有个任务有结果了，要听吗？"]);
-    c.speak(0);
-    c.clock.advance(1000);
-    c.conversation.heard("先不用，明天天气怎么样", "");
-    c.conversation.endpoint();
-    expect(c.sent).toEqual(["先不用，明天天气怎么样"]);
+    answer(c, "等会儿再说");
     c.turns[0]?.end();
     await settled();
 
@@ -537,7 +565,7 @@ describe("late messages in a voice conversation", () => {
     expect(c.said).toEqual([]);
   });
 
-  it("reads only the newest report on a task, the one before being out of date", async () => {
+  it("tells only the newest report on a task, the one before being out of date", async () => {
     const c = setup();
     c.conversation.heard("说说别的", "");
     c.conversation.arrived(late("system-1", "还在跑，过了一半。", "start-1"));
@@ -548,11 +576,9 @@ describe("late messages in a voice conversation", () => {
     await settled();
     c.clock.advance(OFFER_AFTER_QUIET_MS);
     expect(texts(c)).toEqual(["有个任务有结果了，要听吗？"]);
-    c.speak(0);
-    c.clock.advance(1000);
-    c.conversation.heard("好，念吧", "");
-    c.conversation.endpoint();
-    expect(texts(c).slice(1)).toEqual(["跑完了，全部通过。"]);
+    answer(c, "好，念吧");
+    expect(c.notes[1]).toContain("跑完了，全部通过。");
+    expect(c.notes[1]).not.toContain("过了一半");
   });
 
   it("offers nothing once the conversation has ended", async () => {

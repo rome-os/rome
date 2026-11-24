@@ -1141,9 +1141,11 @@ export interface WebchatRuntime {
    * the turn that answers it, or, for an agent whose text is private, the
    * messages that turn adds to the chat. Throws the route's error, and also for
    * a chat the guardian may not open or a send that started no turn. Once
-   * `signal` aborts, it lets go of what it gathered and rejects.
+   * `signal` aborts, it lets go of what it gathered and rejects. `note`, from
+   * the voice conversation, follows the spoken note in the turn's prompt, for
+   * that turn only, and is never stored.
    */
-  sendSpoken(chatId: string, text: string, signal?: AbortSignal): Promise<ReplyTurn>;
+  sendSpoken(chatId: string, text: string, signal?: AbortSignal, note?: string): Promise<ReplyTurn>;
   /** Whether `sendSpoken` would take a turn for `chatId`: one the guardian may open. */
   canSendSpoken(chatId: string): Promise<boolean>;
   /** Whether the chat is running a turn now. */
@@ -4256,6 +4258,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       /** Gets the turn this input starts or joins, once the input is submitted. */
       onTurn?: (turn: Promise<AgentTurnHandle>) => void;
       computerUseGrant?: ComputerUseGrant;
+      /** The voice conversation's note for a spoken input, after the spoken note. */
+      spokenNote?: string;
     } = {},
   ): Promise<RouteAnswer> => {
     // A Concierge turn's timing starts when the owner's send reaches Rome.
@@ -4606,7 +4610,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // keeps it.
     const quotedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
     const repliedPrompt =
-      body.spoken === true ? `${SPOKEN_TURN_NOTE}\n\n${quotedPrompt}` : quotedPrompt;
+      body.spoken === true
+        ? `${[SPOKEN_TURN_NOTE, said.spokenNote].filter(Boolean).join("\n")}\n\n${quotedPrompt}`
+        : quotedPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
     // user message so the cached fixed part of the system prompt stays stable.
     // The session leaves out a block that did not change, so the input after
@@ -6163,7 +6169,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       }
     },
     canSendSpoken: async (chatId) => (await spokenRefusal(chatId)) === null,
-    async sendSpoken(chatId, text, signal) {
+    async sendSpoken(chatId, text, signal, note) {
       const refusal = await spokenRefusal(chatId);
       if (refusal) throw new Error(refusal);
       // An agent whose text is private answers with the messages its tools add,
@@ -6181,7 +6187,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         const sent = await handleChatSend(
           chatId,
           { inputId: randomUUID(), text, spoken: true, priority: "now" },
-          { onTurn: (turn) => (started.turn = turn) },
+          { onTurn: (turn) => (started.turn = turn), ...(note ? { spokenNote: note } : {}) },
         );
         if (sent.status >= 400) throw new Error(routeError(sent));
         // A send whose agent could not be opened records a failed turn and submits none.
