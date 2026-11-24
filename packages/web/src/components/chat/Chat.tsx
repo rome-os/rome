@@ -2211,17 +2211,40 @@ export function Chat({
     ],
   );
 
+  // A draft's session is created once, shared by its first send and a voice
+  // conversation started in it, so the two never make two chats.
+  const pendingSessionRef = useRef<Promise<string> | null>(null);
+  const ensureSession = useCallback((create: () => Promise<string>) => {
+    if (mainSessionIdRef.current) return Promise.resolve(mainSessionIdRef.current);
+    pendingSessionRef.current ??= create().finally(() => {
+      pendingSessionRef.current = null;
+    });
+    return pendingSessionRef.current;
+  }, []);
+  const adoptSession = useCallback(
+    (id: string, agentMention: AgentMention | null = null) => {
+      if (mainSessionIdRef.current === id) return;
+      // The refs normally follow the render that adopts the session. A turn
+      // can start before that render, and its stream reads them to decide
+      // which session's end counts as read and which may move the workspace.
+      mainSessionIdRef.current = id;
+      setCreatedAgentMention(agentMention);
+      setCreatedSessionId(id);
+      onSessionCreated?.(id);
+      notifySessionsChanged();
+    },
+    [onSessionCreated, notifySessionsChanged],
+  );
+
   // A voice conversation started in a draft creates its session, as the
-  // draft's first send would, and talks in it.
+  // draft's first send would, and talks in it. A draft left meanwhile stays
+  // left: the chat is made, but nothing moves to it.
   const startConversationChat = useCallback(async () => {
     if (!startSession) throw new Error("This draft cannot start a chat");
-    const id = await startSession();
-    mainSessionIdRef.current = id;
-    setCreatedSessionId(id);
-    onSessionCreated?.(id);
-    notifySessionsChanged();
+    const id = await ensureSession(startSession);
+    if (isMountedRef.current) adoptSession(id);
     return id;
-  }, [startSession, onSessionCreated, notifySessionsChanged]);
+  }, [startSession, ensureSession, adoptSession]);
 
   // Send a turn into the active session. The composer owns the input state
   // (text/uploads/options); this handler builds the POST and delegates the
@@ -2236,21 +2259,26 @@ export function Chat({
         if (creatingSessionRef.current) return;
         creatingSessionRef.current = true;
         try {
-          sendingSessionId = startSession
-            ? await startSession()
-            : (
-                await createSession({
-                  name: t("sidebar.newChat"),
-                  personaId: snapshot.personaId,
-                  projectPath: snapshot.projectPath,
-                  largeModelSelection: snapshot.largeModelSelection,
-                  reasoningEffort: snapshot.reasoningEffort,
-                  agentName: snapshot.agentMention?.agentName,
-                  deviceFolder: snapshot.deviceFolder
-                    ? { deviceId: snapshot.deviceFolder.deviceId, path: snapshot.deviceFolder.path }
-                    : undefined,
-                })
-              ).id;
+          sendingSessionId = await ensureSession(async () =>
+            startSession
+              ? startSession()
+              : (
+                  await createSession({
+                    name: t("sidebar.newChat"),
+                    personaId: snapshot.personaId,
+                    projectPath: snapshot.projectPath,
+                    largeModelSelection: snapshot.largeModelSelection,
+                    reasoningEffort: snapshot.reasoningEffort,
+                    agentName: snapshot.agentMention?.agentName,
+                    deviceFolder: snapshot.deviceFolder
+                      ? {
+                          deviceId: snapshot.deviceFolder.deviceId,
+                          path: snapshot.deviceFolder.path,
+                        }
+                      : undefined,
+                  })
+                ).id,
+          );
           controls.onSessionCreated?.();
         } catch (error) {
           setStreamError(
@@ -2267,14 +2295,7 @@ export function Chat({
         } finally {
           creatingSessionRef.current = false;
         }
-        // The refs normally follow the render that adopts the session. The turn
-        // below starts before that render, and its stream reads them to decide
-        // which session's end counts as read and which may move the workspace.
-        mainSessionIdRef.current = sendingSessionId;
-        setCreatedAgentMention(snapshot.agentMention ?? null);
-        setCreatedSessionId(sendingSessionId);
-        onSessionCreated?.(sendingSessionId);
-        notifySessionsChanged();
+        adoptSession(sendingSessionId, snapshot.agentMention ?? null);
       }
       const authorizedSend =
         controls.userSubmitted && selectedComputerUse?.sessionId === sendingSessionId
@@ -2385,9 +2406,9 @@ export function Chat({
       runTurnLifecycle,
       workspaceContextRegistry,
       t,
-      onSessionCreated,
       startSession,
-      notifySessionsChanged,
+      ensureSession,
+      adoptSession,
       concierge,
       chain.focus,
       queryClient,

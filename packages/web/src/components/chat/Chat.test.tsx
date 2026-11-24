@@ -65,6 +65,8 @@ const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
+// The chats a voice conversation started in the mocked Concierge composer talks in.
+const conciergeVoiceChats = rs.hoisted(() => [] as string[]);
 import { useOutputLinks } from "@/components/chat/outputs/chat-outputs";
 const conciergeAddFiles = rs.hoisted(() => rs.fn());
 const conciergeStopVoiceInput = rs.hoisted(() => rs.fn());
@@ -467,6 +469,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       onStop?: () => void;
       chatName?: string | null;
       placeholder?: string;
+      startChat?: () => Promise<string>;
     },
     ref,
   ) {
@@ -508,6 +511,18 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
               .catch(() => {})
           }
         />
+        {props.startChat ? (
+          <button
+            type="button"
+            data-testid="concierge-voice-start"
+            onClick={() =>
+              void props
+                .startChat?.()
+                .then((id) => conciergeVoiceChats.push(id))
+                .catch(() => {})
+            }
+          />
+        ) : null}
         {props.isStreaming && props.onStop ? (
           <button type="button" data-testid="stop-button" onClick={props.onStop} />
         ) : null}
@@ -3259,6 +3274,58 @@ describe("Chat draft", () => {
     // The send registered its local follow before the render that adopted the
     // session, so the reattach poll never looks the turn up.
     expect(listSessionTurns).not.toHaveBeenCalled();
+  });
+});
+
+describe("Chat topic draft with a voice conversation", () => {
+  afterEach(() => {
+    conciergeVoiceChats.length = 0;
+  });
+
+  /** A topic draft whose chat creation waits for the test. */
+  function renderTopicDraft(onSessionCreated = rs.fn()) {
+    const created: Array<(id: string) => void> = [];
+    const startSession = rs.fn(() => new Promise<string>((resolve) => created.push(resolve)));
+    const view = renderChat(
+      <Chat
+        variant="concierge"
+        startSession={startSession}
+        onSessionCreated={onSessionCreated}
+        emptyState={<p>Empty topic</p>}
+      />,
+    );
+    return { view, startSession, created, onSessionCreated };
+  }
+
+  it("creates one chat for a voice start, a restart and a send while it is being made", async () => {
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: true, data: { turnId: "turn-1" } });
+    const { startSession, created, onSessionCreated } = renderTopicDraft();
+
+    fireEvent.click(screen.getByTestId("concierge-voice-start"));
+    fireEvent.click(screen.getByTestId("concierge-voice-start"));
+    fireEvent.click(screen.getByTestId("concierge-send-button"));
+    expect(startSession).toHaveBeenCalledTimes(1);
+
+    await act(async () => created[0]?.("topic-1"));
+    await waitFor(() =>
+      expect(postSessionTurn).toHaveBeenCalledWith(
+        "topic-1",
+        expect.any(FormData),
+        expect.anything(),
+      ),
+    );
+    expect(conciergeVoiceChats).toEqual(["topic-1", "topic-1"]);
+    expect(onSessionCreated).toHaveBeenCalledTimes(1);
+    expect(onSessionCreated).toHaveBeenCalledWith("topic-1");
+  });
+
+  it("moves nowhere when the draft is left before its chat is made", async () => {
+    const { view, created, onSessionCreated } = renderTopicDraft();
+    fireEvent.click(screen.getByTestId("concierge-voice-start"));
+    view.unmount();
+
+    await act(async () => created[0]?.("topic-1"));
+    expect(onSessionCreated).not.toHaveBeenCalled();
   });
 });
 
