@@ -1,0 +1,83 @@
+{
+  "workspaces": [
+    {
+      "id": "TS0000STND",
+      "name": "Standin",
+      "domain": "standin",
+      "members": [
+        {
+          "id": "US0000GUARD",
+          "name": "alice",
+          "real_name": "Alice Guardian",
+          "email": "alice@standin.test",
+          "is_admin": true,
+          "is_owner": true
+        },
+        {
+          "id": "US0000BOB01",
+          "name": "bob",
+          "real_name": "Bob Member",
+          "email": "bob@standin.test"
+        },
+        {
+          "id": "US0000CARA1",
+          "name": "cara",
+          "real_name": "Cara Member",
+          "email": "cara@standin.test"
+        },
+        {
+          "id": "US0000DAVE1",
+          "name": "dave",
+          "real_name": "Dave Member",
+          "email": "dave@standin.test"
+        },
+        {
+          "id": "US0000EMMA1",
+          "name": "emma",
+          "real_name": "Emma Member",
+          "email": "emma@standin.test"
+        },
+        {
+          "id": "US0000GST01",
+          "name": "gil",
+          "real_name": "Gil Guest",
+          "email": "gil@guest.test",
+          "is_restricted": true
+        }
+      ],
+      "channels": [
+        {
+          "id": "CS0000GENRL",
+          "name": "general",
+          "members": ["US0000GUARD", "US0000BOB01", "US0000CARA1", "US0000DAVE1", "US0000EMMA1"]
+        },
+        {
+          "id": "CS0000NEWS1",
+          "name": "news",
+          "members": ["US0000GUARD", "US0000BOB01", "US0000CARA1", "US0000DAVE1", "US0000EMMA1"]
+        },
+        {
+          "id": "CS0000DSGN1",
+          "name": "design",
+          "members": ["US0000GUARD", "US0000BOB01", "US0000CARA1", "US0000DAVE1", "US0000EMMA1"]
+        },
+        {
+          "id": "CS0000OPS01",
+          "name": "ops",
+          "members": ["US0000GUARD", "US0000BOB01", "US0000CARA1", "US0000DAVE1", "US0000EMMA1"]
+        },
+        {
+          "id": "CS0000SALES",
+          "name": "sales",
+          "members": ["US0000GUARD", "US0000BOB01", "US0000CARA1", "US0000DAVE1", "US0000EMMA1"]
+        },
+        {
+          "id": "CS0000QUIET",
+          "name": "quiet",
+          "bot_member": false,
+          "members": ["US0000BOB01", "US0000CARA1"]
+        }
+      ]
+    }
+  ]
+}
