@@ -16,7 +16,12 @@ import {
 } from "./conversation-server.js";
 
 // Who the upgrade proves the caller to be. Null refuses it as unauthenticated.
-const gate = rs.hoisted(() => ({ caller: null as null | { kind: "guardian" | "visitor" } }));
+const gate = rs.hoisted(() => ({
+  caller: null as
+    | null
+    | { kind: "guardian" }
+    | { kind: "dashboard-admin"; accountId: string; email: string },
+}));
 rs.mock("../access/ws-guardian-gate.js", () => ({
   gateUpgrade: async (_req: unknown, socket: import("node:stream").Duplex) => {
     if (gate.caller) return gate.caller;
@@ -291,6 +296,7 @@ describe("voice conversation socket", () => {
         speaker: standInSpeaker().source,
         canTalkIn: async () => true,
         send: async () => replyOf(""),
+        dashboardAccess: { isCloudEmailAllowed: () => true },
       });
       await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
       servers.push({ close: () => (voice.close(), http.close()) });
@@ -310,10 +316,13 @@ describe("voice conversation socket", () => {
       expect(await upgrade(false, true)).toEqual({ status: 404, asked: 0 });
     });
 
-    it("never asks Rome Cloud for a caller that is not the guardian", async () => {
+    it("never asks Rome Cloud for a caller off the team", async () => {
       expect(await upgrade(true, true)).toEqual({ status: 401, asked: 0 });
-      gate.caller = { kind: "visitor" };
-      expect(await upgrade(true, true)).toEqual({ status: 403, asked: 0 });
+    });
+
+    it("lets a dashboard admin in on the guardian's voice input list", async () => {
+      gate.caller = { kind: "dashboard-admin", accountId: "ada", email: "ada@example.com" };
+      expect(await upgrade(true, true)).toEqual({ status: 101, asked: 1 });
     });
 
     it("is not there for the guardian of an account off the voice input list", async () => {

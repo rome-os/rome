@@ -51,7 +51,7 @@ function attachAll(
     attachDesktopProxy(server, db, dashboardAccess),
     attachTerminalServer(server, db, dashboardAccess),
     attachLiveEventsServer(server, db, dashboardAccess, noSources),
-    attachNodeConsoleServer(server, db, () =>
+    attachNodeConsoleServer(server, db, dashboardAccess, () =>
       createNodeConfig({ directory: join(tmpdir(), "rome-node-console-unconfigured") }),
     ),
     attachVoiceInputServer(server, db, silentSource, null, new DashboardAccessState()),
@@ -208,7 +208,7 @@ describe("guardian WebSocket upgrade handlers", () => {
     }
   });
 
-  it("admits a dashboard admin to the desktop and the Claude sign-in, but not the node console", async () => {
+  it("admits a dashboard admin to the desktop, the Claude sign-in and the node console", async () => {
     const testDb = createTestDb();
     const upstream = createServer();
     upstream.on("upgrade", (_req, socket) => {
@@ -235,8 +235,8 @@ describe("guardian WebSocket upgrade handlers", () => {
       expect(await upgrade(port, "/desktop-proxy/websockify", as("admin@example.com"))).toBe(101);
       // Past the gate, an unknown preset is refused without spawning anything.
       expect(await upgrade(port, "/ws/terminal?preset=none", as("admin@example.com"))).toBe(400);
-      expect(await upgrade(port, "/ws/node", as("admin@example.com"))).toBe(401);
-      for (const path of ["/desktop-proxy/websockify", "/ws/terminal?preset=none"]) {
+      expect(await upgrade(port, "/ws/node", as("admin@example.com"))).toBe(101);
+      for (const path of ["/desktop-proxy/websockify", "/ws/terminal?preset=none", "/ws/node"]) {
         expect(await upgrade(port, path, as("stranger@example.com"))).toBe(401);
       }
     } finally {

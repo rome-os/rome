@@ -1,6 +1,6 @@
 // Dashboard console of the local rome-node daemon at `/ws/node`. Each socket gets one bridge
 // from @rome-os/node-core/client, which forwards the observation methods to the daemon unchanged.
-// Guardian only. Upgrades skip the edge probe like `/ws/terminal`:
+// The team only. Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md.
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
@@ -13,7 +13,8 @@ import {
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import type { DrizzleDb } from "../db/index.js";
-import { gateGuardianUpgrade } from "../access/ws-guardian-gate.js";
+import type { DashboardAllowList } from "../access/team.js";
+import { gateUpgrade } from "../access/ws-guardian-gate.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 
@@ -28,6 +29,7 @@ const CLOSE_TRY_AGAIN_LATER = 1013;
 export function attachNodeConsoleServer(
   httpServer: Server,
   db: DrizzleDb,
+  dashboardAccess: DashboardAllowList,
   config: () => NodeConfig = () => nodeConfigFromEnvironment(process.env),
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_CONSOLE_MESSAGE_BYTES });
@@ -36,9 +38,9 @@ export function attachNodeConsoleServer(
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     if (url.pathname !== NODE_CONSOLE_PATH) return;
     socket.on("error", () => socket.destroy());
-    void gateGuardianUpgrade(req, socket, db)
-      .then((allowed) => {
-        if (!allowed || socket.destroyed) return;
+    void gateUpgrade(req, socket, db, dashboardAccess)
+      .then((caller) => {
+        if (!caller || socket.destroyed) return;
         wss.handleUpgrade(req, socket, head, serve);
       })
       .catch((err) => {

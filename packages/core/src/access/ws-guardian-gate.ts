@@ -4,8 +4,9 @@ import { isLoopbackHostname } from "@rome-os/libs/net";
 import type { DrizzleDb } from "../db/index.js";
 import { createLogger } from "../logger.js";
 import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "./auth.js";
-import type { DashboardAccessState } from "./dashboard-access-state.js";
 import { type GuardianSession, resolveGuardianSessionFromMaterial } from "./guardian-session.js";
+import type { SessionActor } from "./session-actor.js";
+import { type DashboardAllowList, isOnTeam, type TeamActor } from "./team.js";
 import { isSameOriginMutationRequest } from "../lib/mutation-origin.js";
 import { readCookie, rejectUpgrade, toOriginRequest } from "../lib/ws-upgrade.js";
 
@@ -15,6 +16,13 @@ const log = createLogger("ws-guardian-gate");
 export type UpgradeCaller =
   | { kind: "guardian"; userId: string; via: GuardianSession["via"] }
   | { kind: "dashboard-admin"; accountId: string; email: string };
+
+/** The session actor an accepted upgrade proved. */
+export function actorOfUpgrade(caller: UpgradeCaller): TeamActor {
+  return caller.kind === "guardian"
+    ? { kind: "guardian", userId: caller.userId, via: caller.via }
+    : { kind: "visitor", accountId: caller.accountId, email: caller.email };
+}
 
 function hasLoopbackHostname(origin: string): boolean {
   try {
@@ -47,7 +55,7 @@ export async function gateUpgrade(
   req: IncomingMessage,
   socket: Duplex,
   db: DrizzleDb,
-  dashboardAccess?: Pick<DashboardAccessState, "isCloudEmailAllowed">,
+  dashboardAccess?: DashboardAllowList,
 ): Promise<UpgradeCaller | null> {
   try {
     const guardian = await resolveGuardianSessionFromMaterial(
@@ -80,8 +88,11 @@ export async function gateUpgrade(
     const visitorToken = dashboardAccess
       ? readCookie(req.headers.cookie, VISITOR_COOKIE_NAME)
       : null;
-    const visitor = visitorToken ? verifyVisitorSession(visitorToken) : null;
-    if (visitor && dashboardAccess?.isCloudEmailAllowed(visitor.email)) {
+    const session = visitorToken ? verifyVisitorSession(visitorToken) : null;
+    const visitor: Extract<SessionActor, { kind: "visitor" }> | undefined = session
+      ? { kind: "visitor", accountId: session.accountId, email: session.email }
+      : undefined;
+    if (visitor && dashboardAccess && isOnTeam(visitor, dashboardAccess)) {
       if (!sameOrigin()) {
         rejectUpgrade(socket, 403, "Forbidden");
         return null;

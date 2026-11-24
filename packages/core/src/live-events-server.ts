@@ -35,10 +35,11 @@ import {
 } from "@rome/api-types/live-events";
 import type { DrizzleDb } from "./db/index.js";
 import type { DashboardAccessState } from "./access/dashboard-access-state.js";
+import { isOnTeam } from "./access/team.js";
 import type { LiveEventEmit } from "./lib/live-event.js";
 import type { PhoneWatching } from "./lib/phone-watching.js";
 import type { DashboardActivity } from "./lib/dashboard-activity.js";
-import { gateUpgrade, type UpgradeCaller } from "./access/ws-guardian-gate.js";
+import { actorOfUpgrade, gateUpgrade, type UpgradeCaller } from "./access/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
 
@@ -156,13 +157,11 @@ export function attachLiveEventsServer(
     };
     const sendError = (message: string, topic?: string) => send({ type: "error", topic, message });
 
-    // A visitor dropped from the allow-list loses new subscriptions at once and
-    // the socket at the next ping, as the edge probe would refuse a new stream.
-    const visitorAllowed = () =>
-      caller.kind === "guardian" || dashboardAccess.isCloudEmailAllowed(caller.email);
-    // App existence and change timing stay guardian-only, as on `/api/apps/events`.
-    const permitted = (topic: Topic) =>
-      caller.kind === "guardian" || (topic.kind !== "apps.catalog" && visitorAllowed());
+    // A dashboard admin dropped from the allow-list loses new subscriptions at
+    // once and the socket at the next ping, as the edge probe would refuse a
+    // new stream.
+    const actor = actorOfUpgrade(caller);
+    const onTeam = () => isOnTeam(actor, dashboardAccess);
     // Whose Concierge todo list and private chats this socket may read.
     const owner = caller.kind === "guardian" ? "guardian" : `visitor:${caller.accountId}`;
     // A dashboard holds back only its own person's pushes; a phone's
@@ -214,7 +213,7 @@ export function attachLiveEventsServer(
         sendError("Unknown topic", name);
         return;
       }
-      if (!permitted(topic)) {
+      if (!onTeam()) {
         sendError("Forbidden", name);
         return;
       }
@@ -261,7 +260,7 @@ export function attachLiveEventsServer(
     };
 
     const ping = setInterval(() => {
-      if (!visitorAllowed()) {
+      if (!onTeam()) {
         ws.close(CLOSE_POLICY_VIOLATION, "Forbidden");
         return;
       }
@@ -292,7 +291,7 @@ export function attachLiveEventsServer(
       if (message.type === "subscribe") subscribe(message.topic);
       else if (message.type === "unsubscribe") unsubscribe(message.topic);
       else if (message.state === "away") activity?.away();
-      else if (visitorAllowed()) activity?.active();
+      else if (onTeam()) activity?.active();
     });
     ws.on("close", teardown);
     ws.on("error", (err) => {

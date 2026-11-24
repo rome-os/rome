@@ -2,7 +2,7 @@
 // plays what comes down. Rome listens on a transcription stream with endpoint
 // detection, and `conversation.ts` sends each turn to the chat and speaks the
 // reply. Messages are in `@rome/api-types/voice-conversation`. Only the
-// guardian may connect, and only while Rome Cloud lets their account use
+// team may connect, and only while Rome Cloud lets the guardian's account use
 // voice input. Rome keeps no audio: frames go straight to the provider.
 
 import type { IncomingMessage, Server } from "node:http";
@@ -20,6 +20,7 @@ import {
   runWithSessionActor,
   type SessionActor,
 } from "../access/session-actor.js";
+import type { DashboardAllowList } from "../access/team.js";
 import { gateUpgrade } from "../access/ws-guardian-gate.js";
 import type { DrizzleDb } from "../db/index.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
@@ -45,9 +46,9 @@ export interface VoiceConversationDeps {
   /** Where listening sessions come from: the same Rome Cloud sessions dictation uses. */
   listening: Pick<VoiceInputSource, "open">;
   speaker: SpeakerSource;
-  /** Whether `chatId` can take spoken turns, asked before any session opens. */
+  /** Whether `chatId` can take spoken turns from the ambient session actor, asked before any session opens. */
   canTalkIn(chatId: string): Promise<boolean>;
-  /** Sends the guardian's turn into `chatId`, and resolves with the turn that answers it. `signal` aborts once the conversation stops waiting. */
+  /** Sends the speaker's turn into `chatId`, and resolves with the turn that answers it. `signal` aborts once the conversation stops waiting. */
   send(chatId: string, text: string, signal: AbortSignal): Promise<ReplyTurn>;
   usage?: TranscriptionUsageSink | null;
   voiceTerms?: () => Promise<string[]>;
@@ -55,16 +56,17 @@ export interface VoiceConversationDeps {
 }
 
 /**
- * Serves `/ws/voice-conversation` to the guardian while Rome Cloud lets their
- * account use voice input, the list the microphone follows. For any other
- * account the path answers 404, as no client offers the conversation. Rome
- * Cloud is asked only once the caller is proven to be the guardian.
+ * Serves `/ws/voice-conversation` to the team while Rome Cloud lets the
+ * guardian's account use voice input, the list the microphone follows.
+ * Otherwise the path answers 404, as no client offers the conversation. Rome
+ * Cloud is asked only once the caller is proven to be on the team.
  */
 export function attachVoiceConversationServer(
   httpServer: Server,
   db: DrizzleDb,
   deps: VoiceConversationDeps & {
     listening: Pick<VoiceInputSource, "open" | "info" | "available">;
+    dashboardAccess: DashboardAllowList;
   },
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
@@ -78,16 +80,18 @@ export function attachVoiceConversationServer(
       rejectUpgrade(socket, 404, "Not Found");
       return;
     }
-    void gateUpgrade(req, socket, db)
+    void gateUpgrade(req, socket, db, deps.dashboardAccess)
       .then(async (caller) => {
         if (!caller || socket.destroyed) return;
-        if (caller.kind !== "guardian") return rejectUpgrade(socket, 403, "Forbidden");
-        // Only now, for the proven guardian, ask Rome Cloud's list.
+        // Only now, for a proven team member, ask Rome Cloud's list.
         const { available } = await deps.listening.info();
         if (socket.destroyed) return;
         if (!available) return rejectUpgrade(socket, 404, "Not Found");
-        // The guardian the upgrade proved, so each spoken turn is theirs, as a typed one is.
-        const actor = await enrichGuardianActor(db, caller);
+        // The person the upgrade proved, so each spoken turn is theirs, as a typed one is.
+        const actor: SessionActor =
+          caller.kind === "guardian"
+            ? await enrichGuardianActor(db, caller)
+            : { kind: "visitor", accountId: caller.accountId, email: caller.email };
         wss.handleUpgrade(req, socket, head, (ws) => serve(ws, deps, actor));
       })
       .catch((err) => {
@@ -190,7 +194,12 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   async function begin(sampleRate: number) {
     starting = true;
     // A chat that cannot take spoken turns is refused before any paid session opens.
-    if (!chatId || !(await deps.canTalkIn(chatId))) return fail("chat-refused");
+    const to = chatId;
+    if (!to) return fail("chat-refused");
+    const canTalk = actor
+      ? await runWithSessionActor(actor, () => deps.canTalkIn(to))
+      : await deps.canTalkIn(to);
+    if (!canTalk) return fail("chat-refused");
     if (closed) return;
     const spoken = await deps.speaker.open(conversation.speakerListener);
     if (closed) {
