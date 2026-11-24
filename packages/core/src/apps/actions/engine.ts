@@ -211,7 +211,7 @@ export interface ActionRunContext {
    * nested call reads no personal data.
    * Domain: docs/domains/participation.md#audience.
    */
-  audience?: "private" | "shared";
+  audience?: "private" | "admin" | "shared";
   sharedContext?: Record<string, unknown>;
   hookInvocationContext?: HookInvocationContext;
   replayJournal?: JournalEntry[];
@@ -331,7 +331,7 @@ interface ActionEngineOptions {
   mainActions?: ReadonlySet<string>;
   /** Main-only: who can read a chat. A first-party root run given a chat and
    *  no audience, such as the inbox's message handler, takes the chat's. */
-  placeAudience?: (context: ThreadContext) => Promise<"private" | "shared">;
+  placeAudience?: (context: ThreadContext) => Promise<"private" | "admin" | "shared">;
 }
 
 /** The arguments as an execution record keeps them, without the values a root run omits. */

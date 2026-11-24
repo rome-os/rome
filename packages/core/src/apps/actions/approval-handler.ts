@@ -25,7 +25,7 @@ interface ApprovalPayload {
   channelThreadKey?: string;
   /** The agent turn that asked, and who read it, so the replay reads as it. */
   turnId?: string;
-  audience?: "private" | "shared";
+  audience?: "private" | "admin" | "shared";
 }
 
 /** The person an execution acted for, as its row records, for {@link ApprovalHandler}'s requester. */

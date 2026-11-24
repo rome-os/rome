@@ -32,7 +32,7 @@ interface CoreIo {
   /** The props core stored with the widget, which a client cannot change. */
   props: Record<string, unknown>;
   /** Who can read the widget's chat now, read when the event arrives. */
-  chatAudience(): Promise<"private" | "shared">;
+  chatAudience(): Promise<"private" | "admin" | "shared">;
   /** Starts a connection's setup, as the Connections page's Connect does. */
   startSetup(request: SetupStartRequest): Promise<SetupStartOutcome>;
   /** Whether the event came from this instance's own pages, which the setup
@@ -270,7 +270,7 @@ export interface WidgetEventDeps {
   callerOwner?: () => Promise<string | null>;
   /** Who can read a dashboard chat now. Absent, every chat reads as shared,
    *  so no location is accepted. */
-  chatAudience?: (chatId: string) => Promise<"private" | "shared">;
+  chatAudience?: (chatId: string) => Promise<"private" | "admin" | "shared">;
   /** Starts a connection's setup: the operation behind the Connections page's
    *  Connect. Absent, the connect card's Connect starts none and says so. */
   startSetup?: (request: SetupStartRequest) => Promise<SetupStartOutcome>;

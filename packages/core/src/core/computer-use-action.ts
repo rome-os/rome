@@ -7,7 +7,7 @@ import type { ThreadContext } from "./types.js";
 export function registerComputerUseAction(
   registry: Pick<ActionRegistry, "register">,
   devices: { listDevices(): Promise<unknown> },
-  audience: (context: ThreadContext | undefined) => Promise<"private" | "shared">,
+  audience: (context: ThreadContext | undefined) => Promise<"private" | "admin" | "shared">,
 ): void {
   registry.register({
     config: {

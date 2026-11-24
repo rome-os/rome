@@ -103,7 +103,7 @@ export function routineChatOf(
 }
 
 /** Who can read a chat a routine works for. Domain: docs/domains/participation.md#audience. */
-export type RoutinePlaceAudience = (chatId: string) => Promise<"private" | "shared">;
+export type RoutinePlaceAudience = (chatId: string) => Promise<"private" | "admin" | "shared">;
 
 /** Why a routine that reads personal data is not created. */
 export const PERSONAL_DATA_ROUTINE_REFUSED =
@@ -143,7 +143,7 @@ export class RoutinesRepository {
    * Who can read what a routine's fires say: its chat's audience, and shared
    * for a routine of no chat or one that no longer exists.
    */
-  async audienceOf(id: string): Promise<"private" | "shared"> {
+  async audienceOf(id: string): Promise<"private" | "admin" | "shared"> {
     const [row] = await this.db
       .select({ chatId: routines.chatId })
       .from(routines)
@@ -151,7 +151,7 @@ export class RoutinesRepository {
     return this.chatAudience(row?.chatId ?? null);
   }
 
-  private async chatAudience(chatId: string | null): Promise<"private" | "shared"> {
+  private async chatAudience(chatId: string | null): Promise<"private" | "admin" | "shared"> {
     if (!chatId || !this.placeAudience) return "shared";
     return this.placeAudience(chatId);
   }

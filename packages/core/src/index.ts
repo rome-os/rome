@@ -277,6 +277,7 @@ import { createConciergeOwners } from "./concierge/owners.js";
 import { privateChildren, privateOwnerOf } from "./webchat/privacy.js";
 import { ownerOf, ownerOfChat } from "./webchat/owner.js";
 import { actorOfOwner } from "./access/owner-actor.js";
+import { isOnTeam } from "./access/team.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
 import { TaskChecks } from "./concierge/task-checks.js";
@@ -662,6 +663,7 @@ async function main() {
     connectionKindOf: connectionKindOfChannel,
     dashboardChat: (chatId) => webchatRepo.getSession(chatId),
     visitorsAllowed: () => dashboardAccessState.hasCloudEmailAccess(),
+    ownerOnTeam: async (owner) => isOnTeam(await actorOfOwner(db, owner), dashboardAccessState),
     // Main reads who sent a message itself, never the bond a caller names.
     senderBondLevel: async (context) =>
       context.channelUserId

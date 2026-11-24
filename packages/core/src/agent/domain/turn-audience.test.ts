@@ -93,11 +93,41 @@ describe("turnAudience", () => {
   });
 });
 
+describe("a dashboard admin's turn", () => {
+  const dashboard = place({ channel: "webchat", threadType: "private" });
+  const visitor = { kind: "visitor" };
+
+  it("is admin in a chat read as theirs, and shared anywhere else", () => {
+    expect(turnAudience(dashboard, { place: "admin", actor: visitor })).toBe("admin");
+    expect(turnAudience(dashboard, { place: "shared", actor: visitor })).toBe("shared");
+  });
+
+  it("never reads as the guardian's own, even where the guardian's would", () => {
+    expect(turnAudience(dashboard, { place: "private", actor: visitor })).toBe("shared");
+  });
+
+  it("is admin for no one's turn in their chat, such as a routine's, and shared for the guardian's", () => {
+    expect(turnAudience(dashboard, { place: "admin" })).toBe("admin");
+    expect(turnAudience(dashboard, { place: "admin", actor: { kind: "guardian" } })).toBe("shared");
+  });
+
+  it("keeps a subagent's or fork's turn no more private than the one that started it", () => {
+    expect(turnAudience(dashboard, { place: "admin", actor: visitor, parent: "shared" })).toBe(
+      "shared",
+    );
+    expect(turnAudience(undefined, { parent: "admin", actor: visitor })).toBe("admin");
+    expect(turnAudience(dashboard, { place: "private", parent: "admin" })).toBe("admin");
+  });
+});
+
 describe("narrowerAudience", () => {
-  it("is shared when either side is", () => {
+  it("is shared when either side is, and admin when either is and neither is shared", () => {
     expect(narrowerAudience("private", undefined)).toBe("private");
     expect(narrowerAudience("private", "private")).toBe("private");
     expect(narrowerAudience("private", "shared")).toBe("shared");
     expect(narrowerAudience("shared", "private")).toBe("shared");
+    expect(narrowerAudience("admin", "private")).toBe("admin");
+    expect(narrowerAudience("private", "admin")).toBe("admin");
+    expect(narrowerAudience("admin", "shared")).toBe("shared");
   });
 });

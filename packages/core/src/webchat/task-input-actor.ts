@@ -64,7 +64,9 @@ export function withoutTaskInputActor<T>(receive: () => T): T {
 function current(claim: TaskInputClaim): boolean {
   return (
     states.get(claim)?.active === true &&
-    (claim.source.audience === "private" || claim.source.audience === "shared") &&
+    (claim.source.audience === "private" ||
+      claim.source.audience === "admin" ||
+      claim.source.audience === "shared") &&
     (claim.source.actor.kind !== "guardian" || claim.source.audience === "private") &&
     Date.now() < claim.expires &&
     claim.source.isCurrent()

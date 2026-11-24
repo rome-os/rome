@@ -20,6 +20,11 @@ export interface PlaceAudienceDeps {
   /** Whether anyone besides the guardian may open the dashboard. Absent, someone may. */
   visitorsAllowed?: () => boolean;
   /**
+   * Whether the person a chat records as its owner ("visitor:<account>") is
+   * on the team now. Absent, nobody but the guardian is.
+   */
+  ownerOnTeam?: (owner: string) => Promise<boolean>;
+  /**
    * The bond level of the person behind a message's sender, as People links
    * them. Given, it stands in for whatever the thread context says.
    */
@@ -28,17 +33,20 @@ export interface PlaceAudienceDeps {
 
 /**
  * Who can read a dashboard chat. A chat private to the guardian (their
- * Concierge's chats, its task chats and their children) is private. Every
- * other dashboard chat opens for every dashboard user, so it is private only
- * while nobody but the guardian may open the dashboard.
+ * Concierge's chats, its task chats and their children) is private, and one
+ * private to a dashboard admin is `admin` while `ownerOnTeam` says they are on
+ * the team. Every other dashboard chat opens for every dashboard user, so it
+ * is private only while nobody but the guardian may open the dashboard.
  */
-export function dashboardChatAudience(
+export async function dashboardChatAudience(
   chat: ChatPrivacyRow | null,
   visitorsAllowed: boolean,
-): Audience {
+  ownerOnTeam: (owner: string) => Promise<boolean> = async () => false,
+): Promise<Audience> {
   if (!chat) return "shared";
   const privateTo = privateOwnerOf(chat);
-  if (privateTo !== null) return privateTo === GUARDIAN_OWNER ? "private" : "shared";
+  if (privateTo === GUARDIAN_OWNER) return "private";
+  if (privateTo !== null) return (await ownerOnTeam(privateTo)) ? "admin" : "shared";
   return ownerOf(chat) === GUARDIAN_OWNER && !visitorsAllowed ? "private" : "shared";
 }
 
@@ -48,7 +56,7 @@ export function placeAudience(deps: PlaceAudienceDeps): PlaceAudience {
     if (context.channel === "webchat") {
       const chat =
         context.threadId && deps.dashboardChat ? await deps.dashboardChat(context.threadId) : null;
-      return dashboardChatAudience(chat, deps.visitorsAllowed?.() ?? true);
+      return dashboardChatAudience(chat, deps.visitorsAllowed?.() ?? true, deps.ownerOnTeam);
     }
     const kind = deps.connectionKindOf?.(context.channel) ?? context.channel;
     // A connected account's chat is recorded where every dashboard user can

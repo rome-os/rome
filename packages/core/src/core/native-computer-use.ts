@@ -268,7 +268,7 @@ interface PendingBinding {
 
 interface Options {
   createClient?: () => Client;
-  placeAudience?: (turn: TurnFacts) => Promise<"private" | "shared" | undefined>;
+  placeAudience?: (turn: TurnFacts) => Promise<"private" | "admin" | "shared" | undefined>;
   monotonicNow?: () => number;
   local?: { deviceId: string; name: string; host: ComputerUseHost };
 }

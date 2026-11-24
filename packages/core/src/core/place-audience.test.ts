@@ -10,23 +10,47 @@ const concierge = (ownerKey: string | null): ChatPrivacyRow => ({
 const common: ChatPrivacyRow = { id: "chat-1", agentName: "main", ownerKey: null };
 
 describe("dashboardChatAudience", () => {
-  it("reads a chat private to the guardian as private, with visitors or without", () => {
-    expect(dashboardChatAudience(concierge(null), true)).toBe("private");
-    expect(dashboardChatAudience({ ...common, triggerKind: "concierge" }, true)).toBe("private");
+  it("reads a chat private to the guardian as private, with visitors or without", async () => {
+    expect(await dashboardChatAudience(concierge(null), true)).toBe("private");
+    expect(await dashboardChatAudience({ ...common, triggerKind: "concierge" }, true)).toBe(
+      "private",
+    );
   });
 
-  it("reads a visitor's Concierge chat as shared", () => {
-    expect(dashboardChatAudience(concierge("visitor:acct-1"), false)).toBe("shared");
+  it("reads a dashboard admin's Concierge chat as admin while they are on the team", async () => {
+    const team = new Set(["visitor:acct-1"]);
+    const onTeam = async (owner: string) => team.has(owner);
+    expect(await dashboardChatAudience(concierge("visitor:acct-1"), true, onTeam)).toBe("admin");
+    expect(
+      await dashboardChatAudience(
+        { ...common, ownerKey: "visitor:acct-1", triggerKind: "concierge" },
+        true,
+        onTeam,
+      ),
+    ).toBe("admin");
+
+    team.clear();
+    expect(await dashboardChatAudience(concierge("visitor:acct-1"), true, onTeam)).toBe("shared");
   });
 
-  it("reads a common chat as private only while nobody but the guardian may open the dashboard", () => {
-    expect(dashboardChatAudience(common, false)).toBe("private");
-    expect(dashboardChatAudience(common, true)).toBe("shared");
-    expect(dashboardChatAudience({ ...common, ownerKey: "visitor:acct-1" }, false)).toBe("shared");
+  it("reads a visitor's Concierge chat as shared when they are not on the team", async () => {
+    expect(await dashboardChatAudience(concierge("visitor:acct-1"), false)).toBe("shared");
   });
 
-  it("reads a chat Rome cannot find as shared", () => {
-    expect(dashboardChatAudience(null, false)).toBe("shared");
+  it("reads a common chat as private only while nobody but the guardian may open the dashboard", async () => {
+    expect(await dashboardChatAudience(common, false)).toBe("private");
+    expect(await dashboardChatAudience(common, true)).toBe("shared");
+    expect(
+      await dashboardChatAudience(
+        { ...common, ownerKey: "visitor:acct-1" },
+        false,
+        async () => true,
+      ),
+    ).toBe("shared");
+  });
+
+  it("reads a chat Rome cannot find as shared", async () => {
+    expect(await dashboardChatAudience(null, false)).toBe("shared");
   });
 });
 

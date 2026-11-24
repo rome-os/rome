@@ -76,7 +76,7 @@ export interface WorkerCaller {
     actor?: SessionActor;
     /** Who reads the calling turn's answer, as the host read it when the
      *  turn started. Absent for an action that is not the host's own. */
-    audience?: "private" | "shared";
+    audience?: "private" | "admin" | "shared";
     channelContext?: ThreadContext;
     /** The agent turn the action runs in. Absent outside any agent turn, as
      *  for a routine's fire. */

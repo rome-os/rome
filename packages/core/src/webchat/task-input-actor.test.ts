@@ -62,6 +62,28 @@ describe("task input attribution", () => {
     expect(await admitted(visitor, "visitor:v")).toEqual(visitor);
   });
 
+  it("hands a dashboard admin's actor on from a chat only they read", async () => {
+    const { repo } = repository("visitor:v");
+    const actor = await withTaskInputActor(
+      source({ actor: visitor, audience: "admin" }),
+      "target",
+      body,
+      async () => taskInputActor(claimTaskInputActor("target", body, speaker)!, repo, origin),
+    );
+    expect(actor).toEqual(visitor);
+  });
+
+  it("refuses the guardian's actor from a chat only a dashboard admin reads", async () => {
+    await withTaskInputActor(
+      source({ actor: guardian, audience: "admin" }),
+      "target",
+      body,
+      async () => {
+        expect(() => claimTaskInputActor("target", body, speaker)).toThrow();
+      },
+    );
+  });
+
   it("has no authority without the internal scope, regardless of submitted actor/source fields", () => {
     expect(
       claimTaskInputActor("target", { ...body, actor: guardian } as typeof body, speaker),

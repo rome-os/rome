@@ -2,8 +2,13 @@
 
 import type { ThreadContext } from "@rome-os/app-runtime";
 
-/** `private`: only the guardian reads the turn. `shared`: anyone else may. */
-export type Audience = "private" | "shared";
+/**
+ * `private`: only the guardian reads the turn. `admin`: only the dashboard
+ * admin it works for reads it, in a chat private to them, while they are on
+ * the team. `shared`: anyone else may. Only `private` reaches what is the
+ * guardian's own person, such as their personal data.
+ */
+export type Audience = "private" | "admin" | "shared";
 
 /**
  * The connection kinds whose private chats are a direct message between
@@ -41,7 +46,8 @@ export function messagingAudience(context: ThreadContext, kind: string): Audienc
  * the session's chat as its opener read it, with what only the opener knows:
  * the connection kind behind a channel, and who may open a dashboard chat.
  * Without it, a direct message is read by its channel id alone and a
- * dashboard chat is shared. A turn that acts for someone other than the
+ * dashboard chat is shared. A turn that acts for a visitor is `admin` in a
+ * place read as `admin`, and a turn that acts for anyone else but the
  * guardian is shared. A turn started by another turn (a subagent's, a fork's)
  * is never more private than `parent`. A turn with no chat of its own, such
  * as a summoned agent's, takes `parent`'s audience, and is shared without one.
@@ -50,15 +56,27 @@ export function turnAudience(
   context: ThreadContext | undefined,
   facts: { actor?: { kind: string }; parent?: Audience; place?: Audience } = {},
 ): Audience {
-  if (facts.parent === "shared") return "shared";
+  const own = placeOfTurn(context, facts);
+  if (facts.actor?.kind === "visitor") {
+    return own === "admin" ? narrowerAudience(own, facts.parent) : "shared";
+  }
   if (facts.actor && facts.actor.kind !== "guardian") return "shared";
+  if (own === "admin" && facts.actor) return "shared";
+  return narrowerAudience(own, facts.parent);
+}
+
+function placeOfTurn(
+  context: ThreadContext | undefined,
+  facts: { parent?: Audience; place?: Audience },
+): Audience {
   if (!context) return facts.parent ?? "shared";
   if (facts.place) return facts.place;
   if (context.channel === "webchat") return "shared";
   return messagingAudience(context, context.channel);
 }
 
-/** The narrower of two audiences: shared when either is. */
+/** The narrower of two audiences: shared when either is, else `admin` when either is. */
 export function narrowerAudience(a: Audience, b: Audience | undefined): Audience {
-  return a === "shared" || b === "shared" ? "shared" : "private";
+  if (a === "shared" || b === "shared") return "shared";
+  return a === "admin" || b === "admin" ? "admin" : "private";
 }
