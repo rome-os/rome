@@ -169,7 +169,9 @@ struct Composer: View {
         .animation(shapeAnimation, value: editorHeight)
         // The main Chat stays mounted under other sections, so it asks again on each return.
         .task(id: onScreen) { if onScreen { await voiceInput?.refresh() } }
-        .onAppear { voice.arrive(service: voiceInput, chat: voiceKey) }
+        // A field mounted hidden, such as the main Chat under another section,
+        // arrives when it shows.
+        .onAppear { if onScreen { voice.arrive(service: voiceInput, chat: voiceKey) } }
         .onDisappear { voice.leave(service: voiceInput, chat: voiceKey) }
         .onChange(of: voice.state) { voice.stateShown() }
         .onChange(of: onScreen) { _, now in
