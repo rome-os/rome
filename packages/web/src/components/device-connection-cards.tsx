@@ -1,7 +1,7 @@
-import { Section, SectionHeader, SectionHeading, SectionTitle } from "@rome-os/ui/page";
 import { Plus } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { SettingsGroup } from "@/components/settings-group";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,26 +58,23 @@ function DeviceConnectionContent({ method }: { method: SetupMethod }) {
 export function DeviceConnectionCards() {
   const { t } = useTranslation("settings", { keyPrefix: "devices.setup" });
   return (
-    <Section aria-labelledby="connect-device-title">
-      <SectionHeader>
-        <SectionHeading>
-          <SectionTitle id="connect-device-title">{t("title")}</SectionTitle>
-        </SectionHeading>
-      </SectionHeader>
-      {setupMethods.map((method) => (
-        <Card key={method}>
-          <CardHeader>
-            <div className="flex flex-wrap items-center gap-2">
-              <CardTitle>{t(`methods.${method}`)}</CardTitle>
-              {method === "container" && <Badge variant="muted">{t("comingSoon")}</Badge>}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <DeviceConnectionContent method={method} />
-          </CardContent>
-        </Card>
-      ))}
-    </Section>
+    <SettingsGroup title={t("title")} titleId="connect-device-title">
+      <div className="flex flex-col gap-3">
+        {setupMethods.map((method) => (
+          <Card key={method}>
+            <CardHeader>
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle>{t(`methods.${method}`)}</CardTitle>
+                {method === "container" && <Badge variant="muted">{t("comingSoon")}</Badge>}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <DeviceConnectionContent method={method} />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </SettingsGroup>
   );
 }
 

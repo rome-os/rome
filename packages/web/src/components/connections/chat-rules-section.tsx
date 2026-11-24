@@ -310,7 +310,9 @@ export function ChatRulesSection({ connectionId }: { connectionId: string }) {
           {groups.map((group) => (
             <div key={group.container} className="space-y-2">
               {group.container && (
-                <h4 className="px-1 text-aux text-muted-foreground">{group.container}</h4>
+                <h4 className="px-[var(--row-px-md)] text-aux text-muted-foreground">
+                  {group.container}
+                </h4>
               )}
               <List className="overflow-hidden rounded-12 border border-border bg-surface">
                 {group.items.map((item) => (
@@ -477,7 +479,9 @@ function AddChatDialog({
             {groupByContainer(choices).map((group) => (
               <div key={group.container} className="space-y-2">
                 {group.container && (
-                  <h3 className="px-1 text-aux text-muted-foreground">{group.container}</h3>
+                  <h3 className="px-[var(--row-px-sm)] text-aux text-muted-foreground">
+                    {group.container}
+                  </h3>
                 )}
                 <List className="overflow-hidden rounded-12 border border-border">
                   {group.items.map((item) => {
