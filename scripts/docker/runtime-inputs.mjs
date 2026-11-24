@@ -23,6 +23,7 @@ export const runtimePackages = [
   "packages/signer",
   "packages/rome-node-cli",
   "packages/rome-node-core",
+  "packages/rome-node-core-darwin-arm64",
   "packages/rome-node-ui",
   "packages/ui",
   "packages/web",

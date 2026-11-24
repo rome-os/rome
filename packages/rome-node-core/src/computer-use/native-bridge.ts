@@ -2,9 +2,10 @@ import { execFile } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { link, lstat, mkdir, open, realpath, unlink } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { connect } from "node:net";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { isRecord } from "../actions.js";
@@ -17,6 +18,7 @@ import { ComputerUseError, parseComputerUseHello } from "./protocol.js";
 
 const MAX_RPC_BYTES = 8 * 1024 * 1024;
 const runFile = promisify(execFile);
+const DARWIN_ARM64_PACKAGE = "@rome-os/node-core-darwin-arm64";
 
 export interface ComputerUseNative {
   call(method: string, params: Record<string, unknown>): Promise<unknown>;
@@ -35,12 +37,29 @@ export function defaultComputerUseStateDir(): string {
   return join(homedir(), "Library", "Application Support", "Rome", "ComputerUse");
 }
 
+function packagedComputerUseAppPath(): string {
+  // Desktop bundles this module to CJS with esbuild (where import.meta is {}),
+  // and always supplies bundledAppPath. Resolve lazily so CJS module load never throws.
+  if (typeof import.meta.url === "string") {
+    try {
+      const manifestPath = createRequire(import.meta.url).resolve(
+        `${DARWIN_ARM64_PACKAGE}/package.json`,
+      );
+      return join(dirname(manifestPath), "dist", "native", "Rome Computer Use.app");
+    } catch {
+      // Fall back when the optional darwin-arm64 package is not installed.
+    }
+    return fileURLToPath(new URL("../native/Rome Computer Use.app", import.meta.url));
+  }
+  return join("native", "Rome Computer Use.app");
+}
+
 export function computerUseAppPath(options: NativeBridgeOptions): string {
   return (
     options.appPath ??
     process.env.ROME_COMPUTER_USE_APP ??
     options.bundledAppPath ??
-    fileURLToPath(new URL("../native/Rome Computer Use.app", import.meta.url))
+    packagedComputerUseAppPath()
   );
 }
 
@@ -338,18 +357,54 @@ function unavailable(error: unknown): boolean {
   );
 }
 
-function assertComputerUseImplementation(value: unknown, asset: ComputerUseApp): void {
+function matchesComputerUseImplementation(value: unknown, asset: ComputerUseApp): boolean {
   const hello = parseComputerUseHello(value);
-  if (
-    hello.bundleId !== "com.rome.computer-use" ||
-    hello.implementationSha256 !== asset.implementationSha256 ||
-    hello.architecture !== asset.architecture
-  )
+  return (
+    hello.bundleId === "com.rome.computer-use" &&
+    hello.implementationSha256 === asset.implementationSha256 &&
+    hello.architecture === asset.architecture
+  );
+}
+
+function assertComputerUseImplementation(value: unknown, asset: ComputerUseApp): void {
+  if (!matchesComputerUseImplementation(value, asset))
     throw new ComputerUseError(
       "helper_update_required",
       "A different or unidentified helper is running. Finish its work and close it before starting this version.",
       { effectStatus: "not_dispatched" },
     );
+}
+
+function parseNumericVersion(value: unknown): number[] | null {
+  if (typeof value !== "string" || !/^\d+(?:\.\d+)*$/.test(value)) return null;
+  return value.split(".").map((part) => Number(part));
+}
+
+function isNewerVersion(candidate: unknown, running: unknown): boolean {
+  const left = parseNumericVersion(candidate);
+  const right = parseNumericVersion(running);
+  if (!left || !right) return false;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    const a = left[index] ?? 0;
+    const b = right[index] ?? 0;
+    if (a !== b) return a > b;
+  }
+  return false;
+}
+
+function isIdleMismatchedHelper(value: unknown, asset: ComputerUseApp): boolean {
+  const hello = parseComputerUseHello(value);
+  return (
+    hello.bundleId === "com.rome.computer-use" &&
+    typeof hello.implementationSha256 === "string" &&
+    (hello.implementationSha256 !== asset.implementationSha256 ||
+      hello.architecture !== asset.architecture) &&
+    isNewerVersion(asset.version, hello.version) &&
+    hello.activeSessions === 0 &&
+    isRecord(hello.execution) &&
+    hello.execution.busy === false
+  );
 }
 
 /** A default package stages its signed app at a stable per-user path before launching it. */
@@ -371,27 +426,78 @@ export function createComputerUseNativeBridge(
   async function initialize(): Promise<ComputerUseApp> {
     const source = await inspectComputerUseApp(computerUseAppPath(options));
     const canonicalStateDir = await privateComputerUseDirectory(stateDir);
+    const until = Date.now() + (options.startupTimeoutMs ?? 10_000);
+    let handedOff = false;
     try {
-      assertComputerUseImplementation(await callSocket("hello", {}), source);
-      return source;
+      const helloValue = await callSocket("hello", {});
+      try {
+        assertComputerUseImplementation(helloValue, source);
+        return source;
+      } catch (error) {
+        if (!isIdleMismatchedHelper(helloValue, source)) throw error;
+        // The helper is an LSUIElement with no Dock icon; after an auto-update or CLI upgrade,
+        // ask an idle older Rome helper to shut down so we can stage and start this version.
+        try {
+          await callSocket("shutdown", { idleOnly: true }, (currentHello) => {
+            if (!isIdleMismatchedHelper(currentHello, source)) {
+              assertComputerUseImplementation(currentHello, source);
+              return false;
+            }
+          });
+        } catch (shutdownError) {
+          if (
+            !(shutdownError instanceof ComputerUseError) ||
+            !["helper_connection_lost", "helper_unavailable"].includes(shutdownError.code)
+          )
+            throw error;
+        }
+        for (;;) {
+          try {
+            const currentHello = await callSocket("hello", {});
+            if (matchesComputerUseImplementation(currentHello, source)) return source;
+          } catch (pollError) {
+            if (unavailable(pollError)) {
+              handedOff = true;
+              break;
+            }
+          }
+          if (Date.now() >= until) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
     } catch (error) {
       if (!unavailable(error)) throw error;
     }
     const explicit =
       options.appPath !== undefined || process.env.ROME_COMPUTER_USE_APP !== undefined;
-    const until = Date.now() + (options.startupTimeoutMs ?? 10_000);
-    try {
-      const app = explicit ? source : await prepareComputerUseApp(source, canonicalStateDir);
-      await runFile(
-        "/usr/bin/open",
-        ["-g", "-a", app.path, "--args", "--state-dir", canonicalStateDir],
-        {
-          timeout: Math.max(1, until - Date.now()),
-        },
-      );
-    } catch (error) {
-      // Another caller can win the install/service lock after our first hello.
-      if (!(error instanceof ComputerUseError) || error.code !== "helper_install_busy") throw error;
+    for (;;) {
+      try {
+        const app = explicit ? source : await prepareComputerUseApp(source, canonicalStateDir);
+        await runFile(
+          "/usr/bin/open",
+          ["-g", "-a", app.path, "--args", "--state-dir", canonicalStateDir],
+          {
+            timeout: Math.max(1, until - Date.now()),
+          },
+        );
+        break;
+      } catch (error) {
+        // Right after idle shutdown, the exiting helper can unlink helper.sock slightly before
+        // closing service.lock; retry briefly before assuming another caller won the lock.
+        if (
+          handedOff &&
+          error instanceof ComputerUseError &&
+          error.code === "helper_install_busy" &&
+          Date.now() < until
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          continue;
+        }
+        // Another caller can win the install/service lock after our first hello.
+        if (!(error instanceof ComputerUseError) || error.code !== "helper_install_busy")
+          throw error;
+        break;
+      }
     }
     for (;;) {
       try {

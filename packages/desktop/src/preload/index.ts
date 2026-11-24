@@ -13,6 +13,9 @@ const device = {
     ipcRenderer.invoke("device:pickFolder", defaultPath),
   /** Opens this computer's audit log in the app's own window. Returns nothing from the log. */
   openAuditLog: (): Promise<void> => ipcRenderer.invoke("device:openAuditLog"),
+  /** Opens the native helper's permission panel after an explicit user action. */
+  openComputerUsePermissions: (): Promise<void> =>
+    ipcRenderer.invoke("device:openComputerUsePermissions"),
   onStatus: (callback: (status: DeviceStatus) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, status: DeviceStatus) => callback(status);
     ipcRenderer.on("device:status", listener);

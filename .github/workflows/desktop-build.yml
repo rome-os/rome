@@ -143,6 +143,20 @@ jobs:
           echo "::error::Refusing to build a tagged release unsigned — Gatekeeper would block it for every user."
           exit 1
 
+      - name: Build computer-use helper
+        uses: ./.github/actions/build-computer-use
+        with:
+          sign: ${{ steps.mac-signing.outputs.enabled == 'true' }}
+          notarize: "false"
+          certificate: ${{ secrets.CSC_LINK }}
+          certificate-password: ${{ secrets.CSC_KEY_PASSWORD }}
+
+      - name: Check computer-use resources before packaging
+        working-directory: packages/desktop
+        run: node scripts/check-computer-use.mjs
+        env:
+          ROME_DESKTOP_ALLOW_UNSIGNED_COMPUTER_USE: ${{ steps.mac-signing.outputs.enabled == 'true' && '0' || '1' }}
+
       - name: Package macOS app (unsigned)
         if: ${{ env.HAS_MAC_SIGNING_SECRETS != 'true' || steps.mac-signing.outputs.enabled != 'true' }}
         working-directory: packages/desktop
@@ -205,7 +219,30 @@ jobs:
           app="$(find release -maxdepth 2 -name 'Rome.app' -print -quit)"
           if [ -z "$app" ]; then echo "::error::No Rome.app found in release/"; exit 1; fi
 
+          helper="$app/Contents/Resources/native/Rome Computer Use.app"
+          test -x "$helper/Contents/MacOS/RomeComputerUse"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$helper/Contents/Info.plist")" = com.rome.computer-use
+          test "$(lipo -archs "$helper/Contents/MacOS/RomeComputerUse")" = arm64
+          helper_copies="$(find "$app" -name 'Rome Computer Use.app')"
+          if [ "$helper_copies" != "$helper" ]; then
+            echo "::error::Expected exactly one Rome Computer Use.app inside Rome.app, found: $helper_copies"
+            exit 1
+          fi
+          if [ -e "$app/Contents/Resources/app.asar.unpacked/node_modules/@rome-os/node-core-darwin-arm64" ]; then
+            echo "::error::Unexpected duplicate @rome-os/node-core-darwin-arm64 in app.asar.unpacked"
+            exit 1
+          fi
+
           if [ "${SIGNING_ENABLED}" = "true" ]; then
+            codesign --verify --strict --verbose=2 "$helper"
+            helper_signature="$(codesign --display --verbose=4 "$helper" 2>&1)"
+            printf '%s\n' "$helper_signature" | grep -Fx 'Identifier=com.rome.computer-use'
+            printf '%s\n' "$helper_signature" | grep '^Authority=Developer ID Application:'
+            helper_team="$(printf '%s\n' "$helper_signature" | sed -n 's/^TeamIdentifier=//p')"
+            app_team="$(codesign --display --verbose=4 "$app" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+            test -n "$helper_team" && test "$helper_team" = "$app_team"
+            helper_entitlements="$(codesign --display --entitlements - --xml "$helper" 2>/dev/null)"
+            test -z "$helper_entitlements"
             codesign --verify --deep --strict --verbose=2 "$app"
             spctl --assess --type execute --verbose "$app"
             xcrun stapler validate "$app"
