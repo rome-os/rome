@@ -202,6 +202,46 @@ describe("chatSettingsWake", () => {
     expect(gate([blockDevChat])({ ...message, place: "direct" }, { person: null })).toBe("review");
   });
 
+  describe("on an account that serves its workspace", () => {
+    const gate = (policies: Policy[] = []) =>
+      chatSettingsWake({
+        enabled: true,
+        replyRule: "mention",
+        botMessages: "ignore",
+        whenOthersMentioned: "ignore",
+        trustedLevels: ["guardian"],
+        replyToLevels: ["guardian"],
+        policies,
+        connectionKindOf: (channel) => channel,
+        servesWorkspace: true,
+      });
+    const member = { person: { id: "person-other", bondLevel: "other" as const } };
+
+    it.each([
+      "mention",
+      "direct",
+      "reply",
+      "bot_thread",
+    ] as const)("wakes the agent on a %s from anyone", (addressing) => {
+      expect(gate()({ ...message, addressing }, member)).toBe("wake");
+      expect(gate()({ ...message, addressing }, { person: null })).toBe("wake");
+    });
+
+    it("keeps a message addressed to nobody quiet", () => {
+      expect(gate()({ ...message, addressing: "ambient" }, member)).toBe("quiet");
+    });
+
+    it("keeps another bot's mention quiet", () => {
+      expect(gate()({ ...message, addressing: "mention", fromBot: true }, member)).toBe("quiet");
+    });
+
+    it("blocks a sender a policy blocks", () => {
+      expect(gate([globalPolicy("block")])({ ...message, addressing: "mention" }, member)).toBe(
+        "block",
+      );
+    });
+  });
+
   it("answers the same message from the same sender the same way every time", () => {
     const gate = chatSettingsWake({
       enabled: true,

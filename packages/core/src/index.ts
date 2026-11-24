@@ -348,6 +348,7 @@ import { PolicyEngine } from "./participation/wake-gate/policy/policy-engine.js"
 import { guardedSend } from "./participation/send-gate/index.js";
 import { wakeGateLoader } from "./participation/wake-gate/index.js";
 import { ownAccountNames } from "./connections/own-account-name.js";
+import { servesWorkspaceIn } from "./connections/serves-workspace.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
 import type { EmailAdapter, EmailSettings } from "./connections/kinds/email/email.js";
@@ -2028,6 +2029,7 @@ async function main() {
     bondLevelsSetting: (key) => settingsRepo.get<string[]>(key),
     policies: () => policiesRepo.findAll(),
     connectionKindOf: connectionKindOfChannel,
+    servesWorkspace: servesWorkspaceIn(connectionRegistry),
   });
   // Only the Concierge writes in a Concierge chat. An app's action sending
   // there, as a task chat's agent or a routine may, wakes the Concierge with
