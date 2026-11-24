@@ -56,7 +56,7 @@ const connectionId = z.string().describe("The connection's id, from read_connect
 export const readConnections = agentTool({
   name: "system:read_connections",
   description:
-    "See what is connected to Rome and whether each connection works, with the account each one reaches. Use it when the guardian asks what is connected, whether a service such as Slack or Google is connected, or why a connection is not working, and to find a connection's id before disconnecting it",
+    "See what is connected to Rome and whether each connection works, with the account each one reaches. Use it when the guardian asks what is connected, whether a service such as GitHub, Slack or Google is connected, or why a connection is not working, and to find a connection's id before disconnecting it",
   sideEffects: "read-only",
   input: z.object({}),
   run: async (_input, { deps }) => {
@@ -100,7 +100,7 @@ export const connectService = agentTool({
 export const disconnectService = agentTool({
   name: "system:disconnect_service",
   description:
-    "Disconnect one service from Rome, such as a Slack workspace or a Google account, so Rome no longer has access to it. Use it when the guardian asks to disconnect, unlink or remove a connection. The guardian approves it on a card first. Only in the guardian's private chat, in a turn their own message started. Find the connection's id with system:read_connections",
+    "Disconnect one service from Rome, such as a GitHub account, a Slack workspace or a Google account, so Rome no longer has access to it. Use it when the guardian asks to disconnect, unlink or remove a connection. The guardian approves it on a card first. Only in the guardian's private chat, in a turn their own message started. Find the connection's id with system:read_connections",
   sideEffects: "write",
   input: z.object({ connectionId }),
   // Shown to the guardian alone, so it names the connection whoever asked.

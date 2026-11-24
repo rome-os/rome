@@ -77,6 +77,13 @@ function operations(overrides: Partial<ConnectionToolDeps> = {}) {
 }
 
 describe("reading the connections", () => {
+  it("names GitHub where it names services, so an agent searching for it finds the tools", () => {
+    for (const tool of [readConnections, disconnectService]) {
+      const { config } = tool.action({} as ConnectionToolDeps, async () => "guardian");
+      expect(config.description).toMatch(/github/i);
+    }
+  });
+
   it("lists each connection with its kind, state and account, and the kinds not connected", async () => {
     const { ops } = operations();
 
