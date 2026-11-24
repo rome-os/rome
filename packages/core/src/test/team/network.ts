@@ -1,12 +1,15 @@
 // The team verifier's network. While an instance is open, every outgoing
-// connection in the process reaches only a loopback port the verifier started
-// a server on and allowed: the instance itself and the stand-in Rome Cloud. A
-// route that calls anything else, such as Chrome's debugging port or a
-// provider, gets a network error, so a run never touches a real service on
-// the developer's machine or the internet.
+// connection the test process opens on its main thread reaches only a loopback
+// port the verifier started a server on and allowed: the instance itself and
+// the stand-in Rome Cloud. A route that calls anything else, such as Chrome's
+// debugging port or a provider, gets a network error.
 //
 // The guard sits on `net.Socket.prototype.connect`, which `fetch`,
-// `node:http`, `node:tls` and WebSocket clients all go through.
+// `node:http`, `node:tls` and WebSocket clients all go through. It does not
+// cover another process or a worker thread, which have their own sockets.
+// Programs launched through `node:child_process` run only the sandbox's stubs
+// (./sandbox.ts), none of which opens a connection. Not covered: the shell the
+// terminal socket starts through node-pty, which the verifier sends no input.
 
 import { Socket } from "node:net";
 

@@ -1,10 +1,15 @@
-// Routes only the guardian may call, mounted on the "guardian-only-route"
-// stand-in product. Each has its own guard, so the stand-in keeps refusing a
-// teammate whatever the product does with its guardian-only guards.
+// Routes the stand-in products add to the product in the tree. The
+// "guardian-only-route" stand-in mounts routes only the guardian may call,
+// each with its own guard, so the stand-in keeps refusing a teammate whatever
+// the product does with its guardian-only guards. The "open-socket" stand-in
+// attaches a WebSocket path that admits everyone, as `/ws/events` would if it
+// lost its gate.
 
+import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import type { Feature } from "../../api/deps.js";
 import { currentSessionActor } from "../../access/session-actor.js";
+import type { ExtraUpgrade } from "./instance.js";
 
 export const STAND_IN_GUARDIAN_ONLY_ROUTE = "GET /api/team-verifier/guardian-only";
 /** Validates its body before the guard. `bodies.ts` gives it a valid body. */
@@ -31,4 +36,23 @@ export function guardianOnlyFeature(): Feature {
     });
   }
   return { routes, actions: [] };
+}
+
+export const STAND_IN_OPEN_SOCKET_PATH = "/ws/team-verifier-open";
+
+/** Completes every handshake on its path, whoever asks. */
+export function openSocket(): ExtraUpgrade {
+  return {
+    path: STAND_IN_OPEN_SOCKET_PATH,
+    handle(req, socket) {
+      const key = String(req.headers["sec-websocket-key"] ?? "");
+      const accept = createHash("sha1")
+        .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+        .digest("base64");
+      socket.end(
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+          `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+      );
+    },
+  };
 }
