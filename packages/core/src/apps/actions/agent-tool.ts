@@ -7,18 +7,26 @@ import {
   type Action,
   type ActionConfig,
   type ActionResult,
+  type PreviewPayload,
 } from "@rome-os/app-runtime";
 import type { z } from "zod";
 import { actionExecutionContext } from "./context.js";
+import { CallRefusal, withApprovalPerCall } from "./types.js";
 import type { ToolTurn, WhoMayAsk } from "./who-may-ask.js";
 
 export type { ToolTurn } from "./who-may-ask.js";
 
-/** What `run` gets besides its input: the deps its page was handed, and the
- * turn the tool runs for. */
+/** What `run` and `approval` get besides their input: the deps their page
+ * was handed, and the turn the tool runs for. */
 export interface ToolContext<D> {
   deps: D;
   turn: ToolTurn;
+}
+
+/** The words of the card the guardian approves a call on. */
+export interface ToolApproval {
+  title: string;
+  summary: string;
 }
 
 /** One agent tool as its page declares it. */
@@ -33,6 +41,14 @@ export interface AgentToolSpec<D, S extends z.ZodType> {
   /** The tool's arguments, each with a `.describe()` the agent reads. An
    *  argument that does not fit answers the agent with what is wrong. */
   input: S;
+  /** Present when the guardian approves a call on a card first: the card's
+   *  words for the parsed input, or undefined for an input that runs without
+   *  approval. Called only for a turn that may ask. A call whose approval
+   *  throws does not run. */
+  approval?: (
+    input: z.output<S>,
+    context: ToolContext<D>,
+  ) => ToolApproval | undefined | Promise<ToolApproval | undefined>;
   /** The operation, once the turn may ask and the input fits. Returns plain
    *  data for the agent, or `toolError(...)`. */
   run: (input: z.output<S>, context: ToolContext<D>) => Promise<ToolOutcome>;
@@ -87,8 +103,9 @@ function toolAction<D, S extends z.ZodType>(
     speed: "fast",
     reliability: "high",
     sideEffects: spec.sideEffects,
+    ...(spec.approval ? { requiresApproval: true } : {}),
   };
-  return defineAction({
+  const action = defineAction({
     config,
     schema: spec.input,
     execute: async (input) => {
@@ -96,6 +113,25 @@ function toolAction<D, S extends z.ZodType>(
       const refusal = await whoMayAsk(spec, turn);
       if (refusal) return { status: "error", error: refusal };
       return resultOf(await spec.run(input, { deps, turn }));
+    },
+  });
+  const approval = spec.approval;
+  if (!approval) return action;
+  // The engine reads the preview to decide each call: no card, no approval.
+  // Who may ask is checked first, so a turn that may not ask ends with its
+  // refusal before `approval` reads a dep or the engine records a card.
+  return withApprovalPerCall({
+    ...action,
+    preview: async (args): Promise<PreviewPayload | undefined> => {
+      const turn = runningTurn();
+      const refusal = await whoMayAsk(spec, turn);
+      if (refusal) throw new CallRefusal(refusal);
+      const parsed = spec.input.safeParse(args);
+      // An input that does not fit runs to the error `execute` answers it
+      // with, which runs nothing.
+      if (!parsed.success) return undefined;
+      const words = await approval(parsed.data, { deps, turn });
+      return words ? { kind: "generic", ...words } : undefined;
     },
   });
 }

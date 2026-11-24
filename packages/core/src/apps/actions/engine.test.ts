@@ -11,7 +11,7 @@ import { actionExecutionContext, type ActionExecutionStore } from "./context.js"
 import { hashArgs, replayContext, type JournalEntry } from "./replay.js";
 import { ActionRegistryImpl } from "./registry.js";
 import type { MemoryHeadroom } from "../../instance/memory-headroom.js";
-import type { Action, ActionResult } from "./types.js";
+import { type Action, type ActionResult, withApprovalPerCall } from "./types.js";
 import { callAction } from "./call-action.js";
 import { emitAgentMessage, type ActionRuntimeEvent } from "./runtime-events.js";
 import {
@@ -1847,6 +1847,124 @@ describe("ActionEngine", () => {
       }
       const row = await rome.repos.approvals.findById(result.approval.approvalId);
       expect(row!.status).toBe("pending");
+    });
+
+    describe("an action that decides per call", () => {
+      // Asks only to remove, as the Apps page's manage tool does.
+      const manage = () => {
+        const recorded = recordingAction("manage", { requiresApproval: true });
+        const action = withApprovalPerCall({
+          ...recorded.action,
+          preview: async (args) =>
+            args.remove === true
+              ? { kind: "generic" as const, title: "Remove it", summary: "It goes." }
+              : undefined,
+        });
+        return { action, calls: recorded.calls };
+      };
+
+      it("runs a call its preview words no card for, without an approval", async () => {
+        const { action, calls } = manage();
+        await setup({ actions: [action] });
+
+        const result = await rome.actionEngine.run("manage", { remove: false });
+
+        expect(result.status).toBe("ok");
+        expect(calls).toEqual([{ remove: false }]);
+        expect(await rome.repos.approvals.findPending()).toEqual([]);
+      });
+
+      it("parks a call its preview words a card for, on that card, and does not run it", async () => {
+        const { action, calls } = manage();
+        const created: ApprovalCreatedEvent[] = [];
+        await setup({
+          actions: [action],
+          engine: { onApprovalCreated: async (event) => void created.push(event) },
+        });
+
+        const result = await rome.actionEngine.run("manage", { remove: true });
+
+        if (result.status !== "pending_approval") {
+          throw new Error(`expected pending_approval, got ${result.status}`);
+        }
+        expect(calls).toEqual([]);
+        expect(created.map((event) => event.preview)).toEqual([
+          { kind: "generic", title: "Remove it", summary: "It goes." },
+        ]);
+      });
+
+      it("runs a parked call once the guardian approves it", async () => {
+        const { action, calls } = manage();
+        await setup({ actions: [action] });
+        const first = await rome.actionEngine.run("manage", { remove: true });
+        if (first.status !== "pending_approval") {
+          throw new Error(`expected pending_approval, got ${first.status}`);
+        }
+        const approval = await rome.repos.approvals.findById(first.approval.approvalId);
+        const payload = approval!.payload as {
+          rootArgs: Record<string, unknown>;
+          rootExecutionId: string;
+          replayJournal: JournalEntry[];
+        };
+
+        const replayed = await rome.actionEngine.run("manage", payload.rootArgs, {
+          initiator: `approval:${first.approval.approvalId}`,
+          replayJournal: payload.replayJournal,
+          replayRootExecutionId: payload.rootExecutionId,
+        });
+
+        expect(replayed.status).toBe("ok");
+        expect(calls).toEqual([{ remove: true }]);
+      });
+
+      it("does not run a call whose preview throws, and asks for no approval", async () => {
+        const recorded = recordingAction("manage", { requiresApproval: true });
+        const action = withApprovalPerCall({
+          ...recorded.action,
+          preview: () => {
+            throw new Error("no such app");
+          },
+        });
+        await setup({ actions: [action] });
+
+        const result = await rome.actionEngine.run("manage", { remove: true });
+
+        expect(result).toEqual({
+          status: "error",
+          error: expect.stringContaining("manage did not run"),
+        });
+        expect(recorded.calls).toEqual([]);
+        expect(await rome.repos.approvals.findPending()).toEqual([]);
+      });
+
+      it("asks the same of a nested call", async () => {
+        const { action, calls } = manage();
+        await setup({
+          actions: [
+            action,
+            buildAction("caller", {
+              execute: async (args) => callAction("manage", args),
+            }),
+          ],
+        });
+
+        const kept = await rome.actionEngine.run("caller", { remove: false });
+        const removed = await rome.actionEngine.run("caller", { remove: true });
+
+        expect(kept.status).toBe("ok");
+        expect(removed.status).toBe("pending_approval");
+        expect(calls).toEqual([{ remove: false }]);
+      });
+    });
+
+    it("asks on every call of an action that does not decide per call, whatever its preview", async () => {
+      const recorded = recordingAction("risky", { requiresApproval: true });
+      await setup({ actions: [{ ...recorded.action, preview: async () => undefined }] });
+
+      const result = await rome.actionEngine.run("risky", {});
+
+      expect(result.status).toBe("pending_approval");
+      expect(recorded.calls).toEqual([]);
     });
   });
 
