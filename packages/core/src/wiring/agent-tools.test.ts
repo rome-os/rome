@@ -3,6 +3,7 @@ import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import {
   type AgentToolDeps,
   agentToolNames,
+  agentTools,
   agentToolOlderNames,
   registerAgentTools,
 } from "./agent-tools.js";
@@ -32,6 +33,8 @@ describe("core's agent tools", () => {
   });
 
   it("maps each older name to one tool, never to another tool's own name", () => {
+    const declared = agentTools.flatMap((tool) => tool.olderNames);
+    expect(agentToolOlderNames.size).toBe(declared.length);
     for (const [older, tool] of agentToolOlderNames) {
       expect(agentToolNames.has(tool)).toBe(true);
       expect(agentToolNames.has(older)).toBe(false);
