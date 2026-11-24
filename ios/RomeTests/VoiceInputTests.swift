@@ -153,6 +153,103 @@ import Testing
         #expect(VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).takeNotice(for: "chat") == nil)
     }
 
+    // MARK: Which stops leave a notice
+
+    @Test func backgroundedWithNothingHeardLeavesNoNotice() {
+        #expect(VoiceInputStop(reason: .backgrounded).notice(afterHearing: "") == nil)
+        #expect(VoiceInputStop(reason: .backgrounded).notice(afterHearing: " \n") == nil)
+        #expect(VoiceInputStop(reason: .interrupted).notice(afterHearing: "") == nil)
+        #expect(VoiceInputStop(reason: .leftChat).notice(afterHearing: "") == nil)
+    }
+
+    @Test func backgroundedAfterWordsSaysWhy() {
+        #expect(VoiceInputStop(reason: .backgrounded).notice(afterHearing: "Call the dentist") == VoiceInputStop(reason: .backgrounded))
+        #expect(VoiceInputStop(reason: .interrupted).notice(afterHearing: "你好") == VoiceInputStop(reason: .interrupted))
+        #expect(VoiceInputStop(reason: .leftChat).notice(afterHearing: "hi") == VoiceInputStop(reason: .leftChat))
+    }
+
+    @Test func aFaultSaysWhyEvenWithNothingHeard() {
+        for reason in [VoiceInputStopReason.noSpeech, .connectionLost, .microphoneBlocked, .serviceRefused, .appClosed] {
+            #expect(VoiceInputStop(reason: reason).notice(afterHearing: "") == VoiceInputStop(reason: reason))
+        }
+    }
+
+    // MARK: How long a notice shows
+
+    @Test func aNoticeGoesAfterItsTimeOnScreen() async {
+        let timer = VoiceNoticeTimer(lifetime: .milliseconds(50), center: NotificationCenter(), appActive: { true })
+        let expired = Flag()
+        timer.start { expired.set() }
+        #expect(!expired.value)
+        await expired.wait()
+        #expect(expired.value)
+    }
+
+    @Test func aNoticeFromTheBackgroundWaitsForTheAppThenGoes() async {
+        let center = NotificationCenter()
+        let timer = VoiceNoticeTimer(lifetime: .milliseconds(50), center: center, appActive: { false })
+        let expired = Flag()
+        timer.start { expired.set() }
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(!expired.value)
+        center.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        await expired.wait()
+        #expect(expired.value)
+    }
+
+    @Test func goingToTheBackgroundStopsTheClock() async {
+        let center = NotificationCenter()
+        let timer = VoiceNoticeTimer(lifetime: .milliseconds(100), center: center, appActive: { true })
+        let expired = Flag()
+        timer.start { expired.set() }
+        center.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(!expired.value)
+    }
+
+    @Test func aHiddenFieldStopsTheClockUntilItShowsAgain() async {
+        let timer = VoiceNoticeTimer(lifetime: .milliseconds(50), center: NotificationCenter(), appActive: { true })
+        let expired = Flag()
+        timer.start { expired.set() }
+        timer.fieldShown(false)
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(!expired.value)
+        timer.fieldShown(true)
+        await expired.wait()
+        #expect(expired.value)
+    }
+
+    @Test func anEditTakesTheNoticeDownBeforeItsTime() async {
+        let timer = VoiceNoticeTimer(lifetime: .milliseconds(50), center: NotificationCenter(), appActive: { true })
+        let expired = Flag()
+        timer.start { expired.set() }
+        timer.cancel()
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(!expired.value)
+    }
+
+    // MARK: The voice control from the first frame
+
+    @Test func theVoiceControlIsThereBeforeTheInstanceAnswers() async {
+        let defaults = UserDefaults(suiteName: "voice-input-\(UUID())")!
+        #expect(!VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).available)
+        defaults.set(true, forKey: VoiceInputMarks.availablePrefix + "a")
+        let service = VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults)
+        #expect(service.available)
+        #expect(!VoiceInputService(backend: DemoBackend(), instance: "b", defaults: defaults).available)
+        // The instance's answer wins, and is kept for the next launch.
+        await service.refresh(now: true)
+        #expect(!service.available)
+        #expect(!VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).available)
+    }
+
+    @Test func signingOutForgetsWhichInstancesOfferVoiceInput() {
+        let defaults = UserDefaults(suiteName: "voice-input-\(UUID())")!
+        defaults.set(true, forKey: VoiceInputMarks.availablePrefix + "a")
+        VoiceInputMarks.removeAll(defaults: defaults)
+        #expect(!VoiceInputService(backend: DemoBackend(), instance: "a", defaults: defaults).available)
+    }
+
     // MARK: Return while listening
 
     @Test func returnOnTheFieldGoesToVoiceInputOnlyWhileItListens() throws {
@@ -200,6 +297,17 @@ import Testing
         let backend = DemoBackend()
         #expect(try await backend.voiceInputInfo() == nil)
         #expect(backend.voiceInputSocket() == nil)
+    }
+}
+
+@MainActor
+private final class Flag {
+    private(set) var value = false
+    func set() { value = true }
+
+    /// Waits for `set`, at most two seconds, so a busy machine passes too.
+    func wait() async {
+        for _ in 0..<100 where !value { try? await Task.sleep(for: .milliseconds(20)) }
     }
 }
 

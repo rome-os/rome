@@ -91,6 +91,16 @@ struct VoiceInputStop: Sendable, Equatable {
         default: return reason.notice
         }
     }
+
+    /// The notice to show after listening heard `heard`, or nil for none.
+    /// The app going to the background, another app taking the microphone
+    /// or leaving the chat ends listening without a fault, so with no words
+    /// heard nothing was lost and there is nothing to say.
+    func notice(afterHearing heard: String) -> VoiceInputStop? {
+        let quiet: Set<VoiceInputStopReason> = [.backgrounded, .interrupted, .leftChat]
+        let nothingHeard = heard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return quiet.contains(reason) && nothingHeard ? nil : self
+    }
 }
 
 /// A message from the instance on `/ws/voice-input`.
