@@ -186,8 +186,8 @@ export class SlackAppAdapter {
   private readonly refusedWhileStopped = new Map<string, number>();
   private readonly dedup = new InboundDedup(5_000);
   private readonly userNames = new Map<string, SlackMember>();
-  /** The workspace each author from another workspace was heard under, so
-   *  a read names them the same while the directory has not answered. */
+  /** The workspace each author was heard under, so a read names them as
+   *  they were heard. */
   private readonly heardWorkspaces = new Map<string, string>();
   private abort = new AbortController();
   private depositKey: string;
@@ -299,9 +299,9 @@ export class SlackAppAdapter {
       return { status: 500 };
     }
     if (!said) return { status: 200 };
-    const workspace = said.senderId.slice(0, said.senderId.indexOf("/"));
-    if (event.user && workspace !== this.config.teamId)
-      this.rememberWorkspace(event.user, workspace);
+    if (event.user) {
+      this.rememberWorkspace(event.user, said.senderId.slice(0, said.senderId.indexOf("/")));
+    }
 
     const message: ChannelMessage = {
       ...said,
@@ -624,13 +624,16 @@ export class SlackAppAdapter {
     }
   }
 
-  /** What is known of `user`: the directory's answer, or the workspace they
-   *  were heard under when the directory has not answered. */
+  /** What is known of `user` for a read: the workspace they were heard
+   *  under, which a read keeps over the directory's, or else the directory's
+   *  answer. */
   private memberOf(user: string | undefined, names: Map<string, SlackMember>): SlackMember {
     if (!user) return {};
     const named = names.get(user) ?? {};
     const heard = this.heardWorkspaces.get(user);
-    return named.teamId || !heard ? named : { ...named, teamId: heard };
+    if (!heard) return named;
+    const { teams: _teams, ...rest } = named;
+    return { ...rest, teamId: heard };
   }
 
   private rememberWorkspace(user: string, workspace: string): void {
