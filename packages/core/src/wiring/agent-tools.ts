@@ -12,11 +12,13 @@ import { type OwnerOfChat, whoMayAsk } from "../apps/actions/who-may-ask.js";
 import { connectionTools } from "../connections/agent-tools.js";
 import { routineTools } from "../routines/agent-tools.js";
 import { aiToolTools } from "../api/agent-tools/ai-tools.js";
+import { deviceTools } from "../connections/device/agent-tools.js";
 
 const PAGES = {
   connections: connectionTools,
   routines: routineTools,
   aiTools: aiToolTools,
+  devices: deviceTools,
 };
 
 type Page = keyof typeof PAGES;
