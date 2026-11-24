@@ -2,9 +2,16 @@ import { describe, expect, it } from "@rstest/core";
 import type { DefaultProvider, ModelAccountReports } from "../../agent/index.js";
 import { approvalOf, callTool, whoMayAskSuite } from "../../apps/actions/agent-tool-contract.js";
 import { reportOf } from "../../test/kit/model-accounts.js";
-import { type AiToolDeps, changeAiTool, readAiTools, signOutAiTool } from "./ai-tools.js";
+import {
+  type AiToolDeps,
+  changeAiTool,
+  readAiTools,
+  signInAiTool,
+  signOutAiTool,
+} from "./ai-tools.js";
 
 whoMayAskSuite(readAiTools, {});
+whoMayAskSuite(signInAiTool, {});
 whoMayAskSuite(signOutAiTool, { aiTool: "claude" });
 whoMayAskSuite(changeAiTool, { aiTool: "chatgpt" });
 
@@ -116,6 +123,76 @@ describe("reading the AI tools", () => {
         { aiTool: "chatgpt", status: "not_checked_yet" },
       ],
       default: null,
+    });
+  });
+});
+
+describe("signing in to an AI tool", () => {
+  it("returns the sign-in card for the AI tool asked for while another is signed in", async () => {
+    const { deps } = rome({
+      reports: { anthropic: reportOf("available"), openai: reportOf("unauthorized") },
+      current: "anthropic",
+    });
+
+    const result = await callTool(signInAiTool, deps, { aiTool: "chatgpt" });
+
+    expect(result).toEqual({
+      status: "pending_interaction",
+      interaction: {
+        appId: "core",
+        promptText: "Sign in to ChatGPT in Settings › AI Tools.",
+        render: {
+          kind: "inline",
+          componentId: "ai-tool-sign-in-card",
+          props: { aiTools: ["chatgpt"] },
+          builtin: true,
+        },
+      },
+    });
+  });
+
+  it("offers an AI tool whose sign-in expired", async () => {
+    const { deps } = rome({ reports: { anthropic: reportOf("expired") } });
+
+    const result = await callTool(signInAiTool, deps, { aiTool: "claude" });
+
+    expect(result.status === "pending_interaction" && result.interaction.render).toMatchObject({
+      componentId: "ai-tool-sign-in-card",
+      props: { aiTools: ["claude"] },
+    });
+  });
+
+  it("offers every AI tool not signed in when none is named", async () => {
+    const none = rome({ reports: { anthropic: reportOf("unauthorized") } });
+    const one = rome({ reports: { anthropic: reportOf("available") } });
+
+    const both = await callTool(signInAiTool, none.deps, {});
+    const other = await callTool(signInAiTool, one.deps, {});
+
+    expect(both.status === "pending_interaction" && both.interaction).toMatchObject({
+      promptText: "Sign in to Claude or ChatGPT in Settings › AI Tools.",
+      render: { props: { aiTools: ["claude", "chatgpt"] } },
+    });
+    expect(other.status === "pending_interaction" && other.interaction.render).toMatchObject({
+      props: { aiTools: ["chatgpt"] },
+    });
+  });
+
+  it("shows no card for an AI tool already signed in", async () => {
+    const { deps } = rome({
+      reports: { anthropic: reportOf("available"), openai: reportOf("available") },
+    });
+
+    const named = await callTool(signInAiTool, deps, { aiTool: "claude" });
+    const unnamed = await callTool(signInAiTool, deps, {});
+
+    expect(named).toEqual({
+      status: "ok",
+      data: { message: "Claude is already signed in. No card shown." },
+    });
+    expect(unnamed).toEqual({
+      status: "ok",
+      data: { message: "Claude and ChatGPT are both signed in. No card shown." },
     });
   });
 });
@@ -232,7 +309,7 @@ describe("changing the AI tool Rome uses", () => {
     expect(result).toEqual({
       status: "error",
       error:
-        "ChatGPT is not signed in, so it cannot be the default. Ask the guardian to sign in in Settings › AI Tools.",
+        "ChatGPT is not signed in, so it cannot be the default. Ask the guardian to sign in with system:sign_in_ai_tool.",
     });
   });
 });

@@ -48,7 +48,9 @@
     "./app-connection-access": "./src/app-connection-access.ts",
     "./question-card": "./src/question-card.ts",
     "./location-card": "./src/location-card.ts",
-    "./prompt-card": "./src/prompt-card.ts"
+    "./prompt-card": "./src/prompt-card.ts",
+    "./ai-tool-sign-in-card": "./src/ai-tool-sign-in-card.ts",
+    "./add-device-card": "./src/add-device-card.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

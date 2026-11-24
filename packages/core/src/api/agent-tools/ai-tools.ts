@@ -1,14 +1,19 @@
 // What agents do on the AI Tools page: read which AI tools Rome can use and
-// which one is the default, log out of one, and change the default. The page
-// reads the same accounts and default (`GET /api/ai-tools/status`), logs out
-// through the same operation (agent/application/model-logout.ts) and changes
-// the default through the same `DefaultProviders.choose`. Vocabulary:
-// docs/domains/agents.md.
+// which one is the default, open the page's sign-in in a card, log out of
+// one, and change the default. The page reads the same accounts and default
+// (`GET /api/ai-tools/status`), logs out through the same operation
+// (agent/application/model-logout.ts) and changes the default through the
+// same `DefaultProviders.choose`. The sign-in card embeds the page's own
+// sign-in panel for the AI tools it names. Vocabulary: docs/domains/agents.md.
 // How a tool is declared: docs/concepts/actions.md#core-agent-tools.
 //
 // The agent context never imports apps/, so these tools live beside the
 // page's routes rather than in agent/.
 
+import {
+  AI_TOOL_SIGN_IN_CARD_ID,
+  type AiToolSignInCardProps,
+} from "@rome/api-types/ai-tool-sign-in-card";
 import { z } from "zod";
 import {
   type AccountedProviderId,
@@ -18,8 +23,9 @@ import {
   type ModelAccounts,
   type ModelLogoutDeps,
   logOutOfProvider,
+  providerAuthorized,
 } from "../../agent/index.js";
-import { agentToolsOf, toolError } from "../../apps/actions/agent-tool.js";
+import { agentToolsOf, card, toolError } from "../../apps/actions/agent-tool.js";
 import { getErrorMessage } from "../../lib/error-message.js";
 
 export interface AiToolDeps extends ModelLogoutDeps {
@@ -65,6 +71,9 @@ const moveExistingChats = z
 
 const agentTool = agentToolsOf<AiToolDeps>();
 
+/** The one tool that shows the sign-in card (api/routes/webchat.ts). */
+export const SIGN_IN_AI_TOOL = "system:sign_in_ai_tool";
+
 export const readAiTools = agentTool({
   name: "system:read_ai_tools",
   description:
@@ -95,6 +104,38 @@ export const readAiTools = agentTool({
       // Every chat follows the default, except one whose model the guardian picked.
       chatsFollowingDefault: await deps.chatsFollowingDefault().catch(() => null),
     };
+  },
+});
+
+export const signInAiTool = agentTool({
+  name: SIGN_IN_AI_TOOL,
+  description:
+    "Ask the guardian to sign in to an AI tool, Claude or ChatGPT, through a card in the chat where they finish the sign-in, whether or not another AI tool is signed in. Use it when the guardian asks to sign in to, connect or add Claude or ChatGPT, when a sign-in expired, or when no AI tool is signed in and chats cannot run. Only in the guardian's private chat, in a turn their own message started. Check what is signed in with system:read_ai_tools",
+  sideEffects: "write",
+  input: z.object({
+    aiTool: aiTool
+      .optional()
+      .describe(
+        'The AI tool: "claude" for Claude, "chatgpt" for ChatGPT. Default: every one not signed in.',
+      ),
+  }),
+  run: async (input, { deps }) => {
+    const reports = deps.accounts.read();
+    const asked = input.aiTool ? [input.aiTool] : (Object.keys(AI_TOOLS) as AiTool[]);
+    const aiTools = asked.filter((id) => !signedInNow(reports[AI_TOOLS[id].provider]));
+    if (aiTools.length === 0) {
+      return {
+        message: input.aiTool
+          ? `${AI_TOOLS[input.aiTool].name} is already signed in. No card shown.`
+          : "Claude and ChatGPT are both signed in. No card shown.",
+      };
+    }
+    const names = aiTools.map((id) => AI_TOOLS[id].name).join(" or ");
+    return card({
+      componentId: AI_TOOL_SIGN_IN_CARD_ID,
+      props: { aiTools } satisfies AiToolSignInCardProps,
+      ask: `Sign in to ${names} in Settings › AI Tools.`,
+    });
   },
 });
 
@@ -172,7 +213,7 @@ export const changeAiTool = agentTool({
       return toolError(
         provider === "rome_credits"
           ? "Rome credits can be the default only while no AI tool is signed in and credits are left. Check with system:read_ai_tools."
-          : `${name} is not signed in, so it cannot be the default. Ask the guardian to sign in in Settings › AI Tools.`,
+          : `${name} is not signed in, so it cannot be the default. Ask the guardian to sign in with system:sign_in_ai_tool.`,
       );
     }
     return { default: input.aiTool, changed: true };
@@ -180,10 +221,15 @@ export const changeAiTool = agentTool({
 });
 
 /** The AI Tools page's agent tools. */
-export const aiToolTools = [readAiTools, signOutAiTool, changeAiTool];
+export const aiToolTools = [readAiTools, signInAiTool, signOutAiTool, changeAiTool];
 
 function providerOf(name: "claude" | "chatgpt" | "rome_credits"): DefaultProvider {
   return name === "rome_credits" ? "rome_credits" : AI_TOOLS[name].provider;
+}
+
+/** Signed in and usable now, as the page counts it: an expired sign-in is not. */
+function signedInNow(report: ModelAccountReport | undefined): boolean {
+  return report !== undefined && providerAuthorized(report);
 }
 
 /** How the account stands, as the page shows it. No credential is listed. */

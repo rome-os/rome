@@ -183,6 +183,10 @@ import { LOCATION_CARD_ID } from "@rome/api-types/location-card";
 import { cameThroughWidgetEvent } from "./widget-events.js";
 import { agentToolNames, agentToolOlderNames } from "../../wiring/agent-tools.js";
 import { CONNECT_SERVICE } from "../../connections/agent-tools.js";
+import { ADD_DEVICE } from "../../connections/device/agent-tools.js";
+import { SIGN_IN_AI_TOOL } from "../agent-tools/ai-tools.js";
+import { AI_TOOL_SIGN_IN_CARD_ID } from "@rome/api-types/ai-tool-sign-in-card";
+import { ADD_DEVICE_CARD_ID } from "@rome/api-types/add-device-card";
 
 /** The agent of a chat that saved no agent, under the name its sessions are saved by. */
 const MAIN_AGENT = "core:main";
@@ -701,8 +705,9 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
 /** The host-owned inline cards rome-web renders itself, each paired with the
  * one tool allowed to emit it. `ask_question` is the agent tool; `connect_ai`
  * has no agent tool and is emitted by turn middleware alone, so an exact
- * name is the whole allow-list. The connect card comes from one core agent
- * tool, which `execute_action` runs (`coreTool`). */
+ * name is the whole allow-list. The connect, sign-in and add-device cards
+ * each come from one core agent tool, which `execute_action` runs
+ * (`coreTool`). */
 const BUILTIN_CARDS: ReadonlyArray<{
   componentId: string;
   emittedBy: (tool: string, coreTool: string | undefined) => boolean;
@@ -715,6 +720,14 @@ const BUILTIN_CARDS: ReadonlyArray<{
   {
     componentId: "connect-card",
     emittedBy: (tool, coreTool) => isExecuteActionTool(tool) && coreTool === CONNECT_SERVICE,
+  },
+  {
+    componentId: AI_TOOL_SIGN_IN_CARD_ID,
+    emittedBy: (tool, coreTool) => isExecuteActionTool(tool) && coreTool === SIGN_IN_AI_TOOL,
+  },
+  {
+    componentId: ADD_DEVICE_CARD_ID,
+    emittedBy: (tool, coreTool) => isExecuteActionTool(tool) && coreTool === ADD_DEVICE,
   },
   {
     componentId: LOCATION_CARD_ID,
