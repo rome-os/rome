@@ -232,6 +232,8 @@ function setup(
   const told = new ConciergeToldRepository(testDb.db);
   /** The chats whose turns run to their end and say nothing. */
   const silentChats = new Set<string>();
+  /** The chats whose turns say one message and then fail to run to their end. */
+  const saysBeforeFailing = new Set<string>();
   const agentRunner: AgentRunnerInterface = {
     run: (params) =>
       (async function* () {
@@ -411,7 +413,8 @@ function setup(
           runSystemTurn: (c: string, p: string, o?: unknown) => Promise<boolean>;
         }
       ).runSystemTurn(chatId, prompt, turnOptions);
-      return { ran, said: ran && !silentChats.has(chatId) ? 1 : 0, chatId };
+      const spoke = (ran || saysBeforeFailing.has(chatId)) && !silentChats.has(chatId);
+      return { ran, said: spoke ? 1 : 0, chatId };
     },
     attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
     listChats: async (owner = GUARDIAN_OWNER) =>
@@ -452,6 +455,7 @@ function setup(
     turnChats,
     told,
     silentChats,
+    saysBeforeFailing,
     following: () => following!,
     stop: () => {
       stop();
@@ -1019,6 +1023,27 @@ describe("the follow pipeline", () => {
       "line for e3",
     ]);
     expect(await s.told.messagesSince(new Date(0))).toBe(2);
+    s.stop();
+  });
+
+  it("writes what an interrupted alert or digest said to the ledger, and keeps their items owed", async () => {
+    rs.useFakeTimers();
+    const s = setup();
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    const main = mainChatIdOf(GUARDIAN_OWNER);
+    s.failingChats.ends.add(main);
+    s.saysBeforeFailing.add(main);
+    await fire(s, "e1");
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    await s.action("core:concierge_digest").execute({}, {} as never);
+    const told = await s.told.since(new Date(0));
+    expect(told.map((entry) => [entry.kind, entry.messages])).toEqual([
+      ["digest", 1],
+      ["alert", 1],
+    ]);
+    // The turns did not run to their end: their items are still owed.
+    expect((await s.items.owedToConcierge()).map((item) => item.eventId)).toEqual(["e1"]);
+    expect((await s.items.owedToDigest()).map((item) => item.eventId)).toEqual(["e1"]);
     s.stop();
   });
 

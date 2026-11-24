@@ -5,8 +5,9 @@
 // docs/architecture/concierge-patrol.md
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash } from "node:crypto";
 import type { Action } from "../../apps/actions/types.js";
-import type { AgentDefinition } from "../../agent/index.js";
+import { type AgentDefinition, holdsNoTools } from "../../agent/index.js";
 import type { AgentRunnerInterface } from "../../core/types.js";
 import type {
   ConciergeObservationsRepository,
@@ -33,6 +34,7 @@ import {
   parsePatrolOutput,
   renderPatrolBrief,
   speechHold,
+  withToldHistoryOfTask,
 } from "./brief.js";
 import { inWindow, LONG_WAIT_MS, type PatrolSignals, precheck } from "./precheck.js";
 import { runPatrolAgent } from "./run.js";
@@ -40,6 +42,7 @@ import {
   DAILY_MESSAGE_CAP,
   DAY_MS,
   HOUR_MS,
+  type HoldReason,
   holdReason,
   mayRaise,
   nextSpeakingRun,
@@ -78,8 +81,8 @@ const KEEP_MS = 30 * DAY_MS;
 interface PatrolState {
   /** When a run last went past the pre-check, epoch milliseconds. */
   lastRunAt?: number;
-  /** When the pre-check last ran. */
-  lastCheckAt?: number;
+  /** A fingerprint of the calendar events of the next day at the last run past the pre-check. */
+  calendarPrint?: string;
   /** The patrol's routine was made once, so a missing one was deleted. */
   routineMade?: boolean;
 }
@@ -107,17 +110,6 @@ export interface ConciergePatrolDeps {
   /** Hours between patrols. */
   intervalHours: number;
   now?: () => number;
-}
-
-/** Whether an agent definition holds no tool, action, subagent or server: nothing it could call. */
-function holdsNothing(definition: AgentDefinition): boolean {
-  return (
-    definition.tools.length === 0 &&
-    (definition.actions ?? []).length === 0 &&
-    (definition.allowedSubagents ?? []).length === 0 &&
-    Object.keys(definition.mcpServers ?? {}).length === 0 &&
-    definition.networkDiscovery !== true
-  );
 }
 
 /** What a patrol run ended with, for the log and for tests. */
@@ -154,6 +146,26 @@ function localParts(at: number, timeZone: string): { date: string; time: string 
 
 const iso = (at: number | Date | null | undefined) =>
   at === null || at === undefined ? undefined : new Date(at).toISOString();
+
+/**
+ * A fingerprint of the calendar events that start within a day of `at`, or
+ * null with no calendar. Any event added, moved or renamed in that window
+ * changes it.
+ */
+function calendarPrintOf(
+  calendar: readonly PatrolCalendarEvent[] | null,
+  at: number,
+): string | null {
+  if (calendar === null) return null;
+  const soon = calendar
+    .filter((event) => {
+      const start = Date.parse(event.start);
+      return Number.isFinite(start) && start > at && start <= at + DAY_MS;
+    })
+    .map((event) => [event.start, event.end, event.title, event.location ?? "", event.status ?? ""])
+    .sort();
+  return createHash("sha256").update(JSON.stringify(soon)).digest("hex").slice(0, 16);
+}
 
 /** A routine's schedule, in a few words for the patrol. */
 function whenOf(trigger: unknown): string {
@@ -320,7 +332,7 @@ export function startConciergePatrol(
     if (args.recheck) await consumeRecheck();
     if (await paused()) return { status: "skipped", reason: "paused" };
     const definition = deps.patrolAgent?.();
-    if (definition && !holdsNothing(definition)) {
+    if (definition && !holdsNoTools(definition)) {
       // Read-only is the tool set's to keep. One that holds anything never runs.
       log.error("the patrol agent holds tools or actions; the patrol does not run");
       return { status: "skipped", reason: "agent_holds_tools" };
@@ -368,6 +380,7 @@ export function startConciergePatrol(
       })) ?? null;
     const observations = await deps.observations.list();
     const since = lastRunAt;
+    const calendarPrint = calendarPrintOf(calendar, at);
     const signals: PatrolSignals = {
       firstRun: since === null,
       recheck: args.recheck === true,
@@ -386,17 +399,20 @@ export function startConciergePatrol(
           inWindow(status.waitingSince + LONG_WAIT_MS, since, at),
       ).length,
       memoryChanged: memory.changedAt !== null && inWindow(memory.changedAt, since, at),
-      calendarSoon: (calendar ?? []).filter((event) => {
-        const start = Date.parse(event.start);
-        return Number.isFinite(start) && start > at && inWindow(start - DAY_MS, since, at);
-      }).length,
+      calendarSoon:
+        (calendar ?? []).filter((event) => {
+          const start = Date.parse(event.start);
+          return Number.isFinite(start) && start > at && inWindow(start - DAY_MS, since, at);
+        }).length +
+        // An event added or changed within the next day since the last run, such
+        // as one synced already under a day away, is new too.
+        (since !== null && calendarPrint !== (state.calendarPrint ?? null) ? 1 : 0),
       observationsDue: observations.filter((o) => {
         const due = o.dueAt?.getTime() ?? null;
         return o.status === "open" && due !== null && due > at && inWindow(due - DAY_MS, since, at);
       }).length,
     };
     const checked = precheck(signals);
-    await writeState({ lastCheckAt: at });
     if (!checked.run) {
       log.info("patrol pre-check: nothing new");
       return { status: "quiet", reasons: [] };
@@ -447,7 +463,7 @@ export function startConciergePatrol(
       calendar,
       observations: observations
         .filter((o) => o.status === "open")
-        .map((o) => viewOf(o, at, taskUpdatedAt)),
+        .map((o) => viewOf(o, observations, at, taskUpdatedAt)),
       alreadyTold: told
         .flatMap((entry) =>
           entry.items.map((item) => ({
@@ -471,7 +487,7 @@ export function startConciergePatrol(
       log.warn("patrol run failed; it stays silent", { error: messageOf(error) });
       return { status: "failed", error: messageOf(error) };
     }
-    await writeState({ lastRunAt: at });
+    await writeState({ lastRunAt: at, calendarPrint: calendarPrint ?? undefined });
     const output = parsePatrolOutput(raw, { now: at, taskIds, calendar: calendar ?? [] });
     const known = new Map(observations.map((o) => [o.topicKey, o] as const));
     for (const draft of output.observations) {
@@ -508,13 +524,40 @@ export function startConciergePatrol(
       output.speak.offerStart,
       guardianNow(at, zone),
     );
+    // The model ran for a while, and the turn may wait behind others in the
+    // chat: the cap and the timing holds are read again as the turn starts,
+    // with every message an alert or digest said since, and the turn is
+    // dropped when they no longer let it speak.
+    const checkedAt = now();
+    const toldBefore = await deps.told.messagesSince(new Date(checkedAt - DAY_MS));
+    let dropped: HoldReason | null = null;
     const turn = await service.runCountedTurn(mainChat, brief, {
+      shouldRun: () => {
+        dropped = holdReason({
+          now: now(),
+          timeZone: zone,
+          quietHours,
+          digestTimes,
+          // Since the run began, not since the read: a message said before the
+          // read but not yet in the ledger counts. One counted twice errs silent.
+          toldToday: toldBefore + service.countedSaidSince(at),
+          lastRunAt: null,
+          lastOwnerMessageAt: null,
+          intervalMs,
+          recheck: true,
+        });
+        return dropped === null;
+      },
       quiet: true,
       // Its input stays in the turn's trace. The patrol is the Concierge's
       // own, so its messages carry no source label.
       inputLabel: "Concierge patrol",
       pushLevel: "active",
     });
+    if (dropped) {
+      log.info("patrol held at the speaking turn", { reason: dropped });
+      return { status: "held", reason: dropped };
+    }
     // A Start card counts as said even where no count reached it: the safe
     // side is a tell counted that was not, never one missed.
     const said = Math.max(turn.said, turn.ran && output.speak.offerStart ? 1 : 0);
@@ -594,9 +637,11 @@ export function startConciergePatrol(
 }
 
 /**
- * What the patrol may change of an observation it holds. A topic that ended
- * stays ended, and one already told keeps its due time, so a rewrite can
- * neither reopen it nor bring its deadline near to end its cooldown.
+ * What the patrol may change of an observation it holds. An open topic
+ * already told keeps its due time, so a rewrite cannot bring its deadline
+ * near to end its cooldown. A topic that ended may open again, as a task that
+ * waits once more does, with a due time of its own: its told history stays,
+ * so the cooldown and ignored-twice still hold it.
  */
 function keepWhatCodeOwns(
   draft: ObservationWrite,
@@ -605,8 +650,7 @@ function keepWhatCodeOwns(
   if (!before) return draft;
   return {
     ...draft,
-    ...(before.status !== "open" ? { status: before.status } : {}),
-    ...(before.toldCount > 0 ? { dueAt: before.dueAt } : {}),
+    ...(before.status === "open" && before.toldCount > 0 ? { dueAt: before.dueAt } : {}),
   };
 }
 
@@ -617,7 +661,13 @@ function keepWhatCodeOwns(
 function forMemory(observations: readonly Observation[]) {
   return observations
     .filter(
-      (o) => o.basis === "observed" && !NAMED_SOURCES.includes(o.source) && o.status !== "expired",
+      (o) =>
+        o.basis === "observed" &&
+        !NAMED_SOURCES.includes(o.source) &&
+        // Whatever source it names, a topic about the calendar stays out.
+        !o.topicKey.startsWith("calendar:") &&
+        o.kind !== "anticipated_need" &&
+        o.status !== "expired",
     )
     .map((o) => ({
       topic: o.topicKey,
@@ -636,10 +686,15 @@ function forMemory(observations: readonly Observation[]) {
 /** An observation as the patrol reads it, with whether code would let it be told now. */
 function viewOf(
   o: Observation,
+  all: readonly Observation[],
   at: number,
   taskUpdatedAt: (id: string) => number | null,
 ): PatrolObservationView {
-  const verdict = mayRaise(o, at, o.taskId ? taskUpdatedAt(o.taskId) : null);
+  const verdict = mayRaise(
+    withToldHistoryOfTask(o, all),
+    at,
+    o.taskId ? taskUpdatedAt(o.taskId) : null,
+  );
   return {
     topicKey: o.topicKey,
     kind: o.kind,

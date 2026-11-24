@@ -315,6 +315,9 @@ export type ResolvedTurn = TurnParams & {
   inputLabel?: string;
 };
 
+/** A day, epoch milliseconds: how far back counted messages are kept. */
+const DAY_MS = 24 * 60 * 60_000;
+
 /** What a counted turn said: the chat it ran in, and how many messages. */
 interface SaidCount {
   said: number;
@@ -393,6 +396,8 @@ export class ConciergeService {
   private readonly systemTurns = new Map<string, number>();
   /** Per Concierge chat, the counted turn running there now and what it said so far. */
   private readonly countedTurns = new Map<string, SaidCount>();
+  /** When each message a counted turn said was said, epoch milliseconds, the last day only. */
+  private countedSaidAt: number[] = [];
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
@@ -424,8 +429,7 @@ export class ConciergeService {
    * or a visitor, by the rules of {@link ConciergePush}.
    */
   said(said: SaidInTurn): void {
-    const counted = this.countedTurns.get(said.chatId);
-    if (counted) counted.said++;
+    this.countSaid(said.chatId);
     this.push?.said(said);
   }
 
@@ -1411,21 +1415,38 @@ export class ConciergeService {
   }
 
   /**
-   * Says a card the Concierge shows, which replies as its messages do: to the
-   * message `named`, if it names one. A name that is no message of the chat is
-   * dropped, not refused: the guardian was shown the card already. A card is a
-   * message of its own, so it carries no quote.
-   */
-  /**
    * A card the host's own tools showed in Concierge chat `chatId`, such as an
    * `ask_question` card: it is a message, so a counted turn there counts it.
    * The Concierge's own tools tell {@link said} instead.
    */
   cardShown(chatId: string): void {
-    const counted = this.countedTurns.get(chatId);
-    if (counted) counted.said++;
+    this.countSaid(chatId);
   }
 
+  /** Counts a message of chat `chatId` for the counted turn running there, if one is. */
+  private countSaid(chatId: string): void {
+    const counted = this.countedTurns.get(chatId);
+    if (!counted) return;
+    counted.said++;
+    const now = Date.now();
+    this.countedSaidAt = [...this.countedSaidAt.filter((at) => at > now - DAY_MS), now];
+  }
+
+  /**
+   * How many messages counted turns said since `since`, epoch milliseconds,
+   * as this process saw them, at most a day back. Read synchronously, it
+   * holds what a counted turn said before the ledger has it.
+   */
+  countedSaidSince(since: number): number {
+    return this.countedSaidAt.filter((at) => at >= since).length;
+  }
+
+  /**
+   * Says a card the Concierge shows, which replies as its messages do: to the
+   * message `named`, if it names one. A name that is no message of the chat is
+   * dropped, not refused: the guardian was shown the card already. A card is a
+   * message of its own, so it carries no quote.
+   */
   async addCard(
     chatId: string,
     turnId: string,

@@ -719,13 +719,14 @@ export function startConciergeFollowing(
               },
               pushLevel: "active",
             });
+      // What it said reached the guardian, whether or not the turn ran to its end.
+      if (turn) await recordTold("alert", owner, turn, items);
       // Items the Concierge never had stay owed, and the delivery tries again.
       if (!turn?.ran) throw new Error("the Concierge's important turn did not run to its end");
       await deps.items.markOffered(
         items.map((item) => item.id),
         new Date(now()),
       );
-      await recordTold("alert", owner, turn, items);
       log.info("following important", { items: items.length, held, delivered: true });
     },
   });
@@ -928,13 +929,14 @@ export function startConciergeFollowing(
         log.warn("digest turn threw; its items stay owed", { chatId, error: messageOf(error) });
       }
       log.info("following digest", { chatId, items: items.length, delivered: ok });
+      // What it said reached the guardian, whether or not the turn ran to its end.
+      await recordTold("digest", owner, told, items);
       // A digest that did not run to its end leaves its items and notes for the next one.
       if (!ok) continue;
       await deps.items.markDigested(
         items.map((item) => item.id),
         new Date(now()),
       );
-      await recordTold("digest", owner, told, items);
       if (note) {
         await service.markTaskNotesListed(note).catch((error: unknown) => {
           log.warn("failed to mark digest task notes listed", { chatId, error: messageOf(error) });

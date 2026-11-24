@@ -34,6 +34,8 @@ interface Options {
   /** Messages each Concierge turn says. */
   says?: number;
   definition?: Partial<AgentDefinition>;
+  /** The calendar the patrol reads, changed by a test between runs. */
+  calendar?: { events: { start: string; end: string; title: string; allDay: boolean }[] };
 }
 
 function setup(options: Options = {}) {
@@ -48,6 +50,7 @@ function setup(options: Options = {}) {
   const runs: RunParams[] = [];
   const turns: { chatId: string; prompt: string; options: unknown }[] = [];
   const ownerMessages = [...(options.ownerMessages ?? [])];
+  const countedElsewhere = { said: 0 };
   let nextId = 0;
   const agentRunner: AgentRunnerInterface = {
     run: (params) =>
@@ -103,10 +106,18 @@ function setup(options: Options = {}) {
           ),
       },
     },
-    runCountedTurn: async (chatId: string, prompt: string, turnOptions: unknown) => {
+    runCountedTurn: async (
+      chatId: string,
+      prompt: string,
+      turnOptions: { shouldRun?: () => boolean },
+    ) => {
+      // As the runner does: checked right before the turn runs.
+      if (turnOptions.shouldRun && !turnOptions.shouldRun()) return { ran: false, said: 0, chatId };
       turns.push({ chatId, prompt, options: turnOptions });
       return { ran: true, said: options.says ?? 1, chatId };
     },
+    /** What counted alert and digest turns said while the patrol ran. */
+    countedSaidSince: () => countedElsewhere.said,
   } as unknown as ConciergeService;
   const deps: ConciergePatrolDeps = {
     routines: {
@@ -160,10 +171,14 @@ function setup(options: Options = {}) {
       ownerSpokeAt: async () => ownerMessages.at(-1) ?? null,
     },
     memory: async () => ({ text: "", changedAt: null }),
+    ...(options.calendar
+      ? { calendar: async () => options.calendar?.events.map((event) => ({ ...event })) ?? null }
+      : {}),
     patrolAgent: () =>
       ({
         tools: [],
         actions: [],
+        outputSchema: { type: "object" },
         systemPromptPrefix: "",
         ...options.definition,
       }) as AgentDefinition,
@@ -186,6 +201,7 @@ function setup(options: Options = {}) {
     routines,
     settings,
     actions,
+    countedElsewhere,
     ownerMessages,
     setClock: (at: number) => {
       clock = at;
@@ -461,7 +477,7 @@ describe("what code keeps of a tell", () => {
     expect(s.turns).toHaveLength(1);
   });
 
-  it("keeps a told topic's due time, and never reopens one that ended", async () => {
+  it("keeps an open told topic's due time, and lets an ended one open again under its cooldown", async () => {
     const due = (iso: string) => {
       const answer = speakAbout("loop:tax");
       answer.observations[0]!.due = iso;
@@ -494,9 +510,80 @@ describe("what code keeps of a tell", () => {
       },
       new Date(NOON + 3 * HOUR),
     );
+    // The topic comes back, as the patrol writes it open again: still inside its cooldown.
     s.ownerMessages.push(NOON + 4 * HOUR);
     s.setClock(NOON + 6 * HOUR);
-    expect(await s.patrol.run()).toMatchObject({ status: "silent", hold: "not_open" });
+    expect(await s.patrol.run()).toMatchObject({ status: "silent", hold: "cooldown" });
+    expect((await s.observations.list())[0]?.status).toBe("open");
+    // Past three days it is told again.
+    answer = due(new Date(NOON + 9 * 24 * HOUR).toISOString());
+    s.ownerMessages.push(NOON + 74 * HOUR);
+    s.setClock(NOON + 75 * HOUR);
+    expect(await s.patrol.run()).toMatchObject({ status: "spoke" });
+  });
+});
+
+describe("what holds at the speaking turn", () => {
+  it("drops the turn when an alert used the last message of the day while the patrol ran", async () => {
+    const s = setup({
+      tasks: [waitingTask],
+      answer: () => {
+        // An alert says the day's third message while the model decides.
+        s.countedElsewhere.said = 1;
+        return speakAbout("task:task-1:waiting");
+      },
+    });
+    for (const kind of ["alert", "digest"] as const) {
+      await s.told.record({
+        kind,
+        chatId: MAIN,
+        messages: 1,
+        items: [],
+        at: new Date(NOON - HOUR),
+      });
+    }
+    expect(await s.patrol.run()).toEqual({ status: "held", reason: "daily_cap" });
+    expect(s.turns).toHaveLength(0);
+    expect((await s.observations.list())[0]?.toldCount).toBe(0);
+  });
+
+  it("drops the turn when it starts in a digest's margin", async () => {
+    const s = setup({
+      tasks: [waitingTask],
+      answer: () => {
+        s.setClock(Date.parse("2026-11-23T17:50:00+08:00"));
+        return speakAbout("task:task-1:waiting");
+      },
+    });
+    s.setClock(Date.parse("2026-11-23T17:15:00+08:00"));
+    expect(await s.patrol.run()).toEqual({ status: "held", reason: "near_digest" });
+  });
+});
+
+describe("the calendar signal", () => {
+  it("reads further when an event under a day away is added after a run", async () => {
+    const calendar = {
+      events: [] as { start: string; end: string; title: string; allDay: boolean }[],
+    };
+    const s = setup({ ownerMessages: [NOON - HOUR], calendar });
+    await s.patrol.run();
+    s.setClock(NOON + 3 * HOUR);
+    expect(await s.patrol.run()).toEqual({ status: "quiet", reasons: [] });
+    // Synced now, six hours away: never crossed the one-day boundary since a run.
+    calendar.events.push({
+      start: new Date(NOON + 9 * HOUR).toISOString(),
+      end: new Date(NOON + 10 * HOUR).toISOString(),
+      title: "Call with Mei",
+      allDay: false,
+    });
+    s.setClock(NOON + 4 * HOUR);
+    await s.patrol.run();
+    expect(s.runs).toHaveLength(2);
+    // And when it moves.
+    calendar.events[0]!.start = new Date(NOON + 8 * HOUR).toISOString();
+    s.setClock(NOON + 6 * HOUR);
+    await s.patrol.run();
+    expect(s.runs).toHaveLength(3);
   });
 });
 
