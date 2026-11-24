@@ -17,7 +17,7 @@ import { createSessions } from "../agent/index.js";
 import { TurnListeners } from "../agent/index.js";
 import { AppTurnHooks } from "./app-turn-hooks.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
-import type { RomeToolGroup, RomeTools } from "../agent/index.js";
+import type { RomeToolGroup, RomeTools, RomeToolResult } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { bothAvailable, fakeAccounts } from "../test/kit/model-accounts.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
@@ -450,10 +450,7 @@ class McpSessionModelProvider extends MockModelProvider {
   }
 }
 
-interface McpToolResult {
-  content: Array<{ type: string; text: string }>;
-  isError?: boolean;
-}
+type McpToolResult = RomeToolResult;
 
 async function callMcpTool(
   server: RomeTools,
