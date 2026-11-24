@@ -406,13 +406,15 @@ describe("ActionEngine", () => {
       const inMain = async (): Promise<ActionResult> => ({ status: "ok", data: "ran-in-main" });
 
       function engineWith(
-        actions: Action[],
+        actions: Action[] | ActionRegistryImpl,
         isFirstPartyAction?: (name: string) => boolean,
         maxWorkerProcesses = 8,
         autoRespond = true,
+        mainActions?: ReadonlySet<string>,
       ) {
-        const registry = new ActionRegistryImpl();
-        for (const action of actions) registry.register(action);
+        let registry = new ActionRegistryImpl();
+        if (actions instanceof ActionRegistryImpl) registry = actions;
+        else for (const action of actions) registry.register(action);
         const { children, actionWorkerFork } = installFakeChildProcessFactory({ autoRespond });
         const engine = new ActionEngine(registry, createActionEngineRepos(), {
           processRole: "main",
@@ -420,6 +422,7 @@ describe("ActionEngine", () => {
           maxWorkerProcesses,
           actionWorkerFork,
           isFirstPartyAction,
+          mainActions,
         });
         return { engine, children, actionWorkerFork };
       }
@@ -462,6 +465,68 @@ describe("ActionEngine", () => {
 
         children[0].completeNext();
         await expect(busy).resolves.toEqual({ status: "ok", data: "root" });
+      });
+
+      it("runs an action core registers in main alone, such as an agent tool, in main", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [buildAction("system:pause_routine", { type: "system", execute: inMain })],
+          () => true,
+          8,
+          true,
+          new Set(["system:pause_routine"]),
+        );
+
+        await expect(engine.run("system:pause_routine", {})).resolves.toEqual({
+          status: "ok",
+          data: "ran-in-main",
+        });
+        expect(actionWorkerFork).not.toHaveBeenCalled();
+      });
+
+      it("runs core's own main action in main even when its app's first-party check fails", async () => {
+        const { engine, actionWorkerFork } = engineWith(
+          [buildAction("system:pause_routine", { type: "system", execute: inMain })],
+          () => {
+            throw new Error("lockfile unreadable");
+          },
+          8,
+          true,
+          new Set(["system:pause_routine"]),
+        );
+
+        await expect(engine.run("system:pause_routine", {})).resolves.toEqual({
+          status: "ok",
+          data: "ran-in-main",
+        });
+        expect(actionWorkerFork).not.toHaveBeenCalled();
+      });
+
+      it("forks a worker for an app's action under a main action's name", async () => {
+        const registry = new ActionRegistryImpl();
+        registry.register(
+          buildAction("system:pause_routine", { type: "system", execute: inMain }),
+          {
+            kind: "action",
+            ownerType: "app",
+            ownerId: "system",
+            publicName: "pause_routine",
+            aliases: [],
+            sourcePath: "",
+          },
+        );
+        const { engine, actionWorkerFork } = engineWith(
+          registry,
+          () => false,
+          8,
+          true,
+          new Set(["system:pause_routine"]),
+        );
+
+        await expect(engine.run("system:pause_routine", {})).resolves.toEqual({
+          status: "ok",
+          data: "system:pause_routine",
+        });
+        expect(actionWorkerFork).toHaveBeenCalledTimes(1);
       });
 
       it("forks a worker for a first-party action outside the allowlist", async () => {

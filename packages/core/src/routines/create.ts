@@ -164,7 +164,7 @@ export function unknownActionError(actionName: string, suggestion?: string): str
 }
 
 /** The routine actions only the guardian's own message can call
- * (routines/turn-access.ts). */
+ * (apps/actions/who-may-ask.ts). */
 const GUARDIAN_MESSAGE_ONLY = new Set([
   "system:pause_routine",
   "system:resume_routine",

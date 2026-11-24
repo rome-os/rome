@@ -1,6 +1,6 @@
 // Renaming a routine and turning it off or back on. The Routines page does this
 // through `PATCH /routines/:id`, and agents through `system:pause_routine` and
-// `system:resume_routine` (routines/control.ts), so both keep one rule.
+// `system:resume_routine` (routines/agent-tools.ts), so both keep one rule.
 
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import type { RoutineEngine } from "./engine.js";

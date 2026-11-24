@@ -1,7 +1,0 @@
-name: list_routine_runs
-type: system
-description: Check what a routine did — whether it is on, when it last ran and runs next, and its recent runs newest first, each with its status (success, error, running, pending_approval or cancelled), time and error. Use it when the guardian asks whether a routine ran, failed or is due. Find the routine's id with system:search_routine
-complexity: simple
-speed: fast
-reliability: high
-sideEffects: read-only

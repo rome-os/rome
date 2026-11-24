@@ -7,6 +7,7 @@
 import { actionExecutionContext } from "../../apps/actions/context.js";
 import { PERSONAL_DATA_PRIVATE_ONLY } from "../../apps/actions/personal-data.js";
 import type { ActionRegistry, ActionResult } from "../../apps/actions/types.js";
+import { changeRefusalReason, type ToolTurn } from "../../apps/actions/who-may-ask.js";
 import type { DeviceRunResult } from "../../desktops/node-devices.js";
 import { createLogger } from "../../logger.js";
 import { connectStep } from "./connect-step.js";
@@ -33,11 +34,7 @@ export interface DeviceActionDeps {
     args: Record<string, unknown>,
   ) => Promise<DeviceRunResult>;
   /** The running turn's audience and asking device. Default: the action's own run context. */
-  turn?: () => LiveTurn & {
-    audience?: string;
-    /** The guardian's own message started the turn, from their signed-in session. */
-    byGuardian?: boolean;
-  };
+  turn?: () => LiveTurn & Pick<ToolTurn, "audience" | "actor">;
   now?: () => number;
 }
 
@@ -57,7 +54,7 @@ export function registerDeviceActions(
       return {
         audience: store?.audience,
         askingDeviceId: askingDeviceOf(store?.channelContext),
-        byGuardian: store?.actor?.kind === "guardian" && store.actor.via === "cookie",
+        actor: store?.actor,
       };
     });
 
@@ -148,11 +145,11 @@ export function registerDeviceActions(
       if (device !== undefined && typeof device !== "string") {
         return { status: "error", error: "Invalid input: device must be a device id." };
       }
-      const { audience, askingDeviceId, byGuardian = false } = turn();
+      const { audience, askingDeviceId, actor } = turn();
       const route = routes.forOperation(operation, { askingDeviceId, deviceId: device });
       return runOperation(
         deps,
-        { audience, byGuardian },
+        { audience, actor },
         operation,
         args as Record<string, unknown>,
         route,
@@ -163,7 +160,7 @@ export function registerDeviceActions(
 
 async function runOperation(
   deps: DeviceActionDeps,
-  { audience, byGuardian }: { audience: string | undefined; byGuardian: boolean },
+  { audience, actor }: Pick<ToolTurn, "audience" | "actor">,
   operation: string,
   args: Record<string, unknown>,
   route: ReturnType<ReturnType<typeof createLiveRoutes>["forOperation"]>,
@@ -199,7 +196,8 @@ async function runOperation(
     };
   }
   // A change to the guardian's device is theirs to ask for, in their own chat.
-  if (access === "write" && audience !== "private") {
+  const refusal = access === "write" ? changeRefusalReason({ audience, actor }) : null;
+  if (refusal === "not_private") {
     log.info("device write refused outside a private turn", {
       capability: chosen.capability,
       operation,
@@ -211,9 +209,7 @@ async function runOperation(
         "cannot be changed from it. Say so, and that they can ask in their own chat.",
     };
   }
-  // Only a turn the guardian's own message started: never a routine, a
-  // followed mail or another agent acting on what it read.
-  if (access === "write" && !byGuardian) {
+  if (refusal === "not_guardian") {
     log.info("device write refused in a turn the guardian did not start", {
       capability: chosen.capability,
       operation,

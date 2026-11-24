@@ -323,6 +323,10 @@ interface ActionEngineOptions {
    * worker. Trust never comes from the action's own manifest. Absent, every
    * root takes a worker as before. */
   isFirstPartyAction?: (actionName: string) => boolean;
+  /** Main-only: actions core registers in main alone, such as its agent tools
+   *  (agent-tool.ts). Each runs as a root in main while the registry says core
+   *  owns it, whatever any app's first-party flag says. */
+  mainActions?: ReadonlySet<string>;
   /** Main-only: who can read a chat. A first-party root run given a chat and
    *  no audience, such as the inbox's message handler, takes the chat's. */
   placeAudience?: (context: ThreadContext) => Promise<"private" | "shared">;
@@ -455,6 +459,7 @@ export class ActionEngine {
   private actionSubprocessRunner: ActionSubprocessRunner | null;
   private actionWorkerFork: ActionEngineOptions["actionWorkerFork"];
   private isFirstPartyAction: ActionEngineOptions["isFirstPartyAction"];
+  private mainActions: ReadonlySet<string>;
   private placeAudience: ActionEngineOptions["placeAudience"];
   private onWorkerInterrupted: ActionEngineOptions["onWorkerInterrupted"];
   private onApprovalCreated: ActionEngineOptions["onApprovalCreated"];
@@ -492,6 +497,7 @@ export class ActionEngine {
     this.actionSubprocessRunner = options?.actionSubprocessRunner ?? null;
     this.actionWorkerFork = options?.actionWorkerFork;
     this.isFirstPartyAction = options?.isFirstPartyAction;
+    this.mainActions = options?.mainActions ?? new Set();
     this.placeAudience = options?.placeAudience;
     this.workerWarmPoolSize =
       this.processRole === "main"
@@ -1910,13 +1916,19 @@ export class ActionEngine {
     }
   }
 
-  /** Whether a root runs in main: a first-party coordination action that is
-   * not cancellable. Cancellable actions keep their worker so process-level
+  /** Whether a root runs in main: a core-owned main action, or a first-party
+   * coordination action, that is not cancellable. Cancellable actions keep their worker so process-level
    * termination stays available. A failing or absent trust check means a
    * worker, as before. */
   private runsRootInMain(action: Action): boolean {
     if (action.config.cancellable) return false;
-    if (!COORDINATION_ACTIONS.has(action.config.name)) return false;
+    const name = action.config.name;
+    // Core registers its own tools in main alone, so no app's trust decides
+    // where they run, and an app action of the same name is never placed here.
+    if (this.mainActions.has(name) && this.registry.getMetadata?.(name)?.ownerType === "core") {
+      return true;
+    }
+    if (!COORDINATION_ACTIONS.has(name) && !this.mainActions.has(name)) return false;
     if (!this.isFirstPartyAction) return false;
     try {
       return this.isFirstPartyAction(action.config.name);
