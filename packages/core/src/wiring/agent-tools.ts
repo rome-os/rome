@@ -8,10 +8,12 @@ import type { AgentTool } from "../apps/actions/agent-tool.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
 import { type OwnerOfChat, whoMayAsk } from "../apps/actions/who-may-ask.js";
 import { connectionTools } from "../connections/agent-tools.js";
+import { deviceTools } from "../connections/device/agent-tools.js";
 import { routineTools } from "../routines/agent-tools.js";
 
 const PAGES = {
   connections: connectionTools,
+  devices: deviceTools,
   routines: routineTools,
 };
 

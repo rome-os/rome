@@ -68,6 +68,12 @@ export type DeviceFilesErrorCode =
   | "permission_denied"
   | "unavailable";
 
+/** The body of a device rename (`PATCH /api/devices/:deviceId`). Rome Cloud
+ * checks the name: 1 to 80 characters, with no control characters. */
+export const deviceRenameSchema = z.object({
+  name: z.string().describe("The device's new name, 1 to 80 characters."),
+});
+
 /** Why renaming or removing a device failed. */
 export type DeviceManageErrorCode = "device_not_found" | "invalid_device_name" | "unavailable";
 
