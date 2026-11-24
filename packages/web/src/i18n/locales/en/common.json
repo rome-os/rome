@@ -172,6 +172,8 @@
   },
   "thisComputer": {
     "label": "Computer use",
+    "permissions": "Screen control permissions",
+    "permissionsFailed": "Could not open screen control permissions. Check that the desktop app is up to date.",
     "auditLog": "Computer use log",
     "tooltip": {
       "connected": "Rome can use this computer",
