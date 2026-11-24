@@ -14,8 +14,10 @@ import {
   type AgentSession,
   type TurnActor,
   type ModelProvider,
+  type ModelSessionEvent,
   type SubmitOptions,
   type AgentComputerUse,
+  type ComputerUseGrant,
 } from "../agent/index.js";
 import { createSessionFromRun } from "./agent-runner.js";
 import { bothAvailable, fakeAccounts } from "../test/kit/model-accounts.js";
@@ -371,6 +373,249 @@ it("releases the caller lease when a computer-use grant is rejected on submit", 
     ).toThrow("requires an unexpired grant for a private guardian turn");
     expect(inUse(nonPrivate)).toBe(false);
   }, guardian);
+});
+
+it("drains a provider-retained steer B into its own ungranted turn before queued granted turn G opens", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "rome-abg-retained-steer-"));
+  const rows = new Map<string, Session>();
+  const repository: SessionRepository = {
+    session: async (id) => rows.get(id) ?? null,
+    current: async () => [...rows.values()][0] ?? null,
+    predecessorOf: async () => null,
+    add: async (row) => {
+      rows.set(row.id, row);
+      row.markSaved();
+    },
+    save: async (row) => {
+      row.markSaved();
+    },
+    replace: async () => {
+      throw new Error("unexpected replacement");
+    },
+    deprecatedCheckpoint: async () => null,
+  };
+  const agent: Agent = {
+    name: "core:concierge",
+    localName: "concierge",
+    ownerId: "core",
+    ownerType: "core",
+    definition: {
+      description: "synthetic",
+      tier: "medium",
+      providerId: "anthropic",
+      reasoningEffort: "high",
+      systemPromptPrefix: "Synthetic test",
+      tools: [],
+      actions: ["*"],
+      permissionMode: "default",
+    },
+  };
+  const loader: AgentCatalog = { find: () => agent, list: () => [agent] };
+  const grant: ComputerUseGrant = {
+    deviceId: "synthetic-device",
+    expiresAt: Date.now() + 30_000,
+    allowPreemption: true,
+  };
+
+  let facts: TurnFacts | undefined;
+  const finishA = gate();
+  const steeredB = gate();
+  const observed: Array<{
+    nativeInputId: string;
+    turnId: string | undefined;
+    grant: ComputerUseGrant | undefined;
+  }> = [];
+
+  // Models Anthropic's native queue semantics: a steer accepted while turn A is
+  // running sits in the provider's native queue; if A ends before consuming it,
+  // the provider reports it `queued` (retained) and pauses until Rome opens the
+  // next turn, answering native-queued inputs in FIFO order.
+  const provider: ModelProvider = {
+    id: "anthropic",
+    builtinTools: new Set(),
+    openSession: async () => {
+      const outbox: ModelSessionEvent[] = [];
+      let notifyOutbox: (() => void) | undefined;
+      let closed = false;
+      const pushEvent = (event: ModelSessionEvent) => {
+        outbox.push(event);
+        notifyOutbox?.();
+        notifyOutbox = undefined;
+      };
+      const nativeQueue: string[] = [];
+      const pendingSteers = new Set<string>();
+      const deferredInputs = new Set<string>();
+      let resumeTurn: (() => void) | undefined;
+
+      const driver = (async () => {
+        const waitOpen = () =>
+          new Promise<void>((resolve) => {
+            resumeTurn = resolve;
+          });
+        while (!closed) {
+          if (nativeQueue.length === 0) {
+            await waitOpen();
+            if (closed) break;
+          }
+          const nativeInputId = nativeQueue.shift()!;
+          pushEvent({ type: "input_status", inputId: nativeInputId, state: "consumed" });
+          observed.push({
+            nativeInputId,
+            turnId: facts?.turnId(),
+            grant: facts?.computerUseGrant?.(),
+          });
+          if (nativeInputId === "input-a") {
+            await finishA.promise;
+            for (const steeredId of pendingSteers) {
+              deferredInputs.add(steeredId);
+              pushEvent({ type: "input_status", inputId: steeredId, state: "queued" });
+            }
+            pendingSteers.clear();
+          }
+          pushEvent({
+            type: "result",
+            content: `reply:${nativeInputId}`,
+            reasoningEffort: "medium",
+          });
+          if (deferredInputs.size > 0) {
+            await waitOpen();
+          }
+        }
+      })();
+
+      return {
+        providerId: "anthropic",
+        model: "synthetic",
+        events: (async function* () {
+          while (!closed || outbox.length > 0) {
+            if (outbox.length === 0) {
+              await new Promise<void>((resolve) => {
+                notifyOutbox = resolve;
+              });
+              continue;
+            }
+            yield outbox.shift()!;
+          }
+        })(),
+        sendUserInput: async (input) => {
+          const id = input.inputId ?? "anonymous";
+          if (!deferredInputs.delete(id)) {
+            nativeQueue.push(id);
+          }
+          resumeTurn?.();
+          resumeTurn = undefined;
+        },
+        steerUserInput: async (input) => {
+          if (!input.inputId) return "deferred";
+          pendingSteers.add(input.inputId);
+          nativeQueue.push(input.inputId);
+          steeredB.resolve();
+          return "accepted";
+        },
+        interrupt: async () => {},
+        close: async () => {
+          closed = true;
+          resumeTurn?.();
+          notifyOutbox?.();
+          await driver;
+        },
+      };
+    },
+  };
+
+  const noop = () => {};
+  const manager = createSessions(
+    {
+      agentLoader: loader,
+      sessionRepository: repository,
+      systemPrompts: { build: () => "Synthetic test", fingerprint: () => "synthetic" } as never,
+      modelResolver: createModelResolver({
+        providers: [provider],
+        accounts: fakeAccounts(bothAvailable()),
+      }),
+      networkMcpServers: () => ({}),
+      skillCatalog: { list: () => [], find: () => undefined },
+      turnLifecycle: { started: noop, ended: noop, couldNotStart: noop } as never,
+      readAnswerShape: () => {
+        throw new Error("unexpected output schema");
+      },
+      sessionTracing: romeSessionTracing,
+      turnUsage: new Proxy({}, { get: () => noop }) as never,
+      folders: { defaultWorkingDir: directory, projectsFolder: directory },
+      log: { info: noop, warn: noop, error: noop },
+      actions: {
+        list: () => [],
+        permits: () => false,
+        appOf: () => undefined,
+        find: () => undefined,
+        run: async () => ({ status: "ok" }),
+      },
+      defer: {
+        schedule: async () => {
+          throw new Error("unexpected defer");
+        },
+      },
+      sessionTools: {
+        forTurn: async (turn) => {
+          facts = turn;
+          return [];
+        },
+      },
+    },
+    { keepAliveAcrossTurns: true },
+  );
+
+  try {
+    const session = await manager.open(
+      { agentName: agent.name, channelThreadKey: "webchat:abg" },
+      {
+        workingDir: directory,
+        audience: "private",
+        threadContext: { channel: "webchat", threadId: "abg", threadType: "private" },
+      },
+    );
+
+    // 1. Start ordinary turn A.
+    const receiptA = session.submit(
+      { inputId: "input-a", prompt: "turn A" },
+      { actor: guardian, priority: "next" },
+    );
+    await rs.waitFor(() => expect(observed).toHaveLength(1));
+
+    // 2. Queue identified granted turn G behind A (same mutex priority 1 as normal identified turns).
+    const receiptG = session.submit(
+      { inputId: "input-g", prompt: "turn G" },
+      { actor: guardian, priority: "after", computerUseGrant: grant },
+    );
+
+    // 3. Steer ordinary input B into A, then let A end with B retained by the provider.
+    const receiptB = session.submit(
+      { inputId: "input-b", prompt: "steer B" },
+      { actor: guardian, priority: "next" },
+    );
+    await steeredB.promise;
+    finishA.resolve();
+
+    const turnA = await receiptA.turn;
+    const turnB = await receiptB.turn;
+    const turnG = await receiptG.turn;
+    const [endA, endB, endG] = await Promise.all([turnA.ended(), turnB.ended(), turnG.ended()]);
+
+    expect(endA).toMatchObject({ terminal: { type: "result", content: "reply:input-a" } });
+    expect(endB).toMatchObject({ terminal: { type: "result", content: "reply:input-b" } });
+    expect(endG).toMatchObject({ terminal: { type: "result", content: "reply:input-g" } });
+
+    // B must drain in its own ungranted turn BEFORE G runs with G's grant.
+    expect(observed).toEqual([
+      { nativeInputId: "input-a", turnId: turnA.id, grant: undefined },
+      { nativeInputId: "input-b", turnId: turnB.id, grant: undefined },
+      { nativeInputId: "input-g", turnId: turnG.id, grant },
+    ]);
+  } finally {
+    finishA.resolve();
+    await manager.shutdown();
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 for (const reason of ["user-stop", "superseded"] as const) {
