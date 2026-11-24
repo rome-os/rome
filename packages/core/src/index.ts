@@ -414,6 +414,7 @@ import {
 import {
   ChatSettingsRepository,
   ChatSettingsService,
+  chatCommands,
   heardUnlessSwitchedOff,
 } from "./chat-settings/index.js";
 import { recordGrantAccounts } from "./connections/grant-accounts.js";
@@ -2374,16 +2375,24 @@ async function main() {
     },
     settingsRepo,
     chatSettings,
-    chatStop,
     peopleRepo,
     whatsAppSyncSink: refreshingAfter(
       whatsAppStoreRepo,
       ["upsertContacts", "upsertChats"],
       refreshWhatsAppProfiles,
     ),
-    listAgents: () => agentLoader.list().map((agent) => agent.name),
-    hasAgent: (name) => agentLoader.find(name) !== undefined,
-    accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
+    // A Discord bot's slash commands read and change its chats' rules.
+    discordCommandsOf: (connectionId) =>
+      chatCommands({
+        connectionId,
+        service: "discord",
+        settings: chatSettings,
+        chatStop,
+        personOf: (accountId) => peopleRepo.byAccount({ platform: "discord", id: accountId }),
+        listAgents: () => agentLoader.list().map((agent) => agent.name),
+        hasAgent: (name) => agentLoader.find(name) !== undefined,
+        accountAgent: () => accountAgentOf(connectionId) ?? null,
+      }),
     // The account that connected is the guardian's own, so People links it.
     onWhatsAppAccountConnected: (selfJid) => {
       linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {

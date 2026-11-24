@@ -23,10 +23,7 @@ import type { StreamFault, Talker } from "../types.js";
 // and lets a test make start() reject with a chosen error.
 type FakeConfig = {
   botToken: string;
-  resolveDiscordPerson?: (channelUserId: string) => Promise<{
-    id: string;
-    bondLevel: string;
-  } | null>;
+  commands?: unknown;
   onGatewayFault?: (f: { kind: "credential" | "transport"; cause: unknown }) => void;
 };
 type FakeChat = {
@@ -121,8 +118,6 @@ function flush(): Promise<void> {
 
 const deps = {
   chatSettings: {} as never,
-  peopleRepo: { byAccount: rs.fn(async () => null) } as never,
-  listAgents: () => [],
   validateToken: async () => {},
 };
 
@@ -224,26 +219,18 @@ describe("discord descriptor shape", () => {
     await stopped;
   });
 
-  it("resolves command actors through the same Discord person link used by inbound messages", async () => {
-    const guardian = { id: "guardian", bondLevel: "guardian" };
-    const findByChannelUser = rs.fn(async () => guardian);
-    const desc = makeDiscordDescriptor({
-      ...deps,
-      peopleRepo: { byAccount: findByChannelUser } as never,
-    });
+  it("hands each Connection's bot the commands made for that Connection", async () => {
+    const commands = { list: [], ran: async () => "", suggest: async () => [] };
+    const commandsOf = rs.fn(() => commands);
+    const desc = makeDiscordDescriptor({ ...deps, commandsOf });
     desc.capabilities.talker!.build(validCred(), {
       connectionId: "discord-test",
       persist: async () => {},
       registerIngress: () => () => {},
     });
 
-    await expect(fakeState.lastConfig?.resolveDiscordPerson?.("guardian-777")).resolves.toEqual(
-      guardian,
-    );
-    expect(findByChannelUser).toHaveBeenCalledWith({
-      platform: "discord",
-      id: "guardian-777",
-    });
+    expect(commandsOf).toHaveBeenCalledWith("discord-test");
+    expect(fakeState.lastConfig?.commands).toBe(commands);
   });
 
   it("passes the opaque conversation id to the adapter and returns its receipt", async () => {

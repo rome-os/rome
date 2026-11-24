@@ -16,10 +16,10 @@
 
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
+import type { ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures } from "../types.js";
 import { DiscordAdapter, type GuildChannelInfo } from "../kinds/discord/discord.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
+import type { Commands } from "../command.js";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
@@ -99,23 +99,13 @@ export function isDiscordAuthError(err: unknown): boolean {
   );
 }
 
-/**
- * Runtime deps the Discord adapter needs, threaded from index.ts at descriptor
- * registration time (the bridge/registry have no repo access). Mirrors what
- * ChannelManager.createAdapter passes today: the settings repo (channel config
- * read/write for slash commands) and the loaded-agent lister (agent-routing
- * validation + autocomplete).
- */
+/** What the Discord descriptor is given at registration, threaded from
+ *  index.ts where the services exist. */
 export interface DiscordDeps {
   chatSettings: ChatSettingsPort;
-  chatStop?: ChatStopHandler;
-  peopleRepo: PeopleRepository;
-  listAgents: () => string[];
-  /** The agent linked to a Connection's channel, as `accountAgentResolver`
-   *  answers it for that channel. */
-  accountAgentOf?: (connectionId: string) => string | null | undefined;
-  /** Whether an agent is loaded, aliases included. */
-  hasAgent?: (name: string) => boolean;
+  /** The commands a Connection's bot offers as slash commands. Absent, it
+   *  offers none. */
+  commandsOf?: (connectionId: string) => Commands;
   /** Injectable token validator so the connect route / tests can drive the
    *  users/@me probe without hitting the network. Production pings the Discord
    *  REST API; a 401/!ok means the pasted token is not accepted. */
@@ -271,12 +261,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             botToken: token.token,
             connectionId: kit.connectionId,
             chatSettings: deps.chatSettings,
-            chatStop: deps.chatStop,
-            listAgents: deps.listAgents,
-            accountAgent: () => deps.accountAgentOf?.(kit.connectionId),
-            hasAgent: deps.hasAgent,
-            resolveDiscordPerson: (channelUserId) =>
-              deps.peopleRepo.byAccount({ platform: "discord", id: channelUserId }),
+            ...(deps.commandsOf ? { commands: deps.commandsOf(kit.connectionId) } : {}),
             // Live gateway faults (post-login) route through here; the descriptor
             // maps the adapter's kind onto grant state vs. transport.
             onGatewayFault: ({ kind, cause }) => {
