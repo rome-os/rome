@@ -15,6 +15,8 @@ const conversation = rs.hoisted(() => ({
   handlers: null as null | {
     onState(state: string): void;
     onEnded(reason: string | null): void;
+    onHeard?(text: string): void;
+    onCaption?(text: string): void;
   },
   muted: [] as boolean[],
   ended: 0,
@@ -108,6 +110,31 @@ describe("voice conversation in the Concierge's message field", () => {
     expect(conversation.ended).toBe(1);
     expect(document.querySelector("[data-voice-conversation-capsule]")).toBeNull();
     expect(screen.getByRole("button", { name: "Voice conversation" })).toBeTruthy();
+  });
+
+  it("shows the words not sent yet while listening, and Rome's sentence while it speaks", async () => {
+    renderComposer(true);
+    fireEvent.click(await screen.findByRole("button", { name: "Voice conversation" }));
+    const shown = () => document.querySelector("[data-voice-conversation-text]");
+    expect(shown()).toBeNull();
+
+    act(() => conversation.handlers?.onHeard?.("Book a table for"));
+    expect(shown()?.getAttribute("data-voice-conversation-text")).toBe("unsent");
+    expect(shown()?.textContent).toBe("Book a table for");
+
+    // The turn is sent: the words leave the capsule for the chat.
+    act(() => conversation.handlers?.onHeard?.(""));
+    expect(shown()).toBeNull();
+
+    act(() => {
+      conversation.handlers?.onState("speaking");
+      conversation.handlers?.onCaption?.("For how many?");
+    });
+    expect(shown()?.getAttribute("data-voice-conversation-text")).toBe("caption");
+    expect(shown()?.textContent).toBe("For how many?");
+
+    act(() => conversation.handlers?.onState("listening"));
+    expect(shown()).toBeNull();
   });
 
   it("ends the conversation when the host hides the composer without unmounting it", async () => {

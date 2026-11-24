@@ -75,6 +75,7 @@ import {
   VoiceConversationCapsule,
   VoiceConversationEnd,
   VoiceConversationMute,
+  VoiceConversationText,
 } from "./VoiceConversationControl";
 import type { ReplyTarget } from "../reply/reply-draft";
 
@@ -398,11 +399,19 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           />
         )}
         {conversation.active ? (
-          <VoiceConversationCapsule
-            state={conversation.state}
-            muted={conversation.muted}
-            level={conversation.level}
-          />
+          <>
+            <VoiceConversationCapsule
+              state={conversation.state}
+              muted={conversation.muted}
+              level={conversation.level}
+            />
+            {/* Speaking, Rome's sentence; otherwise the guardian's words not sent yet. */}
+            {conversation.state === "speaking" ? (
+              <VoiceConversationText text={conversation.caption} />
+            ) : (
+              <VoiceConversationText text={conversation.heard} unsent />
+            )}
+          </>
         ) : null}
         {conversation.asking || conversation.stopped ? (
           <p role="status" className="mb-2 text-center text-ui text-muted-foreground">

@@ -33,6 +33,10 @@ export interface ConversationHandlers {
   onEnded(reason: ConversationStopReason | null): void;
   /** True while the browser asks the guardian for the microphone, false once answered. */
   onAsking?(asking: boolean): void;
+  /** What Rome has heard of the guardian's turn, not sent yet. Empty once the turn is sent. */
+  onHeard?(text: string): void;
+  /** The reply's sentence playing now, as its audio starts. Empty once the guardian speaks over it. */
+  onCaption?(text: string): void;
 }
 
 export interface VoiceConversation {
@@ -99,11 +103,37 @@ export function startVoiceConversation(
   // The reply's sample rate, once Rome names it.
   let sampleRate = 0;
   let quietTimer: ReturnType<typeof setTimeout> | null = null;
+  // Each caption waits for the audio queued before its sentence.
+  const captionTimers = new Set<ReturnType<typeof setTimeout>>();
+  const clearCaptions = () => {
+    for (const timer of captionTimers) clearTimeout(timer);
+    captionTimers.clear();
+  };
+  // A caption comes before its sentence's audio, which plays after the audio queued so far.
+  const captionWhenPlayed = (text: string) => {
+    const timer = setTimeout(() => {
+      captionTimers.delete(timer);
+      handlers.onCaption?.(text);
+    }, player.ahead() * 1000);
+    captionTimers.add(timer);
+  };
+  // The guardian's turn went to the chat: its words leave the page, and the last reply's too.
+  const turnSent = () => {
+    handlers.onHeard?.("");
+    handlers.onCaption?.("");
+  };
+  // The guardian spoke over the reply: what has not played goes, and its words with it.
+  const dropUnplayed = () => {
+    player.clear();
+    clearCaptions();
+    handlers.onCaption?.("");
+  };
 
   const teardown = () => {
     done = true;
     microphone?.close();
     player.close();
+    clearCaptions();
     if (quietTimer) clearTimeout(quietTimer);
     window.removeEventListener("offline", lost);
     if (socket) {
@@ -171,7 +201,10 @@ export function startVoiceConversation(
         const data = message.data;
         if (data.type === "ready") sampleRate = data.sampleRate;
         else if (data.type === "state") handlers.onState(data.state);
-        else if (data.type === "clear") player.clear();
+        else if (data.type === "heard") handlers.onHeard?.(`${data.settled}${data.pending}`);
+        else if (data.type === "turn") turnSent();
+        else if (data.type === "caption") captionWhenPlayed(data.text);
+        else if (data.type === "clear") dropUnplayed();
         else if (data.type === "ended") finish(null);
         else if (data.type === "error") finish(data.reason);
       };

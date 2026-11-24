@@ -42,12 +42,14 @@ function setup(refuse?: string) {
   const played: Array<[number, number]> = [];
   let cleared = 0;
   let closedPlayer = false;
+  let ahead = 0;
   const player: PcmPlayer = {
     play: (chunk, rate) => played.push([chunk.byteLength, rate]),
     clear: () => {
       cleared += 1;
     },
     level: () => 0.5,
+    ahead: () => ahead,
     close: () => {
       closedPlayer = true;
     },
@@ -71,9 +73,16 @@ function setup(refuse?: string) {
   };
   const states: string[] = [];
   const ended: Array<ConversationStopReason | null> = [];
+  const heard: string[] = [];
+  const captions: string[] = [];
   const conversation = startVoiceConversation(
     "concierge",
-    { onState: (s) => states.push(s), onEnded: (r) => ended.push(r) },
+    {
+      onState: (s) => states.push(s),
+      onEnded: (r) => ended.push(r),
+      onHeard: (text) => heard.push(text),
+      onCaption: (text) => captions.push(text),
+    },
     deps,
   );
   return {
@@ -81,6 +90,11 @@ function setup(refuse?: string) {
     conversation,
     states,
     ended,
+    heard,
+    captions,
+    setAhead: (seconds: number) => {
+      ahead = seconds;
+    },
     played,
     cleared: () => cleared,
     closedPlayer: () => closedPlayer,
@@ -111,6 +125,37 @@ describe("a voice conversation in the browser", () => {
 
     c.socket.say({ type: "clear" });
     expect(c.cleared()).toBe(1);
+  });
+
+  it("shows what Rome hears until the turn is sent, and each caption as its audio starts", async () => {
+    rs.useFakeTimers();
+    try {
+      const c = setup();
+      await rs.advanceTimersByTimeAsync(0);
+      c.socket.open();
+      c.socket.say({ type: "heard", settled: "Book a ", pending: "table" });
+      c.socket.say({ type: "turn", text: "Book a table" });
+      expect(c.heard).toEqual(["Book a table", ""]);
+      expect(c.captions).toEqual([""]);
+
+      // The first sentence has nothing before it; the second waits for the first's audio.
+      c.socket.say({ type: "caption", text: "Sure." });
+      rs.advanceTimersByTime(0);
+      c.setAhead(1.5);
+      c.socket.say({ type: "caption", text: "For how many?" });
+      rs.advanceTimersByTime(1_400);
+      expect(c.captions).toEqual(["", "Sure."]);
+      rs.advanceTimersByTime(100);
+      expect(c.captions).toEqual(["", "Sure.", "For how many?"]);
+
+      // Speaking over the reply drops the captions not shown yet.
+      c.socket.say({ type: "caption", text: "Indoors?" });
+      c.socket.say({ type: "clear" });
+      rs.advanceTimersByTime(2_000);
+      expect(c.captions).toEqual(["", "Sure.", "For how many?", ""]);
+    } finally {
+      rs.useRealTimers();
+    }
   });
 
   it("sends no audio while muted", async () => {
