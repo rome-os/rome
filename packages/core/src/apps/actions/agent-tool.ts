@@ -12,6 +12,7 @@ import {
 } from "@rome-os/app-runtime";
 import type { z } from "zod";
 import { actionExecutionContext } from "./context.js";
+import { withApprovalPerCall } from "./types.js";
 import type { ToolTurn, WhoMayAsk } from "./who-may-ask.js";
 
 export type { ToolTurn } from "./who-may-ask.js";
@@ -41,9 +42,13 @@ export interface AgentToolSpec<D, S extends z.ZodType> {
   /** The tool's arguments, each with a `.describe()` the agent reads. An
    *  argument that does not fit answers the agent with what is wrong. */
   input: S;
-  /** Present when the guardian approves each call on a card first: the card's
-   *  words, for the parsed input. */
-  approval?: (input: z.output<S>, context: ToolContext<D>) => ToolApproval | Promise<ToolApproval>;
+  /** Present when the guardian approves a call on a card first: the card's
+   *  words for the parsed input, or undefined for an input that runs without
+   *  approval. A call whose approval throws does not run. */
+  approval?: (
+    input: z.output<S>,
+    context: ToolContext<D>,
+  ) => ToolApproval | undefined | Promise<ToolApproval | undefined>;
   /** The operation, once the turn may ask and the input fits. Returns plain
    *  data for the agent, `card(...)`, or `toolError(...)`. */
   run: (input: z.output<S>, context: ToolContext<D>) => Promise<ToolOutcome>;
@@ -137,17 +142,18 @@ function toolAction<D, S extends z.ZodType>(
   });
   const approval = spec.approval;
   if (!approval) return action;
-  return {
+  // The engine reads the preview to decide each call: no card, no approval.
+  return withApprovalPerCall({
     ...action,
-    preview: async (args): Promise<PreviewPayload> => {
+    preview: async (args): Promise<PreviewPayload | undefined> => {
       const parsed = spec.input.safeParse(args);
-      if (!parsed.success) {
-        return { kind: "generic", title: "Invalid input", summary: parsed.error.message };
-      }
+      // An input that does not fit runs to the error `execute` answers it
+      // with, which runs nothing.
+      if (!parsed.success) return undefined;
       const words = await approval(parsed.data, { deps, turn: runningTurn() });
-      return { kind: "generic", ...words };
+      return words ? { kind: "generic", ...words } : undefined;
     },
-  };
+  });
 }
 
 function resultOf(outcome: ToolOutcome): ActionResult {

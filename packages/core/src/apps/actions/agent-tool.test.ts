@@ -112,6 +112,46 @@ describe("an agent tool's action", () => {
     });
   });
 
+  it("words no card for an input its approval returns nothing for", async () => {
+    const renameUnlessSame = agentTool({
+      name: "system:rename_thing",
+      description: "Rename a thing",
+      sideEffects: "write",
+      input: z.object({ thingId: z.string(), name: z.string() }),
+      approval: ({ thingId, name }, { deps }) =>
+        deps.names.get(thingId) === name ? undefined : { title: "Rename", summary: name },
+      run: async (input) => input,
+    });
+
+    expect(await approvalOf(renameUnlessSame, deps(), { thingId: "t-1", name: "Old" })).toBe(
+      undefined,
+    );
+    expect(await approvalOf(renameUnlessSame, deps(), { thingId: "t-1", name: "New" })).toEqual({
+      kind: "generic",
+      title: "Rename",
+      summary: "New",
+    });
+  });
+
+  it("words no card for an input that does not fit, which execute answers with an error", async () => {
+    expect(await approvalOf(renameThing, deps(), { thingId: "t-1" })).toBe(undefined);
+  });
+
+  it("passes on an approval that throws, so the engine does not run the call", async () => {
+    const broken = agentTool({
+      name: "system:rename_thing",
+      description: "Rename a thing",
+      sideEffects: "write",
+      input: z.object({ thingId: z.string() }),
+      approval: () => {
+        throw new Error("no such thing");
+      },
+      run: async (input) => input,
+    });
+
+    await expect(approvalOf(broken, deps(), { thingId: "t-1" })).rejects.toThrow("no such thing");
+  });
+
   it("checks who asks once per call, before run", async () => {
     const check = rs.fn(async () => "needs_guardian: no");
     const d = deps();
