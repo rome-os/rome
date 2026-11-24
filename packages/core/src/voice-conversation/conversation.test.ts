@@ -374,6 +374,59 @@ describe("voice conversation", () => {
     expect(t.sent).toEqual(["check the build", "me check"]);
   });
 
+  it("drops the looking line's late echo while the next sentence waits for its audio", async () => {
+    const t = setup();
+    t.conversation.heard("查一下天气", "");
+    t.conversation.endpoint();
+    await settled();
+    t.clock.advance(LOOKING_AFTER_MS);
+    t.turns[0]?.push({ type: "text_delta", content: "今天晴。" });
+    await settled();
+    expect(t.said.map((s) => s.text)).toEqual(["我查一下。", "今天晴。"]);
+    // The reply's sentence is next to play, but none of its audio has come yet.
+    t.speak(0, 800);
+    t.clock.advance(800 + 300);
+    t.conversation.heard("我查一下。", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["查一下天气"]);
+    expect(t.signals[0]?.aborted).toBe(false);
+  });
+
+  it("sends a sentence the guardian says that Rome queued but never played", async () => {
+    const t = setup();
+    t.conversation.heard("check the build", "");
+    t.conversation.endpoint();
+    await settled();
+    t.clock.advance(LOOKING_AFTER_MS);
+    t.turns[0]?.push({ type: "text_delta", content: "Check the logs.\n" });
+    await settled();
+    t.speak(0, 700);
+    t.clock.advance(700 + 300);
+    t.conversation.heard("Check the logs.", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["check the build", "Check the logs."]);
+  });
+
+  it("keeps a late-begun pick as the guardian's when Rome plays again before the endpoint", async () => {
+    const t = setup();
+    t.conversation.heard("check the build", "");
+    t.conversation.endpoint();
+    await settled();
+    t.clock.advance(LOOKING_AFTER_MS);
+    t.speak(0, 700);
+    t.clock.advance(700 + 300);
+    t.conversation.heard("", "me check");
+    t.turns[0]?.push({ type: "text_delta", content: "The build passed.\n" });
+    await settled();
+    t.speak(1, 1000);
+    t.conversation.heard("me check", "");
+    t.conversation.endpoint();
+    await settled();
+    expect(t.sent).toEqual(["check the build", "me check"]);
+  });
+
   it("forgets a stopped reply's words on time, even when the next reply starts at once", async () => {
     const t = setup();
     t.conversation.heard("deploy it", "");

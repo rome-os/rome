@@ -119,6 +119,8 @@ interface Queued {
   /** Audio that came before the sentence's turn to play. */
   waiting: Uint8Array[];
   started: boolean;
+  /** Some of its audio has gone to the client, so its words may come back. */
+  sounded: boolean;
   done: boolean;
 }
 
@@ -147,6 +149,8 @@ export function createConversation(deps: ConversationDeps): Conversation {
   // For a turn begun once Rome's audio had played, the sentences that could
   // come back then: only a whole run of the last ones is an echo.
   let lateEcho: string[] | null = null;
+  // The sentences Rome played again during such a turn: any of their words may come back.
+  let lateAfter: Queued[] = [];
 
   let reply: Reply | null = null;
   let replies = 0;
@@ -203,11 +207,24 @@ export function createConversation(deps: ConversationDeps): Conversation {
     const ms = (pcm.byteLength / 2 / speaker.format.sampleRate) * 1000;
     playsUntil = Math.max(playsUntil, now()) + ms;
     echoUntil = playsUntil + ECHO_TAIL_MS;
-    // Rome plays again during the turn, so any of its words may come back.
-    if (begun) lateEcho = null;
     stopPlayed();
     stopPlayed = schedule(Math.ceil(playsUntil - now()), update);
     update();
+  };
+
+  // Sends audio of the head sentence. Only words with audio can come back, so
+  // a sentence counts as said from its first audio, not from its turn to play.
+  const playOf = (head: Queued, pcm: Uint8Array) => {
+    if (pcm.byteLength === 0) return;
+    if (!head.sounded) {
+      head.sounded = true;
+      // Rome's words are kept while any of its audio may still be heard, however far
+      // the speech runs ahead of playback, and forgotten after.
+      spoken = spoken.filter((s) => now() < (s.until ?? echoUntil));
+      spoken.push({ text: head.text, until: null });
+    }
+    if (begun && lateEcho && lateAfter.at(-1) !== head) lateAfter.push(head);
+    play(pcm);
   };
 
   // Sends the head sentence's audio, and moves on past each finished one.
@@ -217,12 +234,8 @@ export function createConversation(deps: ConversationDeps): Conversation {
       if (!head.started) {
         head.started = true;
         deps.message({ type: "caption", text: head.text });
-        // Rome's words are kept while any of its audio may still be heard, however far
-        // the speech runs ahead of playback, and forgotten after.
-        spoken = spoken.filter((s) => now() < (s.until ?? echoUntil));
-        spoken.push({ text: head.text, until: null });
       }
-      for (const pcm of head.waiting.splice(0)) play(pcm);
+      for (const pcm of head.waiting.splice(0)) playOf(head, pcm);
       if (!head.done) break;
       queue.shift();
     }
@@ -233,7 +246,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
     if (!speaker || reply !== to) return;
     to.quietOver = true;
     const id = `${replies}-${to.said++}`;
-    queue.push({ id, text, waiting: [], started: false, done: false });
+    queue.push({ id, text, waiting: [], started: false, sounded: false, done: false });
     speaker.say(id, text);
     pump();
   };
@@ -322,7 +335,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
       onAudio(frame) {
         const queued = queue.find((q) => q.id === frame.sentenceId);
         if (!queued) return;
-        if (queued === queue[0]) play(frame.pcm);
+        if (queued === queue[0]) playOf(queued, frame.pcm);
         else queued.waiting.push(frame.pcm);
       },
       onSentenceEnd(sentenceId) {
@@ -360,6 +373,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
         const back = echoAt(begunAt);
         maybeEcho = playing || back.length > 0;
         lateEcho = playing ? null : back;
+        lateAfter = [];
       }
       if (state === "speaking" && enoughWords(words) && !isEcho(words, echoAt(begunAt).join(" "))) {
         log.info("guardian spoke over the reply");
@@ -373,10 +387,12 @@ export function createConversation(deps: ConversationDeps): Conversation {
       const text = `${settled}${pending}`.trim();
       const suspect = maybeEcho;
       const late = lateEcho;
+      const after = lateAfter.map((q) => q.text);
       settled = "";
       pending = "";
       maybeEcho = false;
       lateEcho = null;
+      lateAfter = [];
       begun = false;
       // Rome's own words coming back are not a turn. A short answer is always
       // the guardian's: "No" or "香蕉" is likely to be part of what Rome just said.
@@ -385,7 +401,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
       const romes =
         suspect &&
         enoughWords(text) &&
-        (late ? isLateEcho(text, late) : isEcho(text, echoAt(begunAt).join(" ")));
+        (late ? isLateEcho(text, late, after) : isEcho(text, echoAt(begunAt).join(" ")));
       if (!text || romes) {
         if (text) deps.message({ type: "heard", settled: "", pending: "" });
         return;

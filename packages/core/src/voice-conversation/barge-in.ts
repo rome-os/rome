@@ -28,15 +28,24 @@ export function isEcho(heard: string, said: string): boolean {
 /**
  * Whether `heard` is exactly Rome's last sentence, or its last few: the late
  * echo of audio that has already played. Part of a sentence is the guardian
- * picking from what Rome said, as in "下午的航班".
+ * picking from what Rome said, as in "下午的航班". `after` is what Rome
+ * played since the turn began: any of its words may come back too, following
+ * the whole sentences or on their own.
  */
-export function isLateEcho(heard: string, sentences: readonly string[]): boolean {
+export function isLateEcho(
+  heard: string,
+  sentences: readonly string[],
+  after: readonly string[] = [],
+): boolean {
   const words = normalize(heard);
   if (words === "") return false;
+  const next = normalize(after.join(" "));
+  if (next !== "" && next.includes(words)) return true;
   let tail = "";
-  for (let i = sentences.length - 1; i >= 0 && tail.length < words.length; i--) {
+  for (let i = sentences.length - 1; i >= 0; i--) {
     tail = normalize(sentences[i] as string) + tail;
-    if (tail === words) return true;
+    if (tail.length > words.length) break;
+    if (words.startsWith(tail) && next.startsWith(words.slice(tail.length))) return true;
   }
   return false;
 }
