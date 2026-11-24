@@ -255,7 +255,7 @@ import { registerAgentNameAction } from "./people/guardian-profile/index.js";
 import { personHistory } from "./people/person-history/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
 import { registerReadPersonAction } from "./people/actions/read-person.js";
-import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";
+import { agentToolNames, agentToolOlderNames, registerAgentTools } from "./wiring/agent-tools.js";
 import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
@@ -1610,6 +1610,7 @@ async function main() {
       folders: agentFolders(),
       log: createLogger("agent-session"),
       ...romeToolPorts({
+        olderNames: agentToolOlderNames,
         actionRegistry,
         actionEngine,
         webchatRepo,

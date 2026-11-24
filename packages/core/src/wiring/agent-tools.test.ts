@@ -1,6 +1,11 @@
 import { describe, expect, it } from "@rstest/core";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
-import { type AgentToolDeps, agentToolNames, registerAgentTools } from "./agent-tools.js";
+import {
+  type AgentToolDeps,
+  agentToolNames,
+  agentToolOlderNames,
+  registerAgentTools,
+} from "./agent-tools.js";
 
 // Agents, agent prompts and saved routines call these names.
 const NAMES = [
@@ -17,6 +22,13 @@ const NAMES = [
 describe("core's agent tools", () => {
   it("lists every tool under the name agents and saved routines call it by", () => {
     expect([...agentToolNames].sort()).toEqual([...NAMES].sort());
+  });
+
+  it("maps each older name to one tool, never to another tool's own name", () => {
+    for (const [older, tool] of agentToolOlderNames) {
+      expect(agentToolNames.has(tool)).toBe(true);
+      expect(agentToolNames.has(older)).toBe(false);
+    }
   });
 
   it("registers every tool it lists as an action an agent can call, owned by core", () => {

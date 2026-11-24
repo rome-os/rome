@@ -10,6 +10,7 @@ import {
 } from "../webchat/task-input-actor.js";
 import type { SessionToolContext } from "./session-tools.js";
 import { romeToolPorts } from "./rome-tool-ports.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
 
 function action(name: string): Action {
   return {
@@ -121,6 +122,68 @@ describe("romeToolPorts actions", () => {
     );
     await expect(actions.run(turn(), "secret", {})).rejects.toThrow("Unknown action: secret");
     await expect(actions.run(turn(), "missing", {})).rejects.toThrow("Unknown action: missing");
+  });
+});
+
+describe("romeToolPorts actions under an older name", () => {
+  // `system:stop_run` took over from `system:stop_old`, which stays
+  // registered, and from `stop_gone`, which no longer is.
+  function withOlderNames() {
+    const registry = new ActionRegistryImpl();
+    registry.register(action("system:stop_old"));
+    registry.register(action("system:stop_run"));
+    const run = rs.fn(async () => ({ status: "ok" as const, data: {} }));
+    const built = romeToolPorts({
+      actionRegistry: registry,
+      actionEngine: { run } as unknown as ActionEngine,
+      olderNames: new Map([
+        ["system:stop_old", "system:stop_run"],
+        ["stop_gone", "system:stop_run"],
+      ]),
+    });
+    return { actions: built.actions, run };
+  }
+
+  it("lists only the tool that took over, so search finds only it", () => {
+    const { actions } = withOlderNames();
+
+    expect(actions.list(turn({ actions: ["*"] })).map((a) => a.name)).toEqual(["system:stop_run"]);
+  });
+
+  it("still finds and runs a registered older name as itself, by its exact name", async () => {
+    const { actions, run } = withOlderNames();
+    const all = turn({ actions: ["*"] });
+
+    expect(actions.find(all, "system:stop_old")?.name).toBe("system:stop_old");
+    await actions.run(all, "system:stop_old", { runId: "r-1" });
+
+    expect(run).toHaveBeenCalledWith("system:stop_old", { runId: "r-1" }, expect.anything());
+  });
+
+  it("runs the tool for an older name that is no longer registered", async () => {
+    const { actions, run } = withOlderNames();
+    const all = turn({ actions: ["*"] });
+
+    expect(actions.permits(all, "stop_gone")).toBe(true);
+    await actions.run(all, "stop_gone", { runId: "r-1" });
+
+    expect(run).toHaveBeenCalledWith("system:stop_run", { runId: "r-1" }, expect.anything());
+  });
+
+  it("runs an unregistered older name only for an agent that may call the tool", async () => {
+    const { actions } = withOlderNames();
+    const denied = turn({ actions: ["system:stop_old"] });
+
+    expect(actions.permits(denied, "stop_gone")).toBe(false);
+    await expect(actions.run(denied, "stop_gone", {})).rejects.toThrow("Unknown action: stop_gone");
+  });
+
+  it("lists the older name to an agent that may not call the tool that took over", () => {
+    const { actions } = withOlderNames();
+
+    expect(actions.list(turn({ actions: ["system:stop_old"] })).map((a) => a.name)).toEqual([
+      "system:stop_old",
+    ]);
   });
 });
 

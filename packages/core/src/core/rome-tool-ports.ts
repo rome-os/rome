@@ -54,6 +54,9 @@ export interface RomeToolPortsDeps {
    * only a task chat of its own chat's owner. When absent, no check names one.
    */
   taskOwner?: (chatId: string) => Promise<string | null>;
+  /** Each older name a core agent tool took over, to the tool's name
+   *  (wiring/agent-tools.ts). When absent, none. */
+  olderNames?: ReadonlyMap<string, string>;
   /** The device kinds `connect_account` connects. When absent, none. */
   deviceKinds?: () => readonly DeviceKind[];
   /** How a device kind stands for a turn, on its asking device alone when it has one. */
@@ -96,8 +99,22 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
     const names = new Set(withheld.map((name) => actionRegistry.get(name)?.config.name ?? name));
     return granted.filter((action) => !names.has(action.config.name));
   };
+  const olderNames = deps.olderNames ?? new Map<string, string>();
+  // An older name that is no longer registered runs the tool that took it over.
+  const registered = (name: string): Action | undefined =>
+    actionRegistry.get(name) ??
+    (olderNames.has(name) ? actionRegistry.get(olderNames.get(name) as string) : undefined);
+  // While the agent may call a tool, the older actions it took over stay
+  // callable by name but are not listed or searched, so it finds one way.
+  const listed = (permittedNow: Action[]): Action[] => {
+    const names = new Set(permittedNow.map((action) => action.config.name));
+    return permittedNow.filter((action) => {
+      const tool = olderNames.get(action.config.name);
+      return tool === undefined || !names.has(tool);
+    });
+  };
   const findPermittedAction = (turn: TurnFacts, name: string): Action | undefined => {
-    const requestedAction = actionRegistry.get(name);
+    const requestedAction = registered(name);
     if (!requestedAction) {
       throw new Error(`Unknown action: ${name}${permittedHint(turn, name)}`);
     }
@@ -113,8 +130,12 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
     });
 
   const actions: AgentActions = {
-    list: (turn) => permittedActions(turn).map(toAgentAction),
-    find: (turn, name) => actions.list(turn).find((action) => action.name === name),
+    list: (turn) => listed(permittedActions(turn)).map(toAgentAction),
+    find: (turn, name) => {
+      const requested = registered(name);
+      const action = requested ? permitted(turn, requested) : undefined;
+      return action ? toAgentAction(action) : undefined;
+    },
     appOf: (name) => {
       const metadata = actionRegistry.getMetadata?.(name);
       return metadata?.ownerType === "app" ? metadata.ownerId : undefined;

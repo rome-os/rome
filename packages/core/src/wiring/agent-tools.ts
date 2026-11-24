@@ -28,6 +28,11 @@ export const agentTools: ReadonlyArray<AgentTool<never>> = Object.values(PAGES).
 /** The names of core's agent tools, which run in the main process as a root. */
 export const agentToolNames: ReadonlySet<string> = new Set(agentTools.map((tool) => tool.name));
 
+/** Each older name a tool took over, to the tool's name. */
+export const agentToolOlderNames: ReadonlyMap<string, string> = new Map(
+  agentTools.flatMap((tool) => tool.olderNames.map((older) => [older, tool.name] as const)),
+);
+
 /** Registers every agent tool, each page's over its deps. `ownerOfChat` is
  * what the check of who may ask reads. */
 export function registerAgentTools(
