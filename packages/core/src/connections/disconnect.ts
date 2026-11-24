@@ -1,5 +1,5 @@
-// Disconnecting one connection, as the Connections page's Disconnect does
-// (`DELETE /api/connections/:id`). Vocabulary:
+// Disconnecting one connection, as the Connections page's Disconnect and the
+// agent tool `system:disconnect_service` (agent-tools.ts) both do. Vocabulary:
 // docs/domains/connections.md#connection.
 
 import type { ConnectionRegistry } from "./registry.js";

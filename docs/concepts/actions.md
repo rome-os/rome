@@ -43,22 +43,22 @@ A core agent tool is an action core declares so an agent can do what a dashboard
 **Example:**
 
 ```ts
-const agentTool = agentToolsOf<RoutineToolDeps>();
+const agentTool = agentToolsOf<ConnectionToolDeps>();
 
-export const stopRoutine = agentTool({
-  name: "system:stop_routine",
-  description: "Stop a routine's running run, as the Routines page's Stop does. …",
+export const disconnectService = agentTool({
+  name: "system:disconnect_service",
+  description: "Disconnect one service from Rome, such as a Slack workspace. …",
   sideEffects: "write",
-  input: z.object({ routineId: z.string().describe("The routine's id, from search_routine.") }),
-  run: async ({ routineId }, { deps }) => {
-    const row = await deps.routines.findById(routineId);
-    if (!row) return toolError(`No routine found with id "${routineId}". …`);
-    const { stopped } = await deps.engine.cancelRun(routineId);
-    return { routineId, name: row.name, stopped };
+  input: z.object({ connectionId: z.string().describe("The connection's id, from read_connections.") }),
+  approval: async ({ connectionId }, { deps }) => ({ title: "Disconnect …", summary: "…" }),
+  run: async ({ connectionId }, { deps }) => {
+    const outcome = await disconnectConnection(deps.registry, connectionId);
+    if (outcome.status === "not-found") return toolError(`No connection found with id "${connectionId}". …`);
+    return { connectionId, disconnected: true };
   },
 });
 
-export const routineTools = [listRoutineRunsTool, readRoutineRunTool, pauseRoutine, resumeRoutine, runRoutine, stopRoutine];
+export const connectionTools = [readConnections, disconnectService];
 ```
 
 ## Action results

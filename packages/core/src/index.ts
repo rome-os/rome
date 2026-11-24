@@ -1940,6 +1940,11 @@ async function main() {
       routineRuns: routineRunsRepo,
       actionExecutions: actionExecutionsRepo,
     },
+    // The projection `GET /connections` serves, and the Connections page's disconnect.
+    connections: {
+      connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
+      registry: connectionRegistry,
+    },
   });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
