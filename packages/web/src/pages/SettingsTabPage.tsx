@@ -1,12 +1,6 @@
 import { DevicesSection } from "@/components/devices-section";
-import {
-  Measure,
-  Section,
-  SectionDescription,
-  SectionHeader,
-  SectionHeading,
-  SectionTitle,
-} from "@rome-os/ui/page";
+import { SettingsGroup, SettingsGroupFooter } from "@/components/settings-group";
+import { Measure, Section } from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
 import { VoiceInputRow } from "@/components/voice-input-row";
 import { ComputerUseRow } from "@/components/computer-use-section";
@@ -902,17 +896,14 @@ function AdvancedSection({
   return (
     <Measure>
       <Section className="gap-8">
-        <Section>
-          <SectionHeader>
-            <SectionTitle>{t("system.title")}</SectionTitle>
-          </SectionHeader>
+        <SettingsGroup title={t("system.title")}>
           <FormRows>
             <SystemVersionRow />
             <SystemDiagnosisRow details={<RelayHealthSection />} />
             <ComputerUseRow />
             <VoiceInputRow />
           </FormRows>
-        </Section>
+        </SettingsGroup>
         <FeaturesSection />
         <AccessControlSection settings={settings} onSave={onSave} saving={saving} />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
@@ -989,16 +980,13 @@ function DeveloperSettingsSection({
 
   return (
     <>
-      <Section>
-        <SectionHeader>
-          <SectionTitle>{t("advanced.developerSettings.title")}</SectionTitle>
-        </SectionHeader>
+      <SettingsGroup title={t("advanced.developerSettings.title")}>
         <FormRows>
           <ModelSelectorAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <ImpersonationAdvancedSection settings={settings} onSave={onSave} saving={saving} />
           <AiToolUsageAdvancedSection settings={settings} onSave={onSave} saving={saving} />
         </FormRows>
-      </Section>
+      </SettingsGroup>
       <TierModelMappingsAdvancedSection settings={settings} onSave={onSave} saving={saving} />
     </>
   );
@@ -1068,13 +1056,7 @@ function TierModelMappingsAdvancedSection({
   }
 
   return (
-    <Section>
-      <SectionHeader>
-        <SectionHeading>
-          <SectionTitle>{t("advanced.tierModelMappings.title")}</SectionTitle>
-          <SectionDescription>{t("advanced.tierModelMappings.description")}</SectionDescription>
-        </SectionHeading>
-      </SectionHeader>
+    <SettingsGroup title={t("advanced.tierModelMappings.title")}>
       <FormRows>
         {TIER_MODEL_MAPPING_FIELDS.map(({ provider, tier, placeholder }) => {
           const id = `tier-model-${provider}-${tier}`;
@@ -1099,10 +1081,11 @@ function TierModelMappingsAdvancedSection({
           );
         })}
       </FormRows>
-      <Button type="button" size="sm" className="self-start" onClick={save} disabled={saving}>
+      <SettingsGroupFooter>{t("advanced.tierModelMappings.description")}</SettingsGroupFooter>
+      <Button type="button" size="sm" className="mt-1 self-start" onClick={save} disabled={saving}>
         {t("advanced.tierModelMappings.save")}
       </Button>
-    </Section>
+    </SettingsGroup>
   );
 }
 
@@ -1321,15 +1304,12 @@ function FeaturesSection() {
   const { t } = useTranslation("settings");
 
   return (
-    <Section>
-      <SectionHeader>
-        <SectionTitle>{t("advanced.features.title")}</SectionTitle>
-      </SectionHeader>
+    <SettingsGroup title={t("advanced.features.title")}>
       <FormRows>
         <SpokenRecapsRows />
         <PresentationModeRow />
       </FormRows>
-    </Section>
+    </SettingsGroup>
   );
 }
 
@@ -1457,10 +1437,7 @@ function AccessControlSection({
 }) {
   const { t } = useTranslation("settings");
   return (
-    <Section>
-      <SectionHeader>
-        <SectionTitle>{t("publicAccess.title")}</SectionTitle>
-      </SectionHeader>
+    <SettingsGroup title={t("publicAccess.title")}>
       <FormRows>
         <AppKeysRow />
         <VaultRow />
@@ -1474,7 +1451,7 @@ function AccessControlSection({
         />
         <AllowedCloudEmailsRows />
       </FormRows>
-    </Section>
+    </SettingsGroup>
   );
 }
 
