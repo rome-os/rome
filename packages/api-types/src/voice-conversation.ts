@@ -8,6 +8,14 @@ import { z } from "zod";
 export const VOICE_CONVERSATION_SOCKET_PATH = "/ws/voice-conversation";
 
 /**
+ * `GET /api/voice-conversation`. `available` is true only for the guardian,
+ * while `voice_mode` is on and Rome can both listen and speak. A client offers
+ * the voice conversation button only then, and only in a Concierge chat.
+ */
+export const voiceConversationInfoSchema = z.object({ available: z.boolean() });
+export type VoiceConversationInfo = z.infer<typeof voiceConversationInfoSchema>;
+
+/**
  * What a client sends as text frames. `start` comes first and names the chat
  * to talk in, then binary audio frames: raw PCM, signed 16-bit little-endian,
  * mono, at `sampleRate`. `stop` ends the conversation.
