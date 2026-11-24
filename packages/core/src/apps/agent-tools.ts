@@ -107,7 +107,6 @@ export const searchAppStore = agentTool({
 });
 
 const CHANGES = ["install", "update", "turn_on", "turn_off", "remove"] as const;
-type Change = (typeof CHANGES)[number];
 
 const manageInput = z.object({
   change: z
