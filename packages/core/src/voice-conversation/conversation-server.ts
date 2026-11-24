@@ -30,6 +30,7 @@ import type { ListeningSource, VoiceInputSource } from "../voice-input/voice-inp
 import { readVoiceTerms } from "../voice-input/voice-terms.js";
 import type { SpeakerSource } from "../voice-output/speaker-source.js";
 import { createConversation, type ReplyTurn } from "./conversation.js";
+import type { AddedMessage } from "./delivered-reply.js";
 
 const log = createLogger("voice-conversation");
 
@@ -49,6 +50,10 @@ export interface VoiceConversationDeps {
   canTalkIn(chatId: string): Promise<boolean>;
   /** Sends the guardian's turn into `chatId`, and resolves with the turn that answers it. `signal` aborts once the conversation stops waiting. */
   send(chatId: string, text: string, signal: AbortSignal): Promise<ReplyTurn>;
+  /** Calls `listener` with each message added to any chat, and returns the unsubscribe. */
+  watch?: (listener: (message: AddedMessage) => void) => () => void;
+  /** The name of the task started at message `messageId` of `chatId`. */
+  nameOf?: (chatId: string, messageId: string) => Promise<string | null>;
   usage?: TranscriptionUsageSink | null;
   voiceTerms?: () => Promise<string[]>;
   maxConversationMs?: number;
@@ -119,6 +124,7 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   let alive: ReturnType<typeof setInterval> | null = null;
   let limit: ReturnType<typeof setTimeout> | null = null;
   let chatId: string | null = null;
+  let stopWatching: (() => void) | null = null;
 
   const reply = (message: VoiceConversationServerMessage) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
@@ -139,6 +145,8 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
       if (!closed && ws.readyState === WebSocket.OPEN) ws.send(pcm, { binary: true });
     },
     fail: (reason) => close({ type: "error", reason }),
+    nameOf: (messageId) =>
+      chatId && deps.nameOf ? deps.nameOf(chatId, messageId) : Promise.resolve(null),
   });
 
   // Every listening session is a Rome Cloud session, so each one reports.
@@ -157,6 +165,8 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
   };
 
   const settle = (outcome: string) => {
+    stopWatching?.();
+    stopWatching = null;
     if (alive) clearInterval(alive);
     if (limit) clearTimeout(limit);
     conversation.close();
@@ -192,6 +202,12 @@ export function serve(ws: WebSocket, deps: VoiceConversationDeps, actor?: Sessio
     // A chat that cannot take spoken turns is refused before any paid session opens.
     if (!chatId || !(await deps.canTalkIn(chatId))) return fail("chat-refused");
     if (closed) return;
+    // From now on, before any spoken turn, so none of its messages is missed.
+    const watched = chatId;
+    stopWatching =
+      deps.watch?.((message) => {
+        if (message.sessionId === watched) conversation.arrived(message);
+      }) ?? null;
     const spoken = await deps.speaker.open(conversation.speakerListener);
     if (closed) {
       if (spoken.ok) spoken.session.close();

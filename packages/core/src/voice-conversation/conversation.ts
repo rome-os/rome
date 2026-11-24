@@ -2,8 +2,11 @@
 // back. Each finished turn of the guardian's goes to the chat. The reply is
 // read as it streams, cut into sentences and spoken. Speaking over the reply
 // stops it at once. While the agent works with nothing to say for 2 s, Rome
-// says once that it is looking. The socket, listening and the chat are the
-// caller's: this file holds no I/O of its own, so tests drive it by hand.
+// says once that it is looking. A message the chat gets outside the
+// guardian's spoken turns, such as a task's result, is offered once both are
+// quiet for 3 s, and read whole on a yes (`late-results.ts`). The socket,
+// listening and the chat are the caller's: this file holds no I/O of its own,
+// so tests drive it by hand.
 
 import type {
   VoiceConversationServerMessage,
@@ -14,6 +17,8 @@ import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { createLogger } from "../logger.js";
 import type { SpeakerListener, SpeakerSession } from "../voice-output/speaker.js";
 import { enoughWords, isEcho } from "./barge-in.js";
+import type { AddedMessage } from "./delivered-reply.js";
+import { isYes, type LateMessage, lateMessage, offerLine } from "./late-results.js";
 import { createSentenceSplitter, type SentenceSplitter } from "./sentences.js";
 import {
   createSpeakableFilter,
@@ -45,6 +50,8 @@ export const SPOKEN_TURN_NOTE = [
   "</voice_context>",
 ].join("\n");
 
+/** How long the guardian and Rome are both quiet before Rome offers a late message. */
+export const OFFER_AFTER_QUIET_MS = 3_000;
 /** How long the agent may work with nothing said before Rome says it is looking. */
 export const LOOKING_AFTER_MS = 2_000;
 const LOOKING = { zh: "我查一下。", en: "Let me check." };
@@ -65,6 +72,8 @@ export type ReplyEvent = StreamAgentEvent | { type: "said"; text: string } | { t
 
 /** A turn of the chat's agent, as far as the conversation reads it. */
 export interface ReplyTurn {
+  /** The turn's id, so its own messages are not taken for late ones. */
+  id?: string;
   events(): AsyncIterable<ReplyEvent>;
 }
 
@@ -81,6 +90,8 @@ export interface ConversationDeps {
   audio(pcm: Uint8Array): void;
   /** Ends the conversation. */
   fail(reason: VoiceConversationStopReason): void;
+  /** The name of the task started at message `messageId`, to offer its result by. */
+  nameOf?: (messageId: string) => Promise<string | null>;
   /** Runs `fn` after `ms`, and returns the cancel. */
   schedule?: (ms: number, fn: () => void) => () => void;
   now?: () => number;
@@ -95,6 +106,8 @@ export interface Conversation {
   heard(settled: string, pending: string): void;
   /** The guardian finished a turn. */
   endpoint(): void;
+  /** A message the chat got, from any turn. One outside the guardian's spoken turns is offered. */
+  arrived(message: AddedMessage): void;
   /** Stops speaking and reading. Nothing is sent after this. */
   close(): void;
 }
@@ -129,6 +142,13 @@ const realSchedule = (ms: number, fn: () => void) => {
 
 const languageOf = (text: string): ReplyLanguage => (/\p{Script=Han}/u.test(text) ? "zh" : "en");
 
+/** A late message waiting to be offered. */
+interface Offer {
+  message: LateMessage;
+  /** Its name is looked up. */
+  ready: boolean;
+}
+
 export function createConversation(deps: ConversationDeps): Conversation {
   const schedule = deps.schedule ?? realSchedule;
   const now = deps.now ?? Date.now;
@@ -154,6 +174,20 @@ export function createConversation(deps: ConversationDeps): Conversation {
   let echoUntil = 0;
   let stopPlayed = () => {};
   let stopLooking: (() => void) | null = null;
+
+  // Late messages. Those that come while a spoken turn is sent wait until its
+  // id is known, so its own messages are not offered.
+  const ownTurns = new Set<string>();
+  let sending = 0;
+  const unsorted: AddedMessage[] = [];
+  const offers: Offer[] = [];
+  // What was offered in this conversation, by key: each is offered once.
+  const offered = new Set<string>();
+  // The message Rome asked about, until the guardian's next turn.
+  let asked: LateMessage | null = null;
+  let lastHeardAt = 0;
+  let lastLanguage: ReplyLanguage | null = null;
+  let stopOffering: (() => void) | null = null;
 
   const setState = (next: VoiceConversationState) => {
     if (next === state || closed) return;
@@ -185,6 +219,95 @@ export function createConversation(deps: ConversationDeps): Conversation {
       stopLooking();
       stopLooking = null;
     }
+    considerOffer();
+  };
+
+  const newReply = (language: ReplyLanguage): Reply => ({
+    language,
+    filter: createSpeakableFilter(language),
+    splitter: createSentenceSplitter(),
+    said: 0,
+    ended: false,
+    quietOver: false,
+    left: new AbortController(),
+  });
+
+  // Offers the next late message once the guardian and Rome have both been quiet long enough.
+  function considerOffer() {
+    stopOffering?.();
+    stopOffering = null;
+    if (closed || !speaker) return;
+    const next = offers.find((o) => o.ready);
+    if (!next) return;
+    const working = reply !== null && (!reply.ended || queue.length > 0);
+    if (begun || working || now() < playsUntil) return;
+    const wait = Math.max(lastHeardAt, playsUntil) + OFFER_AFTER_QUIET_MS - now();
+    if (wait > 0) {
+      stopOffering = schedule(wait, considerOffer);
+      return;
+    }
+    offers.splice(offers.indexOf(next), 1);
+    offered.add(next.message.key);
+    asked = next.message;
+    replies++;
+    const to = newReply(lastLanguage ?? languageOf(next.message.text));
+    reply = to;
+    say(to, offerLine(next.message, to.language));
+    to.ended = true;
+    update();
+  }
+
+  // Reads a late message whole, as a reply.
+  const readLate = (message: LateMessage) => {
+    replies++;
+    const to = newReply(lastLanguage ?? languageOf(message.text));
+    reply = to;
+    for (const event of message.events) {
+      if (event.type === "said") feed(to, `${event.text}\n`);
+      else speakAll(to, to.splitter.push(to.filter.point()));
+    }
+    finish(to);
+  };
+
+  const take = (added: AddedMessage) => {
+    if (added.turnId && ownTurns.has(added.turnId)) return;
+    const message = lateMessage(added.content, added.turnId);
+    if (!message || offered.has(message.key)) return;
+    const waiting = offers.find((o) => o.message.key === message.key);
+    if (waiting && waiting.message.turnId === message.turnId) {
+      // More of the same turn's report, such as its card.
+      waiting.message.events.push(...message.events);
+      waiting.message.text = `${waiting.message.text} ${message.text}`;
+      return;
+    }
+    if (waiting) {
+      // A newer report on the same task: the one before it is out of date.
+      waiting.message = { ...message, name: message.name ?? waiting.message.name };
+      return;
+    }
+    const offer: Offer = { message, ready: false };
+    offers.push(offer);
+    const named = (name: string | null) => {
+      offer.message.name ??= name;
+      offer.ready = true;
+      considerOffer();
+    };
+    if (message.name || !message.replyTo || !deps.nameOf) named(null);
+    else
+      deps.nameOf(message.replyTo).then(named, (err: unknown) => {
+        log.warn("late message's task not named", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        named(null);
+      });
+  };
+
+  // A spoken turn was sent, or failed to be: what waited on it is sorted.
+  const sent = (turnId: string | undefined) => {
+    if (turnId) ownTurns.add(turnId);
+    sending--;
+    if (sending > 0 || closed) return;
+    for (const added of unsorted.splice(0)) take(added);
   };
 
   const play = (pcm: Uint8Array) => {
@@ -331,6 +454,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
 
     attach(session) {
       speaker = session;
+      considerOffer();
     },
 
     heard(newSettled, newPending) {
@@ -339,6 +463,7 @@ export function createConversation(deps: ConversationDeps): Conversation {
       pending = newPending;
       deps.message({ type: "heard", settled, pending });
       const words = `${settled}${pending}`;
+      if (words.trim()) lastHeardAt = now();
       if (!begun && words.trim()) {
         begun = true;
         maybeEcho = now() < playsUntil;
@@ -362,32 +487,39 @@ export function createConversation(deps: ConversationDeps): Conversation {
       // the guardian's: "No" or "香蕉" is likely to be part of what Rome just said.
       if (!text || (suspect && enoughWords(text) && isEcho(text, echo))) {
         if (text) deps.message({ type: "heard", settled: "", pending: "" });
+        update();
         return;
       }
+      lastHeardAt = now();
+      lastLanguage = languageOf(text);
+      // A yes to "want to hear it?" reads the message here. It is not sent to the chat.
+      const answered = asked;
+      asked = null;
       drop();
+      if (answered && isYes(text)) {
+        deps.message({ type: "turn", text });
+        readLate(answered);
+        return;
+      }
       replies++;
-      const to: Reply = {
-        language: languageOf(text),
-        filter: createSpeakableFilter(languageOf(text)),
-        splitter: createSentenceSplitter(),
-        said: 0,
-        ended: false,
-        quietOver: false,
-        left: new AbortController(),
-      };
+      const to = newReply(languageOf(text));
       reply = to;
       deps.message({ type: "turn", text });
       update();
+      sending++;
       deps.send(text, to.left.signal).then(
-        (turn) =>
-          read(to, turn).catch((err: unknown) => {
+        (turn) => {
+          sent(turn.id);
+          return read(to, turn).catch((err: unknown) => {
             // The reply still shows in the chat. Rome says what it has.
             log.warn("voice reply not read", {
               error: err instanceof Error ? err.message : String(err),
             });
             if (reply === to) finish(to);
-          }),
+          });
+        },
         (err: unknown) => {
+          sent(undefined);
           if (reply !== to || closed) return;
           log.warn("voice turn not sent", {
             error: err instanceof Error ? err.message : String(err),
@@ -397,9 +529,20 @@ export function createConversation(deps: ConversationDeps): Conversation {
       );
     },
 
+    arrived(added) {
+      if (closed || added.role !== "assistant") return;
+      if (added.turnId && ownTurns.has(added.turnId)) return;
+      if (sending > 0) unsorted.push(added);
+      else take(added);
+    },
+
     close() {
       if (closed) return;
       closed = true;
+      // Late messages stay in the chat. Nothing more is offered.
+      offers.length = 0;
+      unsorted.length = 0;
+      stopOffering?.();
       reply?.left.abort();
       reply = null;
       queue.length = 0;

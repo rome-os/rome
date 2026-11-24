@@ -9,6 +9,7 @@ import type { Transcriber, TranscriptionListener } from "../voice-input/transcri
 import type { SpeakerListener } from "../voice-output/speaker.js";
 import type { SpeakerSource } from "../voice-output/speaker-source.js";
 import type { ReplyTurn } from "./conversation.js";
+import type { AddedMessage } from "./delivered-reply.js";
 import {
   attachVoiceConversationServer,
   serve,
@@ -256,6 +257,55 @@ describe("voice conversation socket", () => {
     await closed;
     expect(messages).toEqual([{ type: "error", reason: "listening-failed" }]);
     expect(mouth.closed()).toBe(true);
+  });
+
+  it("watches its own chat's messages from start until it ends", async () => {
+    const ear = standInTranscriber();
+    const watching: { listener: ((message: AddedMessage) => void) | null } = { listener: null };
+    let unwatched = 0;
+    const named: string[] = [];
+    const { client, messages, closed } = await connect({
+      listening: {
+        open: async () => ({
+          ok: true,
+          source: { transcriber: ear.transcriber, romeCloudSessionId: "session-1" },
+        }),
+      },
+      speaker: standInSpeaker().source,
+      canTalkIn: async () => true,
+      send: async () => replyOf(""),
+      watch: (l) => {
+        watching.listener = l;
+        return () => {
+          unwatched++;
+        };
+      },
+      nameOf: async (chatId, messageId) => {
+        named.push(`${chatId} ${messageId}`);
+        return "Fix CI";
+      },
+    });
+    expect(watching.listener).toBeNull();
+    client.send(JSON.stringify({ type: "start", chatId: "chat-1", sampleRate: 16_000 }));
+    await until(() => messages.some((m) => m.type === "ready"), "ready");
+    const report = (sessionId: string, replyTo: string) => ({
+      sessionId,
+      turnId: "system-1",
+      role: "assistant",
+      content: JSON.stringify([
+        { type: "reply_to", messageId: replyTo, author: "guardian", text: "q" },
+        { type: "text", content: "Done." },
+      ]),
+    });
+    watching.listener?.(report("other-chat", "start-2"));
+    watching.listener?.(report("chat-1", "start-1"));
+    await until(() => named.length > 0, "named");
+    // Only this chat's message is taken, and its task is named in this chat.
+    expect(named).toEqual(["chat-1 start-1"]);
+
+    client.send(JSON.stringify({ type: "stop" }));
+    await closed;
+    expect(unwatched).toBe(1);
   });
 
   it("refuses audio before start", async () => {
