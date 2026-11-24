@@ -23,6 +23,10 @@ struct Composer: View {
     /// False while the field's chat is covered or hidden but still mounted
     /// (Chat under another section, a sheet, the drawer): listening stops.
     var onScreen = true
+    /// False while the field writes in a thread or replies to one message. A
+    /// voice conversation's turns go to the chat itself, where the thread
+    /// would not show them, so none is offered then.
+    var conversationHere = true
     let onSend: () -> Void
     var onStop: () -> Void = {}
 
@@ -73,9 +77,13 @@ struct Composer: View {
     private var showsExpansion: Bool { (overflows || expanded) && !voice.active && !conversation.active }
 
     /// Whether this field offers a voice conversation: Chat and topic chats,
-    /// on an instance that offers one.
+    /// on an instance that offers one, outside a thread or a reply.
     private var offersConversation: Bool {
-        voiceField != .taskChat && voiceKey != nil && (voiceInput?.conversationAvailable ?? false)
+        Self.offersConversation(field: voiceField, chat: voiceKey, available: voiceInput?.conversationAvailable ?? false, here: conversationHere)
+    }
+
+    static func offersConversation(field: VoiceInputField, chat: String?, available: Bool, here: Bool) -> Bool {
+        field != .taskChat && chat != nil && available && here
     }
 
     private func leadingInset(rows: Bool) -> CGFloat { rows || attachments == nil ? 18 : 51 }
@@ -282,12 +290,16 @@ struct Composer: View {
         } else {
             if let voiceInput, voiceInput.available {
                 VoiceInputButton(state: voice.state) {
+                    // A conversation's old notice would hide what listening says.
+                    conversation.edited()
                     voice.toggle(service: voiceInput, chat: voiceKey, field: voiceField, text: $text, handle: textHandle)
                 }
             }
             if offersConversation, !voice.active, let voiceInput, let voiceKey {
                 VoiceConversationButton {
                     focused = false
+                    // Listening's old notice would hide what the conversation says.
+                    voice.edited(service: voiceInput, chat: voiceKey)
                     conversation.start(service: voiceInput, chat: voiceKey)
                 }
                 .transition(.scale.combined(with: .opacity))

@@ -158,7 +158,11 @@ final class SpeakerphoneAudio: VoiceConversationAudio {
         } catch {
             close()
             onLost()
+            return
         }
+        // Stopping the engine stopped the player too: the reply that came
+        // meanwhile, and any to come, play now.
+        player.play()
     }
 
     func play(_ chunk: Data, sampleRate: Int) {
@@ -169,7 +173,9 @@ final class SpeakerphoneAudio: VoiceConversationAudio {
         }
         guard let format = playerFormat, let buffer = Self.buffer(chunk, format: format) else { return }
         player.scheduleBuffer(buffer, completionHandler: nil)
-        if !player.isPlaying { player.play() }
+        // A route change stops the engine before its notice reaches main, and
+        // playing on a stopped engine traps. The buffer waits: `restart` plays it.
+        if engine.isRunning, !player.isPlaying { player.play() }
     }
 
     func clear() {

@@ -50,6 +50,17 @@ import Testing
 
     // MARK: Whether the field offers it
 
+    @Test func onlyChatAndTopicChatsOutsideAThreadOrReplyOfferAConversation() {
+        #expect(Composer.offersConversation(field: .chat, chat: "concierge", available: true, here: true))
+        #expect(Composer.offersConversation(field: .topicChat, chat: "topic", available: true, here: true))
+        // Spoken turns go to the chat itself, where a thread or a reply would not show them.
+        #expect(!Composer.offersConversation(field: .chat, chat: "concierge", available: true, here: false))
+        #expect(!Composer.offersConversation(field: .topicChat, chat: "topic", available: true, here: false))
+        #expect(!Composer.offersConversation(field: .taskChat, chat: "task", available: true, here: true))
+        #expect(!Composer.offersConversation(field: .chat, chat: nil, available: true, here: true))
+        #expect(!Composer.offersConversation(field: .chat, chat: "concierge", available: false, here: true))
+    }
+
     @Test func theInstancesAnswerShowsTheControlAndIsKeptForTheNextLaunch() async {
         let defaults = UserDefaults(suiteName: "voice-conversation-\(UUID())")!
         let backend = StubBackend()
