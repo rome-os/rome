@@ -251,9 +251,7 @@ import { registerAgentNameAction } from "./people/guardian-profile/index.js";
 import { personHistory } from "./people/person-history/index.js";
 import { phoneBook } from "./people/phone-book/index.js";
 import { registerReadPersonAction } from "./people/actions/read-person.js";
-import { routineControlService, routineOperations } from "./routines/control.js";
-import { changeRefusalReason, turnWorksForGuardian } from "./routines/turn-access.js";
-import { connectionControlService, connectionOperations } from "./connections/control.js";
+import { agentToolNames, registerAgentTools } from "./wiring/agent-tools.js";
 import { routineCreationService } from "./routines/create.js";
 import { registerShowFileAction } from "./assets/show-file-action.js";
 import { placeAudience } from "./core/place-audience.js";
@@ -309,10 +307,7 @@ import { agentWorkerCalls } from "./app-host/agent-calls.js";
 import { sessionWorkerCalls } from "./app-host/session-calls.js";
 import { chatWorkerCalls } from "./app-host/chat-calls.js";
 import { mailWorkerCalls } from "./app-host/mail-calls.js";
-import {
-  connectionControlWorkerCalls,
-  connectionWorkerCalls,
-} from "./app-host/connection-calls.js";
+import { connectionWorkerCalls } from "./app-host/connection-calls.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
   resolveOneOffDate,
@@ -1061,6 +1056,7 @@ async function main() {
       // Coordination roots run in main only when the lockfile marks their app
       // first-party; the action's own manifest is never trusted for this.
       isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
+      mainActions: agentToolNames,
       placeAudience: chatAudience,
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
       onApprovalCreated: (approval) => sendApprovalCard(approvalCardChannels, approval),
@@ -1912,30 +1908,24 @@ async function main() {
     people: peopleRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
-  // What the system app's routine actions do beyond create, search and
-  // delete: in this process directly, from a worker over `routines.control`.
-  const routineOps = routineOperations({
-    routines: routinesRepo,
-    engine: routineEngine,
-    routineRuns: routineRunsRepo,
-    actionExecutions: actionExecutionsRepo,
-    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
-  });
-  // What the system app's connection actions do: in this process directly,
-  // from a worker over `connections.control`. They read the projection
-  // `GET /connections` serves and disconnect as the Connections page does.
-  const connectionOps = connectionOperations({
-    connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
-    registry: connectionRegistry,
-    worksForGuardian: (turn) =>
-      turnWorksForGuardian((chatId) => concierge.ownerOfChat(chatId), turn),
-    changeRefusalReason,
-    deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
-    deviceState: (kind, askingDeviceId) =>
-      deviceKindState(deviceLiveRoutes.forKind(kind, { askingDeviceId }), { askingDeviceId }),
-    guardianLanguage: async () => {
-      const stored = await settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
-      return typeof stored === "string" ? stored : null;
+  registerAgentTools(actionRegistry, (chatId) => concierge.ownerOfChat(chatId), {
+    routines: {
+      routines: routinesRepo,
+      engine: routineEngine,
+      routineRuns: routineRunsRepo,
+      actionExecutions: actionExecutionsRepo,
+    },
+    // The projection `GET /connections` serves, and the Connections page's disconnect.
+    connections: {
+      connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
+      registry: connectionRegistry,
+      deviceKinds: () => deviceKinds(deviceConnectionsRepo.list()),
+      deviceState: (kind, askingDeviceId) =>
+        deviceKindState(deviceLiveRoutes.forKind(kind, { askingDeviceId }), { askingDeviceId }),
+      guardianLanguage: async () => {
+        const stored = await settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
+        return typeof stored === "string" ? stored : null;
+      },
     },
   });
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
@@ -2074,8 +2064,6 @@ async function main() {
     wakeGateFor,
     routinesRepo,
     routineEngine,
-    routineControl: routineControlService(routineOps),
-    connectionControl: connectionControlService(connectionOps),
     // Real coordinators in the main process; workers inject the matching proxies
     // (see worker-runtime.ts) so the event/app-lifecycle actions are
     // process-agnostic — they never branch on where they run.
@@ -2730,10 +2718,8 @@ async function main() {
         routinesRepo,
         routineEngine,
         routineCreation,
-        routineOperations: routineOps,
       }),
       ...mailWorkerCalls(actionRegistry),
-      ...connectionControlWorkerCalls(connectionOps),
       ...connectionWorkerCalls({
         appConnections,
         appIdForAction: (actionName) => {

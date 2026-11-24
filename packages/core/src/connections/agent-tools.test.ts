@@ -1,20 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import {
-  type ConnectionOperationDeps,
-  type ConnectionTurn,
-  connectionOperations,
+  approvalOf,
+  callTool,
+  GUARDIAN_TURN,
+  whoMayAskSuite,
+} from "../apps/actions/agent-tool-contract.js";
+import {
+  type ConnectionToolDeps,
+  connectService,
+  disconnectService,
   type ListedConnection,
-} from "./control.js";
+  readConnections,
+} from "./agent-tools.js";
 import type { Connection } from "./types.js";
 
-const guardianAsked: ConnectionTurn = {
-  actor: { kind: "guardian", userId: "guardian", via: "cookie" },
-  audience: "private",
-};
-const visitorAsked: ConnectionTurn = {
-  actor: { kind: "visitor", accountId: "acct-1" } as never,
-  audience: "shared",
-};
+whoMayAskSuite(readConnections, {});
+whoMayAskSuite(connectService, { kind: "github" });
+whoMayAskSuite(disconnectService, { connectionId: "conn-slack" });
 
 const unlocked = { state: "unlocked" } as const;
 const unsupported = { state: "unsupported" } as const;
@@ -51,7 +53,7 @@ const github = {
   },
 } as ListedConnection;
 
-function operations(overrides: Partial<ConnectionOperationDeps> = {}) {
+function operations(overrides: Partial<ConnectionToolDeps> = {}) {
   const connection = { id: "conn-slack", connectionKind: "slack", label: "slack" } as Connection;
   const registry = {
     all: rs.fn(() => [connection]),
@@ -59,18 +61,18 @@ function operations(overrides: Partial<ConnectionOperationDeps> = {}) {
     disconnect: rs.fn(async () => ({})),
     remove: rs.fn(async () => {}),
   };
-  const ops = connectionOperations({
+  const deps: ConnectionToolDeps = {
     connections: async () => [slack, github],
     registry,
-    worksForGuardian: async (turn) => turn.actor?.kind === "guardian",
-    changeRefusalReason: (turn) =>
-      turn.audience !== "private"
-        ? "not_private"
-        : turn.actor?.kind === "guardian"
-          ? null
-          : "not_guardian",
     ...overrides,
-  });
+  };
+  const ops = {
+    read: (input: Record<string, unknown>) => callTool(readConnections, deps, input),
+    connect: (input: Record<string, unknown>, turn = GUARDIAN_TURN) =>
+      callTool(connectService, deps, input, turn),
+    disconnect: (input: Record<string, unknown>) => callTool(disconnectService, deps, input),
+    approval: (input: Record<string, unknown>) => approvalOf(disconnectService, deps, input),
+  };
   return { ops, registry };
 }
 
@@ -78,7 +80,7 @@ describe("reading the connections", () => {
   it("lists each connection with its kind, state and account, and the kinds not connected", async () => {
     const { ops } = operations();
 
-    expect(await ops.read({}, guardianAsked)).toEqual({
+    expect(await ops.read({})).toEqual({
       status: "ok",
       data: {
         connections: [
@@ -99,20 +101,11 @@ describe("reading the connections", () => {
   it("carries no link, setup or grant of the page's rows", async () => {
     const { ops } = operations();
 
-    const text = JSON.stringify(await ops.read({}, guardianAsked));
+    const text = JSON.stringify(await ops.read({}));
 
     for (const field of ["/api/oauth", "setup-1", "authorized", "avatar", "grants", "talk"]) {
       expect(text).not.toContain(field);
     }
-  });
-
-  it("refuses a turn that does not work for the guardian", async () => {
-    const { ops } = operations();
-
-    const result = await ops.read({}, visitorAsked);
-
-    expect(result).toMatchObject({ status: "error" });
-    expect(result.status === "error" && result.error).toMatch(/^connections_guardian_only: /);
   });
 });
 
@@ -120,7 +113,7 @@ describe("disconnecting a connection", () => {
   it("disconnects through the operation the Connections page uses", async () => {
     const { ops, registry } = operations();
 
-    expect(await ops.disconnect({ connectionId: "conn-slack" }, guardianAsked)).toEqual({
+    expect(await ops.disconnect({ connectionId: "conn-slack" })).toEqual({
       status: "ok",
       data: { connectionId: "conn-slack", kind: "slack", name: "Slack", disconnected: true },
     });
@@ -131,7 +124,7 @@ describe("disconnecting a connection", () => {
     const { ops, registry } = operations();
     registry.disconnect.mockImplementation(async () => ({ notTakenBack: "Slack was down" }));
 
-    const result = await ops.disconnect({ connectionId: "conn-slack" }, guardianAsked);
+    const result = await ops.disconnect({ connectionId: "conn-slack" });
 
     expect(result).toMatchObject({
       status: "ok",
@@ -139,27 +132,10 @@ describe("disconnecting a connection", () => {
     });
   });
 
-  it("refuses a turn the guardian's own message did not start, and disconnects nothing", async () => {
-    const { ops, registry } = operations();
-
-    const shared = await ops.disconnect({ connectionId: "conn-slack" }, visitorAsked);
-    const notGuardian = await ops.disconnect(
-      { connectionId: "conn-slack" },
-      { ...visitorAsked, audience: "private" },
-    );
-
-    expect(shared.status === "error" && shared.error).toMatch(/^connection_private_only: /);
-    expect(notGuardian.status === "error" && notGuardian.error).toMatch(
-      /^connection_needs_guardian: /,
-    );
-    expect(registry.disconnect).not.toHaveBeenCalled();
-    expect(registry.remove).not.toHaveBeenCalled();
-  });
-
   it("names system:read_connections for an id it does not know", async () => {
     const { ops } = operations();
 
-    const result = await ops.disconnect({ connectionId: "nope" }, guardianAsked);
+    const result = await ops.disconnect({ connectionId: "nope" });
 
     expect(result.status === "error" && result.error).toContain("system:read_connections");
   });
@@ -167,14 +143,20 @@ describe("disconnecting a connection", () => {
   it("words the approval card with the connection's service and account", async () => {
     const { ops } = operations();
 
-    expect(await ops.previewDisconnect({ connectionId: "conn-slack" }, visitorAsked)).toEqual({
-      status: "ok",
-      data: {
-        kind: "generic",
-        title: "Disconnect Slack (Acme)",
-        summary:
-          "Rome loses its access to Slack (Acme). To use it again, you connect it again in Settings › Connections.",
-      },
+    expect(await ops.approval({ connectionId: "conn-slack" })).toEqual({
+      kind: "generic",
+      title: "Disconnect Slack (Acme)",
+      summary:
+        "Rome loses its access to Slack (Acme). To use it again, you connect it again in Settings › Connections.",
+    });
+  });
+
+  it("words the approval card for an id it does not know with the way to find one", async () => {
+    const { ops } = operations();
+
+    expect(await ops.approval({ connectionId: "nope" })).toMatchObject({
+      title: "Disconnect a connection",
+      summary: expect.stringContaining("system:read_connections"),
     });
   });
 });
@@ -191,7 +173,7 @@ describe("asking the guardian to connect a service", () => {
   it("returns core's connect card, which the chat draws and the agent waits on", async () => {
     const { ops } = operations();
 
-    const result = await ops.connect({ kind: "github" }, guardianAsked);
+    const result = await ops.connect({ kind: "github" });
 
     expect(result).toEqual({
       status: "pending_interaction",
@@ -217,8 +199,12 @@ describe("asking the guardian to connect a service", () => {
     const result = await ops.connect(
       { kind: "apple_health" },
       {
-        ...guardianAsked,
-        channelContext: { channel: "webchat", threadId: "c1", askingDeviceId: "dev-1" } as never,
+        ...GUARDIAN_TURN,
+        channelContext: {
+          channel: "webchat",
+          threadId: "guardian-chat",
+          askingDeviceId: "dev-1",
+        } as never,
       },
     );
 
@@ -236,7 +222,7 @@ describe("asking the guardian to connect a service", () => {
       deviceState: () => ({ state: "working", device: "iPhone" }),
     });
 
-    expect(await ops.connect({ kind: "apple_health" }, guardianAsked)).toEqual({
+    expect(await ops.connect({ kind: "apple_health" })).toEqual({
       status: "ok",
       data: { message: "Apple Health is already connected on iPhone. Go ahead; no card shown." },
     });
@@ -245,23 +231,8 @@ describe("asking the guardian to connect a service", () => {
   it("lists the kinds it connects for one it does not", async () => {
     const { ops } = operations();
 
-    const result = await ops.connect({ kind: "notion" }, guardianAsked);
+    const result = await ops.connect({ kind: "notion" });
 
     expect(result.status === "error" && result.error).toContain('"github"');
-  });
-
-  it("refuses a turn the guardian's own message did not start, and shows no card", async () => {
-    const { ops } = operations();
-
-    const shared = await ops.connect({ kind: "github" }, visitorAsked);
-    const notGuardian = await ops.connect(
-      { kind: "github" },
-      { ...visitorAsked, audience: "private" },
-    );
-
-    expect(shared.status === "error" && shared.error).toMatch(/^connection_private_only: /);
-    expect(notGuardian.status === "error" && notGuardian.error).toMatch(
-      /^connection_needs_guardian: /,
-    );
   });
 });

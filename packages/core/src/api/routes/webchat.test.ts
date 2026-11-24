@@ -9532,13 +9532,14 @@ describe("Webchat API", () => {
       }
     });
 
-    // The connect card also comes from `system:connect_service`, run through
-    // `execute_action`, when the system app owns that action; never from
-    // another action, nor from an action of that name another app owns.
+    // The connect card also comes from a core agent tool, such as
+    // `system:connect_service`, run through `execute_action`; never from an
+    // app's action of that name, nor from a core action that is no agent tool.
     it.each([
-      ["persists", "system:connect_service", "system", true],
-      ["rejects", "system:connect_service", "meals", false],
+      ["persists", "system:connect_service", "core", true],
+      ["rejects", "system:connect_service", "system", false],
       ["rejects", "meals:connect_service", "meals", false],
+      ["rejects", "core:device_run", "core", false],
     ])("%s a connect card from the execute_action call of %s owned by %s", async (_label, actionName, ownerId, persisted) => {
       deps.actionRegistry.register(
         {
@@ -9554,14 +9555,16 @@ describe("Webchat API", () => {
           inputSchema: { type: "object", properties: {} },
           execute: async () => ({ status: "ok", data: {} }),
         },
-        {
-          kind: "action",
-          ownerType: "app",
-          ownerId,
-          publicName: actionName,
-          aliases: [],
-          sourcePath: "",
-        },
+        ownerId === "core"
+          ? undefined
+          : {
+              kind: "action",
+              ownerType: "app",
+              ownerId,
+              publicName: actionName,
+              aliases: [],
+              sourcePath: "",
+            },
       );
       const sessionId = `sess-connect-action-${ownerId}-${persisted}`;
       await deps.webchatRepo.createSession(sessionId, "Connect card");

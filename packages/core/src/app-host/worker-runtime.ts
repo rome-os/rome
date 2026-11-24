@@ -46,8 +46,6 @@ import {
   CloudProfileProxy,
   RoutineEngineProxy,
   RoutineCreationProxy,
-  RoutineControlProxy,
-  ConnectionControlProxy,
   SystemUpgradeServiceProxy,
   ChannelsServiceProxy,
   AppConnectionsProxy,
@@ -245,8 +243,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       // without branching on which process they run in.
       routineEngine: new RoutineEngineProxy(),
       routineCreation: new RoutineCreationProxy(),
-      routineControl: new RoutineControlProxy(),
-      connectionControl: new ConnectionControlProxy(),
       eventBus: new EventBusProxy(),
       eventCatalog: new EventCatalogProxy(),
       appStore: new AppStoreProxy(),

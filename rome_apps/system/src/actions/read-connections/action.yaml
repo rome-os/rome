@@ -1,7 +1,0 @@
-name: read_connections
-type: system
-description: See what is connected to Rome and whether each connection works, with the account each one reaches. Use it when the guardian asks what is connected, whether a service such as Slack or Google is connected, or why a connection is not working, and to find a connection's id before disconnecting it
-complexity: simple
-speed: fast
-reliability: high
-sideEffects: read-only
