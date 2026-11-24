@@ -5,7 +5,7 @@ import { guardianAuth } from "../db/schema.js";
 import { createTestDb } from "../test/db.js";
 import { createSession, createVisitorSession } from "./auth.js";
 import { DashboardAccessState } from "./dashboard-access-state.js";
-import { gateGuardianUpgrade, gateUpgrade } from "./ws-guardian-gate.js";
+import { gateUpgrade } from "./ws-guardian-gate.js";
 
 const testDb = createTestDb();
 afterAll(() => testDb.close());
@@ -38,11 +38,15 @@ function captureSocket() {
   return { socket, response: () => response };
 }
 
-describe("gateGuardianUpgrade", () => {
+// Whether the gate, with no dashboard allow-list, admits the caller.
+const admitsGuardian = async (...args: [IncomingMessage, Duplex, typeof testDb.db]) =>
+  (await gateUpgrade(...args)) !== null;
+
+describe("gateUpgrade without a dashboard allow-list", () => {
   it("rejects a proxied anonymous request before upgrading", async () => {
     const { socket, response } = captureSocket();
     expect(
-      await gateGuardianUpgrade(request({ "x-forwarded-for": "203.0.113.1" }), socket, testDb.db),
+      await admitsGuardian(request({ "x-forwarded-for": "203.0.113.1" }), socket, testDb.db),
     ).toBe(false);
     expect(response()).toContain("HTTP/1.1 401 Unauthorized");
   });
@@ -56,7 +60,7 @@ describe("gateGuardianUpgrade", () => {
       "x-forwarded-host": "rome.example",
       "x-forwarded-proto": "https",
     });
-    expect(await gateGuardianUpgrade(req, socket, testDb.db)).toBe(true);
+    expect(await admitsGuardian(req, socket, testDb.db)).toBe(true);
     expect(response()).toBe("");
   });
 
@@ -70,7 +74,7 @@ describe("gateGuardianUpgrade", () => {
       "x-forwarded-host": "rome.example",
       "x-forwarded-proto": "https",
     });
-    expect(await gateGuardianUpgrade(req, socket, testDb.db)).toBe(false);
+    expect(await admitsGuardian(req, socket, testDb.db)).toBe(false);
     expect(response()).toContain("HTTP/1.1 403 Forbidden");
   });
 
@@ -80,7 +84,7 @@ describe("gateGuardianUpgrade", () => {
       cookie: `rome_session=${createSession("guardian-1")}`,
       "x-forwarded-for": "203.0.113.1",
     });
-    expect(await gateGuardianUpgrade(req, socket, testDb.db)).toBe(false);
+    expect(await admitsGuardian(req, socket, testDb.db)).toBe(false);
     expect(response()).toContain("HTTP/1.1 403 Forbidden");
   });
 
@@ -91,27 +95,27 @@ describe("gateGuardianUpgrade", () => {
       origin: "https://rome.example",
       "x-forwarded-for": "203.0.113.1",
     });
-    expect(await gateGuardianUpgrade(req, socket, testDb.db)).toBe(false);
+    expect(await admitsGuardian(req, socket, testDb.db)).toBe(false);
     expect(response()).toContain("HTTP/1.1 401 Unauthorized");
   });
 
   it("accepts a direct loopback caller without a cookie or Origin", async () => {
     const { socket, response } = captureSocket();
-    expect(await gateGuardianUpgrade(request(), socket, testDb.db)).toBe(true);
+    expect(await admitsGuardian(request(), socket, testDb.db)).toBe(true);
     expect(response()).toBe("");
   });
 
   it("rejects a direct loopback caller whose Origin is another site", async () => {
     const { socket, response } = captureSocket();
     const req = request({ origin: "https://evil.example", "sec-fetch-site": "cross-site" });
-    expect(await gateGuardianUpgrade(req, socket, testDb.db)).toBe(false);
+    expect(await admitsGuardian(req, socket, testDb.db)).toBe(false);
     expect(response()).toContain("HTTP/1.1 403 Forbidden");
   });
 
   it("accepts a direct loopback caller from the dashboard's own origin", async () => {
     const { socket, response } = captureSocket();
     const req = request({ origin: "http://127.0.0.1:4141" });
-    expect(await gateGuardianUpgrade(req, socket, testDb.db)).toBe(true);
+    expect(await admitsGuardian(req, socket, testDb.db)).toBe(true);
     expect(response()).toBe("");
   });
 
@@ -122,7 +126,7 @@ describe("gateGuardianUpgrade", () => {
       origin: "http://evil.example:4141",
       "sec-fetch-site": "same-origin",
     });
-    expect(await gateGuardianUpgrade(req, socket, testDb.db)).toBe(false);
+    expect(await admitsGuardian(req, socket, testDb.db)).toBe(false);
     expect(response()).toContain("HTTP/1.1 403 Forbidden");
   });
 
@@ -180,7 +184,7 @@ describe("gateGuardianUpgrade", () => {
   it("rejects a proxied loopback caller without a cookie", async () => {
     const { socket, response } = captureSocket();
     const req = request({ "x-forwarded-for": "203.0.113.1" });
-    expect(await gateGuardianUpgrade(req, socket, testDb.db)).toBe(false);
+    expect(await admitsGuardian(req, socket, testDb.db)).toBe(false);
     expect(response()).toContain("HTTP/1.1 401 Unauthorized");
   });
 });
