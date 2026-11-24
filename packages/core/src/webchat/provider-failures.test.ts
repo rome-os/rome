@@ -56,6 +56,8 @@ function harness(
     runtimeOf?: (chatId: string) => Promise<string | null>;
     /** What a recovery turn waits on in the chat's queue before it is dispatched. */
     queue?: Promise<void>;
+    /** The chats held on a provider. Default: none. */
+    held?: string[];
     /** Whether someone wrote in the chat since. Default: nobody did. */
     movedOnSince?: (chatId: string, since: number) => boolean;
     /** Whether the usage-limit continuation takes the chat. Default: it does not. */
@@ -69,12 +71,14 @@ function harness(
   const swaps: string[] = [];
   const kept: Array<{ chatId: string; provider: string }> = [];
   const followed: string[] = [];
+  const picked: Array<{ chatId: string; selection: string | null }> = [];
   const chose: Array<{ provider: string; moveExisting?: boolean }> = [];
   const selected: Array<{ chatId: string; selection: string | null }> = [];
   const accountListeners = new Set<
     (provider: ProviderId, change: "authorization" | "refreshed") => void
   >();
   let defaultProvider: DefaultProvider = options.defaultProvider ?? "anthropic";
+  let chooseFails: Error | undefined;
   const signedIn = options.signedIn ?? { anthropic: true, openai: true, rome_credits: false };
   const deps: ProviderFailuresDeps = {
     accounts: {
@@ -88,6 +92,11 @@ function harness(
       current: () => defaultProvider,
       signedIn: () => signedIn,
       choose: async (provider, choice) => {
+        if (chooseFails) {
+          const error = chooseFails;
+          chooseFails = undefined;
+          throw error;
+        }
         chose.push({ provider, ...(choice ? { moveExisting: choice.moveExisting } : {}) });
         defaultProvider = provider;
       },
@@ -99,6 +108,14 @@ function harness(
       },
       follow: async (chatId) => {
         followed.push(chatId);
+        return null;
+      },
+      pick: async (chatId, selection) => {
+        picked.push({ chatId, selection });
+        if (chats[chatId]) {
+          chats[chatId].largeModelSelection = selection;
+          chats[chatId].largeModelSelectionBy = "owner";
+        }
       },
     },
     webchatRepo: {
@@ -164,9 +181,13 @@ function harness(
       return options.swap === false ? null : { moved: true };
     },
     creditsUsable: () => options.credits ?? false,
+    held: (chatId) => options.held?.includes(chatId) ?? false,
     actorOf: async (chatId) =>
       chatId === "visitors" ? ({ kind: "visitor", accountId: "acct-v" } as never) : undefined,
     ...(options.movedOnSince ? { movedOnSince: options.movedOnSince } : {}),
+    // As the chat reads: the last message written in it.
+    newestMessageId: async (chatId) =>
+      [...messages].filter(([, message]) => message.chatId === chatId).at(-1)?.[0] ?? null,
     ...(options.continuesAfterLimit ? { continuesAfterLimit: options.continuesAfterLimit } : {}),
     selectModel: (chatId, _agentName, selection) => {
       selected.push({ chatId, selection });
@@ -226,6 +247,7 @@ function harness(
     swaps,
     kept,
     followed,
+    picked,
     chose,
     selected,
     accountChanged,
@@ -234,6 +256,9 @@ function harness(
     notice,
     fail,
     defaultProvider: () => defaultProvider,
+    failNextChoose: (error: Error) => {
+      chooseFails = error;
+    },
   };
 }
 
@@ -578,6 +603,52 @@ describe("the three cards", () => {
     expect(parts.map((part) => part.resolved?.by)).toEqual(["moved", undefined]);
   });
 
+  it("rewrites the open card in place while refusals repeat and it is the newest message", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("unauthorized") });
+    const refuse = () =>
+      h.failures.failed(
+        { chatId: "chat", agentName: "main", failure: refused("anthropic", "not_logged_in") },
+        { final: true },
+      );
+    await refuse();
+    const [first] = await h.failures.cards();
+    // A retry refused again and again adds no message, so nothing unread piles up.
+    await refuse();
+    await refuse();
+    expect(h.messages.size).toBe(1);
+    expect(h.shownCards("chat")).toHaveLength(1);
+    const [card] = await h.failures.cards();
+    expect(card?.messageId).toBe(first!.messageId);
+    expect(card?.since).toBe(first!.since);
+  });
+
+  it("writes a new card for a refusal once anything was said after the open card", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("unauthorized") });
+    const refuse = () =>
+      h.failures.failed(
+        { chatId: "chat", agentName: "main", failure: refused("anthropic", "not_logged_in") },
+        { final: true },
+      );
+    await refuse();
+    // A reply of the agent's, or someone's message, comes after the card.
+    h.messages.set("said", { chatId: "chat", parts: [{ type: "text", content: "Done." }] });
+    await refuse();
+    expect(h.shownCards("chat")).toHaveLength(1);
+    const parts = [...h.messages.values()]
+      .flatMap((m) => m.parts as ProviderFailurePart[])
+      .filter((part) => part.type === "provider_failure");
+    expect(parts.map((part) => part.resolved?.by)).toEqual(["moved", undefined]);
+  });
+
+  it("keeps a card for each turn that ran and failed, its newest message or not", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("usage_limit_reached") });
+    await h.fail("chat", quota);
+    await h.fail("chat", quota);
+    // Each turn's own card explains its error where the turn shows.
+    expect(h.messages.size).toBe(2);
+    expect(h.shownCards("chat")).toHaveLength(1);
+  });
+
   it("settles a card when a later turn in the chat runs", async () => {
     const h = harness({ chat: {} }, { anthropic: reportOf("usage_limit_reached") });
     await h.fail("chat", quota);
@@ -840,6 +911,136 @@ describe("a card's button", () => {
     await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
     await flush();
     expect(h.runs[0]?.actor).toMatchObject({ kind: "visitor", accountId: "acct-v" });
+  });
+});
+
+describe("a card's options stay as written, and Retry is on every card", () => {
+  it("an option that no longer works writes a fresh card with the options that work now", async () => {
+    const reports: ModelAccountReports = {
+      anthropic: reportOf("usage_limit_reached"),
+      openai: reportOf("available"),
+    };
+    const h = harness({ chat: {} }, reports);
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    expect(card?.part.alternatives).toEqual(["openai"]);
+    // ChatGPT's login expired after the card was written.
+    reports.openai = reportOf("expired");
+    expect(
+      await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" }),
+    ).toBe("refreshed");
+    await flush();
+    expect(h.runs).toEqual([]);
+    expect(h.kept).toEqual([]);
+    const shown = h.shownCards("chat");
+    expect(shown).toHaveLength(1);
+    expect(shown[0]).toMatchObject({ reason: "quota", alternatives: [] });
+    const [fresh] = await h.failures.cards();
+    expect(fresh?.messageId).not.toBe(card!.messageId);
+  });
+
+  it("a stale Use Rome credits writes a fresh card instead of failing", async () => {
+    // No balance is left now, whatever the card offered when it was written.
+    const h = harness(
+      { chat: {} },
+      { openai: reportOf("unauthorized"), anthropic: reportOf("unauthorized") },
+      { defaultProvider: "anthropic", signedIn: noAccount },
+    );
+    await h.fail("chat", notLoggedIn);
+    const [card] = await h.failures.cards();
+    expect(
+      await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "rome_credits" }),
+    ).toBe("refreshed");
+    expect(h.chose).toEqual([]);
+    expect(h.shownCards("chat")).toHaveLength(1);
+  });
+
+  it("Retry runs an account card's stopped turn too, at once", async () => {
+    const h = harness({ chat: {} }, { anthropic: reportOf("unauthorized") });
+    await h.fail("chat", notLoggedIn);
+    const [card] = await h.failures.cards();
+    expect(card?.part.card).toBe("account");
+    await h.failures.continueCard(card!.messageId);
+    await flush();
+    expect(h.runs.map((run) => run.threadId)).toEqual(["chat"]);
+    expect(h.cardIn("chat")?.resolved).toMatchObject({ by: "recovered", continued: true });
+  });
+
+  it("nothing resumes by itself after a login: the card waits for Retry", async () => {
+    const reports: ModelAccountReports = { anthropic: reportOf("unauthorized") };
+    const h = harness({ chat: {} }, reports);
+    await h.fail("chat", notLoggedIn);
+    reports.anthropic = reportOf("available");
+    await h.accountChanged("anthropic");
+    expect(h.runs).toEqual([]);
+    expect(await h.failures.cards()).toHaveLength(1);
+  });
+
+  it("a held chat runs on its own account: its ChatGPT card is not Rome credits used up", async () => {
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("unauthorized"), openai: reportOf("unauthorized") },
+      { defaultProvider: "rome_credits", signedIn: noAccount, credits: true, held: ["chat"] },
+    );
+    await h.fail("chat", revoked);
+    expect(h.cardIn("chat")).toMatchObject({
+      card: "account",
+      provider: "openai",
+      reason: "removed",
+    });
+  });
+
+  it("Use Rome credits on a held chat's card moves existing chats, held ones included", async () => {
+    const chats: Record<string, Row> = {
+      chat: { largeModelSelection: "claude-haiku", largeModelSelectionBy: "owner" },
+    };
+    const h = harness(
+      chats,
+      { anthropic: reportOf("unauthorized"), openai: reportOf("unauthorized") },
+      { defaultProvider: "rome_credits", signedIn: noAccount, credits: true, held: ["chat"] },
+    );
+    await h.fail("chat", notLoggedIn);
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "rome_credits" });
+    // Choosing them with Move existing chats too releases every held conversation.
+    expect(h.chose).toEqual([{ provider: "rome_credits", moveExisting: true }]);
+    // An owner's pick stays theirs.
+    expect(chats.chat).toMatchObject({
+      largeModelSelection: "claude-haiku",
+      largeModelSelectionBy: "owner",
+    });
+  });
+
+  it("a card's switch of an owner's pick moves its conversation's hold with it", async () => {
+    const chats: Record<string, Row> = {
+      chat: { largeModelSelection: "claude-opus-5-5", largeModelSelectionBy: "owner" },
+    };
+    const h = harness(chats, {
+      anthropic: reportOf("usage_limit_reached"),
+      openai: reportOf("available"),
+    });
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    await h.failures.switchCard(card!.messageId, { kind: "provider", provider: "openai" });
+    expect(h.picked).toEqual([{ chatId: "chat", selection: "gpt-6-1-sol" }]);
+  });
+
+  it("an error other than a logged-out provider stays an error, not a fresh card", async () => {
+    const h = harness(
+      { chat: {} },
+      { anthropic: reportOf("usage_limit_reached"), openai: reportOf("available") },
+    );
+    await h.fail("chat", quota);
+    const [card] = await h.failures.cards();
+    h.failNextChoose(new Error("disk full"));
+    await expect(
+      h.failures.switchCard(card!.messageId, {
+        kind: "provider",
+        provider: "openai",
+        makeDefault: true,
+      }),
+    ).rejects.toThrow("disk full");
+    expect(h.shownCards("chat")).toHaveLength(1);
   });
 });
 

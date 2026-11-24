@@ -118,6 +118,79 @@ describe("AgentSessionBridge turn routing", () => {
   });
 });
 
+describe("AgentSessionBridge on a connected chat", () => {
+  it("shows the chat's typing for a person's turn, and hands the worker no private text", async () => {
+    const events = (async function* (): AsyncIterable<StreamAgentEvent> {
+      yield { type: "turn_start", turnId: "turn-1", sessionId: "session-1", userPrompt: "hi" };
+      yield { type: "tool_input_delta", tool: "say", toolUseId: "call-1", content: "{" } as never;
+      yield { type: "text", content: "note to self" } as never;
+      yield { type: "result", content: "note to self" } as never;
+      yield { type: "turn_end", turnId: "turn-1", status: "completed", durationMs: 1 };
+    })();
+    const session = {
+      key: { agentName: "core:concierge", channelThreadKey: "discord_app:900" },
+      sessionId: "session-1",
+      providerId: "anthropic",
+      submit: submitStartingTurn,
+      startTurn: () => testTurnHandle({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
+    } as unknown as AgentSession;
+    const manager = { open: async () => session, find: () => session } as unknown as Sessions;
+    const seen: { turn: Record<string, unknown>; events: string[]; ended: boolean }[] = [];
+    const child = new FakeChild();
+    new AgentSessionBridge(
+      manager,
+      undefined,
+      undefined,
+      createAgentTurnStreamRegistry(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (turn) => {
+        const entry = {
+          turn: { ...turn, providerId: turn.providerId() },
+          events: [] as string[],
+          ended: false,
+        };
+        seen.push(entry);
+        return {
+          event: (msg) => entry.events.push(String(msg.type)),
+          end: () => {
+            entry.ended = true;
+          },
+        };
+      },
+      (agentName, channel) => agentName === "core:concierge" && channel !== "webchat",
+    ).attach(
+      new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
+      child as unknown as ChildProcess,
+    );
+    child.emit("message", {
+      type: "rpc_request",
+      reqId: "request-1",
+      method: "agent.session.runTurn",
+      params: {
+        key: session.key,
+        input: { prompt: "hi" },
+        platformMessageId: "800000000000000001",
+        init: { threadContext: { channel: "discord_app", threadId: "900" } },
+      },
+    });
+    await rs.waitFor(() => expect(seen[0]?.ended).toBe(true));
+    expect(seen[0]?.turn).toMatchObject({
+      channel: "discord_app",
+      threadId: "900",
+      initiatedBy: "user",
+      providerId: "anthropic",
+    });
+    expect(seen[0]?.events).toContain("tool_input_delta");
+    // The trace keeps the text; the result the worker reads carries none.
+    await rs.waitFor(() => expect(JSON.stringify(child.sent)).toContain('"type":"result"'));
+    expect(JSON.stringify(child.sent)).toMatch(/"type":"result","content":""/);
+  });
+});
+
 describe("AgentSessionBridge conversation", () => {
   it("records a turn with no caller conversation in the one the session recorded", async () => {
     const testDb = createTestDb();

@@ -4,13 +4,30 @@ Rome Node exposes a computer to Rome instances in the same Cloud account while
 `rome-node connect` runs. Programs run as the OS user who starts the command.
 The computer needs Node.js 24 or later. It does not need a Rome instance.
 
-Build an installation archive from this repository:
+Build an installation archive from this repository on an arm64 Mac with a real
+Apple signing identity:
 
 ```sh
 pnpm --filter @rome-os/node build
+pnpm --filter @rome-os/node-core build:native --identity "Apple Development: Your Name (TEAMID)"
+pnpm --filter @rome-os/node-core-darwin-arm64 pack --pack-destination /tmp
 pnpm --filter @rome-os/node-core pack --pack-destination /tmp
 pnpm --filter @rome-os/node pack --pack-destination /tmp
-npm install -g /tmp/rome-os-node-core-0.1.0.tgz /tmp/rome-os-node-0.1.0.tgz
+mkdir -p /tmp/rome-node-local
+cat > /tmp/rome-node-local/package.json <<'EOF'
+{
+  "private": true,
+  "dependencies": {
+    "@rome-os/node": "file:/tmp/rome-os-node-0.1.11.tgz"
+  },
+  "overrides": {
+    "@rome-os/node-core": "file:/tmp/rome-os-node-core-0.1.8.tgz",
+    "@rome-os/node-core-darwin-arm64": "file:/tmp/rome-os-node-core-darwin-arm64-0.1.8.tgz"
+  }
+}
+EOF
+npm install --prefix /tmp/rome-node-local
+/tmp/rome-node-local/node_modules/.bin/rome-node --help
 ```
 
 On the target computer:
@@ -32,6 +49,10 @@ rome-node connect --device-code --name "Remote Linux" --cloud https://romeos.cc
 Open the printed URL on another device and approve the displayed user code.
 The CLI prints the expiry and waits for approval without a callback listener or SSH tunnel.
 Ctrl+C cancels the authorization. Both modes reuse stored credentials when valid.
+
+On Apple Silicon macOS, ordinary `rome-node connect` (and Rome Desktop when
+Computer Use is enabled) advertises background-window control alongside regular
+Node actions on the same Gateway connection.
 
 Rome instances prepare caller authorization automatically at startup and after
 Cloud enrollment. In a server environment that supplies `ROME_INSTANCE_TOKEN`, run:
@@ -59,6 +80,65 @@ rome-node device
 rome-node device describe <device-id>
 rome-node device run <device-id> exec --args '{"command":"git","args":["status"],"cwd":"/workspace"}'
 ```
+
+Native window control on the target Mac uses the helper shipped in the package:
+
+```sh
+rome-node computer permissions
+rome-node computer status
+rome-node connect --name "My Mac"
+```
+
+Grant persistent Screen Recording and Accessibility to **Rome Computer Use**
+through its local panel. Input Monitoring is not required.
+**Check window access** tests capture against the helper's own permission panel.
+Ordinary status and bind calls do not request grants. Stable signed builds retain
+the same application identity, but macOS can require consent or launch disclosures again.
+Unsigned CI builds cannot request those grants or dispatch input.
+The implementation targets Apple Silicon macOS 14 or later. Audio capture is disabled.
+
+On the caller, discover a window and bind its opaque reference:
+
+```sh
+rome-node device run <device-id> computer.windows
+rome-node device run <device-id> computer.bind --args '{"windowRef":"<listed-window-ref>"}'
+rome-node device run <device-id> computer.observe --args '{"sessionId":"<session-id>","full":true}'
+rome-node device run <device-id> computer.observe --args '{"sessionId":"<session-id>","screenshot":true}' --output window.png
+rome-node help device run
+```
+
+Full input requires the target application to own neither system frontmost status
+nor system key focus. A different non-key window in that foreground application
+can instead use `window_semantics`: ref-only AX `click`, `press`, `setValue` and
+`selectText`. Click is a single left AX press without coordinates; this mode has
+no type, raw keys, pointer events, dragging, scrolling or raw AX actions.
+The binding's input mode stays fixed until a new binding.
+The agent uses its own virtual cursor. Input and focus changes in
+other applications do not interrupt it. Target takeover stops the session.
+There is no global mouse, keyboard, activation or focus-restoration fallback.
+Omitting `windowRef` returns `window_selection_required`.
+
+Use only actions advertised by the binding and the selected element.
+The implementation provides `move`, `click`, `drag`, `scroll`, `key`, `type`,
+`press`, `setValue`, `selectText` and `performAction`.
+Coordinates use pixels in the latest window image. `click` and `scroll` can use
+a ref without coordinates. AX operations require an element ref.
+The backend has no application allowlist. Its capabilities do not prove compatibility
+with every application. Legacy bindings retain their `setValue`-only, 180-unit contract.
+
+`computer.observe` returns full or delta records. Supply `baseVersion` for incremental
+reads, or `full: true` for a reset. An absent or mismatched baseline produces a full response.
+Use `computer.act` with a unique action ID and the fresh observation's version,
+then `computer.verify`. Event delivery alone does not prove success.
+`setValue` and `selectText` support independent readback. Generic input without a
+checkable AX postcondition remains `unverifiable`.
+
+Unicode input does not provide IME composition. `computer.cancel` stops a session.
+Observations expire after 15 seconds, and unknown outcomes must never be replayed.
+Images travel as raw bytes. Audit records omit image and input contents.
+Real AppKit checks and isolated input checks do not qualify complete tasks,
+multiple applications, both hosts or distribution permissions. See the
+[full action contract](../rome-node-core/README.md#shared-macos-computer-use).
 
 Copy a file to or from a device:
 

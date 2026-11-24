@@ -55,6 +55,7 @@ const GuardianBubble = memo(
             : null
         }
         anchorId={msg.id}
+        partOf={msg.id}
         arrival={arrival}
         className={GUARDIAN_BUBBLE_GAP}
       >
@@ -122,7 +123,7 @@ const AgentEntry = memo(function AgentEntry({
     // The first bubble of a reply carries its quote on top of its content,
     // unless the reply sits under what it answers or in a run of replies to it.
     const first = quote?.type === "reply_to" && index === firstBubble ? quote : null;
-    const quoted = first && showQuote ? <QuotedReply part={first} /> : null;
+    const quoted = first && showQuote ? <QuotedReply part={first} from={message.id} /> : null;
     if (part.type === "task_chat") {
       // The card is a message of its own, so it takes the same details as a bubble.
       return (

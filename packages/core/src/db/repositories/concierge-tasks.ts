@@ -70,7 +70,14 @@ export interface ConciergeTaskWithChat {
   row: ConciergeTaskRow;
   chat: { id: string; name: string };
   /** The Concierge chat the row came from: its owner's main chat when the row names none or its chat is gone. */
-  conciergeChat: { id: string; name: string; main: boolean };
+  conciergeChat: {
+    id: string;
+    name: string;
+    main: boolean;
+    /** Set when the row came from a chat on one of Rome's connected accounts,
+     *  such as a Discord channel, where the task reports while that chat is live. */
+    onConnection?: true;
+  };
   /** Whose Concierge the row is, as its chat records it. Never sent to a client. */
   owner: string;
   sourceMessageId: string | null;
@@ -1375,6 +1382,7 @@ export class ConciergeTasksRepository {
         ...JOINED,
         originName: origin.name,
         originArchivedAt: origin.archivedAt,
+        originChannel: origin.sourceChannel,
       })
       .from(taskChats)
       .innerJoin(romeSessions, eq(romeSessions.id, taskChats.sessionId))
@@ -1401,11 +1409,23 @@ export class ConciergeTasksRepository {
       found,
     }: {
       row: ConciergeTaskRow;
-      found: { originName: string | null; originArchivedAt: Date | null };
+      found: {
+        originName: string | null;
+        originArchivedAt: Date | null;
+        originChannel: string | null;
+      };
     }) => {
       const main = mainChatIdOf(row.ownerKey);
       return row.chatId && found.originName !== null && found.originArchivedAt === null
-        ? { id: row.chatId, name: found.originName, main: row.chatId === main }
+        ? {
+            id: row.chatId,
+            name: found.originName,
+            main: row.chatId === main,
+            // A dashboard chat is a channel row too, on the webchat channel.
+            ...(found.originChannel && found.originChannel !== "webchat"
+              ? { onConnection: true as const }
+              : {}),
+          }
         : { id: main, name: mainNames.get(main) ?? MAIN_CHAT_NAME, main: true };
     };
     // Only a message the row's Concierge chat still holds counts as a source.

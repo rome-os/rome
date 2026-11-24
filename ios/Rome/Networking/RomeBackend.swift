@@ -38,6 +38,12 @@ protocol RomeBackend: AnyObject, Sendable {
     /// Archives a topic chat. `stoppingWork` ends its follows and open tasks
     /// instead of moving them to the main chat.
     func archiveChat(_ id: String, stoppingWork: Bool) async throws
+    /// The guardian's archived topic chats, from `GET /chat/sessions?status=archived`,
+    /// in the server's order.
+    func archivedTopicChats() async throws -> [ChatSession]
+    /// Restores an archived topic chat. `movingFollowsBack` moves the follows
+    /// its archive moved to the main chat back to it.
+    func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws
     /// Deletes a chat for good; a Concierge topic chat retires with it.
     func deleteChat(_ id: String) async throws
     /// Deletes a topic chat for good. `stoppingWork` ends its follows and open
@@ -45,6 +51,7 @@ protocol RomeBackend: AnyObject, Sendable {
     func deleteChat(_ id: String, stoppingWork: Bool) async throws
     /// The follows and open tasks that archiving or deleting topic chat `chatId` would move.
     func chatWork(chatId: String) async throws -> ConciergeChatWork
+    func threadPage(sessionId: String, anchor: String, before: String?, after: String?, limit: Int) async throws -> ThreadPage
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     /// The newest page, reaching down to `through` and two turns past it.
     func messages(sessionId: String, through: String, limit: Int) async throws -> MessagePage
@@ -98,12 +105,52 @@ protocol RomeBackend: AnyObject, Sendable {
     func chatOutputs(chatId: String) async throws -> ChatOutputsResponse
     /// An output's bytes, from its `contentUrl` (the path after `/api`).
     func chatOutputFile(path: String) async throws -> Data
+    /// A file a chat links to (`/projects/download`, `/memory/download` or an
+    /// asset), as large as an output may be.
+    func linkedFile(_ file: LinkedFile) async throws -> Data
+    /// What a linked project or memory path names, from `/<folder>/resolve`;
+    /// `.file` for any other link.
+    func linkedFileKind(_ file: LinkedFile) async throws -> LinkedFileKind
     func approval(id: String) async throws -> ApprovalRecord
     /// Every pending approval; the guardian's only (a visitor gets an error).
     func pendingApprovals() async throws -> [PendingApproval]
     func resolveApproval(id: String, approve: Bool) async throws
     func toolCalls(traceMessageId: String) async throws -> [ToolCall]
     func aiTools() async throws -> AIToolsStatus
+    /// `POST /ai-tools/refresh?provider=`: one account read again now, not
+    /// the remembered report. A login watches it to see the account arrive.
+    func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus
+    /// Starts a ChatGPT device-code login: the code and the page to enter it on.
+    func startChatGPTDeviceLogin() async throws -> DeviceLoginCode
+    /// Cancels a ChatGPT login still in progress.
+    func cancelChatGPTDeviceLogin() async
+    /// Logs Rome out of the account, on this instance only.
+    /// `moveExisting`: whether the chats that follow the default move with it,
+    /// when the logout moves it.
+    func logOut(_ account: AIAccount, moveExisting: Bool) async throws
+    /// Makes `provider` the default; `moveExisting` false leaves the chats
+    /// that follow it where they run, pinned there.
+    func setDefaultProvider(_ provider: DefaultModelProvider, moveExisting: Bool) async throws
+    /// One chat as the server shows it, with whether it follows the default.
+    func chatSession(_ id: String) async throws -> ChatSession
+    /// "Back to default": a pinned chat follows the default again.
+    func followDefault(sessionId: String) async throws -> ChatSession
+    /// The account's Rome credits; nil when the instance has none.
+    func romeCredits() async throws -> RomeCreditsResponse.Credits?
+    /// `showAiToolUsage` in `GET /settings`: on unless the guardian turned it off.
+    func showsAIToolUsage() async -> Bool
+    /// The terminal socket that runs Claude's login (`claude-login`), opened;
+    /// nil without one.
+    func claudeLoginSocket() -> LoginSocket?
+    /// Answers a card the agent waits on, as an `interaction_result` part:
+    /// the turn goes on from `output`.
+    func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws
+    /// A provider failure card's switch (`change` as the web sends it): the
+    /// chat moves and the stopped turn runs again.
+    /// True when the option no longer worked and the server wrote a fresh card.
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws -> Bool
+    /// A provider failure card's Retry or Continue: the stopped turn runs again where it ran.
+    func continueProviderFailure(messageId: String) async throws
     func setConciergeEnabled(_ enabled: Bool) async throws
     func search(_ query: String) async throws -> [SearchHit]
     /// The guardian's display name on this instance.
@@ -147,8 +194,9 @@ protocol RomeBackend: AnyObject, Sendable {
     /// `agentName` (nil: the page says Rome). No title: the instance names
     /// the share after the first turn.
     func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink
-    /// The chat's live share links, newest first.
-    func chatShares(sessionId: String) async throws -> [ChatShareLink]
+    /// Every live share link of the signed-in person, across their chats,
+    /// newest first, each with its chat's name.
+    func allShares() async throws -> [ChatShareLink]
     /// Revokes a share link: it stops opening.
     func revokeShare(id: String) async throws
 }
@@ -199,6 +247,18 @@ final class LiveBackend: RomeBackend {
         try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(body))
     }
 
+    func archivedTopicChats() async throws -> [ChatSession] {
+        let sessions: [ChatSession] = try await client.get("/chat/sessions", query: [URLQueryItem(name: "status", value: "archived")])
+        return sessions.filter(\.isArchivedTopicChat)
+    }
+
+    func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws {
+        // Without the option, the follows stay in the main chat.
+        var body: [String: JSONValue] = ["archived": .bool(false)]
+        if movingFollowsBack { body["follows"] = .string("moveBack") }
+        try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(body))
+    }
+
     func deleteChat(_ id: String) async throws {
         try await client.delete("/chat/sessions/\(escape(id))")
     }
@@ -215,6 +275,13 @@ final class LiveBackend: RomeBackend {
         try await client.get("/concierge/chats/\(escape(chatId))/follows-and-tasks", reportsUnauthorized: false)
     }
 
+
+    func threadPage(sessionId: String, anchor: String, before: String?, after: String?, limit: Int) async throws -> ThreadPage {
+        var query = [URLQueryItem(name: "limit", value: String(limit))]
+        if let before { query.append(URLQueryItem(name: "before", value: before)) }
+        if let after { query.append(URLQueryItem(name: "after", value: after)) }
+        return try await client.get("/chat/sessions/\(escape(sessionId))/messages/\(escape(anchor))/thread", query: query)
+    }
 
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         var query = [URLQueryItem(name: "limit", value: String(limit))]
@@ -336,6 +403,22 @@ final class LiveBackend: RomeBackend {
         try await client.getFile(apiPath: path, percentEncodedQuery: nil, limit: APIClient.outputLimit, accept: "*/*")
     }
 
+    func linkedFile(_ file: LinkedFile) async throws -> Data {
+        try await client.getFile(apiPath: file.apiPath, percentEncodedQuery: file.query, limit: APIClient.outputLimit, accept: "*/*")
+    }
+
+    func linkedFileKind(_ file: LinkedFile) async throws -> LinkedFileKind {
+        guard let logical = file.logicalPath, let folder = logical.split(separator: "/").first else { return .file }
+        // Encoded strictly, as the download is: a `+` would reach the server as a space.
+        let data = try await client.getData("/\(folder)/resolve", query: [URLQueryItem(name: "path", value: logical)])
+        let answer = try JSONDecoder().decode(JSONValue.self, from: data)
+        switch answer["type"]?.string {
+        case "directory": return .folder
+        case "missing": return .missing
+        default: return .file
+        }
+    }
+
     func pendingApprovals() async throws -> [PendingApproval] {
         let rows: JSONValue = try await client.get("/approvals", query: [URLQueryItem(name: "status", value: "pending")], reportsUnauthorized: false)
         return (rows.array ?? []).compactMap(PendingApproval.init(json:))
@@ -356,6 +439,67 @@ final class LiveBackend: RomeBackend {
 
     func aiTools() async throws -> AIToolsStatus {
         try await client.get("/ai-tools/status")
+    }
+
+    func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus {
+        try await client.post("/ai-tools/refresh", query: [URLQueryItem(name: "provider", value: provider.wire)], as: AIToolsStatus.self)
+    }
+
+    func startChatGPTDeviceLogin() async throws -> DeviceLoginCode {
+        try await client.post("/ai-tools/codex/device-login/start", as: DeviceLoginCode.self)
+    }
+
+    func cancelChatGPTDeviceLogin() async {
+        _ = try? await client.post("/ai-tools/codex/device-login/cancel")
+    }
+
+    func logOut(_ account: AIAccount, moveExisting: Bool) async throws {
+        _ = try await client.post("/ai-tools/\(account.routeSegment)/logout", json: .object(["moveExisting": .bool(moveExisting)]))
+    }
+
+    func setDefaultProvider(_ provider: DefaultModelProvider, moveExisting: Bool) async throws {
+        try await client.put("/ai-tools/default", json: .object(["provider": .string(provider.wire), "moveExisting": .bool(moveExisting)]))
+    }
+
+    func chatSession(_ id: String) async throws -> ChatSession {
+        try await client.get("/chat/sessions/\(escape(id))")
+    }
+
+    func followDefault(sessionId: String) async throws -> ChatSession {
+        try await client.post("/chat/sessions/\(escape(sessionId))/model/follow-default", as: ChatSession.self)
+    }
+
+    func romeCredits() async throws -> RomeCreditsResponse.Credits? {
+        let response: RomeCreditsResponse = try await client.get("/ai-tools/rome-credits", reportsUnauthorized: false)
+        return response.credits
+    }
+
+    func showsAIToolUsage() async -> Bool {
+        guard let settings: JSONValue = try? await client.get("/settings", reportsUnauthorized: false) else { return true }
+        return settings["showAiToolUsage"]?.bool ?? true
+    }
+
+    func claudeLoginSocket() -> LoginSocket? {
+        var request = client.socketRequest("/ws/terminal")
+        guard let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.queryItems = [URLQueryItem(name: "preset", value: "claude-login")]
+        request.url = components.url
+        return WebLoginSocket(request: request)
+    }
+
+    func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws {
+        let part: JSONValue = .object(["type": .string("interaction_result"), "toolUseId": .string(toolUseId), "output": output])
+        let body: JSONValue = .object(["inputId": .string(UUID().uuidString.lowercased()), "parts": .array([part])])
+        _ = try await client.post("/chat/sessions/\(escape(sessionId))/turns", json: body)
+    }
+
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws -> Bool {
+        let answer: JSONValue = try await client.post("/ai-tools/provider-failures/\(escape(messageId))/switch", json: change, as: JSONValue.self)
+        return answer["refreshed"]?.bool ?? false
+    }
+
+    func continueProviderFailure(messageId: String) async throws {
+        _ = try await client.post("/ai-tools/provider-failures/\(escape(messageId))/continue")
     }
 
     func setConciergeEnabled(_ enabled: Bool) async throws {
@@ -464,8 +608,8 @@ final class LiveBackend: RomeBackend {
         return .object(body)
     }
 
-    func chatShares(sessionId: String) async throws -> [ChatShareLink] {
-        try await client.get("/chat/sessions/\(escape(sessionId))/shares")
+    func allShares() async throws -> [ChatShareLink] {
+        try await client.get("/chat/shares")
     }
 
     func revokeShare(id: String) async throws {
@@ -521,10 +665,20 @@ enum ToolCallExtractor {
 }
 
 extension RomeBackend {
+    func threadPage(sessionId: String, anchor: String, before: String?, after: String?, limit: Int) async throws -> ThreadPage {
+        throw APIError.notFound
+    }
+
     /// Demo data and test doubles move a chat's work, as an older instance does.
     func archiveChat(_ id: String, stoppingWork: Bool) async throws { try await archiveChat(id) }
     func deleteChat(_ id: String, stoppingWork: Bool) async throws { try await deleteChat(id) }
     func chatWork(chatId: String) async throws -> ConciergeChatWork { throw APIError.notFound }
+    /// Test doubles hold no linked files.
+    func linkedFile(_ file: LinkedFile) async throws -> Data { throw APIError.notFound }
+    func linkedFileKind(_ file: LinkedFile) async throws -> LinkedFileKind { .file }
+    /// Test doubles archive nothing for good.
+    func archivedTopicChats() async throws -> [ChatSession] { [] }
+    func unarchiveChat(_ id: String, movingFollowsBack: Bool) async throws { throw APIError.notFound }
     /// Test doubles keep no pins.
     func pinChat(_ id: String, pinned: Bool) async throws { throw APIError.notFound }
     /// Demo data and test doubles hold every message in the newest page.
@@ -568,8 +722,21 @@ extension RomeBackend {
     func voiceInputSocket() -> URLRequest? { nil }
     func apps() async throws -> [InstalledApp] { [] }
     func webSessionCookie() -> HTTPCookie? { nil }
+    func refreshAITools(_ provider: DefaultModelProvider) async throws -> AIToolsStatus { try await aiTools() }
+    func startChatGPTDeviceLogin() async throws -> DeviceLoginCode { throw APIError.notFound }
+    func cancelChatGPTDeviceLogin() async {}
+    func logOut(_ account: AIAccount, moveExisting: Bool) async throws { throw APIError.notFound }
+    func setDefaultProvider(_ provider: DefaultModelProvider, moveExisting: Bool) async throws { throw APIError.notFound }
+    func chatSession(_ id: String) async throws -> ChatSession { throw APIError.notFound }
+    func followDefault(sessionId: String) async throws -> ChatSession { throw APIError.notFound }
+    func romeCredits() async throws -> RomeCreditsResponse.Credits? { nil }
+    func showsAIToolUsage() async -> Bool { true }
+    func claudeLoginSocket() -> LoginSocket? { nil }
+    func answerInteraction(sessionId: String, toolUseId: String, output: JSONValue) async throws { throw APIError.notFound }
+    func switchProviderFailure(messageId: String, change: JSONValue) async throws -> Bool { throw APIError.notFound }
+    func continueProviderFailure(messageId: String) async throws { throw APIError.notFound }
     func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink { throw APIError.notFound }
-    func chatShares(sessionId: String) async throws -> [ChatShareLink] { [] }
+    func allShares() async throws -> [ChatShareLink] { [] }
     func revokeShare(id: String) async throws {}
 }
 

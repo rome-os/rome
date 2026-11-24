@@ -34,6 +34,10 @@ struct TaskChatScreen: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .providerFailurePrompts(store, workspace: workspace)
+        // Whether the chat follows the default, read each time it opens.
+        // Read again each time it comes back into view.
+        .task(id: "\(chatId)|\(visibleChat == chatId)") { if visibleChat == chatId { await store.readChatSession() } }
         .floatingTopBar { header }
         .overlay(alignment: .top) {
             TranscriptBanners(store: store)
@@ -114,7 +118,6 @@ struct TaskChatScreen: View {
                 Button(role: .destructive) { confirmDelete = true } label: {
                     Label("Delete", systemImage: "trash")
                 }
-                ChatShareMenuItems(share: store.share)
             } label: {
                 Image(systemName: "ellipsis")
                     .romeFont(17, .semibold)
@@ -139,7 +142,7 @@ struct TaskChatScreen: View {
             store: store,
             composerFocused: composerFocused,
             alignTop: true,
-            footer: store.running && store.loaded ? AnyView(runningLine(store)) : nil
+            footer: footer(store)
         ) { row, previous in
             // A row that draws nothing takes no space either: a row view of
             // its own would still take the spacing above it.
@@ -150,6 +153,18 @@ struct TaskChatScreen: View {
             }
         }
         .onTapGesture { composerFocused = false }
+    }
+
+    /// After the last row: "Running…" while a turn runs, then the pinned
+    /// hint while the chat does not follow the default.
+    private func footer(_ store: TranscriptStore) -> AnyView? {
+        let running = store.running && store.loaded
+        let hint = PinnedHintLine.footer(store, visitor: workspace.isVisitor)
+        guard running || hint != nil else { return nil }
+        return AnyView(VStack(spacing: 0) {
+            if running { runningLine(store) }
+            if let hint { hint }
+        })
     }
 
     private func runningLine(_ store: TranscriptStore) -> some View {
@@ -203,7 +218,7 @@ private struct TaskChatRow: View, Equatable {
     static func draws(_ row: TranscriptRow, briefID: String?) -> Bool {
         switch row {
         case .separator(let id, _): briefID.map { id != "sep-\($0)" } ?? true
-        case .taskAsk, .sourceLabel, .sessionRenewal, .unreadDivider: false
+        case .taskAsk, .sourceLabel, .sessionRenewal, .unreadDivider, .providerOutage: false
         default: true
         }
     }
@@ -230,8 +245,11 @@ private struct TaskChatRow: View, Equatable {
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, menu: menu)
-        case .tools, .approval, .question, .webOnly, .routineDraft, .connect, .widgetUI:
+        case .tools, .approval, .question, .webOnly, .aiTools, .providerFailure, .routineDraft, .connect, .widgetUI:
             InteractionRow(row: row, store: store)
+        case .providerOutage:
+            // Only the main Chat gets the notice.
+            EmptyView()
         case .error(_, let error):
             ErrorLine(error: error)
         case .notice(_, let text):

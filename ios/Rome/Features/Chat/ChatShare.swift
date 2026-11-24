@@ -63,8 +63,8 @@ final class ShareLinkSource: NSObject, UIActivityItemSource {
 }
 
 /// Sharing one chat: share mode, where the guardian picks turns and makes a
-/// read-only public link of them, and the chat's list of links. A message's
-/// Share opens share mode.
+/// read-only public link of them. A message's Share opens share mode. Every
+/// link is listed in Settings (`SharedLinksStore`).
 @Observable
 @MainActor
 final class ChatShareFlow {
@@ -80,12 +80,6 @@ final class ChatShareFlow {
     private(set) var error: String?
     /// Set, the share sheet is up with it.
     var outgoing: ShareOutgoing?
-    /// The Shared links sheet is up.
-    var showsLinks = false
-    /// The chat's links; nil until they load.
-    private(set) var links: [ChatShareLink]?
-    private(set) var linksFailed = false
-    private(set) var revokeFailed = false
 
     @ObservationIgnored weak var chat: TranscriptStore?
     @ObservationIgnored private let backend: RomeBackend
@@ -187,7 +181,6 @@ final class ChatShareFlow {
                 return
             }
             outgoing = ShareOutgoing(url: url, title: link.title)
-            links = links.map { [link] + $0 }
             selection = nil
         } catch {
             if current { self.error = String(localized: "Couldn't create the link.") }
@@ -201,46 +194,8 @@ final class ChatShareFlow {
         return UpdateGate.isSupported(version, minimum: UpdateGate.shareLinksInstanceVersion)
     }
 
-    /// The Shared links sheet or the share sheet is up over the chat.
-    var coversChat: Bool { showsLinks || outgoing != nil }
-
-    func openLinks() {
-        showsLinks = true
-        Task { await loadLinks() }
-    }
-
-    func loadLinks() async {
-        guard let sessionId else { return }
-        linksFailed = false
-        do {
-            let loaded = try await backend.chatShares(sessionId: sessionId)
-            links = Self.newestFirst(loaded)
-        } catch {
-            if links == nil { linksFailed = true }
-        }
-    }
-
-    /// Stops a link from opening. It leaves the list at once. If the
-    /// instance refuses, that link alone comes back, into the list as it is
-    /// by then; one the instance no longer knows was revoked already.
-    func revoke(_ link: ChatShareLink) async {
-        links?.removeAll { $0.id == link.id }
-        revokeFailed = false
-        do {
-            try await backend.revokeShare(id: link.id)
-        } catch APIError.notFound {
-            // Gone already: nothing to put back.
-        } catch {
-            if let current = links, !current.contains(where: { $0.id == link.id }) {
-                links = Self.newestFirst(current + [link])
-            }
-            revokeFailed = true
-        }
-    }
-
-    private static func newestFirst(_ links: [ChatShareLink]) -> [ChatShareLink] {
-        links.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
-    }
+    /// The share sheet is up over the chat.
+    var coversChat: Bool { outgoing != nil }
 }
 
 // MARK: Views
@@ -325,9 +280,8 @@ extension View {
         modifier(ShareSelectable(row: row, share: share, top: top, placement: placement ?? .of(row)))
     }
 
-    /// The chat's header, covered by Cancel and the count in share mode. A
-    /// topic chat's "…" menu offers Shared links; the main Chat's are in
-    /// Settings. Nil: a chat not started yet, with nothing to share.
+    /// The chat's header, covered by Cancel and the count in share mode.
+    /// Nil: a chat not started yet, with nothing to share.
     func shareModeHeader(_ share: ChatShareFlow?) -> some View {
         let selecting = share?.isSelecting ?? false
         return self
@@ -341,22 +295,10 @@ extension View {
     }
 
     /// The composer, covered by Create link in share mode; also the share
-    /// sheet and the Shared links sheet.
+    /// sheet.
     @ViewBuilder
     func shareModeComposer(_ share: ChatShareFlow?) -> some View {
         if let share { modifier(ShareModeComposer(share: share)) } else { self }
-    }
-}
-
-/// The "…" menu's Shared links, its last item. Sharing itself starts from a
-/// message's Share.
-struct ChatShareMenuItems: View {
-    let share: ChatShareFlow?
-
-    var body: some View {
-        if let share {
-            Button { share.openLinks() } label: { Label("Shared links", systemImage: "link") }
-        }
     }
 }
 
@@ -468,237 +410,5 @@ private struct ShareModeComposer: ViewModifier {
             ActivitySheet(items: outgoing.items)
                 .presentationDetents([.medium, .large])
         }
-        .sharedLinksSheet(share, isPresented: $share.showsLinks)
-    }
-}
-
-extension View {
-    /// The Shared links sheet of `share`'s chat, up while `isPresented`:
-    /// over its chat, or over Settings for the main chat.
-    func sharedLinksSheet(_ share: ChatShareFlow, isPresented: Binding<Bool>) -> some View {
-        modifier(SharedLinksPresenter(share: share, isPresented: isPresented))
-    }
-}
-
-/// The Shared links sheet; on a snapshot run, its content in a sheet's frame.
-private struct SharedLinksPresenter: ViewModifier {
-    let share: ChatShareFlow
-    @Binding var isPresented: Bool
-
-    func body(content: Content) -> some View {
-        #if DEBUG
-        if SnapshotRunner.directory != nil {
-            // A system sheet cannot be captured on Mac Catalyst: its content
-            // in a large sheet's frame, reaching past the composer it hangs
-            // from to the whole window.
-            content.overlay(alignment: .bottom) {
-                if isPresented, let window = Self.window {
-                    ZStack(alignment: .bottom) {
-                        Color.black
-                        SharedLinksSheet(share: share)
-                            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
-                            .padding(.top, 64)
-                    }
-                    .frame(width: window.width, height: window.height)
-                    // The composer sits 8 pt above the window's foot.
-                    .offset(y: 8)
-                }
-            }
-        } else {
-            sheet(content)
-        }
-        #else
-        sheet(content)
-        #endif
-    }
-
-    #if DEBUG
-    private static var window: CGSize? {
-        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).first?.bounds.size
-    }
-    #endif
-
-    private func sheet(_ content: Content) -> some View {
-        content.sheet(isPresented: $isPresented) {
-            SharedLinksSheet(share: share)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
-                .presentationCornerRadius(22)
-                .presentationBackground(Palette.sheet)
-        }
-    }
-}
-
-/// The chat's share links: tap one to send it again, swipe to stop sharing.
-struct SharedLinksSheet: View {
-    let share: ChatShareFlow
-    @Environment(\.dismiss) private var dismiss
-    @State private var outgoing: ShareOutgoing?
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Capsule()
-                .fill(Palette.grabber)
-                .frame(width: 36, height: 5)
-                .padding(.top, 7)
-            HStack {
-                Text("Shared links")
-                    .romeFont(24, .bold)
-                    .tracking(-0.6)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-                SheetCloseButton {
-                    dismiss()
-                    share.showsLinks = false
-                }
-            }
-            .padding(.leading, 20)
-            .padding(.trailing, 12)
-            .frame(height: 54)
-
-            if let links = share.links {
-                if links.isEmpty {
-                    empty
-                } else {
-                    list(links)
-                }
-            } else if share.linksFailed {
-                failed
-            } else {
-                Spacer()
-                Spinner(size: 20, color: Palette.sub)
-                Spacer()
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Palette.sheet.ignoresSafeArea())
-        .sheet(item: $outgoing) { outgoing in
-            ActivitySheet(items: outgoing.items)
-                .presentationDetents([.medium, .large])
-        }
-    }
-
-    private func list(_ links: [ChatShareLink]) -> some View {
-        List {
-            if share.revokeFailed {
-                Text("Couldn't stop sharing.")
-                    .romeFont(13, .medium)
-                    .foregroundStyle(Palette.destructive)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-            ForEach(links) { link in
-                Button {
-                    if let url = share.url(of: link) { outgoing = ShareOutgoing(url: url, title: link.title) }
-                } label: {
-                    SharedLinkRow(link: link)
-                }
-                .buttonStyle(RowPressStyle())
-                .listRowBackground(Palette.elevated)
-                .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-                .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) {
-                        Task { await share.revoke(link) }
-                    } label: {
-                        Label("Stop sharing", systemImage: "xmark.circle")
-                    }
-                }
-                .contextMenu {
-                    Button {
-                        UIPasteboard.general.url = share.url(of: link)
-                    } label: {
-                        Label("Copy link", systemImage: "link")
-                    }
-                    Button(role: .destructive) {
-                        Task { await share.revoke(link) }
-                    } label: {
-                        Label("Stop sharing", systemImage: "xmark.circle")
-                    }
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
-        // Right under the title, as the Tasks sheet's list sits: the grouped
-        // list's own top margin is far taller.
-        .contentMargins(.top, 4, for: .scrollContent)
-        .listSectionSpacing(.compact)
-        .scrollContentBackground(.hidden)
-        .animation(.easeOut(duration: 0.2), value: links)
-    }
-
-    private var empty: some View {
-        VStack(spacing: 8) {
-            Spacer()
-            Image(systemName: "link")
-                .romeFont(22, .semibold)
-                .foregroundStyle(Palette.sub)
-                .frame(width: 52, height: 52)
-                .background(Palette.fillStrong, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            Text("No shared links")
-                .romeFont(17, .semibold)
-                .padding(.top, 6)
-            Text("Links you create in this chat show here.")
-                .romeFont(15)
-                .foregroundStyle(Palette.sub)
-                .multilineTextAlignment(.center)
-            Spacer()
-            Spacer()
-        }
-        .padding(.horizontal, 32)
-    }
-
-    private var failed: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Text("Couldn't load the links.")
-                .romeFont(15)
-                .foregroundStyle(Palette.sub)
-            Button("Try again") { Task { await share.loadLinks() } }
-                .romeFont(15, .semibold)
-                .foregroundStyle(Palette.primaryText)
-            Spacer()
-            Spacer()
-        }
-    }
-}
-
-/// One link: its title, and when it was made.
-private struct SharedLinkRow: View {
-    let link: ChatShareLink
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "link")
-                .romeFont(CardScale.iconGlyph, .medium)
-                .foregroundStyle(Palette.primaryText)
-                .frame(width: CardScale.iconBox, height: CardScale.iconBox)
-                .background(Palette.primarySoft, in: RoundedRectangle(cornerRadius: CardScale.iconCorner, style: .continuous))
-            VStack(alignment: .leading, spacing: 2) {
-                Group {
-                    if let title = link.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
-                        Text(verbatim: title)
-                    } else {
-                        Text("Shared chat")
-                    }
-                }
-                .romeFont(16, .medium)
-                .foregroundStyle(Palette.fg)
-                .lineLimit(1)
-                if let date = link.date {
-                    Text(verbatim: RelativeTime.ago(date))
-                        .romeFont(13)
-                        .foregroundStyle(Palette.sub)
-                }
-            }
-            Spacer(minLength: 0)
-            Image(systemName: "square.and.arrow.up")
-                .romeFont(15, .medium)
-                .foregroundStyle(Palette.sub)
-        }
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityHint("Shares the link")
     }
 }

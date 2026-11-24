@@ -1,7 +1,18 @@
 import type { ConciergeChatDto } from "@rome/api-types/concierge";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, Ellipsis, Hash, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import {
+  Archive,
+  ArchiveRestore,
+  ChevronDown,
+  ChevronRight,
+  Ellipsis,
+  Hash,
+  Pencil,
+  Pin,
+  PinOff,
+  Trash2,
+} from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -14,6 +25,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import { readStored, writeStored } from "@/lib/stored-preference";
 import { IconButton } from "@/components/ui/icon-button";
 import { archiveSession, deleteSession, pinSession, renameSession } from "@/lib/chat-api";
 import { findScrollableYAncestor } from "@/lib/scroll-container";
@@ -39,9 +52,14 @@ const anyEvent = z.unknown();
 /** How many topic chats show at first, and how many more each scroll to the end adds. */
 export const TOPIC_CHATS_PAGE = 30;
 
+const OLDER_TOPICS_OPEN_KEY = "rome-older-topic-chats-open";
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
 /** A topic chat as the sidebar lists it. */
 export interface TopicChatRow extends ConciergeChatDto {
   archived: boolean;
+  /** Milliseconds since epoch, or infinity while the chat list has not caught up. */
+  activityAt: number;
   /** When its owner pinned it; null when it is not pinned. An archived chat is never shown pinned. */
   pinnedAt: string | null;
 }
@@ -60,7 +78,7 @@ export function topicChatRows(
   topicSessions: readonly ChatSession[],
 ): TopicChatRow[] {
   const listed = new Map(topicSessions.map((session) => [session.id, session]));
-  const rows: Array<TopicChatRow & { at: number; pin: number }> = [];
+  const rows: Array<TopicChatRow & { pin: number }> = [];
   if (statusFilter !== "archived") {
     // The Concierge lists them oldest first. Walking it backwards leaves the
     // newest first among those the chat list has no time for, as the sort
@@ -72,7 +90,7 @@ export function topicChatRows(
         ...chat,
         archived: false,
         pinnedAt,
-        at: session ? sessionActivityTime(session) : Number.POSITIVE_INFINITY,
+        activityAt: session ? sessionActivityTime(session) : Number.POSITIVE_INFINITY,
         pin: pinnedAt ? new Date(pinnedAt).getTime() : Number.NEGATIVE_INFINITY,
       });
     }
@@ -87,14 +105,14 @@ export function topicChatRows(
         unread: 0,
         archived: true,
         pinnedAt: null,
-        at: sessionActivityTime(session),
+        activityAt: sessionActivityTime(session),
         pin: Number.NEGATIVE_INFINITY,
       });
     }
   }
   return rows
-    .sort((a, b) => (a.pin !== b.pin ? b.pin - a.pin : b.at - a.at))
-    .map(({ at: _at, pin: _pin, ...row }) => row);
+    .sort((a, b) => (a.pin !== b.pin ? b.pin - a.pin : b.activityAt - a.activityAt))
+    .map(({ pin: _pin, ...row }) => row);
 }
 
 /**
@@ -160,13 +178,7 @@ export function ConciergeEntry({ chatId, active }: { chatId: string; active: boo
   );
 }
 
-/**
- * The sidebar's Concierge section: the main chat's entry, then the topic
- * chats, latest first, {@link TOPIC_CHATS_PAGE} at a time: scrolling near the
- * end of the list shows the next page. Each topic chat has its unread badge
- * and a menu to rename, pin or unpin, archive or unarchive, and delete it. The status filter applies here too:
- * the main chat is never archived, so the archived filter hides it.
- */
+/** The dashboard's topic list. Grouping rules: docs/domains/chats.md#topic-chat. */
 export function ConciergeChats({
   mainChatId,
   activeSessionId,
@@ -192,41 +204,89 @@ export function ConciergeChats({
     [conciergeChats, statusFilter, topicSessions],
   );
   const [limit, setLimit] = useState(TOPIC_CHATS_PAGE);
+  const [olderLimit, setOlderLimit] = useState(TOPIC_CHATS_PAGE);
+  const [olderOpen, setOlderOpen] = useState(() => readStored(OLDER_TOPICS_OPEN_KEY) === "true");
+  const olderId = useId();
+  useEffect(() => {
+    writeStored(OLDER_TOPICS_OPEN_KEY, String(olderOpen));
+  }, [olderOpen]);
   // A topic chat's rows read two lists, so every change refetches both. A
   // reply in any topic chat, shown or not yet scrolled to, refetches them from
   // the chat list's status stream, so no row subscribes on its own.
   const refresh = useRefreshTopicChats();
   useSessionsChanged(refresh);
-  // The open topic chat stays in view, even when it is past the pages shown.
-  const activeIndex = topics.findIndex((chat) => chat.id === activeSessionId);
-  const shown = Math.max(limit, activeIndex + 1);
-  const visible = topics.slice(0, shown);
-  const hasMore = topics.length > shown;
-  // Near the end of the list, the next page: the list's scroller is the root,
-  // so the page lands a little before the guardian reaches the last row.
+  const cutoff = Date.now() - WEEK_MS;
+  const older: TopicChatRow[] = [];
+  const current: TopicChatRow[] = [];
+  for (const chat of topics) {
+    if (
+      chat.activityAt <= cutoff &&
+      chat.pinnedAt === null &&
+      chat.unread === 0 &&
+      chat.id !== activeSessionId
+    ) {
+      older.push(chat);
+    } else {
+      current.push(chat);
+    }
+  }
+  // Exceptions stay visible without revealing the rows between them and the page.
+  const visible = current.filter(
+    (chat, index) =>
+      index < limit || chat.id === activeSessionId || chat.unread > 0 || chat.pinnedAt !== null,
+  );
+  const hasMore = current.length > visible.length;
   const end = useListEnd({
     enabled: hasMore,
-    page: shown,
-    onReached: () => setLimit(shown + TOPIC_CHATS_PAGE),
+    page: limit,
+    onReached: () => setLimit(limit + TOPIC_CHATS_PAGE),
     rootMargin: "0px 0px 160px 0px",
   });
+  const olderEnd = useListEnd({
+    enabled: olderOpen && older.length > olderLimit,
+    page: olderLimit,
+    onReached: () => setOlderLimit(olderLimit + TOPIC_CHATS_PAGE),
+    rootMargin: "0px 0px 160px 0px",
+  });
+  const renderTopic = (chat: TopicChatRow) => (
+    <ConciergeTopicEntry
+      key={chat.id}
+      chat={chat}
+      active={activeSessionId === chat.id}
+      onChanged={refresh}
+      onGone={() => {
+        if (activeSessionId === chat.id) navigate(MAIN_CHAT_PATH);
+      }}
+    />
+  );
   return (
     <section aria-label={t("recentChats.conciergeSection")} data-concierge-section>
       {statusFilter === "archived" ? null : (
         <ConciergeEntry chatId={mainChatId} active={activeSessionId === mainChatId} />
       )}
-      {visible.map((chat) => (
-        <ConciergeTopicEntry
-          key={chat.id}
-          chat={chat}
-          active={activeSessionId === chat.id}
-          onChanged={refresh}
-          onGone={() => {
-            if (activeSessionId === chat.id) navigate(MAIN_CHAT_PATH);
-          }}
-        />
-      ))}
+      {visible.map(renderTopic)}
       {hasMore ? <div ref={end.ref} aria-hidden className="h-px" data-topic-chats-end /> : null}
+      {older.length > 0 ? (
+        <>
+          <Button
+            variant="ghost"
+            className={`${LINK_CLASS} ${IDLE_CLASS} mb-[var(--row-gap)] justify-start text-subtle-foreground aria-expanded:bg-transparent`}
+            aria-expanded={olderOpen}
+            aria-controls={olderId}
+            data-older-topic-chats
+            onClick={() => setOlderOpen(!olderOpen)}
+          >
+            {olderOpen ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+            <span>{t("recentChats.olderTopics", { count: older.length })}</span>
+          </Button>
+          <div id={olderId} hidden={!olderOpen}>
+            {olderOpen ? older.slice(0, olderLimit).map(renderTopic) : null}
+            {olderOpen && older.length > olderLimit ? (
+              <div ref={olderEnd.ref} aria-hidden className="h-px" data-older-topic-chats-end />
+            ) : null}
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }
@@ -341,10 +401,13 @@ function ConciergeTopicEntry({
           className="min-w-[180px]"
           {...rename.menuContentProps}
         >
-          <DropdownMenuItem onSelect={() => rename.start(chat.id, chat.name)}>
-            <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            {t("recentChats.rename")}
-          </DropdownMenuItem>
+          {/* An archived topic chat is renamed once it is unarchived. */}
+          {chat.archived ? null : (
+            <DropdownMenuItem onSelect={() => rename.start(chat.id, chat.name)}>
+              <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              {t("recentChats.rename")}
+            </DropdownMenuItem>
+          )}
           {chat.archived ? null : (
             <DropdownMenuItem onSelect={() => void togglePin()}>
               {pinned ? (

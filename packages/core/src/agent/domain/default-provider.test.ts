@@ -47,13 +47,16 @@ describe("reconciledDefault", () => {
     });
   });
 
-  it("moves a logged-out default to the other login, never to Rome credits", () => {
+  it("the default changes on a logout: to the other login, an expired one included", () => {
     expect(
       reconciledDefault("openai", { anthropic: true, openai: false, rome_credits: false }, null),
     ).toEqual({ provider: "anthropic", moved: true });
+  });
+
+  it("the default changes on the last logout: to Rome credits, when they can run", () => {
     expect(
       reconciledDefault("anthropic", { anthropic: false, openai: false, rome_credits: true }, null),
-    ).toEqual({ provider: "anthropic", moved: false });
+    ).toEqual({ provider: "rome_credits", moved: true });
   });
 
   it("gives Rome credits up to the first login without a note", () => {

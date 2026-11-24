@@ -17,7 +17,7 @@ Write an authoring guideline for a family only when both hold: `[human]`
 1. The family has three or more files, or a concrete plan to reach that.
 2. Inconsistency across the family has caused at least one real miss — a wrong edit, a failed lookup, a rule applied in one file but not another. The authoring guideline names that miss.
 
-Until then, the family's rules stay as a section in [CLAUDE.md](../CLAUDE.md). An authoring guideline written before the family needs one is speculation. Reject it.
+Until then, the family's rules stay as a section in [AGENTS.md](../AGENTS.md). An authoring guideline written before the family needs one is speculation. Reject it.
 
 ## Required sections
 
@@ -33,7 +33,7 @@ Every per-type authoring guideline contains these four sections. It may add sect
 Each rule in an authoring guideline carries one of three tier tags. The tags are the contract with tooling: `[mech]` rules get lint scripts, `[llm]` rules get an automated audit pass, and both skip `[human]` rules. `[mech]`
 
 - `[mech]` — a script can decide pass/fail. Examples: the file contains every required section, file names match a pattern, internal links resolve, the file uses no listed word.
-- `[llm]` — deciding takes judgment, but the rule states a decision procedure and includes one passing and one failing example. The example pair is the auditor's test fixture. A judgment rule without the pair fails admission. The "Prefer / Over" blocks in [CLAUDE.md](../CLAUDE.md) are the house format.
+- `[llm]` — deciding takes judgment, but the rule states a decision procedure and includes one passing and one failing example. The example pair is the auditor's test fixture. A judgment rule without the pair fails admission. The "Prefer / Over" blocks in [AGENTS.md](../AGENTS.md) are the house format.
 - `[human]` — only a person can decide (e.g. "this changed a real decision"). Auditors skip these. They never guess.
 
 A rule that fits no tier is an opinion, not a rule. Reject it.

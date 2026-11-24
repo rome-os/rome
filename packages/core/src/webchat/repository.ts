@@ -118,6 +118,14 @@ export interface StoredSharedChatSummary {
   createdAt: Date;
 }
 
+/** A live share with the chat it was made from, for the owner's list of all their links. */
+export interface StoredOwnerSharedChat extends StoredSharedChatSummary {
+  sessionId: string;
+  chatName: string;
+  chatAgentName: string | null;
+  chatOwnerKey: string | null;
+}
+
 export interface StoredWebchatHistoryMessage extends StoredWebchatMessage {
   sessionName: string;
   sessionAgentName: string | null;
@@ -329,6 +337,30 @@ export interface MessagePageOptions {
    */
   through?: string;
 }
+
+/** Which part of a reply chain a thread page holds, around or beside a message. */
+export interface ThreadPageOptions {
+  /** Messages per side of the anchor, or on the one side asked for. */
+  limit: number;
+  /** Return only chain messages strictly older than this message id. */
+  before?: string;
+  /** Return only chain messages strictly newer than this message id. */
+  after?: string;
+}
+
+/**
+ * A page of one reply chain, oldest first, with the trace rows of its
+ * messages' turns placed as in {@link MessagePageOptions}'s pages. `hasOlder`
+ * and `hasNewer` count within the chain. Or why there is none: the message
+ * is none of the session's, or a cursor is in another chain.
+ */
+export type ThreadPageResult =
+  | {
+      rows: Awaited<ReturnType<WebChatRepository["getMessages"]>>;
+      hasOlder: boolean;
+      hasNewer: boolean;
+    }
+  | { error: "message_not_found" | "not_in_thread" };
 
 /**
  * `rows` of a page, which stand in the order they were said, with a trace that
@@ -1890,7 +1922,7 @@ export class WebChatRepository {
   /**
    * Stores the chat's model, with who chose it: its owner, or Rome. `kept` is
    * Rome's choice that a change of the default does not move: the chat stays
-   * on that model's provider (docs/domains/agents.md#kept-provider).
+   * on that model's provider (docs/domains/agents.md#pinned-chat).
    */
   async updateSessionLargeModelSelection(
     id: string,
@@ -1928,15 +1960,51 @@ export class WebChatRepository {
   }
 
   /**
+   * The chats among `ids` that exist, with the model each stored and who
+   * chose it, in one read.
+   */
+  async modelSelectionsOf(ids: readonly string[]): Promise<
+    Map<
+      string,
+      {
+        agentName: string | null;
+        largeModelSelection: string | null;
+        largeModelSelectionBy: ModelSelectionBy | null;
+      }
+    >
+  > {
+    const out = new Map<
+      string,
+      {
+        agentName: string | null;
+        largeModelSelection: string | null;
+        largeModelSelectionBy: ModelSelectionBy | null;
+      }
+    >();
+    if (ids.length === 0) return out;
+    const rows = await this.db
+      .select({
+        id: romeSessions.id,
+        agentName: romeSessions.agentName,
+        largeModelSelection: romeSessions.largeModelSelection,
+        largeModelSelectionBy: romeSessions.largeModelSelectionBy,
+      })
+      .from(romeSessions)
+      .where(inArray(romeSessions.id, [...new Set(ids)]));
+    for (const { id, ...row } of rows) out.set(id, row);
+    return out;
+  }
+
+  /**
    * The kept chats: a change of the default that moves existing chats lets
    * them follow it again.
    */
-  async keptChatCount(): Promise<number> {
+  async keptChats(): Promise<string[]> {
     const rows = await this.db
-      .select({ count: sql<number>`count(*)`.mapWith(Number) })
+      .select({ id: romeSessions.id })
       .from(romeSessions)
       .where(eq(romeSessions.largeModelSelectionBy, "kept"));
-    return rows[0]?.count ?? 0;
+    return rows.map((row) => row.id);
   }
 
   /**
@@ -2598,6 +2666,15 @@ export class WebChatRepository {
           ? ({ at: oldest.at, seq: oldest.seq } satisfies MessagePageCursor)
           : null,
     };
+  }
+
+  /** The chain of message `messageId` as a page. A session in no chat has no chains. */
+  async getThreadPage(
+    _sessionId: string,
+    _messageId: string,
+    _options: ThreadPageOptions,
+  ): Promise<ThreadPageResult> {
+    return { error: "message_not_found" };
   }
 
   /**
@@ -3322,6 +3399,35 @@ export class WebChatRepository {
       .from(sharedChats)
       .where(and(eq(sharedChats.sessionId, sessionId), isNull(sharedChats.revokedAt)))
       .orderBy(desc(sharedChats.createdAt));
+  }
+
+  /**
+   * Every live share of the chats `ownerKey` owns, newest first. A chat with
+   * no owner is the guardian's; a null owner (no one signed in) owns none.
+   */
+  async listSharedChatsByOwner(ownerKey: string | null): Promise<StoredOwnerSharedChat[]> {
+    if (ownerKey === null) return [];
+    return this.db
+      .select({
+        id: sharedChats.id,
+        title: sharedChats.title,
+        createdAt: sharedChats.createdAt,
+        sessionId: sharedChats.sessionId,
+        chatName: romeSessions.name,
+        chatAgentName: romeSessions.agentName,
+        chatOwnerKey: romeSessions.ownerKey,
+      })
+      .from(sharedChats)
+      .innerJoin(romeSessions, eq(romeSessions.id, sharedChats.sessionId))
+      .where(
+        and(
+          isNull(sharedChats.revokedAt),
+          ownerKey === "guardian"
+            ? or(eq(romeSessions.ownerKey, ownerKey), isNull(romeSessions.ownerKey))
+            : eq(romeSessions.ownerKey, ownerKey),
+        ),
+      )
+      .orderBy(desc(sharedChats.createdAt), desc(sharedChats.id));
   }
 
   /** Soft-delete (revoke) a share. Returns true if a live row was revoked. */

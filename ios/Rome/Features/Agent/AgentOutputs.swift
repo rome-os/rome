@@ -61,21 +61,25 @@ final class ChatOutputsStore {
 
 /// What an output is, as its row names it. The web's `outputTypeOf`, kept in step.
 enum ChatOutputType: Equatable {
-    case document, spreadsheet, page, picture, code, file
+    case document, spreadsheet, page, picture, audio, video, code, file
 
     init(name: String, mimeType: String?) {
         let ext = (name as NSString).pathExtension.lowercased()
-        if ["md", "markdown", "txt", "pdf", "docx", "doc"].contains(ext) { self = .document }
+        let type = mimeType ?? ""
+        if ["md", "markdown", "txt", "pdf", "docx", "doc", "pptx", "ppt"].contains(ext) { self = .document }
         else if ["csv", "tsv", "xlsx", "xls"].contains(ext) { self = .spreadsheet }
         else if ["html", "htm"].contains(ext) { self = .page }
-        else if (mimeType ?? "").hasPrefix("image/") { self = .picture }
+        else if type.hasPrefix("image/") { self = .picture }
+        else if type.hasPrefix("audio/") { self = .audio }
+        else if type.hasPrefix("video/") { self = .video }
         else if Self.codeExtensions.contains(ext) { self = .code }
         else { self = .file }
     }
 
     private static let codeExtensions: Set<String> = [
-        "c", "cc", "cpp", "cs", "css", "go", "h", "java", "js", "jsx", "json", "kt", "mjs", "py",
-        "rb", "rs", "sh", "sql", "swift", "toml", "ts", "tsx", "xml", "yaml", "yml",
+        "c", "cc", "cjs", "cpp", "cs", "css", "diff", "go", "h", "java", "js", "jsx", "json", "kt",
+        "mjs", "patch", "py", "rb", "rs", "sh", "sql", "swift", "toml", "ts", "tsx", "xml", "yaml",
+        "yml",
     ]
 
     var label: String {
@@ -84,6 +88,8 @@ enum ChatOutputType: Equatable {
         case .spreadsheet: return String(localized: "Spreadsheet")
         case .page: return String(localized: "Page")
         case .picture: return String(localized: "Picture")
+        case .audio: return String(localized: "Audio")
+        case .video: return String(localized: "Video")
         case .code: return String(localized: "Code")
         case .file: return String(localized: "File")
         }
@@ -95,6 +101,8 @@ enum ChatOutputType: Equatable {
         case .spreadsheet: return "tablecells"
         case .page: return "macwindow"
         case .picture: return "photo"
+        case .audio: return "waveform"
+        case .video: return "film"
         case .code: return "chevron.left.forwardslash.chevron.right"
         case .file: return "doc"
         }

@@ -20,6 +20,19 @@ export function useProviderName(): (provider: DefaultModelProvider) => string {
         : t("aiTools.romeCredits.name");
 }
 
+/**
+ * Under "Move existing chats too": a checked move never takes a model its
+ * owner picked. docs/domains/agents.md#pinned-chat
+ */
+export function OwnerPicksNote() {
+  const { t } = useTranslation("settings");
+  return (
+    <p className="pl-6 text-aux text-muted-foreground">
+      {t("aiTools.defaultProvider.ownerPicksKeep")}
+    </p>
+  );
+}
+
 /** A checkbox with its label, the whole row a target. */
 export function LabeledCheckbox({
   checked,
@@ -121,6 +134,7 @@ export function MakeDefaultProviderButton({
                 {t("aiTools.defaultProvider.moveExisting")}
               </LabeledCheckbox>
             )}
+            {asksToMove && <OwnerPicksNote />}
             {save.isError && (
               <p role="alert" className="text-ui text-destructive">
                 {save.error.message || t("aiTools.defaultProvider.saveFailed")}

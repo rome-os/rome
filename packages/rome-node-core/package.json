@@ -9,7 +9,8 @@
   },
   "files": [
     "bin",
-    "dist",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
     "README.md"
   ],
   "exports": {
@@ -24,6 +25,10 @@
     "./host": {
       "types": "./dist/host.d.ts",
       "default": "./dist/host.js"
+    },
+    "./computer-use": {
+      "types": "./dist/computer-use.d.ts",
+      "default": "./dist/computer-use.js"
     },
     "./daemon": {
       "types": "./dist/daemon.d.ts",
@@ -48,12 +53,16 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "build:native": "node scripts/build-computer-use.ts --output '../rome-node-core-darwin-arm64/dist/native/Rome Computer Use.app'",
     "prepare": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm build && ../../scripts/test-env.sh rstest"
+    "test": "pnpm build && ../../scripts/test-env.sh rstest --include 'src/**/*.test.ts'"
   },
   "dependencies": {
     "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "@rome-os/node-core-darwin-arm64": "workspace:*"
   },
   "devDependencies": {
     "@rstest/core": "^0.11.11",

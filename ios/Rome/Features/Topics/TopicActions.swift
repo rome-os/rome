@@ -68,6 +68,96 @@ private struct TopicRetireModifier: ViewModifier {
     }
 }
 
+/// Rename asked for a topic chat, from its header's "…" or from its row in
+/// the drawer.
+struct TopicRenameRequest: Equatable {
+    let chatId: String
+    /// The chat's name as the guardian sees it, the field's first text.
+    let name: String
+}
+
+extension View {
+    /// Asks for a topic chat's new name once `request` is set, in one alert
+    /// with the current name filled in, and renames it on Rename.
+    func topicRename(_ request: Binding<TopicRenameRequest?>, workspace: Workspace) -> some View {
+        modifier(TopicRenameModifier(request: request, workspace: workspace))
+    }
+}
+
+private struct TopicRenameModifier: ViewModifier {
+    @Binding var request: TopicRenameRequest?
+    let workspace: Workspace
+    @State private var name = ""
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: request) { _, asked in
+                if let asked { name = asked.name }
+            }
+            .alert("Rename chat", isPresented: Binding(get: { request != nil }, set: { if !$0 { request = nil } }), presenting: request) { asked in
+                TextField("Name", text: $name)
+                Button("Cancel", role: .cancel) {}
+                Button("Rename") {
+                    let name = name
+                    Task { await workspace.renameTopic(asked.chatId, to: name) }
+                }
+            }
+    }
+}
+
+/// Unarchive asked for an archived topic chat, from its row in the Archived
+/// sheet or its banner.
+struct TopicRestoreRequest: Equatable {
+    let chatId: String
+    /// The chat's name as the guardian sees it, for the alert.
+    let name: String
+}
+
+extension View {
+    /// Restores an archived topic chat once `request` is set, as the web
+    /// does: it reads the follows its archive moved to the main Chat, and
+    /// asks whether they move back only when some are still there. A read
+    /// that fails restores at once, leaving them where they are.
+    /// `onRestored` gets the chat's id once it is restored. A request made
+    /// while one is read is ignored.
+    func topicRestore(_ request: Binding<TopicRestoreRequest?>, workspace: Workspace, onRestored: @escaping (String) -> Void = { _ in }) -> some View {
+        modifier(TopicRestoreModifier(request: request, workspace: workspace, onRestored: onRestored))
+    }
+}
+
+private struct TopicRestoreModifier: ViewModifier {
+    @Binding var request: TopicRestoreRequest?
+    let workspace: Workspace
+    let onRestored: (String) -> Void
+    @State private var prompt: TopicRestorePrompt?
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: request) { _, asked in
+                if let asked { ask(asked) }
+            }
+            .restoreTopicChatAlert($prompt) { id, movingBack in
+                restore(id, movingBack: movingBack)
+            }
+    }
+
+    private func ask(_ asked: TopicRestoreRequest) {
+        Task {
+            let moved = await workspace.topicWork(asked.chatId)?.movedFollows ?? []
+            request = nil
+            if moved.isEmpty {
+                restore(asked.chatId, movingBack: false)
+            } else {
+                prompt = TopicRestorePrompt(id: asked.chatId, name: asked.name, moved: moved)
+            }
+        }
+    }
+
+    private func restore(_ id: String, movingBack: Bool) {
+        Task { if await workspace.restoreTopic(id, movingFollowsBack: movingBack) { onRestored(id) } }
+    }
+}
+
 /// Pin or Unpin, as the header's "…", a drawer row's swipe and its menu show it.
 struct TopicPinButton: View {
     let pinned: Bool

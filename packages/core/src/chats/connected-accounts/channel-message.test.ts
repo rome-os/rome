@@ -147,6 +147,41 @@ function isAgreedChange(facts: Facts): boolean {
 }
 
 describe("channelMessageOf", () => {
+  it("keeps a reply in a thread that lives inside its chat in that chat, naming the thread to read", () => {
+    const base: Message = {
+      id: "1.2:1.3",
+      where: { chatId: "C1" as ChatId, kind: "group" },
+      sender: { accountId: "T1:U1" },
+      content: { text: "hi", attachments: [] },
+      receivedBy: ME,
+      mentions: [ME],
+      saidAt: new Date(0),
+    };
+    const inside = channelMessageOf(
+      {
+        ...base,
+        where: {
+          ...base.where,
+          thread: { parentChatId: "C1" as ChatId, id: "C1:1.2" as ChatId },
+        },
+      },
+      "slack_app",
+    );
+    expect(inside).toMatchObject({ chatId: "C1", inThread: "C1:1.2", thread: { kind: "group" } });
+    expect(inside.parentChatId).toBeUndefined();
+
+    // A thread that is a chat of its own, as on Discord, reads as a topic.
+    const own = channelMessageOf(
+      {
+        ...base,
+        where: { chatId: "T9" as ChatId, kind: "group", thread: { parentChatId: "C1" as ChatId } },
+      },
+      "discord",
+    );
+    expect(own).toMatchObject({ chatId: "T9", parentChatId: "C1", thread: { kind: "topic" } });
+    expect(own.inThread).toBeUndefined();
+  });
+
   it("gives apps the addressing the Discord connection gave, for every combination of facts", () => {
     const differ: string[] = [];
     for (const facts of allFacts()) {

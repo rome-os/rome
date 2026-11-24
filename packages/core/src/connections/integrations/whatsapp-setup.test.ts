@@ -13,7 +13,6 @@
 //      through the generic SetupManager surface.
 
 import { describe, expect, it, rs } from "@rstest/core";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
 import { SetupManager, type SetupRegistry } from "../setup/manager.js";
 import { SetupSession } from "../setup/session.js";
 import type { SetupGrant } from "../setup/types.js";
@@ -96,10 +95,10 @@ describe("makeWhatsAppSetup", () => {
         expiresAt: "never",
       },
       profile: { phoneNumber: "14155550134", jid: "14155550134@s.whatsapp.net" },
-      guardianChannelUserId: "14155550134@s.whatsapp.net",
+      connectedBy: { id: "14155550134@s.whatsapp.net" },
       summary: {
         title: "WhatsApp connected",
-        body: ["+14155550134 is linked and your account is mapped as guardian."],
+        body: ["+14155550134 is linked."],
       },
     });
   });
@@ -147,7 +146,7 @@ describe("WhatsApp setup discovery", () => {
   function makeRegistry(): SetupRegistry {
     const descriptor = createWhatsAppDescriptor({
       syncSink: { upsertContacts: rs.fn(), upsertChats: rs.fn(), insertMessages: rs.fn() } as never,
-      onGuardianConnected: () => {},
+      onAccountConnected: () => {},
       openPairing: () => makePairingFake(new Promise<string>(() => {})),
     });
     return {
@@ -162,7 +161,6 @@ describe("WhatsApp setup discovery", () => {
   it("reports an in-flight pairing setup as the session grant's active setup", async () => {
     const manager = new SetupManager({
       registry: makeRegistry(),
-      peopleRepo: {} as PeopleRepository,
     });
 
     const started = await manager.start({ connectionKind: "whatsapp" }, "session");

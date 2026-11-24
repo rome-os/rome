@@ -149,6 +149,8 @@
     },
     "packages/lib": { "entry": ["src/**/*.test.ts"] },
     "packages/rome-node-core": {
+      // scripts/*.ts, native/check-*.ts, and native/tests/*.ts are standalone macOS
+      // native helper build/verification scripts and acceptance checks invoked directly.
       "entry": [
         "src/**/*.test.ts",
         "src/index.ts",
@@ -158,10 +160,16 @@
         "src/host.ts",
         "src/auth.ts",
         "src/storage.ts",
-        "src/daemon.ts"
+        "src/daemon.ts",
+        "scripts/*.ts",
+        "native/check-*.ts",
+        "native/tests/*.ts"
       ]
     },
     "packages/rome-node-cli": {
+      // scripts/package-smoke.mjs verifies whether npm installed @rome-os/node-core's
+      // optional darwin-arm64 helper package in an isolated temp prefix.
+      "ignoreDependencies": ["@rome-os/node-core-darwin-arm64"],
       "entry": ["src/**/*.test.ts", "src/entry.ts", "src/index.ts", "scripts/*.mjs"]
     },
     "packages/discord-cli": { "entry": ["src/**/*.test.ts", "src/entry.ts"] },
@@ -182,7 +190,7 @@
     },
 
     // An app's manifest, not its imports, decides what the runtime loads. Each
-    // pattern below mirrors a key in `app.yaml` — see rome_apps/CLAUDE.md.
+    // pattern below mirrors a key in `app.yaml` — see rome_apps/AGENTS.md.
     // These are globs over the shape of a manifest, not reads of one, so a
     // directory that matches the shape counts as an entry even when no
     // `app.yaml` lists it: an action dropped from a manifest goes quiet here

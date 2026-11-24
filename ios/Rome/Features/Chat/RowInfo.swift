@@ -17,7 +17,7 @@ struct RowInfo: Hashable {
     var mark: MessageMark?
     /// The row is a send the app still holds, which only it can drop.
     var isPending = false
-    /// The message takes a Reply, from the long-press menu or a swipe: the
+    /// The message takes a Reply, from the long-press menu: the
     /// Agent's text, and the guardian's own once it has gone through, in a
     /// Concierge chat (docs/domains/chats.md#chat-thread).
     var canReply = false

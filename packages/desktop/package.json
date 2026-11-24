@@ -9,8 +9,8 @@
     "build": "pnpm --filter rome-desktop-base-web build && node scripts/build.mjs",
     "test": "../../scripts/test-env.sh rstest",
     "rebuild:native": "node scripts/rebuild-native.mjs",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
+    "pack": "node scripts/check-computer-use.mjs && electron-builder --dir",
+    "dist": "node scripts/check-computer-use.mjs && electron-builder",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

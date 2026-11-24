@@ -83,8 +83,29 @@ export interface TranscriptionUsageEvent {
   occurredAt: string;
 }
 
+/**
+ * One Rome Cloud speech session of voice conversation mode, reported once
+ * after it expired. A session can serve several conversations.
+ */
+export interface SpeechUsageEvent {
+  type: "speech";
+  /** Rome Cloud's session id, which is also `sessionId`: one event per session. */
+  eventId: string;
+  kind: "voice_mode";
+  /** The session id Rome Cloud returned with the credential. */
+  sessionId: string;
+  provider: string;
+  model: string;
+  /** Characters of the text the provider spoke: a sentence stopped before any of its audio came does not count. */
+  characters: number;
+  /** Seconds of audio the provider returned, to a tenth. */
+  seconds: number;
+  occurredAt: string;
+}
+
 export type UsageEvent =
   | TurnUsageEvent
   | ActionRunUsageEvent
   | LoginUsageEvent
-  | TranscriptionUsageEvent;
+  | TranscriptionUsageEvent
+  | SpeechUsageEvent;

@@ -15,6 +15,7 @@
 // dashboard, a chat-driven grant — can narrate any setup from the payload
 // alone. Custom per-`(connectionKind, state)` components override RENDERING only.
 
+import type { DrizzleTx } from "../../db/index.js";
 import type { Credential, ProfileRecord } from "../types.js";
 
 /**
@@ -89,9 +90,9 @@ export interface SetupView {
 /**
  * The one durable outcome a setup coroutine returns — the terminal
  * grant. The runtime performs a SINGLE ledger write from it (credential +
- * profile), plus an optional guardian channel mapping, only once the coroutine
- * returns; nothing half-granted is ever observable. Abandoning or cancelling a
- * setup runs no write at all.
+ * profile), plus whatever a {@link ConnectParticipant} joins to it, only once
+ * the coroutine returns; nothing half-granted is ever observable. Abandoning or
+ * cancelling a setup runs no write at all.
  */
 export interface SetupGrant {
   /** The proven credential for this grant. */
@@ -99,15 +100,9 @@ export interface SetupGrant {
   /** The non-secret grant outcome written in the same update as the
    *  credential. Omit when there is no identity to record. */
   profile?: ProfileRecord;
-  /** The guardian's own identity on this connection kind's channel to auto-map in the
-   *  same terminal write (e.g. Discord's verified author id). Omit for connection kinds
-   *  with no guardian-link step. */
-  guardianChannelUserId?: string;
-  /** True when `guardianChannelUserId` is one more of the guardian's accounts
-   *  rather than a newer id for one they hold, so the mapping only ever adds a
-   *  link. A signed-in account is one: the guardian may hold several on a
-   *  platform, and re-pointing their only link there would take one away. */
-  addsGuardianAccount?: boolean;
+  /** The platform account that gave Rome this access, as the platform
+   *  reported it. Omit when the platform did not say. */
+  connectedBy?: ConnectedBy;
   /** The success view the standard "done" renderer presents. */
   summary?: SetupView;
 }
@@ -191,4 +186,41 @@ export type SetupFn = (interact: SetupInteraction, ctx: SetupContext) => Promise
 export interface SetupCommitted {
   connectionId: string;
   ended?: string;
+}
+
+/**
+ * The platform account that gave Rome a connection's access: the signed-in
+ * account for a user session, the person who approved the app for an app.
+ */
+interface ConnectedBy {
+  /** The platform's own id for the account, in the form the kind records it. */
+  id: string;
+  /** True when this kind has only ever reported the account under this id.
+   *  Absent when an earlier version of the kind may have reported the same
+   *  account under another form of id, such as a WhatsApp id with a device
+   *  suffix. */
+  stableId?: boolean;
+}
+
+/** A connect whose grant reports who gave the access, before it is written. */
+interface ReportedConnect {
+  /** The platform of the connection's kind. */
+  platform: string;
+  connectedBy: ConnectedBy;
+}
+
+/**
+ * A write outside Connections that joins a connect's transaction, so it and
+ * the credential commit together or not at all.
+ *
+ * `prepare` runs before the transaction opens and may read. The write it
+ * returns runs inside the transaction and must be synchronous. A throw from
+ * either fails the connect and leaves nothing written. `reachesAnotherAccount`
+ * is true when a fix reached another account than the connection held, so
+ * Connections ended that connection and made a new one.
+ */
+export interface ConnectParticipant {
+  prepare(
+    connect: ReportedConnect,
+  ): Promise<((tx: DrizzleTx, grant: { reachesAnotherAccount: boolean }) => void) | undefined>;
 }

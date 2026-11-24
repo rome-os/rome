@@ -341,7 +341,6 @@ const statusDevices: DevicesStatus["devices"] = [
   { id: "linux", name: "Development workstation", platform: "linux", status: "connected" },
   { id: "windows", name: "Windows PC", platform: "windows", status: "not_connected" },
   { id: "build", name: "Build server", platform: "linux", status: "not_connected" },
-  { id: "old-laptop", name: "Old laptop", platform: "darwin", status: "revoked" },
 ];
 
 // The System app serves these; the mock keeps whatever the page last saved.
@@ -379,8 +378,7 @@ export const settingsHandlers = [
   ),
   http.patch("/api/devices/:deviceId", async ({ params, request }) => {
     const device = statusDevices.find((item) => item.id === params.deviceId);
-    if (!device || device.status === "revoked")
-      return HttpResponse.json({ error: "device_not_found" }, { status: 404 });
+    if (!device) return HttpResponse.json({ error: "device_not_found" }, { status: 404 });
     const { name } = (await request.json()) as { name?: unknown };
     const trimmed = typeof name === "string" ? name.trim() : "";
     if (!trimmed || trimmed.length > 80)

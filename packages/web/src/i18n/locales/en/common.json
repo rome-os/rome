@@ -41,6 +41,7 @@
     "title": "Chats",
     "newChat": "New chat",
     "mainChat": "Main chat",
+    "olderTopics": "Older · {{count}}",
     "conciergeSection": "Main chat and topic chats",
     "mainChatUnavailable": "Could not load the main chat",
     "conciergeUnread_one": "{{name}}, {{label}} unread message",

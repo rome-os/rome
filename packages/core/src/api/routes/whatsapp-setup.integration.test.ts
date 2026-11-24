@@ -6,6 +6,7 @@
 // external WhatsApp socket boundary, which issues rotating linking QRs and then
 // opens once "scanned".
 
+import { linkGuardianOnConnect } from "../../people/guardian-mapping.js";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { setupsRoutes } from "./setups.js";
@@ -70,7 +71,7 @@ function harness() {
         upsertChats: async () => {},
         insertMessages: async () => {},
       } as never,
-      onGuardianConnected: () => {},
+      onAccountConnected: () => {},
       createAdapter: (authProvider) => new WhatsAppAdapter({ authProvider }, socketFactory),
     }),
   );
@@ -79,7 +80,10 @@ function harness() {
     isDismissed: async () => false,
     byBondLevel: async () => [],
   } as unknown as PeopleRepository;
-  const setupManager = new SetupManager({ registry, peopleRepo });
+  const setupManager = new SetupManager({
+    registry,
+    participant: linkGuardianOnConnect(peopleRepo),
+  });
   const deps = { connectionRegistry: registry, setupManager } as unknown as ApiDeps;
   const app = new Hono().route("/", setupsRoutes(deps));
   return { app, sockets };

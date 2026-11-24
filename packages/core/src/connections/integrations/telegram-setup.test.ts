@@ -17,7 +17,7 @@ describe("telegram credential setup", () => {
     expect(commit.mock.calls[0][0]).toMatchObject({
       credential: { material: { token: "good-token" } },
     });
-    expect(commit.mock.calls[0][0]).not.toHaveProperty("guardianChannelUserId");
+    expect(commit.mock.calls[0][0]).not.toHaveProperty("connectedBy");
   });
 
   it("re-prompts a refused token and allows retry", async () => {

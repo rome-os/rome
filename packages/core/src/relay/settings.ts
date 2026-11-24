@@ -95,18 +95,30 @@ export function resolveRelayTarget(catalog: RelayAppCatalog): RelayTarget | null
   };
 }
 
+/** Whether a running connection takes frames from the mailbox (relay/mailbox-claims.ts). */
+export interface MailboxClaimed {
+  readonly any: boolean;
+}
+
 /**
  * Current drains: the stored mailbox credential bound to the app-declared
- * target. `[]` when the credential is absent, or present but no installed app
- * declares `api.relayWebhook` (nothing to deliver to).
+ * target. With no app declaring `api.relayWebhook`, the mailbox is drained
+ * alone, with no target, only while a connection claims it; otherwise `[]`.
+ * Also `[]` when the credential is absent.
  */
 export async function resolveRelayDrains(
   settingsRepo: SettingsRepository,
   catalog: RelayAppCatalog,
+  claims?: MailboxClaimed,
 ): Promise<RelayDrain[]> {
   const setting = await settingsRepo.get<unknown>(RELAY_SETTING_KEY);
   if (!isCompleteRelaySetting(setting)) return [];
   const target = resolveRelayTarget(catalog);
+  if (!target && claims?.any) {
+    return [
+      { connectUrl: setting.drainUrl, drainKey: setting.drainKey, targetAppId: "", targetPath: [] },
+    ];
+  }
   if (!target) {
     log.warn(
       "relay credential configured but no installed app declares api.relayWebhook — nothing to drain",
@@ -174,12 +186,7 @@ export function redactRelaySetting(value: unknown): unknown {
   return out;
 }
 
-export type RelayRuntimeState =
-  | "connected"
-  | "notConnected"
-  | "reconnecting"
-  | "retrying"
-  | "blocked";
+export type RelayRuntimeState = "connected" | "notConnected" | "reconnecting" | "retrying";
 
 /** Guardian-facing relay status for the Integrations tab. Never includes the drainKey. */
 export interface RelayStatus {
@@ -205,9 +212,8 @@ export async function buildRelayStatus(
   const configured = isCompleteRelaySetting(setting);
   // v1 is single-mailbox, so the first connection's health is the relay's health.
   const conn = drainer?.getStatus()[0];
-  const state: RelayRuntimeState = conn?.blocked
-    ? "blocked"
-    : conn?.nextReconnectAt != null
+  const state: RelayRuntimeState =
+    conn?.nextReconnectAt != null
       ? "reconnecting"
       : conn?.retry
         ? "retrying"

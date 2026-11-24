@@ -1,4 +1,5 @@
 import type { Account } from "@rome-os/app-runtime";
+import type { ConnectParticipant } from "../connections/index.js";
 import type { DrizzleTx } from "../db/index.js";
 import type { PeopleRepository } from "./model/people-repository.js";
 import { createLogger } from "../logger.js";
@@ -12,11 +13,15 @@ const log = createLogger("guardian-mapping");
  * address (WhatsApp pairing today) and by the connection routes. Returns
  * `true` when a link was created or re-canonicalized, `false` when the
  * account was already linked or dismissed, or no guardian person exists.
+ * With `addOnly`, the account is one more of the guardian's, as each Discord
+ * account the guardian binds to Rome's Discord bot is: it is added beside the
+ * guardian's other accounts on the platform, and none of them is re-pointed.
  */
 export async function linkGuardianToAccount(
   repo: PeopleRepository,
   platform: string,
   accountId: string,
+  opts: { addOnly?: boolean } = {},
 ): Promise<boolean> {
   const account: Account = { platform, id: accountId };
   const existing = await repo.byAccount(account);
@@ -37,7 +42,7 @@ export async function linkGuardianToAccount(
 
   const guardian = guardians[0];
 
-  const stale = staleAddress(guardian.links, platform);
+  const stale = opts.addOnly ? undefined : staleAddress(guardian.links, platform);
   if (stale) {
     if (repo.readdress(guardian.id, { platform, id: stale }, accountId)) {
       log.info("re-canonicalized guardian link", {
@@ -172,4 +177,36 @@ export function applyGuardianMappingWithinTx(
   } else {
     repo.linkStated({ platform, id: accountId }, plan.guardianId, tx);
   }
+}
+
+/**
+ * Joins each connect to link the account that gave the access to the guardian,
+ * in the same transaction as the credential. The guardian is the one who
+ * connects accounts to Rome, so the account that connected is theirs.
+ *
+ * A kind whose ids are stable reports one more of the guardian's accounts, so
+ * the link is added beside the others. Otherwise a single link the guardian
+ * holds on the platform may be an older id for this account, and is re-pointed.
+ * A fix that reached another account leaves the first account the guardian's,
+ * so its link stays and the new account is added beside it.
+ */
+export function linkGuardianOnConnect(repo: PeopleRepository): ConnectParticipant {
+  return {
+    async prepare({ platform, connectedBy }) {
+      const plan = await planGuardianMapping(repo, platform, connectedBy.id, {
+        addOnly: connectedBy.stableId,
+      });
+      if (plan.op === "noop") return undefined;
+      return (tx, { reachesAnotherAccount }) =>
+        applyGuardianMappingWithinTx(
+          tx,
+          repo,
+          platform,
+          connectedBy.id,
+          reachesAnotherAccount && plan.op === "update"
+            ? { op: "add", guardianId: plan.guardianId }
+            : plan,
+        );
+    },
+  };
 }

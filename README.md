@@ -138,7 +138,7 @@ The script prints the local URLs and development credentials when startup comple
 
 This is the contributor development path, not the final production self-hosting
 distribution. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to report issues,
-open pull requests, and get through code review, and [`CLAUDE.md`](CLAUDE.md) for
+open pull requests, and get through code review, and [`AGENTS.md`](AGENTS.md) for
 the complete development loop, container commands, and validation requirements.
 
 ## Rome Apps

@@ -24,7 +24,6 @@ import { domainOf } from "../../connections/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
 import { DrizzlePeopleRepository } from "../../people/infrastructure/drizzle-people-repository.js";
-import type { PeopleRepository } from "../../people/model/people-repository.js";
 import {
   createTestDb,
   grantReaching,
@@ -76,6 +75,27 @@ function makePasteTalkWithProfile() {
 }
 
 describe("GET /connections", () => {
+  it("reports act by the grant for a talker agents act through, connected or not", async () => {
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
+    const telegram = makePasteTalkWithProfile();
+    telegram.descriptor.actsWithGrant = true;
+    registry.register(telegram.descriptor);
+
+    const before = await (await makeApp(registry).request("/connections")).json();
+    const placeholder = before.connections.find(
+      (c: { connectionKind: string }) => c.connectionKind === "fake-telegram",
+    );
+    expect(placeholder.capabilities.act).toEqual(placeholder.capabilities.chat);
+
+    const tg = await registry.connect("fake-telegram", "Telegram");
+    await registry.giveGrant(tg.connectionKind, tg.id, "bot", telegram.validCredential(), {
+      name: "Rome Bot",
+    });
+    const { connections } = await (await makeApp(registry).request("/connections")).json();
+    expect(connections[0].capabilities.chat).toEqual({ state: "unlocked" });
+    expect(connections[0].capabilities.act).toEqual({ state: "unlocked" });
+  });
+
   it("lists every connection with grants, capabilities, and revived display", async () => {
     const registry = new ConnectionRegistry({ repository: makeLedger() });
     const telegram = makePasteTalkWithProfile();
@@ -526,7 +546,6 @@ describe("DELETE /connections/:id/grants/:name", () => {
     });
     const setupManager = new SetupManager({
       registry,
-      peopleRepo: {} as PeopleRepository,
     });
     const conn = await registry.connect("fake-telegram");
     await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.validCredential(), {

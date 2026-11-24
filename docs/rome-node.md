@@ -44,11 +44,11 @@ to stderr instead.
 
 Settings → Devices shows the caller connection, connected device count, and each
 device's name, platform, and status. Each card's menu renames the device or removes
-it, which revokes it and deletes it from the account in one step. A removed device
-returns only as a new device, after `rome-node connect` and a new approval. A
-device whose revocation the Gateway has not confirmed stays listed as revoked, and
-removing it again deletes it. The dashboard refreshes every 15 seconds
-while open. `client.getDevicesStatus()` returns the same daemon-owned checks.
+it. Removing a device is one step. Cloud ends its token at once, the Gateway
+disconnects it, and Cloud deletes the record. A removed device returns only as a
+new device, after `rome-node connect` and a new approval. The dashboard
+refreshes every 15 seconds while open. `client.getDevicesStatus()` returns the
+same daemon-owned checks.
 
 It only connects to an existing daemon and returns `null` if none is running.
 Opening the page, polling, and refreshing never start or restart the daemon.
@@ -72,7 +72,7 @@ computer's OS user. This is separate from starting the service on the Rome insta
 Cloud's device list records authorization, not live presence. The daemon sends
 read-only `system.info` requests: a successful reply confirms a connected device,
 `target_unavailable` means not connected, and a timeout or other failure means
-unknown. Revoked devices are shown separately and excluded from the count.
+unknown.
 When checks are incomplete, the count is a lower bound. A failed list query or
 local service failure displays an unavailable count, never a fabricated zero.
 
@@ -99,7 +99,7 @@ volume keeps the device credential, Web UI preferences, and the
 ```yaml
 services:
   rome-node:
-    image: ghcr.io/rome-os/rome-node@sha256:<manifest-digest>
+    image: ghcr.io/rome-os/rome-node:latest
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     ports:
@@ -113,7 +113,7 @@ volumes:
   rome-node:
 ```
 
-1. Start the container with `docker compose up -d`.
+1. Start the container with `docker compose up -d` (or pin a release tag such as `ghcr.io/rome-os/rome-node:0.1.12` or an immutable `@sha256:<manifest-digest>`).
 2. Open `http://127.0.0.1:4310` in a browser. Because the container listens on
    `0.0.0.0`, if you did not set `ROME_NODE_UI_PASSWORD`, run
    `docker compose logs rome-node` to copy the one-time setup token and choose a
@@ -143,7 +143,7 @@ After approval, the container connects to the account Gateway and appears on
 
 Recreating the container with the same volume keeps the device identity,
 custom Web UI password, and audit log, and reconnects automatically without
-another approval. If Rome Cloud revokes the device, the container stays up so
+another approval. If the device is removed from the account, the container stays up so
 you can re-authorize from the Web UI.
 
 For headless CLI-only deployments without the Web UI, override the container
@@ -157,7 +157,7 @@ If **Allow remote execution** (`executionEnabled`) was turned off in the Web UI
 (`web-config.json`), `rome-node connect` honors that setting on the shared
 volume and connects in limited mode (`computer_use_off`).
 
-To revoke access from Rome, choose **Remove** on its device card. If you added
+To take this computer off your account, choose **Remove** on its device card. If you added
 a restart policy, stop the container with `docker compose down`.
 
 ### Build the image
@@ -174,12 +174,25 @@ To run the local build with Compose, set `image: rome-node:local` and pass
 
 ### Release the image
 
-Run the [Rome Node package workflow](../.github/workflows/rome-node.yml) on
-`main` with **Publish the Docker image to GitHub Container Registry** selected.
-The workflow checks amd64 and arm64 before publishing both under the source
-commit SHA and writes the multi-platform image digest to the workflow summary.
-A package admin sets the package to public and verifies anonymous pulls on both
-architectures.
+Whenever `@rome-os/node` (`packages/rome-node-cli`) releases via the
+[Release workflow](../.github/workflows/release.yml) (automatically when a
+`release-please` PR merges on `main`, or manually via `workflow_dispatch` with
+`package: packages/rome-node-cli` or `all`), the workflow invokes the
+[Rome Node package workflow](../.github/workflows/rome-node.yml) to verify
+`linux/amd64` and `linux/arm64` and publish the multi-platform image to
+`ghcr.io/rome-os/rome-node` with:
+
+- `<version>` matching `packages/rome-node-cli/package.json` (immutable, so the workflow refuses to overwrite an already-published version tag)
+- `latest` (moved only for stable semver releases without a prerelease suffix)
+- `<commit-sha>`
+
+For an ad-hoc build outside a `@rome-os/node` release (for example, changes
+that only touch `packages/rome-node-web` or `infra/rome-node`), run the
+[Rome Node package workflow](../.github/workflows/rome-node.yml) on `main` with
+**Publish the Docker image to GitHub Container Registry** selected. Ad-hoc runs
+publish only the `<commit-sha>` tag without moving `latest`. A package admin
+sets the GHCR package visibility to public once and verifies anonymous pulls on
+both architectures.
 
 ## Chat device folders
 
@@ -235,7 +248,7 @@ The connection uses JSON-RPC 2.0 and starts with `daemon.hello`, passing
 | `daemon.stop` | Explicitly stop the shared daemon |
 | `devices.list` | List authorized devices from Cloud |
 | `devices.rename` | Rename `{ deviceId, name }` in the account through Cloud |
-| `devices.remove` | Revoke `{ deviceId }` and delete it from the account through Cloud |
+| `devices.remove` | Remove `{ deviceId }` from the account through Cloud |
 | `devices.status` | Check device reachability with read-only `system.info` requests |
 | `devices.run` | Forward `{ deviceId, action, args }` to a device |
 | `devices.runBinary` | Forward `{ deviceId, action, args }` and input bytes to a device as a binary frame |
@@ -577,8 +590,8 @@ the app adopts the PATH of the user's login shell, because an app opened from
 Finder or the Dock gets only the system directories.
 
 While the app runs signed in it is always connected to the Gateway. It disconnects
-only when the user signs out, the app quits, the network is lost, or Rome Cloud
-revokes the device, so the device's connected or offline state is real. Two
+only when the user signs out, the app quits, the network is lost, or the device is
+removed from the account, so the device's connected or offline state is real. Two
 independent choices apply on top of the connection, and both persist across restarts.
 
 - **Computer use** (on by default) decides whether Rome may
@@ -863,14 +876,12 @@ security boundary ([personal-data.md](personal-data.md#what-is-and-is-not-enforc
 `device rename <id> <name>` and `device remove <id>` change the account's device
 list in Cloud. They do not contact the device, so it can be offline. Cloud trims
 names to 1–80 characters without control characters. Names need not be unique.
-`remove` revokes the device, which disconnects it, then deletes the record. A
-removed computer must run `connect` and be approved again. Cloud keeps the record
-until the Gateway confirms the revocation, and until then `remove` fails with
-`revocation_pending`. The device is already revoked. Run `remove` again later.
+`remove` is one step. Cloud ends the device's token at once, the Gateway
+disconnects the device, and the record is deleted. A removed computer must run
+`connect` and be approved again.
 Rome Core exposes the same operations as `PATCH /api/devices/:deviceId` with
 `{ name }` and `DELETE /api/devices/:deviceId`. Both answer 204, or 404
-`device_not_found`, 400 `invalid_device_name`, 409 `revocation_pending`, or 503
-`unavailable`.
+`device_not_found`, 400 `invalid_device_name`, or 503 `unavailable`.
 
 `device run <id> exec --args <json>` starts a program with an argument vector.
 The arguments are `command`, optional `args: string[]`, and optional `cwd`.
@@ -1073,12 +1084,14 @@ remains available for other devices.
 
 Instance startup and enrollment prepare the caller token through the core
 library. The existing Cloud device endpoints and Gateway protocol handle communication.
-Configure the npm Trusted Publishers for `@rome-os/node` and `@rome-os/node-core`
-before their package releases. Building an archive does not publish it.
+Configure the npm Trusted Publishers for `@rome-os/node`, `@rome-os/node-core`,
+and `@rome-os/node-core-darwin-arm64` before their package releases. Building an
+archive does not publish it.
 
 The main CI runs the unit suites of both packages on Linux. The
-[package workflow](../.github/workflows/rome-node.yml) packs both packages, installs
-the archives with npm, and starts a daemon from the installed core package. CI does
-not run on macOS or Windows, so behavior specific to those platforms is unverified.
-Browser authorization and two-computer acceptance also require real environments.
+[package workflow](../.github/workflows/rome-node.yml) packs `@rome-os/node`,
+`@rome-os/node-core`, and `@rome-os/node-core-darwin-arm64`, installs the archives
+with npm on Linux and Apple Silicon macOS, verifies that Linux skips the optional
+macOS helper while macOS installs it, and starts a daemon from the installed core
+package. Windows and browser/two-computer acceptance still require real environments.
 Platform simulations and type checks do not establish those results.

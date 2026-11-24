@@ -213,9 +213,9 @@ function parseTelegramUserCredentials(
  *   5. stop the login client, then return the terminal grant: the serialized
  *      session material + identity profile.
  * The runtime performs the single durable write from the returned grant;
- * cancel/abandon stops the login client and writes nothing. A user session is
- * the guardian's own account, so the grant names it as theirs
- * (`guardianChannelUserId`), the same id `accountIdOf` records on the channel.
+ * cancel/abandon stops the login client and writes nothing. The grant names the
+ * signed-in account (`connectedBy`), the same id `accountIdOf` records on the
+ * channel.
  */
 export function makeTelegramUserSetup(deps: {
   openLogin: (apiId: number, apiHash: string) => TelegramUserLoginHandle;
@@ -314,9 +314,7 @@ export function makeTelegramUserSetup(deps: {
       return {
         credential: { material, expiresAt: "never" },
         profile,
-        ...(account.userId
-          ? { guardianChannelUserId: account.userId, addsGuardianAccount: true }
-          : {}),
+        ...(account.userId ? { connectedBy: { id: account.userId, stableId: true } } : {}),
         summary: {
           title: "Telegram account connected",
           body: [

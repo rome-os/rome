@@ -6,7 +6,7 @@
 
 Three rulebooks own the tokens, one each: [ui-primitive-tokens.md](ui-primitive-tokens.md), [ui-semantic-tokens.md](ui-semantic-tokens.md), and [ui-component-tokens.md](ui-component-tokens.md). A rulebook owns what its tokens hold, when one enters or leaves, and the format of the docs in its directory. Read the one for the doc you are writing.
 
-This file holds the rules every token doc shares: the terminology, the reference direction, the shared format, and the deprecation notes. A rule lives here or in one rulebook, never in both. Tier tags come from [authoring.md](authoring.md). The prose rules for all of `docs/` come from [WRITING.md](WRITING.md). The repo-wide doc-writing rules come from [../CLAUDE.md](../CLAUDE.md).
+This file holds the rules every token doc shares: the terminology, the reference direction, the shared format, and the deprecation notes. A rule lives here or in one rulebook, never in both. Tier tags come from [authoring.md](authoring.md). The prose rules for all of `docs/` come from [WRITING.md](WRITING.md). The repo-wide doc-writing rules come from [../AGENTS.md](../AGENTS.md).
 
 ## Terminology
 

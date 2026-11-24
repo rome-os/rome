@@ -145,7 +145,7 @@
                 "patterns": [
                   {
                     "group": ["@rome/core", "@rome/core/**", "**/packages/core/**"],
-                    "message": "An app reaches core only through @rome-os/app-runtime and @rome-os/app-web-sdk. See rome_apps/CLAUDE.md."
+                    "message": "An app reaches core only through @rome-os/app-runtime and @rome-os/app-web-sdk. See rome_apps/AGENTS.md."
                   }
                 ]
               }

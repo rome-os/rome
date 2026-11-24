@@ -70,7 +70,7 @@ const SETTINGS = {
 };
 
 /** A channel post from user 111 that replies to message 5 and carries a PDF. */
-function documentMessage(overrides: { out?: boolean } = {}): Api.Message {
+function documentMessage(overrides: { out?: boolean; peerId?: Api.TypePeer } = {}): Api.Message {
   return new Api.Message({
     id: 7,
     peerId: new Api.PeerChannel({ channelId: returnBigInt(555) }),
@@ -139,6 +139,17 @@ describe("TelegramUserAdapter", () => {
       },
     ]);
     expect(delivered[0]?.raw).toBe(message);
+  });
+
+  it("reports a message in a private chat as direct", async () => {
+    const delivered: ChannelMessage[] = [];
+    adapter.onInbound(async (msg) => {
+      delivered.push(channelMessageOf(msg, "telegram_user"));
+    });
+    const message = documentMessage({ peerId: new Api.PeerUser({ userId: returnBigInt(111) }) });
+    await internals.handleNewMessage({ message });
+
+    expect(delivered[0]?.thread).toEqual({ kind: "dm" });
   });
 
   it("answers a send with the conversation and the sent message id", async () => {

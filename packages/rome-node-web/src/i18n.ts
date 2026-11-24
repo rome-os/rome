@@ -51,7 +51,7 @@ export const messages = {
       online: "Online",
       retrying: "Reconnecting",
       disconnected: "Disconnected",
-      revoked: "Revoked",
+      revoked: "Removed from your account",
       superseded: "Superseded",
       error: "Error",
     } satisfies Record<HostPhase, string>,
@@ -166,7 +166,7 @@ export const messages = {
       resetConfirm: "Reset credential",
       cancel: "Cancel",
       revokedNotice:
-        "This device authorization was revoked or rejected by Rome Cloud. Authorize the container again to restore access.",
+        "This device was removed from your account, or Rome Cloud rejected its authorization. Authorize the container again to add it back.",
       supersededNotice:
         "Another process connected with the same device credential and replaced this session.",
     },
@@ -250,7 +250,7 @@ export const messages = {
       online: "在线",
       retrying: "重连中",
       disconnected: "已断开",
-      revoked: "已撤销",
+      revoked: "已从账号移除",
       superseded: "连接被替换",
       error: "异常",
     } satisfies Record<HostPhase, string>,
@@ -358,7 +358,8 @@ export const messages = {
       resetDialogBody: "此操作将断开容器连接并删除本地保存的设备凭证，已有审计日志不会被删除。",
       resetConfirm: "确认清除",
       cancel: "取消",
-      revokedNotice: "设备授权已被 Rome Cloud 撤销或失效，请重新发起设备授权以恢复接入。",
+      revokedNotice:
+        "此设备已从账号移除，或授权已被 Rome Cloud 拒绝。请重新发起设备授权以重新添加。",
       supersededNotice: "另一进程使用了相同设备凭证上线，当前连接已被替换。",
     },
     log: {

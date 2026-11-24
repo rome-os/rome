@@ -63,13 +63,13 @@ const BULLET_KEYS: Record<string, string[]> = {
   "linkedin.bot": ["read", "recap"],
   "discord.bot": ["reply", "start"],
   "feishu.bot": ["reply", "start"],
-  "slack_app.bot": ["reply"],
+  "slack_app.bot": ["reply", "tasks"],
+  "discord_app.bot": ["reply", "tasks"],
   "email.bot": ["reply", "start"],
   "agents.bot": ["reply", "start"],
   "github.user": ["work", "watch"],
   "google.user": ["work"],
   "microsoft.user": ["work"],
-  "slack.user": ["work"],
   "shopify.user": ["work"],
   "composio.user": ["act"],
 };
@@ -137,6 +137,5 @@ const PRIVACY_SLOTS = new Set([
   "github.user",
   "google.user",
   "microsoft.user",
-  "slack.user",
   "shopify.user",
 ]);

@@ -15,6 +15,7 @@ const PLATFORM_BY_KIND: Readonly<Record<string, string>> = {
   wechat_user: "wechat",
   slack_bot: "slack",
   slack_app: "slack",
+  discord_app: "discord",
 };
 
 /**

@@ -289,11 +289,6 @@ const CONNECTIONS_PENDING: ReadonlyArray<{ from: string; to: readonly string[]; 
     ],
     why: "Feishu still checks whether a chat is switched off, its mention-only rule and link codes, until those move up.",
   },
-  {
-    from: "connections/setup/manager.ts",
-    to: ["people/model/people-repository.ts", "people/guardian-mapping.ts"],
-    why: "Setting up a connection reads the guardian from People, until it gets a port.",
-  },
 ];
 
 /** Crossings that remain until their ticket lands. */

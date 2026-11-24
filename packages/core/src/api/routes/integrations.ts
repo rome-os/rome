@@ -31,23 +31,6 @@ export function integrationsRoutes(deps: ApiDeps): Hono {
     });
   });
 
-  // A bounded local delivery retry leaves the lowest un-acked event blocked
-  // rather than churning the WebSocket forever. The guardian can re-arm that
-  // event after fixing the local receiver; the relay never loses the payload.
-  app.post("/integrations/relay/resume", async (c) => {
-    if (!isSameOriginMutationRequest(c.req.raw)) {
-      return c.json({ error: "Cross-site requests are not allowed." }, 403);
-    }
-
-    const resumed = deps.relayDrainer.resumeBlocked();
-    c.header("Cache-Control", "no-store");
-    return c.json({
-      ok: true,
-      resumed,
-      relay: await buildRelayStatus(deps.settingsRepo, deps.relayDrainer, deps.appCatalog),
-    });
-  });
-
   // Webhook relay drainer config. The guardian provides the mailbox connect URL
   // + drain key (via Rome Cloud provisioning, or a manual paste where provisioning
   // isn't available). The delivery target is NOT set here — core resolves it
@@ -94,7 +77,9 @@ export function integrationsRoutes(deps: ApiDeps): Hono {
     let reloaded = false;
     let reloadError: string | undefined;
     try {
-      await deps.relayDrainer.reload(await resolveRelayDrains(deps.settingsRepo, deps.appCatalog));
+      await deps.relayDrainer.reload(
+        await resolveRelayDrains(deps.settingsRepo, deps.appCatalog, deps.mailboxClaims),
+      );
       reloaded = true;
     } catch (err) {
       reloadError = err instanceof Error ? err.message : String(err);

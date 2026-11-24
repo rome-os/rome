@@ -54,7 +54,7 @@ Rome is open source (MIT), self-hostable or run on Rome Cloud, and exportable, s
 ## Capabilities and Constraints
 
 - A Rome App ships any mix of actions, agents, skills, hooks, web UI and APIs, and a database and files, declared in `app.yaml`. Together these form a capability, the unit Rome discovers and reuses. The app is that capability's human interface.
-- App web bundles mount inside a Shadow DOM in the dashboard host. Apps receive the theme layer from the host and must compile their own geometry and typography tokens ([`rome_apps/CLAUDE.md`](rome_apps/CLAUDE.md)).
+- App web bundles mount inside a Shadow DOM in the dashboard host. Apps receive the theme layer from the host and must compile their own geometry and typography tokens ([`rome_apps/AGENTS.md`](rome_apps/AGENTS.md)).
 - Apps build on the public SDKs and the shared kit `@rome-os/ui`, which are published to npm through release-please.
 - A Rome instance keeps working without Rome Cloud. It loses only centralized provisioning, third-party OAuth, and App Store installs.
 - The dashboard is guardian-only. Visitors reach only the surfaces their email is allow-listed for.

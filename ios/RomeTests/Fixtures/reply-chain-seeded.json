@@ -1,0 +1,655 @@
+{
+  "messages": [
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000001",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"text\",\"content\":\"Good morning! What's on my plate today?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000001",
+      "createdAt": "2026-11-22T04:51:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000002",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"text\",\"content\":\"Good morning. Standup at 10, lunch with Ana at 12:30, and the plumber comes at 4 pm.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000002",
+      "createdAt": "2026-11-22T04:51:43.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000003",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"text\",\"content\":\"What's the weather like in Lisbon this weekend?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000003",
+      "createdAt": "2026-11-22T05:03:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000004",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000003\",\"author\":\"guardian\",\"text\":\"What's the weather like in Lisbon this weekend?\"},{\"type\":\"text\",\"content\":\"Saturday: sunny, 22°. Sunday: 19° with a light shower after 3 pm.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000003",
+      "createdAt": "2026-11-22T05:03:43.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000005",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"text\",\"content\":\"Can you compare round-trip fares to Lisbon for 1–7 March and tell me what to book?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T05:11:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000006",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000005\",\"author\":\"guardian\",\"text\":\"Can you compare round-trip fares to Lisbon for 1–7 March and tell me what to book?\"},{\"type\":\"text\",\"content\":\"On it. I'll start a task and report back with the fares.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T05:11:43.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000007",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"text\",\"content\":\"Remind me to call mom at 6.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000007",
+      "createdAt": "2026-11-22T05:21:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000008",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"text\",\"content\":\"Done, reminder set for 6 pm.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000008",
+      "createdAt": "2026-11-22T05:21:37.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000009",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000004\",\"author\":\"agent\",\"text\":\"Saturday: sunny, 22°. Sunday: 19° with a light shower after 3 pm.\"},{\"type\":\"text\",\"content\":\"Then I'll pack a light jacket. Thanks!\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000003",
+      "createdAt": "2026-11-22T05:26:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000010",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000005\",\"author\":\"guardian\",\"text\":\"Can you compare round-trip fares to Lisbon for 1–7 March and tell me what to book?\"},{\"type\":\"text\",\"content\":\"Task started: Lisbon fares. I'm checking TAP, Lufthansa and easyJet.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T05:39:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000011",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"text\",\"content\":\"帮我排一下京都三天的行程，喜欢安静的地方。\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+      "createdAt": "2026-11-22T05:41:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000012",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000011\",\"author\":\"guardian\",\"text\":\"帮我排一下京都三天的行程，喜欢安静的地方。\"},{\"type\":\"text\",\"content\":\"第一天：清晨去伏见稻荷大社，下午去岚山竹林，傍晚在鸭川边吃饭。\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+      "createdAt": "2026-11-22T05:41:43.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000013",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000011\",\"author\":\"guardian\",\"text\":\"帮我排一下京都三天的行程，喜欢安静的地方。\"},{\"type\":\"text\",\"content\":\"第二天：金阁寺和龙安寺石庭，晚上可以去祇园走走。\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+      "createdAt": "2026-11-22T05:41:43.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000014",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000011\",\"author\":\"guardian\",\"text\":\"帮我排一下京都三天的行程，喜欢安静的地方。\"},{\"type\":\"text\",\"content\":\"第三天去奈良还是大阪？告诉我你的偏好，我再细排。\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+      "createdAt": "2026-11-22T05:41:55.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000015",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"text\",\"content\":\"Heads up: your passport expires in 5 months. Want me to look into renewal?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000015",
+      "createdAt": "2026-11-22T05:51:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000016",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"text\",\"content\":\"Not yet, ask me next month.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000016",
+      "createdAt": "2026-11-22T05:57:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000017",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"text\",\"content\":\"Will do.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000017",
+      "createdAt": "2026-11-22T05:57:37.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000018",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000005\",\"author\":\"guardian\",\"text\":\"Can you compare round-trip fares to Lisbon for 1–7 March and tell me what to book?\"},{\"type\":\"text\",\"content\":\"First results, round trip:\\n\\n1. **TAP** direct, €312\\n2. **Lufthansa** via Frankfurt, €268\\n3. **easyJet** direct, €189, no bag\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T06:06:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000019",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000018\",\"author\":\"agent\",\"text\":\"First results, round trip:\\n\\n1. **TAP** direct, €312\\n2. **Lufthansa** via Frankfurt, €268\\n3. **easyJet** direct, €189, no bag\"},{\"type\":\"text\",\"content\":\"Is the easyJet price with a cabin bag?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T06:11:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000020",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000019\",\"author\":\"guardian\",\"text\":\"Is the easyJet price with a cabin bag?\"},{\"type\":\"text\",\"content\":\"No. With a cabin bag it is €229, with a checked bag €254.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T06:11:43.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000021",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000020\",\"author\":\"agent\",\"text\":\"No. With a cabin bag it is €229, with a checked bag €254.\"},{\"type\":\"text\",\"content\":\"And TAP, does it include a bag?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T06:16:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000022",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000021\",\"author\":\"guardian\",\"text\":\"And TAP, does it include a bag?\"},{\"type\":\"text\",\"content\":\"Yes: one 8 kg cabin bag and one 23 kg checked bag.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T06:16:49.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000023",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000014\",\"author\":\"agent\",\"text\":\"第三天去奈良还是大阪？告诉我你的偏好，我再细排。\"},{\"type\":\"text\",\"content\":\"奈良吧，我想看鹿。\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+      "createdAt": "2026-11-22T06:26:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000024",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000023\",\"author\":\"guardian\",\"text\":\"奈良吧，我想看鹿。\"},{\"type\":\"text\",\"content\":\"好的。第三天：东大寺和奈良公园，午饭吃捣麻糬，下午回京都。\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+      "createdAt": "2026-11-22T06:26:43.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000025",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000022\",\"author\":\"agent\",\"text\":\"Yes: one 8 kg cabin bag and one 23 kg checked bag.\"},{\"type\":\"text\",\"content\":\"What time do the TAP flights leave?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T06:31:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000026",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000025\",\"author\":\"guardian\",\"text\":\"What time do the TAP flights leave?\"},{\"type\":\"text\",\"content\":\"Outbound on 1 March at 07:05, back on 7 March at 18:40.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T06:32:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000027",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000026\",\"author\":\"agent\",\"text\":\"Outbound on 1 March at 07:05, back on 7 March at 18:40.\"},{\"type\":\"text\",\"content\":\"Any earlier return on the 7th?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T06:51:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000028",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000027\",\"author\":\"guardian\",\"text\":\"Any earlier return on the 7th?\"},{\"type\":\"text\",\"content\":\"There is a 14:15 back, €27 more.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T06:53:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000029",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000013\",\"author\":\"agent\",\"text\":\"第二天：金阁寺和龙安寺石庭，晚上可以去祇园走走。\"},{\"type\":\"text\",\"content\":\"第二天的龙安寺需要预约吗？\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+      "createdAt": "2026-11-22T07:01:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000030",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000029\",\"author\":\"guardian\",\"text\":\"第二天的龙安寺需要预约吗？\"},{\"type\":\"text\",\"content\":\"不需要预约，但周末人多，建议 8 点前到。\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+      "createdAt": "2026-11-22T07:01:49.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000031",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000028\",\"author\":\"agent\",\"text\":\"There is a 14:15 back, €27 more.\"},{\"type\":\"text\",\"content\":\"OK, what would you pick?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T07:11:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000032",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000031\",\"author\":\"guardian\",\"text\":\"OK, what would you pick?\"},{\"type\":\"text\",\"content\":\"TAP with the 14:15 return: €339 in total, bags included, and you are home before dinner.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T07:12:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000033",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"text\",\"content\":\"今天东京的天气怎么样？\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000033",
+      "createdAt": "2026-11-22T07:21:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000034",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"text\",\"content\":\"东京今天晴，最高 18°，傍晚有风。\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000034",
+      "createdAt": "2026-11-22T07:21:37.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000035",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000032\",\"author\":\"agent\",\"text\":\"TAP with the 14:15 return: €339 in total, bags included, and you are home before dinner.\"},{\"type\":\"text\",\"content\":\"Does that fit my meeting on the 7th?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T07:31:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000036",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000035\",\"author\":\"guardian\",\"text\":\"Does that fit my meeting on the 7th?\"},{\"type\":\"text\",\"content\":\"You have a call at 5 pm on the 7th, and the 14:15 lands at 17:30. That is tight.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T07:32:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000037",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000036\",\"author\":\"agent\",\"text\":\"You have a call at 5 pm on the 7th, and the 14:15 lands at 17:30. That is tight.\"},{\"type\":\"text\",\"content\":\"Can you move the call to 6?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T07:36:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000038",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000037\",\"author\":\"guardian\",\"text\":\"Can you move the call to 6?\"},{\"type\":\"text\",\"content\":\"I asked the organiser. I'll tell you when they answer.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T07:37:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000039",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000037\",\"author\":\"guardian\",\"text\":\"Can you move the call to 6?\"},{\"type\":\"text\",\"content\":\"They agreed: the call is at 6 pm on the 7th now.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T08:01:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000040",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000039\",\"author\":\"agent\",\"text\":\"They agreed: the call is at 6 pm on the 7th now.\"},{\"type\":\"text\",\"content\":\"Great. Book the TAP flights with the 14:15 return.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T08:06:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000041",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000040\",\"author\":\"guardian\",\"text\":\"Great. Book the TAP flights with the 14:15 return.\"},{\"type\":\"text\",\"content\":\"Booking needs your card. Shall I use the one ending 4242?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T08:07:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000042",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000041\",\"author\":\"agent\",\"text\":\"Booking needs your card. Shall I use the one ending 4242?\"},{\"type\":\"text\",\"content\":\"Yes.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T08:09:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000043",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000042\",\"author\":\"guardian\",\"text\":\"Yes.\"},{\"type\":\"text\",\"content\":\"Booked: TAP TP1951 on 1 March at 07:05, TP1956 on 7 March at 14:15. The confirmation is in your inbox.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T08:10:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000044",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"text\",\"content\":\"Last night's NAS backup failed: the backup disk is full.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000044",
+      "createdAt": "2026-11-22T08:11:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000045",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000044\",\"author\":\"agent\",\"text\":\"Last night's NAS backup failed: the backup disk is full.\"},{\"type\":\"text\",\"content\":\"Can you clean it up?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000044",
+      "createdAt": "2026-11-22T08:16:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000046",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000045\",\"author\":\"guardian\",\"text\":\"Can you clean it up?\"},{\"type\":\"text\",\"content\":\"Done. I removed the snapshots from before 2025 and freed 820 GB. Last night's backup ran again.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000044",
+      "createdAt": "2026-11-22T08:17:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000047",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000043\",\"author\":\"agent\",\"text\":\"Booked: TAP TP1951 on 1 March at 07:05, TP1956 on 7 March at 14:15. The confirmation is in your inbox.\"},{\"type\":\"text\",\"content\":\"Add both flights to my calendar.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T08:26:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000048",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000047\",\"author\":\"guardian\",\"text\":\"Add both flights to my calendar.\"},{\"type\":\"text\",\"content\":\"Added, with a reminder 3 hours before each.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+      "createdAt": "2026-11-22T08:27:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000049",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000046\",\"author\":\"agent\",\"text\":\"Done. I removed the snapshots from before 2025 and freed 820 GB. Last night's backup ran again.\"},{\"type\":\"text\",\"content\":\"Great, set it up to run weekly.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000044",
+      "createdAt": "2026-11-22T08:41:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000050",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "user",
+      "content": "[{\"type\":\"text\",\"content\":\"Thanks for today. Anything left?\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000050",
+      "createdAt": "2026-11-22T09:01:31.000Z"
+    },
+    {
+      "id": "5eedc4a1-0000-4000-8000-000000000051",
+      "sessionId": "concierge",
+      "turnId": null,
+      "role": "assistant",
+      "content": "[{\"type\":\"text\",\"content\":\"All done. Nothing is waiting on you.\"}]",
+      "chatThreadId": "5eedc4a1-0000-4000-8000-000000000051",
+      "createdAt": "2026-11-22T09:01:43.000Z"
+    }
+  ],
+  "short": {
+    "messages": [
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000011",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "user",
+        "content": "[{\"type\":\"text\",\"content\":\"帮我排一下京都三天的行程，喜欢安静的地方。\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+        "createdAt": "2026-11-22T05:41:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000012",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "assistant",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000011\",\"author\":\"guardian\",\"text\":\"帮我排一下京都三天的行程，喜欢安静的地方。\"},{\"type\":\"text\",\"content\":\"第一天：清晨去伏见稻荷大社，下午去岚山竹林，傍晚在鸭川边吃饭。\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+        "createdAt": "2026-11-22T05:41:43.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000013",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "assistant",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000011\",\"author\":\"guardian\",\"text\":\"帮我排一下京都三天的行程，喜欢安静的地方。\"},{\"type\":\"text\",\"content\":\"第二天：金阁寺和龙安寺石庭，晚上可以去祇园走走。\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+        "createdAt": "2026-11-22T05:41:43.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000014",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "assistant",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000011\",\"author\":\"guardian\",\"text\":\"帮我排一下京都三天的行程，喜欢安静的地方。\"},{\"type\":\"text\",\"content\":\"第三天去奈良还是大阪？告诉我你的偏好，我再细排。\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+        "createdAt": "2026-11-22T05:41:55.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000023",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "user",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000014\",\"author\":\"agent\",\"text\":\"第三天去奈良还是大阪？告诉我你的偏好，我再细排。\"},{\"type\":\"text\",\"content\":\"奈良吧，我想看鹿。\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+        "createdAt": "2026-11-22T06:26:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000024",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "assistant",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000023\",\"author\":\"guardian\",\"text\":\"奈良吧，我想看鹿。\"},{\"type\":\"text\",\"content\":\"好的。第三天：东大寺和奈良公园，午饭吃捣麻糬，下午回京都。\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+        "createdAt": "2026-11-22T06:26:43.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000029",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "user",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000013\",\"author\":\"agent\",\"text\":\"第二天：金阁寺和龙安寺石庭，晚上可以去祇园走走。\"},{\"type\":\"text\",\"content\":\"第二天的龙安寺需要预约吗？\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+        "createdAt": "2026-11-22T07:01:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000030",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "assistant",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000029\",\"author\":\"guardian\",\"text\":\"第二天的龙安寺需要预约吗？\"},{\"type\":\"text\",\"content\":\"不需要预约，但周末人多，建议 8 点前到。\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000011",
+        "createdAt": "2026-11-22T07:01:49.000Z"
+      }
+    ],
+    "hasOlder": false,
+    "hasNewer": false
+  },
+  "long": {
+    "messages": [
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000032",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "assistant",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000031\",\"author\":\"guardian\",\"text\":\"OK, what would you pick?\"},{\"type\":\"text\",\"content\":\"TAP with the 14:15 return: €339 in total, bags included, and you are home before dinner.\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+        "createdAt": "2026-11-22T07:12:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000035",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "user",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000032\",\"author\":\"agent\",\"text\":\"TAP with the 14:15 return: €339 in total, bags included, and you are home before dinner.\"},{\"type\":\"text\",\"content\":\"Does that fit my meeting on the 7th?\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+        "createdAt": "2026-11-22T07:31:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000036",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "assistant",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000035\",\"author\":\"guardian\",\"text\":\"Does that fit my meeting on the 7th?\"},{\"type\":\"text\",\"content\":\"You have a call at 5 pm on the 7th, and the 14:15 lands at 17:30. That is tight.\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+        "createdAt": "2026-11-22T07:32:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000037",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "user",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000036\",\"author\":\"agent\",\"text\":\"You have a call at 5 pm on the 7th, and the 14:15 lands at 17:30. That is tight.\"},{\"type\":\"text\",\"content\":\"Can you move the call to 6?\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+        "createdAt": "2026-11-22T07:36:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000038",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "assistant",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000037\",\"author\":\"guardian\",\"text\":\"Can you move the call to 6?\"},{\"type\":\"text\",\"content\":\"I asked the organiser. I'll tell you when they answer.\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+        "createdAt": "2026-11-22T07:37:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000039",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "assistant",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000037\",\"author\":\"guardian\",\"text\":\"Can you move the call to 6?\"},{\"type\":\"text\",\"content\":\"They agreed: the call is at 6 pm on the 7th now.\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+        "createdAt": "2026-11-22T08:01:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000040",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "user",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000039\",\"author\":\"agent\",\"text\":\"They agreed: the call is at 6 pm on the 7th now.\"},{\"type\":\"text\",\"content\":\"Great. Book the TAP flights with the 14:15 return.\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+        "createdAt": "2026-11-22T08:06:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000041",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "assistant",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000040\",\"author\":\"guardian\",\"text\":\"Great. Book the TAP flights with the 14:15 return.\"},{\"type\":\"text\",\"content\":\"Booking needs your card. Shall I use the one ending 4242?\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+        "createdAt": "2026-11-22T08:07:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000042",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "user",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000041\",\"author\":\"agent\",\"text\":\"Booking needs your card. Shall I use the one ending 4242?\"},{\"type\":\"text\",\"content\":\"Yes.\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+        "createdAt": "2026-11-22T08:09:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000043",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "assistant",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000042\",\"author\":\"guardian\",\"text\":\"Yes.\"},{\"type\":\"text\",\"content\":\"Booked: TAP TP1951 on 1 March at 07:05, TP1956 on 7 March at 14:15. The confirmation is in your inbox.\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+        "createdAt": "2026-11-22T08:10:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000047",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "user",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000043\",\"author\":\"agent\",\"text\":\"Booked: TAP TP1951 on 1 March at 07:05, TP1956 on 7 March at 14:15. The confirmation is in your inbox.\"},{\"type\":\"text\",\"content\":\"Add both flights to my calendar.\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+        "createdAt": "2026-11-22T08:26:31.000Z"
+      },
+      {
+        "id": "5eedc4a1-0000-4000-8000-000000000048",
+        "sessionId": "concierge",
+        "turnId": null,
+        "role": "assistant",
+        "content": "[{\"type\":\"reply_to\",\"messageId\":\"5eedc4a1-0000-4000-8000-000000000047\",\"author\":\"guardian\",\"text\":\"Add both flights to my calendar.\"},{\"type\":\"text\",\"content\":\"Added, with a reminder 3 hours before each.\"}]",
+        "chatThreadId": "5eedc4a1-0000-4000-8000-000000000005",
+        "createdAt": "2026-11-22T08:27:31.000Z"
+      }
+    ],
+    "hasOlder": true,
+    "hasNewer": false
+  }
+}

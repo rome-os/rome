@@ -9,11 +9,13 @@ Commands:
   web              Run the local Web UI to manage connection and audit logs.
   auth             Configure caller authorization through stdin or server mode.
   auth status      Report local caller configuration without revealing the token.
+  computer status  Check this Mac's native helper and privacy permissions.
+  computer permissions  Open this Mac's native helper permission panel.
   device           List authorized devices (they may be offline).
   device describe  Query a device's platform and supported actions.
   device run       Execute an action on a device.
   device rename    Rename a device in the account.
-  device remove    Revoke a device and delete it from the account.
+  device remove    Remove a device from the account.
   cp               Copy a file to or from a device.
   watch            Stream caller connection snapshots and changes as JSON lines.
   daemon           Manage the caller's background connection.
@@ -31,6 +33,34 @@ Set ROME_NODE_CONFIG_DIR to use a separate configuration directory.
 `;
 
 const commands: Record<string, string> = {
+  computer: `Usage: rome-node computer <status|permissions>
+
+These commands run locally on an Apple Silicon Mac. They need no Cloud credential
+and do not start the caller daemon.
+
+  status       Start or contact the signed helper and report its permissions.
+  permissions  Open the helper's permission panel. Grant Accessibility and Screen
+               Recording access. Input Monitoring is not required. Opening the panel
+               does not grant either permission.
+
+The package contains the native helper. No compiler or runtime download is needed.
+ROME_COMPUTER_USE_APP can name a development build of Rome Computer Use.app.
+Keep its path, bundle identifier, and signing identity stable between builds.
+Ad-hoc and unsigned development builds cannot retain privacy authorization.
+`,
+  "computer status": `Usage: rome-node computer status
+
+Start or contact this Mac's signed native helper and print its protocol version,
+permissions, and capabilities as an ActionResponse. This does not request a
+permission or contact Rome Cloud. Use computer permissions to open the local panel.
+`,
+  "computer permissions": `Usage: rome-node computer permissions
+
+Open the local signed Rome Computer Use helper's permission panel. Grant
+Accessibility and Screen Recording in macOS System Settings. The command reports
+that the request reached the helper, not that access has been granted.
+This command does not authorize a remote device or start a caller daemon.
+`,
   watch: `Usage: rome-node watch
 
 Subscribe to caller connection state as newline-delimited JSON.
@@ -184,17 +214,14 @@ The local exit status is 0 on success or 1 on failure.
 `,
   "device remove": `Usage: rome-node device remove <device-id>
 
-Revoke a device and delete it from the account. Use an ID from rome-node device.
-The device can be offline. A connected device is disconnected and must run
-rome-node connect and be approved again to come back.
+Remove a device from the account. Use an ID from rome-node device. The device
+can be offline. A connected device is disconnected and must run rome-node
+connect and be approved again to come back.
 
-Rome Cloud keeps a revoked device listed until the Gateway confirms the
-revocation. Until then remove fails with code revocation_pending: the device is
-already revoked, and running remove again later deletes it. Other failure codes
-are device_not_found, invalid_device_session, and cloud_unavailable.
-
-Prints {"type":"response","ok":true,"result":{}} on success. The local exit
-status is 0 on success or 1 on failure.
+Prints {"type":"response","ok":true,"result":{}} on success. Failures print
+{"type":"response","ok":false,"error":{"code":"...","message":"..."}} with code
+device_not_found, invalid_device_session, or cloud_unavailable.
+The local exit status is 0 on success or 1 on failure.
 `,
   "device run": `Usage:
   rome-node device run <device-id> <action> [--args <json>]
@@ -207,6 +234,7 @@ Computer actions:
   system.info  No arguments. Returns name, platform, and actions.
   exec         Run a program on the target computer.
   fs.list      List one folder. Read-only. Older targets return unsupported_action.
+  computer.*   Native macOS window control. See rome-node help computer.
 
 exec arguments:
   command      Required nonempty executable name or path.
@@ -229,6 +257,39 @@ Examples below use POSIX caller-shell quoting:
   rome-node device run <device-id> exec --args '{"command":"cat","args":["/workspace/README.md"]}'
   rome-node device run <device-id> exec --args '{"command":"sh","args":["-c","ls /workspace | head"]}'
   rome-node device run <device-id> exec --args '{"command":"powershell.exe","args":["-NoProfile","-Command","Get-ChildItem -LiteralPath C:/Work"]}'
+
+Native computer use on an Apple Silicon Mac:
+  computer.status   Read helper permissions and supported input actions.
+  computer.windows  List supported windows and opaque windowRef values.
+  computer.bind     Bind a listed {windowRef} for background window control.
+  computer.observe  Read {sessionId}; returns observationId, stateVersion, elements.
+  computer.act      Use a fresh observation and a unique actionId to dispatch input.
+  computer.verify   Independently verify {sessionId, actionId}.
+  computer.cancel   Stop {sessionId}; a stopped session cannot resume.
+
+Background window actions are move, click, drag, scroll, key, type, press, setValue,
+selectText and performAction. Omitting windowRef returns window_selection_required.
+A non-key window in the foreground app can bind in window_semantics mode (ref-only AX
+click, press, setValue and selectText). Coordinates are pixels in the latest window
+image; click and scroll can also target an element ref without coordinates. type
+inserts Unicode text without using the clipboard and does not emulate IME composition.
+Capability lists describe implemented routes, not acceptance for every application.
+
+  rome-node device run <device-id> computer.windows
+  rome-node device run <device-id> computer.bind --args '{"windowRef":"<listed-window-ref>"}'
+  rome-node device run <device-id> computer.observe --args '{"sessionId":"<session-id>","full":true}'
+  rome-node device run <device-id> computer.act --args '{"sessionId":"<session-id>","actionId":"unique-action-id","observationId":"<observation-id>","stateVersion":1,"action":{"type":"click","x":100,"y":200}}'
+  rome-node device run <device-id> computer.verify --args '{"sessionId":"<session-id>","actionId":"unique-action-id"}'
+  rome-node device run <device-id> computer.observe --args '{"sessionId":"<session-id>","screenshot":true}' --output window.png
+  rome-node device run <device-id> computer.cancel --args '{"sessionId":"<session-id>"}'
+
+Use the returned stateVersion and viewport, not the example's placeholder values.
+Observations expire after 15 seconds. A dispatched action is not a verified effect.
+An act may include expect:{identifier,title,role,value,contains} as an AX postcondition.
+Generic input without a checkable postcondition remains unverifiable.
+An unknown outcome must never be replayed, including after refreshing the observation.
+Window images require --output and travel as raw bytes. JSON metadata carries
+their byteLength and sha256. Screenshots and input text do not enter the host audit.
 
 Output:
   Success: {"type":"response","ok":true,"result":{...}}

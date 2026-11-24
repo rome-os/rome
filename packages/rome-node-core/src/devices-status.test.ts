@@ -4,7 +4,7 @@ import { DeviceStatusReader } from "./devices-status.js";
 import { actionError, type ActionResponse } from "./actions.js";
 import type { ConnectionStatus } from "./client.js";
 
-it("distinguishes replies, unavailable targets, timeouts, and revoked devices", async () => {
+it("distinguishes replies, unavailable targets, and timeouts", async () => {
   const run = rs.fn(
     async (id: string): Promise<ActionResponse> =>
       id === "online"
@@ -14,11 +14,10 @@ it("distinguishes replies, unavailable targets, timeouts, and revoked devices", 
   const reader = new DeviceStatusReader({
     getStatus: () => "online",
     list: async () => ({
-      items: ["online", "offline", "unknown", "revoked"].map((id) => ({
+      items: ["online", "offline", "unknown"].map((id) => ({
         id,
         device_name: id,
         platform: "linux",
-        revoked_at: id === "revoked" ? "2026-09-21" : null,
       })),
     }),
     run,
@@ -28,7 +27,6 @@ it("distinguishes replies, unavailable targets, timeouts, and revoked devices", 
     "connected",
     "not_connected",
     "unknown",
-    "revoked",
   ]);
   expect(run).toHaveBeenCalledTimes(3);
   expect(run).toHaveBeenCalledWith("online", "system.info", {}, 3000);

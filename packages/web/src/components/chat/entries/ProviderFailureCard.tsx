@@ -1,4 +1,5 @@
 import { ChevronRight, CirclePause, Info, TriangleAlert } from "lucide-react";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -9,7 +10,7 @@ import type {
   ProviderFailureReason,
   ProviderFailureResolution,
 } from "@rome/api-types/chat";
-import { LabeledCheckbox, useProviderName } from "@/components/default-provider";
+import { LabeledCheckbox, OwnerPicksNote, useProviderName } from "@/components/default-provider";
 import { ChatNotice } from "@/components/chat/ChatNotice";
 import { ProviderSignIn } from "@/components/chat/ProviderSignIn";
 import { Button } from "@/components/ui/button";
@@ -72,6 +73,8 @@ export interface FailureFacts {
   credits?: boolean;
   replacement?: { selection: string; model: string };
   detail?: string;
+  /** The chat follows the default, rather than a model its owner picked. */
+  followsDefault?: boolean;
 }
 
 /** The card's one line on what stopped. */
@@ -214,9 +217,11 @@ function usePassed(time: string | undefined): boolean {
 /**
  * The buttons a failure offers, grouped by what the guardian has to do:
  * switch to another account (`wait`), log in or switch (`account`), or move
- * to another model (`model`). A wait card also runs its turn again on a
- * click: [Retry] at once, or for a quota [Continue] once its reset has passed. A provider switch moves this chat only, unless "Also
- * make default" is checked; Rome credits are always the default.
+ * to another model (`model`). Every card runs its turn again on a click:
+ * [Retry] at once, or for a quota [Continue] once its reset has passed.
+ * Nothing else resumes it, not a login nor a top-up. A provider switch
+ * moves this chat only, unless "Also make default" is checked; Rome credits
+ * are always the default.
  */
 export function FailureActions({
   facts,
@@ -240,10 +245,11 @@ export function FailureActions({
   const quota = facts.reason === "quota";
   const resetPassed = usePassed(quota ? facts.until : undefined);
   const kind = failureCardKind(facts);
-  // A wait card runs its turn again on a click: a quota once its reset has
-  // passed (or when no reset is known), anything else at once.
-  const again =
-    kind !== "wait" ? null : !quota ? "retry" : !facts.until || resetPassed ? "continue" : null;
+  // Every card runs its turn again on a click: a quota reads [Continue] once
+  // its reset has passed (or when no reset is known), anything else [Retry].
+  const again = quota && (!facts.until || resetPassed) ? "continue" : "retry";
+  // [Retry] leads only where nothing else does the job: a wait it may get past.
+  const againLeads = kind === "wait" && (again === "continue" || !quota);
   const providers =
     kind === "model"
       ? []
@@ -256,9 +262,9 @@ export function FailureActions({
   const canLogIn = kind === "account";
   return (
     <div>
-      {(again || canLogIn || providers.length > 0 || replacement) && (
+      {
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          {again && (
+          {againLeads && (
             <Button type="button" size="sm" disabled={pending} onClick={onContinue}>
               {t(again === "retry" ? "providerFailure.retry" : "providerFailure.continue")}
             </Button>
@@ -278,7 +284,7 @@ export function FailureActions({
               key={provider}
               type="button"
               size="sm"
-              variant={!canLogIn && !again && index === 0 ? "default" : "outline"}
+              variant={!canLogIn && !againLeads && index === 0 ? "default" : "outline"}
               disabled={pending}
               onClick={() => setConfirming(provider)}
             >
@@ -298,10 +304,22 @@ export function FailureActions({
               {t("providerFailure.switchTo", { target: modelDisplayName(replacement.model) })}
             </Button>
           )}
+          {!againLeads && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={onContinue}
+            >
+              {t(again === "retry" ? "providerFailure.retry" : "providerFailure.continue")}
+            </Button>
+          )}
         </div>
-      )}
+      }
       <SwitchConfirmDialog
         provider={confirming}
+        followsDefault={facts.followsDefault}
         pending={pending}
         onCancel={() => setConfirming(null)}
         onConfirm={(makeDefault, moveExisting) => {
@@ -386,13 +404,20 @@ export function ProviderFailureCard({
     );
   }
 
-  /** Sends a button's request; the card reads as `settled` until the chat is read again. */
+  /**
+   * Sends a button's request; the card reads as `settled` until the chat is
+   * read again. An option that no longer worked wrote a fresh card instead:
+   * reading the chat again shows it.
+   */
   const act = async (send: () => Promise<unknown>, settled: ProviderFailureResolution) => {
     setPending(true);
     setFailed(false);
     try {
-      await send();
-      setSwitched(settled);
+      const answer = (await send()) as { refreshed?: boolean } | undefined;
+      if (!answer?.refreshed) setSwitched(settled);
+      // A switch pins this chat, or moves the default: the open chat reads
+      // itself again, so its pinned hint and model menu show where it runs.
+      emitSessionsChanged();
       onSettled?.();
     } catch {
       setFailed(true);
@@ -467,6 +492,8 @@ export function ProviderFailureCard({
 type SwitchConfirmProps = {
   /** The provider to switch to; null keeps the dialog closed. */
   provider: DefaultModelProvider | null;
+  /** Whether this chat follows the default, so a change of it counts it already. */
+  followsDefault?: boolean;
   pending: boolean;
   onCancel: () => void;
   onConfirm: (makeDefault: boolean, moveExisting: boolean) => void;
@@ -477,14 +504,21 @@ function SwitchConfirmDialog(props: SwitchConfirmProps) {
   return props.provider ? <OpenSwitchConfirmDialog {...props} /> : null;
 }
 
-function OpenSwitchConfirmDialog({ provider, pending, onCancel, onConfirm }: SwitchConfirmProps) {
+function OpenSwitchConfirmDialog({
+  provider,
+  followsDefault,
+  pending,
+  onCancel,
+  onConfirm,
+}: SwitchConfirmProps) {
   const { t, i18n } = useTranslation("chat");
   const providerName = useProviderName();
   const [makeDefault, setMakeDefault] = useState(false);
   const [moveExisting, setMoveExisting] = useState(true);
   const [credits, setCredits] = useState<RomeCreditsView | null | undefined>(undefined);
-  // Asked exactly when Settings asks it: only while a change would move other chats.
-  const asksToMove = (useDefaultProvider().data?.followingChats ?? 0) > 0;
+  // Asked only while a change would move other chats than this one, which moves anyway.
+  const following = useDefaultProvider().data?.followingChats ?? 0;
+  const asksToMove = following - (followsDefault === false ? 0 : 1) > 0;
   const open = provider !== null;
   useEffect(() => {
     if (!open) return;
@@ -534,6 +568,7 @@ function OpenSwitchConfirmDialog({ provider, pending, onCancel, onConfirm }: Swi
                 >
                   {t("providerFailure.confirm.moveExisting")}
                 </LabeledCheckbox>
+                <OwnerPicksNote />
                 {moveExisting && (
                   <p className="pl-6 text-aux text-muted-foreground">
                     {t("providerFailure.confirm.moveExistingHelp", { provider: name })}
@@ -543,7 +578,7 @@ function OpenSwitchConfirmDialog({ provider, pending, onCancel, onConfirm }: Swi
             )
           ) : (
             <p className="pl-6 text-aux text-muted-foreground">
-              {t("providerFailure.confirm.makeDefaultHelp", { provider: name })}
+              {t("providerFailure.confirm.thisChatOnlyHelp")}
             </p>
           )}
         </div>

@@ -107,20 +107,40 @@ describe("logoutOutcome", () => {
   });
 
   it("hands the default to the other account when the default logs out", () => {
-    expect(logoutOutcome("claude", both("anthropic"), names, t)).toBe(
-      "ChatGPT becomes the default. Chats move to it on their next reply.",
-    );
+    expect(logoutOutcome("claude", both("anthropic"), names, t)).toEqual({
+      text: "ChatGPT becomes the default. Chats move to it on their next reply.",
+      asksToMove: false,
+    });
     expect(logoutOutcome("claude", both("openai"), names, t)).toBeNull();
   });
 
-  it("pauses the chats when the only account logs out", () => {
+  it("asks Move existing chats too while chats would move, and says where they stay unchecked", () => {
+    const busy = { ...both("anthropic"), followingChats: 3 };
+    expect(logoutOutcome("claude", busy, names, t)).toMatchObject({ asksToMove: true });
+    expect(logoutOutcome("claude", busy, names, t, { moveExisting: false })?.text).toBe(
+      "ChatGPT becomes the default for new chats. Existing chats stay on Claude and wait until you log in again.",
+    );
+  });
+
+  it("still hands the default to an expired account, and warns that its login expired", () => {
+    expect(logoutOutcome("claude", both("anthropic"), names, t, { otherExpired: true })?.text).toBe(
+      "ChatGPT becomes the default. Chats move to it on their next reply. Its login has expired: log in to ChatGPT again after you log out.",
+    );
+  });
+
+  it("makes Rome credits the default when the last account logs out", () => {
     const only: DefaultProviderState = {
       provider: "openai",
       signedIn: { anthropic: false, openai: true, rome_credits: false },
+      followingChats: 2,
     };
-    expect(logoutOutcome("codex", only, names, t)).toBe("Chats pause until you log in again.");
-    expect(logoutOutcome("codex", { ...only, romeCreditsUsable: true }, names, t)).toBe(
-      "Chats pause until you log in again, or until you switch every chat to Rome credits.",
-    );
+    expect(logoutOutcome("codex", { ...only, romeCreditsUsable: true }, names, t)).toEqual({
+      text: "Rome credits become the default. Chats move to them on their next reply.",
+      asksToMove: true,
+    });
+    expect(logoutOutcome("codex", only, names, t)).toEqual({
+      text: "Chats pause until you log in again.",
+      asksToMove: false,
+    });
   });
 });

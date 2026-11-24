@@ -154,12 +154,17 @@ describe("TraceDrawer hosted in the tool pane", () => {
   };
   const loadStoredTrace = async () => usageSnapshot(false);
 
-  function hosted(outlet: HTMLElement | null, target: TraceDrawerTarget | null = storedTarget) {
+  function hosted(
+    outlet: HTMLElement | null,
+    target: TraceDrawerTarget | null = storedTarget,
+    actions: HTMLElement | null = null,
+  ) {
     return (
       <TraceDrawer
         target={target}
         onClose={() => {}}
         outlet={outlet}
+        actions={actions}
         loadStoredTrace={loadStoredTrace}
         renderInlineBlock={() => null}
         renderRunBlocks={() => null}
@@ -167,15 +172,21 @@ describe("TraceDrawer hosted in the tool pane", () => {
     );
   }
 
-  it("renders into the outlet with only the summary and the dump link as its header", async () => {
+  it("renders into the outlet with the summary first, and its dump link in the tab row", async () => {
     const outlet = document.createElement("div");
-    document.body.append(outlet);
-    render(hosted(outlet));
+    const actions = document.createElement("div");
+    document.body.append(outlet, actions);
+    const { rerender } = render(hosted(outlet, storedTarget, actions));
 
     await waitFor(() => expect(outlet.textContent).toContain("trace.summary.stepsSingle"));
-    expect(outlet.querySelector("a[download]")?.getAttribute("href")).toBe(
+    expect(outlet.querySelector("a[download]")).toBeNull();
+    expect(actions.querySelector("a[download]")?.getAttribute("href")).toBe(
       "/api/chat/sessions/s/turns/t/trace.json",
     );
+    // Another tab chosen: the row holds nothing of the trace's.
+    rerender(hosted(outlet, storedTarget, null));
+    expect(actions.querySelector("a[download]")).toBeNull();
+    actions.remove();
     // The tab owns the title, the Live indicator and the close button.
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("heading", { name: "trace.drawer.title" })).toBeNull();

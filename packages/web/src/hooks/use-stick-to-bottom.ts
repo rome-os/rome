@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { findScrollableYAncestor } from "@/lib/scroll-container";
 
 // A reusable "keep the viewport pinned to the bottom" hook, written for chat /
@@ -33,6 +33,8 @@ export const HOLD_STICK_EVENT = "rome:hold-stick";
 export interface UseStickToBottomOptions {
   /** Whether to begin pinned to the bottom. Default true. */
   initialStuck?: boolean;
+  /** While covered by another transcript, keep position and stickiness intent unchanged. */
+  paused?: RefObject<boolean>;
 }
 
 export interface UseStickToBottom {
@@ -93,7 +95,10 @@ const STUCK_THRESHOLD_PX = 96;
 
 export function useStickToBottom({
   initialStuck = true,
+  paused,
 }: UseStickToBottomOptions = {}): UseStickToBottom {
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   const [isAtBottom, setIsAtBottom] = useState(initialStuck);
   const [contentEl, setContentEl] = useState<HTMLElement | null>(null);
   const explicitScrollRef = useRef<HTMLElement | null>(null);
@@ -124,6 +129,7 @@ export function useStickToBottom({
 
   const jumpToBottom = useCallback(
     (behavior: ScrollBehavior) => {
+      if (pausedRef.current?.current) return;
       const scroller = resolveScroller();
       if (scroller === window) {
         window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
@@ -142,6 +148,7 @@ export function useStickToBottom({
 
   const scrollToBottom = useCallback(
     (behavior: ScrollBehavior = "auto") => {
+      if (pausedRef.current?.current) return;
       setStuck(true);
       jumpToBottom(behavior);
     },
@@ -191,7 +198,7 @@ export function useStickToBottom({
       const movedUp = lastScrollTop !== null && metrics.scrollTop < lastScrollTop - 0.5;
       lastScrollTop = metrics.scrollTop;
       // The control that holds the position moves the scroller itself.
-      if (holdRef.current) return;
+      if (holdRef.current || pausedRef.current?.current) return;
       const userDriven = performance.now() - lastUserGestureRef.current <= USER_INTENT_WINDOW_MS;
       if (userDriven) {
         // The user is scrolling: they may release the pin or scroll back to re-engage.
