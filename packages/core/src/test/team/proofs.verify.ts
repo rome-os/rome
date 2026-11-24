@@ -3,11 +3,14 @@
 // guardian may call, which must fail rule 2 naming that route; one where every
 // check admits the teammate as it admits the guardian, which must pass; one
 // that admits a visitor nobody invited, which must fail; and one whose sign-in
-// hands an uninvited account the guardian's session, which must fail rule 1.
+// hands an uninvited account the guardian's session, which must fail rule 1;
+// and one where the guardian's save keeps the teammate on the list, which must
+// fail the removal check with every socket it could check still open.
 
 import { describe, expect, it } from "@rstest/core";
 import { runRule1b } from "./rule1.js";
 import { runRule2, STAND_IN_GUARDIAN_ONLY_ROUTE, type Rule2Result } from "./rule2.js";
+import { runRule3Dashboard } from "./rule3.js";
 import { writePart } from "./report.js";
 
 const summary = (result: Rule2Result) => ({
@@ -59,4 +62,19 @@ describe("the rule 1 sign-in check", () => {
     expect(result.pass).toBe(false);
     expect(result.uninvited.at(-1)?.ok).toBe(false);
   }, 60_000);
+});
+
+describe("the removal check", () => {
+  it("fails a stand-in whose save keeps the teammate on the list", async () => {
+    const result = await runRule3Dashboard({ standIn: "teammate-kept" });
+    proofs.teammateKept = result;
+    writePart("proofs", proofs);
+    expect(result.pass).toBe(false);
+    const checked = result.sockets.filter((s) => s.verdict !== "unverified");
+    expect(checked.map((s) => s.route)).toEqual(
+      expect.arrayContaining(["WS /ws/events", "WS /ws/voice-conversation"]),
+    );
+    expect(checked.every((s) => s.verdict === "open")).toBe(true);
+    expect(result.nextCall.refused).toBe(false);
+  }, 120_000);
 });
