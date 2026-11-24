@@ -626,7 +626,7 @@ export class SlackAppAdapter {
       const name = await this.config.api.userName(this.config.teamId, userId, this.abort.signal);
       // An answer without the member's workspace is not kept, so a message
       // held for want of it asks again.
-      if (!name.teamId) return name;
+      if (!name.teamId?.startsWith("T")) return name;
       if (this.userNames.size >= USER_NAME_CACHE_SIZE) {
         const oldest = this.userNames.keys().next().value;
         if (oldest !== undefined) this.userNames.delete(oldest);
