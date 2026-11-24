@@ -27,3 +27,16 @@ Each difference below is deliberate. A rule that passes here can still fail in p
 | Wiping Rome's copy (R13) | No such operation; a chat's copy is only lost by accident | `ctl.sh wipe-chat` deletes the rows and transcripts with the instance stopped (README) | A copy kept where the words are transformed (hashed, summarised) survives the sweep, which matches text only. |
 | Mail | Rome Cloud provisions Rome's email inbox through AgentMail | No mail provider: an instance's mail provision gets 500 ("AGENTMAIL_API_KEY is not set") at start, a known warning unrelated to Slack | Anything about email. |
 | R6 outage | The instance is offline for up to 1 hour | The instance is stopped for 2 minutes (`ctl.sh stop`, then `ctl.sh start`) | Mailbox expiry or drain-key expiry over a longer outage. |
+
+## For the ambient agent rules
+
+The rules of "an agent can be ambient in a work place" (recall in Slack, silence, instance stopped, no platform-specific logic) depend on these. The rows above still hold.
+
+| Area | Production | This environment | What it can hide |
+|---|---|---|---|
+| Slack | slack.com | The fake Slack in `fake-slack/`, as the Slack row above says. A group message written with `POST /_control/group-message` enters the group's history and nothing else, and `conversations.history` and `conversations.replies` answer it from there. Its history never expires and is never edited or deleted by members. | A field of a real message (edits, deletions, attachments, bots' own messages in a group) the product would have to skip or read; a history Slack returns differently. |
+| Group message events | Rome's Slack app subscribes to no group message event (`message.channels`, `message.groups`), so Slack sends it nothing for a group message that does not mention it, only `app_mention` for one that does | The same: `group-message` sends no event. Its `send_event: true` option sends one as `message.channels` for other environments' checks; nothing here turns it on, and the ambient checks never pass it. | Nothing: this matches production. |
+| History limit | Slack's limit for an app outside the Marketplace: `conversations.history` and `conversations.replies` at 1 request a minute and 15 messages a request | On by default and on in every ambient check; the Rate limits row above has how it is counted (per method and workspace, `Retry-After` in whole seconds). | A Marketplace app's higher limit, which the product does not have. |
+| The agent's model | Whatever the Concierge picks (Opus 5.5 when Claude is connected) | Pinned to Haiku 5.5 by `tools/model-proxy.mjs` (the model row above) | A fact a stronger model would recall, or a reply it would hold back, that Haiku 5.5 misses or sends. |
+| Instance stopped | An instance VM that is off or unreachable | `ctl.sh stop rome-a` stops the container; Rome Cloud, the relay and the fake Slack keep running, and the messages written meanwhile stay in the fake's history | A VM that comes back with a different disk or clock. |
+| A test file not in the product | No such file | `ctl.sh product-tests --add` mounts the verifier's own test file into an image of the product commit and runs it with the product's rstest (README). The commit is unchanged. | A test that passes only because of where it was placed. |
