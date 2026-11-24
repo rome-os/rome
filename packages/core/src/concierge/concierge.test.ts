@@ -976,6 +976,19 @@ describe("Concierge tools", () => {
         ]);
       });
 
+      it("lets anyone in the workspace start a task, as the guardian does", async () => {
+        const s = setup();
+        const chatId = await connectionChat(s);
+        workspace(s);
+        const result = await run(there(s, chatId, "other"), s, "chat_start", {
+          title: "Flights",
+          brief: "Find flights to Tokyo",
+        });
+        expect(result.isError).toBeFalsy();
+        const { chatId: taskId } = JSON.parse(result.content[0]!.text) as { chatId: string };
+        expect((await s.taskRepo.getWithChat(taskId))?.conciergeChat.id).toBe(chatId);
+      });
+
       it("says a message that quotes nothing into the thread the turn stands in", async () => {
         const s = setup();
         const chatId = await connectionChat(s);

@@ -65,7 +65,10 @@ describe("the Concierge on a connection", () => {
       { channel: "slack_app", connectionId: "slack" },
       serves,
     );
-    expect(setup?.systemPromptPrefix).toBe(`${CONNECTION_PROMPT}\n\n${WORKSPACE_PROMPT}`);
+    expect(setup?.systemPromptPrefix).toContain(WORKSPACE_PROMPT);
+    // Anyone in the workspace may ask for a task there.
+    expect(setup?.systemPromptPrefix).toContain("Anyone in this workspace may ask for one.");
+    expect(setup?.systemPromptPrefix).not.toContain("Only the guardian may ask for one");
     expect(WORKSPACE_PROMPT).toContain("`<place>`");
     expect(WORKSPACE_PROMPT).toContain("`send`");
     // Every other account, and the Concierge without the rule, keep theirs.

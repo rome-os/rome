@@ -132,9 +132,15 @@ export const WORKSPACE_PROMPT = [
   "- A task's news reaches you with the `<place>` of the chat and thread that asked for it: tell its result there with `say`.",
 ].join("\n");
 
+/** Who may ask for a task on a connection, and who may on an account that
+ *  serves its workspace: anyone in it, with the guardian's access (Ouou,
+ *  2026-11-24). A list of allowed teammates replaces this later. */
+const TASKS_GUARDIAN_ONLY = "Only the guardian may ask for one; tell anyone else that the guardian can.";
+const TASKS_ANYONE = "Anyone in this workspace may ask for one.";
+
 const ON_WORKSPACE: PlaceSetup = {
   ...ON_CONNECTION,
-  systemPromptPrefix: `${CONNECTION_PROMPT}\n\n${WORKSPACE_PROMPT}`,
+  systemPromptPrefix: `${CONNECTION_PROMPT.replace(TASKS_GUARDIAN_ONLY, TASKS_ANYONE)}\n\n${WORKSPACE_PROMPT}`,
 };
 
 /**
