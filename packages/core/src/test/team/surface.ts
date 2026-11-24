@@ -29,9 +29,14 @@ export interface HttpOperation {
   /** The route as the route table names it, such as `GET /api/approvals/:id`. */
   route: string;
   method: string;
+  /** The route pattern as the route table holds it. */
+  pattern: string;
   /** The route pattern with its parameters filled. */
   path: string;
   reach: Reach;
+  /** Set when the chat in the path is the caller's own Concierge chat, which
+   *  differs by caller: `pathFor` fills it. */
+  ownChat?: true;
 }
 
 export interface UpgradeOperation {
@@ -88,6 +93,7 @@ function paramValue(name: string, pattern: string, ids: SeededIds): string {
     if (under("sentinel-log")) return ids.sentinelId;
   }
   if (name === "personId") return ids.personId;
+  if (name === "deviceId") return ids.deviceId;
   return `verifier-${name}`;
 }
 
@@ -106,9 +112,17 @@ export function fillPattern(pattern: string, ids: SeededIds): string {
     .join("/");
 }
 
+// A chat's routes, which some capabilities (computer use) answer only in a
+// chat private to the caller.
+const CHAT_ROUTE = /^\/api\/chat\/sessions\/:(id|sessionId)(\/|$)/;
+
+const OWN_CHAT_SUFFIX = " in the caller's own Concierge chat";
+
 /**
  * Every operation in the app's route table, one per method and pattern.
- * `ALL` entries are middleware or catch-all handlers, called with GET.
+ * `ALL` entries are middleware or catch-all handlers, called with GET. A
+ * chat's route is called twice: in a chat every dashboard user may open, and
+ * in the caller's own Concierge chat.
  */
 export function httpOperations(app: Hono, ids: SeededIds): HttpOperation[] {
   const edge = readEdgeMatchers();
@@ -120,9 +134,29 @@ export function httpOperations(app: Hono, ids: SeededIds): HttpOperation[] {
     if (seen.has(route)) continue;
     seen.add(route);
     const path = fillPattern(entry.path, ids);
-    operations.push({ kind: "http", route, method, path, reach: reachOf(path, edge) });
+    const operation: HttpOperation = {
+      kind: "http",
+      route,
+      method,
+      pattern: entry.path,
+      path,
+      reach: reachOf(path, edge),
+    };
+    operations.push(operation);
+    if (CHAT_ROUTE.test(entry.path)) {
+      operations.push({ ...operation, route: `${route}${OWN_CHAT_SUFFIX}`, ownChat: true });
+    }
   }
   return operations;
+}
+
+/** The path `op` is called on for a caller with a guardian's or a
+ *  teammate's session. Anyone else is given the guardian's chat. */
+export function pathFor(op: HttpOperation, ids: SeededIds, caller: string): string {
+  if (!op.ownChat) return op.path;
+  const chatId =
+    caller === "teammate" ? ids.conciergeChatIds.teammate : ids.conciergeChatIds.guardian;
+  return fillPattern(op.pattern, { ...ids, chatId });
 }
 
 /**

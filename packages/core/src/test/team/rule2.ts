@@ -5,7 +5,17 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createInstance, mountDrift, OUTSIDER, TEAMMATE, type Instance } from "./instance.js";
+import { Hono } from "hono";
+import type { Feature } from "../../api/deps.js";
+import { guardianOnly } from "../../access/guardian-only.js";
+import {
+  createInstance,
+  mountDrift,
+  OUTSIDER,
+  TEAMMATE,
+  type Instance,
+  type InstanceOptions,
+} from "./instance.js";
 import {
   callHttp,
   callUpgrade,
@@ -13,25 +23,39 @@ import {
   type Outcome,
   type Role,
 } from "./callers.js";
-import { httpOperations, upgradeOperations, type Operation } from "./surface.js";
+import { httpOperations, pathFor, upgradeOperations, type Operation } from "./surface.js";
 
 /**
  * A product the verifier is proven against instead of the one in the tree.
  * "open-checks": the teammate's calls carry the guardian's session, so every
  * check admits them as it admits the guardian. "admit-every-visitor": the
  * outsider's email is on the dashboard list too, so the product admits a
- * visitor nobody invited.
+ * visitor nobody invited. "guardian-only-route": the product in the tree plus
+ * `STAND_IN_GUARDIAN_ONLY_ROUTE`, which refuses everyone but the guardian.
  */
-export type StandIn = "open-checks" | "admit-every-visitor";
+export type StandIn = "open-checks" | "admit-every-visitor" | "guardian-only-route";
+
+/**
+ * "per-call" gives every call a fresh instance, so no call sees what another
+ * changed: about 1,000 boots. "per-role" runs every operation in the same
+ * order on one instance per role: 4 boots, and an operation after one that
+ * changed state compares instances that went through the same calls.
+ */
+export type Isolation = "per-call" | "per-role";
 
 export interface Rule2Options {
   standIn?: StandIn;
+  /** Default "per-call". */
+  isolation?: Isolation;
 }
+
+export const STAND_IN_GUARDIAN_ONLY_ROUTE = "GET /api/team-verifier/guardian-only";
 
 export type Verdict =
   | "match"
   | "teammate-refused"
   | "status-differs"
+  | "unverified"
   | "exception"
   | "out-of-scope";
 
@@ -52,6 +76,10 @@ export interface Rule2Result {
   operations: OperationResult[];
   teammateRefused: string[];
   statusDiffers: string[];
+  /** Routes where guardian and teammate got the same 404, 5xx or timeout, so
+   *  the call never reached what it would compare. Reported, never passed or
+   *  failed. */
+  unverified: string[];
   outsiderAdmitted: string[];
   unclaimedUpgradeHandlers: number[];
   mountDrift: string[];
@@ -73,8 +101,19 @@ function readExceptions(): Map<string, string> {
   return byRoute;
 }
 
-function dashboardEmails(standIn: StandIn | undefined): string[] {
-  return standIn === "admit-every-visitor" ? [TEAMMATE.email, OUTSIDER.email] : [TEAMMATE.email];
+function instanceOptions(standIn: StandIn | undefined): InstanceOptions {
+  return {
+    dashboardEmails:
+      standIn === "admit-every-visitor" ? [TEAMMATE.email, OUTSIDER.email] : [TEAMMATE.email],
+    ...(standIn === "guardian-only-route" ? { extraFeatures: [guardianOnlyFeature()] } : {}),
+  };
+}
+
+function guardianOnlyFeature(): Feature {
+  const routes = new Hono();
+  const path = STAND_IN_GUARDIAN_ONLY_ROUTE.slice("GET /api".length);
+  routes.get(path, guardianOnly, (c) => c.json({ ok: true }));
+  return { routes, actions: [] };
 }
 
 /** The role whose session a call carries. The open-checks stand-in hands the
@@ -87,7 +126,7 @@ async function onFreshInstance<T>(
   standIn: StandIn | undefined,
   run: (instance: Instance) => Promise<T>,
 ): Promise<T> {
-  const instance = await createInstance({ dashboardEmails: dashboardEmails(standIn) });
+  const instance = await createInstance(instanceOptions(standIn));
   try {
     return await run(instance);
   } finally {
@@ -95,31 +134,72 @@ async function onFreshInstance<T>(
   }
 }
 
-async function call(op: Operation, role: Role, standIn: StandIn | undefined): Promise<Outcome> {
+/** Calls `op` on `instance`, filling its parameters from that instance's seeded ids. */
+async function callOn(instance: Instance, port: number, op: Operation, as: Role): Promise<Outcome> {
+  if (op.kind === "http") {
+    const own = httpOperations(instance.app, instance.ids).find((o) => o.route === op.route) ?? op;
+    return callHttp(instance.app, { ...own, path: pathFor(own, instance.ids, as) }, as);
+  }
+  return callUpgrade(instance.app, port, op, as);
+}
+
+async function callOnFreshInstance(
+  op: Operation,
+  role: Role,
+  standIn: StandIn | undefined,
+): Promise<Outcome> {
   return onFreshInstance(standIn, async (instance) => {
     const as = sessionRole(role, standIn);
-    if (op.kind === "http") {
-      // Parameters are filled per instance, from that instance's seeded ids.
-      const fresh = httpOperations(instance.app, instance.ids).find((o) => o.route === op.route);
-      return callHttp(instance.app, fresh ?? op, as);
-    }
+    // Only an upgrade needs the instance on a port.
+    if (op.kind === "http") return callOn(instance, 0, op, as);
     const listening = await instance.listen();
     try {
-      return await callUpgrade(instance.app, listening.port, op, as);
+      return await callOn(instance, listening.port, op, as);
     } finally {
       await listening.close();
     }
   });
 }
 
+/** Every operation in order on one instance for `role`. A write that changes
+ *  the dashboard list (a teammate may save it, and every call sends `{}`)
+ *  would sign the teammate out of the calls after it, so the list goes back
+ *  to the booted one after each call. */
+async function callAllAs(
+  ops: Operation[],
+  role: Role,
+  standIn: StandIn | undefined,
+): Promise<Map<string, Outcome>> {
+  return onFreshInstance(standIn, async (instance) => {
+    const listening = await instance.listen();
+    const outcomes = new Map<string, Outcome>();
+    try {
+      for (const op of ops) {
+        outcomes.set(
+          op.route,
+          await callOn(instance, listening.port, op, sessionRole(role, standIn)),
+        );
+        await instance.restoreDashboardList();
+      }
+    } finally {
+      await listening.close();
+    }
+    return outcomes;
+  });
+}
+
+const unusable = (status: Outcome["status"]) =>
+  status === "timeout" || status === 404 || status >= 500;
+
 function compare(guardian: Outcome, teammate: Outcome): Verdict {
   if (!guardian.refused && teammate.refused) return "teammate-refused";
   if (guardian.status !== teammate.status) return "status-differs";
+  if (unusable(guardian.status)) return "unverified";
   return "match";
 }
 
 export async function runRule2(options: Rule2Options = {}): Promise<Rule2Result> {
-  const { standIn } = options;
+  const { standIn, isolation = "per-call" } = options;
   const exceptions = readExceptions();
 
   const { operations, unclaimed } = await onFreshInstance(standIn, async (instance) => {
@@ -139,16 +219,39 @@ export async function runRule2(options: Rule2Options = {}): Promise<Rule2Result>
       await listening.close();
     }
   });
+  const inScope = operations.filter((op) => op.reach !== "machine" && op.reach !== "loopback-only");
+
+  // Per role, each role's outcomes come from one instance; per call, each
+  // outcome is fetched when the comparison needs it.
+  const byRole = new Map<Role, Map<string, Outcome>>();
+  if (isolation === "per-role") {
+    // Deletes go last, so a seeded record one removes is still there for the
+    // operations that read or change it, and the deepest path first, so a
+    // record goes before the record it sits under.
+    const isDelete = (op: Operation) => op.kind === "http" && op.method === "DELETE";
+    const depth = (op: Operation) => op.path.split("/").length;
+    const ordered = [
+      ...inScope.filter((op) => !isDelete(op)),
+      ...inScope.filter(isDelete).sort((a, b) => depth(b) - depth(a)),
+    ];
+    for (const role of ["guardian", "teammate", "anonymous", "outsider"] as const) {
+      byRole.set(role, await callAllAs(ordered, role, standIn));
+    }
+  }
+  const outcomeOf = async (op: Operation, role: Role): Promise<Outcome> => {
+    const recorded = byRole.get(role)?.get(op.route);
+    return recorded ?? callOnFreshInstance(op, role, standIn);
+  };
 
   const results: OperationResult[] = [];
   for (const op of operations) {
     const base = { route: op.route, path: op.path, kind: op.kind, reach: op.reach };
-    if (op.reach === "machine" || op.reach === "loopback-only") {
+    if (!inScope.includes(op)) {
       results.push({ ...base, verdict: "out-of-scope", outcomes: {} });
       continue;
     }
-    const guardian = await call(op, "guardian", standIn);
-    const teammate = await call(op, "teammate", standIn);
+    const guardian = await outcomeOf(op, "guardian");
+    const teammate = await outcomeOf(op, "teammate");
     const exception = exceptions.get(op.route);
     const result: OperationResult = {
       ...base,
@@ -157,10 +260,10 @@ export async function runRule2(options: Rule2Options = {}): Promise<Rule2Result>
       outcomes: { guardian, teammate },
     };
     if (!guardian.refused) {
-      const anonymous = await call(op, "anonymous", standIn);
+      const anonymous = await outcomeOf(op, "anonymous");
       result.outcomes.anonymous = anonymous;
       if (anonymous.refused) {
-        const outsider = await call(op, "outsider", standIn);
+        const outsider = await outcomeOf(op, "outsider");
         result.outcomes.outsider = outsider;
         result.outsider = outsider.refused ? "refused" : "admitted";
       }
@@ -184,6 +287,7 @@ export async function runRule2(options: Rule2Options = {}): Promise<Rule2Result>
     operations: results,
     teammateRefused,
     statusDiffers,
+    unverified: routesWith("unverified"),
     outsiderAdmitted,
     unclaimedUpgradeHandlers: unclaimed,
     mountDrift: drift,

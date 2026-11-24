@@ -34,22 +34,11 @@ function hasLoopbackHostname(origin: string): boolean {
 
 /**
  * Accepts the guardian: a guardian cookie from the dashboard's own origin, or a
- * direct loopback caller that is not a browser page on a non-loopback host. A
- * browser on another origin is refused whatever credential it carries. Writes
- * the 401, 403 or 500 itself and resolves false.
- */
-export async function gateGuardianUpgrade(
-  req: IncomingMessage,
-  socket: Duplex,
-  db: DrizzleDb,
-): Promise<boolean> {
-  return (await gateUpgrade(req, socket, db)) !== null;
-}
-
-/**
- * `gateGuardianUpgrade`, and with `dashboardAccess` also a visitor the
- * dashboard allow-list names, from the dashboard's own origin. Resolves the
- * caller, or null once it has written the rejection.
+ * direct loopback caller that is not a browser page on a non-loopback host.
+ * With `dashboardAccess` it also accepts a visitor the dashboard allow-list
+ * names, from the dashboard's own origin. A browser on another origin is
+ * refused whatever credential it carries. Resolves the caller, or null once it
+ * has written the 401, 403 or 500.
  */
 export async function gateUpgrade(
   req: IncomingMessage,

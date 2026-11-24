@@ -5922,7 +5922,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   // Why a spoken turn may not go into `chatId`, or null when it may.
-  // The guardian's socket reaches the chats the guardian's dashboard opens, as the routes' gate allows.
+  // A socket reaches the chats its person's dashboard opens, as the routes' gate allows.
   // A voice conversation is a call with the Concierge: its main chat and topic chats, not a task chat.
   const spokenRefusal = async (chatId: string): Promise<string | null> => {
     const owner = await currentChatOwner();

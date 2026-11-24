@@ -42,7 +42,7 @@ A dashboard admin is a [visitor](#visitor) whose email is on the dashboard allow
 
 **Contracts:**
 
-- A dashboard admin passes every dashboard check the guardian passes, approvals, the vault and app-connection access included, apart from the three [exceptions](#team).
+- A dashboard admin passes every dashboard check the guardian passes, approvals, the vault and app-connection access included, apart from the four [exceptions](#team).
 - A dashboard admin has their own Concierge while it is on. Memory and connections stay shared.
 - Removing the email ends dashboard admin access at the next request.
 
@@ -57,8 +57,8 @@ The team is the guardian and every [dashboard admin](#dashboard-admin). Access a
 
 **Contracts:**
 
-- Every dashboard check admits the team, except three that stay the guardian's: billing for the instance, deleting the instance, and removing or replacing the guardian's seat or its credentials.
-- Linking an outside account to the guardian as a person replaces the guardian's credentials, so a dashboard admin cannot ask for a link code.
+- Every dashboard check admits the team, except four that stay the guardian's: billing for the instance, deleting the instance, removing or replacing the guardian's seat or its credentials, and what is the guardian's own person.
+- What is the guardian's own person covers their personal data, their devices, their time zone, and making an account theirs. A dashboard admin reads the guardian's personal data and devices but changes none of them, sets no guardian time zone, and cannot ask for a link code.
 - Each person's Concierge chats stay private to that person, the guardian's included.
 
 **Not to be confused with:**

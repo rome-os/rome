@@ -11,7 +11,7 @@ import { attachVoiceInputServer, type VoiceInputSource } from "./voice-input/ind
 import { guardianAuth } from "./db/schema.js";
 import { createTestDb, type TestDb } from "./test/db.js";
 import { createSession, createVisitorSession } from "./access/auth.js";
-import { createNodeConfig } from "@rome-os/node-core/client";
+import { createNodeConfig, openConsoleBridge } from "@rome-os/node-core/client";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -51,8 +51,11 @@ function attachAll(
     attachDesktopProxy(server, db, dashboardAccess),
     attachTerminalServer(server, db, dashboardAccess),
     attachLiveEventsServer(server, db, dashboardAccess, noSources),
-    attachNodeConsoleServer(server, db, dashboardAccess, () =>
-      createNodeConfig({ directory: join(tmpdir(), "rome-node-console-unconfigured") }),
+    attachNodeConsoleServer(server, db, dashboardAccess, (transport) =>
+      openConsoleBridge(
+        createNodeConfig({ directory: join(tmpdir(), "rome-node-console-unconfigured") }),
+        transport,
+      ),
     ),
     attachVoiceInputServer(server, db, silentSource, null, new DashboardAccessState()),
   ];

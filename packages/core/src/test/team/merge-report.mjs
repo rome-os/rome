@@ -44,6 +44,7 @@ const rule2 = rule2Core
       pass: rule2Core.pass,
       teammateRefused: rule2Core.operations.filter((o) => o.verdict === "teammate-refused"),
       statusDiffers: rule2Core.operations.filter((o) => o.verdict === "status-differs"),
+      unverified: rule2Core.operations.filter((o) => o.verdict === "unverified"),
       outsiderAdmitted: rule2Core.operations.filter((o) => o.outsider === "admitted"),
       unclaimedUpgradeHandlers: rule2Core.unclaimedUpgradeHandlers,
       mountDrift: rule2Core.mountDrift,
@@ -109,6 +110,9 @@ else {
       (o) =>
         `- ${o.route}: guardian ${outcome(o.outcomes.guardian)}, teammate ${outcome(o.outcomes.teammate)}`,
     ),
+    "",
+    `Not verified: guardian and teammate got the same 404, 5xx or timeout, so the call never reached what it compares (${rule2.unverified.length}):`,
+    ...rule2.unverified.map((o) => `- ${o.route}: ${outcome(o.outcomes.guardian)}`),
     "",
     `A visitor not on the list admitted where a signed-out caller is refused (${rule2.outsiderAdmitted.length}):`,
     ...rule2.outsiderAdmitted.map((o) => `- ${o.route}: ${outcome(o.outcomes.outsider)}`),

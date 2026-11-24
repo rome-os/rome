@@ -40,11 +40,17 @@ export function personalDataRoutes(deps: PersonalDataRoutesDeps): Hono {
     ((c: Context) => resolveSessionActorFromMaterial(sessionActorMaterial(c), deps.db));
   const recentIngests = new Map<string, number[]>();
 
-  // Only a team member's own signed-in session reads or writes personal data.
-  // A loopback caller, which an agent's shell is, does not count here.
+  // A team member's own signed-in session reads personal data. Only the
+  // guardian's writes it, because the store has no owner and agents read
+  // everything in it as the guardian's. A loopback caller, which an agent's
+  // shell is, does not count here.
   app.use("/personal-data/*", async (c, next) => {
     const actor = await sessionActor(c);
     if (!isOnTeam(actor, deps.dashboardAccessState) || !bySignedInSession(actor)) {
+      return c.json({ error: "Guardian session required" }, 403);
+    }
+    const reads = c.req.method === "GET" || c.req.method === "HEAD";
+    if (!reads && actor.kind !== "guardian") {
       return c.json({ error: "Guardian session required" }, 403);
     }
     c.header("Cache-Control", "no-store");

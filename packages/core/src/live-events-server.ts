@@ -3,9 +3,9 @@
 // none of the browser's six HTTP/1.1 connections per origin.
 // The SSE routes emit the same events for clients that cannot open the socket.
 // Upgrades skip the edge probe like `/ws/terminal`:
-// docs/architecture/access-control.md. Reach mirrors the SSE routes: the
-// guardian gets every topic, and a dashboard admin gets
-// every topic but `apps.catalog`. `concierge.activity` carries the caller's own
+// docs/architecture/access-control.md. Reach mirrors the SSE routes: a
+// dashboard admin gets every topic the guardian gets, and loses the socket at
+// the next ping once off the team. `concierge.activity` carries the caller's own
 // Concierge chats, `chat.tasks:<id>` only the
 // caller's own Concierge chat, and another owner's Concierge or task chat is
 // not found.

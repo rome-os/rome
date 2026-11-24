@@ -1,20 +1,22 @@
 // Dashboard console of the local rome-node daemon at `/ws/node`. Each socket gets one bridge
 // from @rome-os/node-core/client, which forwards the observation methods to the daemon unchanged.
-// The team only. Upgrades skip the edge probe like `/ws/terminal`:
+// The team only: a person dropped from the allow-list loses the socket at the next message either
+// way, or at the next ping. Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md.
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import {
+  type ConsoleBridge,
+  type ConsoleTransport,
   MAX_CONSOLE_MESSAGE_BYTES,
   nodeConfigFromEnvironment,
   openConsoleBridge,
-  type NodeConfig,
 } from "@rome-os/node-core/client";
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import type { DrizzleDb } from "../db/index.js";
-import type { DashboardAllowList } from "../access/team.js";
-import { gateUpgrade } from "../access/ws-guardian-gate.js";
+import { type DashboardAllowList, isOnTeam, type TeamActor } from "../access/team.js";
+import { actorOfUpgrade, gateUpgrade } from "../access/ws-guardian-gate.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 
@@ -24,13 +26,15 @@ const PING_INTERVAL_MS = 25_000;
 // The daemon caps its own event backlog at 1 MiB, so a tab that falls further behind than this
 // has stopped reading. It reconnects and fills the gap with log.query.
 const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
+const CLOSE_POLICY_VIOLATION = 1008;
 const CLOSE_TRY_AGAIN_LATER = 1013;
 
 export function attachNodeConsoleServer(
   httpServer: Server,
   db: DrizzleDb,
   dashboardAccess: DashboardAllowList,
-  config: () => NodeConfig = () => nodeConfigFromEnvironment(process.env),
+  openBridge: (transport: ConsoleTransport) => ConsoleBridge = (transport) =>
+    openConsoleBridge(nodeConfigFromEnvironment(process.env), transport),
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_CONSOLE_MESSAGE_BYTES });
 
@@ -41,7 +45,8 @@ export function attachNodeConsoleServer(
     void gateUpgrade(req, socket, db, dashboardAccess)
       .then((caller) => {
         if (!caller || socket.destroyed) return;
-        wss.handleUpgrade(req, socket, head, serve);
+        const actor = actorOfUpgrade(caller);
+        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, actor));
       })
       .catch((err) => {
         log.error("node console upgrade failed", {
@@ -52,11 +57,17 @@ export function attachNodeConsoleServer(
   };
   httpServer.on("upgrade", onUpgrade);
 
-  function serve(ws: WebSocket): void {
+  function serve(ws: WebSocket, actor: TeamActor): void {
     let alive = true;
-    const bridge = openConsoleBridge(config(), {
+    // Closes the socket once the person is off the team, as `/ws/events` does.
+    const stillOnTeam = () => {
+      if (isOnTeam(actor, dashboardAccess)) return true;
+      ws.close(CLOSE_POLICY_VIOLATION, "Forbidden");
+      return false;
+    };
+    const bridge = openBridge({
       send: (text) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
+        if (ws.readyState !== WebSocket.OPEN || !stillOnTeam()) return;
         if (ws.bufferedAmount > MAX_BUFFERED_BYTES) {
           ws.close(CLOSE_TRY_AGAIN_LATER, "Client is not reading");
           return;
@@ -68,6 +79,7 @@ export function attachNodeConsoleServer(
       },
     });
     const ping = setInterval(() => {
+      if (!stillOnTeam()) return;
       if (!alive) {
         ws.terminate();
         return;
@@ -83,6 +95,7 @@ export function attachNodeConsoleServer(
         ws.close(1003, "Text messages only");
         return;
       }
+      if (!stillOnTeam()) return;
       bridge.receive(raw.toString());
     });
     const teardown = () => {

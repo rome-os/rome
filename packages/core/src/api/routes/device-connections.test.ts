@@ -1,11 +1,17 @@
 import { DashboardAccessState } from "../../access/dashboard-access-state.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { COOKIE_NAME, createSession } from "../../access/auth.js";
+import {
+  COOKIE_NAME,
+  createSession,
+  createVisitorSession,
+  VISITOR_COOKIE_NAME,
+} from "../../access/auth.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { DeviceConnectionsRepository } from "../../connections/device/repository.js";
 import { deviceConnectionRoutes } from "./device-connections.js";
 
 const GUARDIAN_COOKIE = `${COOKIE_NAME}=${createSession("guardian-seat")}`;
+const ADMIN_COOKIE = `${VISITOR_COOKIE_NAME}=${createVisitorSession("ada", "ada@example.com")}`;
 const NOW = Date.parse("2026-11-14T10:20:00Z");
 
 const health = {
@@ -39,13 +45,15 @@ describe("/device-connections routes", () => {
   let testDb: TestDb;
   let app: ReturnType<typeof deviceConnectionRoutes>;
   let now = NOW;
+  let dashboardAccess: DashboardAccessState;
 
   beforeEach(() => {
     testDb = createTestDb();
     now = NOW;
+    dashboardAccess = new DashboardAccessState();
     app = deviceConnectionRoutes({
       db: testDb.db,
-      dashboardAccessState: new DashboardAccessState(),
+      dashboardAccessState: dashboardAccess,
       deviceConnections: new DeviceConnectionsRepository(testDb.db),
       now: () => now,
     });
@@ -137,6 +145,20 @@ describe("/device-connections routes", () => {
       sessionActor: async () => ({ kind: "guardian", userId: "guardian-seat", via: "loopback" }),
     });
     expect((await loopback.request("/device-connections")).status).toBe(403);
+  });
+
+  it("lets a dashboard admin read the guardian's devices, never report one", async () => {
+    await put(report("dev-1", [health]));
+    dashboardAccess.setCloudEmailAccess(["ada@example.com"]);
+
+    const listed = await send({}, ADMIN_COOKIE);
+    expect(listed.status).toBe(200);
+    const reported = await send(
+      { method: "PUT", body: JSON.stringify(report("dev-ada", [health])) },
+      ADMIN_COOKIE,
+    );
+    expect(reported.status).toBe(403);
+    expect((await list()).map((row) => row.id)).toEqual(["dev-1:apple_health"]);
   });
 
   it("refuses a report that is not JSON, too large, or out of shape", async () => {

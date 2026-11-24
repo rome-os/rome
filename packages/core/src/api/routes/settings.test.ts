@@ -342,7 +342,10 @@ describe("Settings API", () => {
       });
     }
 
-    it("refuses a caller off the team", async () => {
+    // A dashboard admin also reaches `phase: "ready"`, so the
+    // SPA posts its browser zone too and the edge forwards it. The zone belongs
+    // to the guardian, so the route refuses anyone without a guardian session.
+    it("refuses a caller with no guardian session", async () => {
       const reactivate = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
 
       const res = await postDetected("Asia/Tokyo", null);
@@ -352,7 +355,7 @@ describe("Settings API", () => {
       expect(reactivate).not.toHaveBeenCalled();
     });
 
-    it("keeps a dashboard admin's zone out of the guardian's zone", async () => {
+    it("refuses a dashboard admin, whose zone is not the guardian's", async () => {
       deps.dashboardAccessState.setCloudEmailAccess(["ada@example.com"]);
       const reactivate = rs.spyOn(deps.routineEngine, "reactivateFloating").mockResolvedValue();
 
@@ -361,8 +364,7 @@ describe("Settings API", () => {
         `${VISITOR_COOKIE_NAME}=${createVisitorSession("ada", "ada@example.com")}`,
       );
 
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ status: "unchanged" });
+      expect(res.status).toBe(403);
       expect(await deps.settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY)).toBeNull();
       expect(reactivate).not.toHaveBeenCalled();
     });
