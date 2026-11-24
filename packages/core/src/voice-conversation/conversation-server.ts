@@ -57,12 +57,15 @@ export interface VoiceConversationDeps {
 /**
  * Serves `/ws/voice-conversation` to the guardian while Rome Cloud lets their
  * account use voice input, the list the microphone follows. For any other
- * account the path answers 404, as no client offers the conversation.
+ * account the path answers 404, as no client offers the conversation. Rome
+ * Cloud is asked only once the caller is proven to be the guardian.
  */
 export function attachVoiceConversationServer(
   httpServer: Server,
   db: DrizzleDb,
-  deps: VoiceConversationDeps & { listening: Pick<VoiceInputSource, "open" | "info"> },
+  deps: VoiceConversationDeps & {
+    listening: Pick<VoiceInputSource, "open" | "info" | "available">;
+  },
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
 
@@ -70,13 +73,19 @@ export function attachVoiceConversationServer(
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
     if (url.pathname !== VOICE_CONVERSATION_SOCKET_PATH) return;
     socket.on("error", () => socket.destroy());
-    void deps.listening
-      .info()
-      .then(async ({ available }) => {
-        if (!available) return rejectUpgrade(socket, 404, "Not Found");
-        const caller = await gateUpgrade(req, socket, db);
+    // Not signed in to Rome Cloud: no voice at all, known without asking it.
+    if (!deps.listening.available()) {
+      rejectUpgrade(socket, 404, "Not Found");
+      return;
+    }
+    void gateUpgrade(req, socket, db)
+      .then(async (caller) => {
         if (!caller || socket.destroyed) return;
         if (caller.kind !== "guardian") return rejectUpgrade(socket, 403, "Forbidden");
+        // Only now, for the proven guardian, ask Rome Cloud's list.
+        const { available } = await deps.listening.info();
+        if (socket.destroyed) return;
+        if (!available) return rejectUpgrade(socket, 404, "Not Found");
         // The guardian the upgrade proved, so each spoken turn is theirs, as a typed one is.
         const actor = await enrichGuardianActor(db, caller);
         wss.handleUpgrade(req, socket, head, (ws) => serve(ws, deps, actor));
