@@ -170,11 +170,13 @@ const GUARDIAN_MESSAGE_ONLY = new Set([
   "system:resume_routine",
   "system:run_routine",
   "system:stop_routine",
+  "system:stop_routine_run",
+  "system:change_routine",
 ]);
 
 // An agent's hint names only an action it holds, so it learns of nothing more.
 async function suggestFor(
-  deps: CreateRoutineDeps,
+  deps: Pick<CreateRoutineDeps, "actionRegistry" | "agentRunner">,
   actionName: string,
   agentName: string | undefined,
 ): Promise<string | undefined> {
@@ -442,65 +444,13 @@ export async function createRoutine(
   }
   const input = parsed.data;
   const args = input.args ?? {};
-  if (RESERVED_ARG_KEY in args) {
-    return { status: "error", error: `args may not contain reserved key "${RESERVED_ARG_KEY}"` };
-  }
+  const action = await checkRoutineAction(deps, input.actionName, args, creator);
+  if (!action.ok) return { status: "error", error: action.error };
+  const actionName = action.value;
 
-  // A blank/whitespace actionName fails the exact lookup in actionEngine.run on
-  // every fire; reject and persist the trimmed full ID.
-  const actionName = input.actionName.trim();
-  if (!actionName) {
-    return { status: "error", error: "actionName must be a non-empty action name" };
-  }
-  // Fail closed: a routine bound to a non-existent action would persist and
-  // error on every fire (actionEngine.run throws "Action not found"). Reject at
-  // create time with a remedy the agent can act on.
-  if (!(await deps.actionRegistry.has(actionName))) {
-    const agentName = creator.kind === "action" ? creator.agentName : undefined;
-    return {
-      status: "error",
-      error: unknownActionError(actionName, await suggestFor(deps, actionName, agentName)),
-    };
-  }
-  // A routine's fire acts through loopback, which these refuse on every fire.
-  if (GUARDIAN_MESSAGE_ONLY.has(actionName)) {
-    return {
-      status: "error",
-      error: `actionName "${actionName}" takes the guardian's own message, so a routine cannot run it`,
-    };
-  }
-  // A routine fires its action outside the agent tool gate, so an explicit
-  // target needs a principal that may call it: the app code that owns the call
-  // (callerAppId), or an agent that holds the action. Unattributed calls, such
-  // as one fired by another routine, a webhook or a favor, fail closed.
-  // A person on the Routines page may schedule any action they could run.
-  const callerAppId = creator.kind === "action" ? creator.callerAppId : undefined;
-  if (
-    creator.kind === "action" &&
-    !callerAppId &&
-    (await deps.actionRegistry.isExplicit(actionName))
-  ) {
-    const agentName = creator.agentName;
-    if (!agentName || (await deps.agentRunner?.hasAction?.(agentName, actionName)) !== true) {
-      return {
-        status: "error",
-        error: `actionName "${actionName}" is explicit: only an agent granted it can schedule it`,
-      };
-    }
-  }
-  // Every fire passes these stored args to the action, so args its input
-  // schema rejects would fail every fire.
-  const argsError = await deps.actionRegistry.validateArgs(actionName, args);
-  if (argsError) {
-    return { status: "error", error: argsError };
-  }
-
-  // `name` is the human-readable display label; trim and reject blank so a
-  // whitespace-only " " isn't persisted as a routine with no visible title.
-  const name = input.name.trim();
-  if (!name) {
-    return { status: "error", error: "name must be a non-empty routine name" };
-  }
+  const named = checkRoutineName(input.name);
+  if (!named.ok) return { status: "error", error: named.error };
+  const name = named.value;
 
   // `key` is the optional stable identity for dedup. Trim, treat blank as unset,
   // and reject a duplicate before insert (the column's UNIQUE constraint is the
@@ -518,12 +468,10 @@ export async function createRoutine(
     }
   }
 
-  const canonical = canonicalizeTrigger(input.trigger);
-  const triggerError = validateTrigger(canonical);
-  if (triggerError) {
-    return { status: "error", error: triggerError };
-  }
-  const trigger = await deps.resolveOneOffDate(canonical);
+  const checkedTrigger = await checkRoutineTrigger(deps, input.trigger);
+  if (!checkedTrigger.ok) return { status: "error", error: checkedTrigger.error };
+  const trigger = checkedTrigger.value;
+  const callerAppId = creator.kind === "action" ? creator.callerAppId : undefined;
 
   // The runtime attributes the routine to the app that invoked this action (from
   // action ownership, not caller-supplied) — so any routine an app creates is
@@ -562,6 +510,96 @@ export async function createRoutine(
   }
 
   return { status: "ok", data: { routineId } };
+}
+
+/** A check's outcome: the value to store, or why it is refused. */
+export type Checked<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** Whether a routine may run `actionName` with `args` on every fire, by the
+ * rules a new routine meets. Answers the trimmed full action id. */
+export async function checkRoutineAction(
+  deps: Pick<CreateRoutineDeps, "actionRegistry" | "agentRunner">,
+  rawActionName: string,
+  args: Record<string, unknown>,
+  creator: RoutineCreator = creatorOfRunningAction(),
+): Promise<Checked<string>> {
+  if (RESERVED_ARG_KEY in args) {
+    return { ok: false, error: `args may not contain reserved key "${RESERVED_ARG_KEY}"` };
+  }
+
+  // A blank/whitespace actionName fails the exact lookup in actionEngine.run on
+  // every fire; reject and persist the trimmed full ID.
+  const actionName = rawActionName.trim();
+  if (!actionName) {
+    return { ok: false, error: "actionName must be a non-empty action name" };
+  }
+  // Fail closed: a routine bound to a non-existent action would persist and
+  // error on every fire (actionEngine.run throws "Action not found"). Reject at
+  // create time with a remedy the agent can act on.
+  if (!(await deps.actionRegistry.has(actionName))) {
+    const agentName = creator.kind === "action" ? creator.agentName : undefined;
+    return {
+      ok: false,
+      error: unknownActionError(actionName, await suggestFor(deps, actionName, agentName)),
+    };
+  }
+  // A routine's fire acts through loopback, which these refuse on every fire.
+  if (GUARDIAN_MESSAGE_ONLY.has(actionName)) {
+    return {
+      ok: false,
+      error: `actionName "${actionName}" takes the guardian's own message, so a routine cannot run it`,
+    };
+  }
+  // A routine fires its action outside the agent tool gate, so an explicit
+  // target needs a principal that may call it: the app code that owns the call
+  // (callerAppId), or an agent that holds the action. Unattributed calls, such
+  // as one fired by another routine, a webhook or a favor, fail closed.
+  // A person on the Routines page may schedule any action they could run.
+  const callerAppId = creator.kind === "action" ? creator.callerAppId : undefined;
+  if (
+    creator.kind === "action" &&
+    !callerAppId &&
+    (await deps.actionRegistry.isExplicit(actionName))
+  ) {
+    const agentName = creator.agentName;
+    if (!agentName || (await deps.agentRunner?.hasAction?.(agentName, actionName)) !== true) {
+      return {
+        ok: false,
+        error: `actionName "${actionName}" is explicit: only an agent granted it can schedule it`,
+      };
+    }
+  }
+  // Every fire passes these stored args to the action, so args its input
+  // schema rejects would fail every fire.
+  const argsError = await deps.actionRegistry.validateArgs(actionName, args);
+  if (argsError) return { ok: false, error: argsError };
+  return { ok: true, value: actionName };
+}
+
+/** The routine's display name, trimmed, so a whitespace-only " " is never
+ * stored as a routine with no visible title. */
+export function checkRoutineName(rawName: string): Checked<string> {
+  const name = rawName.trim();
+  if (!name) return { ok: false, error: "name must be a non-empty routine name" };
+  return { ok: true, value: name };
+}
+
+/** Whether a trigger can fire as asked, by the rules a new routine meets.
+ * Answers the trigger to store, with "once at the next localTime" dated. */
+export async function checkRoutineTrigger(
+  deps: Pick<CreateRoutineDeps, "resolveOneOffDate" | "hasTriggerType">,
+  rawTrigger: CreateRoutineInput["trigger"],
+): Promise<Checked<Trigger>> {
+  if (deps.hasTriggerType && !deps.hasTriggerType(rawTrigger.type)) {
+    return {
+      ok: false,
+      error: `trigger type "${rawTrigger.type}" is not supported on this server`,
+    };
+  }
+  const canonical = canonicalizeTrigger(rawTrigger);
+  const triggerError = validateTrigger(canonical);
+  if (triggerError) return { ok: false, error: triggerError };
+  return { ok: true, value: await deps.resolveOneOffDate(canonical) };
 }
 
 /** The creator the running action names: the app that called it, or the agent
