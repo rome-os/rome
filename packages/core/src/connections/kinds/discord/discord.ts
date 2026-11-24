@@ -908,11 +908,12 @@ export class DiscordAdapter {
     }
     const path = [interaction.commandName];
     const options: Record<string, string> = {};
+    const { Subcommand, SubcommandGroup } = discordJs().ApplicationCommandOptionType;
     const read = (data: readonly import("discord.js").CommandInteractionOption[]) => {
       for (const option of data) {
-        if (option.options && option.value === undefined) {
+        if (option.type === Subcommand || option.type === SubcommandGroup) {
           path.push(option.name);
-          read(option.options);
+          read(option.options ?? []);
         } else if (option.value !== undefined) {
           options[option.name] = String(option.value);
         }

@@ -119,6 +119,24 @@ describe("Discord slash commands", () => {
     expect(editReply).toHaveBeenCalledWith({ content: "✓ routed" });
   });
 
+  it("reports a subcommand Discord delivers without an options list", async () => {
+    const { commands, ran } = makeCommands("status");
+    const { adapter } = adapterWith(commands);
+    const interaction = agentSet("unused", {
+      deferReply: rs.fn(async () => undefined),
+      editReply: rs.fn(async () => undefined),
+      options: { data: [{ name: "status", type: SUBCOMMAND }] },
+    });
+
+    await (
+      adapter as unknown as { handleSlashCommand(i: ChatInputCommandInteraction): Promise<void> }
+    ).handleSlashCommand(interaction as unknown as ChatInputCommandInteraction);
+
+    expect(ran).toHaveBeenCalledWith(
+      expect.objectContaining({ path: ["channel", "status"], options: {} }),
+    );
+  });
+
   it("shows the values suggested for an option while it is typed", async () => {
     const { commands, suggest } = makeCommands();
     const { adapter } = adapterWith(commands);
