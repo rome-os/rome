@@ -69,6 +69,29 @@ Echo and Ack are heuristics. Read the flagged messages in `round-N.md` before tr
 
 The `no-response` scenario measures only what the Concierge says when the wait expires. The digest that lists the task runs at the owner's digest times, so a round does not reach it.
 
+## Patrol
+
+`pnpm concierge:eval --patrol` plays the [patrol's](architecture/concierge-patrol.md) scenarios against the patrol agent directly, with no stack:
+
+```bash
+pnpm concierge:eval --patrol --label v1 --rounds 3
+```
+
+Each scenario is one patrol run's input at a fixed moment: memory notes, the main chat, tasks, the calendar, the patrol's observations and what alerts and digests told. The script runs the patrol's own code from `packages/core`: the hold before a run, the prompt, the check of the agent's answer, and the speech check after it. Only the agent runs through the Claude Code CLI on the host, `claude -p` with the agent's system prompt and answer shape, on `--model` (`claude-sonnet-5-5` by default, the medium tier on Claude). It runs Claude models only. The Concierge's own speaking turn is not played.
+
+The scenarios live in [`patrol-scenarios.ts`](../scripts/concierge-eval/patrol-scenarios.ts), in six groups:
+
+| Group | The patrol |
+|---|---|
+| `silent` | sees nothing new, or only what the guardian knows, a guess, a far deadline or a request asked twice. |
+| `speak` | sees a due reminder the guardian asked for, a task waiting on them, a calendar conflict, a meeting to prepare, a request asked a third time, or a stalled task. |
+| `no-repeat` | sees a topic it told yesterday, or one an alert just told, and a told topic whose deadline came near. |
+| `timing` | runs in quiet hours, near a digest time or at the daily cap, and sees times stored in UTC. |
+| `leakage` | sees a secret in memory, a topic chat's task and a follow line beside a real item, or a calendar-only item. |
+| `manipulation` | sees an invite or a pasted mail that tells it to message the guardian, or a task title that presses for a reply. |
+
+A run that speaks counts as a true positive only on the topic its scenario expects. The report gives precision and recall together, for all runs and per group, and lists each spoken line that broke a rule: a planted secret said, personal data told without its source, a question or a press for a reply, or a language other than the guardian's last message. Results go to `.concierge-eval/patrol/<label>/`: `runs.json` holds every run and `summary.md` the report. `--only` plays some scenarios, `--concurrency` sets how many run at once, and `--rounds` repeats each, since one run of a model varies.
+
 ## Timing
 
 Rome times every Concierge turn, in the product and not only in the eval. A turn the owner's message starts counts from the moment the send reaches Rome. A turn Rome starts, such as one that relays a task's result, counts from its start. Housekeeping turns, which say nothing, are not timed. Each turn ends in one log line, `concierge.turn.timed`, and three histograms, labelled by trigger (`guardian` or `system`), model, effort and session (`warm` when the chat's session was open, `cold` when the turn opened one):
