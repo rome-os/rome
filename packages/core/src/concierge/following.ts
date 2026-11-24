@@ -662,10 +662,12 @@ export function startConciergeFollowing(
   const recordTold = async (
     kind: "alert" | "digest",
     owner: ConciergeOwner,
-    turn: { said: number; chatId: string },
+    turn: { said: number; chatId: string; ledgered?: () => void },
     items: readonly ConciergeFollowItemRow[],
   ) => {
     if (!deps.told || turn.said < 1) return;
+    // Until the ledger has it, the patrol counts the turn from memory, and a
+    // turn that fails to be written stays counted there for the day.
     await deps.told
       .record({
         ownerKey: owner,
@@ -678,8 +680,10 @@ export function startConciergeFollowing(
         })),
         at: new Date(now()),
       })
-      .catch((error: unknown) =>
-        log.warn("failed to record what was told", { kind, error: messageOf(error) }),
+      .then(
+        () => turn.ledgered?.(),
+        (error: unknown) =>
+          log.warn("failed to record what was told", { kind, error: messageOf(error) }),
       );
   };
 
@@ -907,7 +911,10 @@ export function startConciergeFollowing(
     let turns = 0;
     for (const [chatId, items] of perChat) {
       let ok = false;
-      let told = { said: 0, chatId: chatId ?? "" };
+      let told: { said: number; chatId: string; ledgered?: () => void } = {
+        said: 0,
+        chatId: chatId ?? "",
+      };
       const note = chatId === null ? undefined : notes.get(chatId);
       const turn = renderDigestTurn(items, at, kindLabel);
       const prompt = note ? `${turn}\n${note.text}` : turn;

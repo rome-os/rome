@@ -282,10 +282,14 @@ export function withToldHistoryOfTask(
 ): Observation {
   if (!observation.taskId) return observation;
   const same = observations.filter((o) => o.taskId === observation.taskId);
-  const told = same.flatMap((o) => (o.lastToldAt ? [o.lastToldAt.getTime()] : []));
+  const told = same
+    .filter((o) => o.lastToldAt !== null)
+    .sort((a, b) => (b.lastToldAt?.getTime() ?? 0) - (a.lastToldAt?.getTime() ?? 0));
+  const latest = told[0];
   return {
     ...observation,
-    lastToldAt: told.length > 0 ? new Date(Math.max(...told)) : null,
+    // The due time the task was last told with, not one a reworded row brings.
+    ...(latest ? { lastToldAt: latest.lastToldAt, dueAt: latest.dueAt } : { lastToldAt: null }),
     ignoredCount: Math.max(...same.map((o) => o.ignoredCount)),
     outcomes: same.flatMap((o) => o.outcomes),
   };

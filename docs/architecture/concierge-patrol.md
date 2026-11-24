@@ -49,7 +49,7 @@ Solid lines are one run. Dashed lines are what a run reads or sets for a later o
 
 ### Pre-check
 
-- **A run reads further only when something came in since the last run that went past the pre-check.** The signals are the guardian's messages in the main chat, a task that changed or ended, a wait on the guardian that reached two days, a change to the memory notes the patrol reads, a calendar event that came within the next day, any change to the events of the next day, an observation whose due time came within the next day, and the patrol's own wake-up. Code counts them, and no model runs.
+- **A run reads further only when something came in since the last run that went past the pre-check.** The signals are the guardian's messages in the main chat, a task that changed or ended, a wait on the guardian that reached two days, a change to the memory notes the patrol reads, a calendar event that came within the next day, an event of the next day that the last run never read, such as one added or moved, an observation whose due time came within the next day, and the patrol's own wake-up. Code counts them, and no model runs.
 
 ### Reading
 
@@ -73,5 +73,5 @@ Solid lines are one run. Dashed lines are what a run reads or sets for a later o
 
 ### Volume
 
-- **At most three proactive messages reach the guardian in 24 hours,** counted across alerts, digests and the patrol from the messages each turn actually said. Only the patrol is held by the cap: alerts and digests keep their own rules. The patrol checks the cap, quiet hours and digest times again as its speaking turn starts, after any turn queued before it, and drops the turn when they hold it then.
+- **At most three proactive messages reach the guardian in 24 hours,** counted across alerts, digests and the patrol from the messages each turn actually said. Only the patrol is held by the cap: alerts and digests keep their own rules. The patrol checks the cap, quiet hours and digest times again as its speaking turn starts, after any turn queued before it, and drops the turn when they hold it then. Both checks count what an alert or digest still running said, before the ledger has it.
 - **One already-told ledger is written by every alert, digest and patrol turn that said something.** The patrol reads its last three days before it speaks. A turn that said nothing writes nothing, and one cut short writes what it said before it stopped.

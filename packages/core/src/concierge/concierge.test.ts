@@ -4071,12 +4071,38 @@ describe("Concierge system turns", () => {
       },
     } as unknown as ConciergeDeps);
     const turn = await service.runCountedTurn(CONCIERGE_CHAT_ID, "lines");
-    expect(turn).toEqual({ ran: true, said: 2, chatId: CONCIERGE_CHAT_ID });
+    expect(turn).toMatchObject({ ran: true, said: 2, chatId: CONCIERGE_CHAT_ID });
     // Once it ended, the chat counts nothing for it.
     say(CONCIERGE_CHAT_ID);
     expect(turn.said).toBe(2);
     // A plain system turn counts nothing.
     expect(await service.runSystemTurn(CONCIERGE_CHAT_ID, "lines")).toBe(true);
+    // Until the ledger has the turn, it counts outside any read of the ledger.
+    expect(service.saidOutsideLedger(Date.now())).toBe(2);
+    const readAt = Date.now();
+    turn.ledgered();
+    // Taken after the read: still outside it. Taken before a later read: inside.
+    expect(service.saidOutsideLedger(readAt)).toBe(2);
+    expect(service.saidOutsideLedger(Date.now() + 1)).toBe(0);
+  });
+
+  it("counts what a turn still running said outside the ledger", async () => {
+    let service: ConciergeService | null = null;
+    let during = -1;
+    service = new ConciergeService({
+      sessionRepository: { current: async () => ({ id: "runtime-1" }) },
+      webchatRepo: { getSession: async () => null },
+      settingsRepo: { get: async () => null },
+      runBackendTurn: async (_params: BackendTurnParams, options?: SystemTurnOptions) => {
+        options?.shouldRun?.();
+        service?.said({ turnId: "t", chatId: CONCIERGE_CHAT_ID, ownWords: "hi", level: undefined });
+        // Another check reads the count while the alert has spoken but not ended.
+        during = service?.saidOutsideLedger(Date.now()) ?? -1;
+        return "interrupted";
+      },
+    } as unknown as ConciergeDeps);
+    await service.runCountedTurn(CONCIERGE_CHAT_ID, "lines");
+    expect(during).toBe(1);
   });
 
   it("counts a question card the host showed in the counted turn's chat", async () => {

@@ -81,8 +81,8 @@ const KEEP_MS = 30 * DAY_MS;
 interface PatrolState {
   /** When a run last went past the pre-check, epoch milliseconds. */
   lastRunAt?: number;
-  /** A fingerprint of the calendar events of the next day at the last run past the pre-check. */
-  calendarPrint?: string;
+  /** The fingerprints of the calendar events the last run past the pre-check read. */
+  calendarSeen?: string[];
   /** The patrol's routine was made once, so a missing one was deleted. */
   routineMade?: boolean;
 }
@@ -147,24 +147,20 @@ function localParts(at: number, timeZone: string): { date: string; time: string 
 const iso = (at: number | Date | null | undefined) =>
   at === null || at === undefined ? undefined : new Date(at).toISOString();
 
-/**
- * A fingerprint of the calendar events that start within a day of `at`, or
- * null with no calendar. Any event added, moved or renamed in that window
- * changes it.
- */
-function calendarPrintOf(
-  calendar: readonly PatrolCalendarEvent[] | null,
-  at: number,
-): string | null {
-  if (calendar === null) return null;
-  const soon = calendar
-    .filter((event) => {
-      const start = Date.parse(event.start);
-      return Number.isFinite(start) && start > at && start <= at + DAY_MS;
-    })
-    .map((event) => [event.start, event.end, event.title, event.location ?? "", event.status ?? ""])
-    .sort();
-  return createHash("sha256").update(JSON.stringify(soon)).digest("hex").slice(0, 16);
+/** A short fingerprint of one calendar event: a moved or renamed event is a new one. */
+function eventPrintOf(event: PatrolCalendarEvent): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        event.start,
+        event.end,
+        event.title,
+        event.location ?? "",
+        event.status ?? "",
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 12);
 }
 
 /** A routine's schedule, in a few words for the patrol. */
@@ -345,7 +341,8 @@ export function startConciergePatrol(
     const { quietHours, digestTimes } = await rules();
     const state = await readState();
     const lastRunAt = state.lastRunAt ?? null;
-    const toldToday = await deps.told.messagesSince(new Date(at - DAY_MS));
+    const toldToday =
+      (await deps.told.messagesSince(new Date(at - DAY_MS))) + service.saidOutsideLedger(at);
     const hold = holdReason({
       now: at,
       timeZone: zone,
@@ -380,7 +377,7 @@ export function startConciergePatrol(
       })) ?? null;
     const observations = await deps.observations.list();
     const since = lastRunAt;
-    const calendarPrint = calendarPrintOf(calendar, at);
+    const seenEvents = new Set(state.calendarSeen ?? []);
     const signals: PatrolSignals = {
       firstRun: since === null,
       recheck: args.recheck === true,
@@ -404,9 +401,21 @@ export function startConciergePatrol(
           const start = Date.parse(event.start);
           return Number.isFinite(start) && start > at && inWindow(start - DAY_MS, since, at);
         }).length +
-        // An event added or changed within the next day since the last run, such
-        // as one synced already under a day away, is new too.
-        (since !== null && calendarPrint !== (state.calendarPrint ?? null) ? 1 : 0),
+        // An event within the next day that the last run never read, such as
+        // one synced already under a day away or moved, is new too. One that
+        // started since, or came near from further out, is not.
+        (since === null
+          ? 0
+          : (calendar ?? []).filter((event) => {
+              const start = Date.parse(event.start);
+              return (
+                Number.isFinite(start) &&
+                start > at &&
+                start <= at + DAY_MS &&
+                !inWindow(start - DAY_MS, since, at) &&
+                !seenEvents.has(eventPrintOf(event))
+              );
+            }).length),
       observationsDue: observations.filter((o) => {
         const due = o.dueAt?.getTime() ?? null;
         return o.status === "open" && due !== null && due > at && inWindow(due - DAY_MS, since, at);
@@ -487,7 +496,10 @@ export function startConciergePatrol(
       log.warn("patrol run failed; it stays silent", { error: messageOf(error) });
       return { status: "failed", error: messageOf(error) };
     }
-    await writeState({ lastRunAt: at, calendarPrint: calendarPrint ?? undefined });
+    await writeState({
+      lastRunAt: at,
+      calendarSeen: calendar === null ? undefined : calendar.map(eventPrintOf),
+    });
     const output = parsePatrolOutput(raw, { now: at, taskIds, calendar: calendar ?? [] });
     const known = new Map(observations.map((o) => [o.topicKey, o] as const));
     for (const draft of output.observations) {
@@ -538,9 +550,9 @@ export function startConciergePatrol(
           timeZone: zone,
           quietHours,
           digestTimes,
-          // Since the run began, not since the read: a message said before the
-          // read but not yet in the ledger counts. One counted twice errs silent.
-          toldToday: toldBefore + service.countedSaidSince(at),
+          // With what the read could not hold: a turn still running anywhere,
+          // or one the ledger took since. One counted twice errs silent.
+          toldToday: toldBefore + service.saidOutsideLedger(checkedAt),
           lastRunAt: null,
           lastOwnerMessageAt: null,
           intervalMs,
@@ -570,6 +582,7 @@ export function startConciergePatrol(
         at: new Date(now()),
       });
       await deps.observations.recordOutcome(observation.topicKey, { outcome: "told", at: now() });
+      turn.ledgered();
     }
     log.info("patrol spoke", { ran: turn.ran, said, kind: observation.kind });
     return { status: "spoke", topicKey: observation.topicKey, said };
@@ -637,11 +650,11 @@ export function startConciergePatrol(
 }
 
 /**
- * What the patrol may change of an observation it holds. An open topic
- * already told keeps its due time, so a rewrite cannot bring its deadline
- * near to end its cooldown. A topic that ended may open again, as a task that
- * waits once more does, with a due time of its own: its told history stays,
- * so the cooldown and ignored-twice still hold it.
+ * What the patrol may change of an observation it holds. A topic already
+ * told keeps its due time, open or ended, so a rewrite cannot bring its
+ * deadline near to end its cooldown or lift ignored-twice. A topic that ended
+ * may open again, as a task that waits once more does: its told history
+ * stays, so the cooldown and ignored-twice still hold it.
  */
 function keepWhatCodeOwns(
   draft: ObservationWrite,
@@ -650,7 +663,7 @@ function keepWhatCodeOwns(
   if (!before) return draft;
   return {
     ...draft,
-    ...(before.status === "open" && before.toldCount > 0 ? { dueAt: before.dueAt } : {}),
+    ...(before.toldCount > 0 ? { dueAt: before.dueAt } : {}),
   };
 }
 

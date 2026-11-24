@@ -322,6 +322,19 @@ const DAY_MS = 24 * 60 * 60_000;
 interface SaidCount {
   said: number;
   chatId: string;
+  /** When its first message was said, epoch milliseconds. */
+  firstAt?: number;
+  /** When the ledger took it, epoch milliseconds. */
+  ledgeredAt?: number;
+}
+
+/** A counted turn as it ran: whether it ran to its end, the chat and what it said. */
+export interface CountedTurn {
+  ran: boolean;
+  said: number;
+  chatId: string;
+  /** Tells Rome that the ledger has what this turn said, or that it never will. */
+  ledgered(): void;
 }
 
 export interface SystemTurnOptions {
@@ -396,8 +409,8 @@ export class ConciergeService {
   private readonly systemTurns = new Map<string, number>();
   /** Per Concierge chat, the counted turn running there now and what it said so far. */
   private readonly countedTurns = new Map<string, SaidCount>();
-  /** When each message a counted turn said was said, epoch milliseconds, the last day only. */
-  private countedSaidAt: number[] = [];
+  /** Counted turns of the last day that said something, until the ledger has had them a while. */
+  private saidCounts: SaidCount[] = [];
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
@@ -1180,10 +1193,17 @@ export class ConciergeService {
     chatId: string,
     prompt: string,
     options: SystemTurnOptions = {},
-  ): Promise<{ ran: boolean; said: number; chatId: string }> {
+  ): Promise<CountedTurn> {
     const count: SaidCount = { said: 0, chatId };
     const outcome = await this.systemTurnOutcome(chatId, prompt, options, count);
-    return { ran: outcome === "completed", said: count.said, chatId: count.chatId };
+    return {
+      ran: outcome === "completed",
+      said: count.said,
+      chatId: count.chatId,
+      ledgered: () => {
+        count.ledgeredAt ??= Date.now();
+      },
+    };
   }
 
   /** {@link runSystemTurn}, telling a turn cut short by a Stop or a newer message from one that failed. */
@@ -1428,17 +1448,27 @@ export class ConciergeService {
     const counted = this.countedTurns.get(chatId);
     if (!counted) return;
     counted.said++;
-    const now = Date.now();
-    this.countedSaidAt = [...this.countedSaidAt.filter((at) => at > now - DAY_MS), now];
+    if (counted.firstAt === undefined) {
+      const now = Date.now();
+      counted.firstAt = now;
+      this.saidCounts = [
+        ...this.saidCounts.filter((count) => (count.firstAt ?? now) > now - DAY_MS),
+        counted,
+      ];
+    }
   }
 
   /**
-   * How many messages counted turns said since `since`, epoch milliseconds,
-   * as this process saw them, at most a day back. Read synchronously, it
-   * holds what a counted turn said before the ledger has it.
+   * How many messages counted turns said in the last day that a read of the
+   * ledger made at `readAt`, epoch milliseconds, does not hold: those of a
+   * turn still running or not yet in the ledger, and those the ledger took
+   * after the read. Read synchronously, at the moment a turn starts. It may
+   * count a message the read already held, never miss one.
    */
-  countedSaidSince(since: number): number {
-    return this.countedSaidAt.filter((at) => at >= since).length;
+  saidOutsideLedger(readAt: number): number {
+    return this.saidCounts
+      .filter((count) => count.ledgeredAt === undefined || count.ledgeredAt >= readAt)
+      .reduce((sum, count) => sum + count.said, 0);
   }
 
   /**

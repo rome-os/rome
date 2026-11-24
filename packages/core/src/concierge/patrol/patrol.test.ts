@@ -112,12 +112,14 @@ function setup(options: Options = {}) {
       turnOptions: { shouldRun?: () => boolean },
     ) => {
       // As the runner does: checked right before the turn runs.
-      if (turnOptions.shouldRun && !turnOptions.shouldRun()) return { ran: false, said: 0, chatId };
+      if (turnOptions.shouldRun && !turnOptions.shouldRun()) {
+        return { ran: false, said: 0, chatId, ledgered: () => {} };
+      }
       turns.push({ chatId, prompt, options: turnOptions });
-      return { ran: true, said: options.says ?? 1, chatId };
+      return { ran: true, said: options.says ?? 1, chatId, ledgered: () => {} };
     },
-    /** What counted alert and digest turns said while the patrol ran. */
-    countedSaidSince: () => countedElsewhere.said,
+    /** What counted alert and digest turns said that the ledger does not hold yet. */
+    saidOutsideLedger: () => countedElsewhere.said,
   } as unknown as ConciergeService;
   const deps: ConciergePatrolDeps = {
     routines: {
@@ -477,7 +479,7 @@ describe("what code keeps of a tell", () => {
     expect(s.turns).toHaveLength(1);
   });
 
-  it("keeps an open told topic's due time, and lets an ended one open again under its cooldown", async () => {
+  it("keeps a told topic's due time, and lets an ended one open again under its cooldown", async () => {
     const due = (iso: string) => {
       const answer = speakAbout("loop:tax");
       answer.observations[0]!.due = iso;
@@ -547,6 +549,23 @@ describe("what holds at the speaking turn", () => {
     expect((await s.observations.list())[0]?.toldCount).toBe(0);
   });
 
+  it("counts an alert still running that spoke before the patrol began", async () => {
+    const s = setup({ tasks: [waitingTask], answer: () => speakAbout("task:task-1:waiting") });
+    for (const kind of ["alert", "digest"] as const) {
+      await s.told.record({
+        kind,
+        chatId: MAIN,
+        messages: 1,
+        items: [],
+        at: new Date(NOON - HOUR),
+      });
+    }
+    // Its message reached another chat; the ledger has it only once the turn ends.
+    s.countedElsewhere.said = 1;
+    expect(await s.patrol.run()).toEqual({ status: "held", reason: "daily_cap" });
+    expect(s.runs).toHaveLength(0);
+  });
+
   it("drops the turn when it starts in a digest's margin", async () => {
     const s = setup({
       tasks: [waitingTask],
@@ -584,6 +603,9 @@ describe("the calendar signal", () => {
     s.setClock(NOON + 6 * HOUR);
     await s.patrol.run();
     expect(s.runs).toHaveLength(3);
+    // An event that started since is nothing new.
+    s.setClock(NOON + 9 * HOUR);
+    expect(await s.patrol.run()).toEqual({ status: "quiet", reasons: [] });
   });
 });
 
