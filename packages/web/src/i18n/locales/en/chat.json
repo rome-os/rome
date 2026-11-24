@@ -759,6 +759,31 @@
     "sendMessage": "Send a message",
     "action": "Action"
   },
+  "voiceConversation": {
+    "start": "Voice conversation",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "end": "End",
+    "state": {
+      "listening": "Listening",
+      "thinking": "Thinking",
+      "speaking": "Speaking",
+      "muted": "Muted"
+    },
+    "asking": "Allow the microphone to talk with Rome",
+    "stopped": {
+      "unavailable": "Voice conversation is not available right now",
+      "listening-failed": "Rome could not listen. The voice conversation ended",
+      "speaking-failed": "Rome could not speak. The voice conversation ended",
+      "chat-refused": "This chat can't take a voice conversation",
+      "time-limit": "The voice conversation reached its time limit",
+      "bad-request": "The voice conversation ended after an error",
+      "microphone-blocked": "Microphone blocked. Allow it in the browser's site settings",
+      "microphone-missing": "No microphone found",
+      "microphone-failed": "The microphone could not start",
+      "connection-lost": "Connection to Rome lost. The voice conversation ended"
+    }
+  },
   "voiceInput": {
     "start": "Start voice input",
     "stop": "Stop voice input",
@@ -856,6 +881,8 @@
     "missing": "Moved or deleted",
     "download": "Download",
     "noPreview": "This file has no preview.",
+    "pageNoPreview": "This page does not run here. Open it in a new tab to see it.",
+    "openInNewTab": "Open in new tab",
     "unavailable": "This file cannot be opened here.",
     "previewFailed": "Failed to load the file",
     "truncated": "Showing the first {{count}} characters.",

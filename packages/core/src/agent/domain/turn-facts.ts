@@ -8,6 +8,16 @@ import type { WidgetDrawing } from "./widget-drawing.js";
 /** The level at which a turn pushes the messages it says to the person the chat serves. */
 export type PushLevel = "active" | "passive";
 
+/** A trusted input's short-lived authority to use one exact device. */
+export interface ComputerUseGrant {
+  readonly deviceId: string;
+  /** Expiry in wall-clock milliseconds. */
+  readonly expiresAt: number;
+  /** Rechecks the underlying pairing before a window request is dispatched. */
+  readonly isCurrent?: () => Promise<boolean>;
+  readonly allowPreemption?: true;
+}
+
 /**
  * Who a turn acts for: the person whose message started it, as the request
  * that admitted the message proved. The agent context reads only who it is,
@@ -52,6 +62,8 @@ export interface TurnFacts {
   turnId(): string | undefined;
   /** False once interrupted or closing. Absent facts cannot grant a task handoff. */
   live?(): boolean;
+  /** The live input's device grant, scoped to its own turn. */
+  computerUseGrant?(): ComputerUseGrant | undefined;
   /** Pins the live source before async task setup. Same-person supersession may
    * continue it. Stop, close, or a changed person/chat/audience revokes it for good. */
   captureTaskInputLiveness?(): () => boolean;

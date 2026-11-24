@@ -143,7 +143,8 @@ export interface ChatComposerHandle {
   };
   /**
    * Stops listening, as the voice control's stop does, and keeps the heard
-   * text in the field. For a host about to hide the composer.
+   * text in the field. Ends a voice conversation too. For a host about to
+   * hide the composer.
    */
   stopVoiceInput: () => void;
 }

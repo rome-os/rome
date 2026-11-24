@@ -1,10 +1,12 @@
 import {
   type ModelToolCallContext,
   ROME_TOOL_GROUPS,
+  romeToolTraceOutput,
   type RomeToolGroup,
   type RomeToolResult,
   type RomeTools,
 } from "../../../domain/rome-tools.js";
+import { computerToolTraceOutput, isComputerTool } from "../../../domain/computer-use.js";
 import type { DynamicToolCallResponse, DynamicToolSpec } from "./app-server-protocol.js";
 
 export interface RomeDynamicToolCallResult {
@@ -24,10 +26,11 @@ export interface RomeDynamicTools {
 
 function toDynamicResponse(result: RomeToolResult): DynamicToolCallResponse {
   return {
-    contentItems: result.content.map((item) => ({
-      type: "inputText" as const,
-      text: item.text,
-    })),
+    contentItems: result.content.map((item) =>
+      item.type === "text"
+        ? { type: "inputText" as const, text: item.text }
+        : { type: "inputImage" as const, imageUrl: `data:${item.mimeType};base64,${item.data}` },
+    ),
     success: result.isError !== true,
   };
 }
@@ -106,8 +109,13 @@ export function createRomeDynamicTools(tools: RomeTools): RomeDynamicTools {
       const args = recordInput(input);
       if (!args) return errorResult(`Invalid arguments for dynamic tool: ${name}`);
       try {
-        const traceOutput = await tools.callTool(group, name, args, context);
-        return { response: toDynamicResponse(traceOutput), traceOutput };
+        const result = await tools.callTool(group, name, args, context);
+        return {
+          response: toDynamicResponse(result),
+          traceOutput: isComputerTool(name)
+            ? computerToolTraceOutput(result.isError)
+            : romeToolTraceOutput(result),
+        };
       } catch (err) {
         return errorResult(err instanceof Error ? err.message : String(err));
       }

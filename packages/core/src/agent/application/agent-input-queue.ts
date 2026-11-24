@@ -115,6 +115,8 @@ export class AgentInputQueue {
 
   submit(input: AgentTurnInput & { inputId: string }, options: QueueOptions): AgentInputReceipt {
     if (this.closed) throw new Error("Input queue is closed");
+    if (options.computerUseGrant !== undefined)
+      throw new Error("A computer-use grant requires a separate turn.");
     const existing = this.entries.get(input.inputId);
     if (existing) {
       return {

@@ -9022,7 +9022,9 @@ describe("AgentRunner", () => {
             routineDraft(actionName),
             { toolUseId: "tu-1" },
           );
-          proposals[actionName] = result.content.map((item) => item.text).join("\n");
+          proposals[actionName] = result.content
+            .map((item) => (item.type === "text" ? item.text : ""))
+            .join("\n");
         }
         yield { type: "result", content: "Done" };
       });
